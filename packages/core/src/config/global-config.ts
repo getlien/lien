@@ -20,15 +20,17 @@ export class ConfigValidationError extends Error {
  * Global configuration for Lien.
  * Only contains what truly needs configuration: storage backend choice.
  *
- * 'lancedb' (default) is the vector backend; 'sqlite' is the opt-in structural
- * store (better-sqlite3 + FTS5). The default remains 'lancedb'.
+ * 'sqlite' (the default and only supported backend) is the structural store
+ * (better-sqlite3 + FTS5 lexical search). The former 'lancedb' vector backend
+ * is retired — its code lingers until it is removed, but it is unreachable
+ * via config: any retired value is mapped to 'sqlite' with a one-time warning.
  */
 export interface GlobalConfig {
-  backend?: 'lancedb' | 'sqlite';
+  backend?: 'sqlite';
 }
 
 /** Backends the config layer accepts. */
-const VALID_BACKENDS: ReadonlySet<string> = new Set(['lancedb', 'sqlite']);
+const VALID_BACKENDS: ReadonlySet<string> = new Set(['sqlite']);
 
 /**
  * Raw shape of a parsed config file before sanitization.
@@ -40,10 +42,15 @@ interface RawGlobalConfig {
 }
 
 const QDRANT_REMOVED_WARNING =
-  'Warning: Qdrant support was removed in Lien v0.49; falling back to local LanceDB. ' +
+  'Warning: Qdrant support was removed in Lien v0.49; using the SQLite backend. ' +
   'You can delete the "qdrant" settings from your config.';
 
+const LANCEDB_REMOVED_WARNING =
+  'The LanceDB backend has been retired; using sqlite. ' +
+  'Run `lien index` to rebuild your index — it is fast and downloads nothing.';
+
 let qdrantWarningShown = false;
+let lancedbWarningShown = false;
 
 /**
  * Warn (once per process) that Qdrant settings were found but are no longer supported.
@@ -55,22 +62,41 @@ function warnQdrantRemoved(): void {
 }
 
 /**
- * Strip retired Qdrant settings from a parsed config.
- *
- * Graceful degradation: an existing config with backend: "qdrant" or
- * qdrant.* keys must not crash — warn once and proceed with LanceDB.
+ * Warn (once per process) that a retired LanceDB backend selection was found.
  */
-function stripRemovedQdrantConfig(raw: RawGlobalConfig): RawGlobalConfig {
-  if (raw.backend !== 'qdrant' && raw.qdrant === undefined) {
-    return raw;
+function warnLancedbRemoved(): void {
+  if (lancedbWarningShown) return;
+  lancedbWarningShown = true;
+  console.warn(LANCEDB_REMOVED_WARNING);
+}
+
+/**
+ * Strip retired backend selections from a parsed config.
+ *
+ * Graceful degradation: an existing config pinned to a retired backend
+ * ('qdrant' or 'lancedb') or carrying orphaned qdrant.* keys must not crash —
+ * warn once and map forward to the sole supported backend, sqlite.
+ */
+function stripRetiredBackends(raw: RawGlobalConfig): RawGlobalConfig {
+  let result: RawGlobalConfig = raw;
+
+  // Qdrant: retired in v0.49. Drop its settings and map forward to sqlite.
+  if (result.backend === 'qdrant' || result.qdrant !== undefined) {
+    warnQdrantRemoved();
+    const { qdrant: _qdrant, ...rest } = result;
+    result = rest;
+    if (result.backend === 'qdrant') {
+      result.backend = 'sqlite';
+    }
   }
 
-  warnQdrantRemoved();
-  const { qdrant: _qdrant, ...rest } = raw;
-  if (rest.backend === 'qdrant') {
-    rest.backend = 'lancedb';
+  // LanceDB: retired in this release. Map to sqlite and warn once.
+  if (result.backend === 'lancedb') {
+    warnLancedbRemoved();
+    result = { ...result, backend: 'sqlite' };
   }
-  return rest;
+
+  return result;
 }
 
 /**
@@ -85,13 +111,17 @@ function loadConfigFromEnv(): GlobalConfig | null {
 
   if (backendEnv === 'qdrant') {
     warnQdrantRemoved();
-    return { backend: 'lancedb' };
+    return { backend: 'sqlite' };
+  }
+
+  if (backendEnv === 'lancedb') {
+    warnLancedbRemoved();
+    return { backend: 'sqlite' };
   }
 
   if (!VALID_BACKENDS.has(backendEnv)) {
     throw new ConfigValidationError(
-      `Invalid LIEN_BACKEND environment variable: "${backendEnv}"\n` +
-        `Valid values: 'lancedb', 'sqlite'`,
+      `Invalid LIEN_BACKEND environment variable: "${backendEnv}"\n` + `Valid values: 'sqlite'`,
       '<environment>',
     );
   }
@@ -110,7 +140,7 @@ function validateConfig(
     throw new ConfigValidationError(
       `Invalid backend in global config: "${config.backend}"\n` +
         `Config file: ${configPath}\n` +
-        `Valid values: 'lancedb', 'sqlite'`,
+        `Valid values: 'sqlite'`,
       configPath,
     );
   }
@@ -140,7 +170,7 @@ function parseConfigFile(content: string, configPath: string): RawGlobalConfig {
  * Precedence:
  * 1. Environment variables (highest)
  * 2. Global config file (~/.lien/config.json)
- * 3. Defaults (LanceDB)
+ * 3. Defaults (SQLite)
  *
  * @returns Global configuration
  */
@@ -150,7 +180,7 @@ export async function loadGlobalConfig(): Promise<GlobalConfig> {
   const configPath = path.join(getLienHome(), '.lien', 'config.json');
   try {
     const content = await fs.readFile(configPath, 'utf-8');
-    const sanitized = stripRemovedQdrantConfig(parseConfigFile(content, configPath));
+    const sanitized = stripRetiredBackends(parseConfigFile(content, configPath));
     validateConfig(sanitized, configPath);
     fileConfig = sanitized;
   } catch (error) {
@@ -167,7 +197,7 @@ export async function loadGlobalConfig(): Promise<GlobalConfig> {
 
   // 3. Apply defaults if no config found at all
   if (!fileConfig.backend) {
-    fileConfig.backend = 'lancedb';
+    fileConfig.backend = 'sqlite';
   }
   return fileConfig;
 }
@@ -186,7 +216,7 @@ export async function saveGlobalConfig(config: GlobalConfig): Promise<void> {
 
 /**
  * Load existing global config, merge a partial update, and save.
- * Retired Qdrant settings in the existing file are dropped on save.
+ * Retired backend selections in the existing file are dropped on save.
  */
 export async function mergeGlobalConfig(partial: Partial<GlobalConfig>): Promise<GlobalConfig> {
   const configPath = path.join(getLienHome(), '.lien', 'config.json');
@@ -194,7 +224,7 @@ export async function mergeGlobalConfig(partial: Partial<GlobalConfig>): Promise
   let existing: RawGlobalConfig = {};
   try {
     const content = await fs.readFile(configPath, 'utf-8');
-    existing = stripRemovedQdrantConfig(parseConfigFile(content, configPath));
+    existing = stripRetiredBackends(parseConfigFile(content, configPath));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
       throw error;

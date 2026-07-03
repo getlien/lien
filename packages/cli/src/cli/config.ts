@@ -23,14 +23,14 @@ const ALLOWED_KEYS: Record<
 > = {
   backend: {
     scope: 'global',
-    values: ['lancedb', 'sqlite'],
-    description: 'Storage backend (lancedb = vector search; sqlite = structural store)',
+    values: ['sqlite'],
+    description: 'Storage backend (sqlite = structural store with FTS5 lexical search)',
   },
   'embeddings.enabled': {
     scope: 'project',
     values: ['true', 'false'],
     description:
-      'Compute embeddings for semantic search (false = structural-only mode; run `lien index --force` after changing this)',
+      'Deprecated and inert: embeddings are no longer computed (search is lexical FTS5). Accepted for back-compat; has no effect.',
   },
 };
 

@@ -4,10 +4,10 @@
  * Every connecting MCP client receives this string as always-on guidance
  * for how to use Lien's tools. Keep it tight — it travels with every turn.
  */
-export const SERVER_INSTRUCTIONS = `Lien provides semantic code search and dependency analysis over this codebase.
+export const SERVER_INSTRUCTIONS = `Lien provides fast lexical code search and dependency analysis over this codebase.
 Use Lien tools proactively — they complement grep/glob rather than replace each
-other. Prefer Lien for meaning-based queries and structural impact; use grep
-only for exact literals (error strings, config keys, TODOs).
+other. Prefer Lien for keyword discovery and structural impact; use grep only
+for exact literals (error strings, config keys, TODOs).
 
 REQUIRED before Edit/Write on any file:
   get_files_context({ filepaths }) — returns imports, callSites, and test
@@ -27,12 +27,16 @@ symbol:
   Symbol-level queries stay at depth 1 — pass depth only for file-level.
 
 For discovery ("where is X?", "how does Y work?"), call semantic_search FIRST.
-Phrase queries as full questions ("How does the code handle auth?") — natural
-questions score ~2x higher than keyword phrases.
+It runs full-text BM25 keyword search over code, docstrings, and camelCase-split
+identifiers. Query with concrete KEYWORDS, identifiers, and domain terms
+("chunk overlap config", "parse import statement") — NOT natural-language
+questions. There are no embeddings, so a meaning-only paraphrase that shares no
+words with the code will not match; use vocabulary that appears in the code or
+comments. For an exact symbol name, prefer list_functions.
 
 Tool selection:
-  semantic_search   — discovery by meaning
-  list_functions    — by-name/pattern lookup; 10x faster for structural queries
+  semantic_search   — keyword/full-text discovery
+  list_functions    — exact by-name/pattern lookup; fastest for structural queries
   find_similar      — before adding new code, check for existing patterns
   get_complexity    — before refactoring; identify real hotspots
   get_files_context — before editing (MANDATORY)

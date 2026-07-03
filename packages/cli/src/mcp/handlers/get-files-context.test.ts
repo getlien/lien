@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   searchFileChunks,
+  findRelatedChunks,
   handleGetFilesContext,
   clearTestAssociationScanCache,
 } from './get-files-context.js';
@@ -115,6 +116,63 @@ describe('searchFileChunks', () => {
     const results = await searchFileChunks(['src/foo.ts'], ctx);
 
     expect(results[0]).toHaveLength(3);
+  });
+});
+
+describe('findRelatedChunks (lexical FTS5 on first-chunk content)', () => {
+  const mockLog = vi.fn();
+
+  function makeResult(file: string, content: string, language = 'typescript'): SearchResult {
+    return {
+      content,
+      metadata: { file, startLine: 1, endLine: 10, type: 'function', language },
+      score: 0,
+      relevance: 'highly_relevant',
+    };
+  }
+
+  it('searches with the first chunk content string and never embeds', async () => {
+    const firstChunk = makeResult('src/foo.ts', 'function foo() { return computeThing(); }');
+    const related = makeResult('src/bar.ts', 'function computeThing() {}');
+    const mockEmbeddings = { embed: vi.fn() };
+    const mockVectorDB = { search: vi.fn().mockResolvedValue([related]) };
+
+    const ctx = {
+      vectorDB: mockVectorDB as any,
+      embeddings: mockEmbeddings as any,
+      log: mockLog,
+      workspaceRoot: '/project',
+    };
+
+    const result = await findRelatedChunks(['src/foo.ts'], [[firstChunk]], ctx);
+
+    // Lexical path: first chunk content is the query text (3rd arg); vector is
+    // a vestigial empty Float32Array; embeddings are never used.
+    expect(mockVectorDB.search).toHaveBeenCalledWith(
+      expect.any(Float32Array),
+      5,
+      firstChunk.content,
+      expect.objectContaining({ columns: expect.any(Array) }),
+    );
+    expect(mockEmbeddings.embed).not.toHaveBeenCalled();
+    expect(result[0].some(r => r.metadata.file === 'src/bar.ts')).toBe(true);
+  });
+
+  it('filters out same-file and markdown related chunks', async () => {
+    const firstChunk = makeResult('src/foo.ts', 'function foo() {}');
+    const sameFile = makeResult('src/foo.ts', 'function other() {}');
+    const markdown = makeResult('README.md', '# docs', 'markdown');
+    const mockVectorDB = { search: vi.fn().mockResolvedValue([sameFile, markdown]) };
+
+    const ctx = {
+      vectorDB: mockVectorDB as any,
+      log: mockLog,
+      workspaceRoot: '/project',
+    };
+
+    const result = await findRelatedChunks(['src/foo.ts'], [[firstChunk]], ctx);
+
+    expect(result[0]).toHaveLength(0);
   });
 });
 

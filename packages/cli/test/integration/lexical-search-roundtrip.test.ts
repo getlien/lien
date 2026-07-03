@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import fs from 'fs/promises';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
@@ -8,6 +8,7 @@ import {
   indexCodebase,
   createVectorDB,
   NullEmbeddings,
+  WorkerEmbeddings,
   type VectorDBInterface,
 } from '@liendev/core';
 import { createTestDir, cleanupTestDir, createTestFile } from '@liendev/core/test';
@@ -16,29 +17,20 @@ import { createReindexStateManager } from '../../src/mcp/reindex-state-manager.j
 import type { ToolContext } from '../../src/mcp/types.js';
 
 /**
- * Real MCP protocol round-trip test.
+ * Real MCP protocol round trip proving lexical (FTS5) search end to end:
  *
- * server.test.ts mocks the SDK's `Server`/`StdioServerTransport` classes and
- * only asserts that setup functions were *called*. The handler unit tests
- * (e.g. semantic-search.test.ts, get-files-context.test.ts) mock the vector
- * DB underneath. Neither half ever proves that a real MCP client can
- * connect to a real server and get a real tool response back — this test
- * closes that gap.
+ * - `indexCodebase()` builds a real SQLite index of a tiny fixture repo
+ *   without ever computing embeddings (no model, no worker thread).
+ * - `semantic_search` runs a real FTS5 keyword query against that index and
+ *   returns real chunks with a populated relevance category — proving the
+ *   lexical path is live (not the old "embeddings disabled" stub).
+ * - The structural tools (get_files_context, list_functions) return correct
+ *   data over the same real round trip.
  *
- * It stands up:
- * - a real fixture repo on disk (temp dir, cleaned up in afterAll)
- * - a real SQLite index built via the real `indexCodebase()` path (no
- *   embeddings are ever computed)
- * - the real `Server` + the real `registerMCPHandlers` (nothing mocked)
- * - a real `Client` from the MCP SDK, connected over
- *   `InMemoryTransport.createLinkedPair()` (the SDK's in-process transport
- *   pair — faster and more hermetic than spawning a stdio subprocess, and
- *   exercises the exact same request/response wire format)
- *
- * `semantic_search` runs a real FTS5 lexical query — no model, no worker.
- * Run directly with `npm run test:e2e:mcp -w @liendev/lien`.
+ * Uses `NullEmbeddings` and the default sqlite backend, so this runs in the
+ * fast suite (no model download) — unlike test/e2e/mcp-roundtrip.test.ts.
  */
-const TIMEOUT = 60_000;
+const TIMEOUT = 30_000;
 
 const FIXTURE_FILES: Record<string, string> = {
   'math-utils.ts': `export function addNumbers(a: number, b: number): number {
@@ -47,6 +39,12 @@ const FIXTURE_FILES: Record<string, string> = {
 
 export function multiplyNumbers(a: number, b: number): number {
   return a * b;
+}
+`,
+  'main.ts': `import { addNumbers } from './math-utils.js';
+
+export function sumAll(values: number[]): number {
+  return values.reduce((total, v) => addNumbers(total, v), 0);
 }
 `,
   'math-utils.test.ts': `import { describe, it, expect } from 'vitest';
@@ -58,10 +56,6 @@ describe('addNumbers', () => {
   });
 });
 `,
-  'greeter.py': `def greet_user(name: str) -> str:
-    """Return a friendly greeting for the given user name."""
-    return f"Hello, {name}!"
-`,
 };
 
 /** Parse the JSON text payload out of a real tools/call response. */
@@ -71,20 +65,22 @@ function parseToolResponse(result: CallToolResult): any {
   return JSON.parse(first.text);
 }
 
-describe('MCP protocol round trip (real server, real client, real index)', () => {
+describe('Lexical FTS5 search — real MCP round trip', () => {
   let fixtureDir: string;
   let vectorDB: VectorDBInterface;
   let client: Client;
   let server: Server;
+  let workerInitSpy: ReturnType<typeof vi.spyOn>;
 
   beforeAll(async () => {
+    workerInitSpy = vi.spyOn(WorkerEmbeddings.prototype, 'initialize');
+
     fixtureDir = await createTestDir();
     for (const [name, content] of Object.entries(FIXTURE_FILES)) {
       await createTestFile(fixtureDir, name, content);
     }
 
-    // The real indexing path — same function the CLI's `lien index` and the
-    // MCP server's auto-indexing call. No embeddings are computed.
+    // Real indexing path — never computes embeddings.
     const indexResult = await indexCodebase({ rootDir: fixtureDir });
     if (!indexResult.success) {
       throw new Error(`Fixture indexing failed: ${indexResult.error}`);
@@ -99,8 +95,6 @@ describe('MCP protocol round trip (real server, real client, real index)', () =>
       vectorDB,
       embeddings: new NullEmbeddings(),
       rootDir: fixtureDir,
-      // No live file watcher/version-file churn in this test, so reconnect
-      // is a real no-op function rather than a mock assertion target.
       log: () => {},
       checkAndReconnect: async () => {},
       getIndexMetadata: () => ({
@@ -110,8 +104,6 @@ describe('MCP protocol round trip (real server, real client, real index)', () =>
       getReindexState: () => reindexStateManager.getState(),
     };
 
-    // Real server config + real handler registration — the exact function
-    // startMCPServer calls in production.
     const serverConfig = createMCPServerConfig('lien', '0.0.0-test');
     server = new Server(
       { name: serverConfig.name, version: serverConfig.version },
@@ -120,12 +112,13 @@ describe('MCP protocol round trip (real server, real client, real index)', () =>
     registerMCPHandlers(server, toolContext, () => {});
 
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-    client = new Client({ name: 'lien-roundtrip-test-client', version: '0.0.0' }, {});
+    client = new Client({ name: 'lien-lexical-roundtrip-test-client', version: '0.0.0' }, {});
 
     await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
   }, TIMEOUT);
 
   afterAll(async () => {
+    workerInitSpy.mockRestore();
     await client?.close();
     await server?.close();
     // SqliteBackend owns a file handle; release it before removing the store.
@@ -138,22 +131,12 @@ describe('MCP protocol round trip (real server, real client, real index)', () =>
     }
   });
 
-  it('lists the real registered tools over the wire', async () => {
-    const { tools } = await client.listTools();
-    const names = tools.map(t => t.name);
-
-    expect(names).toEqual(
-      expect.arrayContaining([
-        'semantic_search',
-        'get_files_context',
-        'find_similar',
-        'list_functions',
-      ]),
-    );
+  it('indexed the fixture without ever initializing a real embedding worker', () => {
+    expect(workerInitSpy).not.toHaveBeenCalled();
   });
 
   it(
-    'semantic_search round-trips through the real handler to real indexed chunks (lexical FTS5)',
+    'semantic_search returns real FTS5 results with a populated relevance category',
     async () => {
       const response = await client.callTool({
         name: 'semantic_search',
@@ -166,20 +149,22 @@ describe('MCP protocol round trip (real server, real client, real index)', () =>
       expect(Array.isArray(payload.results)).toBe(true);
       expect(payload.results.length).toBeGreaterThan(0);
 
-      // Real chunk content from the real fixture file, produced by a real
-      // FTS5 lexical query against a real index — not a mocked stand-in.
+      // Real chunk content produced by a real FTS5 query over a real index.
       const symbolNames = payload.results.map((r: any) => r.metadata.symbolName).filter(Boolean);
       expect(symbolNames).toContain('addNumbers');
 
-      const mathResult = payload.results.find((r: any) => r.metadata.symbolName === 'addNumbers');
-      expect(mathResult.metadata.file).toBe('math-utils.ts');
-      expect(mathResult.content).toContain('return a + b');
+      const match = payload.results.find((r: any) => r.metadata.symbolName === 'addNumbers');
+      expect(match.metadata.file).toBe('math-utils.ts');
+      expect(match.content).toContain('return a + b');
+      // Relevance must be a real category (not the not_relevant that the
+      // handler filters out).
+      expect(['highly_relevant', 'relevant', 'loosely_related']).toContain(match.relevance);
     },
     TIMEOUT,
   );
 
   it(
-    'get_files_context round-trips through the real handler for a specific fixture file',
+    'get_files_context returns real chunks and test associations',
     async () => {
       const response = await client.callTool({
         name: 'get_files_context',
@@ -192,19 +177,25 @@ describe('MCP protocol round trip (real server, real client, real index)', () =>
       expect(payload.file).toBe('math-utils.ts');
       expect(payload.chunks.length).toBeGreaterThan(0);
       expect(payload.chunks.some((c: any) => c.content.includes('addNumbers'))).toBe(true);
-
-      // Proves the real test-association scan (a full real chunk scan, not a
-      // mocked DB) found the real fixture test file that imports this one.
       expect(payload.testAssociations).toContain('math-utils.test.ts');
     },
     TIMEOUT,
   );
 
-  it('returns a real MCP tool error for an unregistered tool name', async () => {
-    const response = await client.callTool({ name: 'not_a_real_tool', arguments: {} });
+  it(
+    'list_functions finds the real exported functions by pattern',
+    async () => {
+      const response = await client.callTool({
+        name: 'list_functions',
+        arguments: { pattern: '.*Numbers$' },
+      });
 
-    expect(response.isError).toBe(true);
-    const payload = parseToolResponse(response as CallToolResult);
-    expect(payload.message ?? payload.error).toMatch(/unknown tool/i);
-  });
+      expect(response.isError).not.toBe(true);
+      const payload = parseToolResponse(response as CallToolResult);
+
+      const symbolNames = payload.results.map((r: any) => r.metadata.symbolName);
+      expect(symbolNames).toEqual(expect.arrayContaining(['addNumbers', 'multiplyNumbers']));
+    },
+    TIMEOUT,
+  );
 });

@@ -1,7 +1,7 @@
 {
   "name": "@liendev/lien",
   "version": "0.51.2",
-  "description": "Local semantic code search for AI assistants via MCP",
+  "description": "Local lexical code search and dependency analysis for AI assistants via MCP",
   "type": "module",
   "bin": {
     "lien": "./dist/index.js"

@@ -1,11 +1,6 @@
 import type { VectorDBInterface } from './types.js';
-import { VectorDB } from './lancedb.js';
 import { SqliteBackend } from './sqlite/sqlite-backend.js';
-import {
-  loadGlobalConfig,
-  ConfigValidationError,
-  type GlobalConfig,
-} from '../config/global-config.js';
+import { loadGlobalConfig, ConfigValidationError } from '../config/global-config.js';
 
 /**
  * Validate that a VectorDB instance has the required methods.
@@ -19,20 +14,24 @@ function validateVectorDBInterface(db: VectorDBInterface): void {
 /**
  * Factory function to create a VectorDB instance.
  *
- * Selects the backend from GlobalConfig: 'sqlite' → SqliteBackend (opt-in
- * structural store), otherwise the default LanceDB VectorDB. The
- * VectorDBInterface seam means call sites don't change regardless of choice.
+ * SqliteBackend (better-sqlite3 + FTS5 lexical search) is the sole backend
+ * reachable via config. The former LanceDB backend is retired —
+ * `loadGlobalConfig` maps any retired 'lancedb' selection to 'sqlite' — so the
+ * factory always constructs a SqliteBackend. The VectorDBInterface seam means
+ * call sites don't change.
  *
- * Loading the global config here surfaces validation errors early and
- * emits the one-time warning for retired Qdrant settings.
+ * Loading the global config here surfaces validation errors early and emits
+ * the one-time warning for retired backend settings.
  *
  * @param projectRoot - Root directory of the project
  * @returns VectorDBInterface instance for the configured backend
  */
 export async function createVectorDB(projectRoot: string): Promise<VectorDBInterface> {
-  let config: GlobalConfig = {};
+  // Load the global config for its side effects only: surface validation
+  // errors early and emit the one-time retired-backend warning. The backend
+  // choice itself is fixed — sqlite is the only reachable backend.
   try {
-    config = await loadGlobalConfig();
+    await loadGlobalConfig();
   } catch (error) {
     // ConfigValidationError: Config file exists but has syntax/validation errors
     // This should fail hard with a clear error message
@@ -40,7 +39,7 @@ export async function createVectorDB(projectRoot: string): Promise<VectorDBInter
       throw error; // Error message already has helpful details
     }
 
-    // "File not found" is expected: no config file means default LanceDB
+    // "File not found" is expected: no config file means the default backend (sqlite)
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
       // Any other error: fail hard with details
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -51,8 +50,7 @@ export async function createVectorDB(projectRoot: string): Promise<VectorDBInter
     }
   }
 
-  const db: VectorDBInterface =
-    config.backend === 'sqlite' ? new SqliteBackend(projectRoot) : new VectorDB(projectRoot);
+  const db: VectorDBInterface = new SqliteBackend(projectRoot);
   validateVectorDBInterface(db);
   return db;
 }

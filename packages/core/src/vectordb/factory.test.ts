@@ -39,28 +39,17 @@ describe('createVectorDB', () => {
     }
   });
 
-  describe('LanceDB backend', () => {
-    it('should create LanceDB instance when backend is lancedb', async () => {
-      vi.mocked(loadGlobalConfig).mockResolvedValue({
-        backend: 'lancedb',
-      });
-
-      const db = await createVectorDB(testDir);
-      expect(db).toBeDefined();
-    });
-
-    it('should create LanceDB instance when backend is undefined (default)', async () => {
+  describe('SQLite backend (the only backend)', () => {
+    it('should create SqliteBackend when backend is undefined (default)', async () => {
       vi.mocked(loadGlobalConfig).mockResolvedValue({
         backend: undefined,
       });
 
       const db = await createVectorDB(testDir);
       expect(db).toBeDefined();
-      expect((db as unknown as { backend: string }).backend).toBe('lancedb');
+      expect((db as unknown as { backend: string }).backend).toBe('sqlite');
     });
-  });
 
-  describe('SQLite backend', () => {
     it('should create SqliteBackend when backend is sqlite', async () => {
       vi.mocked(loadGlobalConfig).mockResolvedValue({ backend: 'sqlite' });
 
@@ -90,7 +79,7 @@ describe('createVectorDB', () => {
   });
 
   describe('Error handling', () => {
-    it('should silently fall back to LanceDB when config file does not exist (normal for CLI)', async () => {
+    it('should silently fall back to the default sqlite backend when config file does not exist (normal for CLI)', async () => {
       const error = new Error('ENOENT: Config file not found') as NodeJS.ErrnoException;
       error.code = 'ENOENT';
       vi.mocked(loadGlobalConfig).mockRejectedValue(error);
@@ -98,6 +87,7 @@ describe('createVectorDB', () => {
       const db = await createVectorDB(testDir);
 
       expect(db).toBeDefined();
+      expect((db as unknown as { backend: string }).backend).toBe('sqlite');
       // No console output expected - this is normal behavior
     });
 

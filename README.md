@@ -2,9 +2,9 @@
 
 > **/ljɛ̃/** — French for "link"
 
-**Give AI deep understanding of your codebase through semantic search. 100% local, 100% private.**
+**Give AI deep understanding of your codebase through fast lexical search and dependency analysis. 100% local, 100% private.**
 
-Lien connects AI coding assistants like Cursor and Claude Code to your codebase through the Model Context Protocol (MCP). Ask questions in natural language, get precise answers from semantic search—all running locally on your machine.
+Lien connects AI coding assistants like Cursor and Claude Code to your codebase through the Model Context Protocol (MCP). Search by keyword, understand structure and impact, get precise answers—all running locally on your machine. No embeddings, no model download.
 
 📚 **[Full Documentation](https://lien.dev)** | 🚀 **[Getting Started](https://lien.dev/guide/getting-started)** | 🔍 **[How It Works](https://lien.dev/how-it-works)**
 
@@ -13,7 +13,7 @@ Lien connects AI coding assistants like Cursor and Claude Code to your codebase 
 ## Features
 
 - 🔒 **100% Local & Private** - All code analysis happens on your machine
-- 🚀 **Semantic Search** - Natural language queries: "How does authentication work?"
+- 🚀 **Lexical Search** - Fast full-text (FTS5/BM25) keyword search over code, docstrings, and split identifiers
 - 🎯 **MCP Integration** - Works seamlessly with Cursor, Claude Code, and other MCP-compatible tools
 - ⚡ **Fast** - Sub-500ms queries, minutes to index large codebases
 - 🆓 **Free Forever** - No API costs, no subscriptions, no usage limits
@@ -55,7 +55,7 @@ Lien exposes **6 powerful tools** via Model Context Protocol:
 
 | Tool | Description |
 |------|-------------|
-| `semantic_search` | Natural language code search |
+| `semantic_search` | Full-text (BM25) keyword code search |
 | `find_similar` | Find similar code patterns |
 | `get_files_context` | Get file context with test associations |
 | `list_functions` | List symbols by pattern |

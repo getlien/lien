@@ -27,7 +27,7 @@ export const program = new Command();
 
 program
   .name('lien')
-  .description('Local semantic code search for AI assistants via MCP')
+  .description('Local lexical code search and dependency analysis for AI assistants via MCP')
   .version(packageJson.version);
 
 program
@@ -52,12 +52,12 @@ program
 
 program
   .command('index')
-  .description('Index the codebase for semantic search')
+  .description('Index the codebase for lexical (FTS5) search and dependency analysis')
   .option('-f, --force', 'Force full reindex (skip incremental)')
   .option('-v, --verbose', 'Show detailed logging during indexing')
   .option(
     '--no-embeddings',
-    'Skip embedding computation (structural-only mode: no model download, no embedding worker)',
+    '[deprecated, no-op] Embeddings are never computed; search is lexical FTS5',
   )
   .action(indexCommand);
 

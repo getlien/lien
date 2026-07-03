@@ -9,7 +9,7 @@ import {
   isTestFile,
   MAX_CHUNKS_PER_FILE,
 } from '@liendev/parser';
-import type { SearchResult, EmbeddingService, VectorDBInterface } from '@liendev/core';
+import type { SearchResult, VectorDBInterface } from '@liendev/core';
 import {
   FILE_CONTEXT_COLUMNS,
   RELATED_CHUNKS_COLUMNS,
@@ -29,7 +29,6 @@ interface ValidatedArgs {
 /** Context for helper functions (subset of ToolContext) */
 interface HandlerContext {
   vectorDB: VectorDBInterface;
-  embeddings: EmbeddingService;
   log: LogFn;
   workspaceRoot: string;
 }
@@ -147,10 +146,12 @@ export async function searchFileChunks(
 }
 
 /**
- * Find related chunks for files based on semantic similarity.
+ * Find related chunks for files based on lexical similarity.
  *
- * Uses the first chunk of each file to find semantically similar code
- * in other files.
+ * Runs an FTS5 keyword search using the first chunk of each file as the query
+ * text, surfacing lexically similar code in other files. The `queryVector`
+ * argument is vestigial (SqliteBackend matches the text and ignores it), so an
+ * empty Float32Array is passed.
  *
  * @param filepaths - Array of file paths
  * @param fileChunksMap - Chunks already found for each file
@@ -162,7 +163,7 @@ export async function findRelatedChunks(
   fileChunksMap: SearchResult[][],
   ctx: HandlerContext,
 ): Promise<SearchResult[][]> {
-  const { vectorDB, embeddings, workspaceRoot } = ctx;
+  const { vectorDB, workspaceRoot } = ctx;
 
   // Get files that have chunks (need first chunk for related search)
   const filesWithChunks = fileChunksMap
@@ -173,15 +174,10 @@ export async function findRelatedChunks(
     return Array.from({ length: filepaths.length }, () => []);
   }
 
-  // Batch embedding calls for all first chunks
-  const relatedEmbeddings = await Promise.all(
-    filesWithChunks.map(({ chunks }) => embeddings.embed(chunks[0].content)),
-  );
-
-  // Batch all related chunk searches
+  // Batch all related chunk searches (lexical FTS5 on each first chunk's text)
   const relatedSearches = await Promise.all(
-    relatedEmbeddings.map((embedding, i) =>
-      vectorDB.search(embedding, 5, filesWithChunks[i].chunks[0].content, {
+    filesWithChunks.map(({ chunks }) =>
+      vectorDB.search(new Float32Array(0), 5, chunks[0].content, {
         columns: RELATED_CHUNKS_COLUMNS,
       }),
     ),
@@ -395,7 +391,7 @@ export async function handleGetFilesContext(
   args: unknown,
   ctx: ToolContext,
 ): Promise<MCPToolResult> {
-  const { vectorDB, embeddings, log, checkAndReconnect, getIndexMetadata } = ctx;
+  const { vectorDB, log, checkAndReconnect, getIndexMetadata } = ctx;
 
   return await wrapToolHandler(GetFilesContextSchema, async (validatedArgs: ValidatedArgs) => {
     // Normalize input: convert single string to array
@@ -420,7 +416,6 @@ export async function handleGetFilesContext(
     // Create handler context for helper functions
     const handlerCtx: HandlerContext = {
       vectorDB,
-      embeddings,
       log,
       workspaceRoot,
     };

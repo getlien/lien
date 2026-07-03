@@ -5,7 +5,8 @@ import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
 import { execSync } from 'child_process';
-import { VectorDB, LocalEmbeddings } from '@liendev/core';
+import { createVectorDB } from '@liendev/core';
+import type { VectorDBInterface } from '@liendev/core';
 import { getLienHome } from '@liendev/parser';
 
 /**
@@ -44,7 +45,7 @@ import { getLienHome } from '@liendev/parser';
  * - Cleanup runs even if tests fail or are interrupted
  */
 
-const E2E_TIMEOUT = 180000; // 3 minutes per test (cloning + indexing + embeddings)
+const E2E_TIMEOUT = 180000; // 3 minutes per test (cloning + indexing)
 
 interface ProjectConfig {
   name: string;
@@ -200,6 +201,17 @@ function getIndexPath(projectDir: string): string {
 }
 
 /**
+ * Open the store `lien index` wrote for a project, via the same factory the
+ * CLI uses (SQLite by default) — reading through a different backend than the
+ * one that indexed would silently return nothing.
+ */
+async function loadDb(projectDir: string): Promise<VectorDBInterface> {
+  const db = await createVectorDB(projectDir);
+  await db.initialize();
+  return db;
+}
+
+/**
  * Helper to get index statistics from the manifest
  */
 function getIndexStats(projectDir: string): { files: number; chunks: number } {
@@ -308,14 +320,6 @@ if (!process.env.CI) {
 }
 
 describe('E2E: Real Open Source Projects', () => {
-  let embeddings: LocalEmbeddings;
-
-  // Initialize embeddings once for all projects (expensive operation)
-  beforeAll(async () => {
-    embeddings = new LocalEmbeddings();
-    await embeddings.initialize();
-  }, E2E_TIMEOUT);
-
   // Cleanup after all tests complete
   afterAll(async () => {
     await cleanup();
@@ -457,7 +461,9 @@ describe('E2E: Real Open Source Projects', () => {
       });
 
       it('should show status after indexing', () => {
-        const output = runLienCommand(projectDir, 'status');
+        // Strip ANSI escapes — chalk styles the label and count separately
+
+        const output = runLienCommand(projectDir, 'status').replace(/\[[0-9;]*m/g, '');
 
         // Should report index exists
         expect(output).toContain('Exists');
@@ -493,7 +499,7 @@ describe('E2E: Real Open Source Projects', () => {
       it(
         'should find symbols via querySymbols',
         async () => {
-          const db = await VectorDB.load(fsSync.realpathSync(projectDir));
+          const db = await loadDb(fsSync.realpathSync(projectDir));
 
           // Query for functions — every project should have at least some
           const functions = await db.querySymbols({ symbolType: 'function', limit: 10 });
@@ -524,7 +530,7 @@ describe('E2E: Real Open Source Projects', () => {
           expect(indexedFiles.length).toBeGreaterThan(0);
 
           const targetFile = indexedFiles[0];
-          const db = await VectorDB.load(fsSync.realpathSync(projectDir));
+          const db = await loadDb(fsSync.realpathSync(projectDir));
           const results = await db.scanWithFilter({ file: [targetFile], limit: 50 });
 
           console.log(
@@ -546,8 +552,10 @@ describe('E2E: Real Open Source Projects', () => {
       it(
         'should have import/export metadata in chunks',
         async () => {
-          const db = await VectorDB.load(fsSync.realpathSync(projectDir));
-          const results = await db.scanWithFilter({ limit: 100 });
+          const db = await loadDb(fsSync.realpathSync(projectDir));
+          // Scan everything — a small fixed sample is order-dependent and the
+          // first N chunks of a project can legitimately lack imports/exports
+          const results = await db.scanAll();
 
           // At least some chunks should have imports populated
           const chunksWithImports = results.filter(
@@ -574,14 +582,13 @@ describe('E2E: Real Open Source Projects', () => {
       it(
         'should find similar code from an indexed chunk',
         async () => {
-          const db = await VectorDB.load(fsSync.realpathSync(projectDir));
+          const db = await loadDb(fsSync.realpathSync(projectDir));
 
           // Get a function chunk to use as the similarity query
           const [sample] = await db.querySymbols({ symbolType: 'function', limit: 1 });
           expect(sample).toBeDefined();
 
-          const vector = await embeddings.embed(sample.content);
-          const results = await db.search(vector, 5);
+          const results = await db.search(new Float32Array(0), 5, sample.content);
 
           console.log(
             `🔍 ${project.name} find_similar: ${results.length} results, ` +
@@ -600,9 +607,8 @@ describe('E2E: Real Open Source Projects', () => {
       it(
         'should return relevant results for semantic search',
         async () => {
-          const db = await VectorDB.load(fsSync.realpathSync(projectDir));
-          const queryVector = await embeddings.embed(project.sampleSearchQuery);
-          const results = await db.search(queryVector, 5, project.sampleSearchQuery);
+          const db = await loadDb(fsSync.realpathSync(projectDir));
+          const results = await db.search(new Float32Array(0), 5, project.sampleSearchQuery);
 
           console.log(
             `🔎 Search "${project.sampleSearchQuery}" returned ${results.length} results`,

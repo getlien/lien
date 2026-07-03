@@ -21,6 +21,8 @@ import {
 } from '../constants.js';
 import { WorkerEmbeddings } from '../embeddings/worker-embeddings.js';
 import { NullEmbeddings } from '../embeddings/null-embeddings.js';
+// resolveEmbeddingsEnabled is no longer consulted — embeddings are never
+// computed (lexical FTS5 search replaces semantic search).
 import { createVectorDB } from '../vectordb/factory.js';
 import { writeVersionFile } from '../vectordb/version.js';
 import { ManifestManager } from './manifest.js';
@@ -32,7 +34,6 @@ import { indexMultipleFiles, normalizeToRelativePath } from './incremental.js';
 import type { EmbeddingService } from '../embeddings/types.js';
 import { ChunkBatchProcessor } from './chunk-batch-processor.js';
 import type { VectorDBInterface } from '../vectordb/types.js';
-import { resolveEmbeddingsEnabled } from '../config/embeddings-enabled.js';
 import {
   extractRepoId,
   scanCodebase,
@@ -52,18 +53,20 @@ export interface IndexingOptions {
   verbose?: boolean;
   /** Force full reindex, skip incremental */
   force?: boolean;
-  /** Pre-initialized embedding service (for warm workers) */
+  /**
+   * Accepted for back-compat but inert: embeddings are never computed, so any
+   * service passed here is discarded and a `NullEmbeddings` is used instead.
+   */
   embeddings?: EmbeddingService;
   /** Pre-loaded config (skip loading from disk) */
   config?: LienConfig;
   /** Progress callback for external UI */
   onProgress?: (progress: IndexingProgress) => void;
   /**
-   * Skip real embedding computation. Indexing still proceeds normally
-   * (chunking + full persistence to the vector store) but uses zero-vector
-   * placeholders instead of computed embeddings — structural-only mode.
-   * When omitted, falls back to the project config's `embeddings.enabled`
-   * setting (default: true, i.e. embeddings run as before).
+   * Accepted for back-compat but inert: embeddings are never computed
+   * regardless of this flag or the project config's `embeddings.enabled`
+   * setting. Indexing always runs in structural-only mode (chunking + full
+   * persistence, zero-vector placeholders). Search is lexical FTS5.
    */
   skipEmbeddings?: boolean;
 }
@@ -594,39 +597,18 @@ async function performFullIndex(
 }
 
 /**
- * Resolve whether this indexing run should skip real embedding computation.
- *
- * Precedence: an explicit `options.skipEmbeddings` always wins (this is how
- * `lien index --no-embeddings` forces structural-only mode for a single
- * run). Otherwise, falls back to the project config's `embeddings.enabled`
- * (default: true) via {@link resolveEmbeddingsEnabled}, which already
- * handles a malformed/unreadable config safely.
- */
-async function resolveSkipEmbeddings(options: IndexingOptions, rootDir: string): Promise<boolean> {
-  if (typeof options.skipEmbeddings === 'boolean') {
-    return options.skipEmbeddings;
-  }
-
-  const enabled = await resolveEmbeddingsEnabled(rootDir, options.config);
-  return !enabled;
-}
-
-/**
- * Index a codebase, creating vector embeddings for semantic search.
+ * Index a codebase into the structural store.
  *
  * This is the main entry point for indexing. It:
  * - Tries incremental indexing first (if not forced)
  * - Falls back to full indexing if needed
  * - Provides progress callbacks for UI integration
  *
- * When embeddings are disabled (explicitly via `skipEmbeddings: true`, or
- * via the project config's `embeddings.enabled: false`), indexing still
- * runs the normal chunking + persistence pipeline — it just substitutes a
- * `NullEmbeddings` service that writes zero-vector placeholders instead of
- * computing real embeddings. This is structural-only mode: no model
- * download, no embedding worker, and every structural tool
- * (`get_files_context`, `get_dependents`, `list_functions`,
- * `get_complexity`) keeps working against the persisted index.
+ * Embeddings are never computed. Indexing runs the normal chunking +
+ * persistence pipeline but always substitutes a `NullEmbeddings` service (no
+ * model download, no embedding worker). Search is lexical FTS5 over the
+ * persisted structural store; the `skipEmbeddings` option and
+ * `--no-embeddings` flag are accepted for back-compat but are now inert.
  *
  * @param options - Indexing options
  * @returns Indexing result with stats
@@ -641,14 +623,6 @@ async function resolveSkipEmbeddings(options: IndexingOptions, rootDir: string):
  *   rootDir: '/path/to/project',
  *   onProgress: (p) => console.log(`${p.phase}: ${p.message}`)
  * });
- *
- * // With pre-initialized embeddings (warm worker)
- * const embeddings = new WorkerEmbeddings();
- * await embeddings.initialize();
- * const result = await indexCodebase({ embeddings });
- *
- * // Structural-only mode (no embeddings)
- * const result = await indexCodebase({ skipEmbeddings: true });
  * ```
  */
 export async function indexCodebase(options: IndexingOptions = {}): Promise<IndexingResult> {
@@ -658,14 +632,10 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<Inde
   try {
     options.onProgress?.({ phase: 'initializing', message: 'Loading configuration...' });
 
-    const skipEmbeddings = await resolveSkipEmbeddings(options, rootDir);
-    // `skipEmbeddings` is authoritative: even if the caller also passed a
-    // real `options.embeddings` instance (e.g. a pre-initialized
-    // WorkerEmbeddings), structural-only mode must win so no real vectors
-    // are ever computed.
-    const effectiveOptions: IndexingOptions = skipEmbeddings
-      ? { ...options, embeddings: new NullEmbeddings() }
-      : options;
+    // Embeddings are never computed. Substitute NullEmbeddings even if the
+    // caller passed a real `options.embeddings` instance — no real vectors are
+    // ever produced (lexical FTS5 search replaces semantic search).
+    const effectiveOptions: IndexingOptions = { ...options, embeddings: new NullEmbeddings() };
 
     // Initialize vector database (use factory to select backend from global config)
     options.onProgress?.({ phase: 'initializing', message: 'Initializing vector database...' });

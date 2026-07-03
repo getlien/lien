@@ -462,44 +462,22 @@ describe('handleFindSimilar', () => {
     });
   });
 
-  describe('embeddings disabled (structural-only mode)', () => {
-    it('returns a clear disabled note instead of searching', async () => {
-      const disabledCtx: ToolContext = { ...mockCtx, embeddingsEnabled: false };
+  describe('lexical search path', () => {
+    it('runs lexical search with the raw code text and never embeds', async () => {
+      mockVectorDB.search.mockResolvedValue([]);
+      const code = 'async function fetchData() { return await db.find(); }';
 
-      const result = await handleFindSimilar(
-        { code: 'async function fetchData() { return await db.find(); }' },
-        disabledCtx,
+      await handleFindSimilar({ code }, mockCtx);
+
+      // The code string is passed straight to search() (3rd arg); the vector
+      // arg is a vestigial empty Float32Array. limit defaults to 5, +10 overfetch.
+      expect(mockVectorDB.search).toHaveBeenCalledWith(
+        expect.any(Float32Array),
+        15,
+        code,
+        expect.objectContaining({ columns: expect.any(Array) }),
       );
-
-      const parsed = JSON.parse(result.content![0].text);
-      expect(parsed.results).toEqual([]);
-      expect(parsed.note).toContain('disabled');
-      expect(parsed.note).toContain('structural-only mode');
-      expect(parsed.note).toContain('lien config set embeddings.enabled true');
-      expect(parsed.indexInfo).toBeDefined();
-    });
-
-    it('does not call embed() or vectorDB.search() when disabled', async () => {
-      const disabledCtx: ToolContext = { ...mockCtx, embeddingsEnabled: false };
-
-      await handleFindSimilar(
-        { code: 'async function fetchData() { return await db.find(); }' },
-        disabledCtx,
-      );
-
       expect(mockEmbeddings.embed).not.toHaveBeenCalled();
-      expect(mockVectorDB.search).not.toHaveBeenCalled();
-    });
-
-    it('is not an error result', async () => {
-      const disabledCtx: ToolContext = { ...mockCtx, embeddingsEnabled: false };
-
-      const result = await handleFindSimilar(
-        { code: 'async function fetchData() { return await db.find(); }' },
-        disabledCtx,
-      );
-
-      expect(result.isError).toBeUndefined();
     });
   });
 

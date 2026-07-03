@@ -179,50 +179,15 @@ describe('startMCPServer', () => {
     vi.restoreAllMocks();
   });
 
-  it('should initialize embeddings and vector database', async () => {
+  it('should initialize the vector database and always use NullEmbeddings (never a worker)', async () => {
     await startMCPServer({ rootDir: '/test/project' });
 
-    expect(WorkerEmbeddings).toHaveBeenCalledOnce();
-    expect(createVectorDB).toHaveBeenCalledWith('/test/project');
-    expect(mockEmbeddings.initialize).toHaveBeenCalledOnce();
-    expect(mockVectorDB.initialize).toHaveBeenCalledOnce();
-  });
-
-  it('should not construct WorkerEmbeddings or call its initialize when embeddings are disabled', async () => {
-    mockResolveEmbeddingsEnabled.mockResolvedValue(false);
-
-    await startMCPServer({ rootDir: '/test/project' });
-
-    // No embedding worker/model spawn: the whole point of structural-only mode.
-    expect(WorkerEmbeddings).not.toHaveBeenCalled();
-    expect(mockEmbeddings.initialize).not.toHaveBeenCalled();
-
-    // NullEmbeddings is used in its place, and the vector DB still initializes normally.
+    // Embeddings are never computed: NullEmbeddings only, no worker/model spawn.
     expect(NullEmbeddings).toHaveBeenCalledOnce();
+    expect(WorkerEmbeddings).not.toHaveBeenCalled();
+    expect(mockNullEmbeddingsInstance.initialize).toHaveBeenCalledOnce();
     expect(createVectorDB).toHaveBeenCalledWith('/test/project');
     expect(mockVectorDB.initialize).toHaveBeenCalledOnce();
-  });
-
-  it('should mark the tool context as embeddings-disabled when structural-only', async () => {
-    mockResolveEmbeddingsEnabled.mockResolvedValue(false);
-
-    await startMCPServer({ rootDir: '/test/project' });
-
-    expect(registerMCPHandlers).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ embeddingsEnabled: false }),
-      expect.any(Function),
-    );
-  });
-
-  it('should mark the tool context as embeddings-enabled by default', async () => {
-    await startMCPServer({ rootDir: '/test/project' });
-
-    expect(registerMCPHandlers).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ embeddingsEnabled: true }),
-      expect.any(Function),
-    );
   });
 
   it('should create MCP server and register handlers', async () => {
@@ -294,7 +259,7 @@ describe('startMCPServer', () => {
     const toolContext = vi.mocked(registerMCPHandlers).mock.calls[0][1];
 
     expect(toolContext.vectorDB).toBe(mockVectorDB);
-    expect(toolContext.embeddings).toEqual(mockEmbeddings);
+    expect(toolContext.embeddings).toEqual(mockNullEmbeddingsInstance);
     expect(toolContext.rootDir).toBe('/test/project');
     expect(typeof toolContext.log).toBe('function');
     expect(typeof toolContext.checkAndReconnect).toBe('function');

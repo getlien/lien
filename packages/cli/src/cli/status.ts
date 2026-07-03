@@ -9,7 +9,7 @@ import {
   getCurrentBranch,
   getCurrentCommit,
   readVersionFile,
-  resolveEmbeddingsEnabled,
+  loadGlobalConfig,
   DEFAULT_CONCURRENCY,
   DEFAULT_EMBEDDING_BATCH_SIZE,
   DEFAULT_GIT_POLL_INTERVAL_MS,
@@ -70,6 +70,15 @@ async function getGitState(rootDir: string): Promise<{ branch: string; commit: s
     return { branch, commit };
   } catch {
     return null;
+  }
+}
+
+/** Resolve the configured backend, defaulting to sqlite on any error. */
+async function resolveBackend(): Promise<string> {
+  try {
+    return (await loadGlobalConfig()).backend ?? 'sqlite';
+  } catch {
+    return 'sqlite';
   }
 }
 
@@ -142,24 +151,9 @@ function printWatchStatus() {
   console.log(chalk.dim('  Disable with:'), chalk.bold('lien serve --no-watch'));
 }
 
-function printEmbeddingsStatus(enabled: boolean) {
-  if (enabled) {
-    console.log(chalk.dim('Embeddings:'), chalk.green('✓ Enabled'));
-    console.log(
-      chalk.dim('  Disable with:'),
-      chalk.bold('lien config set embeddings.enabled false'),
-    );
-  } else {
-    console.log(chalk.dim('Embeddings:'), chalk.yellow('✗ Disabled (structural-only mode)'));
-    console.log(
-      chalk.dim('  semantic_search / find_similar are unavailable; structural tools still work.'),
-    );
-    console.log(
-      chalk.dim('  Re-enable with:'),
-      chalk.bold('lien config set embeddings.enabled true'),
-    );
-    console.log(chalk.dim('  Then reindex with:'), chalk.bold('lien index --force'));
-  }
+function printSearchStatus() {
+  console.log(chalk.dim('Search:'), chalk.green('✓ Lexical (FTS5 full-text, BM25)'));
+  console.log(chalk.dim('  No embeddings are computed — nothing is downloaded.'));
 }
 
 function printIndexingSettings() {
@@ -190,23 +184,18 @@ export async function statusCommand(options: { verbose?: boolean; format?: strin
     return;
   }
 
-  const embeddingsEnabled = await resolveEmbeddingsEnabled(rootDir);
+  const backend = await resolveBackend();
 
   showCompactBanner();
   console.log(chalk.bold('Status\n'));
-  console.log(
-    chalk.dim('Configuration:'),
-    embeddingsEnabled
-      ? chalk.green('✓ Using defaults')
-      : chalk.yellow('✗ Customized (embeddings disabled)'),
-  );
+  console.log(chalk.dim('Backend:'), backend);
 
   await printIndexStatus(indexPath);
 
   console.log(chalk.bold('\nFeatures:'));
   await printGitStatus(rootDir, indexPath);
   printWatchStatus();
-  printEmbeddingsStatus(embeddingsEnabled);
+  printSearchStatus();
 
   if (options.verbose) {
     printIndexingSettings();
@@ -225,7 +214,8 @@ async function outputJson(rootDir: string, indexPath: string) {
     lastReindex: null as string | null,
     git: { enabled: false, branch: null, commit: null },
     features: { fileWatching: true, gitDetection: true },
-    embeddings: { enabled: await resolveEmbeddingsEnabled(rootDir) },
+    backend: await resolveBackend(),
+    search: 'lexical',
     settings: {
       concurrency: DEFAULT_CONCURRENCY,
       batchSize: DEFAULT_EMBEDDING_BATCH_SIZE,

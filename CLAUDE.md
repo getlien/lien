@@ -2,7 +2,7 @@
 
 ## What is Lien?
 
-Local-first semantic code search tool providing context to AI coding assistants via MCP (Model Context Protocol).
+Local-first structural code search tool (lexical FTS5 search + dependency analysis) providing context to AI coding assistants via MCP (Model Context Protocol).
 
 **Key Facts:**
 - Package: `@liendev/lien`
@@ -53,7 +53,7 @@ packages/site/              # VitePress docs site (lien.dev)
 
 ## Lien MCP Tools — MANDATORY Usage
 
-Lien provides semantic code search via MCP. These tools are **not optional** — they MUST be used as described below. Using grep/glob when a Lien tool is appropriate is a violation of this project's workflow.
+Lien provides lexical (FTS5) code search and dependency analysis via MCP. These tools are **not optional** — they MUST be used as described below. Using grep/glob when a Lien tool is appropriate is a violation of this project's workflow.
 
 ### MANDATORY: Before Editing Any File
 
@@ -75,9 +75,9 @@ Lien provides semantic code search via MCP. These tools are **not optional** —
 
 **When asked "where is X?", "how does X work?", or any question about understanding the codebase, you MUST use `semantic_search` BEFORE falling back to grep/glob.**
 
-- `semantic_search` finds code by meaning — grep finds exact strings
-- Use `semantic_search` for: "Where is authentication handled?", "How does indexing work?", "What handles file watching?"
-- Use grep/glob ONLY for: exact symbol names, literal strings, config keys, TODOs
+- `semantic_search` is full-text (BM25) keyword search over code, docstrings, and camelCase-split identifiers — query with concrete keywords/identifiers/domain terms, not natural-language questions. There are no embeddings, so meaning-only paraphrases that share no words with the code won't match.
+- Use `semantic_search` for: "authenticate user session", "index codebase pipeline", "file watcher debounce" — words that appear in the code
+- Use grep/glob ONLY for: exact symbol names, literal strings, config keys, TODOs (or `list_functions` for a single exact symbol name)
 
 ### When to Use Other Tools
 
