@@ -1,6 +1,6 @@
 # @liendev/core
 
-Core indexing and analysis engine for Lien. This package provides the low-level APIs for semantic code search, complexity analysis, and framework detection.
+Core indexing and analysis engine for Lien. This package provides the low-level APIs for lexical (FTS5) code search, complexity analysis, and framework detection.
 
 ## Installation
 
@@ -25,8 +25,8 @@ await indexCodebase({
 // Load the vector database
 const db = await VectorDB.load('/path/to/project');
 
-// Run semantic search
-const results = await db.search('authentication logic', { limit: 10 });
+// Run lexical (FTS5) keyword search
+const results = await db.search('authenticate session token', { limit: 10 });
 
 // Analyze complexity
 const analyzer = new ComplexityAnalyzer(db);
@@ -41,7 +41,7 @@ console.log(`Found ${report.summary.totalViolations} complexity violations`);
 
 #### `indexCodebase(options: IndexingOptions): Promise<IndexingResult>`
 
-Index a codebase for semantic search.
+Index a codebase for lexical (FTS5) search and dependency analysis.
 
 ```typescript
 interface IndexingOptions {
@@ -85,7 +85,7 @@ const db = await VectorDB.load('./my-project');
 
 #### `db.search(query: string, options?: SearchOptions): Promise<SearchResult[]>`
 
-Perform semantic search.
+Perform lexical (FTS5/BM25) keyword search.
 
 ```typescript
 interface SearchOptions {
@@ -218,32 +218,14 @@ const changed = await getChangedFiles('./my-project');
 
 ## Advanced Usage
 
-### Warm Workers (Cloud/Action Use)
-
-Keep embeddings loaded between requests for better performance:
-
-```typescript
-import { WorkerEmbeddings, indexCodebase } from '@liendev/core';
-
-// Initialize once (runs ONNX inference in a worker thread)
-const embeddings = new WorkerEmbeddings();
-await embeddings.initialize();
-
-// Reuse across multiple indexing operations
-for (const project of projects) {
-  await indexCodebase({
-    rootDir: project.path,
-    embeddings,  // Reuse warm embeddings
-  });
-}
-
-// Terminate the worker thread when done
-await embeddings.dispose();
-```
-
 ### Custom Embedding Service
 
-Implement `EmbeddingService` interface for custom embeddings:
+> **Note:** Embeddings are no longer computed during indexing — search is
+> lexical FTS5 over the persisted structural store. The `EmbeddingService`
+> interface and the `embeddings` indexing option are retained for back-compat
+> but are inert; any service passed to `indexCodebase` is discarded.
+
+`EmbeddingService` interface (legacy/back-compat only; indexing ignores it):
 
 ```typescript
 interface EmbeddingService {

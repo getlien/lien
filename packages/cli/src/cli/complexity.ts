@@ -1,10 +1,10 @@
 import chalk from 'chalk';
 import fs from 'fs';
 import path from 'path';
-import { VectorDB } from '@liendev/core';
+import { createVectorDB } from '@liendev/core';
 import { ComplexityAnalyzer } from '@liendev/core';
 import { formatReport } from '@liendev/core';
-import type { OutputFormat } from '@liendev/core';
+import type { OutputFormat, VectorDBInterface } from '@liendev/core';
 import { EXISTENCE_COLUMNS } from '../mcp/handlers/columns.js';
 
 interface ComplexityOptions {
@@ -53,7 +53,7 @@ function validateFilesExist(files: string[] | undefined, rootDir: string): void 
 }
 
 /** Check if index exists */
-async function ensureIndexExists(vectorDB: VectorDB): Promise<void> {
+async function ensureIndexExists(vectorDB: VectorDBInterface): Promise<void> {
   try {
     await vectorDB.scanWithFilter({ limit: 1, columns: EXISTENCE_COLUMNS });
   } catch {
@@ -79,8 +79,9 @@ export async function complexityCommand(options: ComplexityOptions) {
     validateFormat(options.format);
     validateFilesExist(options.files, rootDir);
 
-    // Initialize database (no config needed)
-    const vectorDB = new VectorDB(rootDir);
+    // Initialize database via the factory so reads hit the same backend
+    // `lien index` wrote
+    const vectorDB = await createVectorDB(rootDir);
     await vectorDB.initialize();
     await ensureIndexExists(vectorDB);
 

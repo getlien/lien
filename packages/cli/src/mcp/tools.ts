@@ -18,15 +18,13 @@ export const tools = [
   toMCPToolSchema(
     SemanticSearchSchema,
     'semantic_search',
-    `Search codebase by MEANING, not text. Complements grep - use this for discovery and understanding, grep for exact matches.
+    `Full-text keyword search over the codebase (BM25 over code, docstrings, and camelCase-split identifiers). Complements grep - use this for discovery, grep for exact literal strings.
 
 Examples:
-- "Where is authentication handled?" → semantic_search({ query: "How does the code handle user authentication?" })
-- "How does payment work?" → semantic_search({ query: "How are payment transactions processed and validated?" })
+- "Where is authentication handled?" → semantic_search({ query: "authenticate user session token" })
+- "How does payment work?" → semantic_search({ query: "payment transaction charge refund" })
 
-IMPORTANT: Phrase queries as full questions starting with "How", "Where", "What", etc. Full questions produce significantly better relevance than keyword phrases.
-
-Use natural language describing what the code DOES, not function names. For exact string matching, use grep instead.
+IMPORTANT: Query with concrete KEYWORDS, identifiers, and domain terms that actually appear in the code — NOT natural-language questions. There are no embeddings: a meaning-only paraphrase that shares no words with the code will not match. For an exact symbol name, use list_functions.
 
 Returns:
 - results[]: { content, score, relevance, metadata: { file, startLine, endLine, language?, symbolName?, symbolType?, signature?, enclosingSymbol? } }
@@ -37,12 +35,12 @@ Returns:
   toMCPToolSchema(
     FindSimilarSchema,
     'find_similar',
-    `Find code structurally similar to a given snippet. Use for:
+    `Find code similar to a given snippet via lexical full-text (BM25) matching on the snippet's tokens. Use for:
 - Ensuring consistency when adding new code
 - Finding duplicate implementations
 - Refactoring similar patterns together
 
-Provide at least 24 characters of code to match against. Results include a relevance category for each match.
+Provide at least 24 characters of code to match against. Matching is keyword-based (identifiers, keywords), not semantic. Results include a relevance category for each match.
 
 Optional filters:
 - language: Filter by programming language (e.g., "typescript", "python")

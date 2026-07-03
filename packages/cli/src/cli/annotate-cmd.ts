@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { VectorDB, ComplexityAnalyzer } from '@liendev/core';
+import { createVectorDB, ComplexityAnalyzer } from '@liendev/core';
 import {
   findTestAssociationsFromChunks,
   computeBlastRadiusRisk,
@@ -126,7 +126,7 @@ async function run(file: string): Promise<void> {
   const needsChdir = originalCwd !== rootDir;
   if (needsChdir) process.chdir(rootDir);
   try {
-    const vectorDB = new VectorDB(rootDir);
+    const vectorDB = await createVectorDB(rootDir);
     await vectorDB.initialize();
 
     const log = () => undefined;

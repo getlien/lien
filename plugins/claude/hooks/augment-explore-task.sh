@@ -46,7 +46,7 @@ esac
 
 # Don't inject the mandate if the repo has no usable Lien index — would
 # point the subagent at tools that return empty for everything and
-# burn calls on dead ends. The LanceDB table dir is the canonical
+# burn calls on dead ends. The sqlite structural.db file is the canonical
 # "is this repo indexed?" signal.
 cwd="$(printf '%s' "$input" | jq -r '.cwd // empty')"
 if [ -n "$cwd" ] && [ -d "$cwd" ]; then
@@ -54,14 +54,14 @@ if [ -n "$cwd" ] && [ -d "$cwd" ]; then
 else
   store="$(lien path --store 2>/dev/null)"
 fi
-[ -n "$store" ] && [ -d "$store/code_chunks.lance" ] || exit 0
+[ -n "$store" ] && [ -f "$store/structural.db" ] || exit 0
 
 injection='
 
 [Lien] MCP tools are REQUIRED for meaning-based and structural codebase queries in this repo. Use Lien tools as your primary discovery mechanism — grep/glob/Read are fallbacks ONLY for exact-literal lookups (error strings, config keys, TODOs).
 
 Required tools:
-  • mcp__plugin_lien_lien__semantic_search — REQUIRED for "where is X?" / "how does Y work?" / "what depends on Z?". Phrase queries as full questions.
+  • mcp__plugin_lien_lien__semantic_search — REQUIRED for meaning-based discovery. Full-text (BM25) search: phrase queries with concrete keywords/identifiers/domain terms that appear in the code ("chunk overlap config", "parse import statement"), NOT full natural-language questions — there are no embeddings, so paraphrase queries score worse.
   • mcp__plugin_lien_lien__list_functions — REQUIRED for "find all X" / pattern-based structural lookup (10× faster than grep).
   • mcp__plugin_lien_lien__get_files_context — REQUIRED before reporting on any file you exploratively read (returns imports, callers, test associations).
   • mcp__plugin_lien_lien__get_dependents — REQUIRED before reporting an exported symbol change is "safe" or complete.

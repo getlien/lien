@@ -62,11 +62,11 @@ Test each of the 6 Lien MCP tools against the Lien codebase. For each tool, run 
 
 ### semantic_search
 
-Run at least 3 queries with varying specificity:
+Lexical full-text (FTS5/BM25) search — query with concrete keywords/identifiers that appear in the code, not natural-language questions. Run at least 3 queries with varying specificity:
 
-- Broad: `semantic_search({ query: "How does the indexing pipeline work?" })`
-- Specific: `semantic_search({ query: "Where are code chunks stored in the vector database?" })`
-- Cross-cutting: `semantic_search({ query: "How does Lien detect test file associations?" })`
+- Broad: `semantic_search({ query: "indexing pipeline chunk batch" })`
+- Specific: `semantic_search({ query: "code chunk insert batch structural store" })`
+- Cross-cutting: `semantic_search({ query: "test file associations imports" })`
 
 **Check:** Results should return relevant files with reasonable relevance scores. Flag if results seem off-topic or if relevance categories don't match expectations.
 
@@ -306,7 +306,7 @@ You are a **senior software architect** evaluating the overall architecture of L
 
 ### Context
 
-Lien is a local-first semantic code search tool with two packages:
+Lien is a local-first lexical (FTS5) code search and dependency-analysis tool with two packages:
 - `@liendev/core` — AST parsing, language definitions, vector DB operations, complexity analysis
 - `@liendev/lien` (cli) — CLI commands, MCP server, embeddings, config, indexing pipeline, git integration
 
@@ -441,7 +441,7 @@ Review all test files across both packages:
 1. Use `Glob` to find all test files: `**/*.test.ts`, `**/*.spec.ts`
 2. Use `get_files_context` on critical source files to check `testAssociations`
 3. Read test files for the most critical modules (MCP handlers, indexer, vector DB)
-4. Use `semantic_search({ query: "How are MCP tools tested?" })` to find test patterns
+4. Use `semantic_search({ query: "MCP tool test coverage vi.mock handler" })` to find test patterns
 5. Use `find_similar` on a well-written test to see if the pattern is consistent
 6. Check for test utilities: `Grep` for `beforeEach`, `afterEach`, `jest.mock`, `vi.mock` patterns
 
@@ -539,7 +539,7 @@ Lien's attack surface includes:
 
 1. Start with the MCP server entry point — find how requests are received and dispatched
 2. Trace each MCP tool from input to output, checking for validation at each step
-3. Use `semantic_search({ query: "How does Lien validate file paths?" })` to find path validation code
+3. Use `semantic_search({ query: "validate file path sanitize resolve" })` to find path validation code
 4. Use `Grep` for security-relevant patterns: `path.join`, `path.resolve`, `fs.readFile`, `new RegExp`, `eval`, `exec`, `spawn`
 5. Use `Grep` for input validation patterns: `zod`, `validate`, `sanitize`, `allowlist`
 6. Check the server binding: search for `listen`, `createServer`, `bind`, `0.0.0.0`, `127.0.0.1`
@@ -632,7 +632,7 @@ You are a **developer advocate** evaluating the developer experience of Lien fro
 2. Read the CLI command source files to understand what output is produced
 3. Read MCP tool handlers to evaluate response format and structure
 4. Use `Grep` for error message patterns: `console.error`, `console.warn`, `throw new Error`, `logger.error`
-5. Use `semantic_search({ query: "How does Lien handle errors in CLI commands?" })` to find error handling patterns
+5. Use `semantic_search({ query: "error handling CLI command throw catch" })` to find error handling patterns
 6. Check for progress indicators: `Grep` for `spinner`, `progress`, `ora`, `chalk`
 7. Compare output consistency across commands
 

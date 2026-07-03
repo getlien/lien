@@ -1,9 +1,9 @@
 import { z } from 'zod';
 
 /**
- * Schema for semantic search tool input.
+ * Schema for the lexical code search tool input.
  *
- * Validates query strings and result limits for semantic code search.
+ * Validates query strings and result limits for full-text (BM25) code search.
  * Includes rich descriptions to guide AI assistants on proper usage.
  */
 export const SemanticSearchSchema = z.object({
@@ -12,15 +12,16 @@ export const SemanticSearchSchema = z.object({
     .min(3, 'Query must be at least 3 characters')
     .max(500, 'Query too long (max 500 characters)')
     .describe(
-      "Natural language description of what you're looking for.\n\n" +
-        'Use full sentences describing functionality, not exact names.\n\n' +
+      'Keywords, identifiers, and domain terms to match — full-text (BM25) search.\n\n' +
+        'Use concrete words that actually appear in the code, comments, or docstrings; ' +
+        'this is NOT semantic search, so meaning-only paraphrases that share no words will not match.\n\n' +
         'Good examples:\n' +
-        "  - 'How does the code handle user authentication?'\n" +
-        "  - 'Where are email addresses validated?'\n" +
-        "  - 'How are payment transactions processed?'\n\n" +
+        "  - 'authenticate user session token'\n" +
+        "  - 'validate email address'\n" +
+        "  - 'payment transaction charge refund'\n\n" +
         'Bad examples:\n' +
-        "  - 'auth' (too vague)\n" +
-        "  - 'validateEmail' (use grep for exact names)",
+        "  - 'How does the code handle things?' (natural-language question, no matching keywords)\n" +
+        "  - 'validateEmail' (a single exact name — use list_functions instead)",
     ),
 
   limit: z
@@ -39,7 +40,7 @@ export const SemanticSearchSchema = z.object({
     .boolean()
     .default(false)
     .describe(
-      'If true, search across all repos in the organization (requires a cross-repo-capable backend; the bundled LanceDB backend is single-repo).\n\n' +
+      'If true, search across all repos in the organization (requires a cross-repo-capable backend; the bundled backend is single-repo).\n\n' +
         'Default: false (single-repo search)\n' +
         'When enabled, results are grouped by repository.',
     ),

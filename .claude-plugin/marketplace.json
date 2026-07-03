@@ -1,12 +1,12 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "lien",
-  "description": "Lien — local semantic code search and dependency analysis for AI assistants.",
+  "description": "Lien — local lexical code search and dependency analysis for AI assistants.",
   "owner": { "name": "Lien" },
   "plugins": [
     {
       "name": "lien",
-      "description": "Local semantic code search and dependency analysis for your codebase via MCP. Ships the Explore agent plus Lien's MCP tools (semantic_search, get_files_context, get_dependents, list_functions, get_complexity, find_similar). No per-project setup required.",
+      "description": "Local lexical (FTS5) code search and dependency analysis for your codebase via MCP. Ships the Explore agent plus Lien's MCP tools (semantic_search, get_files_context, get_dependents, list_functions, get_complexity, find_similar). No per-project setup required.",
       "category": "development",
       "source": "./plugins/claude",
       "homepage": "https://lien.dev"

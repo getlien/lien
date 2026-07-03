@@ -8,12 +8,7 @@ vi.mock('@liendev/core', async () => {
   const actual = await vi.importActual<typeof import('@liendev/core')>('@liendev/core');
   return {
     ...actual,
-    VectorDB: class MockVectorDB {
-      constructor() {}
-      async initialize() {}
-      async scanWithFilter() {}
-      async scanAll() {}
-    },
+    createVectorDB: vi.fn(),
   };
 });
 
@@ -31,12 +26,8 @@ describe('complexityCommand', () => {
       scanAll: vi.fn(), // Used for actual analysis
     };
 
-    // Mock VectorDB constructor to return our mock instance
-    (coreModule.VectorDB as any) = class {
-      constructor() {
-        return mockVectorDB;
-      }
-    };
+    // The factory hands back our mock instance
+    vi.mocked(coreModule.createVectorDB).mockResolvedValue(mockVectorDB);
 
     // Spy on console
     consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});

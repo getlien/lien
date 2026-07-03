@@ -5,11 +5,9 @@ import { fileURLToPath } from 'url';
 import { dirname, join, resolve } from 'path';
 import type { EmbeddingService, VectorDBInterface, GitState } from '@liendev/core';
 import {
-  WorkerEmbeddings,
   NullEmbeddings,
   VERSION_CHECK_INTERVAL_MS,
   createVectorDB,
-  resolveEmbeddingsEnabled,
   isGitRepo,
 } from '@liendev/core';
 import { FileWatcher } from '../watcher/index.js';
@@ -42,10 +40,10 @@ export interface MCPServerOptions {
  * Initialize embeddings and vector database.
  * Uses factory to create the vector database backend.
  *
- * When embeddings are disabled via project config, uses a `NullEmbeddings`
- * stub instead of `WorkerEmbeddings` — this is what actually skips the
- * model download and worker-thread spawn (the CPU/heat cost the
- * structural-only mode exists to avoid).
+ * Embeddings are never computed: search is lexical FTS5 over the SQLite
+ * backend. A `NullEmbeddings` stub satisfies the EmbeddingService interface
+ * (its initialize/embed are no-ops — no model download, no worker thread) for
+ * the incremental-index call sites that still thread an embeddings argument.
  */
 async function initializeDatabase(
   rootDir: string,
@@ -53,12 +51,8 @@ async function initializeDatabase(
 ): Promise<{
   embeddings: EmbeddingService;
   vectorDB: VectorDBInterface;
-  embeddingsEnabled: boolean;
 }> {
-  const embeddingsEnabled = await resolveEmbeddingsEnabled(rootDir);
-  const embeddings: EmbeddingService = embeddingsEnabled
-    ? new WorkerEmbeddings()
-    : new NullEmbeddings();
+  const embeddings: EmbeddingService = new NullEmbeddings();
 
   // Create vector DB using global config (auto-detects backend and orgId)
   log('Creating vector database...');
@@ -75,18 +69,14 @@ async function initializeDatabase(
     );
   }
 
-  if (embeddingsEnabled) {
-    log('Loading embedding model...');
-    await embeddings.initialize();
-  } else {
-    log('Embeddings disabled (embeddings.enabled: false) — running in structural-only mode.');
-  }
+  // NullEmbeddings.initialize is a no-op; calling it unconditionally is fine.
+  await embeddings.initialize();
 
   log('Loading vector database...');
   await vectorDB.initialize();
 
-  log('Embeddings and vector DB ready');
-  return { embeddings, vectorDB, embeddingsEnabled };
+  log('Vector DB ready');
+  return { embeddings, vectorDB };
 }
 
 // Walk parent directories to detect whether startDir is inside a git work tree.
@@ -317,7 +307,6 @@ async function initializeComponents(
 ): Promise<{
   embeddings: EmbeddingService;
   vectorDB: VectorDBInterface;
-  embeddingsEnabled: boolean;
 }> {
   try {
     const result = await initializeDatabase(rootDir, earlyLog);
@@ -425,7 +414,7 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
   const earlyLog = createEarlyLog(verbose);
   earlyLog('Initializing MCP server...');
 
-  const { embeddings, vectorDB, embeddingsEnabled } = await initializeComponents(rootDir, earlyLog);
+  const { embeddings, vectorDB } = await initializeComponents(rootDir, earlyLog);
   const server = createMCPServer();
   const log = createMCPLog(server, verbose);
 
@@ -449,7 +438,6 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
     checkAndReconnect,
     getIndexMetadata,
     getReindexState: () => reindexStateManager.getState(),
-    embeddingsEnabled,
   };
 
   await setupAndConnectServer(server, toolContext, log, versionCheckInterval, reindexStateManager, {

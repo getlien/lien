@@ -15,11 +15,11 @@ import { formatDuration } from './utils.js';
  * Clears the existing index and manifest (for --force flag).
  */
 async function clearExistingIndex(): Promise<void> {
-  const { VectorDB } = await import('@liendev/core');
+  const { createVectorDB } = await import('@liendev/core');
   const { ManifestManager } = await import('@liendev/core');
 
   console.log(chalk.yellow('Clearing existing index and manifest...'));
-  const vectorDB = new VectorDB(process.cwd());
+  const vectorDB = await createVectorDB(process.cwd());
   await vectorDB.initialize();
   await vectorDB.clear();
 

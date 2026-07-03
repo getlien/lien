@@ -39,34 +39,24 @@ function pruneIrrelevantResults(results: SearchResult[]): {
   return { filtered, prunedCount: beforePrune - filtered.length };
 }
 
-/** Message returned by semantic_search/find_similar when embeddings are disabled. */
-const EMBEDDINGS_DISABLED_NOTE =
-  'find_similar relies on embeddings, which are disabled (structural-only mode). Re-enable with ' +
-  '`lien config set embeddings.enabled true` and run `lien index --force` to compute embeddings.';
-
 /**
  * Handle find_similar tool calls.
- * Finds code structurally similar to a given snippet.
+ *
+ * Finds code similar to a given snippet via lexical full-text (FTS5/BM25)
+ * matching on the snippet's tokens. The `queryVector` argument to
+ * `vectorDB.search` is vestigial (SqliteBackend matches the code text and
+ * ignores the vector), so an empty Float32Array is passed.
  */
 export async function handleFindSimilar(args: unknown, ctx: ToolContext): Promise<MCPToolResult> {
-  const { vectorDB, embeddings, log, checkAndReconnect, getIndexMetadata } = ctx;
+  const { vectorDB, log, checkAndReconnect, getIndexMetadata } = ctx;
 
   return await wrapToolHandler(FindSimilarSchema, async validatedArgs => {
-    if (ctx.embeddingsEnabled === false) {
-      return {
-        indexInfo: getIndexMetadata(),
-        results: [],
-        note: EMBEDDINGS_DISABLED_NOTE,
-      };
-    }
-
     log(`Finding similar code...`);
     await checkAndReconnect();
 
-    const codeEmbedding = await embeddings.embed(validatedArgs.code);
     const limit = validatedArgs.limit ?? 5;
     const extraLimit = limit + 10;
-    let results = await vectorDB.search(codeEmbedding, extraLimit, validatedArgs.code, {
+    let results = await vectorDB.search(new Float32Array(0), extraLimit, validatedArgs.code, {
       columns: SYMBOL_SEARCH_COLUMNS,
     });
 

@@ -12,6 +12,9 @@ describe('loadGlobalConfig', () => {
     vi.resetModules();
     process.env = { ...originalEnv };
     delete process.env.LIEN_BACKEND;
+    // Keep retired-backend warnings out of the test output. Tests that assert
+    // on the warning create their own spy against a fresh module instance.
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
   });
 
   afterEach(() => {
@@ -26,17 +29,8 @@ describe('loadGlobalConfig', () => {
 
       const config = await loadGlobalConfig();
 
-      // Should fall back to defaults
-      expect(config).toEqual({ backend: 'lancedb' });
-    });
-
-    it('should return config with backend only when LIEN_BACKEND is set to lancedb', async () => {
-      process.env.LIEN_BACKEND = 'lancedb';
-      vi.spyOn(fs, 'readFile').mockRejectedValue({ code: 'ENOENT' } as NodeJS.ErrnoException);
-
-      const config = await loadGlobalConfig();
-
-      expect(config).toEqual({ backend: 'lancedb' });
+      // Should fall back to the default backend (sqlite)
+      expect(config).toEqual({ backend: 'sqlite' });
     });
 
     it('should accept LIEN_BACKEND=sqlite', async () => {
@@ -63,10 +57,11 @@ describe('loadGlobalConfig', () => {
 
     beforeEach(() => {
       vi.clearAllMocks();
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
     });
 
     it('should successfully parse valid JSON config', async () => {
-      const validConfig = { backend: 'lancedb' as const };
+      const validConfig = { backend: 'sqlite' as const };
       vi.spyOn(fs, 'readFile').mockResolvedValue(JSON.stringify(validConfig));
 
       const config = await loadGlobalConfig();
@@ -99,6 +94,7 @@ describe('loadGlobalConfig', () => {
   describe('Config validation (validateConfig)', () => {
     beforeEach(() => {
       vi.clearAllMocks();
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
     });
 
     it('should throw ConfigValidationError for invalid backend values', async () => {
@@ -107,14 +103,6 @@ describe('loadGlobalConfig', () => {
       await expect(loadGlobalConfig()).rejects.toThrow(ConfigValidationError);
       await expect(loadGlobalConfig()).rejects.toThrow('Invalid backend in global config');
       await expect(loadGlobalConfig()).rejects.toThrow('invalid');
-    });
-
-    it('should pass validation for valid lancedb configuration', async () => {
-      vi.spyOn(fs, 'readFile').mockResolvedValue(JSON.stringify({ backend: 'lancedb' }));
-
-      const config = await loadGlobalConfig();
-
-      expect(config).toEqual({ backend: 'lancedb' });
     });
 
     it('should pass validation for valid sqlite configuration', async () => {
@@ -126,6 +114,53 @@ describe('loadGlobalConfig', () => {
     });
   });
 
+  describe('Retired LanceDB backend (graceful degradation)', () => {
+    // Import a fresh module instance so the warn-once flag is reset per test
+    async function loadFreshModule() {
+      vi.resetModules();
+      return import('./global-config.js');
+    }
+
+    it('should fall back to sqlite when config file has backend: "lancedb"', async () => {
+      const { loadGlobalConfig: load } = await loadFreshModule();
+      vi.spyOn(fs, 'readFile').mockResolvedValue(JSON.stringify({ backend: 'lancedb' }));
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const config = await load();
+
+      expect(config).toEqual({ backend: 'sqlite' });
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('The LanceDB backend has been retired'),
+      );
+    });
+
+    it('should fall back to sqlite when LIEN_BACKEND=lancedb', async () => {
+      const { loadGlobalConfig: load } = await loadFreshModule();
+      process.env.LIEN_BACKEND = 'lancedb';
+      vi.spyOn(fs, 'readFile').mockRejectedValue({ code: 'ENOENT' } as NodeJS.ErrnoException);
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const config = await load();
+
+      expect(config).toEqual({ backend: 'sqlite' });
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('The LanceDB backend has been retired'),
+      );
+    });
+
+    it('should warn only once per process for repeated loads', async () => {
+      const { loadGlobalConfig: load } = await loadFreshModule();
+      vi.spyOn(fs, 'readFile').mockResolvedValue(JSON.stringify({ backend: 'lancedb' }));
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      await load();
+      await load();
+      await load();
+
+      expect(warnSpy).toHaveBeenCalledOnce();
+    });
+  });
+
   describe('Retired Qdrant settings (graceful degradation)', () => {
     // Import a fresh module instance so the warn-once flag is reset per test
     async function loadFreshModule() {
@@ -133,7 +168,7 @@ describe('loadGlobalConfig', () => {
       return import('./global-config.js');
     }
 
-    it('should fall back to LanceDB when config file has backend: "qdrant"', async () => {
+    it('should fall back to sqlite when config file has backend: "qdrant"', async () => {
       const { loadGlobalConfig: load } = await loadFreshModule();
       vi.spyOn(fs, 'readFile').mockResolvedValue(
         JSON.stringify({
@@ -145,15 +180,15 @@ describe('loadGlobalConfig', () => {
 
       const config = await load();
 
-      expect(config).toEqual({ backend: 'lancedb' });
+      expect(config).toEqual({ backend: 'sqlite' });
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Qdrant support was removed'));
     });
 
-    it('should strip orphaned qdrant.* keys even when backend is lancedb', async () => {
+    it('should strip orphaned qdrant.* keys even when backend is sqlite', async () => {
       const { loadGlobalConfig: load } = await loadFreshModule();
       vi.spyOn(fs, 'readFile').mockResolvedValue(
         JSON.stringify({
-          backend: 'lancedb',
+          backend: 'sqlite',
           qdrant: { url: 'http://localhost:6333' },
         }),
       );
@@ -161,11 +196,11 @@ describe('loadGlobalConfig', () => {
 
       const config = await load();
 
-      expect(config).toEqual({ backend: 'lancedb' });
+      expect(config).toEqual({ backend: 'sqlite' });
       expect(warnSpy).toHaveBeenCalledOnce();
     });
 
-    it('should fall back to LanceDB when LIEN_BACKEND=qdrant', async () => {
+    it('should fall back to sqlite when LIEN_BACKEND=qdrant', async () => {
       const { loadGlobalConfig: load } = await loadFreshModule();
       process.env.LIEN_BACKEND = 'qdrant';
       vi.spyOn(fs, 'readFile').mockRejectedValue({ code: 'ENOENT' } as NodeJS.ErrnoException);
@@ -173,24 +208,8 @@ describe('loadGlobalConfig', () => {
 
       const config = await load();
 
-      expect(config).toEqual({ backend: 'lancedb' });
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('falling back to local LanceDB'),
-      );
-    });
-
-    it('should warn only once per process for repeated loads', async () => {
-      const { loadGlobalConfig: load } = await loadFreshModule();
-      vi.spyOn(fs, 'readFile').mockResolvedValue(
-        JSON.stringify({ backend: 'qdrant', qdrant: { url: 'http://localhost:6333' } }),
-      );
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-      await load();
-      await load();
-      await load();
-
-      expect(warnSpy).toHaveBeenCalledOnce();
+      expect(config).toEqual({ backend: 'sqlite' });
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Qdrant support was removed'));
     });
 
     it('should drop retired qdrant keys when merging config updates', async () => {
@@ -202,11 +221,11 @@ describe('loadGlobalConfig', () => {
       const writeSpy = vi.spyOn(fs, 'writeFile').mockResolvedValue(undefined);
       vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-      const merged = await merge({ backend: 'lancedb' });
+      const merged = await merge({ backend: 'sqlite' });
 
-      expect(merged).toEqual({ backend: 'lancedb' });
+      expect(merged).toEqual({ backend: 'sqlite' });
       const written = JSON.parse((writeSpy.mock.calls[0]![1] as string).toString());
-      expect(written).toEqual({ backend: 'lancedb' });
+      expect(written).toEqual({ backend: 'sqlite' });
     });
   });
 
@@ -216,20 +235,20 @@ describe('loadGlobalConfig', () => {
 
       const config = await loadGlobalConfig();
 
-      expect(config).toEqual({ backend: 'lancedb' });
+      expect(config).toEqual({ backend: 'sqlite' });
     });
   });
 
   describe('Precedence order', () => {
     it('should prefer environment variables over config file', async () => {
-      process.env.LIEN_BACKEND = 'lancedb';
+      process.env.LIEN_BACKEND = 'sqlite';
 
       // Mock config file (env should win regardless of file contents)
-      vi.spyOn(fs, 'readFile').mockResolvedValue(JSON.stringify({ backend: 'lancedb' }));
+      vi.spyOn(fs, 'readFile').mockResolvedValue(JSON.stringify({ backend: 'sqlite' }));
 
       const config = await loadGlobalConfig();
 
-      expect(config.backend).toBe('lancedb');
+      expect(config.backend).toBe('sqlite');
     });
   });
 });

@@ -16,11 +16,7 @@ vi.mock('@liendev/core', async () => {
   return {
     ...actual,
     indexCodebase: (...args: any[]) => mockIndexCodebase(...args),
-    VectorDB: class {
-      constructor() {
-        return mockVectorDB;
-      }
-    },
+    createVectorDB: async () => mockVectorDB,
     ManifestManager: class {
       constructor() {
         return mockManifest;

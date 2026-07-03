@@ -2,7 +2,7 @@
   "name": "lien-monorepo",
   "version": "0.1.0",
   "private": true,
-  "description": "Lien - Local semantic code search for AI assistants",
+  "description": "Lien - Local lexical code search and dependency analysis for AI assistants",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/getlien/lien.git"

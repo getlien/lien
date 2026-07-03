@@ -36,8 +36,8 @@ describe('config command', () => {
     vi.spyOn(process, 'exit').mockImplementation(() => {
       throw new Error('process.exit');
     });
-    mockLoadGlobalConfig.mockResolvedValue({ backend: 'lancedb' });
-    mockMergeGlobalConfig.mockResolvedValue({ backend: 'lancedb' });
+    mockLoadGlobalConfig.mockResolvedValue({ backend: 'sqlite' });
+    mockMergeGlobalConfig.mockResolvedValue({ backend: 'sqlite' });
     mockConfigServiceLoad.mockResolvedValue({ ...baseProjectConfig });
     mockConfigServiceSave.mockResolvedValue(undefined);
   });
@@ -47,14 +47,14 @@ describe('config command', () => {
   });
 
   describe('configSetCommand (global keys)', () => {
-    it('should set a valid backend value', async () => {
-      await configSetCommand('backend', 'lancedb');
-      expect(mockMergeGlobalConfig).toHaveBeenCalledWith({ backend: 'lancedb' });
-    });
-
     it('should set the sqlite backend value', async () => {
       await configSetCommand('backend', 'sqlite');
       expect(mockMergeGlobalConfig).toHaveBeenCalledWith({ backend: 'sqlite' });
+    });
+
+    it('should reject the retired lancedb backend value', async () => {
+      await expect(configSetCommand('backend', 'lancedb')).rejects.toThrow('process.exit');
+      expect(mockMergeGlobalConfig).not.toHaveBeenCalled();
     });
 
     it('should reject unknown keys', async () => {
@@ -122,9 +122,9 @@ describe('config command', () => {
 
   describe('configGetCommand (global keys)', () => {
     it('should display a set value', async () => {
-      mockLoadGlobalConfig.mockResolvedValue({ backend: 'lancedb' });
+      mockLoadGlobalConfig.mockResolvedValue({ backend: 'sqlite' });
       await configGetCommand('backend');
-      expect(console.log).toHaveBeenCalledWith(expect.stringContaining('lancedb'));
+      expect(console.log).toHaveBeenCalledWith(expect.stringContaining('sqlite'));
     });
 
     it('should display (not set) for missing values', async () => {
@@ -157,7 +157,7 @@ describe('config command', () => {
   describe('configListCommand', () => {
     it('should list all global config keys', async () => {
       mockLoadGlobalConfig.mockResolvedValue({
-        backend: 'lancedb',
+        backend: 'sqlite',
       });
 
       await configListCommand();

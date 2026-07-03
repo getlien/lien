@@ -33,10 +33,9 @@ export interface ToolContext {
   /** Get current reindex state */
   getReindexState: () => ReindexState;
   /**
-   * Whether embeddings are enabled for this session (structural-only mode
-   * when false — see config `embeddings.enabled`). Defaults to `true` when
-   * omitted so existing callers/tests are unaffected. semantic_search and
-   * find_similar check this before querying; the other four tools ignore it.
+   * Currently unused/reserved. Search is always lexical FTS5 (no embeddings),
+   * so no handler reads this field — it is retained for back-compat and is
+   * scheduled for removal in a follow-up. Setting it has no effect.
    */
   embeddingsEnabled?: boolean;
 }

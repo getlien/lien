@@ -144,12 +144,20 @@ describe('handleSemanticSearch', () => {
       expect(mockCheckAndReconnect).toHaveBeenCalled();
     });
 
-    it('should embed the query before searching', async () => {
+    it('should run lexical search with the raw query text and never embed', async () => {
       mockVectorDB.search.mockResolvedValue([]);
 
       await handleSemanticSearch({ query: 'handles authentication' }, mockCtx);
 
-      expect(mockEmbeddings.embed).toHaveBeenCalledWith('handles authentication');
+      // Lexical FTS5 path: the query string is passed straight to search()
+      // (3rd arg); the vector arg is a vestigial empty Float32Array.
+      expect(mockVectorDB.search).toHaveBeenCalledWith(
+        expect.any(Float32Array),
+        5,
+        'handles authentication',
+        expect.objectContaining({ columns: expect.any(Array) }),
+      );
+      expect(mockEmbeddings.embed).not.toHaveBeenCalled();
     });
 
     it('should handle empty results gracefully', async () => {
@@ -419,38 +427,6 @@ describe('handleSemanticSearch', () => {
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.results).toHaveLength(2);
-    });
-  });
-
-  describe('embeddings disabled (structural-only mode)', () => {
-    it('returns a clear disabled note instead of searching', async () => {
-      const disabledCtx: ToolContext = { ...mockCtx, embeddingsEnabled: false };
-
-      const result = await handleSemanticSearch({ query: 'handles authentication' }, disabledCtx);
-
-      const parsed = JSON.parse(result.content![0].text);
-      expect(parsed.results).toEqual([]);
-      expect(parsed.note).toContain('disabled');
-      expect(parsed.note).toContain('structural-only mode');
-      expect(parsed.note).toContain('lien config set embeddings.enabled true');
-      expect(parsed.indexInfo).toBeDefined();
-    });
-
-    it('does not call embed() or vectorDB.search() when disabled', async () => {
-      const disabledCtx: ToolContext = { ...mockCtx, embeddingsEnabled: false };
-
-      await handleSemanticSearch({ query: 'handles authentication' }, disabledCtx);
-
-      expect(mockEmbeddings.embed).not.toHaveBeenCalled();
-      expect(mockVectorDB.search).not.toHaveBeenCalled();
-    });
-
-    it('is not an error result', async () => {
-      const disabledCtx: ToolContext = { ...mockCtx, embeddingsEnabled: false };
-
-      const result = await handleSemanticSearch({ query: 'handles authentication' }, disabledCtx);
-
-      expect(result.isError).toBeUndefined();
     });
   });
 

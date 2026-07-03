@@ -90,40 +90,30 @@ function processResults(
   return { results, notes };
 }
 
-/** Message returned by semantic_search/find_similar when embeddings are disabled. */
-const EMBEDDINGS_DISABLED_NOTE =
-  'Semantic search is disabled (structural-only mode). Re-enable with ' +
-  '`lien config set embeddings.enabled true` and run `lien index --force` to compute embeddings.';
-
 /**
  * Handle semantic_search tool calls.
- * Searches the codebase by meaning using embeddings.
- * Supports cross-repo search when using a cross-repo-capable backend.
+ *
+ * Runs lexical full-text (FTS5/BM25) search over code, docstrings, and
+ * camelCase-split identifiers via `vectorDB.search`. The `queryVector`
+ * argument is vestigial — the SqliteBackend matches the `query` text and
+ * ignores the vector — so an empty Float32Array is passed. Supports cross-repo
+ * search when using a cross-repo-capable backend.
  */
 export async function handleSemanticSearch(
   args: unknown,
   ctx: ToolContext,
 ): Promise<MCPToolResult> {
-  const { vectorDB, embeddings, log, checkAndReconnect, getIndexMetadata } = ctx;
+  const { vectorDB, log, checkAndReconnect, getIndexMetadata } = ctx;
 
   return await wrapToolHandler(SemanticSearchSchema, async validatedArgs => {
-    if (ctx.embeddingsEnabled === false) {
-      return {
-        indexInfo: getIndexMetadata(),
-        results: [],
-        note: EMBEDDINGS_DISABLED_NOTE,
-      };
-    }
-
     const { crossRepo, repoIds, query, limit } = validatedArgs;
 
     log(`Searching for: "${query}"${crossRepo ? ' (cross-repo)' : ''}`);
     await checkAndReconnect();
 
-    const queryEmbedding = await embeddings.embed(query);
     const { results: rawResults, crossRepoFallback } = await executeSearch(
       vectorDB,
-      queryEmbedding,
+      new Float32Array(0),
       { query, limit: limit ?? 5, crossRepo, repoIds },
       log,
     );
@@ -136,7 +126,7 @@ export async function handleSemanticSearch(
 
     if (shaped.length === 0) {
       notes.push(
-        '0 results. Try rephrasing as a full question (e.g. "How does X work?"), or use grep for exact string matches. If the codebase was recently updated, run "lien index".',
+        '0 results. Search is lexical: query with concrete keywords or identifiers that appear in the code (function names, domain terms), not natural-language questions. Or use grep for exact string matches. If the codebase was recently updated, run "lien index".',
       );
     }
 
