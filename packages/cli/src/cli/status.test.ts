@@ -182,6 +182,28 @@ describe('statusCommand', () => {
     expect(allOutput).toContain('lien index --force');
   });
 
+  it('should report "Using defaults" in the Configuration banner when embeddings are enabled', async () => {
+    vi.mocked(fs.stat).mockRejectedValue(new Error('ENOENT'));
+
+    await statusCommand();
+
+    const allOutput = consoleLogSpy.mock.calls.flat().join(' ');
+    expect(allOutput).toContain('Configuration:');
+    expect(allOutput).toContain('Using defaults');
+  });
+
+  it('should NOT claim "Using defaults" in the Configuration banner when embeddings are disabled', async () => {
+    vi.mocked(resolveEmbeddingsEnabled).mockResolvedValue(false);
+    vi.mocked(fs.stat).mockRejectedValue(new Error('ENOENT'));
+
+    await statusCommand();
+
+    const allOutput = consoleLogSpy.mock.calls.flat().join(' ');
+    expect(allOutput).toContain('Configuration:');
+    expect(allOutput).not.toContain('Using defaults');
+    expect(allOutput).toContain('Customized (embeddings disabled)');
+  });
+
   it('should include embeddings.enabled in JSON output', async () => {
     vi.mocked(fs.stat).mockRejectedValue(new Error('ENOENT'));
 

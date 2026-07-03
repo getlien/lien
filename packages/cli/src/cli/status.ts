@@ -138,8 +138,7 @@ function printWatchStatus() {
   console.log(chalk.dim('  Disable with:'), chalk.bold('lien serve --no-watch'));
 }
 
-async function printEmbeddingsStatus(rootDir: string) {
-  const enabled = await resolveEmbeddingsEnabled(rootDir);
+function printEmbeddingsStatus(enabled: boolean) {
   if (enabled) {
     console.log(chalk.dim('Embeddings:'), chalk.green('✓ Enabled'));
     console.log(
@@ -187,16 +186,23 @@ export async function statusCommand(options: { verbose?: boolean; format?: strin
     return;
   }
 
+  const embeddingsEnabled = await resolveEmbeddingsEnabled(rootDir);
+
   showCompactBanner();
   console.log(chalk.bold('Status\n'));
-  console.log(chalk.dim('Configuration:'), chalk.green('✓ Using defaults'));
+  console.log(
+    chalk.dim('Configuration:'),
+    embeddingsEnabled
+      ? chalk.green('✓ Using defaults')
+      : chalk.yellow('✗ Customized (embeddings disabled)'),
+  );
 
   await printIndexStatus(indexPath);
 
   console.log(chalk.bold('\nFeatures:'));
   await printGitStatus(rootDir, indexPath);
   printWatchStatus();
-  await printEmbeddingsStatus(rootDir);
+  printEmbeddingsStatus(embeddingsEnabled);
 
   if (options.verbose) {
     printIndexingSettings();

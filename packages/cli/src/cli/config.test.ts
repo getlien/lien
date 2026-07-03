@@ -166,5 +166,17 @@ describe('config command', () => {
       expect(allOutput).toContain('embeddings.enabled');
       expect(allOutput).toContain('Project Configuration');
     });
+
+    it('should print a friendly error instead of rejecting when the global config fails to load', async () => {
+      mockLoadGlobalConfig.mockRejectedValue(new Error('Invalid JSON syntax'));
+
+      await expect(configListCommand()).resolves.toBeUndefined();
+
+      const allOutput = vi.mocked(console.log).mock.calls.flat().join(' ');
+      expect(allOutput).toContain('Failed to load global config');
+      expect(allOutput).toContain('Invalid JSON syntax');
+      // Project config section must still render even though global failed.
+      expect(allOutput).toContain('Project Configuration');
+    });
   });
 });

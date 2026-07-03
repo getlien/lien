@@ -133,16 +133,23 @@ export async function configGetCommand(key: string) {
 }
 
 export async function configListCommand() {
-  const globalConfig = await loadGlobalConfig();
-
   console.log(chalk.bold('Global Configuration'));
   console.log(chalk.dim(`File: ${GLOBAL_CONFIG_PATH}\n`));
 
-  for (const [key, meta] of Object.entries(ALLOWED_KEYS)) {
-    if (meta.scope !== 'global') continue;
-    const value = getNestedValue(globalConfig, key);
-    const display = value ?? chalk.dim('(not set)');
-    console.log(`  ${chalk.cyan(key)}: ${display}  ${chalk.dim(`— ${meta.description}`)}`);
+  try {
+    const globalConfig = await loadGlobalConfig();
+    for (const [key, meta] of Object.entries(ALLOWED_KEYS)) {
+      if (meta.scope !== 'global') continue;
+      const value = getNestedValue(globalConfig, key);
+      const display = value ?? chalk.dim('(not set)');
+      console.log(`  ${chalk.cyan(key)}: ${display}  ${chalk.dim(`— ${meta.description}`)}`);
+    }
+  } catch (error) {
+    console.log(
+      chalk.red(
+        `  Failed to load global config: ${error instanceof Error ? error.message : error}`,
+      ),
+    );
   }
 
   try {
