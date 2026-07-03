@@ -659,10 +659,13 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<Inde
     options.onProgress?.({ phase: 'initializing', message: 'Loading configuration...' });
 
     const skipEmbeddings = await resolveSkipEmbeddings(options, rootDir);
-    const effectiveOptions: IndexingOptions =
-      skipEmbeddings && !options.embeddings
-        ? { ...options, embeddings: new NullEmbeddings() }
-        : options;
+    // `skipEmbeddings` is authoritative: even if the caller also passed a
+    // real `options.embeddings` instance (e.g. a pre-initialized
+    // WorkerEmbeddings), structural-only mode must win so no real vectors
+    // are ever computed.
+    const effectiveOptions: IndexingOptions = skipEmbeddings
+      ? { ...options, embeddings: new NullEmbeddings() }
+      : options;
 
     // Initialize vector database (use factory to select backend from global config)
     options.onProgress?.({ phase: 'initializing', message: 'Initializing vector database...' });

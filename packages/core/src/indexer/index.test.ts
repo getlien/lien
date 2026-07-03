@@ -123,12 +123,14 @@ describe('indexCodebase - embeddings enabled/disabled', () => {
       expect(rows.length).toBeGreaterThan(0);
     });
 
-    it('an explicit skipEmbeddings: true still honors a caller-provided embeddings instance', async () => {
-      // If the caller went to the trouble of pre-initializing a warm
-      // embeddings service and *also* passed skipEmbeddings, their explicit
-      // instance wins over the NullEmbeddings substitution.
+    it('skipEmbeddings: true wins even when the caller also passes a real embeddings instance', async () => {
+      // `skipEmbeddings` is authoritative. Even if the caller went to the
+      // trouble of pre-initializing a warm embeddings service and *also*
+      // passed skipEmbeddings, structural-only mode must win — the caller's
+      // instance must never be used to compute real vectors.
       const mockEmbeddings = new MockEmbeddings();
       await mockEmbeddings.initialize();
+      const embedSpy = vi.spyOn(mockEmbeddings, 'embed');
       const embedBatchSpy = vi.spyOn(mockEmbeddings, 'embedBatch');
 
       const result = await indexCodebase({
@@ -139,7 +141,29 @@ describe('indexCodebase - embeddings enabled/disabled', () => {
       });
 
       expect(result.success).toBe(true);
-      expect(embedBatchSpy).toHaveBeenCalled();
+      expect(result.chunksCreated).toBeGreaterThan(0);
+      expect(embedSpy).not.toHaveBeenCalled();
+      expect(embedBatchSpy).not.toHaveBeenCalled();
+      expect(workerInitSpy).not.toHaveBeenCalled();
+    });
+
+    it('an explicit real embeddings instance without skipEmbeddings is used as-is (regression guard)', async () => {
+      // The WorkerEmbeddings-specific case from the reported finding: a
+      // pre-initialized real embedding service, passed alongside
+      // `skipEmbeddings: true`, must never have its worker touched.
+      const workerEmbeddings = new WorkerEmbeddings();
+      const embedBatchSpy = vi.spyOn(workerEmbeddings, 'embedBatch');
+
+      const result = await indexCodebase({
+        rootDir: testDir,
+        force: true,
+        skipEmbeddings: true,
+        embeddings: workerEmbeddings,
+      });
+
+      expect(result.success).toBe(true);
+      expect(workerInitSpy).not.toHaveBeenCalled();
+      expect(embedBatchSpy).not.toHaveBeenCalled();
     });
   });
 
