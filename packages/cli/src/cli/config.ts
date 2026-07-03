@@ -23,8 +23,8 @@ const ALLOWED_KEYS: Record<
 > = {
   backend: {
     scope: 'global',
-    values: ['lancedb'],
-    description: 'Vector database backend',
+    values: ['lancedb', 'sqlite'],
+    description: 'Storage backend (lancedb = vector search; sqlite = structural store)',
   },
   'embeddings.enabled': {
     scope: 'project',

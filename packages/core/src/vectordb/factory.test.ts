@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createVectorDB } from './factory.js';
 import { loadGlobalConfig } from '../config/global-config.js';
+import type * as globalConfigModule from '../config/global-config.js';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
@@ -9,6 +10,14 @@ import * as os from 'os';
 vi.mock('../config/global-config.js');
 vi.mock('./lancedb.js', () => ({
   VectorDB: class MockVectorDB {
+    backend = 'lancedb';
+    dbPath = '/test/path';
+    async initialize() {}
+  },
+}));
+vi.mock('./sqlite/sqlite-backend.js', () => ({
+  SqliteBackend: class MockSqliteBackend {
+    backend = 'sqlite';
     dbPath = '/test/path';
     async initialize() {}
   },
@@ -47,6 +56,36 @@ describe('createVectorDB', () => {
 
       const db = await createVectorDB(testDir);
       expect(db).toBeDefined();
+      expect((db as unknown as { backend: string }).backend).toBe('lancedb');
+    });
+  });
+
+  describe('SQLite backend', () => {
+    it('should create SqliteBackend when backend is sqlite', async () => {
+      vi.mocked(loadGlobalConfig).mockResolvedValue({ backend: 'sqlite' });
+
+      const db = await createVectorDB(testDir);
+      expect((db as unknown as { backend: string }).backend).toBe('sqlite');
+    });
+
+    it('should create SqliteBackend when LIEN_BACKEND=sqlite (real env-var path)', async () => {
+      // Exercise the genuine env→config→factory wiring: delegate to the real
+      // loadGlobalConfig so process.env.LIEN_BACKEND is actually parsed. Env has
+      // highest precedence, so it overrides any on-disk config file.
+      const actual = (await vi.importActual(
+        '../config/global-config.js',
+      )) as typeof globalConfigModule;
+      vi.mocked(loadGlobalConfig).mockImplementation(actual.loadGlobalConfig);
+
+      const prev = process.env.LIEN_BACKEND;
+      process.env.LIEN_BACKEND = 'sqlite';
+      try {
+        const db = await createVectorDB(testDir);
+        expect((db as unknown as { backend: string }).backend).toBe('sqlite');
+      } finally {
+        if (prev === undefined) delete process.env.LIEN_BACKEND;
+        else process.env.LIEN_BACKEND = prev;
+      }
     });
   });
 

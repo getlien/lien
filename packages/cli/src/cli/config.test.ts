@@ -52,6 +52,11 @@ describe('config command', () => {
       expect(mockMergeGlobalConfig).toHaveBeenCalledWith({ backend: 'lancedb' });
     });
 
+    it('should set the sqlite backend value', async () => {
+      await configSetCommand('backend', 'sqlite');
+      expect(mockMergeGlobalConfig).toHaveBeenCalledWith({ backend: 'sqlite' });
+    });
+
     it('should reject unknown keys', async () => {
       await expect(configSetCommand('unknown.key', 'value')).rejects.toThrow('process.exit');
     });

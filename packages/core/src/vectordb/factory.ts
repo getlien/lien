@@ -1,6 +1,11 @@
 import type { VectorDBInterface } from './types.js';
 import { VectorDB } from './lancedb.js';
-import { loadGlobalConfig, ConfigValidationError } from '../config/global-config.js';
+import { SqliteBackend } from './sqlite/sqlite-backend.js';
+import {
+  loadGlobalConfig,
+  ConfigValidationError,
+  type GlobalConfig,
+} from '../config/global-config.js';
 
 /**
  * Validate that a VectorDB instance has the required methods.
@@ -14,19 +19,20 @@ function validateVectorDBInterface(db: VectorDBInterface): void {
 /**
  * Factory function to create a VectorDB instance.
  *
- * LanceDB is the only supported backend. The factory (and the
- * VectorDBInterface seam) is deliberately kept so an alternative backend
- * can be reintroduced later without touching call sites.
+ * Selects the backend from GlobalConfig: 'sqlite' → SqliteBackend (opt-in
+ * structural store), otherwise the default LanceDB VectorDB. The
+ * VectorDBInterface seam means call sites don't change regardless of choice.
  *
  * Loading the global config here surfaces validation errors early and
  * emits the one-time warning for retired Qdrant settings.
  *
  * @param projectRoot - Root directory of the project
- * @returns VectorDBInterface instance (LanceDB)
+ * @returns VectorDBInterface instance for the configured backend
  */
 export async function createVectorDB(projectRoot: string): Promise<VectorDBInterface> {
+  let config: GlobalConfig = {};
   try {
-    await loadGlobalConfig();
+    config = await loadGlobalConfig();
   } catch (error) {
     // ConfigValidationError: Config file exists but has syntax/validation errors
     // This should fail hard with a clear error message
@@ -45,7 +51,8 @@ export async function createVectorDB(projectRoot: string): Promise<VectorDBInter
     }
   }
 
-  const db = new VectorDB(projectRoot);
+  const db: VectorDBInterface =
+    config.backend === 'sqlite' ? new SqliteBackend(projectRoot) : new VectorDB(projectRoot);
   validateVectorDBInterface(db);
   return db;
 }
