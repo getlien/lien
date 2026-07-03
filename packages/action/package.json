@@ -13,8 +13,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@liendev/parser": "*",
-    "@liendev/review": "*"
+    "@liendev/parser": "^0.50.0",
+    "@liendev/review": "^0.1.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
