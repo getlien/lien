@@ -41,6 +41,14 @@ coverage/
 # Claude Code (local settings are machine-specific)
 .claude/settings.local.json
 
+# Claude Code agent worktrees (full nested repo clones used as scratch
+# space by CC agents; never meant to be committed or indexed)
+.claude/worktrees/
+
+# Playwright MCP scratch output (screenshots, console/page captures from
+# browser-automation runs)
+.playwright-mcp/
+
 # OS
 .DS_Store
 Thumbs.db
