@@ -110,6 +110,19 @@ jobs:
     # lockfile -- the same resolution path an external `npm install
     # @liendev/lien` gets -- so a phantom dependency fails the PR instead of
     # shipping.
+    #
+    # It packs and installs all three PUBLISHED packages together (parser,
+    # core, lien), not just the CLI. A real release publishes them together
+    # (version-linked by changesets), so the CLI's @liendev/* sibling deps
+    # should resolve to those local tarballs, not whatever's currently live
+    # on the registry. Packing only the CLI made "new CLI + old published
+    # core/parser" -- a combination that can't happen in production -- the
+    # thing this job tested, which false-positived on any PR adding a new
+    # cross-package export (see #644: core shipped `NullEmbeddings` but the
+    # CLI resolved the older, still-published core without it). review,
+    # action, and site are private and intentionally excluded: if the CLI
+    # ever depends on one of them again, it still has to resolve from the
+    # registry and 404, preserving the #620 detection this job exists for.
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -128,18 +141,20 @@ jobs:
       - name: Build packages required for the CLI tarball
         run: npm run build:core && npm run build -w packages/cli
 
-      - name: Pack @liendev/lien tarball
-        run: npm pack -w @liendev/lien
+      - name: Pack published packages (parser, core, lien)
+        run: npm pack -w @liendev/parser -w @liendev/core -w @liendev/lien
 
-      - name: Install tarball as an external consumer
+      - name: Install tarballs together as an external consumer
         run: |
           set -euo pipefail
-          TARBALL="$(pwd)/$(ls liendev-lien-*.tgz)"
+          PARSER_TARBALL="$(pwd)/$(ls liendev-parser-*.tgz)"
+          CORE_TARBALL="$(pwd)/$(ls liendev-core-*.tgz)"
+          CLI_TARBALL="$(pwd)/$(ls liendev-lien-*.tgz)"
           SCRATCH="$(mktemp -d)"
           echo "SCRATCH_DIR=$SCRATCH" >> "$GITHUB_ENV"
           cd "$SCRATCH"
           npm init -y >/dev/null
-          npm install "$TARBALL"
+          npm install "$PARSER_TARBALL" "$CORE_TARBALL" "$CLI_TARBALL"
 
       - name: Run the installed CLI binary
         run: |
