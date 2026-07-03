@@ -1,7 +1,6 @@
 import type { LanceDBTable } from './lancedb-types.js';
 import type { SearchResult } from './types.js';
 import { EMBEDDING_DIMENSION } from '../embeddings/types.js';
-import { SYMBOL_TYPE_MATCHES } from './types.js';
 import { MAX_CHUNKS_PER_FILE } from '../constants.js';
 import { DatabaseError, wrapError } from '../errors/index.js';
 import { calculateRelevance } from './relevance.js';
@@ -12,8 +11,17 @@ import {
   FilenameBoostingStrategy,
   FileTypeBoostingStrategy,
 } from './boosting/index.js';
-import { safeRegex } from '../utils/safe-regex.js';
 import { CAPTURED_TRUE, CAPTURED_UNKNOWN } from './batch-insert.js';
+import {
+  toPlainArray,
+  hasValidStringEntries,
+  filterByLanguage,
+  filterByPattern,
+  filterBySymbolType,
+  matchesSymbolFilter,
+  buildLegacySymbols,
+  type SymbolQueryOptions,
+} from './filters.js';
 
 /**
  * Cached strategy instances to avoid repeated instantiation overhead.
@@ -111,15 +119,6 @@ function isValidRecord(r: DBRecord): boolean {
 }
 
 /**
- * Check if a string array has valid (non-empty) entries.
- * LanceDB stores empty string arrays as [''] which we need to filter out.
- * This is specifically for string arrays (cf. hasValidNumberEntries for number arrays).
- */
-function hasValidStringEntries(arr: string[] | undefined): boolean {
-  return Boolean(arr && arr.length > 0 && arr[0] !== '');
-}
-
-/**
  * Check if a number array has valid entries (filters out placeholder values).
  *
  * serializeCallSites() uses 0 as a sentinel meaning "no valid line number"
@@ -130,43 +129,6 @@ function hasValidStringEntries(arr: string[] | undefined): boolean {
  */
 function hasValidNumberEntries(arr: number[] | undefined): boolean {
   return Boolean(arr && arr.length > 0 && arr[0] !== 0);
-}
-
-/**
- * Get symbols for a specific type from a DB record.
- * Consolidates the symbol extraction logic used across query functions.
- */
-function getSymbolsForType(
-  r: DBRecord,
-  symbolType?: 'function' | 'method' | 'class' | 'interface',
-): string[] {
-  if (symbolType === 'function' || symbolType === 'method')
-    return toPlainArray<string>(r.functionNames) || [];
-  if (symbolType === 'class') return toPlainArray<string>(r.classNames) || [];
-  if (symbolType === 'interface') return toPlainArray<string>(r.interfaceNames) || [];
-  return [
-    ...(toPlainArray<string>(r.functionNames) || []),
-    ...(toPlainArray<string>(r.classNames) || []),
-    ...(toPlainArray<string>(r.interfaceNames) || []),
-  ];
-}
-
-/**
- * Convert Arrow Vector to plain array if needed.
- * LanceDB returns Arrow Vector objects for array columns.
- */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function toPlainArray<T>(arr: any): T[] | undefined {
-  if (!arr) return undefined;
-  // Arrow Vectors have a toArray() method
-  if (typeof arr.toArray === 'function') {
-    return arr.toArray();
-  }
-  // Already a plain array
-  if (Array.isArray(arr)) {
-    return arr;
-  }
-  return undefined;
 }
 
 /**
@@ -511,42 +473,6 @@ export async function search(
 }
 
 /**
- * Filter records by language (case-insensitive match).
- */
-function filterByLanguage(records: DBRecord[], language: string): DBRecord[] {
-  return records.filter(
-    (r: DBRecord) => r.language && r.language.toLowerCase() === language.toLowerCase(),
-  );
-}
-
-/**
- * Filter records by regex pattern against content and file path.
- */
-function filterByPattern(records: DBRecord[], pattern: string): DBRecord[] {
-  const regex = safeRegex(pattern);
-  if (!regex) return records;
-  // Both fields may be `undefined` under column projection — coerce so the
-  // regex doesn't see the literal string "undefined" and match spuriously.
-  // `applySelect` always injects `file`, but be defensive in case the
-  // helper changes.
-  return records.filter((r: DBRecord) => regex.test(r.content ?? '') || regex.test(r.file ?? ''));
-}
-
-/**
- * Filter records by symbol type using SYMBOL_TYPE_MATCHES lookup.
- */
-function filterBySymbolType(
-  records: DBRecord[],
-  symbolType: keyof typeof SYMBOL_TYPE_MATCHES,
-): DBRecord[] {
-  const allowedTypes = SYMBOL_TYPE_MATCHES[symbolType];
-  if (!allowedTypes) {
-    return [];
-  }
-  return records.filter((r: DBRecord) => r.symbolType != null && allowedTypes.has(r.symbolType));
-}
-
-/**
  * Convert DB records to unscored SearchResults (for scan/scroll operations).
  * Uses 'not_relevant' relevance to indicate results are unscored, not semantically irrelevant.
  */
@@ -647,87 +573,6 @@ export async function scanWithFilter(
   } catch (error) {
     throw wrapError(error, 'Failed to scan with filter');
   }
-}
-
-/**
- * Helper to check if a record matches the requested symbol type
- */
-function matchesSymbolType(
-  record: DBRecord,
-  symbolType: 'function' | 'method' | 'class' | 'interface',
-  symbols: string[],
-): boolean {
-  // If AST-based symbolType exists, use lookup table
-  if (record.symbolType) {
-    return SYMBOL_TYPE_MATCHES[symbolType]?.has(record.symbolType) ?? false;
-  }
-
-  // Fallback: check if pre-AST symbols array has valid entries
-  return symbols.length > 0 && symbols.some((s: string) => s.length > 0 && s !== '');
-}
-
-interface SymbolQueryOptions {
-  language?: string;
-  pattern?: string;
-  symbolType?: 'function' | 'method' | 'class' | 'interface';
-}
-
-/**
- * Check if any symbol name matches the given regex pattern.
- * Returns true if the pattern is invalid (graceful degradation) or if a name matches.
- */
-function matchesPattern(pattern: string, symbols: string[], astSymbolName: string): boolean {
-  const regex = safeRegex(pattern);
-  if (!regex) return true;
-  return symbols.some((s: string) => regex.test(s)) || regex.test(astSymbolName);
-}
-
-/**
- * Check if a record matches the symbol query filters.
- * Extracted to reduce complexity of querySymbols.
- */
-function matchesSymbolFilter(
-  r: DBRecord,
-  { language, pattern, symbolType }: SymbolQueryOptions,
-): boolean {
-  // Language filter
-  if (language && (!r.language || r.language.toLowerCase() !== language.toLowerCase())) {
-    return false;
-  }
-
-  const symbols = getSymbolsForType(r, symbolType);
-  const astSymbolName = r.symbolName || '';
-
-  // Must have at least one symbol (legacy or AST-based)
-  if (symbols.length === 0 && !astSymbolName) {
-    return false;
-  }
-
-  // Pattern filter (if provided)
-  if (pattern && !matchesPattern(pattern, symbols, astSymbolName)) {
-    return false;
-  }
-
-  // Symbol type filter (if provided)
-  if (symbolType) {
-    return matchesSymbolType(r, symbolType, symbols);
-  }
-
-  return true;
-}
-
-/**
- * Build legacy symbols object for backwards compatibility.
- */
-function buildLegacySymbols(r: DBRecord) {
-  const functions = toPlainArray<string>(r.functionNames);
-  const classes = toPlainArray<string>(r.classNames);
-  const interfaces = toPlainArray<string>(r.interfaceNames);
-  return {
-    functions: hasValidStringEntries(functions) ? functions! : [],
-    classes: hasValidStringEntries(classes) ? classes! : [],
-    interfaces: hasValidStringEntries(interfaces) ? interfaces! : [],
-  };
 }
 
 /**

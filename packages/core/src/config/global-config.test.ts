@@ -39,6 +39,15 @@ describe('loadGlobalConfig', () => {
       expect(config).toEqual({ backend: 'lancedb' });
     });
 
+    it('should accept LIEN_BACKEND=sqlite', async () => {
+      process.env.LIEN_BACKEND = 'sqlite';
+      vi.spyOn(fs, 'readFile').mockRejectedValue({ code: 'ENOENT' } as NodeJS.ErrnoException);
+
+      const config = await loadGlobalConfig();
+
+      expect(config).toEqual({ backend: 'sqlite' });
+    });
+
     it('should throw ConfigValidationError when LIEN_BACKEND has an invalid value', async () => {
       process.env.LIEN_BACKEND = 'invalid';
       vi.spyOn(fs, 'readFile').mockRejectedValue({ code: 'ENOENT' } as NodeJS.ErrnoException);
@@ -106,6 +115,14 @@ describe('loadGlobalConfig', () => {
       const config = await loadGlobalConfig();
 
       expect(config).toEqual({ backend: 'lancedb' });
+    });
+
+    it('should pass validation for valid sqlite configuration', async () => {
+      vi.spyOn(fs, 'readFile').mockResolvedValue(JSON.stringify({ backend: 'sqlite' }));
+
+      const config = await loadGlobalConfig();
+
+      expect(config).toEqual({ backend: 'sqlite' });
     });
   });
 

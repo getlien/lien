@@ -20,12 +20,15 @@ export class ConfigValidationError extends Error {
  * Global configuration for Lien.
  * Only contains what truly needs configuration: storage backend choice.
  *
- * LanceDB is the only supported backend. The field is kept so an
- * alternative backend can be reintroduced later without a config migration.
+ * 'lancedb' (default) is the vector backend; 'sqlite' is the opt-in structural
+ * store (better-sqlite3 + FTS5). The default remains 'lancedb'.
  */
 export interface GlobalConfig {
-  backend?: 'lancedb';
+  backend?: 'lancedb' | 'sqlite';
 }
+
+/** Backends the config layer accepts. */
+const VALID_BACKENDS: ReadonlySet<string> = new Set(['lancedb', 'sqlite']);
 
 /**
  * Raw shape of a parsed config file before sanitization.
@@ -85,14 +88,15 @@ function loadConfigFromEnv(): GlobalConfig | null {
     return { backend: 'lancedb' };
   }
 
-  if (backendEnv !== 'lancedb') {
+  if (!VALID_BACKENDS.has(backendEnv)) {
     throw new ConfigValidationError(
-      `Invalid LIEN_BACKEND environment variable: "${backendEnv}"\n` + `Valid value: 'lancedb'`,
+      `Invalid LIEN_BACKEND environment variable: "${backendEnv}"\n` +
+        `Valid values: 'lancedb', 'sqlite'`,
       '<environment>',
     );
   }
 
-  return { backend: 'lancedb' };
+  return { backend: backendEnv as GlobalConfig['backend'] };
 }
 
 /**
@@ -102,11 +106,11 @@ function validateConfig(
   config: RawGlobalConfig,
   configPath: string,
 ): asserts config is GlobalConfig {
-  if (config.backend && config.backend !== 'lancedb') {
+  if (config.backend && !VALID_BACKENDS.has(config.backend)) {
     throw new ConfigValidationError(
       `Invalid backend in global config: "${config.backend}"\n` +
         `Config file: ${configPath}\n` +
-        `Valid value: 'lancedb'`,
+        `Valid values: 'lancedb', 'sqlite'`,
       configPath,
     );
   }
