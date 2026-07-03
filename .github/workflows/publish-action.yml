@@ -20,8 +20,12 @@ name: Publish Action
 # behavior for every private package, out of scope here.
 #
 # Caveat: an action-only change that doesn't also bump the CLI's version won't
-# trigger this automatically. Use workflow_dispatch to publish it manually
-# until/unless we add a dedicated tag (see the README runbook).
+# trigger this automatically. workflow_dispatch does NOT fill that gap — on
+# dispatch, "Resolve tags" below emits only the sha tag, and the dist-repo
+# sync step is gated to `push` only, so dispatch never syncs the dist repo or
+# moves :v1/:latest. It's useful only as an image-only smoke test. To ship an
+# action-only fix, include a changeset that bumps `@liendev/lien` so the next
+# release tag carries it (see the README runbook).
 
 on:
   push:
@@ -121,7 +125,7 @@ jobs:
           set -euo pipefail
 
           if [ -z "${GH_DIST_TOKEN:-}" ]; then
-            echo "::notice::GH_DIST_TOKEN is not set — skipping the getlien/lien-review dist-repo sync. The GHCR image was published above, but 'uses: getlien/lien-review@v1' will not resolve to it yet. See packages/action/README.md 'Publishing the Action' for the one-time human setup (create the dist repo + add the secret), then re-run this workflow via workflow_dispatch."
+            echo "::notice::GH_DIST_TOKEN is not set — skipping the getlien/lien-review dist-repo sync. The GHCR image was published above, but 'uses: getlien/lien-review@v1' will not resolve to it yet. See packages/action/README.md 'Publishing the Action' for the one-time human setup (create the dist repo + add the secret). Once that's done, this step runs automatically on the next @liendev/lien@* release tag push — not on workflow_dispatch, which skips this step entirely."
             exit 0
           fi
 

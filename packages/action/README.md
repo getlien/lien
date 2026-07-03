@@ -234,7 +234,11 @@ piggybacking on the CLI's tag avoids adding a dedicated tag scheme.
 **Caveat:** an action-only change that doesn't also bump `@liendev/lien`'s
 version won't auto-trigger a publish. Include a changeset that touches
 `@liendev/lien` (even a patch-level one) when you want a release to carry an
-action-only fix, or trigger `workflow_dispatch` manually.
+action-only fix. `workflow_dispatch` is not a substitute for that — it only
+publishes the immutable `sha-<commit>` image tag (see "One-time human setup"
+above and "What gets published where" below); the dist-repo sync and the
+`:v1`/`:latest` tag move are gated to tag pushes only, so dispatch never runs
+them.
 
 ### What gets published where
 
