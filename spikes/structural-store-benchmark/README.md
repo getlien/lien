@@ -9,6 +9,12 @@ workload is 100% relational / graph / array-shaped.
 changes no production defaults, and exists only to produce reproducible numbers
 and a recommendation. See `REPORT.md` for the results and the call.
 
+**Follow-up spike**: `REPORT.md` settles the storage backend (better-sqlite3).
+`FTS5-SEARCH.md` is the next question — does FTS5 keyword/BM25 search +
+trigram substring search + hybrid lexical-structural JOINs (the search story
+that replaces LanceDB's vector index) actually work and perform? Run it with
+`npx tsx fts5.mjs`.
+
 ## What it measures
 
 Four backends behind the same structural read/write surface Lien's five
@@ -94,6 +100,12 @@ Tune iteration counts with `N_LIGHT` / `N_HEAVY` env vars.
 - `consistency.mjs` — cross-backend parity check.
 - `run-all.mjs` — orchestrator → `results.json`.
 - `REPORT.md` — methodology, results table, recommendation, caveats.
+- `lib/fts5-store.mjs` — FTS5 virtual tables (keyword + trigram) layered on
+  the same structural schema.
+- `fts5.mjs` — builds the FTS5 index, benchmarks keyword/trigram/hybrid
+  queries, and dumps example output.
+- `FTS5-SEARCH.md` — the lexical + hybrid search demo: latency, example
+  queries, and an honest read on quality vs. semantic search.
 
 Native binary weights were measured on darwin-arm64 with `du -sh` against the
 installed packages.

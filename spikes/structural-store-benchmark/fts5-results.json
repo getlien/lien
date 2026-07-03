@@ -1,0 +1,912 @@
+{
+  "generatedAt": "2026-07-03T05:07:09.738Z",
+  "platform": "darwin-arm64",
+  "node": "v22.22.0",
+  "corpusChunks": 44430,
+  "buildMs": 1556,
+  "ftsRows": 44430,
+  "triRows": 44430,
+  "nLight": 150,
+  "nHeavy": 100,
+  "latency": {
+    "keywordBm25": {
+      "n": 100,
+      "p50": 6.79,
+      "p95": 13.37,
+      "p99": 13.9,
+      "min": 4.29,
+      "max": 14.1,
+      "mean": 7.79
+    },
+    "listFunctionsRegexBaseline": {
+      "n": 100,
+      "p50": 332.59,
+      "p95": 379.98,
+      "p99": 398.17,
+      "min": 300.13,
+      "max": 439.68,
+      "mean": 337.55
+    },
+    "symbolTrigram": {
+      "n": 150,
+      "p50": 0.21,
+      "p95": 0.36,
+      "p99": 0.4,
+      "min": 0.03,
+      "max": 0.45,
+      "mean": 0.19
+    },
+    "hybrid": {
+      "content∩imports (traverse, imports @liendev/parser)": {
+        "n": 100,
+        "p50": 0.5,
+        "p95": 0.65,
+        "p99": 0.68,
+        "min": 0.47,
+        "max": 0.71,
+        "mean": 0.52
+      },
+      "symbol∩complexity (process, complexity>=6)": {
+        "n": 100,
+        "p50": 0.21,
+        "p95": 0.24,
+        "p99": 0.27,
+        "min": 0.2,
+        "max": 0.27,
+        "mean": 0.22
+      },
+      "content∩structural (cache, function+typescript)": {
+        "n": 100,
+        "p50": 0.34,
+        "p95": 0.4,
+        "p99": 0.46,
+        "min": 0.33,
+        "max": 0.53,
+        "mean": 0.35
+      }
+    }
+  },
+  "examples": {
+    "keyword": {
+      "parse import statement": [
+        {
+          "file": "packages/parser/src/ast/symbols.ts",
+          "startLine": 234,
+          "endLine": 248,
+          "symbolName": "",
+          "symbolType": "",
+          "language": "typescript",
+          "rank": -11.483536502701952
+        },
+        {
+          "file": "packages/parser/src/ast/languages/ruby.ts",
+          "startLine": 1,
+          "endLine": 23,
+          "symbolName": "",
+          "symbolType": "",
+          "language": "typescript",
+          "rank": -10.366208682423922
+        },
+        {
+          "file": "packages/parser/src/ast/languages/javascript.ts",
+          "startLine": 794,
+          "endLine": 912,
+          "symbolName": "",
+          "symbolType": "",
+          "language": "typescript",
+          "rank": -10.128313677930727
+        },
+        {
+          "file": "packages/parser/src/ast/languages/python.ts",
+          "startLine": 226,
+          "endLine": 234,
+          "symbolName": "processImportSymbols",
+          "symbolType": "method",
+          "language": "typescript",
+          "rank": -10.079041622917911
+        }
+      ],
+      "vector search": [
+        {
+          "file": "packages/core/src/vectordb/query.ts",
+          "startLine": 465,
+          "endLine": 468,
+          "symbolName": "",
+          "symbolType": "",
+          "language": "typescript",
+          "rank": -10.132778710243679
+        },
+        {
+          "file": "packages/cli/src/mcp/handlers/semantic-search.ts",
+          "startLine": 31,
+          "endLine": 34,
+          "symbolName": "",
+          "symbolType": "",
+          "language": "typescript",
+          "rank": -9.658889320681169
+        },
+        {
+          "file": "packages/core/src/vectordb/lancedb.ts",
+          "startLine": 74,
+          "endLine": 108,
+          "symbolName": "search",
+          "symbolType": "method",
+          "language": "typescript",
+          "rank": -9.536280035668135
+        },
+        {
+          "file": "packages/core/src/vectordb/query.ts",
+          "startLine": 469,
+          "endLine": 511,
+          "symbolName": "search",
+          "symbolType": "function",
+          "language": "typescript",
+          "rank": -9.07360654568097
+        }
+      ],
+      "complexity": [
+        {
+          "file": "packages/cli/src/mcp/handlers/dependency-analyzer.ts",
+          "startLine": 40,
+          "endLine": 48,
+          "symbolName": "",
+          "symbolType": "",
+          "language": "typescript",
+          "rank": -4.181706027201977
+        },
+        {
+          "file": "packages/parser/src/dependency-analyzer.ts",
+          "startLine": 20,
+          "endLine": 28,
+          "symbolName": "",
+          "symbolType": "",
+          "language": "typescript",
+          "rank": -4.177259235945522
+        },
+        {
+          "file": "packages/parser/src/insights/chunk-complexity.ts",
+          "startLine": 305,
+          "endLine": 322,
+          "symbolName": "computeComplexityStats",
+          "symbolType": "function",
+          "language": "typescript",
+          "rank": -4.093311300034468
+        },
+        {
+          "file": "packages/cli/src/mcp/handlers/dependency-analyzer.ts",
+          "startLine": 1018,
+          "endLine": 1038,
+          "symbolName": "calculateComplexityRiskBoost",
+          "symbolType": "function",
+          "language": "typescript",
+          "rank": -4.086010786287744
+        },
+        {
+          "file": "packages/parser/src/dependency-analyzer.ts",
+          "startLine": 252,
+          "endLine": 272,
+          "symbolName": "calculateComplexityRiskBoost",
+          "symbolType": "function",
+          "language": "typescript",
+          "rank": -4.086010786287744
+        }
+      ]
+    },
+    "symbol": {
+      "Extractor": [
+        {
+          "file": "packages/parser/src/ast/extractors/index.ts",
+          "startLine": 22,
+          "endLine": 24,
+          "symbolName": "getExtractor",
+          "symbolType": "function",
+          "language": "typescript"
+        },
+        {
+          "file": "packages/parser/src/ast/extractors/index.ts",
+          "startLine": 33,
+          "endLine": 37,
+          "symbolName": "getImportExtractor",
+          "symbolType": "function",
+          "language": "typescript"
+        },
+        {
+          "file": "packages/parser/src/ast/extractors/index.ts",
+          "startLine": 46,
+          "endLine": 50,
+          "symbolName": "getSymbolExtractor",
+          "symbolType": "function",
+          "language": "typescript"
+        },
+        {
+          "file": "packages/parser/src/ast/extractors/index.ts",
+          "startLine": 58,
+          "endLine": 60,
+          "symbolName": "hasExtractor",
+          "symbolType": "function",
+          "language": "typescript"
+        },
+        {
+          "file": "packages/parser/src/ast/extractors/types.ts",
+          "startLine": 11,
+          "endLine": 20,
+          "symbolName": "LanguageSymbolExtractor",
+          "symbolType": "interface",
+          "language": "typescript"
+        },
+        {
+          "file": "packages/parser/src/ast/extractors/types.ts",
+          "startLine": 54,
+          "endLine": 71,
+          "symbolName": "LanguageExportExtractor",
+          "symbolType": "interface",
+          "language": "typescript"
+        },
+        {
+          "file": "packages/parser/src/ast/extractors/types.ts",
+          "startLine": 85,
+          "endLine": 107,
+          "symbolName": "LanguageImportExtractor",
+          "symbolType": "interface",
+          "language": "typescript"
+        },
+        {
+          "file": "packages/parser/src/ast/languages/csharp.ts",
+          "startLine": 121,
+          "endLine": 222,
+          "symbolName": "CSharpExportExtractor",
+          "symbolType": "class",
+          "language": "typescript"
+        }
+      ],
+      "handle": [
+        {
+          "file": "lien-review-testbed/typescript/src/api-handler.ts",
+          "startLine": 22,
+          "endLine": 60,
+          "symbolName": "handleGetUser",
+          "symbolType": "function",
+          "language": "typescript"
+        },
+        {
+          "file": "lien-review-testbed/typescript/src/api-handler.ts",
+          "startLine": 69,
+          "endLine": 124,
+          "symbolName": "handleCreateUser",
+          "symbolType": "function",
+          "language": "typescript"
+        },
+        {
+          "file": "lien-review-testbed/typescript/src/api-handler.ts",
+          "startLine": 132,
+          "endLine": 176,
+          "symbolName": "handleDeleteUser",
+          "symbolType": "function",
+          "language": "typescript"
+        },
+        {
+          "file": "lien-review-testbed/typescript/src/api-handler.ts",
+          "startLine": 184,
+          "endLine": 237,
+          "symbolName": "handleNotifyUser",
+          "symbolType": "function",
+          "language": "typescript"
+        },
+        {
+          "file": "lien-review-testbed/typescript/src/api-handler.ts",
+          "startLine": 245,
+          "endLine": 304,
+          "symbolName": "handleUpdateUser",
+          "symbolType": "function",
+          "language": "typescript"
+        },
+        {
+          "file": "lien-review-testbed/typescript/src/api-handler.ts",
+          "startLine": 311,
+          "endLine": 341,
+          "symbolName": "handleListUsers",
+          "symbolType": "function",
+          "language": "typescript"
+        },
+        {
+          "file": "lien-review-testbed/typescript/src/api-handler.ts",
+          "startLine": 348,
+          "endLine": 391,
+          "symbolName": "handleLogin",
+          "symbolType": "function",
+          "language": "typescript"
+        },
+        {
+          "file": "lien-review-testbed/typescript/src/api-handler.ts",
+          "startLine": 399,
+          "endLine": 462,
+          "symbolName": "handleChangePassword",
+          "symbolType": "function",
+          "language": "typescript"
+        }
+      ],
+      "Chunk": [
+        {
+          "file": "packages/cli/src/cli/annotate-cmd.ts",
+          "startLine": 99,
+          "endLine": 107,
+          "symbolName": "adaptChunkImports",
+          "symbolType": "function",
+          "language": "typescript"
+        },
+        {
+          "file": "packages/cli/src/cli/utils.ts",
+          "startLine": 174,
+          "endLine": 176,
+          "symbolName": "formatChunkCount",
+          "symbolType": "function",
+          "language": "typescript"
+        },
+        {
+          "file": "packages/cli/src/mcp/handlers/dependency-analyzer.test.ts",
+          "startLine": 12,
+          "endLine": 41,
+          "symbolName": "createChunk",
+          "symbolType": "function",
+          "language": "typescript"
+        },
+        {
+          "file": "packages/cli/src/mcp/handlers/dependency-analyzer.ts",
+          "startLine": 128,
+          "endLine": 141,
+          "symbolName": "collectNamedSymbolsFromChunk",
+          "symbolType": "function",
+          "language": "typescript"
+        },
+        {
+          "file": "packages/cli/src/mcp/handlers/dependency-analyzer.ts",
+          "startLine": 173,
+          "endLine": 179,
+          "symbolName": "collectExportsFromChunks",
+          "symbolType": "function",
+          "language": "typescript"
+        },
+        {
+          "file": "packages/cli/src/mcp/handlers/dependency-analyzer.ts",
+          "startLine": 264,
+          "endLine": 288,
+          "symbolName": "addChunkToImportIndex",
+          "symbolType": "function",
+          "language": "typescript"
+        },
+        {
+          "file": "packages/cli/src/mcp/handlers/dependency-analyzer.ts",
+          "startLine": 293,
+          "endLine": 310,
+          "symbolName": "addChunkToFileMap",
+          "symbolType": "function",
+          "language": "typescript"
+        },
+        {
+          "file": "packages/cli/src/mcp/handlers/dependency-analyzer.ts",
+          "startLine": 320,
+          "endLine": 369,
+          "symbolName": "scanAllChunks",
+          "symbolType": "function",
+          "language": "typescript"
+        }
+      ]
+    },
+    "hybrid": {
+      "hybrid1": [
+        {
+          "file": "packages/review/src/stale-literal-signals.ts",
+          "symbolName": "RepoScanResult",
+          "symbolType": "interface",
+          "rank": -10.133246454760883
+        },
+        {
+          "file": "packages/review/src/plugins/agent/agent-tools.ts",
+          "symbolName": "",
+          "symbolType": "",
+          "rank": -9.02985841972373
+        },
+        {
+          "file": "packages/cli/src/cli/annotate-cmd.ts",
+          "symbolName": "resolvePaths",
+          "symbolType": "function",
+          "rank": -4.882784251006642
+        },
+        {
+          "file": "packages/review/test/stale-literal-signals.test.ts",
+          "symbolName": "",
+          "symbolType": "",
+          "rank": -1.8715963838269243
+        }
+      ],
+      "hybrid2": [
+        {
+          "file": "lien-review-testbed/rust/src/main.rs",
+          "symbolName": "process_files",
+          "complexity": 16,
+          "cognitiveComplexity": 40
+        },
+        {
+          "file": "lien-review-testbed/python/pipeline/processor.py",
+          "symbolName": "process_pipeline",
+          "complexity": 11,
+          "cognitiveComplexity": 23
+        },
+        {
+          "file": "packages/parser/src/ast/languages/javascript.ts",
+          "symbolName": "processRequireDeclaration",
+          "complexity": 8,
+          "cognitiveComplexity": 13
+        },
+        {
+          "file": "packages/core/src/indexer/incremental.ts",
+          "symbolName": "processFileContent",
+          "complexity": 6,
+          "cognitiveComplexity": 8
+        },
+        {
+          "file": "packages/parser/src/ast/languages/kotlin.ts",
+          "symbolName": "processImportSymbols",
+          "complexity": 6,
+          "cognitiveComplexity": 5
+        },
+        {
+          "file": "packages/parser/src/ast/languages/rust.ts",
+          "symbolName": "processUseArgument",
+          "complexity": 6,
+          "cognitiveComplexity": 5
+        },
+        {
+          "file": "packages/parser/src/liquid-chunker.ts",
+          "symbolName": "processTemplateContent",
+          "complexity": 6,
+          "cognitiveComplexity": 8
+        }
+      ],
+      "hybrid3": [
+        {
+          "file": "packages/parser/src/dependency-analyzer.ts",
+          "symbolName": "createPathNormalizer",
+          "language": "typescript",
+          "rank": -6.54802711821476
+        },
+        {
+          "file": "packages/cli/src/mcp/handlers/get-files-context.ts",
+          "symbolName": "createPathCache",
+          "language": "typescript",
+          "rank": -6.502303287779715
+        },
+        {
+          "file": "packages/cli/src/mcp/handlers/dependency-analyzer.ts",
+          "symbolName": "createPathNormalizer",
+          "language": "typescript",
+          "rank": -6.27446410715174
+        },
+        {
+          "file": "packages/parser/src/test-associations.ts",
+          "symbolName": "findTestAssociationsFromChunks",
+          "language": "typescript",
+          "rank": -5.628243185105724
+        },
+        {
+          "file": "packages/core/src/vectordb/intent-classifier.ts",
+          "symbolName": "addIntentRule",
+          "language": "typescript",
+          "rank": -5.308640068441599
+        }
+      ]
+    },
+    "eyeball": {
+      "[keyword] parse import statement": [
+        {
+          "file": "packages/parser/src/ast/symbols.ts",
+          "startLine": 234,
+          "endLine": 248,
+          "symbolName": "",
+          "symbolType": "",
+          "language": "typescript",
+          "rank": -11.483536502701952
+        },
+        {
+          "file": "packages/parser/src/ast/languages/ruby.ts",
+          "startLine": 1,
+          "endLine": 23,
+          "symbolName": "",
+          "symbolType": "",
+          "language": "typescript",
+          "rank": -10.366208682423922
+        },
+        {
+          "file": "packages/parser/src/ast/languages/javascript.ts",
+          "startLine": 794,
+          "endLine": 912,
+          "symbolName": "",
+          "symbolType": "",
+          "language": "typescript",
+          "rank": -10.128313677930727
+        },
+        {
+          "file": "packages/parser/src/ast/languages/python.ts",
+          "startLine": 226,
+          "endLine": 234,
+          "symbolName": "processImportSymbols",
+          "symbolType": "method",
+          "language": "typescript",
+          "rank": -10.079041622917911
+        },
+        {
+          "file": "packages/parser/src/ast/extractors/types.ts",
+          "startLine": 72,
+          "endLine": 84,
+          "symbolName": "",
+          "symbolType": "",
+          "language": "typescript",
+          "rank": -9.941510304585234
+        },
+        {
+          "file": "packages/parser/src/ast/languages/python.ts",
+          "startLine": 256,
+          "endLine": 260,
+          "symbolName": "",
+          "symbolType": "",
+          "language": "typescript",
+          "rank": -9.863132309341399
+        }
+      ],
+      "[keyword] vector search implementation": [
+        {
+          "file": "docs/architecture/data-flow.md",
+          "startLine": 196,
+          "endLine": 270,
+          "symbolName": "",
+          "symbolType": "",
+          "language": "markdown",
+          "rank": -11.170907914876702
+        },
+        {
+          "file": "docs/architecture/data-flow.md",
+          "startLine": 261,
+          "endLine": 335,
+          "symbolName": "",
+          "symbolType": "",
+          "language": "markdown",
+          "rank": -10.352242986380155
+        },
+        {
+          "file": "packages/core/src/vectordb/intent-boosting.test.ts",
+          "startLine": 1,
+          "endLine": 588,
+          "symbolName": "",
+          "symbolType": "",
+          "language": "typescript",
+          "rank": -10.175739770236865
+        },
+        {
+          "file": "packages/core/src/vectordb/query.ts",
+          "startLine": 465,
+          "endLine": 468,
+          "symbolName": "",
+          "symbolType": "",
+          "language": "typescript",
+          "rank": -10.132778710243679
+        },
+        {
+          "file": "packages/core/src/vectordb/intent-classifier.ts",
+          "startLine": 1,
+          "endLine": 33,
+          "symbolName": "",
+          "symbolType": "",
+          "language": "typescript",
+          "rank": -10.001834026831528
+        },
+        {
+          "file": "packages/core/src/vectordb/intent-classifier.ts",
+          "startLine": 107,
+          "endLine": 121,
+          "symbolName": "",
+          "symbolType": "",
+          "language": "typescript",
+          "rank": -9.984921209385163
+        }
+      ],
+      "[keyword] complexity calculation for functions": [
+        {
+          "file": "packages/review/src/delta.ts",
+          "startLine": 1,
+          "endLine": 12,
+          "symbolName": "",
+          "symbolType": "",
+          "language": "typescript",
+          "rank": -10.78060885668853
+        },
+        {
+          "file": "packages/parser/src/ast/complexity/cyclomatic.ts",
+          "startLine": 22,
+          "endLine": 31,
+          "symbolName": "",
+          "symbolType": "",
+          "language": "typescript",
+          "rank": -10.773792159980763
+        },
+        {
+          "file": "packages/cli/src/mcp/handlers/dependency-analyzer.ts",
+          "startLine": 948,
+          "endLine": 951,
+          "symbolName": "",
+          "symbolType": "",
+          "language": "typescript",
+          "rank": -10.598940111734954
+        },
+        {
+          "file": "packages/parser/src/dependency-analyzer.ts",
+          "startLine": 171,
+          "endLine": 177,
+          "symbolName": "",
+          "symbolType": "",
+          "language": "typescript",
+          "rank": -10.482781249345663
+        },
+        {
+          "file": "packages/cli/src/mcp/handlers/dependency-analyzer.ts",
+          "startLine": 974,
+          "endLine": 977,
+          "symbolName": "",
+          "symbolType": "",
+          "language": "typescript",
+          "rank": -10.118244530016058
+        },
+        {
+          "file": "docs/architecture/indexing-flow.md",
+          "startLine": 261,
+          "endLine": 335,
+          "symbolName": "",
+          "symbolType": "",
+          "language": "markdown",
+          "rank": -10.055405358230535
+        }
+      ],
+      "[keyword] user authentication login flow": [
+        {
+          "file": "lien-review-testbed/typescript/src/api-handler.ts",
+          "startLine": 1,
+          "endLine": 21,
+          "symbolName": "",
+          "symbolType": "",
+          "language": "typescript",
+          "rank": -15.310171123529075
+        },
+        {
+          "file": "lien-review-testbed/typescript/src/router.ts",
+          "startLine": 1,
+          "endLine": 25,
+          "symbolName": "",
+          "symbolType": "",
+          "language": "typescript",
+          "rank": -14.650267069720948
+        },
+        {
+          "file": "lien-review-testbed/typescript/src/auth-service.ts",
+          "startLine": 77,
+          "endLine": 120,
+          "symbolName": "login",
+          "symbolType": "function",
+          "language": "typescript",
+          "rank": -14.00468997469632
+        },
+        {
+          "file": "lien-review-testbed/typescript/src/router.ts",
+          "startLine": 175,
+          "endLine": 191,
+          "symbolName": "loginAndUpdateProfile",
+          "symbolType": "function",
+          "language": "typescript",
+          "rank": -13.83187381606113
+        },
+        {
+          "file": "packages/site/docs/guide/mcp-tools.md",
+          "startLine": 1,
+          "endLine": 75,
+          "symbolName": "",
+          "symbolType": "",
+          "language": "markdown",
+          "rank": -13.590376709637846
+        },
+        {
+          "file": "lien-review-testbed/typescript/src/api-handler.ts",
+          "startLine": 348,
+          "endLine": 391,
+          "symbolName": "handleLogin",
+          "symbolType": "function",
+          "language": "typescript",
+          "rank": -13.308822830479778
+        }
+      ],
+      "[symbol] auth": [
+        {
+          "file": "lien-review-testbed/typescript/src/middleware.ts",
+          "startLine": 31,
+          "endLine": 76,
+          "symbolName": "authMiddleware",
+          "symbolType": "function",
+          "language": "typescript"
+        },
+        {
+          "file": "lien-review-testbed/typescript/src/router.ts",
+          "startLine": 198,
+          "endLine": 208,
+          "symbolName": "authenticatedBatchNotify",
+          "symbolType": "function",
+          "language": "typescript"
+        }
+      ],
+      "[keyword] check if user is logged in": [
+        {
+          "file": "packages/review/src/plugins/agent/rules.ts",
+          "startLine": 311,
+          "endLine": 353,
+          "symbolName": "",
+          "symbolType": "",
+          "language": "typescript",
+          "rank": -12.389165976810718
+        },
+        {
+          "file": "packages/parser/src/gitignore.ts",
+          "startLine": 96,
+          "endLine": 111,
+          "symbolName": "",
+          "symbolType": "",
+          "language": "typescript",
+          "rank": -11.762186436648305
+        },
+        {
+          "file": "lien-review-testbed/typescript/src/auth-service.ts",
+          "startLine": 28,
+          "endLine": 34,
+          "symbolName": "",
+          "symbolType": "",
+          "language": "typescript",
+          "rank": -11.647057684774284
+        },
+        {
+          "file": "packages/cli/src/mcp/git-detection.ts",
+          "startLine": 23,
+          "endLine": 64,
+          "symbolName": "handleGitStartup",
+          "symbolType": "function",
+          "language": "typescript",
+          "rank": -11.343110814899099
+        },
+        {
+          "file": "docs/architecture/config-system.md",
+          "startLine": 131,
+          "endLine": 205,
+          "symbolName": "",
+          "symbolType": "",
+          "language": "markdown",
+          "rank": -10.737552645237306
+        },
+        {
+          "file": "lien-review-testbed/typescript/src/notification.ts",
+          "startLine": 20,
+          "endLine": 26,
+          "symbolName": "",
+          "symbolType": "",
+          "language": "typescript",
+          "rank": -10.363884045418615
+        }
+      ],
+      "[keyword] file watching": [
+        {
+          "file": "packages/cli/src/mcp/server.ts",
+          "startLine": 129,
+          "endLine": 163,
+          "symbolName": "setupFileWatching",
+          "symbolType": "function",
+          "language": "typescript",
+          "rank": -9.921969235781377
+        },
+        {
+          "file": "packages/cli/src/mcp/server.ts",
+          "startLine": 124,
+          "endLine": 128,
+          "symbolName": "",
+          "symbolType": "",
+          "language": "typescript",
+          "rank": -9.531202955103877
+        },
+        {
+          "file": "packages/cli/src/cli/serve.ts",
+          "startLine": 7,
+          "endLine": 64,
+          "symbolName": "serveCommand",
+          "symbolType": "function",
+          "language": "typescript",
+          "rank": -9.372594466785738
+        },
+        {
+          "file": "packages/cli/src/watcher/index.ts",
+          "startLine": 564,
+          "endLine": 579,
+          "symbolName": "getWatchedFiles",
+          "symbolType": "method",
+          "language": "typescript",
+          "rank": -9.304837587341344
+        },
+        {
+          "file": "packages/core/src/constants.ts",
+          "startLine": 35,
+          "endLine": 36,
+          "symbolName": "",
+          "symbolType": "",
+          "language": "typescript",
+          "rank": -9.074711265501906
+        },
+        {
+          "file": "packages/core/src/config/service.ts",
+          "startLine": 384,
+          "endLine": 387,
+          "symbolName": "",
+          "symbolType": "",
+          "language": "typescript",
+          "rank": -8.885227283114562
+        }
+      ],
+      "[keyword] circular dependency detection": [
+        {
+          "file": "packages/core/src/indexer/change-detector.ts",
+          "startLine": 1,
+          "endLine": 15,
+          "symbolName": "",
+          "symbolType": "",
+          "language": "typescript",
+          "rank": -13.000490302153741
+        },
+        {
+          "file": "packages/review/src/plugin-types.ts",
+          "startLine": 371,
+          "endLine": 379,
+          "symbolName": "",
+          "symbolType": "",
+          "language": "typescript",
+          "rank": -9.715101864669487
+        },
+        {
+          "file": "docs/architecture/decisions/0009-extract-parser-package.md",
+          "startLine": 66,
+          "endLine": 134,
+          "symbolName": "",
+          "symbolType": "",
+          "language": "markdown",
+          "rank": -6.780390785032197
+        },
+        {
+          "file": "packages/cli/CHANGELOG.md",
+          "startLine": 456,
+          "endLine": 530,
+          "symbolName": "",
+          "symbolType": "",
+          "language": "markdown",
+          "rank": -6.498454125053626
+        },
+        {
+          "file": ".claude/skills/dogfood/SKILL.md",
+          "startLine": 261,
+          "endLine": 335,
+          "symbolName": "",
+          "symbolType": "",
+          "language": "markdown",
+          "rank": -6.181673778039387
+        },
+        {
+          "file": "packages/cli/CHANGELOG.md",
+          "startLine": 131,
+          "endLine": 205,
+          "symbolName": "",
+          "symbolType": "",
+          "language": "markdown",
+          "rank": -6.1545163488821135
+        }
+      ]
+    }
+  }
+}
