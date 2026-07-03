@@ -15,7 +15,7 @@ For Claude Code users, the simplest path is the one-time plugin install — no `
 /plugin install lien
 ```
 
-The plugin spawns Lien on demand via `npx -y @liendev/lien`, so it always pulls the latest release. To upgrade, restart Claude Code — the next spawn fetches the newest version automatically.
+The plugin spawns Lien on demand via `npx -y @liendev/lien@latest`, which resolves against the npm registry on every launch, so it always runs the latest published release — even if you have a local `npm link` or workspace copy of `@liendev/lien` on your machine. To upgrade, restart Claude Code — the next spawn fetches the newest version automatically.
 
 ::: tip Working on Lien itself?
 Contributors should NOT install the plugin in their dev environment — that points the MCP server at the npm-published binary, bypassing your local changes. See [CONTRIBUTING.md](https://github.com/getlien/lien/blob/main/CONTRIBUTING.md) for the dogfooding setup that points at your local build instead.
@@ -59,7 +59,7 @@ For frequent use, global installation gives better cold-start performance.
 
 ## Upgrading
 
-**Plugin users (Claude Code):** restart Claude Code. The plugin's `npx -y @liendev/lien` invocation re-resolves to the latest npm version on every cold start, so a restart is all you need.
+**Plugin users (Claude Code):** restart Claude Code. The plugin's `npx -y @liendev/lien@latest` invocation re-resolves to the latest npm version on every cold start, so a restart is all you need.
 
 **Global install users:** bump the package and restart your editor.
 

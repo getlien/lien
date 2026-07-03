@@ -1,6 +1,6 @@
 {
   "lien": {
     "command": "npx",
-    "args": ["-y", "@liendev/lien", "serve"]
+    "args": ["-y", "@liendev/lien@latest", "serve"]
   }
 }
