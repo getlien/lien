@@ -2,7 +2,6 @@ import chalk from 'chalk';
 import type { Stats } from 'fs';
 import fs from 'fs/promises';
 import path from 'path';
-import os from 'os';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import {
@@ -15,7 +14,12 @@ import {
   DEFAULT_EMBEDDING_BATCH_SIZE,
   DEFAULT_GIT_POLL_INTERVAL_MS,
 } from '@liendev/core';
-import { extractRepoId, DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP } from '@liendev/parser';
+import {
+  extractRepoId,
+  getLienHome,
+  DEFAULT_CHUNK_SIZE,
+  DEFAULT_CHUNK_OVERLAP,
+} from '@liendev/parser';
 import { showCompactBanner } from '../utils/banner.js';
 
 const VALID_FORMATS = ['text', 'json'];
@@ -179,7 +183,7 @@ export async function statusCommand(options: { verbose?: boolean; format?: strin
 
   const rootDir = process.cwd();
   const repoId = extractRepoId(rootDir);
-  const indexPath = path.join(os.homedir(), '.lien', 'indices', repoId);
+  const indexPath = path.join(getLienHome(), '.lien', 'indices', repoId);
 
   if (format === 'json') {
     await outputJson(rootDir, indexPath);

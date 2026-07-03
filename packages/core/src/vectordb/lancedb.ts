@@ -1,10 +1,9 @@
 import * as lancedb from '@lancedb/lancedb';
 import path from 'path';
-import os from 'os';
 import type { SearchResult, VectorDBInterface } from './types.js';
 import type { LanceDBConnection, LanceDBTable } from './lancedb-types.js';
 import type { ChunkMetadata } from '@liendev/parser';
-import { extractRepoId } from '@liendev/parser';
+import { extractRepoId, getLienHome } from '@liendev/parser';
 import { EMBEDDING_DIMENSION } from '../embeddings/types.js';
 import { readVersionFile } from './version.js';
 import { DatabaseError, wrapError } from '../errors/index.js';
@@ -23,9 +22,11 @@ export class VectorDB implements VectorDBInterface {
 
   constructor(projectRoot: string) {
     // Store in user's home directory under ~/.lien/indices/{projectName-hash}
+    // (or LIEN_HOME, when set — used by tests to avoid writing into the
+    // real global store).
     const repoId = extractRepoId(projectRoot);
 
-    this.dbPath = path.join(os.homedir(), '.lien', 'indices', repoId);
+    this.dbPath = path.join(getLienHome(), '.lien', 'indices', repoId);
   }
 
   async initialize(): Promise<void> {

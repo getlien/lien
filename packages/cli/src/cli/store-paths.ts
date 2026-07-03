@@ -1,6 +1,5 @@
 import path from 'path';
-import os from 'os';
-import { extractRepoId } from '@liendev/parser';
+import { extractRepoId, getLienHome } from '@liendev/parser';
 import { resolveProjectRoot } from './project-root.js';
 
 /**
@@ -11,5 +10,5 @@ import { resolveProjectRoot } from './project-root.js';
  */
 export function getStoreRoot(cwd: string = process.cwd()): string {
   const repoId = extractRepoId(resolveProjectRoot(cwd));
-  return path.join(os.homedir(), '.lien', 'indices', repoId).replace(/\\/g, '/');
+  return path.join(getLienHome(), '.lien', 'indices', repoId).replace(/\\/g, '/');
 }

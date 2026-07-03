@@ -5,13 +5,11 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['src/**/*.test.ts'],
+    globalSetup: ['./src/test/global-setup.ts'],
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],
-      exclude: [
-        'src/**/*.test.ts',
-        'src/test/**',
-      ],
+      exclude: ['src/**/*.test.ts', 'src/test/**'],
       reporter: ['text', 'text-summary', 'lcov'],
     },
     testTimeout: 30000,

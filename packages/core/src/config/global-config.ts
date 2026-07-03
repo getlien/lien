@@ -1,6 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
-import os from 'os';
+import { getLienHome } from '@liendev/parser';
 
 /**
  * Error thrown when config file exists but has invalid syntax or structure.
@@ -143,7 +143,7 @@ function parseConfigFile(content: string, configPath: string): RawGlobalConfig {
 export async function loadGlobalConfig(): Promise<GlobalConfig> {
   // 1. Load config file as base
   let fileConfig: GlobalConfig = {};
-  const configPath = path.join(os.homedir(), '.lien', 'config.json');
+  const configPath = path.join(getLienHome(), '.lien', 'config.json');
   try {
     const content = await fs.readFile(configPath, 'utf-8');
     const sanitized = stripRemovedQdrantConfig(parseConfigFile(content, configPath));
@@ -173,7 +173,7 @@ export async function loadGlobalConfig(): Promise<GlobalConfig> {
  * Creates the directory if it doesn't exist.
  */
 export async function saveGlobalConfig(config: GlobalConfig): Promise<void> {
-  const configDir = path.join(os.homedir(), '.lien');
+  const configDir = path.join(getLienHome(), '.lien');
   const configPath = path.join(configDir, 'config.json');
 
   await fs.mkdir(configDir, { recursive: true });
@@ -185,7 +185,7 @@ export async function saveGlobalConfig(config: GlobalConfig): Promise<void> {
  * Retired Qdrant settings in the existing file are dropped on save.
  */
 export async function mergeGlobalConfig(partial: Partial<GlobalConfig>): Promise<GlobalConfig> {
-  const configPath = path.join(os.homedir(), '.lien', 'config.json');
+  const configPath = path.join(getLienHome(), '.lien', 'config.json');
 
   let existing: RawGlobalConfig = {};
   try {
