@@ -109,8 +109,14 @@ function parseJsonArray(value: unknown): string[] {
 function parseImportedSymbols(value: unknown): Record<string, string[]> | undefined {
   if (typeof value !== 'string') return undefined;
   try {
-    const parsed = JSON.parse(value);
-    if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) {
+    const parsed: unknown = JSON.parse(value);
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      !Array.isArray(parsed) &&
+      Object.keys(parsed).length > 0 &&
+      Object.values(parsed).every(v => Array.isArray(v) && v.every(s => typeof s === 'string'))
+    ) {
       return parsed as Record<string, string[]>;
     }
   } catch {
@@ -177,8 +183,10 @@ export function parseRow(raw: Record<string, unknown>): SqliteChunkRecord {
 /**
  * Build a SearchResult's metadata from a parsed record, reproducing the
  * LanceDB read path (query.ts buildSearchResultMetadata) field-for-field:
- * empty arrays -> undefined, '' -> undefined for optional strings, `0`
- * complexity -> undefined, but Halstead 0 is preserved (explicit != null).
+ * empty arrays -> undefined, '' -> undefined for symbolName/parentClass/
+ * signature, `0` complexity -> undefined, Halstead 0 preserved (explicit
+ * != null). symbolType is a bare cast — query.ts passes '' through, so a
+ * `|| undefined` here would break parity.
  */
 function buildMetadata(r: SqliteChunkRecord): SearchResult['metadata'] {
   return {

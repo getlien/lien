@@ -96,8 +96,9 @@ export function keywordSearch(
   );
 
   const results = rows.map(row => {
-    // rankBest is the most-negative (best) rank; guard the degenerate 0 case.
-    const ratio = rankBest !== 0 ? row.rank / rankBest : 1;
+    // rankBest is the most-negative (best) rank. Clamp to [0, 1] so degenerate
+    // bm25 outputs (zero or positive ranks) can never invert the mapping.
+    const ratio = rankBest < 0 ? Math.min(1, Math.max(0, row.rank / rankBest)) : 1;
     const record = parseRow(row);
     const exactSymbolMatch = record.symbolName !== '' && terms.has(record.symbolName.toLowerCase());
     const relevance = exactSymbolMatch ? 'highly_relevant' : toRelevance(ratio);

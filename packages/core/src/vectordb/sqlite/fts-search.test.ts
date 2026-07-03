@@ -55,6 +55,7 @@ describe('SqliteBackend.search (FTS5)', () => {
   });
 
   afterEach(async () => {
+    db.close();
     await fs.rm(projectRoot, { recursive: true, force: true });
     await fs.rm(db.dbPath, { recursive: true, force: true });
   });

@@ -113,6 +113,7 @@ describe('SqliteBackend / LanceDB parity', () => {
   });
 
   afterAll(async () => {
+    sqlite.close();
     await Promise.all([
       fs.rm(sqliteRoot, { recursive: true, force: true }),
       fs.rm(lanceRoot, { recursive: true, force: true }),

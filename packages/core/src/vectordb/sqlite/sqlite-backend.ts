@@ -336,12 +336,19 @@ export class SqliteBackend implements VectorDBInterface {
     }
   }
 
+  /** Release the SQLite file handle. Not part of VectorDBInterface; callers
+   * that own the backend's lifecycle (tests, shutdown paths) use it to free
+   * file descriptors deterministically before removing the store. */
+  close(): void {
+    if (this.db) {
+      this.db.close();
+      this.db = null;
+    }
+  }
+
   async reconnect(): Promise<void> {
     try {
-      if (this.db) {
-        this.db.close();
-        this.db = null;
-      }
+      this.close();
       await this.initialize();
     } catch (error) {
       throw wrapError(error, 'Failed to reconnect to vector database');

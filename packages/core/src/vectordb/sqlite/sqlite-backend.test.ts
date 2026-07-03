@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
+import Database from 'better-sqlite3';
 import type { ChunkMetadata } from '@liendev/parser';
 import { SqliteBackend } from './sqlite-backend.js';
 import { readVersionFile } from '../version.js';
@@ -63,6 +64,7 @@ describe('SqliteBackend', () => {
   });
 
   afterEach(async () => {
+    db.close();
     await fs.rm(projectRoot, { recursive: true, force: true });
     await fs.rm(db.dbPath, { recursive: true, force: true });
   });
@@ -339,6 +341,21 @@ describe('SqliteBackend', () => {
       await db.checkVersion(); // bumps in-memory currentVersion from the file
       expect(db.getCurrentVersion()).toBeGreaterThan(0);
       expect(db.getVersionDate()).not.toBe('Unknown');
+    });
+  });
+
+  describe('corrupt rows', () => {
+    it('degrades malformed importedSymbols JSON to undefined instead of crashing', async () => {
+      const { metadata, content } = makeChunk();
+      await insertOne(db, metadata, content);
+
+      const raw = new Database(path.join(db.dbPath, 'structural.db'));
+      raw.prepare(`UPDATE chunks SET importedSymbols = '{"mod": 123}'`).run();
+      raw.close();
+
+      const [result] = await db.scanWithFilter({ file: metadata.file });
+      expect(result.metadata.importedSymbols).toBeUndefined();
+      expect(result.metadata.imports).toEqual(metadata.imports);
     });
   });
 });
