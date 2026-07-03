@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'fs/promises';
 import path from 'path';
-import os from 'os';
+import { getLienHome } from '@liendev/parser';
 import { loadGlobalConfig, ConfigValidationError } from './global-config.js';
 
 describe('loadGlobalConfig', () => {
@@ -50,7 +50,7 @@ describe('loadGlobalConfig', () => {
   });
 
   describe('Config file parsing (parseConfigFile)', () => {
-    const configPath = path.join(os.homedir(), '.lien', 'config.json');
+    const configPath = path.join(getLienHome(), '.lien', 'config.json');
 
     beforeEach(() => {
       vi.clearAllMocks();

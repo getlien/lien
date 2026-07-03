@@ -1,6 +1,6 @@
 import chalk from 'chalk';
 import path from 'path';
-import os from 'os';
+import { getLienHome } from '@liendev/parser';
 import {
   loadGlobalConfig,
   mergeGlobalConfig,
@@ -9,7 +9,7 @@ import {
   type LienConfig,
 } from '@liendev/core';
 
-const GLOBAL_CONFIG_PATH = path.join(os.homedir(), '.lien', 'config.json');
+const GLOBAL_CONFIG_PATH = path.join(getLienHome(), '.lien', 'config.json');
 const PROJECT_CONFIG_FILENAME = '.lien.config.json';
 
 /**

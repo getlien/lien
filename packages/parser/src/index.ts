@@ -32,6 +32,8 @@ export { normalizePath, matchesFile, getCanonicalPath, isTestFile } from './util
 
 export { extractRepoId } from './utils/repo-id.js';
 
+export { getLienHome } from './utils/lien-home.js';
+
 // =============================================================================
 // AST
 // =============================================================================
