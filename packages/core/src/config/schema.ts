@@ -53,6 +53,18 @@ export interface LienConfig {
     enabled: boolean;
     debounceMs: number;
   };
+  embeddings: {
+    /**
+     * Compute embeddings for semantic search (default: true).
+     * Set to false for structural-only mode: no model download, no
+     * embedding worker, no CPU cost on index/reindex. Structural tools
+     * (get_files_context, get_dependents, list_functions, get_complexity)
+     * keep working; semantic_search and find_similar report as disabled.
+     * Toggling this requires a full reindex (`lien index --force`) to take
+     * effect on already-indexed files.
+     */
+    enabled: boolean;
+  };
   complexity?: {
     enabled: boolean;
     thresholds: {
@@ -144,6 +156,9 @@ export const defaultConfig: LienConfig = {
   fileWatching: {
     enabled: true, // Enabled by default (fast with incremental indexing!)
     debounceMs: DEFAULT_DEBOUNCE_MS,
+  },
+  embeddings: {
+    enabled: true, // Embeddings on by default — no behavior change for existing users
   },
   complexity: {
     enabled: true,

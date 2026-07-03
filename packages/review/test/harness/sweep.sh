@@ -1,7 +1,16 @@
 #!/usr/bin/env bash
-# Multi-model sweep across all canary fixtures.
+# Multi-model sweep across all canary fixtures — an experimental A/B/
+# regression tool, distinct from the single-rule `--calibrate` shipping
+# gate (see run.ts / README.md), which defaults to the prod model
+# (`moonshotai/kimi-k2.7-code`, from src/defaults.ts) whenever --model is
+# omitted.
 # Usage: OPENROUTER_API_KEY=… ./sweep.sh [model1 model2 ...]
-# Default models: google/gemini-2.5-flash google/gemini-3-flash-preview
+# Default models: moonshotai/kimi-k2.7-code google/gemini-3-flash-preview
+#   (Kimi is the prod default; Gemini 3 Flash is kept as the original
+#   calibration baseline some canaries were tuned against, for regression
+#   comparison. A couple of canaries are known-red on Kimi — see the
+#   README's "Known-red reconciliation" note — so this sweep's bar is "no
+#   regression vs main," not literal 9/10 on every fixture/model pair.)
 #
 # A calibration that misses the 9/10 bar exits non-zero — that's expected
 # data, not a script error. So we deliberately do NOT use `set -e` here.
@@ -33,7 +42,7 @@ ROOT=packages/review/test/harness/fixtures
 if [ "$#" -gt 0 ]; then
   MODELS=("$@")
 else
-  MODELS=(google/gemini-2.5-flash google/gemini-3-flash-preview)
+  MODELS=(moonshotai/kimi-k2.7-code google/gemini-3-flash-preview)
 fi
 
 # Portable equivalent of `mapfile` (bash 3.2 on macOS lacks it).

@@ -1,8 +1,12 @@
-# E2E Tests with Real Projects
+# E2E Tests
+
+Gated tests that are excluded from the fast suite (`npm test`) because they
+load real, non-mocked dependencies (a git clone, the real local embedding
+model, or both) that are too slow/heavy for the default `vitest run`.
+
+## Real Open Source Projects (`real-projects.test.ts`)
 
 End-to-end tests that validate Lien works correctly on real open source projects.
-
-## Overview
 
 These tests:
 - Clone popular open source projects for each supported language
@@ -213,9 +217,28 @@ A: Pin to a specific commit SHA instead of branch name, or update expected value
 **Q: Why shallow clones?**  
 A: Speed. We only need latest code to validate Lien works.
 
+## MCP Protocol Round Trip (`mcp-roundtrip.test.ts`)
+
+Drives a real `@modelcontextprotocol/sdk` `Client` against a real MCP
+`Server` (connected over `InMemoryTransport.createLinkedPair()`), backed by
+a real LanceDB index of a small in-memory fixture repo built via the real
+`indexCodebase()` path. Unlike `server.test.ts` (which mocks the SDK's
+`Server`/transport classes and only asserts setup calls) and the handler
+unit tests (which mock the vector DB), this proves a client can actually
+connect and get a real `tools/call` response for `semantic_search` and
+`get_files_context`.
+
+Uses `LocalEmbeddings` (in-process, no worker thread) loaded once for the
+whole file — same approach as `real-projects.test.ts` — which is why it
+lives here instead of the fast suite.
+
+```bash
+npm run test:e2e:mcp -w @liendev/lien
+```
+
 ## Future Enhancements
 
-- [ ] Add semantic search validation (requires MCP server)
+- [x] Add semantic search validation (requires MCP server) — see `mcp-roundtrip.test.ts`
 - [ ] Add performance benchmarks (index time, search latency)
 - [ ] Add multi-language project test (e.g., Django + React)
 - [ ] Cache git clones between runs

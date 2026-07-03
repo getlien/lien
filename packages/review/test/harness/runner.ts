@@ -6,11 +6,11 @@
  * the user has set OPENROUTER_API_KEY.
  */
 
-import type { Logger } from '../../src/logger.js';
 import type { ReviewContext, ReviewFinding } from '../../src/plugin-types.js';
 import { AgentReviewPlugin } from '../../src/plugins/agent/index.js';
 import type { AgentTrace } from '../../src/plugins/agent/types.js';
 import { DEFAULT_REVIEW_MODEL, DEFAULT_OPENROUTER_BASE_URL } from '../../src/defaults.js';
+import { silentLogger } from '../../src/test-helpers.js';
 
 import { loadFixture } from './fixture-loader.js';
 import type { HarnessResult } from './assertions.js';
@@ -28,45 +28,35 @@ export interface RunnerOptions {
   maxTokenBudget?: number;
 }
 
-interface CapturingLogger extends Logger {
-  lines: string[];
+/**
+ * The harness doesn't need per-line log capture: `AgentReviewPlugin` reports
+ * a fully structured `AgentTrace` via `reportTrace` regardless (see
+ * `toolCallsFromTrace`/`turnCountFromTrace` below), and nothing here reads
+ * raw log text, so `runFixture` passes the shared `silentLogger` (below).
+ * `openai-client.ts`'s `[agent] Turn N: ...` / `[agent] Turn N tools: ...`
+ * calls stay as human-readable production logs (untouched) — they're just
+ * not depended on here anymore.
+ */
+
+/**
+ * Flatten every tool call made across the run from the structured trace.
+ * Previously this regex-parsed logger lines like "[agent] Turn 2 tools:
+ * get_files_context, read_file" — stable only as long as nobody reworded
+ * that log line. The trace carries the same data structurally (each turn's
+ * `toolCalls[].name`), independent of any log phrasing.
+ */
+export function toolCallsFromTrace(trace: AgentTrace | undefined): string[] {
+  if (!trace) return [];
+  return trace.turns.flatMap(turn => turn.toolCalls.map(call => call.name));
 }
 
-function makeCapturingLogger(): CapturingLogger {
-  const lines: string[] = [];
-  return {
-    lines,
-    info: (msg: string) => lines.push(`info: ${msg}`),
-    warning: (msg: string) => lines.push(`warning: ${msg}`),
-    error: (msg: string) => lines.push(`error: ${msg}`),
-    debug: (msg: string) => lines.push(`debug: ${msg}`),
-  };
-}
-
-/** Extract tool names from logger lines like "[agent] Turn 2 tools: get_files_context, read_file". */
-function extractToolCalls(lines: string[]): string[] {
-  const calls: string[] = [];
-  for (const line of lines) {
-    const match = line.match(/\[agent\] Turn \d+ tools: (.+)$/);
-    if (match) {
-      for (const name of match[1].split(',').map(s => s.trim())) {
-        if (name) calls.push(name);
-      }
-    }
-  }
-  return calls;
-}
-
-function extractTurns(lines: string[]): number {
-  let max = 0;
-  for (const line of lines) {
-    const match = line.match(/\[agent\] Turn (\d+)/);
-    if (match) {
-      const n = parseInt(match[1], 10);
-      if (n > max) max = n;
-    }
-  }
-  return max;
+/**
+ * Turn count from the structured trace (mirrors `compare-votes.ts`'s
+ * `trace.turns.length`), rather than the max turn number regex-parsed out
+ * of "[agent] Turn N" log lines.
+ */
+export function turnCountFromTrace(trace: AgentTrace | undefined): number {
+  return trace?.turns.length ?? 0;
 }
 
 function findingsToHarness(findings: ReviewFinding[]): HarnessResult['findings'] {
@@ -91,7 +81,6 @@ export async function runFixture(
   opts: RunnerOptions,
 ): Promise<HarnessResult & { cost: number }> {
   const ctx = (await loadFixture(fixturePath)) as ReviewContext;
-  const logger = makeCapturingLogger();
 
   let cost = 0;
   const reportUsage = (usage: {
@@ -110,7 +99,7 @@ export async function runFixture(
 
   const pluginCtx: ReviewContext = {
     ...ctx,
-    logger,
+    logger: silentLogger,
     reportUsage,
     reportTrace,
     config: {
@@ -132,8 +121,8 @@ export async function runFixture(
 
   return {
     findings: findingsToHarness(findings),
-    toolCalls: extractToolCalls(logger.lines),
-    turns: extractTurns(logger.lines),
+    toolCalls: toolCallsFromTrace(trace),
+    turns: turnCountFromTrace(trace),
     trace,
     cost,
   };

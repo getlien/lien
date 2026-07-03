@@ -422,6 +422,38 @@ describe('handleSemanticSearch', () => {
     });
   });
 
+  describe('embeddings disabled (structural-only mode)', () => {
+    it('returns a clear disabled note instead of searching', async () => {
+      const disabledCtx: ToolContext = { ...mockCtx, embeddingsEnabled: false };
+
+      const result = await handleSemanticSearch({ query: 'handles authentication' }, disabledCtx);
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.results).toEqual([]);
+      expect(parsed.note).toContain('disabled');
+      expect(parsed.note).toContain('structural-only mode');
+      expect(parsed.note).toContain('lien config set embeddings.enabled true');
+      expect(parsed.indexInfo).toBeDefined();
+    });
+
+    it('does not call embed() or vectorDB.search() when disabled', async () => {
+      const disabledCtx: ToolContext = { ...mockCtx, embeddingsEnabled: false };
+
+      await handleSemanticSearch({ query: 'handles authentication' }, disabledCtx);
+
+      expect(mockEmbeddings.embed).not.toHaveBeenCalled();
+      expect(mockVectorDB.search).not.toHaveBeenCalled();
+    });
+
+    it('is not an error result', async () => {
+      const disabledCtx: ToolContext = { ...mockCtx, embeddingsEnabled: false };
+
+      const result = await handleSemanticSearch({ query: 'handles authentication' }, disabledCtx);
+
+      expect(result.isError).toBeUndefined();
+    });
+  });
+
   describe('logging', () => {
     it('should log search query', async () => {
       mockVectorDB.search.mockResolvedValue([]);

@@ -65,6 +65,7 @@ export {
 export { LocalEmbeddings } from './embeddings/local.js';
 export { WorkerEmbeddings } from './embeddings/worker-embeddings.js';
 export { CachedEmbeddings } from './embeddings/cache.js';
+export { NullEmbeddings } from './embeddings/null-embeddings.js';
 export type { EmbeddingService } from './embeddings/types.js';
 export { EMBEDDING_DIMENSION, EMBEDDING_DIMENSIONS } from './embeddings/types.js';
 
@@ -105,6 +106,16 @@ export {
   ConfigValidationError,
 } from './config/global-config.js';
 export type { GlobalConfig } from './config/global-config.js';
+
+// =============================================================================
+// PROJECT CONFIGURATION (.lien.config.json)
+// =============================================================================
+
+export { configService, ConfigService } from './config/service.js';
+export type { ValidationResult } from './config/service.js';
+export { defaultConfig } from './config/schema.js';
+export type { LienConfig } from './config/schema.js';
+export { resolveEmbeddingsEnabled } from './config/embeddings-enabled.js';
 
 // =============================================================================
 // GIT UTILITIES

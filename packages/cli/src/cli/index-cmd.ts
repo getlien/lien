@@ -178,7 +178,11 @@ function displayFinalResult(
   }
 }
 
-export async function indexCommand(options: { verbose?: boolean; force?: boolean }) {
+export async function indexCommand(options: {
+  verbose?: boolean;
+  force?: boolean;
+  embeddings?: boolean;
+}) {
   showCompactBanner();
 
   try {
@@ -196,11 +200,18 @@ export async function indexCommand(options: { verbose?: boolean; force?: boolean
     const tracker = createProgressTracker();
     startMessageRotation(spinner, tracker);
 
+    // Commander's --no-embeddings negatable flag defaults `embeddings` to
+    // true when omitted, so only force skipEmbeddings when the flag was
+    // explicitly passed. Leave it undefined otherwise so indexCodebase()
+    // falls back to the project config's embeddings.enabled setting.
+    const skipEmbeddings = options.embeddings === false ? true : undefined;
+
     // Run indexing with progress callback
     const result = await indexCodebase({
       rootDir: process.cwd(),
       verbose: options.verbose || false,
       force: options.force || false,
+      skipEmbeddings,
       onProgress: createProgressCallback(spinner, tracker),
     });
 

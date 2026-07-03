@@ -462,6 +462,47 @@ describe('handleFindSimilar', () => {
     });
   });
 
+  describe('embeddings disabled (structural-only mode)', () => {
+    it('returns a clear disabled note instead of searching', async () => {
+      const disabledCtx: ToolContext = { ...mockCtx, embeddingsEnabled: false };
+
+      const result = await handleFindSimilar(
+        { code: 'async function fetchData() { return await db.find(); }' },
+        disabledCtx,
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.results).toEqual([]);
+      expect(parsed.note).toContain('disabled');
+      expect(parsed.note).toContain('structural-only mode');
+      expect(parsed.note).toContain('lien config set embeddings.enabled true');
+      expect(parsed.indexInfo).toBeDefined();
+    });
+
+    it('does not call embed() or vectorDB.search() when disabled', async () => {
+      const disabledCtx: ToolContext = { ...mockCtx, embeddingsEnabled: false };
+
+      await handleFindSimilar(
+        { code: 'async function fetchData() { return await db.find(); }' },
+        disabledCtx,
+      );
+
+      expect(mockEmbeddings.embed).not.toHaveBeenCalled();
+      expect(mockVectorDB.search).not.toHaveBeenCalled();
+    });
+
+    it('is not an error result', async () => {
+      const disabledCtx: ToolContext = { ...mockCtx, embeddingsEnabled: false };
+
+      const result = await handleFindSimilar(
+        { code: 'async function fetchData() { return await db.find(); }' },
+        disabledCtx,
+      );
+
+      expect(result.isError).toBeUndefined();
+    });
+  });
+
   describe('filtersApplied metadata', () => {
     it('should not include filtersApplied when no filtering occurred', async () => {
       const mockResults = [createMockResult({ relevance: 'highly_relevant' })];
