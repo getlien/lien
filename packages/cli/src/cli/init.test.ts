@@ -298,18 +298,20 @@ describe('initCommand', () => {
     expect(configFiles).toHaveLength(0);
   });
 
-  // --- Legacy config warning ---
+  // --- Project config note ---
 
-  it('should warn about legacy .lien.config.json', async () => {
-    const legacyPath = path.join(testDir, '.lien.config.json');
-    await fs.writeFile(legacyPath, JSON.stringify({ version: '0.2.0' }));
+  it('should note that .lien.config.json is found and only embeddings.enabled is used', async () => {
+    const projectConfigPath = path.join(testDir, '.lien.config.json');
+    await fs.writeFile(projectConfigPath, JSON.stringify({ version: '0.2.0' }));
 
     const logSpy = vi.spyOn(console, 'log');
 
     await initCommand({ editor: 'cursor' });
 
     expect(logSpy).toHaveBeenCalledWith(
-      expect.stringContaining('.lien.config.json found but no longer used'),
+      expect.stringContaining(
+        '.lien.config.json found — only its "embeddings.enabled" setting is used',
+      ),
     );
   });
 

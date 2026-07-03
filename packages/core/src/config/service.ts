@@ -196,6 +196,11 @@ export class ConfigService {
       this.validateFileWatchingConfig(config.fileWatching, errors, warnings);
     }
 
+    // Validate embeddings settings if present
+    if (config.embeddings) {
+      this.validateEmbeddingsConfig(config.embeddings, errors);
+    }
+
     return {
       valid: errors.length === 0,
       errors,
@@ -241,6 +246,13 @@ export class ConfigService {
       return;
     }
     this.validateFileWatchingConfig(config.fileWatching, errors, warnings);
+
+    // Validate embeddings settings
+    if (!config.embeddings) {
+      errors.push('Missing required field: embeddings');
+      return;
+    }
+    this.validateEmbeddingsConfig(config.embeddings, errors);
   }
 
   /**
@@ -403,6 +415,20 @@ export class ConfigService {
         warnings.push(
           'fileWatching.debounceMs is very short (<100ms). This may cause excessive reindexing',
         );
+      }
+    }
+  }
+
+  /**
+   * Validate embeddings configuration settings
+   */
+  private validateEmbeddingsConfig(
+    embeddings: Partial<LienConfig['embeddings']>,
+    errors: string[],
+  ): void {
+    if (embeddings.enabled !== undefined) {
+      if (typeof embeddings.enabled !== 'boolean') {
+        errors.push('embeddings.enabled must be a boolean');
       }
     }
   }

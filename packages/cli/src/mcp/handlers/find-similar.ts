@@ -39,6 +39,11 @@ function pruneIrrelevantResults(results: SearchResult[]): {
   return { filtered, prunedCount: beforePrune - filtered.length };
 }
 
+/** Message returned by semantic_search/find_similar when embeddings are disabled. */
+const EMBEDDINGS_DISABLED_NOTE =
+  'find_similar relies on embeddings, which are disabled (structural-only mode). Re-enable with ' +
+  '`lien config set embeddings.enabled true` and run `lien index --force` to compute embeddings.';
+
 /**
  * Handle find_similar tool calls.
  * Finds code structurally similar to a given snippet.
@@ -47,6 +52,14 @@ export async function handleFindSimilar(args: unknown, ctx: ToolContext): Promis
   const { vectorDB, embeddings, log, checkAndReconnect, getIndexMetadata } = ctx;
 
   return await wrapToolHandler(FindSimilarSchema, async validatedArgs => {
+    if (ctx.embeddingsEnabled === false) {
+      return {
+        indexInfo: getIndexMetadata(),
+        results: [],
+        note: EMBEDDINGS_DISABLED_NOTE,
+      };
+    }
+
     log(`Finding similar code...`);
     await checkAndReconnect();
 

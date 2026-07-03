@@ -10,6 +10,7 @@ import {
   getCurrentBranch,
   getCurrentCommit,
   readVersionFile,
+  resolveEmbeddingsEnabled,
   DEFAULT_CONCURRENCY,
   DEFAULT_EMBEDDING_BATCH_SIZE,
   DEFAULT_GIT_POLL_INTERVAL_MS,
@@ -137,6 +138,26 @@ function printWatchStatus() {
   console.log(chalk.dim('  Disable with:'), chalk.bold('lien serve --no-watch'));
 }
 
+function printEmbeddingsStatus(enabled: boolean) {
+  if (enabled) {
+    console.log(chalk.dim('Embeddings:'), chalk.green('✓ Enabled'));
+    console.log(
+      chalk.dim('  Disable with:'),
+      chalk.bold('lien config set embeddings.enabled false'),
+    );
+  } else {
+    console.log(chalk.dim('Embeddings:'), chalk.yellow('✗ Disabled (structural-only mode)'));
+    console.log(
+      chalk.dim('  semantic_search / find_similar are unavailable; structural tools still work.'),
+    );
+    console.log(
+      chalk.dim('  Re-enable with:'),
+      chalk.bold('lien config set embeddings.enabled true'),
+    );
+    console.log(chalk.dim('  Then reindex with:'), chalk.bold('lien index --force'));
+  }
+}
+
 function printIndexingSettings() {
   console.log(chalk.bold('\nIndexing Settings (defaults):'));
   console.log(chalk.dim('Concurrency:'), DEFAULT_CONCURRENCY);
@@ -165,11 +186,15 @@ export async function statusCommand(options: { verbose?: boolean; format?: strin
     return;
   }
 
+  const embeddingsEnabled = await resolveEmbeddingsEnabled(rootDir);
+
   showCompactBanner();
   console.log(chalk.bold('Status\n'));
   console.log(
     chalk.dim('Configuration:'),
-    chalk.green('✓ Using defaults (no per-project config needed)'),
+    embeddingsEnabled
+      ? chalk.green('✓ Using defaults')
+      : chalk.yellow('✗ Customized (embeddings disabled)'),
   );
 
   await printIndexStatus(indexPath);
@@ -177,6 +202,7 @@ export async function statusCommand(options: { verbose?: boolean; format?: strin
   console.log(chalk.bold('\nFeatures:'));
   await printGitStatus(rootDir, indexPath);
   printWatchStatus();
+  printEmbeddingsStatus(embeddingsEnabled);
 
   if (options.verbose) {
     printIndexingSettings();
@@ -195,6 +221,7 @@ async function outputJson(rootDir: string, indexPath: string) {
     lastReindex: null as string | null,
     git: { enabled: false, branch: null, commit: null },
     features: { fileWatching: true, gitDetection: true },
+    embeddings: { enabled: await resolveEmbeddingsEnabled(rootDir) },
     settings: {
       concurrency: DEFAULT_CONCURRENCY,
       batchSize: DEFAULT_EMBEDDING_BATCH_SIZE,

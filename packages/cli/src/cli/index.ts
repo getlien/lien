@@ -55,6 +55,10 @@ program
   .description('Index the codebase for semantic search')
   .option('-f, --force', 'Force full reindex (skip incremental)')
   .option('-v, --verbose', 'Show detailed logging during indexing')
+  .option(
+    '--no-embeddings',
+    'Skip embedding computation (structural-only mode: no model download, no embedding worker)',
+  )
   .action(indexCommand);
 
 program
@@ -87,11 +91,11 @@ program
 
 const configCmd = program
   .command('config')
-  .description('Manage global configuration (~/.lien/config.json)');
+  .description('Manage configuration (global: ~/.lien/config.json, project: ./.lien.config.json)');
 
 configCmd
   .command('set <key> <value>')
-  .description('Set a global config value')
+  .description('Set a config value (global or project, depending on the key)')
   .action(configSetCommand);
 
 configCmd.command('get <key>').description('Get a config value').action(configGetCommand);

@@ -203,12 +203,15 @@ export async function initCommand(options: InitOptions = {}) {
     console.log(JSON.stringify(snippet, null, 2));
   }
 
-  // Check if old config exists and warn
-  const legacyConfigPath = path.join(rootDir, '.lien.config.json');
+  // Check if a project config exists and note what it's used for.
+  // Most settings in it are legacy/unused — only `embeddings.enabled` is
+  // currently read (see `lien config set embeddings.enabled false`).
+  const projectConfigPath = path.join(rootDir, '.lien.config.json');
   try {
-    await fs.access(legacyConfigPath);
-    console.log(chalk.yellow('⚠️  Note: .lien.config.json found but no longer used'));
-    console.log(chalk.dim('  You can safely delete it.'));
+    await fs.access(projectConfigPath);
+    console.log(
+      chalk.dim('  Note: .lien.config.json found — only its "embeddings.enabled" setting is used.'),
+    );
   } catch {
     // Config doesn't exist - that's fine
   }

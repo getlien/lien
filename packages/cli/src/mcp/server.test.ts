@@ -7,10 +7,12 @@ const {
   mockTransportInstance,
   mockVectorDB,
   mockEmbeddings,
+  mockNullEmbeddingsInstance,
   mockSetupGitDetection,
   mockSetupCleanupHandlers,
   mockIsGitRepo,
   mockIndexCodebase,
+  mockResolveEmbeddingsEnabled,
 } = vi.hoisted(() => ({
   mockServerInstance: {
     connect: vi.fn().mockResolvedValue(undefined),
@@ -34,10 +36,14 @@ const {
   mockEmbeddings: {
     initialize: vi.fn().mockResolvedValue(undefined),
   },
+  mockNullEmbeddingsInstance: {
+    initialize: vi.fn().mockResolvedValue(undefined),
+  },
   mockSetupGitDetection: vi.fn().mockResolvedValue({ gitPollInterval: null }),
   mockSetupCleanupHandlers: vi.fn().mockReturnValue(vi.fn().mockResolvedValue(undefined)),
   mockIsGitRepo: vi.fn(async (_dir: string) => true),
   mockIndexCodebase: vi.fn(async (_opts: { rootDir: string; verbose?: boolean }) => undefined),
+  mockResolveEmbeddingsEnabled: vi.fn(async (_dir: string) => true),
 }));
 
 vi.mock('@modelcontextprotocol/sdk/server/index.js', () => ({
@@ -56,7 +62,11 @@ vi.mock('@liendev/core', () => ({
   WorkerEmbeddings: vi.fn(function (this: any) {
     Object.assign(this, mockEmbeddings);
   }),
+  NullEmbeddings: vi.fn(function (this: any) {
+    Object.assign(this, mockNullEmbeddingsInstance);
+  }),
   createVectorDB: vi.fn(async () => mockVectorDB),
+  resolveEmbeddingsEnabled: mockResolveEmbeddingsEnabled,
   VERSION_CHECK_INTERVAL_MS: 60000,
   isGitRepo: mockIsGitRepo,
   indexCodebase: mockIndexCodebase,
@@ -119,7 +129,7 @@ vi.mock('url', () => ({
 import { startMCPServer } from './server.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { WorkerEmbeddings, createVectorDB } from '@liendev/core';
+import { WorkerEmbeddings, NullEmbeddings, createVectorDB } from '@liendev/core';
 import { FileWatcher } from '../watcher/index.js';
 import { createMCPServerConfig, registerMCPHandlers } from './server-config.js';
 import { setupCleanupHandlers } from './cleanup.js';
@@ -147,6 +157,8 @@ describe('startMCPServer', () => {
     mockVectorDB.getCurrentVersion.mockReturnValue(1);
     mockVectorDB.getVersionDate.mockReturnValue('2026-01-01');
     mockEmbeddings.initialize.mockResolvedValue(undefined);
+    mockNullEmbeddingsInstance.initialize.mockResolvedValue(undefined);
+    mockResolveEmbeddingsEnabled.mockResolvedValue(true);
     mockSetupGitDetection.mockResolvedValue({ gitPollInterval: null });
     mockSetupCleanupHandlers.mockReturnValue(vi.fn().mockResolvedValue(undefined));
     vi.mocked(createVectorDB).mockImplementation(async () => mockVectorDB as any);
@@ -174,6 +186,43 @@ describe('startMCPServer', () => {
     expect(createVectorDB).toHaveBeenCalledWith('/test/project');
     expect(mockEmbeddings.initialize).toHaveBeenCalledOnce();
     expect(mockVectorDB.initialize).toHaveBeenCalledOnce();
+  });
+
+  it('should not construct WorkerEmbeddings or call its initialize when embeddings are disabled', async () => {
+    mockResolveEmbeddingsEnabled.mockResolvedValue(false);
+
+    await startMCPServer({ rootDir: '/test/project' });
+
+    // No embedding worker/model spawn: the whole point of structural-only mode.
+    expect(WorkerEmbeddings).not.toHaveBeenCalled();
+    expect(mockEmbeddings.initialize).not.toHaveBeenCalled();
+
+    // NullEmbeddings is used in its place, and the vector DB still initializes normally.
+    expect(NullEmbeddings).toHaveBeenCalledOnce();
+    expect(createVectorDB).toHaveBeenCalledWith('/test/project');
+    expect(mockVectorDB.initialize).toHaveBeenCalledOnce();
+  });
+
+  it('should mark the tool context as embeddings-disabled when structural-only', async () => {
+    mockResolveEmbeddingsEnabled.mockResolvedValue(false);
+
+    await startMCPServer({ rootDir: '/test/project' });
+
+    expect(registerMCPHandlers).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ embeddingsEnabled: false }),
+      expect.any(Function),
+    );
+  });
+
+  it('should mark the tool context as embeddings-enabled by default', async () => {
+    await startMCPServer({ rootDir: '/test/project' });
+
+    expect(registerMCPHandlers).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ embeddingsEnabled: true }),
+      expect.any(Function),
+    );
   });
 
   it('should create MCP server and register handlers', async () => {

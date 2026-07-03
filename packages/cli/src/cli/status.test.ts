@@ -9,6 +9,7 @@ vi.mock('@liendev/core', async () => {
     getCurrentBranch: vi.fn().mockResolvedValue('main'),
     getCurrentCommit: vi.fn().mockResolvedValue('abc12345def67890'),
     readVersionFile: vi.fn().mockResolvedValue(0),
+    resolveEmbeddingsEnabled: vi.fn().mockResolvedValue(true),
   };
 });
 
@@ -35,7 +36,13 @@ vi.mock('fs/promises', () => ({
 }));
 
 import { statusCommand } from './status.js';
-import { isGitRepo, getCurrentBranch, getCurrentCommit, readVersionFile } from '@liendev/core';
+import {
+  isGitRepo,
+  getCurrentBranch,
+  getCurrentCommit,
+  readVersionFile,
+  resolveEmbeddingsEnabled,
+} from '@liendev/core';
 import fs from 'fs/promises';
 
 describe('statusCommand', () => {
@@ -47,6 +54,7 @@ describe('statusCommand', () => {
     vi.mocked(fs.stat).mockRejectedValue(new Error('ENOENT'));
     vi.mocked(fs.readdir).mockResolvedValue([]);
     vi.mocked(fs.readFile).mockRejectedValue(new Error('ENOENT'));
+    vi.mocked(resolveEmbeddingsEnabled).mockResolvedValue(true);
   });
 
   afterEach(() => {
@@ -148,6 +156,89 @@ describe('statusCommand', () => {
     expect(data.features).toEqual({ fileWatching: true, gitDetection: true });
     expect(data.settings).toBeDefined();
     expect(data.settings.concurrency).toBeDefined();
+  });
+
+  it('should show embeddings as enabled by default', async () => {
+    vi.mocked(fs.stat).mockRejectedValue(new Error('ENOENT'));
+
+    await statusCommand();
+
+    const allOutput = consoleLogSpy.mock.calls.flat().join(' ');
+    expect(allOutput).toContain('Embeddings:');
+    expect(allOutput).toContain('Enabled');
+    expect(allOutput).not.toContain('structural-only mode');
+  });
+
+  it('should show embeddings as disabled (structural-only) when config disables them', async () => {
+    vi.mocked(resolveEmbeddingsEnabled).mockResolvedValue(false);
+    vi.mocked(fs.stat).mockRejectedValue(new Error('ENOENT'));
+
+    await statusCommand();
+
+    const allOutput = consoleLogSpy.mock.calls.flat().join(' ');
+    expect(allOutput).toContain('Embeddings:');
+    expect(allOutput).toContain('Disabled (structural-only mode)');
+    expect(allOutput).toContain('lien config set embeddings.enabled true');
+    expect(allOutput).toContain('lien index --force');
+  });
+
+  it('should report "Using defaults" in the Configuration banner when embeddings are enabled', async () => {
+    vi.mocked(fs.stat).mockRejectedValue(new Error('ENOENT'));
+
+    await statusCommand();
+
+    const allOutput = consoleLogSpy.mock.calls.flat().join(' ');
+    expect(allOutput).toContain('Configuration:');
+    expect(allOutput).toContain('Using defaults');
+  });
+
+  it('should NOT claim "Using defaults" in the Configuration banner when embeddings are disabled', async () => {
+    vi.mocked(resolveEmbeddingsEnabled).mockResolvedValue(false);
+    vi.mocked(fs.stat).mockRejectedValue(new Error('ENOENT'));
+
+    await statusCommand();
+
+    const allOutput = consoleLogSpy.mock.calls.flat().join(' ');
+    expect(allOutput).toContain('Configuration:');
+    expect(allOutput).not.toContain('Using defaults');
+    expect(allOutput).toContain('Customized (embeddings disabled)');
+  });
+
+  it('should include embeddings.enabled in JSON output', async () => {
+    vi.mocked(fs.stat).mockRejectedValue(new Error('ENOENT'));
+
+    await statusCommand({ format: 'json' });
+
+    const calls = consoleLogSpy.mock.calls as string[][];
+    const jsonCall = calls.find(call => {
+      try {
+        JSON.parse(call[0]);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    const data = JSON.parse(jsonCall![0]);
+    expect(data.embeddings).toEqual({ enabled: true });
+  });
+
+  it('should reflect disabled embeddings in JSON output', async () => {
+    vi.mocked(resolveEmbeddingsEnabled).mockResolvedValue(false);
+    vi.mocked(fs.stat).mockRejectedValue(new Error('ENOENT'));
+
+    await statusCommand({ format: 'json' });
+
+    const calls = consoleLogSpy.mock.calls as string[][];
+    const jsonCall = calls.find(call => {
+      try {
+        JSON.parse(call[0]);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    const data = JSON.parse(jsonCall![0]);
+    expect(data.embeddings).toEqual({ enabled: false });
   });
 
   it('should show file count in index', async () => {

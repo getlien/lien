@@ -89,6 +89,22 @@ describe('deepMergeConfig', () => {
     expect(result.fileWatching.debounceMs).toBe(500);
   });
 
+  it('should merge embeddings config', () => {
+    const userConfig: Partial<LienConfig> = {
+      embeddings: { enabled: false },
+    };
+
+    const result = deepMergeConfig(defaultConfig, userConfig);
+
+    expect(result.embeddings.enabled).toBe(false);
+  });
+
+  it('should default embeddings.enabled to true when unspecified', () => {
+    const result = deepMergeConfig(defaultConfig, {});
+
+    expect(result.embeddings).toEqual({ enabled: true });
+  });
+
   it('should work with actual Lien config', () => {
     const userConfig: Partial<LienConfig> = {
       core: {
