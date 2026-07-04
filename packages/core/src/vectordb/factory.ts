@@ -1,5 +1,7 @@
 import type { VectorDBInterface } from './types.js';
 import { SqliteBackend } from './sqlite/sqlite-backend.js';
+import { OverlayBackend } from './overlay-backend.js';
+import { resolveIndexStrategy } from './overlay-resolution.js';
 import { loadGlobalConfig, ConfigValidationError } from '../config/global-config.js';
 
 /**
@@ -50,7 +52,15 @@ export async function createVectorDB(projectRoot: string): Promise<VectorDBInter
     }
   }
 
-  const db: VectorDBInterface = new SqliteBackend(projectRoot);
+  // Worktree-aware: when projectRoot is a linked git worktree with a usable
+  // main-checkout index, back it with an OverlayBackend (shared read-only base
+  // + small writable overlay) instead of a full independent index. Every
+  // uncertain condition resolves to standalone.
+  const strategy = await resolveIndexStrategy(projectRoot);
+  const db: VectorDBInterface =
+    strategy.mode === 'overlay'
+      ? new OverlayBackend(projectRoot, strategy.baseIndexDir)
+      : new SqliteBackend(projectRoot);
   validateVectorDBInterface(db);
   return db;
 }

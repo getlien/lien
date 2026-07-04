@@ -59,6 +59,10 @@ export interface VectorDBInterface {
   getVersionDate(): string;
   /** Whether this backend supports cross-repo operations. */
   readonly supportsCrossRepo: boolean;
+  /** True for the worktree overlay backend (shared read-only base + writable
+   *  overlay). Lets the indexer route to the overlay build instead of a full
+   *  reindex of the worktree. */
+  readonly isOverlay: boolean;
   /** Scan across all repos in the organization. Returns [] if unsupported. */
   scanCrossRepo(options: {
     language?: string;

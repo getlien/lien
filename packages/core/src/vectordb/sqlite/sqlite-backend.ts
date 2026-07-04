@@ -13,57 +13,22 @@ import {
   matchesSymbolFilter,
   buildLegacySymbols,
 } from '../filters.js';
-import { openDatabase, STRUCTURAL_DB_FILENAME, CHUNK_COLUMNS } from './schema.js';
+import { openDatabase, STRUCTURAL_DB_FILENAME } from './schema.js';
+import { recordToUnscoredResult, buildSearchResultMetadata } from './row-mapping.js';
 import {
-  chunkToRow,
-  parseRow,
-  recordToUnscoredResult,
-  buildSearchResultMetadata,
-  type SqliteChunkRecord,
-} from './row-mapping.js';
+  normalizeFileFilter,
+  readAllRecords,
+  readRecordsByFiles,
+  readSymbolRecords,
+  paginateRecords,
+} from './read-ops.js';
+import {
+  insertChunks,
+  replaceFileChunks,
+  deleteFileChunks,
+  validateBatchLengths,
+} from './write-ops.js';
 import { keywordSearch } from './fts-search.js';
-
-const INSERT_SQL = `INSERT INTO chunks (${CHUNK_COLUMNS.join(', ')}) VALUES (${CHUNK_COLUMNS.map(
-  c => '@' + c,
-).join(', ')})`;
-
-/**
- * A row identity requires a non-empty file and non-empty content. Scan paths
- * drop empty-content rows (content is always a string here — NOT NULL).
- */
-function isValidRecord(r: SqliteChunkRecord): boolean {
-  if (!r.file || r.file.length === 0) return false;
-  if (r.content.trim().length === 0) return false;
-  return true;
-}
-
-/**
- * Trim + validate a file filter into a list of exact-match paths. Empty or
- * whitespace-only paths throw — matching query.ts buildFileWhereClause.
- */
-function normalizeFileFilter(file: string | string[]): string[] {
-  if (typeof file === 'string') {
-    const trimmed = file.trim();
-    if (trimmed.length === 0) {
-      throw new DatabaseError('Invalid file filter: file path must be non-empty');
-    }
-    return [trimmed];
-  }
-  const cleaned = file.map(f => f.trim()).filter(f => f.length > 0);
-  if (cleaned.length === 0) {
-    throw new DatabaseError('Invalid file filter: at least one non-empty file path is required');
-  }
-  return cleaned;
-}
-
-function validateBatchLengths(metadatas: ChunkMetadata[], contents: string[]): void {
-  if (metadatas.length !== contents.length) {
-    throw new DatabaseError('Metadatas and contents arrays must have the same length', {
-      metadatasLength: metadatas.length,
-      contentsLength: contents.length,
-    });
-  }
-}
 
 /**
  * SQLite + FTS5 structural backend implementing VectorDBInterface.
@@ -77,6 +42,7 @@ export class SqliteBackend implements VectorDBInterface {
   public readonly dbPath: string;
   private readonly dbFilePath: string;
   public readonly supportsCrossRepo = false;
+  public readonly isOverlay = false;
   private lastVersionCheck = 0;
   private currentVersion = 0;
 
@@ -108,15 +74,7 @@ export class SqliteBackend implements VectorDBInterface {
   async insertBatch(metadatas: ChunkMetadata[], contents: string[]): Promise<void> {
     const db = this.requireDb();
     validateBatchLengths(metadatas, contents);
-    // Empty batch is a no-op.
-    if (metadatas.length === 0) return;
-
-    // Single transaction, one prepared statement.
-    const insert = db.prepare(INSERT_SQL);
-    const insertAll = db.transaction((rows: ReturnType<typeof chunkToRow>[]) => {
-      for (const row of rows) insert.run(row);
-    });
-    insertAll(metadatas.map((metadata, i) => chunkToRow(contents[i], metadata)));
+    insertChunks(db, metadatas, contents);
   }
 
   async search(query: string, limit: number = 5): Promise<SearchResult[]> {
@@ -135,21 +93,10 @@ export class SqliteBackend implements VectorDBInterface {
     const db = this.requireDb();
     const { file, language, pattern, symbolType, limit = 100 } = options;
 
-    let rawRows: Record<string, unknown>[];
     // Truthy guard mirrors query.ts (`file ? ... : 'file != ""'`): an empty
     // string is treated as no filter (full scan), while a non-empty array
     // still routes through normalizeFileFilter.
-    if (file) {
-      const files = normalizeFileFilter(file);
-      const placeholders = files.map(() => '?').join(', ');
-      rawRows = db
-        .prepare(`SELECT * FROM chunks WHERE file IN (${placeholders}) ORDER BY id`)
-        .all(...files) as Record<string, unknown>[];
-    } else {
-      rawRows = db.prepare('SELECT * FROM chunks ORDER BY id').all() as Record<string, unknown>[];
-    }
-
-    let records = rawRows.map(parseRow).filter(isValidRecord);
+    let records = file ? readRecordsByFiles(db, normalizeFileFilter(file)) : readAllRecords(db);
     if (language) records = filterByLanguage(records, language);
     if (pattern) records = filterByPattern(records, pattern);
     if (symbolType) records = filterBySymbolType(records, symbolType);
@@ -169,11 +116,7 @@ export class SqliteBackend implements VectorDBInterface {
 
     // Fast path: no filters → plain full read.
     if (!language && !pattern) {
-      const rawRows = db.prepare('SELECT * FROM chunks ORDER BY id').all() as Record<
-        string,
-        unknown
-      >[];
-      return rawRows.map(parseRow).filter(isValidRecord).map(recordToUnscoredResult);
+      return readAllRecords(db).map(recordToUnscoredResult);
     }
 
     // Otherwise delegate to scanWithFilter with no result cap (parity with
@@ -188,21 +131,8 @@ export class SqliteBackend implements VectorDBInterface {
   ): AsyncGenerator<SearchResult[]> {
     const db = this.requireDb();
     const pageSize = options.pageSize ?? 1000;
-    if (pageSize <= 0) {
-      throw new DatabaseError('pageSize must be a positive number');
-    }
-
-    const stmt = db.prepare("SELECT * FROM chunks WHERE file != '' ORDER BY id LIMIT ? OFFSET ?");
-    let offset = 0;
-    while (true) {
-      const rawRows = stmt.all(pageSize, offset) as Record<string, unknown>[];
-      if (rawRows.length === 0) break;
-
-      const page = rawRows.map(parseRow).filter(isValidRecord).map(recordToUnscoredResult);
-      if (page.length > 0) yield page;
-
-      if (rawRows.length < pageSize) break;
-      offset += pageSize;
+    for (const page of paginateRecords(db, pageSize)) {
+      yield page.map(recordToUnscoredResult);
     }
   }
 
@@ -218,13 +148,9 @@ export class SqliteBackend implements VectorDBInterface {
     // content != '' is a hard SQL prefilter (empty-content chunks excluded);
     // matchesSymbolFilter stays authoritative for the rest (legacy symbol
     // arrays can match with an empty symbolType).
-    const rawRows = db
-      .prepare("SELECT * FROM chunks WHERE content != '' ORDER BY id")
-      .all() as Record<string, unknown>[];
-
-    const records = rawRows
-      .map(parseRow)
-      .filter(r => isValidRecord(r) && matchesSymbolFilter(r, { language, pattern, symbolType }));
+    const records = readSymbolRecords(db).filter(r =>
+      matchesSymbolFilter(r, { language, pattern, symbolType }),
+    );
 
     return records.slice(0, limit).map(r => ({
       content: r.content,
@@ -238,7 +164,7 @@ export class SqliteBackend implements VectorDBInterface {
     const db = this.requireDb();
     // Exact match, no normalization — caller normalizes. FTS stays in sync via
     // the AFTER DELETE trigger.
-    db.prepare('DELETE FROM chunks WHERE file = ?').run(filepath);
+    deleteFileChunks(db, filepath);
   }
 
   async updateFile(
@@ -250,13 +176,7 @@ export class SqliteBackend implements VectorDBInterface {
     validateBatchLengths(metadatas, contents);
 
     // delete + insert in ONE transaction.
-    const del = db.prepare('DELETE FROM chunks WHERE file = ?');
-    const insert = db.prepare(INSERT_SQL);
-    const apply = db.transaction((rows: ReturnType<typeof chunkToRow>[]) => {
-      del.run(filepath);
-      for (const row of rows) insert.run(row);
-    });
-    apply(metadatas.map((metadata, i) => chunkToRow(contents[i], metadata)));
+    replaceFileChunks(db, filepath, metadatas, contents);
 
     // Bump the cross-process invalidation token. currentVersion is intentionally
     // NOT bumped in-memory here — only the file is written; checkVersion picks
