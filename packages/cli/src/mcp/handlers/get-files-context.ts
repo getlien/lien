@@ -326,7 +326,11 @@ export function computeComplexityHeadroom(chunks: SearchResult[]): {
     let best: (ComplexityHeadroomEntry & { ratio: number }) | null = null;
     for (const spec of HEADROOM_METRICS) {
       const value = spec.value(m);
-      if (value === undefined || spec.threshold <= 0) continue;
+      // Skip non-finite values explicitly (mirrors fmtValue's display guard):
+      // NaN would slip past the `ratio < NEAR_BUDGET_RATIO` skip (NaN
+      // comparisons are false) and Infinity would pass it outright — either
+      // would leak a nonsensical value into the MCP payload.
+      if (value === undefined || !Number.isFinite(value) || spec.threshold <= 0) continue;
       const ratio = value / spec.threshold;
       if (ratio < NEAR_BUDGET_RATIO) continue;
       if (!best || ratio > best.ratio) {

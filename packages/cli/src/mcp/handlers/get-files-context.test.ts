@@ -374,6 +374,23 @@ describe('computeComplexityHeadroom (Mechanism 3)', () => {
     expect(entries.map(e => e.symbol)).toEqual(['Svc.constructor', 'arrowFn']);
   });
 
+  it('skips non-finite metric values — NaN and Infinity never reach the payload', () => {
+    // Mirrors fmtValue's display guard: NaN slips past `ratio < 0.8` (NaN
+    // comparisons are false) and Infinity passes it outright — without the
+    // explicit guard either would leak into the MCP response.
+    const { entries, overflow } = computeComplexityHeadroom([
+      makeFnChunk('nanFn', { cognitive: Number.NaN }),
+      makeFnChunk('infFn', { cyclomatic: Number.POSITIVE_INFINITY }),
+      // Mixed: one corrupt metric, one valid over-budget metric — the valid one
+      // must still be reported.
+      makeFnChunk('mixedFn', { cognitive: Number.NaN, cyclomatic: 18 }),
+    ]);
+    expect(entries).toEqual([
+      { symbol: 'mixedFn', metric: 'cyclomatic', value: 18, threshold: 15 },
+    ]);
+    expect(overflow).toBe(0);
+  });
+
   it('sorts worst-first and caps at 5 with an overflow count', () => {
     const chunks = [
       makeFnChunk('f1', { cognitive: 13 }),
