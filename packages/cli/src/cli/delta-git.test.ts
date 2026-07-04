@@ -228,6 +228,52 @@ describe('delta-git', () => {
       await commitAll('init');
       expect(await collectFileChange(dir, 'ghost.ts')).toBeNull();
     });
+
+    it('accepts the repo root through a symlinked ancestor, even for a deleted file in a deleted dir', async () => {
+      // Regression (Phase-2 review finding #1): with a symlinked ANCESTOR of
+      // the repo root, a target whose file AND parent dir no longer exist hits
+      // canonicalize()'s identity fallback. Resolving against the raw rootDir
+      // then left the symlinked prefix in place, and the lexical
+      // path.relative(canonRoot, …) falsely escaped the repo → null.
+      await initRepo();
+      await write('sub/dir/a.ts', COMPLEX);
+      await commitAll('init');
+      await fs.rm(path.join(dir, 'sub'), { recursive: true }); // file AND parent dir gone
+
+      // Symlink an ancestor: linkParent/repo → dir. dir is already realpath'd,
+      // so every path through linkParent has a symlinked ancestor.
+      const linkParent = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-delta-link-'));
+      const linkedRoot = path.join(linkParent, 'repo');
+      await fs.symlink(dir, linkedRoot);
+      try {
+        const c = await collectFileChange(linkedRoot, 'sub/dir/a.ts');
+        expect(c).not.toBeNull();
+        expect(c!.filepath).toBe('sub/dir/a.ts');
+        expect(c!.before).toBe(COMPLEX);
+        expect(c!.after).toBeNull(); // deleted
+      } finally {
+        await fs.rm(linkParent, { recursive: true, force: true });
+      }
+    });
+
+    it('accepts a relative path when the repo root itself is reached via a symlink (file present)', async () => {
+      await initRepo();
+      await write('a.ts', SIMPLE);
+      await commitAll('init');
+      await write('a.ts', COMPLEX);
+
+      const linkParent = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-delta-link-'));
+      const linkedRoot = path.join(linkParent, 'repo');
+      await fs.symlink(dir, linkedRoot);
+      try {
+        const c = await collectFileChange(linkedRoot, 'a.ts');
+        expect(c).not.toBeNull();
+        expect(c!.before).toBe(SIMPLE);
+        expect(c!.after).toBe(COMPLEX);
+      } finally {
+        await fs.rm(linkParent, { recursive: true, force: true });
+      }
+    });
   });
 
   describe('readWorktree — only ENOENT maps to null (Phase-1 finding #4)', () => {

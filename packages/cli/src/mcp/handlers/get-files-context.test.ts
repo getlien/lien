@@ -359,6 +359,21 @@ describe('computeComplexityHeadroom (Mechanism 3)', () => {
     expect(entries).toEqual([]);
   });
 
+  it('includes over-budget constructors (chunked as symbolType "method", name "constructor")', () => {
+    // Regression lock for a review finding that suggested 'constructor' /
+    // 'arrow_function' symbolTypes escape headroom: neither exists in the
+    // parser's symbolType vocabulary. Verified against the real chunker —
+    // constructors chunk as { symbolName: 'constructor', symbolType: 'method',
+    // parentClass: <Class> } and arrow functions as symbolType 'function', so
+    // the function|method filter (identical to the delta primitive's) covers
+    // every callable kind the chunker emits.
+    const { entries } = computeComplexityHeadroom([
+      makeFnChunk('constructor', { cognitive: 18, parentClass: 'Svc', symbolType: 'method' }),
+      makeFnChunk('arrowFn', { cognitive: 16, symbolType: 'function' }),
+    ]);
+    expect(entries.map(e => e.symbol)).toEqual(['Svc.constructor', 'arrowFn']);
+  });
+
   it('sorts worst-first and caps at 5 with an overflow count', () => {
     const chunks = [
       makeFnChunk('f1', { cognitive: 13 }),

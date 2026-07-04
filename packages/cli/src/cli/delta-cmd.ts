@@ -126,8 +126,15 @@ function displayMetric(fn: FunctionComplexityDelta): MetricComplexityDelta | und
   return [...pool].sort((a, b) => order.indexOf(a.metricType) - order.indexOf(b.metricType))[0];
 }
 
-function fmtValue(v: number | null, metricType: MetricComplexityDelta['metricType']): string {
+// Exported for unit testing (Phase-2 review finding: non-finite guard).
+export function fmtValue(
+  v: number | null,
+  metricType: MetricComplexityDelta['metricType'],
+): string {
   if (v === null) return '–';
+  // Malformed metrics (NaN/Infinity) must not leak "NaNm"/"Infinitym" into the
+  // report — render them as absent, same as null.
+  if (!Number.isFinite(v)) return '–';
   if (metricType === 'halstead_bugs') return v.toFixed(2);
   // Floor (not round) effort-minutes: classification compares the RAW value to
   // the threshold, so a rounded display could show an at/over-limit number for a
@@ -197,6 +204,14 @@ export async function deltaCommand(options: DeltaOptions): Promise<void> {
 
   if (!VALID_FORMATS.includes(options.format)) {
     console.error(chalk.red(`Error: Invalid --format "${options.format}". Must be text or json.`));
+    process.exit(2);
+  }
+
+  // Validate --file before doing any work: an empty value is a usage error
+  // (exit 2), not a silent no-op — silence is reserved for genuinely
+  // out-of-scope files (non-code, outside the repo), never malformed input.
+  if (options.file !== undefined && options.file.trim() === '') {
+    console.error(chalk.red('lien delta: --file requires a non-empty path.'));
     process.exit(2);
   }
 

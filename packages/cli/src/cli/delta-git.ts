@@ -205,8 +205,18 @@ export async function collectFileChange(
   // Canonicalize symlinked path segments on BOTH sides first — otherwise a
   // symlinked ancestor (macOS /tmp → /private/tmp, or a symlinked project dir)
   // makes an absolute input path lexically "escape" the repo and get rejected.
+  //
+  // Resolve filePath against the CANONICAL root, not the raw rootDir: when the
+  // repo root itself sits behind a symlinked ancestor AND the target no longer
+  // exists on disk (deleted file in a deleted directory), canonicalize() falls
+  // back to the identity — resolving against the raw root would then leave the
+  // symlinked prefix in place and path.relative(canonRoot, …) would falsely
+  // escape. Residual (accepted) edge: an *absolute* input path through a
+  // symlinked ancestor whose file AND parent dir are both gone can still hit
+  // the identity fallback and be rejected — that fails silent-safe, and hook
+  // payloads reference files that were just edited (they exist).
   const canonRoot = await canonicalize(rootDir);
-  const abs = await canonicalize(path.resolve(rootDir, filePath));
+  const abs = await canonicalize(path.resolve(canonRoot, filePath));
   const rel = path.relative(canonRoot, abs);
   if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) return null;
   const relPosix = rel.split(path.sep).join('/');

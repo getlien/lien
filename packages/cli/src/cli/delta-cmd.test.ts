@@ -10,6 +10,7 @@ import {
   parseThresholdFlag,
   deltaExitCode,
   formatDeltaText,
+  fmtValue,
   deltaCommand,
 } from './delta-cmd.js';
 
@@ -151,6 +152,28 @@ describe('formatDeltaText', () => {
   });
 });
 
+describe('fmtValue — display formatting guards', () => {
+  it('renders null as an em-dash', () => {
+    expect(fmtValue(null, 'cognitive')).toBe('–');
+  });
+
+  it('renders NaN and Infinity as an em-dash, never "NaNm"/"Infinitym"', () => {
+    expect(fmtValue(Number.NaN, 'halstead_effort')).toBe('–');
+    expect(fmtValue(Number.POSITIVE_INFINITY, 'halstead_effort')).toBe('–');
+    expect(fmtValue(Number.NaN, 'cognitive')).toBe('–');
+    expect(fmtValue(Number.NaN, 'halstead_bugs')).toBe('–');
+  });
+
+  it('floors halstead effort minutes so display never overstates past a limit', () => {
+    expect(fmtValue(59.7, 'halstead_effort')).toBe('59m');
+  });
+
+  it('formats bugs with two decimals and integers verbatim', () => {
+    expect(fmtValue(1.5, 'halstead_bugs')).toBe('1.50');
+    expect(fmtValue(12, 'cognitive')).toBe('12');
+  });
+});
+
 describe('deltaCommand — operational failures exit 2 (Phase-1 findings #2, #3)', () => {
   let errSpy: ReturnType<typeof vi.spyOn>;
   let logSpy: ReturnType<typeof vi.spyOn>;
@@ -177,6 +200,15 @@ describe('deltaCommand — operational failures exit 2 (Phase-1 findings #2, #3)
 
   it('exits 2 on a float --threshold', async () => {
     await expect(deltaCommand({ format: 'text', threshold: '5.7' })).rejects.toThrow('__exit__:2');
+  });
+
+  it('exits 2 on an empty --file (usage error, not silence)', async () => {
+    await expect(deltaCommand({ format: 'text', file: '' })).rejects.toThrow('__exit__:2');
+    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('non-empty path'));
+  });
+
+  it('exits 2 on a whitespace-only --file', async () => {
+    await expect(deltaCommand({ format: 'text', file: '   ' })).rejects.toThrow('__exit__:2');
   });
 
   it('exits 2 when config fails to load (malformed .lien.config.json)', async () => {

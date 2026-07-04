@@ -95,11 +95,26 @@ function runHook(
   return { stdout: res.stdout.trim(), status: res.status };
 }
 
-/** Extract the additionalContext string from the hook's JSON stdout. */
+/**
+ * Extract the additionalContext string from the hook's JSON stdout, failing
+ * with a readable message (rather than a bare JSON.parse stack) when the hook
+ * unexpectedly printed nothing or printed non-JSON.
+ */
 function additionalContext(stdout: string): string {
-  expect(stdout, 'hook should emit JSON').not.toBe('');
-  const parsed = JSON.parse(stdout);
-  return parsed.hookSpecificOutput.additionalContext as string;
+  if (stdout === '') {
+    throw new Error('hook produced no stdout — expected an additionalContext JSON envelope');
+  }
+  let parsed: { hookSpecificOutput?: { additionalContext?: unknown } };
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    throw new Error(`hook stdout is not valid JSON: ${stdout}`);
+  }
+  const ctx = parsed.hookSpecificOutput?.additionalContext;
+  if (typeof ctx !== 'string') {
+    throw new Error(`hook JSON has no string additionalContext: ${stdout}`);
+  }
+  return ctx;
 }
 
 const editPayload = (filePath: string, tool = 'Edit') => ({
