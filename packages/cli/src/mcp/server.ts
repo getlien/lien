@@ -43,7 +43,7 @@ async function initializeDatabase(
 }> {
   // Create the structural store using global config (auto-detects backend and orgId)
   log('Creating structural store...');
-  const vectorDB = await createVectorDB(rootDir);
+  const vectorDB = await createVectorDB(rootDir, { warn: message => log(message, 'warning') });
 
   // Verify we got a valid instance
   if (!vectorDB) {

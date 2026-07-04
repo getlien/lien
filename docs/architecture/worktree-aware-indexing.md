@@ -217,8 +217,8 @@ and correctness is a property of the backend, not of every call site.
 |---|---|
 | Not a linked worktree | Standalone (unchanged). |
 | `LIEN_WORKTREE_STANDALONE=1` | Standalone (forced). |
-| Main checkout has **no index** | Standalone + one-line hint: run `lien index` in the main checkout to enable shared-base mode. |
-| Base `formatVersion` ≠ current | Standalone + warn once (schema mismatch — can't safely read base rows). |
+| Main checkout has **no index** | Standalone. `serve` emits a one-line hint (run `lien index` in the main checkout to enable shared-base mode); other commands stay silent — `resolveIndexStrategy` is silent by default and callers opt into the hint via `createVectorDB(root, { warn })`. |
+| Base `formatVersion` ≠ current | Standalone + (opt-in) warn once (schema mismatch — can't safely read base rows). |
 | Base db file missing **mid-serve** | Reads degrade: base connection errors are caught and treated as "base returned nothing"; overlay still serves. Next serve start re-resolves and falls back to standalone cleanly. |
 | Main indexed from a **different path string** than git reports (e.g. a symlinked checkout: `/var/...` vs `/private/var/...`) | The base index dir is keyed by `md5(path)` (`extractRepoId`). If the path string the main checkout was indexed under differs from the canonical path `git worktree list` reports, the base-dir hash misses and we fall back to standalone (safe, no error). Normal for repos under a real (non-symlinked) path; a known limitation otherwise, inherited from `extractRepoId`. |
 

@@ -20,7 +20,9 @@ export type IndexStrategy =
       overlayIndexDir: string;
     };
 
-/** Injectable logger so the fallback hints are testable; defaults to stderr. */
+/** Injectable logger for the fallback hints. Silent by default so library-level
+ *  `createVectorDB` calls (status, complexity, annotate, …) don't nag on every
+ *  invocation; `serve` and `index` opt in, where the hint is actionable. */
 export interface ResolveOptions {
   warn?: (message: string) => void;
 }
@@ -83,7 +85,7 @@ export async function resolveIndexStrategy(
   projectRoot: string,
   opts: ResolveOptions = {},
 ): Promise<IndexStrategy> {
-  const warn = opts.warn ?? ((m: string) => console.error(m));
+  const warn = opts.warn ?? (() => {});
 
   if (process.env.LIEN_WORKTREE_STANDALONE === '1') {
     return { mode: 'standalone' };
