@@ -55,6 +55,26 @@ describe('ManifestManager', () => {
     });
   });
 
+  describe('recordSourceRoot', () => {
+    it('records the source root on a fresh manifest (GC provenance)', async () => {
+      await manifestManager.recordSourceRoot('/abs/project/root');
+
+      const manifest = await manifestManager.load();
+      expect(manifest?.sourceRoot).toBe('/abs/project/root');
+    });
+
+    it('preserves the source root across later manifest writes', async () => {
+      await manifestManager.recordSourceRoot('/abs/project/root');
+      await manifestManager.updateFiles([
+        { filepath: 'test.ts', lastModified: Date.now(), chunkCount: 3 },
+      ]);
+
+      const manifest = await manifestManager.load();
+      expect(manifest?.sourceRoot).toBe('/abs/project/root');
+      expect(manifest?.files['test.ts']).toBeTruthy();
+    });
+  });
+
   describe('updateFile', () => {
     it('should create manifest if it does not exist', async () => {
       const entry = {

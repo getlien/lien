@@ -122,13 +122,19 @@ export async function scanFilesToIndex(rootDir: string): Promise<string[]> {
 }
 
 /**
- * Update git state after indexing (if in a git repo).
+ * Finalize the manifest after indexing: record provenance (the absolute source
+ * root, so `lien gc` can detect orphaned indices) and, when in a git repo, the
+ * current git state.
  */
-async function updateGitState(
+async function finalizeManifest(
   rootDir: string,
   vectorDB: VectorDBInterface,
   manifest: ManifestManager,
 ): Promise<void> {
+  // Provenance: always record the absolute root this index was built from,
+  // regardless of git — orphan GC depends on it.
+  await manifest.recordSourceRoot(path.resolve(rootDir));
+
   const gitAvailable = await isGitAvailable();
   const isRepo = await isGitRepo(rootDir);
 
@@ -268,7 +274,7 @@ async function tryIncrementalIndex(
   // Fast path: deletions-only — no need to initialize embeddings
   if (totalChanges === 0 && totalDeleted > 0) {
     await handleDeletions(changes.deleted, vectorDB, manifest);
-    await updateGitState(rootDir, vectorDB, manifest);
+    await finalizeManifest(rootDir, vectorDB, manifest);
 
     options.onProgress?.({
       phase: 'complete',
@@ -300,7 +306,7 @@ async function tryIncrementalIndex(
     rootDir,
   );
 
-  await updateGitState(rootDir, vectorDB, manifest);
+  await finalizeManifest(rootDir, vectorDB, manifest);
 
   options.onProgress?.({
     phase: 'complete',
@@ -420,7 +426,7 @@ async function saveIndexResults(
   );
 
   // Save git state if in a git repo
-  await updateGitState(rootDir, vectorDB, manifest);
+  await finalizeManifest(rootDir, vectorDB, manifest);
 
   // Write version file to mark successful completion
   await writeVersionFile(vectorDB.dbPath);

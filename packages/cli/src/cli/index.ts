@@ -1,4 +1,5 @@
 import { Command, Option } from 'commander';
+import { DEFAULT_STALE_DAYS } from '@liendev/core';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -11,6 +12,7 @@ import { deltaCommand } from './delta-cmd.js';
 import { configSetCommand, configGetCommand, configListCommand } from './config.js';
 import { pathCommand } from './path-cmd.js';
 import { annotateCommand } from './annotate-cmd.js';
+import { gcCommand } from './gc.js';
 
 // Get version from package.json dynamically
 const __filename = fileURLToPath(import.meta.url);
@@ -122,6 +124,18 @@ program
   .command('annotate <file>')
   .description('Print a short impact summary for a single file (for hook annotation)')
   .action(annotateCommand);
+
+program
+  .command('gc')
+  .description('Garbage-collect stale/orphaned index directories under ~/.lien/indices')
+  .option('--dry-run', 'List candidates with size and reason; delete nothing')
+  .option(
+    '--stale [days]',
+    `Also remove indices not accessed in N days (default ${DEFAULT_STALE_DAYS})`,
+  )
+  .option('--format <type>', 'Output format: text, json', 'text')
+  .option('-v, --verbose', 'Show detailed error output')
+  .action(gcCommand);
 
 program.action(() => {
   program.help();

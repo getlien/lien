@@ -75,6 +75,43 @@ export type { RelevanceCategory } from './vectordb/relevance.js';
 export { readVersionFile, writeVersionFile } from './vectordb/version.js';
 
 // =============================================================================
+// INDEX GARBAGE COLLECTION
+// =============================================================================
+
+export {
+  planGc,
+  executeGc,
+  runGc,
+  runAutoGc,
+  getIndicesRoot,
+  enumerateIndexDirs,
+  writeAccessStamp,
+  readAccessStamp,
+  isIndexLocked,
+  computeDirSize,
+  formatBytes,
+  LEGACY_LANCE_DIRNAME,
+  DEFAULT_STALE_DAYS,
+  AUTO_GC_INTERVAL_MS,
+  GC_STAMP_FILE,
+  GC_LOCK_FILE,
+  ACCESS_STAMP_FILE,
+} from './gc/index.js';
+export type {
+  GcOptions,
+  GcPlan,
+  GcResult,
+  GcSummary,
+  GcRemoval,
+  GcRemovalKind,
+  GcLanceSweep,
+  GcSkip,
+  GcSkipReason,
+  AutoGcOptions,
+  AutoGcResult,
+} from './gc/index.js';
+
+// =============================================================================
 // COMPLEXITY ANALYSIS
 // =============================================================================
 

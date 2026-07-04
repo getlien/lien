@@ -28,6 +28,12 @@ export interface IndexManifest {
   gitState?: GitState; // Last known git state
   files: Record<string, FileEntry>; // Map of filepath -> FileEntry (stored as object for JSON)
   hashAlgorithm?: 'sha256-16' | 'sha256-16-large'; // Content hash algorithm (for future migrations)
+  // Absolute source root this index was built from. Written at index time so
+  // `lien gc` can detect orphaned indices whose project directory was deleted.
+  // Optional: legacy indices written before provenance tracking lack it and are
+  // treated as "unknown provenance" (not orphan-checkable, removable only via
+  // `lien gc --stale`). Additive/optional — no INDEX_FORMAT_VERSION bump needed.
+  sourceRoot?: string;
 }
 
 /**
@@ -223,6 +229,34 @@ export class ManifestManager {
       })
       .catch(error => {
         console.error(`[Lien] Failed to update manifest for ${entries.length} files: ${error}`);
+        // Return to reset lock - don't let errors block future operations
+        return undefined;
+      });
+
+    // Wait for this operation to complete
+    await this.updateLock;
+  }
+
+  /**
+   * Records the absolute source root this index was built from (provenance for
+   * `lien gc` orphan detection). Best-effort, under the same lock as other
+   * mutations. No-op when the recorded value is already current.
+   *
+   * @param sourceRoot - Absolute path of the indexed project root
+   */
+  async recordSourceRoot(sourceRoot: string): Promise<void> {
+    // Chain this operation to the lock to ensure atomicity
+    this.updateLock = this.updateLock
+      .then(async () => {
+        const manifest = (await this.load()) || this.createEmpty();
+        if (manifest.sourceRoot === sourceRoot) {
+          return; // already current — skip the write
+        }
+        manifest.sourceRoot = sourceRoot;
+        await this.save(manifest);
+      })
+      .catch(error => {
+        console.error(`[Lien] Failed to record source root: ${error}`);
         // Return to reset lock - don't let errors block future operations
         return undefined;
       });

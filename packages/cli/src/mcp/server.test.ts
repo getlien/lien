@@ -10,6 +10,8 @@ const {
   mockSetupCleanupHandlers,
   mockIsGitRepo,
   mockIndexCodebase,
+  mockWriteAccessStamp,
+  mockRunAutoGc,
 } = vi.hoisted(() => ({
   mockServerInstance: {
     connect: vi.fn().mockResolvedValue(undefined),
@@ -34,6 +36,8 @@ const {
   mockSetupCleanupHandlers: vi.fn().mockReturnValue(vi.fn().mockResolvedValue(undefined)),
   mockIsGitRepo: vi.fn(async (_dir: string) => true),
   mockIndexCodebase: vi.fn(async (_opts: { rootDir: string; verbose?: boolean }) => undefined),
+  mockWriteAccessStamp: vi.fn(async (_dir: string) => undefined),
+  mockRunAutoGc: vi.fn(async () => ({ ran: false, reason: 'throttled' as const })),
 }));
 
 vi.mock('@modelcontextprotocol/sdk/server/index.js', () => ({
@@ -53,6 +57,8 @@ vi.mock('@liendev/core', () => ({
   VERSION_CHECK_INTERVAL_MS: 60000,
   isGitRepo: mockIsGitRepo,
   indexCodebase: mockIndexCodebase,
+  writeAccessStamp: mockWriteAccessStamp,
+  runAutoGc: mockRunAutoGc,
 }));
 
 vi.mock('../watcher/index.js', () => ({
@@ -112,7 +118,7 @@ vi.mock('url', () => ({
 import { startMCPServer } from './server.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { createVectorDB } from '@liendev/core';
+import { createVectorDB, writeAccessStamp, runAutoGc } from '@liendev/core';
 import { FileWatcher } from '../watcher/index.js';
 import { createMCPServerConfig, registerMCPHandlers } from './server-config.js';
 import { setupCleanupHandlers } from './cleanup.js';
@@ -187,6 +193,26 @@ describe('startMCPServer', () => {
     await startMCPServer({ rootDir: '/test/project' });
 
     expect(StdioServerTransport).toHaveBeenCalledOnce();
+    expect(mockServerInstance.connect).toHaveBeenCalledOnce();
+  });
+
+  it('touches the access stamp and kicks off auto-GC once the server is ready', async () => {
+    await startMCPServer({ rootDir: '/test/project' });
+
+    // Access stamp is written for the serving index dir.
+    expect(writeAccessStamp).toHaveBeenCalledWith('/test/.lien');
+    // Auto-GC runs in the background, protecting the serving index dir.
+    expect(runAutoGc).toHaveBeenCalledWith(
+      expect.objectContaining({ protectedDirs: ['/test/.lien'], log: expect.any(Function) }),
+    );
+  });
+
+  it('does not block serve readiness on background maintenance', async () => {
+    // Maintenance is fire-and-forget: even if auto-GC never settles, startMCPServer
+    // resolves (connect completed) without awaiting it.
+    vi.mocked(runAutoGc).mockReturnValueOnce(new Promise(() => {}) as never);
+
+    await expect(startMCPServer({ rootDir: '/test/project' })).resolves.toBeUndefined();
     expect(mockServerInstance.connect).toHaveBeenCalledOnce();
   });
 
