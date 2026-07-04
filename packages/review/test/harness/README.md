@@ -59,6 +59,7 @@ test PRs in this repo. Each fixture is gitignored (regenerate with
 | `error-swallowing`    | #411  | `error-swallowing/payment-error-swallowed`                   |
 | `stale-duplicate`     | #539  | `stale-duplicate/model-partial-update` (capture at `--sha f780541`) |
 | `untrusted-input-validation` | #541 | `untrusted-input-validation/harness-initial` (capture at `--sha 7cb0149`) |
+| `doc-truth`           | #658  | `doc-truth/pr658-search-code-rename`                          |
 
 Regenerate the whole corpus:
 
@@ -72,6 +73,7 @@ npx tsx packages/review/test/harness/capture-pr.ts 437 "$ROOT/incomplete-handlin
 npx tsx packages/review/test/harness/capture-pr.ts 411 "$ROOT/error-swallowing/payment-error-swallowed.fixture.json"
 npx tsx packages/review/test/harness/capture-pr.ts 539 "$ROOT/stale-duplicate/model-partial-update.fixture.json" --sha f780541
 npx tsx packages/review/test/harness/capture-pr.ts 541 "$ROOT/untrusted-input-validation/harness-initial.fixture.json" --sha 7cb0149
+npx tsx packages/review/test/harness/capture-pr.ts 658 "$ROOT/doc-truth/pr658-search-code-rename.fixture.json"
 ```
 
 ## Negative-regression fixtures
@@ -108,14 +110,7 @@ prompt/pipeline from reaching it.
 
 | Rule | PR | Fixture | Why |
 |---|---|---|---|
-| `doc-truth` | #658 | `doc-truth/pr658-search-code-rename` | `schema.ts:62`'s `embeddings.enabled` doc comment claims `search_code` "reports as disabled" — stale since #657 made `search_code` lexical/BM25 with no embeddings dependency. Originally captured under `stale-duplicate` (the nearest rule at the time) as a documented miss: the `<stale_literal_candidates>` scan only matches quoted string literals, so bare identifiers in prose comments got no deterministic assist. RESOLVED by the `<rename_sweep>` signal (#663) + the `doc-truth` rule (#665): the 2026-07-04 post-merge sweep caught this finding on 3/3 votes, all attributed to `doc-truth` — the fixture was retargeted and relocated accordingly. A second real finding on the same PR (`plugins/claude/hooks/augment-explore-task.sh:64`, [thread](https://github.com/getlien/lien/pull/658#discussion_r3522630331)) is documented in the fixture's `.assertions.ts` but still not asserted — `.sh` has no parser support so it produces zero chunks; #665's guidance-surface passthrough now surfaces its raw hunks, so asserting it is a candidate follow-up once evidence shows it fires reliably. |
-
-Regenerate:
-
-```bash
-npx tsx packages/review/test/harness/capture-pr.ts 658 \
-  packages/review/test/harness/fixtures/doc-truth/pr658-search-code-rename.fixture.json
-```
+| _(none currently)_ | | | The one entry this table used to carry — `doc-truth/pr658-search-code-rename` — was **promoted to the canary corpus on 2026-07-04** (see the table above): a `--calibrate 10` run scored 10/10 on Finding A and, after re-verifying via `build-prompts.ts` that the guidance-surface passthrough (#665) now carries the fixture's second real finding (`plugins/claude/hooks/augment-explore-task.sh:64`) into the prompt, 9/10 votes from that same calibration run independently reproduced it too — so it's now asserted (Tier 2) alongside Finding A rather than only documented. Full evidence chain and per-run breakdown live in the fixture's `.assertions.ts` header comment. |
 
 Run the full multi-model sweep:
 
@@ -281,10 +276,13 @@ were calibrated (and last hit ≥ 9/10) against `google/gemini-3-flash-preview`,
 not the current prod default. Running `--calibrate 10` with no `--model`
 now exercises Kimi, and two canaries are **known-red** there:
 `stale-duplicate/model-partial-update` and
-`untrusted-input-validation/harness-initial` (2/8 rules). This is expected,
-already-understood drift from the Kimi cutover (#592) — not a regression
-introduced by this doc change, and not something this change attempts to
-fix. See `packages/review/src/defaults.ts` for the current default model.
+`untrusted-input-validation/harness-initial` (2/9 rules — the corpus grew to
+9 with the `doc-truth` canary added 2026-07-04, itself calibrated fresh
+against Kimi at 10/10, so it isn't part of this known-red set). This is
+expected, already-understood drift from the Kimi cutover (#592) — not a
+regression introduced by this doc change, and not something this change
+attempts to fix. See `packages/review/src/defaults.ts` for the current
+default model.
 
 Because of this, the bar for **touching an existing rule's prompt** is not
 "single-rule calibrate ≥ 9/10 on every canary in the repo" — it's ≥ 9/10 on
