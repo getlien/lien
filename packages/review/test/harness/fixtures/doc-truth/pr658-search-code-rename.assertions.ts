@@ -35,70 +35,81 @@
  *   catching this finding via doc-truth.) Corroborating GitHub
  *   thread: https://github.com/getlien/lien/pull/658#discussion_r3522630327
  *
- * Finding B (documented, NOT asserted — see below):
+ * Finding B (asserted below, Tier 2 — promoted 2026-07-04, see below):
  *   `plugins/claude/hooks/augment-explore-task.sh:64` described
  *   `search_code` as "REQUIRED for meaning-based discovery" — the tool is
  *   keyword/BM25 search, not meaning-based, so the hook's own guidance
  *   contradicts the tool's real behavior post-#657.
  *   https://github.com/getlien/lien/pull/658#discussion_r3522630331
  *
- *   This finding is intentionally left unasserted because it is currently
- *   IMPOSSIBLE for the agent-review pipeline to reach, not merely
- *   model-dependent — a visibility gap, not a prompt-quality gap. Verified
- *   empirically against this exact fixture via
- *   `npx tsx packages/review/test/harness/build-prompts.ts <fixture>`
- *   (no LLM call — pure prompt assembly):
- *     1. `.sh` is not in any `LanguageDefinition.extensions` in
- *        `packages/parser/src/ast/languages/*.ts`, so the parser never
- *        chunks it: this fixture's `chunks`/`repoChunks` have 0 entries for
- *        `plugins/claude/hooks/augment-explore-task.sh`. Every content-based
- *        tool the rules mandate — `get_files_context`, `list_functions`,
- *        `get_complexity` — has nothing to return for this path, full stop.
- *        (In production, `filterAnalyzableFiles()`,
- *        packages/review/src/analysis.ts, additionally drops the path from
- *        `ctx.changedFiles` entirely before the agent runs, since
- *        `review-pr.ts` passes the *filtered* `filesToAnalyze` as
- *        `changedFiles`. `capture-pr.ts` does not reproduce that filter —
- *        it captures the raw unfiltered file list — so this fixture's
- *        `<changed_files>` block, unlike production's, does still name the
- *        path textually. That's a known fixture/production divergence, not
- *        a reason to expect a different outcome: chunk emptiness is the
- *        operative cause either way.)
- *     2. Even the raw diff text can't compensate: `renderDiff()` in
- *        `packages/review/src/plugins/agent/system-prompt.ts` truncates the
- *        concatenated `<diff>` block at `MAX_DIFF_CHARS` (50,000 chars).
- *        Confirmed by inspecting this fixture's rendered initial message —
- *        the `<diff>` section truncates mid-way through
- *        `packages/cli/src/mcp/server.error-handling.test.ts`, which comes
- *        BEFORE `packages/core/src/config/schema.ts` in diff order, and
- *        well before `augment-explore-task.sh` (the last file in the diff,
- *        starting at ~76KB of this PR's ~77.7KB raw diff). Finding A
- *        survives this same truncation only because `schema.ts` has chunks
- *        (case 1 above) — `get_files_context` on it returns the doc comment
- *        independent of the diff render. Finding B has no such fallback.
- *   Fixing this needs infra work — extending `filterAnalyzableFiles`'s
- *   extension allowlist / adding a lightweight non-AST prose path for
- *   shell/config/doc files — not a `stale-duplicate` prompt tweak. Tracked
- *   here as a documented gap rather than a red assertion so it doesn't get
- *   silently "fixed" by prompt-only iteration that can't actually address
- *   it.
+ *   PREVIOUSLY (through the #665 merge) this finding was believed
+ *   IMPOSSIBLE for the agent-review pipeline to reach — `.sh` produces zero
+ *   parser chunks, and the header here documented a second failure mode
+ *   (the raw `<diff>` block truncating at `MAX_DIFF_CHARS` = 50,000 chars
+ *   before reaching this file, the last one in the PR's ~77.7KB diff). That
+ *   analysis predated the guidance-surface passthrough actually landing in
+ *   this rule's rendered prompt for this fixture. Re-verified 2026-07-04 via
+ *   `npx tsx packages/review/test/harness/build-prompts.ts <fixture>` (zero
+ *   LLM calls, pure prompt assembly): the rendered `initialMessage` now
+ *   contains a `<guidance_surface_changes>` block — populated independently
+ *   of the truncated `<diff>` block and of chunk availability — whose second
+ *   entry is the full `augment-explore-task.sh` hunk, including line 64's
+ *   "REQUIRED for meaning-based discovery" claim verbatim. The visibility
+ *   gap is closed; this is no longer a "can't reach it" case.
+ *
+ *   With reachability confirmed, the promotion calibrate-10 (below) doubled
+ *   as the votes-support-strengthening check: 9/10 runs independently
+ *   reported this exact claim, every one quoting "meaning-based" and citing
+ *   `augment-explore-task.sh:64` against the same sentence's "Full-text
+ *   (BM25) search" / "no embeddings" text. The one miss (run 5 of 10) found
+ *   only the `null-embeddings.ts` stale-reference variant of Finding A and
+ *   didn't independently reach Finding B — expected model variance, not a
+ *   pipeline gap. Asserted as a second Tier-2 `expectFindingMentions(['meaning-based',
+ *   'meaning based'], result)` call (kept separate from Finding A's keyword
+ *   list so it gates on Finding B specifically rather than piggybacking on
+ *   Finding A's broader OR-list, several of whose keywords — `search_code`,
+ *   `bm25`, `full-text`, `lexical` — happen to also appear in Finding B's
+ *   wording). Tier 1 (`expectRuleFired('doc-truth', …)`) is unchanged: it
+ *   already covers "some doc-truth finding fired" regardless of which one.
  *
  * Capture command:
  *   npx tsx packages/review/test/harness/capture-pr.ts 658 \
  *     packages/review/test/harness/fixtures/doc-truth/pr658-search-code-rename.fixture.json
  *
- * Calibration status: post-merge sweep 2026-07-04, after the rename-sweep
- * signal (#663) and the doc-truth rule + guidance passthrough (#665)
- * merged: 3/3 votes caught Finding A — every vote attributed it to
- * `doc-truth` (the original `stale-duplicate` Tier-1 expectation written
- * before #665 existed failed only on rule attribution, never on detection).
- * The concern documented at capture time — that the
- * `<stale_literal_candidates>` pre-scan only extracts QUOTED literals and
- * would give no deterministic assist for a bare identifier in a JSDoc
- * comment — was addressed by #663's `<rename_sweep>` signal, which lists
- * exactly these prose-touched renamed lines. Retargeted to doc-truth
- * accordingly; kept at votes-based assertion (not yet canary) pending a
- * dedicated calibrate-10.
+ * Calibration status: PROMOTED TO CANARY 2026-07-04. Fresh `--calibrate 10`
+ * against the (then-unmodified) Finding-A-only assertions: 10/10 passed,
+ * cost $0.4012 — past the >= 9/10 bar (#538), but the per-run breakdown
+ * matters more than the headline number here. Exactly which file the model
+ * cited varied a lot: the literal `schema.ts:62` `embeddings.enabled` claim
+ * Finding A describes fired directly in only 1/10 runs; the closely related
+ * `null-embeddings.ts:22` stale file-path reference (same rename, same
+ * underlying staleness, different file — also a real, valid doc-truth
+ * finding) fired in 6/10; the `augment-explore-task.sh:64` Finding B fired
+ * in 9/10. In 4/10 runs NEITHER schema.ts NOR null-embeddings.ts fired at
+ * all — Finding A's Tier-2 check still passed in those runs purely because
+ * its keyword list (`search_code`, `lexical`, `bm25`, `full-text`, …) is
+ * broad enough to also match Finding B's wording. So the honest read of
+ * "10/10": the doc-truth rule reliably (10/10) surfaces *a* real
+ * rename-staleness finding on this diff, and independently (9/10) surfaces
+ * Finding B specifically — but the original Finding-A assertion, taken
+ * alone, does not verify "schema.ts is cited" so much as "some plausible
+ * stale-rename claim, in this vocabulary neighborhood, was made". Recorded
+ * in full per the harness's Tier-2-brittleness lesson (matches phrasing, not
+ * always substance) rather than glossed over; judged an acceptable canary
+ * because the rule's core mandate — catch this PR's real regression — is
+ * met every run, just not always pinned to the one file this fixture was
+ * named after. Finding B's new Tier-2 check was verified against the same
+ * 10 raw results via `assert-cli.ts` (zero additional LLM cost) rather than
+ * a fresh paid run: 9/10 pass with both Finding-A and Finding-B checks
+ * combined (run 5 is the sole miss — only the null-embeddings.ts variant
+ * fired, no `augment-explore-task.sh` finding), matching the passThreshold
+ * of 9 exactly.
+ *
+ * History: originally captured under `stale-duplicate` — the nearest rule
+ * before `doc-truth` existed — and retargeted to `doc-truth` after a
+ * 2026-07-04 post-merge sweep (rename-sweep signal #663 + doc-truth rule
+ * and guidance passthrough #665) showed 3/3 votes catching Finding A via
+ * `doc-truth`. That 3-vote sweep is superseded by the calibrate-10 above.
  */
 
 import type { FixtureAssertions } from '../../assertions.js';
@@ -133,9 +144,18 @@ const assertions: FixtureAssertions = {
       ],
       result,
     );
+    // Finding B — plugins/claude/hooks/augment-explore-task.sh:64 calling
+    // search_code "meaning-based" when it's lexical BM25. Promoted from
+    // documented-but-unasserted on 2026-07-04: build-prompts.ts confirmed the
+    // guidance_surface_changes passthrough (#665) now carries this hunk into
+    // the prompt, and 9/10 votes in the promotion calibrate-10 independently
+    // reproduced the claim, all quoting "meaning-based" verbatim. See the
+    // header comment's "Finding B" section for the full evidence chain.
+    h.expectFindingMentions(['meaning-based', 'meaning based'], result);
   },
   votes: 3,
   passThreshold: 9,
+  tags: ['canary'],
 };
 
 export default assertions;
