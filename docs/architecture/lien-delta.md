@@ -1,6 +1,7 @@
 # lien delta — complexity accounting before the commit
 
-Status: **Phase 1 (in progress)** — mechanisms 1 + 4 of a 5-mechanism plan.
+Status: **Phase 1 shipped** (mechanisms 1 + 4, PR #672) · **Phase 2 in progress**
+(mechanisms 2 + 3 — see "Phase 2" below) of a 5-mechanism plan.
 
 ## Motivation
 
@@ -328,10 +329,206 @@ gate**:
   that non-zero space into 1 (found crossings) vs 2 (couldn't run) so a gate can
   distinguish the two. Exit 1 remains "new crossings," as specified.
 
-## Milestones
+## Milestones (Phase 1 — shipped in #672)
 
-- [ ] 1. Design doc + draft PR
-- [ ] 2. Shared delta primitive in parser + unit tests
-- [ ] 3. `lien delta` CLI + tests (git edge cases: staged/unstaged, unborn HEAD, renames)
-- [ ] 4. Gate liturgy docs (CLAUDE.md + init templates) + changeset
-- [ ] 5. Full gate green + real-repo & worsened-function demos with timing
+- [x] 1. Design doc + draft PR
+- [x] 2. Shared delta primitive in parser + unit tests
+- [x] 3. `lien delta` CLI + tests (git edge cases: staged/unstaged, unborn HEAD, renames)
+- [x] 4. Gate liturgy docs (CLAUDE.md + init templates) + changeset
+- [x] 5. Full gate green + real-repo & worsened-function demos with timing
+
+---
+
+# Phase 2 — the signal at the moment of the edit
+
+Phase 1 made the verdict *available* (`lien delta`, a gate the agent chooses to
+run). Phase 2 moves it from "when the agent runs the gates" to "the moment the
+agent edits" — **detection** (mechanism 2) plus **prevention** (mechanism 3).
+Neither blocks anything; both are advisory nudges on channels the agent already
+consumes. Mechanism 5 (commit *soft-block*) and the review-engine adoption of
+the shared primitive remain explicitly out of scope.
+
+Both mechanisms reuse Phase-1 machinery unchanged. Mechanism 2 shells out to the
+same `lien delta` command (so write-time and hook verdicts are byte-identical);
+mechanism 3 reads complexity metrics **already stored in the index** (no
+re-parse) and compares them against the same default thresholds the primitive
+uses.
+
+## D. Mechanism 2 — PostToolUse hook on Edit/Write (detection)
+
+A Claude Code plugin hook (`plugins/claude/hooks/delta-write.sh`, registered in
+`plugins/claude/hooks/hooks.json`) that fires **after** every `Edit`, `Write`,
+and `MultiEdit` tool call and warns — once, concisely — only when *that edit*
+introduced a **new** complexity threshold crossing.
+
+### How it locates and drives the CLI
+
+It mirrors `annotate-read.sh` exactly:
+
+- `command -v jq` and `command -v lien` — exit 0 (silent) if either is missing.
+  The hook never assumes a bundled binary; it uses whatever `lien` is on `PATH`,
+  same as every other Lien hook.
+- Reads the PostToolUse payload from stdin, pulls `tool_name`, `tool_input.file_path`,
+  and `cwd` with `jq`, and runs the delta **from `cwd`** so `resolveProjectRoot`
+  and `git` resolve against the session's repo (multi-repo safe).
+
+### hook → CLI invocation (the key decision)
+
+The hook drives the Phase-1 primitive through a **new `--file <path>` flag** on
+`lien delta` rather than running the full working-tree scan and filtering the
+JSON. Rationale:
+
+- The full scan runs `git diff HEAD` across **every** changed file, reads each,
+  and chunks each — wasteful when this hook fires on *every* edit and cares
+  about exactly one file. `--file` bounds the work to a single `git show
+  HEAD:<path>` + one working-tree read + one before/after chunk pair.
+- It is the same code path and the same `computeComplexityDelta` call, so the
+  hook's verdict and `lien delta`'s verdict cannot diverge.
+
+`lien delta --file <path> --format json` semantics:
+
+- Resolves `<path>` (absolute or relative) to a repo-relative path against the
+  git root. Path outside the repo, or a non-code / unsupported extension →
+  empty result, exit 0 (the hook stays silent).
+- `before = git show HEAD:<relpath>` (null when the file is untracked/new or
+  HEAD is unborn → absolute-threshold classification); `after` = working-tree
+  content (null when deleted).
+- Exit codes are unchanged from Phase 1 (0 clean, 1 regression, 2 operational).
+  The hook **ignores** the exit code and inspects the JSON `regressions[]`
+  array — it emits a warning *iff* that array is non-empty, i.e. only for
+  `crossed` / `new-over-threshold` verdicts. Worsened-but-under, pre-existing,
+  and improved are all silent by design (an always-on hook that fires on
+  advisory movement becomes wallpaper and burns context).
+
+### Output channel (hard-won)
+
+The hook emits, on stdout, exactly the JSON shape `annotate-read.sh` uses —
+`additionalContext` is the **only** field that reaches the model on the next
+turn (verified in CC 2.1.142; a bare `systemMessage` does not):
+
+```json
+{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"⚠ lien delta: extractSymbols cognitive 12→29 (threshold 15) — consider simplifying before you commit."}}
+```
+
+The message lists up to the top 3 regressing functions (worst-first, as the
+primitive already sorts them), each rendered `name metric before→after
+(threshold N)`; a `(+N more)` suffix when there are more. A newly-added
+over-threshold function renders its `before` as `new`. **Silence** (exit 0, no
+stdout) in every other case: no regression, non-code file, file outside a git
+repo, unreadable payload, missing `jq`/`lien`. The hook never fails the user's
+edit (`set -u`, best-effort throughout, always `exit 0`).
+
+Kill switch: `LIEN_DELTA_HOOK=off`.
+
+### Performance
+
+The hook cost is dominated by **CLI process startup** (Node + loading the bundled
+`@liendev/lien` image), not the delta compute — the single-file delta itself is a
+few ms. Measured end-to-end on this repo (see PR body for the transcript);
+target is well under 1 s and it clears it comfortably. Because the cost is
+startup, not work, the honest optimisation levers (if it ever matters) are a
+persistent/daemon `lien` or a slimmer entrypoint — **not** pursued now (YAGNI;
+the measured number is already inside budget).
+
+### Subagent caveat (dogfooding item for the maintainer)
+
+Whether a plugin PostToolUse hook fires for `Edit`/`Write` performed *inside a
+subagent session* cannot be verified outside a live Claude Code run (it is the
+same `Agent`-vs-`Task` tool-name matcher subtlety the explore hook already
+navigates). This is flagged as the one explicit live-CC dogfooding check before
+Phase 2 is considered fully proven; the offline drive-the-script tests below
+cover everything else.
+
+## E. Mechanism 3 — `get_files_context` headroom priming (prevention)
+
+`get_files_context` is MANDATORY before any edit. That makes it the natural place
+to *prevent* a crossing: when the agent asks for a file's context, tell it which
+functions are already near or over their complexity budget, so it steers around
+them before writing a line.
+
+### Zero re-parse
+
+The complexity metrics (`complexity` = cyclomatic, `cognitiveComplexity`) are
+**already stored per chunk** in the structural index (`chunks` table columns;
+`SELECT *` in `read-ops.ts` projects them, `buildMetadata` maps them back onto
+`SearchResult.metadata`). The handler already fetches the file's own chunks via
+`searchFileChunks`. So headroom is computed from data in hand — **no second
+parse, no extra query.**
+
+### Shape
+
+A new optional `complexityHeadroom` per file — an array of the functions at
+≥ 80 % of a threshold (near) or over it, worst-first:
+
+```jsonc
+"complexityHeadroom": [
+  { "symbol": "scanPatches", "metric": "cognitive", "value": 14, "threshold": 15 }
+]
+```
+
+- One element **per function** — the single metric closest to (or furthest over)
+  its threshold, by `value / threshold` ratio — never two rows for one function.
+- Metrics considered: **cyclomatic + cognitive** only. These are the integer,
+  intuitive, agent-actionable ones and the ones `--threshold` tunes. Halstead
+  effort/bugs are deliberately left out of the *headroom hint* to keep the
+  payload lean (a prior tuning pass showed response bloat degrades agent
+  behaviour); the write-time `lien delta` gate still scores all four.
+- Thresholds are the primitive's defaults (`DEFAULT_COMPLEXITY_DELTA_THRESHOLDS`:
+  cyclomatic 15, cognitive 15). The handler stays **zero-I/O** — it does not load
+  per-project `.lien.config.json`. Documented limitation: a project that
+  customises `complexity.thresholds` heavily will see headroom computed against
+  defaults; wiring config into `ToolContext` is a deferred follow-up (YAGNI).
+- **Cap 5 per file**, sorted worst-first. Overflow is noted with a sibling
+  `complexityHeadroomMore: <N>` (count of near/over functions beyond the 5 shown),
+  present only when truncated.
+- The field (and its `More` sibling) is **omitted entirely** when nothing is near
+  budget — the overwhelmingly common case — so quiet files pay zero bytes.
+
+### Discoverability
+
+One sentence added to the `get_files_context` tool description and one to the
+server instructions, naming the field. No other tool guidance is reworded.
+
+## F. Phase-1 review findings (fixed on this branch)
+
+Lien Review flagged five legitimate issues on the merged Phase-1 code, all in the
+files Phase 2 touches. They are fixed here (commit `fix(delta): address Phase-1
+review findings`) so they ship before Phase 1 reaches users:
+
+1. **`classifyMetric` "improved" semantics** (`complexity-delta.ts`). A function
+   that drops but stays over threshold (e.g. 20→18 @ 15) was reported `improved`,
+   which reads as "this is fine" for a still-violating function. **Decision:**
+   `improved` is reserved for drops that land **strictly below** threshold; a
+   still-over-threshold decrease is `pre-existing` (the violation persists). Exit
+   code is unaffected either way (neither is a regression), but the report must
+   not imply a still-violating function is healthy. Boundary tests: 20→18@15
+   (`pre-existing`), 20→14@15 (`improved`), 20→15@15 (`pre-existing`).
+2. **`--threshold` validation** (`delta-cmd.ts`). Parsed with
+   `parseInt`+`isNaN` only, so `-5` (turns every function into a regression) and
+   `5.7` (silently truncated) were accepted. Now requires a **positive integer**
+   or exits 2 with a clear message. Tests: `-5`, `5.7`, `0`.
+3. **`configService.load` rejection** (`delta-cmd.ts`). A malformed
+   `.lien.config.json` produced a Node uncaught-exception exit instead of the
+   operational exit-2 path. Now wrapped: clear message + exit 2.
+4. **`readWorktree` swallowing all errors as null** (`delta-git.ts`). `null`
+   downstream means "deleted", so an `EACCES`/`EISDIR` read masqueraded as a
+   deletion. Now **only `ENOENT` → null** (genuinely absent); any other errno is
+   re-thrown to the operational (exit 2) path. Same treatment applied wherever
+   the file maps read errors to null.
+5. **Halstead-effort display vs classification** (`complexity-delta.ts` /
+   `delta-cmd.ts`). The table `Math.round`ed effort-minutes (`60m` for 59.7)
+   while classification used the raw value, so an under-limit function could
+   render at-the-limit. **Decision:** display **floors** effort-minutes, so the
+   shown number can never round *up* past a limit the classifier treats as under.
+
+These interact cleanly with Phase 2: the hook and headroom both surface the
+*corrected* verdicts, and finding #1's `improved`/`pre-existing` split is exactly
+the distinction the hook relies on to stay silent on non-regressions.
+
+## Phase 2 milestones
+
+- [ ] 1. Phase-2 design doc section + draft PR (this section)
+- [ ] 2. Fix Phase-1 review findings (5) + tests — separate commit
+- [ ] 3. Mechanism 2: `lien delta --file` flag + `delta-write.sh` hook + hooks.json + unit tests
+- [ ] 4. Mechanism 3: `complexityHeadroom` in `get_files_context` + description/instructions + unit tests
+- [ ] 5. Verification: drive hook (3 transcripts) + MCP headroom response + latency; full gate green; changeset
