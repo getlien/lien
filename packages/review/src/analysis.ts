@@ -5,7 +5,7 @@
  * from that module still used at runtime.
  */
 
-import { readdir } from 'node:fs/promises';
+import { access, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import {
@@ -118,7 +118,32 @@ export async function runComplexityAnalysis(
   rootDir: string,
   logger: Logger,
 ): Promise<{ report: ComplexityReport; chunks: CodeChunk[] } | null> {
-  if (files.length === 0) {
+  // This runs against both the PR-head clone and the baseline clone with the
+  // same changed-file list. Files the PR adds don't exist in the baseline
+  // checkout, and the parser logs a per-file ENOENT "error" for each. Filter
+  // to files present in this checkout and say so once, honestly.
+  const present: string[] = [];
+  for (const file of files) {
+    try {
+      await access(join(rootDir, file));
+      present.push(file);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        // Not "absent" — a real filesystem problem (EACCES, EMFILE, ...).
+        // Keep the file so the parser surfaces the actual error loudly.
+        present.push(file);
+      }
+    }
+  }
+  const absentCount = files.length - present.length;
+  if (absentCount > 0) {
+    logger.info(
+      `${absentCount} of ${files.length} file(s) not present in this checkout ` +
+        `(expected when analyzing the baseline of a PR that adds files) — skipped`,
+    );
+  }
+
+  if (present.length === 0) {
     logger.info('No files to analyze');
     return null;
   }
@@ -126,8 +151,8 @@ export async function runComplexityAnalysis(
   try {
     // Use performChunkOnlyIndex for fast chunk-only indexing (no VectorDB needed)
     // Pass filesToIndex to skip full repo scan — only chunk the changed files
-    logger.info(`Indexing ${files.length} files (chunk-only)...`);
-    const indexResult = await performChunkOnlyIndex(rootDir, { filesToIndex: files });
+    logger.info(`Indexing ${present.length} files (chunk-only)...`);
+    const indexResult = await performChunkOnlyIndex(rootDir, { filesToIndex: present });
 
     logger.info(
       `Indexing complete: ${indexResult.chunksCreated} chunks from ${indexResult.filesIndexed} files (success: ${indexResult.success})`,
@@ -142,7 +167,7 @@ export async function runComplexityAnalysis(
     const thresholdNum = parseInt(threshold, 10);
     const report = analyzeComplexityFromChunks(
       indexResult.chunks,
-      files,
+      present,
       !isNaN(thresholdNum) ? { testPaths: thresholdNum, mentalLoad: thresholdNum } : undefined,
     );
     logger.info(`Found ${report.summary.totalViolations} violations`);

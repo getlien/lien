@@ -103,4 +103,30 @@ describe('runComplexityAnalysis', () => {
     expect(result).not.toBeNull();
     expect(result!.report).toBeDefined();
   });
+
+  it('skips files absent from the checkout (baseline pass of a PR that adds files)', async () => {
+    const result = await runComplexityAnalysis(
+      ['src/analysis.ts', 'src/added-by-the-pr-does-not-exist.ts'],
+      '15',
+      process.cwd(),
+      silentLogger,
+    );
+
+    // The existing file is analyzed; the absent one is skipped without a
+    // per-file parser error and without appearing in the report.
+    expect(result).not.toBeNull();
+    expect(result!.chunks.length).toBeGreaterThan(0);
+    expect(result!.report.files['src/added-by-the-pr-does-not-exist.ts']).toBeUndefined();
+  });
+
+  it('returns null when no listed file exists in the checkout', async () => {
+    const result = await runComplexityAnalysis(
+      ['src/nope-1.ts', 'src/nope-2.ts'],
+      '15',
+      process.cwd(),
+      silentLogger,
+    );
+
+    expect(result).toBeNull();
+  });
 });
