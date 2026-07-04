@@ -4,7 +4,7 @@ Lien exposes six powerful tools via the Model Context Protocol (MCP) that enable
 
 Lien exposes these tools through the Model Context Protocol (MCP), making them available in Cursor, Claude Code, and other MCP-compatible AI assistants.
 
-## semantic_search
+## search_code
 
 Search your codebase using natural language queries.
 
@@ -100,7 +100,7 @@ find_similar({
 
 ### Response
 
-Similar format to `semantic_search`, returns semantically similar code chunks.
+Similar format to `search_code`, returns semantically similar code chunks.
 
 When filters are applied or low-relevance results are pruned, the response includes:
 
@@ -524,7 +524,7 @@ All search results include test association metadata:
 
 ## Tool Selection Guide
 
-### Use `semantic_search` when:
+### Use `search_code` when:
 - User asks about functionality, features, or "how X works"
 - You need to understand what code exists before editing
 - Looking for patterns, implementations, handlers, validators
@@ -559,7 +559,7 @@ All search results include test association metadata:
 
 ## Performance Tips
 
-1. **Start broad**: Use `semantic_search` with higher limit (10-15) for exploration
+1. **Start broad**: Use `search_code` with higher limit (10-15) for exploration
 2. **Be specific**: More specific queries return more relevant results
 3. **Use context**: Check related files with `get_files_context` before editing
 4. **Chain tools**: search → get context → check dependents → make changes is a powerful pattern

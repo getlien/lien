@@ -38,7 +38,7 @@ packages/core/src/          # Embeddings, vector DB, config, git — depends on 
 
 packages/cli/src/           # CLI + MCP server — depends on core and parser
 ├── cli/         # Commands: init, index, serve, status, config, complexity, path, annotate
-├── mcp/         # MCP server and tool handlers (semantic_search, get_dependents, etc.)
+├── mcp/         # MCP server and tool handlers (search_code, get_dependents, etc.)
 ├── watcher/     # File watching
 ├── types/       # Shared TypeScript types
 └── utils/       # CLI utilities
@@ -73,10 +73,10 @@ Lien provides lexical (FTS5) code search and dependency analysis via MCP. These 
 
 ### MANDATORY: For Discovery Questions
 
-**When asked "where is X?", "how does X work?", or any question about understanding the codebase, you MUST use `semantic_search` BEFORE falling back to grep/glob.**
+**When asked "where is X?", "how does X work?", or any question about understanding the codebase, you MUST use `search_code` BEFORE falling back to grep/glob.**
 
-- `semantic_search` is full-text (BM25) keyword search over code, docstrings, and camelCase-split identifiers — query with concrete keywords/identifiers/domain terms, not natural-language questions. There are no embeddings, so meaning-only paraphrases that share no words with the code won't match.
-- Use `semantic_search` for: "authenticate user session", "index codebase pipeline", "file watcher debounce" — words that appear in the code
+- `search_code` is full-text (BM25) keyword search over code, docstrings, and camelCase-split identifiers — query with concrete keywords/identifiers/domain terms, not natural-language questions. There are no embeddings, so meaning-only paraphrases that share no words with the code won't match.
+- Use `search_code` for: "authenticate user session", "index codebase pipeline", "file watcher debounce" — words that appear in the code
 - Use grep/glob ONLY for: exact symbol names, literal strings, config keys, TODOs (or `list_functions` for a single exact symbol name)
 
 ### When to Use Other Tools

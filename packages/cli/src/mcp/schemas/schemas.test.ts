@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  SemanticSearchSchema,
+  SearchCodeSchema,
   FindSimilarSchema,
   GetFilesContextSchema,
   ListFunctionsSchema,
@@ -8,9 +8,9 @@ import {
   GetComplexitySchema,
 } from './index.js';
 
-describe('SemanticSearchSchema', () => {
+describe('SearchCodeSchema', () => {
   it('should validate correct input', () => {
-    const result = SemanticSearchSchema.parse({
+    const result = SearchCodeSchema.parse({
       query: 'user authentication',
       limit: 10,
     });
@@ -19,59 +19,59 @@ describe('SemanticSearchSchema', () => {
   });
 
   it('should apply default limit', () => {
-    const result = SemanticSearchSchema.parse({
+    const result = SearchCodeSchema.parse({
       query: 'user authentication',
     });
     expect(result.limit).toBe(5);
   });
 
   it('should reject short query', () => {
-    expect(() => SemanticSearchSchema.parse({ query: 'ab' })).toThrow(
+    expect(() => SearchCodeSchema.parse({ query: 'ab' })).toThrow(
       'Query must be at least 3 characters',
     );
   });
 
   it('should reject empty query', () => {
-    expect(() => SemanticSearchSchema.parse({ query: '' })).toThrow(
+    expect(() => SearchCodeSchema.parse({ query: '' })).toThrow(
       'Query must be at least 3 characters',
     );
   });
 
   it('should reject long query', () => {
     const longQuery = 'a'.repeat(501);
-    expect(() => SemanticSearchSchema.parse({ query: longQuery })).toThrow('Query too long');
+    expect(() => SearchCodeSchema.parse({ query: longQuery })).toThrow('Query too long');
   });
 
   it('should reject invalid limit (too low)', () => {
-    expect(() => SemanticSearchSchema.parse({ query: 'test', limit: 0 })).toThrow(
+    expect(() => SearchCodeSchema.parse({ query: 'test', limit: 0 })).toThrow(
       'Limit must be at least 1',
     );
   });
 
   it('should reject invalid limit (too high)', () => {
-    expect(() => SemanticSearchSchema.parse({ query: 'test', limit: 100 })).toThrow(
+    expect(() => SearchCodeSchema.parse({ query: 'test', limit: 100 })).toThrow(
       'Limit cannot exceed 50',
     );
   });
 
   it('should reject non-integer limit', () => {
-    expect(() => SemanticSearchSchema.parse({ query: 'test', limit: 5.5 })).toThrow();
+    expect(() => SearchCodeSchema.parse({ query: 'test', limit: 5.5 })).toThrow();
   });
 
   it('should accept minimum valid query', () => {
-    const result = SemanticSearchSchema.parse({ query: 'abc' });
+    const result = SearchCodeSchema.parse({ query: 'abc' });
     expect(result.query).toBe('abc');
     expect(result.limit).toBe(5);
   });
 
   it('should accept maximum valid limit', () => {
-    const result = SemanticSearchSchema.parse({ query: 'test', limit: 50 });
+    const result = SearchCodeSchema.parse({ query: 'test', limit: 50 });
     expect(result.limit).toBe(50);
   });
 
   it('should reject too-long repoIds element', () => {
     const longRepoId = 'a'.repeat(256);
-    expect(() => SemanticSearchSchema.parse({ query: 'test', repoIds: [longRepoId] })).toThrow();
+    expect(() => SearchCodeSchema.parse({ query: 'test', repoIds: [longRepoId] })).toThrow();
   });
 });
 

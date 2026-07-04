@@ -86,7 +86,7 @@ sequenceDiagram
     AI->>Stdio: Connect to MCP server
     Stdio-->>AI: Connection established
     AI->>MCP: List available tools
-    MCP-->>AI: [semantic_search, find_similar, get_files_context, list_functions, get_dependents, get_complexity]
+    MCP-->>AI: [search_code, find_similar, get_files_context, list_functions, get_dependents, get_complexity]
 ```
 
 ### Available MCP Tools
@@ -95,7 +95,7 @@ The server exposes six tools to AI assistants:
 
 | Tool | Description |
 |------|-------------|
-| `semantic_search` | Natural language code search by meaning |
+| `search_code` | Full-text (BM25) keyword code search |
 | `find_similar` | Find structurally similar code patterns |
 | `get_files_context` | Get file context with dependencies and test associations (supports batch) |
 | `list_functions` | Fast symbol lookup by naming pattern |
@@ -104,7 +104,7 @@ The server exposes six tools to AI assistants:
 
 ## Tool Request Handling
 
-### semantic_search Tool
+### search_code Tool
 
 ```mermaid
 sequenceDiagram
@@ -115,7 +115,7 @@ sequenceDiagram
     participant VectorDB as Vector Database
     participant Version as Version Tracker
     
-    AI->>MCP: Tool Call: semantic_search
+    AI->>MCP: Tool Call: search_code
     Note right of AI: {<br/>  query: "authentication logic",<br/>  limit: 5<br/>}
     
     rect rgb(225, 245, 255)
@@ -359,7 +359,7 @@ flowchart TD
 {
   "content": [{
     "type": "text",
-    "text": "{\"error\":\"Vector database not initialized\",\"tool\":\"semantic_search\"}"
+    "text": "{\"error\":\"Vector database not initialized\",\"tool\":\"search_code\"}"
   }],
   "isError": true
 }
@@ -385,7 +385,7 @@ flowchart TD
   "result": {
     "tools": [
       {
-        "name": "semantic_search",
+        "name": "search_code",
         "description": "Search the codebase semantically...",
         "inputSchema": {
           "type": "object",
@@ -410,7 +410,7 @@ flowchart TD
   "id": 2,
   "method": "tools/call",
   "params": {
-    "name": "semantic_search",
+    "name": "search_code",
     "arguments": {
       "query": "how do we handle authentication",
       "limit": 5
@@ -554,7 +554,7 @@ sequenceDiagram
 4. Lien MCP server initializes
 5. Cursor connects via stdio
 6. User asks: "Where is the authentication logic?"
-7. Cursor calls: semantic_search("authentication logic")
+7. Cursor calls: search_code("authentication logic")
 8. Lien returns: Relevant code chunks
 9. Cursor uses results to answer user
 ```

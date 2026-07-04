@@ -19,7 +19,7 @@ graph TB
     subgraph "MCP Server Layer"
         MCP[MCP Server]
         TOOLS[MCP Tools]
-        SEMANTIC[semantic_search]
+        SEMANTIC[search_code]
         SIMILAR[find_similar]
         CONTEXT[get_files_context]
         LIST[list_functions]
@@ -166,7 +166,7 @@ graph TB
 ### MCP Server Layer
 - **MCP Server**: Implements Model Context Protocol for AI assistant communication
 - **MCP Tools**: Six tools exposed to AI assistants
-  - `semantic_search`: Natural language code search
+  - `search_code`: Full-text (BM25) keyword code search
   - `find_similar`: Find structurally similar code patterns
   - `get_files_context`: Get file context with dependencies and test associations (supports batch)
   - `list_functions`: Fast symbol lookup by naming pattern

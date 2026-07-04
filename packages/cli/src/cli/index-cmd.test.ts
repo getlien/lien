@@ -49,8 +49,6 @@ vi.mock('../utils/banner.js', () => ({
 
 vi.mock('../utils/loading-messages.js', () => ({
   getIndexingMessage: vi.fn().mockReturnValue('Indexing...'),
-  getEmbeddingMessage: vi.fn().mockReturnValue('Embedding...'),
-  getModelLoadingMessage: vi.fn().mockReturnValue('Loading model...'),
 }));
 
 import { indexCommand } from './index-cmd.js';

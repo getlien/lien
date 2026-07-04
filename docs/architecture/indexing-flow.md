@@ -231,7 +231,7 @@ sequenceDiagram
     end
     
     Note over Client: Next Query
-    Client->>MCP: semantic_search("new code")
+    Client->>MCP: search_code("new code")
     MCP->>VectorDB: search(query)
     VectorDB-->>MCP: Results (includes newly indexed code)
     MCP-->>Client: Return results

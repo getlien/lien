@@ -5,7 +5,7 @@
  * The registry is used by the MCP server to dispatch tool calls.
  */
 
-import { handleSemanticSearch } from './semantic-search.js';
+import { handleSearchCode } from './search-code.js';
 import { handleFindSimilar } from './find-similar.js';
 import { handleGetFilesContext } from './get-files-context.js';
 import { handleListFunctions } from './list-functions.js';
@@ -15,7 +15,7 @@ import type { ToolHandler } from '../types.js';
 
 // Re-export individual handlers for direct use if needed
 export {
-  handleSemanticSearch,
+  handleSearchCode,
   handleFindSimilar,
   handleGetFilesContext,
   handleListFunctions,
@@ -28,7 +28,7 @@ export {
  * Used by the MCP server to dispatch tool calls.
  */
 export const toolHandlers: Record<string, ToolHandler> = {
-  semantic_search: handleSemanticSearch,
+  search_code: handleSearchCode,
   find_similar: handleFindSimilar,
   get_files_context: handleGetFilesContext,
   list_functions: handleListFunctions,

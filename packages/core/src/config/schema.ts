@@ -59,7 +59,7 @@ export interface LienConfig {
      * Set to false for structural-only mode: no model download, no
      * embedding worker, no CPU cost on index/reindex. Structural tools
      * (get_files_context, get_dependents, list_functions, get_complexity)
-     * keep working; semantic_search and find_similar report as disabled.
+     * keep working; search_code and find_similar report as disabled.
      * Toggling this requires a full reindex (`lien index --force`) to take
      * effect on already-indexed files.
      */

@@ -3,7 +3,7 @@ name: dogfood
 description: Build Lien, restart MCP, then use a 7-agent team to test tools, review docs, audit code quality, evaluate architecture, review tests, audit security, and assess DX — all in parallel.
 disable-model-invocation: true
 user-invocable: true
-allowed-tools: Bash(npm run build), Bash(npm run typecheck), Bash(npm test), Bash(npm audit *), Bash(npx lien *), Bash(kill *), Bash(lsof *), Bash(node *), mcp__lien__semantic_search, mcp__lien__list_functions, mcp__lien__get_complexity, mcp__lien__get_files_context, mcp__lien__get_dependents, mcp__lien__find_similar, Read, Glob, Grep, Write, Edit, Task, TeamCreate, TeamDelete, TaskCreate, TaskUpdate, TaskList, TaskGet, SendMessage
+allowed-tools: Bash(npm run build), Bash(npm run typecheck), Bash(npm test), Bash(npm audit *), Bash(npx lien *), Bash(kill *), Bash(lsof *), Bash(node *), mcp__lien__search_code, mcp__lien__list_functions, mcp__lien__get_complexity, mcp__lien__get_files_context, mcp__lien__get_dependents, mcp__lien__find_similar, Read, Glob, Grep, Write, Edit, Task, TeamCreate, TeamDelete, TaskCreate, TaskUpdate, TaskList, TaskGet, SendMessage
 ---
 
 # Lien Dogfooding Session (Team Edition)
@@ -60,13 +60,13 @@ Wait for all seven agents to complete their tasks. Once all are done:
 
 Test each of the 6 Lien MCP tools against the Lien codebase. For each tool, run meaningful queries, verify the results make sense, and note any issues.
 
-### semantic_search
+### search_code
 
 Lexical full-text (FTS5/BM25) search — query with concrete keywords/identifiers that appear in the code, not natural-language questions. Run at least 3 queries with varying specificity:
 
-- Broad: `semantic_search({ query: "indexing pipeline chunk batch" })`
-- Specific: `semantic_search({ query: "code chunk insert batch structural store" })`
-- Cross-cutting: `semantic_search({ query: "test file associations imports" })`
+- Broad: `search_code({ query: "indexing pipeline chunk batch" })`
+- Specific: `search_code({ query: "code chunk insert batch structural store" })`
+- Cross-cutting: `search_code({ query: "test file associations imports" })`
 
 **Check:** Results should return relevant files with reasonable relevance scores. Flag if results seem off-topic or if relevance categories don't match expectations.
 
@@ -124,7 +124,7 @@ Write a detailed report to `.wip/dogfood-mcp-report.md` with:
 
 | Tool | Status | Notes |
 |------|--------|-------|
-| semantic_search | pass/warn/fail | ... |
+| search_code | pass/warn/fail | ... |
 | list_functions | pass/warn/fail | ... |
 | get_files_context | pass/warn/fail | ... |
 | get_dependents | pass/warn/fail | ... |
@@ -174,7 +174,7 @@ Audit all user-facing documentation for accuracy, completeness, and consistency 
 For each document:
 
 1. **Read the doc** to understand what it claims
-2. **Verify against code** — use `semantic_search`, `list_functions`, `Grep`, and `Read` to check:
+2. **Verify against code** — use `search_code`, `list_functions`, `Grep`, and `Read` to check:
    - Do referenced files/paths still exist?
    - Do code examples match actual API signatures?
    - Are feature descriptions accurate?
@@ -353,7 +353,7 @@ It serves AI coding assistants (Cursor, Claude Code) via MCP.
 ### How to review
 
 1. Read `CLAUDE.md` and `docs/architecture/` to understand the intended architecture
-2. Use `semantic_search` to find key architectural components: indexing pipeline, MCP server, vector DB, config system
+2. Use `search_code` to find key architectural components: indexing pipeline, MCP server, vector DB, config system
 3. Use `list_functions({ symbolType: "class" })` and `list_functions({ symbolType: "interface" })` to map out the type system
 4. Use `get_dependents` on core modules to trace dependency flow
 5. Read the entry points: CLI commands, MCP server setup, indexer pipeline
@@ -441,7 +441,7 @@ Review all test files across both packages:
 1. Use `Glob` to find all test files: `**/*.test.ts`, `**/*.spec.ts`
 2. Use `get_files_context` on critical source files to check `testAssociations`
 3. Read test files for the most critical modules (MCP handlers, indexer, vector DB)
-4. Use `semantic_search({ query: "MCP tool test coverage vi.mock handler" })` to find test patterns
+4. Use `search_code({ query: "MCP tool test coverage vi.mock handler" })` to find test patterns
 5. Use `find_similar` on a well-written test to see if the pattern is consistent
 6. Check for test utilities: `Grep` for `beforeEach`, `afterEach`, `jest.mock`, `vi.mock` patterns
 
@@ -509,7 +509,7 @@ Lien's attack surface includes:
 
 **Input validation on MCP requests:**
 - Are MCP tool parameters validated before use? (types, lengths, allowed characters)
-- Can a malicious `query` string in `semantic_search` cause issues? (injection into vector DB queries)
+- Can a malicious `query` string in `search_code` cause issues? (injection into vector DB queries)
 - Can a malicious `pattern` in `list_functions` cause ReDoS (catastrophic regex backtracking)?
 - Can a malicious `code` snippet in `find_similar` cause issues?
 - What happens with extremely large inputs? (memory exhaustion)
@@ -539,7 +539,7 @@ Lien's attack surface includes:
 
 1. Start with the MCP server entry point — find how requests are received and dispatched
 2. Trace each MCP tool from input to output, checking for validation at each step
-3. Use `semantic_search({ query: "validate file path sanitize resolve" })` to find path validation code
+3. Use `search_code({ query: "validate file path sanitize resolve" })` to find path validation code
 4. Use `Grep` for security-relevant patterns: `path.join`, `path.resolve`, `fs.readFile`, `new RegExp`, `eval`, `exec`, `spawn`
 5. Use `Grep` for input validation patterns: `zod`, `validate`, `sanitize`, `allowlist`
 6. Check the server binding: search for `listen`, `createServer`, `bind`, `0.0.0.0`, `127.0.0.1`
@@ -632,7 +632,7 @@ You are a **developer advocate** evaluating the developer experience of Lien fro
 2. Read the CLI command source files to understand what output is produced
 3. Read MCP tool handlers to evaluate response format and structure
 4. Use `Grep` for error message patterns: `console.error`, `console.warn`, `throw new Error`, `logger.error`
-5. Use `semantic_search({ query: "error handling CLI command throw catch" })` to find error handling patterns
+5. Use `search_code({ query: "error handling CLI command throw catch" })` to find error handling patterns
 6. Check for progress indicators: `Grep` for `spinner`, `progress`, `ora`, `chalk`
 7. Compare output consistency across commands
 
@@ -679,7 +679,7 @@ After all seven agents finish, produce a unified report in `.wip/dogfood-report.
 
 | Tool | Status | Notes |
 |------|--------|-------|
-| semantic_search | pass/warn/fail | ... |
+| search_code | pass/warn/fail | ... |
 | list_functions | pass/warn/fail | ... |
 | get_files_context | pass/warn/fail | ... |
 | get_dependents | pass/warn/fail | ... |
