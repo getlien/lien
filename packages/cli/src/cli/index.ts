@@ -7,6 +7,7 @@ import { statusCommand } from './status.js';
 import { indexCommand } from './index-cmd.js';
 import { serveCommand } from './serve.js';
 import { complexityCommand } from './complexity.js';
+import { deltaCommand } from './delta-cmd.js';
 import { configSetCommand, configGetCommand, configListCommand } from './config.js';
 import { pathCommand } from './path-cmd.js';
 import { annotateCommand } from './annotate-cmd.js';
@@ -84,6 +85,16 @@ program
   .option('--format <type>', 'Output format: text, json, sarif', 'text')
   .option('--fail-on <severity>', 'Exit 1 if violations: error, warning')
   .action(complexityCommand);
+
+program
+  .command('delta')
+  .description(
+    'Flag NEW complexity threshold crossings in the working tree (vs HEAD) before commit',
+  )
+  .option('--format <type>', 'Output format: text, json', 'text')
+  .option('--threshold <n>', 'Override cyclomatic + cognitive thresholds (default: from config)')
+  .option('--soft', 'Advisory mode: always exit 0 (still prints the report)')
+  .action(deltaCommand);
 
 const configCmd = program
   .command('config')
