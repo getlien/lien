@@ -48,11 +48,12 @@ esac
 # point the subagent at tools that return empty for everything and
 # burn calls on dead ends. The sqlite structural.db file is the canonical
 # "is this repo indexed?" signal.
+. "$(dirname "${BASH_SOURCE[0]}")/lien-resolve.sh" || exit 0
 cwd="$(printf '%s' "$input" | jq -r '.cwd // empty')"
 if [ -n "$cwd" ] && [ -d "$cwd" ]; then
-  store="$(cd "$cwd" && lien path --store 2>/dev/null)"
+  store="$(cd "$cwd" && "${LIEN_CMD[@]}" path --store 2>/dev/null)"
 else
-  store="$(lien path --store 2>/dev/null)"
+  store="$("${LIEN_CMD[@]}" path --store 2>/dev/null)"
 fi
 [ -n "$store" ] && [ -f "$store/structural.db" ] || exit 0
 

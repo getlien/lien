@@ -41,7 +41,7 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/annotate-clean.sh",
-            "timeout": 30
+            "timeout": 5000
           }
         ]
       }
@@ -52,7 +52,7 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/annotate-end.sh",
-            "timeout": 30
+            "timeout": 5000
           }
         ]
       }
