@@ -26,10 +26,38 @@ export interface DeltaOptions {
 
 const VALID_FORMATS = ['text', 'json'];
 
-/** Merge config thresholds (+ optional --threshold override) over the defaults. */
+/**
+ * Parse and validate the `--threshold` flag. Returns `undefined` when the flag
+ * is absent; otherwise the parsed value, which MUST be a positive integer.
+ *
+ * Throws on malformed input (non-numeric, negative, zero, or a float) so the
+ * command can report it and exit 2. A negative threshold would turn every
+ * function into a regression; a float would be silently truncated by parseInt —
+ * both are user errors we refuse rather than guess at.
+ */
+export function parseThresholdFlag(thresholdFlag: string | undefined): number | undefined {
+  if (thresholdFlag === undefined) return undefined;
+  const trimmed = thresholdFlag.trim();
+  if (!/^\d+$/.test(trimmed)) {
+    throw new Error(
+      `Invalid --threshold "${thresholdFlag}": must be a positive integer (whole number > 0).`,
+    );
+  }
+  const n = Number.parseInt(trimmed, 10);
+  if (n <= 0) {
+    throw new Error(`Invalid --threshold "${thresholdFlag}": must be greater than 0.`);
+  }
+  return n;
+}
+
+/**
+ * Merge config thresholds (+ optional validated --threshold override) over the
+ * defaults. `thresholdOverride`, when provided, is an already-validated positive
+ * integer (see `parseThresholdFlag`) and overrides cyclomatic + cognitive.
+ */
 export function resolveDeltaThresholds(
   configThresholds: Partial<ComplexityDeltaThresholds> | undefined,
-  thresholdFlag: string | undefined,
+  thresholdOverride: number | undefined,
 ): ComplexityDeltaThresholds {
   const overrides: Partial<ComplexityDeltaThresholds> = {};
   if (configThresholds) {
@@ -45,12 +73,9 @@ export function resolveDeltaThresholds(
       if (typeof value === 'number') overrides[key] = value;
     }
   }
-  if (thresholdFlag !== undefined) {
-    const n = Number.parseInt(thresholdFlag, 10);
-    if (!Number.isNaN(n)) {
-      overrides.testPaths = n;
-      overrides.mentalLoad = n;
-    }
+  if (thresholdOverride !== undefined) {
+    overrides.testPaths = thresholdOverride;
+    overrides.mentalLoad = thresholdOverride;
   }
   return resolveComplexityDeltaThresholds(overrides);
 }
@@ -98,7 +123,12 @@ function displayMetric(fn: FunctionComplexityDelta): MetricComplexityDelta | und
 function fmtValue(v: number | null, metricType: MetricComplexityDelta['metricType']): string {
   if (v === null) return '–';
   if (metricType === 'halstead_bugs') return v.toFixed(2);
-  if (metricType === 'halstead_effort') return `${Math.round(v)}m`;
+  // Floor (not round) effort-minutes: classification compares the RAW value to
+  // the threshold, so a rounded display could show an at/over-limit number for a
+  // value the classifier treats as under-limit (e.g. 59.7 → "60m" against a 60m
+  // limit). Flooring guarantees the shown number is never larger than the real
+  // one, so display can only ever understate, never falsely cross the limit.
+  if (metricType === 'halstead_effort') return `${Math.floor(v)}m`;
   return String(v);
 }
 
@@ -164,14 +194,37 @@ export async function deltaCommand(options: DeltaOptions): Promise<void> {
     process.exit(2);
   }
 
+  // Validate --threshold before doing any work, so a bad flag fails fast (exit 2).
+  let thresholdOverride: number | undefined;
+  try {
+    thresholdOverride = parseThresholdFlag(options.threshold);
+  } catch (error) {
+    console.error(
+      chalk.red(`lien delta: ${error instanceof Error ? error.message : String(error)}`),
+    );
+    process.exit(2);
+  }
+
   const rootDir = await getRepoRoot(process.cwd());
   if (!rootDir) {
     console.error(chalk.red('lien delta: not a git repository (or git is not installed)'));
     process.exit(2);
   }
 
-  const config = await configService.load(rootDir);
-  const thresholds = resolveDeltaThresholds(config.complexity?.thresholds, options.threshold);
+  let config;
+  try {
+    config = await configService.load(rootDir);
+  } catch (error) {
+    // A malformed .lien.config.json (or any config-load failure) is an
+    // operational error, not a complexity regression — exit 2, don't crash.
+    console.error(
+      chalk.red(
+        `lien delta: failed to load config: ${error instanceof Error ? error.message : String(error)}`,
+      ),
+    );
+    process.exit(2);
+  }
+  const thresholds = resolveDeltaThresholds(config.complexity?.thresholds, thresholdOverride);
 
   let changes;
   try {

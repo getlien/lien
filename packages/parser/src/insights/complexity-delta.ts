@@ -179,8 +179,20 @@ export function hasRegressions(result: ComplexityDeltaResult): boolean {
   return result.summary.regressions > 0;
 }
 
-/** Classify one metric given before/after values and a threshold. */
-function classifyMetric(
+/**
+ * Classify one metric given before/after values and a threshold.
+ *
+ * Semantics note (`improved` vs `pre-existing` for a standing violation):
+ * `improved` is reserved for a decrease that lands **strictly below** the
+ * threshold. A function that was over threshold and drops but is *still* over
+ * threshold (e.g. 20 → 18 against 15) is `pre-existing`, NOT `improved` — the
+ * violation persists, and the report must never imply a still-violating
+ * function is healthy. Neither verdict is a gate regression, so the exit code
+ * is unaffected either way; this is purely about the honesty of the label.
+ *
+ * Exported for unit testing of the boundary cases.
+ */
+export function classifyMetric(
   before: number | null,
   after: number | null,
   threshold: number,
@@ -189,11 +201,14 @@ function classifyMetric(
   if (before === null) return after >= threshold ? 'new-over-threshold' : 'new-under-threshold';
   if (before < threshold && after >= threshold) return 'crossed';
   if (before >= threshold) {
-    // Standing violation: improved if it dropped, pre-existing if it worsened,
-    // unchanged (hidden) if the metric did not move.
-    if (after < before) return 'improved';
+    // Standing violation.
+    if (after < before) {
+      // Dropped. Only call it 'improved' if it cleared the threshold; a decrease
+      // that is still over threshold is 'pre-existing' (violation persists).
+      return after < threshold ? 'improved' : 'pre-existing';
+    }
     if (after > before) return 'pre-existing';
-    return 'unchanged';
+    return 'unchanged'; // unchanged and still over threshold — hidden from the report
   }
   // both under threshold
   if (after > before) return 'worsened';

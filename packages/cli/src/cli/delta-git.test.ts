@@ -4,7 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { getRepoRoot, collectFileChanges } from './delta-git.js';
+import { getRepoRoot, collectFileChanges, readWorktree } from './delta-git.js';
 import type { FileContentChange } from '@liendev/parser';
 
 const execFileAsync = promisify(execFile);
@@ -161,5 +161,22 @@ describe('delta-git', () => {
     await write('a.ts', SIMPLE);
     await commitAll('init');
     expect(await collectFileChanges(dir)).toEqual([]);
+  });
+
+  describe('readWorktree — only ENOENT maps to null (Phase-1 finding #4)', () => {
+    it('reads an existing file', async () => {
+      await write('a.ts', SIMPLE);
+      expect(await readWorktree(dir, 'a.ts')).toBe(SIMPLE);
+    });
+
+    it('returns null for a genuinely absent file (ENOENT)', async () => {
+      expect(await readWorktree(dir, 'does-not-exist.ts')).toBeNull();
+    });
+
+    it('throws (does NOT return null) when the path is a directory (EISDIR)', async () => {
+      // A directory where a file is expected must NOT masquerade as a deletion.
+      await fs.mkdir(path.join(dir, 'a-dir'), { recursive: true });
+      await expect(readWorktree(dir, 'a-dir')).rejects.toThrow();
+    });
   });
 });

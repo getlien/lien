@@ -1,10 +1,17 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   computeComplexityDelta,
   DEFAULT_COMPLEXITY_DELTA_THRESHOLDS,
   type ComplexityDeltaThresholds,
 } from '@liendev/parser';
-import { resolveDeltaThresholds, deltaExitCode, formatDeltaText } from './delta-cmd.js';
+import * as core from '@liendev/core';
+import {
+  resolveDeltaThresholds,
+  parseThresholdFlag,
+  deltaExitCode,
+  formatDeltaText,
+  deltaCommand,
+} from './delta-cmd.js';
 
 const stripAnsi = (s: string): string => s.replace(/\[[0-9;]*m/g, '');
 
@@ -39,19 +46,40 @@ describe('resolveDeltaThresholds', () => {
     expect(resolved.estimatedBugs).toBe(DEFAULT_COMPLEXITY_DELTA_THRESHOLDS.estimatedBugs);
   });
 
-  it('--threshold overrides cyclomatic + cognitive only', () => {
-    const resolved = resolveDeltaThresholds({ testPaths: 20, mentalLoad: 20 }, '7');
+  it('--threshold override applies to cyclomatic + cognitive only', () => {
+    const resolved = resolveDeltaThresholds({ testPaths: 20, mentalLoad: 20 }, 7);
     expect(resolved.testPaths).toBe(7);
     expect(resolved.mentalLoad).toBe(7);
     expect(resolved.timeToUnderstandMinutes).toBe(
       DEFAULT_COMPLEXITY_DELTA_THRESHOLDS.timeToUnderstandMinutes,
     );
   });
+});
 
-  it('ignores a non-numeric --threshold', () => {
-    const resolved = resolveDeltaThresholds({ testPaths: 20, mentalLoad: 20 }, 'abc');
-    expect(resolved.testPaths).toBe(20);
-    expect(resolved.mentalLoad).toBe(20);
+describe('parseThresholdFlag', () => {
+  it('returns undefined when the flag is absent', () => {
+    expect(parseThresholdFlag(undefined)).toBeUndefined();
+  });
+
+  it('parses a positive integer', () => {
+    expect(parseThresholdFlag('7')).toBe(7);
+    expect(parseThresholdFlag(' 12 ')).toBe(12); // tolerant of surrounding whitespace
+  });
+
+  it('rejects a negative value (would make every function a regression)', () => {
+    expect(() => parseThresholdFlag('-5')).toThrow(/positive integer/);
+  });
+
+  it('rejects a float (parseInt would silently truncate it)', () => {
+    expect(() => parseThresholdFlag('5.7')).toThrow(/positive integer/);
+  });
+
+  it('rejects zero', () => {
+    expect(() => parseThresholdFlag('0')).toThrow(/greater than 0/);
+  });
+
+  it('rejects a non-numeric value', () => {
+    expect(() => parseThresholdFlag('abc')).toThrow(/positive integer/);
   });
 });
 
@@ -120,5 +148,44 @@ describe('formatDeltaText', () => {
     const text = stripAnsi(formatDeltaText(result, 1));
     expect(text).toContain('new.ts');
     expect(text).toContain('renamed from old.ts');
+  });
+});
+
+describe('deltaCommand — operational failures exit 2 (Phase-1 findings #2, #3)', () => {
+  let exitSpy: ReturnType<typeof vi.spyOn>;
+  let errSpy: ReturnType<typeof vi.spyOn>;
+  let logSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    // Throw a sentinel so a mocked process.exit actually halts deltaCommand,
+    // exactly as the real one would (rather than letting it run on).
+    exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      throw new Error(`__exit__:${code}`);
+    }) as never);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('exits 2 on a negative --threshold (validated before any git/config work)', async () => {
+    await expect(deltaCommand({ format: 'text', threshold: '-5' })).rejects.toThrow('__exit__:2');
+    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('positive integer'));
+  });
+
+  it('exits 2 on a float --threshold', async () => {
+    await expect(deltaCommand({ format: 'text', threshold: '5.7' })).rejects.toThrow('__exit__:2');
+  });
+
+  it('exits 2 when config fails to load (malformed .lien.config.json)', async () => {
+    vi.spyOn(core.configService, 'load').mockRejectedValue(
+      new SyntaxError('Unexpected token } in JSON'),
+    );
+    await expect(deltaCommand({ format: 'text' })).rejects.toThrow('__exit__:2');
+    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('failed to load config'));
+    // No report is printed on the error path.
+    expect(logSpy).not.toHaveBeenCalled();
   });
 });

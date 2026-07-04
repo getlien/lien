@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   computeComplexityDelta,
   computeFileComplexityDelta,
+  classifyMetric,
   resolveComplexityDeltaThresholds,
   hasRegressions,
   DEFAULT_COMPLEXITY_DELTA_THRESHOLDS,
@@ -45,6 +46,40 @@ function cognitive(fn: FunctionComplexityDelta): MetricComplexityDelta {
   if (!m) throw new Error('no cognitive metric on function delta');
   return m;
 }
+
+describe('classifyMetric — standing-violation semantics (Phase-1 finding #1)', () => {
+  const t = 15;
+
+  it('a decrease that stays over threshold is pre-existing, not improved (20→18@15)', () => {
+    // The violation persists — the report must not imply the function is now fine.
+    expect(classifyMetric(20, 18, t)).toBe('pre-existing');
+  });
+
+  it('a decrease that lands exactly on the threshold is still pre-existing (20→15@15)', () => {
+    // >= threshold counts as over (consistent with the crossing rule), so 15 is
+    // still a violation.
+    expect(classifyMetric(20, 15, t)).toBe('pre-existing');
+  });
+
+  it('a decrease that clears the threshold is improved (20→14@15)', () => {
+    expect(classifyMetric(20, 14, t)).toBe('improved');
+  });
+
+  it('an increase while already over threshold is pre-existing (18→20@15)', () => {
+    expect(classifyMetric(18, 20, t)).toBe('pre-existing');
+  });
+
+  it('classic gate verdicts are unaffected', () => {
+    expect(classifyMetric(10, 20, t)).toBe('crossed'); // under → over
+    expect(classifyMetric(null, 20, t)).toBe('new-over-threshold');
+    expect(classifyMetric(null, 5, t)).toBe('new-under-threshold');
+    expect(classifyMetric(5, 20, t)).toBe('crossed');
+    expect(classifyMetric(20, null, t)).toBe('removed');
+    expect(classifyMetric(5, 8, t)).toBe('worsened'); // both under
+    expect(classifyMetric(8, 5, t)).toBe('improved'); // both under, dropped
+    expect(classifyMetric(8, 8, t)).toBe('unchanged');
+  });
+});
 
 describe('computeFileComplexityDelta — verdict matrix (cognitive-isolated)', () => {
   it('crossed: under-threshold → over-threshold fails the gate', () => {

@@ -88,15 +88,25 @@ async function showHead(rootDir: string, gitPath: string): Promise<string | null
   try {
     return await git(rootDir, ['show', `HEAD:${gitPath}`]);
   } catch {
+    // `null` here means "no version of this path in HEAD" — i.e. the file is
+    // added/untracked. That is the intended, correct meaning of a `git show`
+    // failure for this path (unlike readWorktree below, where null must be
+    // reserved for genuine absence), so all errors legitimately map to null.
     return null;
   }
 }
 
-async function readWorktree(rootDir: string, gitPath: string): Promise<string | null> {
+// Exported for unit testing of the ENOENT-only null-mapping (Phase-1 finding #4).
+export async function readWorktree(rootDir: string, gitPath: string): Promise<string | null> {
   try {
     return await readFile(path.join(rootDir, gitPath), 'utf-8');
-  } catch {
-    return null;
+  } catch (error) {
+    // Downstream, a null `after` is read as "file deleted". Only a genuinely
+    // absent file (ENOENT) means that. Any other failure — EACCES, EISDIR, an
+    // I/O error — must NOT masquerade as a deletion; surface it as an
+    // operational error (the caller maps thrown errors to exit 2).
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return null;
+    throw error;
   }
 }
 
