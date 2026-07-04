@@ -55,13 +55,11 @@ export interface LienConfig {
   };
   embeddings: {
     /**
-     * Compute embeddings for semantic search (default: true).
-     * Set to false for structural-only mode: no model download, no
-     * embedding worker, no CPU cost on index/reindex. Structural tools
-     * (get_files_context, get_dependents, list_functions, get_complexity)
-     * keep working; search_code and find_similar report as disabled.
-     * Toggling this requires a full reindex (`lien index --force`) to take
-     * effect on already-indexed files.
+     * Retained for config compatibility; has no effect since the switch
+     * to lexical FTS5 search. Embeddings are never computed — no model
+     * download, no embedding worker — regardless of this value. search_code
+     * and find_similar run BM25 keyword search and work either way. Slated
+     * for removal together with the embeddings code.
      */
     enabled: boolean;
   };
