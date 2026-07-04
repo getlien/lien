@@ -170,18 +170,33 @@ The base manifest is read-only input for the diff.
 
 ## Incremental / watcher updates (overlay only)
 
-The watcher and `indexMultipleFiles` call `updateFile` / `deleteByFile` on the
-`OverlayBackend`, which **reconciles the mask against base** so the union stays
-correct without the caller knowing about base:
+The watcher and `indexMultipleFiles` write to the `OverlayBackend`, which
+**reconciles the mask against base** so the union stays correct without the
+caller knowing about the base.
 
-- `updateFile(file, …)`: if `file` exists in the base manifest, re-hash the
-  current worktree file; if it now **equals** base → drop overlay rows +
-  un-mask (the edit was reverted to base state); else → mask + write overlay
-  rows. If `file` is not in base → just write overlay rows (added file).
-- `deleteByFile(file)`: drop overlay rows; if `file` ∈ base manifest → mask it
-  (base still has stale rows we must suppress); else → nothing more.
+**Implementation note (deviation from the first-draft reconcile rule):** the
+incremental write path is `deleteByFile(f)` **then** `insertBatch(...)` (see
+`incremental.ts` `handleNonEmptyFile`), not a single `updateFile`. So the mask
+rule hinges on one cheap fact — *is `f` present in the base manifest?* — with no
+per-file re-hashing in the backend:
 
-This makes correctness a property of the backend, not of every call site.
+- `deleteByFile(f)`: drop overlay rows; if `f ∈ base` → mask it. This one rule
+  covers both a real deletion (no insert follows) and the delete-old-chunks step
+  that precedes an incremental `insertBatch` (the file diverged from base, so it
+  must stay masked while its new overlay rows are written).
+- `insertBatch(...)`: write overlay rows only (the preceding `deleteByFile`
+  already set the mask when needed; added files are never in base, so never
+  masked).
+- `updateFile(f, …)` (used by `indexSingleFile`): write overlay rows; mask `f`
+  when `f ∈ base`.
+
+The first draft proposed *un-masking* a file whose content was reverted to
+exactly match base. We drop that: it would require re-hashing every written file
+against base, and the win is only reclaiming a redundant overlay copy. Instead,
+a revert-to-base leaves a correct-but-redundant overlay copy (the union still
+returns the right content because base is masked); the next full overlay
+rebuild — which happens whenever the base is reindexed — reclaims it. Simpler,
+and correctness is a property of the backend, not of every call site.
 
 ## Staleness & revalidation
 
