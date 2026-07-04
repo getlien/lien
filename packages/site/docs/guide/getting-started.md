@@ -63,7 +63,7 @@ After restarting, your AI assistant will automatically:
 - Make Lien tools available
 
 ::: info First-Time Indexing
-On first run, Lien downloads an embedding model (~100MB) and indexes your codebase. This may take 5-20 minutes depending on project size.
+On first run, Lien indexes your codebase. There's no model to download — indexing starts immediately and runs offline. This may take a few minutes depending on project size.
 :::
 
 ## Step 3: Test It Out!
@@ -118,13 +118,6 @@ lien serve --root /path/to/your/project
 ```
 :::
 
-### "Model download failed"
-
-Ensure you have:
-- Internet connection (first run only)
-- ~100MB free disk space
-- Node.js 22+ installed
-
 ### Slow indexing
 
 - Lien automatically excludes `node_modules`, `dist`, and build artifacts
@@ -134,8 +127,8 @@ Ensure you have:
 ### Results not relevant
 
 - Try rebuilding the index: `lien index --force`
-- Be more specific in your queries
-- Use natural language: "how does authentication work?" vs "auth"
+- Search is keyword-based (not meaning-based): query with terms that appear in the code, e.g. "authenticate token session" rather than "how does login work?"
+- For an exact symbol name, ask for `list_functions` instead of search
 
 ## Next Steps
 

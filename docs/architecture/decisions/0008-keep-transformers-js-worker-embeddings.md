@@ -1,9 +1,16 @@
 # ADR-008: Keep transformers.js WorkerEmbeddings as Sole Embedding Backend
 
-**Status**: Accepted
+**Status**: Superseded by [ADR-011](0011-sqlite-structural-store-fts5-lexical-search.md)
 **Date**: 2026-02-10
 **Deciders**: Core Team
 **Related**: PR #160 (transformers v3 upgrade), PR #161 (remove dead device config)
+
+> **Superseded (2026-07-04):** Lien no longer computes embeddings at all.
+> [ADR-011](0011-sqlite-structural-store-fts5-lexical-search.md) removed the
+> transformers.js embedding stack and LanceDB in favor of a SQLite structural
+> store with FTS5/BM25 lexical search. This ADR is retained for history — it
+> explains why transformers.js was the right embedding backend *while Lien had
+> embeddings*.
 
 ## Context and Problem Statement
 

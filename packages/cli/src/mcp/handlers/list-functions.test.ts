@@ -11,10 +11,6 @@ describe('handleListFunctions', () => {
     indexDate: '2025-12-19',
   }));
 
-  const mockEmbeddings = {
-    embed: vi.fn(),
-  };
-
   let mockVectorDB: {
     querySymbols: ReturnType<typeof vi.fn>;
     scanWithFilter: ReturnType<typeof vi.fn>;
@@ -32,7 +28,6 @@ describe('handleListFunctions', () => {
 
     mockCtx = {
       vectorDB: mockVectorDB as any,
-      embeddings: mockEmbeddings as any,
       log: mockLog,
       checkAndReconnect: mockCheckAndReconnect,
       getIndexMetadata: mockGetIndexMetadata,

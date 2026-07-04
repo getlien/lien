@@ -1,36 +1,19 @@
 import chalk from 'chalk';
 import path from 'path';
 import { getLienHome } from '@liendev/parser';
-import {
-  loadGlobalConfig,
-  mergeGlobalConfig,
-  configService,
-  type GlobalConfig,
-  type LienConfig,
-} from '@liendev/core';
+import { loadGlobalConfig, mergeGlobalConfig, type GlobalConfig } from '@liendev/core';
 
 const GLOBAL_CONFIG_PATH = path.join(getLienHome(), '.lien', 'config.json');
-const PROJECT_CONFIG_FILENAME = '.lien.config.json';
 
 /**
- * Allowed config keys, split by scope:
- * - "global": machine-wide, stored in ~/.lien/config.json
- * - "project": per-repo, stored in <cwd>/.lien.config.json (via ConfigService)
+ * Allowed config keys. All remaining keys are global (machine-wide, stored in
+ * ~/.lien/config.json). The per-project `embeddings.enabled` key was retired
+ * along with embeddings.
  */
-const ALLOWED_KEYS: Record<
-  string,
-  { scope: 'global' | 'project'; values: readonly string[]; description: string }
-> = {
+const ALLOWED_KEYS: Record<string, { values: readonly string[]; description: string }> = {
   backend: {
-    scope: 'global',
     values: ['sqlite'],
     description: 'Storage backend (sqlite = structural store with FTS5 lexical search)',
-  },
-  'embeddings.enabled': {
-    scope: 'project',
-    values: ['true', 'false'],
-    description:
-      'Deprecated and inert: embeddings are no longer computed (search is lexical FTS5). Accepted for back-compat; has no effect.',
   },
 };
 
@@ -55,22 +38,6 @@ function buildPartialGlobalConfig(key: string, value: string): Partial<GlobalCon
   }
 }
 
-/** Apply a dot-notation project config key onto a full LienConfig */
-function applyProjectConfigValue(config: LienConfig, key: string, value: string): LienConfig {
-  switch (key) {
-    case 'embeddings.enabled':
-      return { ...config, embeddings: { ...config.embeddings, enabled: value === 'true' } };
-    default:
-      return config;
-  }
-}
-
-/** Print a config-related error and exit non-zero. */
-function failWithConfigError(action: string, error: unknown): never {
-  console.error(chalk.red(`Failed to ${action}:`), error instanceof Error ? error.message : error);
-  process.exit(1);
-}
-
 export async function configSetCommand(key: string, value: string) {
   const allowed = ALLOWED_KEYS[key];
   if (!allowed) {
@@ -83,21 +50,6 @@ export async function configSetCommand(key: string, value: string) {
     console.error(chalk.red(`Invalid value "${value}" for ${key}`));
     console.log(chalk.dim('Valid values:'), allowed.values.join(', '));
     process.exit(1);
-  }
-
-  if (allowed.scope === 'project') {
-    const rootDir = process.cwd();
-    try {
-      const current = await configService.load(rootDir);
-      const updated = applyProjectConfigValue(current, key, value);
-      await configService.save(rootDir, updated);
-    } catch (error) {
-      failWithConfigError(`set ${key}`, error);
-    }
-
-    console.log(chalk.green(`Set ${key} = ${value}`));
-    console.log(chalk.dim(`Config: ${path.join(rootDir, PROJECT_CONFIG_FILENAME)}`));
-    return;
   }
 
   const partial = buildPartialGlobalConfig(key, value);
@@ -117,12 +69,13 @@ export async function configGetCommand(key: string) {
 
   let value: string | undefined;
   try {
-    value =
-      allowed.scope === 'project'
-        ? getNestedValue(await configService.load(process.cwd()), key)
-        : getNestedValue(await loadGlobalConfig(), key);
+    value = getNestedValue(await loadGlobalConfig(), key);
   } catch (error) {
-    failWithConfigError(`get ${key}`, error);
+    console.error(
+      chalk.red(`Failed to get ${key}:`),
+      error instanceof Error ? error.message : error,
+    );
+    process.exit(1);
   }
 
   if (value === undefined) {
@@ -139,7 +92,6 @@ export async function configListCommand() {
   try {
     const globalConfig = await loadGlobalConfig();
     for (const [key, meta] of Object.entries(ALLOWED_KEYS)) {
-      if (meta.scope !== 'global') continue;
       const value = getNestedValue(globalConfig, key);
       const display = value ?? chalk.dim('(not set)');
       console.log(`  ${chalk.cyan(key)}: ${display}  ${chalk.dim(`— ${meta.description}`)}`);
@@ -148,27 +100,6 @@ export async function configListCommand() {
     console.log(
       chalk.red(
         `  Failed to load global config: ${error instanceof Error ? error.message : error}`,
-      ),
-    );
-  }
-
-  try {
-    const projectConfig = await configService.load(process.cwd());
-
-    console.log(chalk.bold('\nProject Configuration'));
-    console.log(chalk.dim(`File: ${path.join(process.cwd(), PROJECT_CONFIG_FILENAME)}\n`));
-
-    for (const [key, meta] of Object.entries(ALLOWED_KEYS)) {
-      if (meta.scope !== 'project') continue;
-      const value = getNestedValue(projectConfig, key);
-      const display = value ?? chalk.dim('(not set)');
-      console.log(`  ${chalk.cyan(key)}: ${display}  ${chalk.dim(`— ${meta.description}`)}`);
-    }
-  } catch (error) {
-    console.log(chalk.bold('\nProject Configuration'));
-    console.log(
-      chalk.red(
-        `  Failed to load ${PROJECT_CONFIG_FILENAME}: ${error instanceof Error ? error.message : error}`,
       ),
     );
   }

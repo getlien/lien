@@ -5,7 +5,6 @@ import {
   handleGetFilesContext,
   clearTestAssociationScanCache,
 } from './get-files-context.js';
-import { TEST_ASSOCIATIONS_COLUMNS } from './columns.js';
 import type { ToolContext } from '../types.js';
 import type { SearchResult } from '@liendev/core';
 
@@ -39,7 +38,6 @@ describe('searchFileChunks', () => {
 
     const ctx = {
       vectorDB: mockVectorDB as any,
-      embeddings: {} as any,
       log: mockLog,
       workspaceRoot: '/project',
     };
@@ -66,7 +64,6 @@ describe('searchFileChunks', () => {
 
     const ctx = {
       vectorDB: mockVectorDB as any,
-      embeddings: {} as any,
       log: mockLog,
       workspaceRoot: '/project',
     };
@@ -75,24 +72,6 @@ describe('searchFileChunks', () => {
 
     expect(results).toHaveLength(1);
     expect(results[0]).toHaveLength(0);
-  });
-
-  it('should not call embeddings.embed', async () => {
-    const mockEmbeddings = { embed: vi.fn() };
-    const mockVectorDB = {
-      scanWithFilter: vi.fn().mockResolvedValue([]),
-    };
-
-    const ctx = {
-      vectorDB: mockVectorDB as any,
-      embeddings: mockEmbeddings as any,
-      log: mockLog,
-      workspaceRoot: '/project',
-    };
-
-    await searchFileChunks(['src/foo.ts'], ctx);
-
-    expect(mockEmbeddings.embed).not.toHaveBeenCalled();
   });
 
   it('should group multiple chunks per file correctly', async () => {
@@ -108,7 +87,6 @@ describe('searchFileChunks', () => {
 
     const ctx = {
       vectorDB: mockVectorDB as any,
-      embeddings: {} as any,
       log: mockLog,
       workspaceRoot: '/project',
     };
@@ -131,30 +109,21 @@ describe('findRelatedChunks (lexical FTS5 on first-chunk content)', () => {
     };
   }
 
-  it('searches with the first chunk content string and never embeds', async () => {
+  it('searches with the first chunk content string', async () => {
     const firstChunk = makeResult('src/foo.ts', 'function foo() { return computeThing(); }');
     const related = makeResult('src/bar.ts', 'function computeThing() {}');
-    const mockEmbeddings = { embed: vi.fn() };
     const mockVectorDB = { search: vi.fn().mockResolvedValue([related]) };
 
     const ctx = {
       vectorDB: mockVectorDB as any,
-      embeddings: mockEmbeddings as any,
       log: mockLog,
       workspaceRoot: '/project',
     };
 
     const result = await findRelatedChunks(['src/foo.ts'], [[firstChunk]], ctx);
 
-    // Lexical path: first chunk content is the query text (3rd arg); vector is
-    // a vestigial empty Float32Array; embeddings are never used.
-    expect(mockVectorDB.search).toHaveBeenCalledWith(
-      expect.any(Float32Array),
-      5,
-      firstChunk.content,
-      expect.objectContaining({ columns: expect.any(Array) }),
-    );
-    expect(mockEmbeddings.embed).not.toHaveBeenCalled();
+    // Lexical path: the first chunk content is the query text passed to search().
+    expect(mockVectorDB.search).toHaveBeenCalledWith(firstChunk.content, 5);
     expect(result[0].some(r => r.metadata.file === 'src/bar.ts')).toBe(true);
   });
 
@@ -210,7 +179,6 @@ describe('handleGetFilesContext - test-association scan (scanAll fast path + cac
         // Per-file lookup (Step 1) — irrelevant to these tests, always empty.
         scanWithFilter: vi.fn().mockResolvedValue([]),
       } as any,
-      embeddings: { embed: vi.fn() } as any,
       rootDir: '/fake/workspace',
       log: mockLog,
       checkAndReconnect: mockCheckAndReconnect,
@@ -239,7 +207,7 @@ describe('handleGetFilesContext - test-association scan (scanAll fast path + cac
     await handleGetFilesContext({ filepaths: 'src/auth.ts', includeRelated: false }, ctx);
 
     expect(scanAll).toHaveBeenCalledTimes(1);
-    expect(scanAll).toHaveBeenCalledWith({ columns: TEST_ASSOCIATIONS_COLUMNS });
+    expect(scanAll).toHaveBeenCalledWith();
   });
 
   it('returns the same test associations via scanAll as scanWithFilter previously produced', async () => {

@@ -19,7 +19,6 @@
     "packages/action",
     "packages/site"
   ],
-  "//test-exclude-reason": "The --exclude '**/worker-embeddings.test.ts' flag on the `test` script below is intentionally duplicated in .github/workflows/ci.yml's 'Run tests (Core)' step rather than moved into packages/core/vitest.config.ts -- see the comment there for the onnxruntime-node segfault rationale and why a config-level exclude would break the documented manual re-run command. Keep both occurrences in sync.",
   "scripts": {
     "build": "npm run build -w @liendev/parser && npm run build -w @liendev/core && npm run build -w @liendev/review && npm run build -w packages/cli && npm run build -w @liendev/action",
     "build:core": "npm run build -w @liendev/parser && npm run build -w @liendev/core",
@@ -32,7 +31,7 @@
     "docs:dev": "npm run docs:dev -w packages/site",
     "docs:build": "npm run docs:build -w packages/site",
     "docs:preview": "npm run docs:preview -w packages/site",
-    "test": "npm run test -w @liendev/parser && npm run test -w @liendev/core -- --exclude '**/worker-embeddings.test.ts' && npm run test -w @liendev/review && npm run test -w packages/cli && npm run test -w @liendev/action",
+    "test": "npm run test -w @liendev/parser && npm run test -w @liendev/core && npm run test -w @liendev/review && npm run test -w packages/cli && npm run test -w @liendev/action",
     "test:coverage": "npm run test:coverage -w @liendev/core",
     "lint": "eslint packages/*/src/",
     "lint:fix": "eslint --fix packages/*/src/",
@@ -43,12 +42,12 @@
   },
   "keywords": [
     "mcp",
-    "semantic-search",
+    "lexical-search",
     "codebase",
     "ai",
     "cursor",
     "code-intelligence",
-    "vector-search",
+    "structural-analysis",
     "local-first"
   ],
   "author": "Alf Henderson",
@@ -57,8 +56,7 @@
     "node": ">=22.21.0"
   },
   "dependencies": {
-    "@liendev/core": "*",
-    "apache-arrow": "^18.1.0"
+    "@liendev/core": "*"
   },
   "devDependencies": {
     "@changesets/cli": "^2.29.8",

@@ -1,20 +1,8 @@
 /**
- * Relevance category based on semantic similarity score
+ * Relevance category for a search result.
+ *
+ * With lexical FTS5 search this is derived from BM25 rank banding
+ * (see fts-search.ts `toRelevance`); scroll/scan operations that do no
+ * scoring report 'not_relevant'.
  */
 export type RelevanceCategory = 'highly_relevant' | 'relevant' | 'loosely_related' | 'not_relevant';
-
-/**
- * Calculate relevance category from cosine distance score.
- *
- * Lower scores indicate higher similarity (closer in vector space).
- * Thresholds based on observed score distributions from dogfooding.
- *
- * @param score - Cosine distance score from vector search
- * @returns Human-readable relevance category
- */
-export function calculateRelevance(score: number): RelevanceCategory {
-  if (score < 1.0) return 'highly_relevant';
-  if (score < 1.3) return 'relevant';
-  if (score < 1.5) return 'loosely_related';
-  return 'not_relevant';
-}

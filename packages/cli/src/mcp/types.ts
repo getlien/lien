@@ -1,4 +1,4 @@
-import type { VectorDBInterface, EmbeddingService } from '@liendev/core';
+import type { VectorDBInterface } from '@liendev/core';
 import type { ReindexState } from './reindex-state-manager.js';
 import type { ToolResult } from './utils/metadata-shaper.js';
 
@@ -18,10 +18,8 @@ export type LogFn = (message: string, level?: LogLevel) => void;
  * Contains dependencies and utilities needed by handlers.
  */
 export interface ToolContext {
-  /** Vector database instance for queries */
+  /** Structural store instance for queries */
   vectorDB: VectorDBInterface;
-  /** Embeddings instance for generating vectors */
-  embeddings: EmbeddingService;
   /** Workspace root directory */
   rootDir: string;
   /** Logging function (logs via MCP notifications with proper levels) */
@@ -32,12 +30,6 @@ export interface ToolContext {
   getIndexMetadata: () => IndexMetadata;
   /** Get current reindex state */
   getReindexState: () => ReindexState;
-  /**
-   * Currently unused/reserved. Search is always lexical FTS5 (no embeddings),
-   * so no handler reads this field — it is retained for back-compat and is
-   * scheduled for removal in a follow-up. Setting it has no effect.
-   */
-  embeddingsEnabled?: boolean;
 }
 
 /**

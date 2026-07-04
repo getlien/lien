@@ -3,13 +3,8 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { dirname, join, resolve } from 'path';
-import type { EmbeddingService, VectorDBInterface, GitState } from '@liendev/core';
-import {
-  NullEmbeddings,
-  VERSION_CHECK_INTERVAL_MS,
-  createVectorDB,
-  isGitRepo,
-} from '@liendev/core';
+import type { VectorDBInterface, GitState } from '@liendev/core';
+import { VERSION_CHECK_INTERVAL_MS, createVectorDB, isGitRepo } from '@liendev/core';
 import { FileWatcher } from '../watcher/index.js';
 import { createMCPServerConfig, registerMCPHandlers } from './server-config.js';
 import { createReindexStateManager } from './reindex-state-manager.js';
@@ -37,25 +32,17 @@ export interface MCPServerOptions {
 }
 
 /**
- * Initialize embeddings and vector database.
- * Uses factory to create the vector database backend.
- *
- * Embeddings are never computed: search is lexical FTS5 over the SQLite
- * backend. A `NullEmbeddings` stub satisfies the EmbeddingService interface
- * (its initialize/embed are no-ops — no model download, no worker thread) for
- * the incremental-index call sites that still thread an embeddings argument.
+ * Initialize the structural store. Uses the factory to create the backend.
+ * Search is lexical FTS5 — no embeddings are computed.
  */
 async function initializeDatabase(
   rootDir: string,
   log: LogFn,
 ): Promise<{
-  embeddings: EmbeddingService;
   vectorDB: VectorDBInterface;
 }> {
-  const embeddings: EmbeddingService = new NullEmbeddings();
-
-  // Create vector DB using global config (auto-detects backend and orgId)
-  log('Creating vector database...');
+  // Create the structural store using global config (auto-detects backend and orgId)
+  log('Creating structural store...');
   const vectorDB = await createVectorDB(rootDir);
 
   // Verify we got a valid instance
@@ -69,14 +56,11 @@ async function initializeDatabase(
     );
   }
 
-  // NullEmbeddings.initialize is a no-op; calling it unconditionally is fine.
-  await embeddings.initialize();
-
-  log('Loading vector database...');
+  log('Loading structural store...');
   await vectorDB.initialize();
 
-  log('Vector DB ready');
-  return { embeddings, vectorDB };
+  log('Structural store ready');
+  return { vectorDB };
 }
 
 // Walk parent directories to detect whether startDir is inside a git work tree.
@@ -138,7 +122,6 @@ async function setupFileWatching(
   watch: boolean | undefined,
   rootDir: string,
   vectorDB: VectorDBInterface,
-  embeddings: EmbeddingService,
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>,
   checkAndReconnect: () => Promise<void>,
@@ -156,7 +139,6 @@ async function setupFileWatching(
     const handler = createFileChangeHandler(
       rootDir,
       vectorDB,
-      embeddings,
       log,
       reindexStateManager,
       checkAndReconnect,
@@ -305,7 +287,6 @@ async function initializeComponents(
   rootDir: string,
   earlyLog: LogFn,
 ): Promise<{
-  embeddings: EmbeddingService;
   vectorDB: VectorDBInterface;
 }> {
   try {
@@ -351,7 +332,7 @@ async function setupAndConnectServer(
   },
 ): Promise<void> {
   const { rootDir, watch, onGitTrackerReady } = options;
-  const { vectorDB, embeddings } = toolContext;
+  const { vectorDB } = toolContext;
 
   // Register all MCP handlers
   registerMCPHandlers(server, toolContext, log);
@@ -364,7 +345,6 @@ async function setupAndConnectServer(
     watch,
     rootDir,
     vectorDB,
-    embeddings,
     log,
     reindexStateManager,
     toolContext.checkAndReconnect,
@@ -374,7 +354,6 @@ async function setupAndConnectServer(
   const { gitTracker, gitPollInterval } = await setupGitDetection(
     rootDir,
     vectorDB,
-    embeddings,
     log,
     reindexStateManager,
     fileWatcher,
@@ -414,7 +393,7 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
   const earlyLog = createEarlyLog(verbose);
   earlyLog('Initializing MCP server...');
 
-  const { embeddings, vectorDB } = await initializeComponents(rootDir, earlyLog);
+  const { vectorDB } = await initializeComponents(rootDir, earlyLog);
   const server = createMCPServer();
   const log = createMCPLog(server, verbose);
 
@@ -432,7 +411,6 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
   } = setupVersionChecking(vectorDB, log, reindexStateManager, () => getGitState());
   const toolContext: ToolContext = {
     vectorDB,
-    embeddings,
     rootDir,
     log,
     checkAndReconnect,

@@ -11,10 +11,6 @@ describe('handleFindSimilar', () => {
     indexDate: '2025-12-19',
   }));
 
-  const mockEmbeddings = {
-    embed: vi.fn().mockResolvedValue(new Float32Array([0.1, 0.2, 0.3])),
-  };
-
   let mockVectorDB: {
     search: ReturnType<typeof vi.fn>;
   };
@@ -61,7 +57,6 @@ describe('handleFindSimilar', () => {
 
     mockCtx = {
       vectorDB: mockVectorDB as any,
-      embeddings: mockEmbeddings as any,
       log: mockLog,
       checkAndReconnect: mockCheckAndReconnect,
       getIndexMetadata: mockGetIndexMetadata,
@@ -463,21 +458,15 @@ describe('handleFindSimilar', () => {
   });
 
   describe('lexical search path', () => {
-    it('runs lexical search with the raw code text and never embeds', async () => {
+    it('runs lexical search with the raw code text', async () => {
       mockVectorDB.search.mockResolvedValue([]);
       const code = 'async function fetchData() { return await db.find(); }';
 
       await handleFindSimilar({ code }, mockCtx);
 
-      // The code string is passed straight to search() (3rd arg); the vector
-      // arg is a vestigial empty Float32Array. limit defaults to 5, +10 overfetch.
-      expect(mockVectorDB.search).toHaveBeenCalledWith(
-        expect.any(Float32Array),
-        15,
-        code,
-        expect.objectContaining({ columns: expect.any(Array) }),
-      );
-      expect(mockEmbeddings.embed).not.toHaveBeenCalled();
+      // The code string is passed straight to search(). limit defaults to 5,
+      // +10 overfetch.
+      expect(mockVectorDB.search).toHaveBeenCalledWith(code, 15);
     });
   });
 

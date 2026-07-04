@@ -8,19 +8,15 @@
  *
  * Key responsibilities:
  * - Accumulate chunks from concurrent file processing
- * - Batch chunks for embedding generation
  * - Manage concurrent access with mutex pattern
- * - Process batches through embedding → vectordb pipeline
+ * - Flush accumulated chunks straight to the structural store
  */
 
 import type { VectorDBInterface } from '../vectordb/types.js';
-import type { EmbeddingService } from '../embeddings/types.js';
 import type { ProgressTracker } from './progress-tracker.js';
 import type { CodeChunk } from '@liendev/parser';
-import { EMBEDDING_MICRO_BATCH_SIZE } from '../constants.js';
-import { chunkArray } from '../utils/chunk-array.js';
 
-/** A chunk with its content ready for embedding */
+/** A chunk with its content ready to persist */
 export interface ChunkWithContent {
   chunk: CodeChunk;
   content: string;
@@ -28,10 +24,8 @@ export interface ChunkWithContent {
 
 /** Configuration for batch processing */
 export interface BatchProcessorConfig {
-  /** Number of chunks to accumulate before triggering a batch */
+  /** Number of chunks to accumulate before triggering a write batch */
   batchThreshold: number;
-  /** Size of embedding batches (for API/memory limits) */
-  embeddingBatchSize: number;
 }
 
 /** Result of adding chunks - includes file metadata for manifest */
@@ -43,33 +37,12 @@ export interface FileIndexEntry {
 }
 
 /**
- * Process embeddings in micro-batches to prevent event loop blocking.
- * Yields to the event loop between batches for UI responsiveness.
- */
-export async function processEmbeddingMicroBatches(
-  texts: string[],
-  embeddings: EmbeddingService,
-): Promise<Float32Array[]> {
-  const results: Float32Array[] = [];
-
-  for (const microBatch of chunkArray(texts, EMBEDDING_MICRO_BATCH_SIZE)) {
-    const microResults = await embeddings.embedBatch(microBatch);
-    results.push(...microResults);
-
-    // Yield to event loop for UI responsiveness
-    await new Promise(resolve => setImmediate(resolve));
-  }
-
-  return results;
-}
-
-/**
- * ChunkBatchProcessor handles the complex concurrent chunk accumulation
- * and batch processing logic for indexing.
+ * ChunkBatchProcessor handles the concurrent chunk accumulation and batch
+ * persistence logic for indexing.
  *
  * Usage:
  * ```typescript
- * const processor = new ChunkBatchProcessor(vectorDB, embeddings, config, tracker);
+ * const processor = new ChunkBatchProcessor(vectorDB, config, tracker);
  *
  * // From concurrent file processing tasks:
  * await processor.addChunks(chunks, filepath, mtime);
@@ -92,7 +65,6 @@ export class ChunkBatchProcessor {
 
   constructor(
     private readonly vectorDB: VectorDBInterface,
-    private readonly embeddings: EmbeddingService,
     private readonly config: BatchProcessorConfig,
     private readonly progressTracker: ProgressTracker,
   ) {}
@@ -190,7 +162,7 @@ export class ChunkBatchProcessor {
 
   /**
    * The actual batch processing logic.
-   * Processes accumulated chunks through embedding → vectordb pipeline.
+   * Persists accumulated chunks straight to the structural store.
    */
   private async doProcess(): Promise<void> {
     if (this.accumulator.length === 0) {
@@ -203,26 +175,15 @@ export class ChunkBatchProcessor {
       // Drain accumulator atomically
       const toProcess = this.accumulator.splice(0, this.accumulator.length);
 
-      // Process in batches for memory/API limits
-      for (const batch of chunkArray(toProcess, this.config.embeddingBatchSize)) {
-        const texts = batch.map(item => item.content);
+      this.progressTracker.setMessage?.(`Inserting ${toProcess.length} chunks...`);
+      await this.vectorDB.insertBatch(
+        toProcess.map(item => item.chunk.metadata),
+        toProcess.map(item => item.content),
+      );
+      this.processedChunkCount += toProcess.length;
 
-        // Generate embeddings
-        this.progressTracker.setMessage?.('Generating embeddings...');
-        const embeddingVectors = await processEmbeddingMicroBatches(texts, this.embeddings);
-        this.processedChunkCount += batch.length;
-
-        // Insert into vector database
-        this.progressTracker.setMessage?.(`Inserting ${batch.length} chunks...`);
-        await this.vectorDB.insertBatch(
-          embeddingVectors,
-          batch.map(item => item.chunk.metadata),
-          texts,
-        );
-
-        // Yield to event loop
-        await new Promise(resolve => setImmediate(resolve));
-      }
+      // Yield to event loop for UI responsiveness
+      await new Promise(resolve => setImmediate(resolve));
 
       this.progressTracker.setMessage?.('Processing files...');
     } finally {

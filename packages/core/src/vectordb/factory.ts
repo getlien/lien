@@ -14,11 +14,11 @@ function validateVectorDBInterface(db: VectorDBInterface): void {
 /**
  * Factory function to create a VectorDB instance.
  *
- * SqliteBackend (better-sqlite3 + FTS5 lexical search) is the sole backend
- * reachable via config. The former LanceDB backend is retired —
- * `loadGlobalConfig` maps any retired 'lancedb' selection to 'sqlite' — so the
- * factory always constructs a SqliteBackend. The VectorDBInterface seam means
- * call sites don't change.
+ * SqliteBackend (better-sqlite3 + FTS5 lexical search) is the sole backend.
+ * `loadGlobalConfig` maps any retired backend selection to 'sqlite',
+ * so the factory always constructs a SqliteBackend. The VectorDBInterface seam
+ * is kept so an alternative backend could be reintroduced without touching
+ * call sites.
  *
  * Loading the global config here surfaces validation errors early and emits
  * the one-time warning for retired backend settings.

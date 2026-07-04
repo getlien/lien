@@ -49,28 +49,7 @@ jobs:
         run: npm run test --workspace=packages/parser
 
       - name: Run tests (Core)
-        # worker-embeddings.test.ts is excluded here (root `npm test` mirrors
-        # this same exclude): its "parity with LocalEmbeddings" case runs
-        # onnxruntime-node inference in both the main thread (LocalEmbeddings)
-        # and a real worker_thread (WorkerEmbeddings) at once, which
-        # reproducibly segfaults the process on teardown ("FATAL ERROR:
-        # v8::HandleScope::CreateHandle() Cannot create a handle without a
-        # HandleScope") even when run in isolation as the only file in the
-        # suite. This is a native cross-isolate onnxruntime-node conflict,
-        # not a vitest pool/isolate scheduling issue -- config-only fixes
-        # (singleFork, isolate:false, pool:'threads') don't touch it. Tracked
-        # as a known environmental issue; run it manually with
-        # `npm run test -w @liendev/core -- src/embeddings/worker-embeddings.test.ts`
-        # when validating WorkerEmbeddings changes by hand.
-        #
-        # This --exclude flag is intentionally duplicated in the root `test`
-        # script in package.json rather than moved into
-        # packages/core/vitest.config.ts: a config-level `exclude` removes
-        # the file from vitest's file-discovery set entirely, which breaks
-        # the manual re-run command above ("No test files found" -- verified
-        # empirically). Keeping the exclude as a CLI flag preserves that
-        # escape hatch. If you change one occurrence, change the other.
-        run: npm run test --workspace=packages/core -- --exclude '**/worker-embeddings.test.ts'
+        run: npm run test --workspace=packages/core
 
       - name: Run tests (CLI)
         run: npm run test --workspace=packages/cli

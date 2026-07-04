@@ -91,10 +91,10 @@ function resolvePaths(file: string): ResolvedPaths | null {
 /**
  * Coerce per-chunk `metadata.imports` to a plain array.
  *
- * LanceDB returns chunks whose `imports` field is an Apache Arrow Vector
- * — iterable but lacking `.some()` and other array methods.
- * `findTestAssociationsFromChunks` uses `.some()`, so the coercion has to
- * happen at the annotate-cmd boundary before the chunks flow downstream.
+ * A backend may return `imports` as an array-like value that lacks `.some()`
+ * and other array methods. `findTestAssociationsFromChunks` uses `.some()`, so
+ * the coercion has to happen at the annotate-cmd boundary before the chunks
+ * flow downstream.
  */
 function adaptChunkImports(chunks: DependencyAnalysisChunk[]): CodeChunk[] {
   return chunks.map(c => ({

@@ -11,10 +11,6 @@ describe('handleSearchCode', () => {
     indexDate: '2025-12-19',
   }));
 
-  const mockEmbeddings = {
-    embed: vi.fn().mockResolvedValue(new Float32Array([0.1, 0.2, 0.3])),
-  };
-
   // Default metadata for mock results
   const defaultMetadata = {
     file: 'src/example.ts',
@@ -48,7 +44,6 @@ describe('handleSearchCode', () => {
 
   let mockVectorDB: {
     search: ReturnType<typeof vi.fn>;
-    searchCrossRepo: ReturnType<typeof vi.fn>;
     supportsCrossRepo: boolean;
   };
 
@@ -59,13 +54,11 @@ describe('handleSearchCode', () => {
 
     mockVectorDB = {
       search: vi.fn(),
-      searchCrossRepo: vi.fn(),
       supportsCrossRepo: false,
     };
 
     mockCtx = {
       vectorDB: mockVectorDB as any,
-      embeddings: mockEmbeddings as any,
       log: mockLog,
       checkAndReconnect: mockCheckAndReconnect,
       getIndexMetadata: mockGetIndexMetadata,
@@ -114,13 +107,8 @@ describe('handleSearchCode', () => {
 
       await handleSearchCode({ query: 'test query here', limit: 10 }, mockCtx);
 
-      // Verify limit was passed to search
-      expect(mockVectorDB.search).toHaveBeenCalledWith(
-        expect.any(Float32Array),
-        10,
-        'test query here',
-        expect.objectContaining({ columns: expect.any(Array) }),
-      );
+      // Lexical search: the query text and limit are passed directly.
+      expect(mockVectorDB.search).toHaveBeenCalledWith('test query here', 10);
     });
 
     it('should use default limit of 5 when not specified', async () => {
@@ -128,12 +116,7 @@ describe('handleSearchCode', () => {
 
       await handleSearchCode({ query: 'test query here' }, mockCtx);
 
-      expect(mockVectorDB.search).toHaveBeenCalledWith(
-        expect.any(Float32Array),
-        5,
-        'test query here',
-        expect.objectContaining({ columns: expect.any(Array) }),
-      );
+      expect(mockVectorDB.search).toHaveBeenCalledWith('test query here', 5);
     });
 
     it('should call checkAndReconnect before searching', async () => {
@@ -144,20 +127,13 @@ describe('handleSearchCode', () => {
       expect(mockCheckAndReconnect).toHaveBeenCalled();
     });
 
-    it('should run lexical search with the raw query text and never embed', async () => {
+    it('should run lexical search with the raw query text', async () => {
       mockVectorDB.search.mockResolvedValue([]);
 
       await handleSearchCode({ query: 'handles authentication' }, mockCtx);
 
-      // Lexical FTS5 path: the query string is passed straight to search()
-      // (3rd arg); the vector arg is a vestigial empty Float32Array.
-      expect(mockVectorDB.search).toHaveBeenCalledWith(
-        expect.any(Float32Array),
-        5,
-        'handles authentication',
-        expect.objectContaining({ columns: expect.any(Array) }),
-      );
-      expect(mockEmbeddings.embed).not.toHaveBeenCalled();
+      // Lexical FTS5 path: the query string is passed straight to search().
+      expect(mockVectorDB.search).toHaveBeenCalledWith('handles authentication', 5);
     });
 
     it('should handle empty results gracefully', async () => {
@@ -183,99 +159,8 @@ describe('handleSearchCode', () => {
     });
   });
 
-  describe('cross-repo search with a cross-repo-capable backend', () => {
-    let mockCrossRepoDB: any;
-
-    beforeEach(() => {
-      mockCrossRepoDB = {
-        search: vi.fn(),
-        searchCrossRepo: vi.fn(),
-        supportsCrossRepo: true,
-      };
-
-      mockCtx = {
-        vectorDB: mockCrossRepoDB,
-        embeddings: mockEmbeddings as any,
-        log: mockLog,
-        checkAndReconnect: mockCheckAndReconnect,
-        getIndexMetadata: mockGetIndexMetadata,
-        getReindexState: vi.fn(() => ({
-          inProgress: false,
-          pendingFiles: [],
-          lastReindexTimestamp: null,
-          lastReindexDurationMs: null,
-        })),
-        rootDir: '/fake/workspace',
-      };
-    });
-
-    it('should use searchCrossRepo when crossRepo=true and the backend supports it', async () => {
-      const mockResults = [
-        createMockResult({ metadata: { repoId: 'repo-a', file: 'src/a.ts' } }),
-        createMockResult({ metadata: { repoId: 'repo-b', file: 'src/b.ts' } }),
-      ];
-      mockCrossRepoDB.searchCrossRepo.mockResolvedValue(mockResults);
-
-      const result = await handleSearchCode(
-        { query: 'cross repo search', crossRepo: true },
-        mockCtx,
-      );
-
-      expect(mockCrossRepoDB.searchCrossRepo).toHaveBeenCalledWith(
-        expect.any(Float32Array),
-        5,
-        expect.objectContaining({ repoIds: undefined }),
-      );
-      expect(mockCrossRepoDB.search).not.toHaveBeenCalled();
-
-      const parsed = JSON.parse(result.content![0].text);
-      expect(parsed.results).toHaveLength(2);
-      expect(parsed.groupedByRepo).toBeDefined();
-    });
-
-    it('should group results by repository when crossRepo=true', async () => {
-      const mockResults = [
-        createMockResult({
-          content: 'result 1',
-          metadata: { repoId: 'repo-a', file: 'src/a1.ts' },
-        }),
-        createMockResult({
-          content: 'result 2',
-          metadata: { repoId: 'repo-a', file: 'src/a2.ts' },
-        }),
-        createMockResult({
-          content: 'result 3',
-          metadata: { repoId: 'repo-b', file: 'src/b1.ts' },
-        }),
-      ];
-      mockCrossRepoDB.searchCrossRepo.mockResolvedValue(mockResults);
-
-      const result = await handleSearchCode({ query: 'test cross repo', crossRepo: true }, mockCtx);
-
-      const parsed = JSON.parse(result.content![0].text);
-      expect(parsed.groupedByRepo).toBeDefined();
-      expect(parsed.groupedByRepo['repo-a']).toHaveLength(2);
-      expect(parsed.groupedByRepo['repo-b']).toHaveLength(1);
-    });
-
-    it('should filter by repoIds when provided', async () => {
-      mockCrossRepoDB.searchCrossRepo.mockResolvedValue([]);
-
-      await handleSearchCode(
-        { query: 'filtered search', crossRepo: true, repoIds: ['repo-a', 'repo-c'] },
-        mockCtx,
-      );
-
-      expect(mockCrossRepoDB.searchCrossRepo).toHaveBeenCalledWith(
-        expect.any(Float32Array),
-        5,
-        expect.objectContaining({ repoIds: ['repo-a', 'repo-c'] }),
-      );
-    });
-  });
-
-  describe('cross-repo fallback (unsupported backend)', () => {
-    it('should fall back to single-repo search when crossRepo=true but the backend does not support it', async () => {
+  describe('cross-repo fallback (unsupported by the bundled backend)', () => {
+    it('should fall back to single-repo search when crossRepo=true', async () => {
       const mockResults = [createMockResult()];
       mockVectorDB.search.mockResolvedValue(mockResults);
 
@@ -290,11 +175,10 @@ describe('handleSearchCode', () => {
         'warning',
       );
 
-      // Should use regular search, not searchCrossRepo
+      // Should use regular lexical search
       expect(mockVectorDB.search).toHaveBeenCalled();
-      expect(mockVectorDB.searchCrossRepo).not.toHaveBeenCalled();
 
-      // Should not include groupedByRepo in response
+      // Should not include groupedByRepo in response (single-repo backend)
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.groupedByRepo).toBeUndefined();
     });

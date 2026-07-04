@@ -1,5 +1,5 @@
 import fs from 'fs/promises';
-import type { VectorDBInterface, EmbeddingService } from '@liendev/core';
+import type { VectorDBInterface } from '@liendev/core';
 import {
   GitStateTracker,
   indexMultipleFiles,
@@ -24,7 +24,6 @@ async function handleGitStartup(
   rootDir: string,
   gitTracker: GitStateTracker,
   vectorDB: VectorDBInterface,
-  embeddings: EmbeddingService,
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>,
   checkAndReconnect: () => Promise<void>,
@@ -47,7 +46,7 @@ async function handleGitStartup(
 
     try {
       await checkAndReconnect();
-      const count = await indexMultipleFiles(filteredFiles, vectorDB, embeddings, {
+      const count = await indexMultipleFiles(filteredFiles, vectorDB, {
         verbose: false,
         rootDir,
       });
@@ -76,7 +75,6 @@ function createGitPollInterval(
   rootDir: string,
   gitTracker: GitStateTracker,
   vectorDB: VectorDBInterface,
-  embeddings: EmbeddingService,
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>,
   checkAndReconnect: () => Promise<void>,
@@ -123,7 +121,7 @@ function createGitPollInterval(
 
         try {
           await checkAndReconnect();
-          const count = await indexMultipleFiles(filteredFiles, vectorDB, embeddings, {
+          const count = await indexMultipleFiles(filteredFiles, vectorDB, {
             verbose: false,
             rootDir,
           });
@@ -201,7 +199,6 @@ async function executeGitReindex(
   filteredFiles: string[],
   rootDir: string,
   vectorDB: VectorDBInterface,
-  embeddings: EmbeddingService,
   reindexStateManager: ReturnType<typeof createReindexStateManager>,
   checkAndReconnect: () => Promise<void>,
   log: LogFn,
@@ -212,7 +209,7 @@ async function executeGitReindex(
 
   try {
     await checkAndReconnect();
-    const count = await indexMultipleFiles(filteredFiles, vectorDB, embeddings, {
+    const count = await indexMultipleFiles(filteredFiles, vectorDB, {
       verbose: false,
       rootDir,
     });
@@ -234,7 +231,6 @@ function createGitChangeHandler(
   rootDir: string,
   gitTracker: GitStateTracker,
   vectorDB: VectorDBInterface,
-  embeddings: EmbeddingService,
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>,
   checkAndReconnect: () => Promise<void>,
@@ -275,7 +271,6 @@ function createGitChangeHandler(
         filteredFiles,
         rootDir,
         vectorDB,
-        embeddings,
         reindexStateManager,
         checkAndReconnect,
         log,
@@ -296,7 +291,6 @@ function createGitChangeHandler(
 async function setupGitDetection(
   rootDir: string,
   vectorDB: VectorDBInterface,
-  embeddings: EmbeddingService,
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>,
   fileWatcher: FileWatcher | null,
@@ -323,7 +317,6 @@ async function setupGitDetection(
       rootDir,
       gitTracker,
       vectorDB,
-      embeddings,
       log,
       reindexStateManager,
       checkAndReconnect,
@@ -344,7 +337,6 @@ async function setupGitDetection(
       rootDir,
       gitTracker,
       vectorDB,
-      embeddings,
       log,
       reindexStateManager,
       checkAndReconnect,
@@ -362,7 +354,6 @@ async function setupGitDetection(
     rootDir,
     gitTracker,
     vectorDB,
-    embeddings,
     log,
     reindexStateManager,
     checkAndReconnect,

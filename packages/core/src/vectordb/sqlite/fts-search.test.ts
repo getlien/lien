@@ -6,9 +6,6 @@ import type { ChunkMetadata } from '@liendev/parser';
 import { SqliteBackend } from './sqlite-backend.js';
 import { orQuery } from './fts-search.js';
 
-const DIM = 384;
-const zeroVec = () => new Float32Array(DIM);
-
 function chunk(
   file: string,
   content: string,
@@ -28,7 +25,7 @@ function chunk(
 }
 
 async function insert(db: SqliteBackend, c: { metadata: ChunkMetadata; content: string }) {
-  await db.insertBatch([zeroVec()], [c.metadata], [c.content]);
+  await db.insertBatch([c.metadata], [c.content]);
 }
 
 describe('orQuery', () => {
@@ -64,7 +61,7 @@ describe('SqliteBackend.search (FTS5)', () => {
     await insert(db, chunk('auth.ts', 'handles user authentication and session tokens'));
     await insert(db, chunk('math.ts', 'adds two numbers together'));
 
-    const results = await db.search(zeroVec(), 5, 'authentication');
+    const results = await db.search('authentication', 5);
     expect(results.length).toBeGreaterThanOrEqual(1);
     expect(results[0].metadata.file).toBe('auth.ts');
   });
@@ -79,7 +76,7 @@ describe('SqliteBackend.search (FTS5)', () => {
       }),
     );
 
-    const results = await db.search(zeroVec(), 5, 'parse');
+    const results = await db.search('parse', 5);
     expect(results).toHaveLength(1);
     expect(results[0].metadata.symbolName).toBe('parseImportStatement');
   });
@@ -88,7 +85,7 @@ describe('SqliteBackend.search (FTS5)', () => {
     await insert(db, chunk('strong.ts', 'cache cache cache invalidation cache layer'));
     await insert(db, chunk('weak.ts', 'a cache and some unrelated words here'));
 
-    const results = await db.search(zeroVec(), 5, 'cache');
+    const results = await db.search('cache', 5);
     expect(results[0].metadata.file).toBe('strong.ts');
     expect(results[0].relevance).toBe('highly_relevant');
     expect(results[0].score).toBe(0);
@@ -98,46 +95,45 @@ describe('SqliteBackend.search (FTS5)', () => {
     await insert(db, chunk('flow.ts', 'user login login login flow handler routine'));
     await insert(db, chunk('def.ts', 'x', { symbolName: 'login' }));
 
-    const results = await db.search(zeroVec(), 5, 'login');
+    const results = await db.search('login', 5);
     const exact = results.find(r => r.metadata.symbolName === 'login');
     expect(exact?.relevance).toBe('highly_relevant');
   });
 
   it('returns [] when there is no query text', async () => {
     await insert(db, chunk('a.ts', 'something searchable here'));
-    expect(await db.search(zeroVec(), 5, '')).toEqual([]);
-    expect(await db.search(zeroVec(), 5, '   ')).toEqual([]);
-    expect(await db.search(zeroVec(), 5, undefined)).toEqual([]);
+    expect(await db.search('', 5)).toEqual([]);
+    expect(await db.search('   ', 5)).toEqual([]);
+    expect(await db.search(undefined as unknown as string, 5)).toEqual([]);
   });
 
   it('over-fetches internally but trims to the requested limit', async () => {
     for (let i = 0; i < 30; i++) {
       await insert(db, chunk(`f${i}.ts`, `shared token number ${i}`));
     }
-    const results = await db.search(zeroVec(), 5, 'shared');
+    const results = await db.search('shared', 5);
     expect(results).toHaveLength(5);
   });
 
   it('keeps the FTS index in sync through updateFile (triggers)', async () => {
     await insert(db, chunk('a.ts', 'alpha zzztokenold marker'));
-    expect(await db.search(zeroVec(), 5, 'zzztokenold')).toHaveLength(1);
+    expect(await db.search('zzztokenold', 5)).toHaveLength(1);
 
     await db.updateFile(
       'a.ts',
-      [zeroVec()],
       [chunk('a.ts', 'beta zzztokennew marker').metadata],
       ['beta zzztokennew marker'],
     );
 
-    expect(await db.search(zeroVec(), 5, 'zzztokenold')).toEqual([]);
-    expect(await db.search(zeroVec(), 5, 'zzztokennew')).toHaveLength(1);
+    expect(await db.search('zzztokenold', 5)).toEqual([]);
+    expect(await db.search('zzztokennew', 5)).toHaveLength(1);
   });
 
   it('keeps the FTS index in sync through deleteByFile (triggers)', async () => {
     await insert(db, chunk('a.ts', 'gone soon uniquetoken'));
-    expect(await db.search(zeroVec(), 5, 'uniquetoken')).toHaveLength(1);
+    expect(await db.search('uniquetoken', 5)).toHaveLength(1);
 
     await db.deleteByFile('a.ts');
-    expect(await db.search(zeroVec(), 5, 'uniquetoken')).toEqual([]);
+    expect(await db.search('uniquetoken', 5)).toEqual([]);
   });
 });

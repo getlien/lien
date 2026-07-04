@@ -4,9 +4,8 @@ import path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { indexMultipleFiles } from './incremental.js';
-import { VectorDB } from '../vectordb/lancedb.js';
+import { SqliteBackend } from '../vectordb/sqlite/sqlite-backend.js';
 import { GitStateTracker } from '../git/tracker.js';
-import { MockEmbeddings } from '../test/helpers/mock-embeddings.js';
 import { createTestDir, cleanupTestDir } from '../test/helpers/test-db.js';
 
 const execFileAsync = promisify(execFile);
@@ -18,8 +17,7 @@ async function git(repoDir: string, ...args: string[]): Promise<void> {
 describe('incremental indexing across git branch switch', () => {
   let repoDir: string;
   let indexPath: string;
-  let vectorDB: VectorDB;
-  let embeddings: MockEmbeddings;
+  let vectorDB: SqliteBackend;
 
   beforeEach(async () => {
     repoDir = await createTestDir();
@@ -31,10 +29,8 @@ describe('incremental indexing across git branch switch', () => {
     await git(repoDir, 'config', 'user.name', 'Lien Test');
     await git(repoDir, 'config', 'commit.gpgsign', 'false');
 
-    embeddings = new MockEmbeddings();
-    vectorDB = new VectorDB(indexPath);
+    vectorDB = new SqliteBackend(indexPath);
     await vectorDB.initialize();
-    await embeddings.initialize();
   });
 
   afterEach(async () => {
@@ -50,7 +46,7 @@ describe('incremental indexing across git branch switch', () => {
 
     // Pass the path RELATIVE TO rootDir, not absolute. Process cwd is the lien
     // package dir at test time, so this is the precise scenario the fix covers.
-    await indexMultipleFiles(['foo/bar.py'], vectorDB, embeddings, { rootDir: repoDir });
+    await indexMultipleFiles(['foo/bar.py'], vectorDB, { rootDir: repoDir });
 
     const chunks = await vectorDB.scanWithFilter({ file: 'foo/bar.py' });
     expect(chunks.length).toBeGreaterThan(0);
@@ -85,7 +81,7 @@ describe('incremental indexing across git branch switch', () => {
     // Simulate the watcher firing — detectChanges → indexMultipleFiles.
     const changedOntoFeature = await tracker.detectChanges();
     expect(changedOntoFeature).toBeTruthy();
-    await indexMultipleFiles(changedOntoFeature!, vectorDB, embeddings, { rootDir: repoDir });
+    await indexMultipleFiles(changedOntoFeature!, vectorDB, { rootDir: repoDir });
 
     const onFeature = await vectorDB.scanWithFilter({ file: 'foo/bar.py' });
     expect(onFeature.length).toBeGreaterThan(0);
@@ -94,7 +90,7 @@ describe('incremental indexing across git branch switch', () => {
     await git(repoDir, 'checkout', '-q', 'main');
 
     const changedBackToMain = await tracker.detectChanges();
-    await indexMultipleFiles(changedBackToMain ?? [], vectorDB, embeddings, { rootDir: repoDir });
+    await indexMultipleFiles(changedBackToMain ?? [], vectorDB, { rootDir: repoDir });
 
     // Assert: no chunks remain for foo/bar.py on main.
     const onMain = await vectorDB.scanWithFilter({ file: 'foo/bar.py' });
@@ -110,7 +106,7 @@ describe('incremental indexing across git branch switch', () => {
     await git(repoDir, 'add', '.');
     await git(repoDir, 'commit', '-q', '-m', 'add foo/bar.py');
 
-    await indexMultipleFiles([fooPath], vectorDB, embeddings, { rootDir: repoDir });
+    await indexMultipleFiles([fooPath], vectorDB, { rootDir: repoDir });
 
     const before = await vectorDB.scanWithFilter({ file: 'foo/bar.py' });
     expect(before.length).toBeGreaterThan(0);
@@ -121,7 +117,7 @@ describe('incremental indexing across git branch switch', () => {
     await git(repoDir, 'add', '-A');
     await git(repoDir, 'commit', '-q', '-m', 'remove foo/bar.py');
 
-    await indexMultipleFiles([fooPath], vectorDB, embeddings, { rootDir: repoDir });
+    await indexMultipleFiles([fooPath], vectorDB, { rootDir: repoDir });
 
     // Assert: no chunks remain for the deleted file.
     const after = await vectorDB.scanWithFilter({ file: 'foo/bar.py' });

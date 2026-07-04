@@ -8,13 +8,6 @@ import * as os from 'os';
 
 // Mock dependencies - must be hoisted
 vi.mock('../config/global-config.js');
-vi.mock('./lancedb.js', () => ({
-  VectorDB: class MockVectorDB {
-    backend = 'lancedb';
-    dbPath = '/test/path';
-    async initialize() {}
-  },
-}));
 vi.mock('./sqlite/sqlite-backend.js', () => ({
   SqliteBackend: class MockSqliteBackend {
     backend = 'sqlite';

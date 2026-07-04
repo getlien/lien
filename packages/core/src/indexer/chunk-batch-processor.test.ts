@@ -1,26 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ChunkBatchProcessor, processEmbeddingMicroBatches } from './chunk-batch-processor.js';
-import type { VectorDB } from '../vectordb/lancedb.js';
-import type { EmbeddingService } from '../embeddings/types.js';
+import { ChunkBatchProcessor } from './chunk-batch-processor.js';
+import type { VectorDBInterface } from '../vectordb/types.js';
 import type { IndexingProgressTracker } from './progress-tracker.js';
 import type { CodeChunk } from '@liendev/parser';
 
 // Mock implementations
-function createMockVectorDB(): VectorDB {
+function createMockVectorDB(): VectorDBInterface {
   return {
     insertBatch: vi.fn().mockResolvedValue(undefined),
     dbPath: '/mock/path',
-  } as unknown as VectorDB;
-}
-
-function createMockEmbeddings(): EmbeddingService {
-  return {
-    embedBatch: vi
-      .fn()
-      .mockImplementation((texts: string[]) =>
-        Promise.resolve(texts.map(() => new Float32Array([0.1, 0.2, 0.3]))),
-      ),
-  } as unknown as EmbeddingService;
+  } as unknown as VectorDBInterface;
 }
 
 function createMockProgressTracker(): IndexingProgressTracker {
@@ -47,14 +36,12 @@ function createMockChunk(id: number): CodeChunk {
 }
 
 describe('ChunkBatchProcessor', () => {
-  let mockVectorDB: VectorDB;
-  let mockEmbeddings: EmbeddingService;
+  let mockVectorDB: VectorDBInterface;
   let mockProgressTracker: IndexingProgressTracker;
 
   beforeEach(() => {
     vi.clearAllMocks();
     mockVectorDB = createMockVectorDB();
-    mockEmbeddings = createMockEmbeddings();
     mockProgressTracker = createMockProgressTracker();
   });
 
@@ -62,13 +49,12 @@ describe('ChunkBatchProcessor', () => {
     it('should accumulate chunks without triggering processing below threshold', async () => {
       const processor = new ChunkBatchProcessor(
         mockVectorDB,
-        mockEmbeddings,
-        { batchThreshold: 10, embeddingBatchSize: 5 },
+        { batchThreshold: 10 },
         mockProgressTracker,
       );
 
       const chunks = [createMockChunk(1), createMockChunk(2)];
-      await processor.addChunks(chunks, 'file1.ts', Date.now());
+      await processor.addChunks(chunks, 'file1.ts', Date.now(), 'hash1');
 
       // Should not have called insertBatch yet (below threshold)
       expect(mockVectorDB.insertBatch).not.toHaveBeenCalled();
@@ -82,14 +68,23 @@ describe('ChunkBatchProcessor', () => {
     it('should trigger processing when threshold is reached', async () => {
       const processor = new ChunkBatchProcessor(
         mockVectorDB,
-        mockEmbeddings,
-        { batchThreshold: 3, embeddingBatchSize: 10 },
+        { batchThreshold: 3 },
         mockProgressTracker,
       );
 
       // Add chunks to reach threshold
-      await processor.addChunks([createMockChunk(1), createMockChunk(2)], 'file1.ts', Date.now());
-      await processor.addChunks([createMockChunk(3), createMockChunk(4)], 'file2.ts', Date.now());
+      await processor.addChunks(
+        [createMockChunk(1), createMockChunk(2)],
+        'file1.ts',
+        Date.now(),
+        'hash1',
+      );
+      await processor.addChunks(
+        [createMockChunk(3), createMockChunk(4)],
+        'file2.ts',
+        Date.now(),
+        'hash2',
+      );
 
       // Should have triggered processing (4 >= 3 threshold)
       expect(mockVectorDB.insertBatch).toHaveBeenCalled();
@@ -98,12 +93,11 @@ describe('ChunkBatchProcessor', () => {
     it('should handle empty chunks array', async () => {
       const processor = new ChunkBatchProcessor(
         mockVectorDB,
-        mockEmbeddings,
-        { batchThreshold: 10, embeddingBatchSize: 5 },
+        { batchThreshold: 10 },
         mockProgressTracker,
       );
 
-      await processor.addChunks([], 'empty.ts', Date.now());
+      await processor.addChunks([], 'empty.ts', Date.now(), 'hash-empty');
 
       const results = processor.getResults();
       expect(results.indexedFiles).toHaveLength(0);
@@ -112,8 +106,7 @@ describe('ChunkBatchProcessor', () => {
     it('should handle concurrent addChunks calls safely', async () => {
       const processor = new ChunkBatchProcessor(
         mockVectorDB,
-        mockEmbeddings,
-        { batchThreshold: 100, embeddingBatchSize: 50 },
+        { batchThreshold: 100 },
         mockProgressTracker,
       );
 
@@ -123,6 +116,7 @@ describe('ChunkBatchProcessor', () => {
           [createMockChunk(i * 2), createMockChunk(i * 2 + 1)],
           `file${i}.ts`,
           Date.now(),
+          `hash${i}`,
         ),
       );
 
@@ -137,12 +131,16 @@ describe('ChunkBatchProcessor', () => {
     it('should process all remaining chunks', async () => {
       const processor = new ChunkBatchProcessor(
         mockVectorDB,
-        mockEmbeddings,
-        { batchThreshold: 100, embeddingBatchSize: 5 }, // High threshold
+        { batchThreshold: 100 }, // High threshold
         mockProgressTracker,
       );
 
-      await processor.addChunks([createMockChunk(1), createMockChunk(2)], 'file1.ts', Date.now());
+      await processor.addChunks(
+        [createMockChunk(1), createMockChunk(2)],
+        'file1.ts',
+        Date.now(),
+        'hash1',
+      );
 
       // Not triggered yet (below threshold)
       expect(mockVectorDB.insertBatch).not.toHaveBeenCalled();
@@ -156,8 +154,7 @@ describe('ChunkBatchProcessor', () => {
     it('should handle flush with no pending chunks', async () => {
       const processor = new ChunkBatchProcessor(
         mockVectorDB,
-        mockEmbeddings,
-        { batchThreshold: 10, embeddingBatchSize: 5 },
+        { batchThreshold: 10 },
         mockProgressTracker,
       );
 
@@ -172,13 +169,17 @@ describe('ChunkBatchProcessor', () => {
     it('should return correct chunk count after processing', async () => {
       const processor = new ChunkBatchProcessor(
         mockVectorDB,
-        mockEmbeddings,
-        { batchThreshold: 2, embeddingBatchSize: 10 },
+        { batchThreshold: 2 },
         mockProgressTracker,
       );
 
-      await processor.addChunks([createMockChunk(1)], 'file1.ts', 1000);
-      await processor.addChunks([createMockChunk(2), createMockChunk(3)], 'file2.ts', 2000);
+      await processor.addChunks([createMockChunk(1)], 'file1.ts', 1000, 'hash1');
+      await processor.addChunks(
+        [createMockChunk(2), createMockChunk(3)],
+        'file2.ts',
+        2000,
+        'hash2',
+      );
       await processor.flush();
 
       const results = processor.getResults();
@@ -189,58 +190,46 @@ describe('ChunkBatchProcessor', () => {
     it('should return file entries with correct metadata', async () => {
       const processor = new ChunkBatchProcessor(
         mockVectorDB,
-        mockEmbeddings,
-        { batchThreshold: 100, embeddingBatchSize: 50 },
+        { batchThreshold: 100 },
         mockProgressTracker,
       );
 
       const mtime = Date.now();
-      await processor.addChunks([createMockChunk(1), createMockChunk(2)], 'src/auth.ts', mtime);
+      await processor.addChunks(
+        [createMockChunk(1), createMockChunk(2)],
+        'src/auth.ts',
+        mtime,
+        'hash-auth',
+      );
 
       const results = processor.getResults();
       expect(results.indexedFiles[0]).toEqual({
         filepath: 'src/auth.ts',
         chunkCount: 2,
         mtime,
+        contentHash: 'hash-auth',
       });
     });
   });
 
   describe('batch processing', () => {
-    it('should respect embeddingBatchSize for large batches', async () => {
+    it('should write accumulated chunks straight to the store on threshold', async () => {
       const processor = new ChunkBatchProcessor(
         mockVectorDB,
-        mockEmbeddings,
-        { batchThreshold: 5, embeddingBatchSize: 2 },
+        { batchThreshold: 5 },
         mockProgressTracker,
       );
 
       // Add 6 chunks to trigger processing
       const chunks = Array.from({ length: 6 }, (_, i) => createMockChunk(i));
-      await processor.addChunks(chunks, 'large-file.ts', Date.now());
+      await processor.addChunks(chunks, 'large-file.ts', Date.now(), 'hash-large');
 
-      // Should have processed in batches of 2 (3 calls for 6 chunks)
-      expect(mockEmbeddings.embedBatch).toHaveBeenCalledTimes(3);
+      // A single insertBatch call persists the drained accumulator.
+      expect(mockVectorDB.insertBatch).toHaveBeenCalledTimes(1);
+      const [metadatas, contents] = (mockVectorDB.insertBatch as ReturnType<typeof vi.fn>).mock
+        .calls[0];
+      expect(metadatas).toHaveLength(6);
+      expect(contents).toHaveLength(6);
     });
-  });
-});
-
-describe('processEmbeddingMicroBatches', () => {
-  it('should process texts in micro-batches', async () => {
-    const mockEmbeddings = createMockEmbeddings();
-    const texts = ['text1', 'text2', 'text3', 'text4', 'text5'];
-
-    const results = await processEmbeddingMicroBatches(texts, mockEmbeddings);
-
-    expect(results).toHaveLength(5);
-    expect(results[0]).toBeInstanceOf(Float32Array);
-  });
-
-  it('should handle empty input', async () => {
-    const mockEmbeddings = createMockEmbeddings();
-
-    const results = await processEmbeddingMicroBatches([], mockEmbeddings);
-
-    expect(results).toHaveLength(0);
   });
 });

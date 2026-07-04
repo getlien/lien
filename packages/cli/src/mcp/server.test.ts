@@ -6,13 +6,10 @@ const {
   mockServerInstance,
   mockTransportInstance,
   mockVectorDB,
-  mockEmbeddings,
-  mockNullEmbeddingsInstance,
   mockSetupGitDetection,
   mockSetupCleanupHandlers,
   mockIsGitRepo,
   mockIndexCodebase,
-  mockResolveEmbeddingsEnabled,
 } = vi.hoisted(() => ({
   mockServerInstance: {
     connect: vi.fn().mockResolvedValue(undefined),
@@ -33,17 +30,10 @@ const {
     getVersionDate: vi.fn().mockReturnValue('2026-01-01'),
     dbPath: '/test/.lien',
   },
-  mockEmbeddings: {
-    initialize: vi.fn().mockResolvedValue(undefined),
-  },
-  mockNullEmbeddingsInstance: {
-    initialize: vi.fn().mockResolvedValue(undefined),
-  },
   mockSetupGitDetection: vi.fn().mockResolvedValue({ gitPollInterval: null }),
   mockSetupCleanupHandlers: vi.fn().mockReturnValue(vi.fn().mockResolvedValue(undefined)),
   mockIsGitRepo: vi.fn(async (_dir: string) => true),
   mockIndexCodebase: vi.fn(async (_opts: { rootDir: string; verbose?: boolean }) => undefined),
-  mockResolveEmbeddingsEnabled: vi.fn(async (_dir: string) => true),
 }));
 
 vi.mock('@modelcontextprotocol/sdk/server/index.js', () => ({
@@ -59,14 +49,7 @@ vi.mock('@modelcontextprotocol/sdk/server/stdio.js', () => ({
 }));
 
 vi.mock('@liendev/core', () => ({
-  WorkerEmbeddings: vi.fn(function (this: any) {
-    Object.assign(this, mockEmbeddings);
-  }),
-  NullEmbeddings: vi.fn(function (this: any) {
-    Object.assign(this, mockNullEmbeddingsInstance);
-  }),
   createVectorDB: vi.fn(async () => mockVectorDB),
-  resolveEmbeddingsEnabled: mockResolveEmbeddingsEnabled,
   VERSION_CHECK_INTERVAL_MS: 60000,
   isGitRepo: mockIsGitRepo,
   indexCodebase: mockIndexCodebase,
@@ -129,7 +112,7 @@ vi.mock('url', () => ({
 import { startMCPServer } from './server.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { WorkerEmbeddings, NullEmbeddings, createVectorDB } from '@liendev/core';
+import { createVectorDB } from '@liendev/core';
 import { FileWatcher } from '../watcher/index.js';
 import { createMCPServerConfig, registerMCPHandlers } from './server-config.js';
 import { setupCleanupHandlers } from './cleanup.js';
@@ -156,9 +139,6 @@ describe('startMCPServer', () => {
     mockVectorDB.checkVersion.mockResolvedValue(false);
     mockVectorDB.getCurrentVersion.mockReturnValue(1);
     mockVectorDB.getVersionDate.mockReturnValue('2026-01-01');
-    mockEmbeddings.initialize.mockResolvedValue(undefined);
-    mockNullEmbeddingsInstance.initialize.mockResolvedValue(undefined);
-    mockResolveEmbeddingsEnabled.mockResolvedValue(true);
     mockSetupGitDetection.mockResolvedValue({ gitPollInterval: null });
     mockSetupCleanupHandlers.mockReturnValue(vi.fn().mockResolvedValue(undefined));
     vi.mocked(createVectorDB).mockImplementation(async () => mockVectorDB as any);
@@ -179,13 +159,9 @@ describe('startMCPServer', () => {
     vi.restoreAllMocks();
   });
 
-  it('should initialize the vector database and always use NullEmbeddings (never a worker)', async () => {
+  it('should initialize the vector database (structural store, no embeddings)', async () => {
     await startMCPServer({ rootDir: '/test/project' });
 
-    // Embeddings are never computed: NullEmbeddings only, no worker/model spawn.
-    expect(NullEmbeddings).toHaveBeenCalledOnce();
-    expect(WorkerEmbeddings).not.toHaveBeenCalled();
-    expect(mockNullEmbeddingsInstance.initialize).toHaveBeenCalledOnce();
     expect(createVectorDB).toHaveBeenCalledWith('/test/project');
     expect(mockVectorDB.initialize).toHaveBeenCalledOnce();
   });
@@ -245,7 +221,6 @@ describe('startMCPServer', () => {
     expect(setupGitDetection).toHaveBeenCalledWith(
       '/test/project',
       mockVectorDB,
-      expect.objectContaining({ initialize: expect.any(Function) }), // embeddings
       expect.any(Function), // log
       expect.anything(), // reindexStateManager
       expect.anything(), // fileWatcher
@@ -259,7 +234,6 @@ describe('startMCPServer', () => {
     const toolContext = vi.mocked(registerMCPHandlers).mock.calls[0][1];
 
     expect(toolContext.vectorDB).toBe(mockVectorDB);
-    expect(toolContext.embeddings).toEqual(mockNullEmbeddingsInstance);
     expect(toolContext.rootDir).toBe('/test/project');
     expect(typeof toolContext.log).toBe('function');
     expect(typeof toolContext.checkAndReconnect).toBe('function');

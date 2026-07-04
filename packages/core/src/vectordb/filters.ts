@@ -2,10 +2,9 @@ import { SYMBOL_TYPE_MATCHES } from './types.js';
 import { safeRegex } from '../utils/safe-regex.js';
 
 /**
- * Minimal record shape the shared filters read. Both the LanceDB `DBRecord`
- * (query.ts, whose array columns may arrive as Arrow Vectors) and the SQLite
- * backend's parsed row (plain JS arrays) structurally satisfy this — which is
- * why `toPlainArray` tolerates both. This is the DRY seam both backends share.
+ * Minimal record shape the shared filters read. The SQLite backend's parsed
+ * row (plain JS arrays) structurally satisfies this; `toPlainArray` also
+ * tolerates any array-like value exposing `toArray()`, normalizing defensively.
  */
 export interface FilterableRecord {
   content?: string;
@@ -25,14 +24,14 @@ export interface SymbolQueryOptions {
 }
 
 /**
- * Convert an Arrow Vector to a plain array if needed.
- * LanceDB returns Arrow Vector objects for array columns; the SQLite backend
- * passes plain arrays through untouched.
+ * Convert an array-like column value to a plain array if needed.
+ * The SQLite backend passes plain arrays through untouched; any value exposing
+ * `toArray()` is normalized via that method.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function toPlainArray<T>(arr: any): T[] | undefined {
   if (!arr) return undefined;
-  // Arrow Vectors have a toArray() method
+  // Some array-like values expose a toArray() method
   if (typeof arr.toArray === 'function') {
     return arr.toArray();
   }
@@ -44,7 +43,7 @@ export function toPlainArray<T>(arr: any): T[] | undefined {
 
 /**
  * Check if a string array has valid (non-empty) entries.
- * LanceDB stores empty string arrays as [''] which we need to filter out.
+ * Treats a lone empty-string entry (['']) as "no entries".
  */
 export function hasValidStringEntries(arr: string[] | undefined): boolean {
   return Boolean(arr && arr.length > 0 && arr[0] !== '');

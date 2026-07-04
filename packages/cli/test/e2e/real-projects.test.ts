@@ -588,7 +588,7 @@ describe('E2E: Real Open Source Projects', () => {
           const [sample] = await db.querySymbols({ symbolType: 'function', limit: 1 });
           expect(sample).toBeDefined();
 
-          const results = await db.search(new Float32Array(0), 5, sample.content);
+          const results = await db.search(sample.content, 5);
 
           console.log(
             `🔍 ${project.name} find_similar: ${results.length} results, ` +
@@ -608,7 +608,7 @@ describe('E2E: Real Open Source Projects', () => {
         'should return relevant results for code search',
         async () => {
           const db = await loadDb(fsSync.realpathSync(projectDir));
-          const results = await db.search(new Float32Array(0), 5, project.sampleSearchQuery);
+          const results = await db.search(project.sampleSearchQuery, 5);
 
           console.log(
             `🔎 Search "${project.sampleSearchQuery}" returned ${results.length} results`,

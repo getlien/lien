@@ -61,9 +61,8 @@ export function deriveSymbolTokens(symbolName: string): string {
  * Serialize a chunk (content + metadata) to a flat insert row. Stores real
  * empties (`[]` / `{}` / `''` / `0`) — no Arrow placeholders.
  *
- * `returnType` is not persisted (parser/src/types.ts). This matches the
- * LanceDB backend, which also drops it — the round-trip stays intentionally
- * lossy for parity.
+ * `returnType` is not persisted (parser/src/types.ts) — the round-trip stays
+ * intentionally lossy.
  */
 export function chunkToRow(content: string, metadata: ChunkMetadata): ChunkInsertRow {
   const symbolName = metadata.symbolName || '';
@@ -136,7 +135,7 @@ function parseCallSites(
     return undefined;
   }
   if (!Array.isArray(parsed)) return undefined;
-  // line > 0 mirrors the LanceDB read path (0 is the missing-data sentinel).
+  // line > 0 drops the missing-data sentinel (0).
   const result = parsed
     .filter(
       (c): c is { symbol: string; line: number; isResultCaptured?: boolean } =>
@@ -181,12 +180,11 @@ export function parseRow(raw: Record<string, unknown>): SqliteChunkRecord {
 }
 
 /**
- * Build a SearchResult's metadata from a parsed record, reproducing the
- * LanceDB read path (query.ts buildSearchResultMetadata) field-for-field:
- * empty arrays -> undefined, '' -> undefined for symbolName/parentClass/
- * signature, `0` complexity -> undefined, Halstead 0 preserved (explicit
- * != null). symbolType is a bare cast — query.ts passes '' through, so a
- * `|| undefined` here would break parity.
+ * Build a SearchResult's metadata from a parsed record with these coercions,
+ * field-for-field: empty arrays -> undefined, '' -> undefined for
+ * symbolName/parentClass/signature, `0` complexity -> undefined, Halstead 0
+ * preserved (explicit != null). symbolType is a bare cast — '' is passed
+ * through, so a `|| undefined` here would drop it.
  */
 function buildMetadata(r: SqliteChunkRecord): SearchResult['metadata'] {
   return {

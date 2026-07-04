@@ -11,7 +11,7 @@ A bird's-eye view of Lien's architecture showing:
 - CLI layer and commands (including `lien config` and `lien complexity`)
 - MCP server and all six tools
 - Core services (indexer, scanner, chunker, complexity analyzer, manifest manager, etc.)
-- Data layer (embeddings, VectorDB factory with the LanceDB backend)
+- Data layer (VectorDB factory with the SQLite structural store + FTS5 lexical search)
 - Optional services (git tracking, file watching, ecosystem presets)
 - External dependencies
 - Lien Review — the separate GitHub Action product surface (`packages/review` + `packages/action`)
@@ -29,8 +29,8 @@ A bird's-eye view of Lien's architecture showing:
 **How data moves through the system**
 
 Detailed flow diagrams showing:
-- **Indexing data flow**: File → Chunks → Embeddings → Vector DB
-- **Search data flow**: Query → Embeddings → Vector Search → Results
+- **Indexing data flow**: File → Chunks → SQLite store (FTS5 kept in sync by triggers)
+- **Search data flow**: Query → FTS5 MATCH → BM25 rank → Results
 - **Incremental update flow**: Change Detection → Reindex → Reconnect
 - Data transformations at each step
 - Performance optimizations
@@ -180,8 +180,9 @@ All processing happens locally. No cloud services required. Your code never leav
 - **Language:** TypeScript (ESM modules)
 - **CLI Framework:** Commander.js
 - **MCP Protocol:** @modelcontextprotocol/sdk
-- **Vector Database:** LanceDB (local)
-- **Embeddings:** @huggingface/transformers v4 (all-MiniLM-L6-v2, worker thread)
+- **Storage:** SQLite via `better-sqlite3` (structural store)
+- **Search:** SQLite FTS5 with BM25 ranking (`porter unicode61` tokenizer)
+- **Parsing:** Tree-sitter (via `@liendev/parser`)
 - **Testing:** Vitest
 - **Build:** tsup
 
@@ -201,12 +202,12 @@ packages/parser/src/     # @liendev/parser — zero deps on core; AST, chunking,
 ├── ecosystem-presets.ts  # Project-type detection (see ADR-007)
 └── scanner.ts, chunker.ts, dependency-analyzer.ts, test-associations.ts, ...
 
-packages/core/src/       # @liendev/core — depends on parser; embeddings, vector DB, config, git
+packages/core/src/       # @liendev/core — depends on parser; SQLite store, config, git
 ├── config/           # GlobalConfig + per-project ConfigService + schema
 ├── indexer/          # Indexing orchestration: manifest, incremental updates
 ├── insights/         # ComplexityAnalyzer (VectorDB-aware wrapper) and formatters (text, JSON, SARIF)
-├── vectordb/         # VectorDB factory, LanceDB, query, batch-insert, maintenance
-├── embeddings/       # WorkerEmbeddings (transformers.js in worker thread)
+├── vectordb/         # VectorDB factory + VectorDBInterface seam
+│   └── sqlite/       # SqliteBackend: structural store + FTS5/BM25 lexical search (ADR-011)
 ├── git/              # Git tracker and utilities
 ├── errors/           # Error codes and classes
 ├── types/            # Shared types (CodeChunk, etc.)
@@ -215,7 +216,7 @@ packages/core/src/       # @liendev/core — depends on parser; embeddings, vect
 packages/cli/src/        # @liendev/lien — depends on core and parser
 ├── cli/              # CLI commands (init, index, serve, status, config, complexity, path, annotate)
 ├── mcp/              # MCP server, tools, and handlers
-│   ├── handlers/     # Tool handlers (semantic-search, find-similar, get-files-context, etc.)
+│   ├── handlers/     # Tool handlers (search-code, find-similar, get-files-context, etc.)
 │   ├── schemas/      # Zod schemas for tool input validation
 │   └── utils/        # Response budgeting, metadata shaping, path matching
 ├── watcher/          # File watching (uses ecosystem presets for patterns)
@@ -231,12 +232,13 @@ packages/site/           # @liendev/site (private) — VitePress docs site (lien
 
 | Operation | Time | Notes |
 |-----------|------|-------|
-| Server startup | 5-7s | First time only (downloads model) |
-| Subsequent starts | 2-3s | Model cached |
-| Index 1000 files | ~60s | With defaults (concurrency=4) |
-| Single file change | ~360ms | Incremental update |
-| Search query (cached) | ~50ms | Embedding cached |
-| Search query (uncached) | ~250ms | Generate embedding + search |
+| Server startup | ~1s | Open SQLite store — no model to download |
+| Index 1000 files | ~35s | With defaults (concurrency=4) |
+| Single file change | ~70ms | Incremental update (delete + insert; triggers sync FTS) |
+| `get_files_context` | sub-millisecond | Indexed `WHERE file IN (...)` — the hot path |
+| FTS5 keyword search | single-digit ms | `chunks_fts MATCH`, ORDER BY bm25 |
+
+*(`get_files_context` and cold-start figures are structural-store spike measurements, PR #645; treat as directional.)*
 
 ## 📈 Scalability
 
@@ -244,10 +246,10 @@ packages/site/           # @liendev/site (private) — VitePress docs site (lien
 - **Files:** Tested up to 10,000 files
 - **Codebase size:** Up to ~1M lines of code
 - **Concurrent operations:** Configurable (default: 4)
-- **Memory:** ~500MB with model loaded
+- **Memory:** modest — no embedding model resident
 
 ### Current Scaling
-- **Single-repo, local-first**: LanceDB is the only backend (the Qdrant backend was retired — see [ADR-0010](decisions/0010-retire-qdrant-backend.md))
+- **Single-repo, local-first**: `SqliteBackend` is the only backend (LanceDB + embeddings were removed — see [ADR-011](decisions/0011-sqlite-structural-store-fts5-lexical-search.md); Qdrant was retired earlier — see [ADR-0010](decisions/0010-retire-qdrant-backend.md))
 - **VectorDB factory**: The `createVectorDB` factory and `VectorDBInterface` seam are retained so an alternative backend can be reintroduced
 
 ### Future Scaling
@@ -289,10 +291,15 @@ Our Mermaid diagrams follow these conventions:
 
 ## 🔄 Version History
 
-### v0.49.x (Current)
+### v0.50.x (Current)
+- ✅ LanceDB + embeddings removed; SQLite structural store + FTS5/BM25 lexical search is the only backend (ADR-011)
+- ✅ No embedding model download — instant, offline first index; ~1.8MB native install
+- ✅ ADR-008 superseded by ADR-011; ADR-011 added
+
+### v0.49.x
 - ✅ Docs resynced to match current package layout and product surface
 - ✅ `@liendev/parser` extracted from `@liendev/core` (ADR-009)
-- ✅ Qdrant backend retired; LanceDB is the only backend (ADR-010)
+- ✅ Qdrant backend retired; LanceDB is the only backend at this version (ADR-010)
 - ✅ Lien Review shipped as a self-hostable GitHub Action (`packages/review` + `packages/action`), replacing the retired hosted runner/platform
 - ✅ `lien path` and `lien annotate` commands added (hook-facing)
 - ✅ ADR-009, ADR-010 added
@@ -345,7 +352,7 @@ If something in the architecture is unclear:
 
 ---
 
-**Last Updated:** July 2, 2026
+**Last Updated:** July 4, 2026
 **Maintained By:** Lien contributors
-**Status:** ✅ Complete and up-to-date (v0.49.x)
+**Status:** ✅ Complete and up-to-date (v0.50.x)
 

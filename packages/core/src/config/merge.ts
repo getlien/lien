@@ -30,10 +30,6 @@ export function deepMergeConfig(defaults: LienConfig, user: Partial<LienConfig>)
       ...defaults.fileWatching,
       ...user.fileWatching,
     },
-    embeddings: {
-      ...defaults.embeddings,
-      ...user.embeddings,
-    },
     storage: user.storage ?? defaults.storage,
     complexity: user.complexity
       ? {

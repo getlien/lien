@@ -24,9 +24,10 @@ For more information, see [adr.github.io](https://adr.github.io/).
 | [ADR-005](0005-per-language-definition-pattern.md) | Consolidate Language Support into Per-Language Definitions | 2026-02-03 | Partially Superseded |
 | [ADR-006](0006-consolidated-language-files-with-import-extractors.md) | Consolidate Language Files and Add Import Extractors | 2026-02-05 | Accepted |
 | [ADR-007](0007-replace-framework-detection-with-ecosystem-presets.md) | Replace Framework Detection with Ecosystem Presets | 2026-02-07 | Accepted |
-| [ADR-008](0008-keep-transformers-js-worker-embeddings.md) | Keep transformers.js WorkerEmbeddings as Sole Embedding Backend | 2026-02-10 | Accepted |
+| [ADR-008](0008-keep-transformers-js-worker-embeddings.md) | Keep transformers.js WorkerEmbeddings as Sole Embedding Backend | 2026-02-10 | Superseded by ADR-011 |
 | [ADR-009](0009-extract-parser-package.md) | Extract `@liendev/parser` from `@liendev/core` | 2026-02-19 | Accepted |
 | [ADR-010](0010-retire-qdrant-backend.md) | Retire the Qdrant Backend | 2026-07-02 | Accepted |
+| [ADR-011](0011-sqlite-structural-store-fts5-lexical-search.md) | Replace LanceDB + Embeddings with a SQLite Structural Store and FTS5 Lexical Search | 2026-07-04 | Accepted |
 
 ## ADR Format
 

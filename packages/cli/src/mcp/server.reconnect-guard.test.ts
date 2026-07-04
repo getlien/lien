@@ -55,10 +55,6 @@ function createMockVectorDB() {
   } as any;
 }
 
-function createMockEmbeddings() {
-  return {} as any;
-}
-
 describe('Background git reindex reconnect guard', () => {
   let checkAndReconnect: () => Promise<void>;
   let log: LogFn;
@@ -86,7 +82,6 @@ describe('Background git reindex reconnect guard', () => {
         '/project',
         gitTracker,
         createMockVectorDB(),
-        createMockEmbeddings(),
         log,
         reindexStateManager,
         checkAndReconnect,
@@ -104,7 +99,6 @@ describe('Background git reindex reconnect guard', () => {
         '/project',
         gitTracker,
         createMockVectorDB(),
-        createMockEmbeddings(),
         log,
         reindexStateManager,
         checkAndReconnect,
@@ -124,7 +118,6 @@ describe('Background git reindex reconnect guard', () => {
         '/project',
         gitTracker,
         createMockVectorDB(),
-        createMockEmbeddings(),
         log,
         reindexStateManager,
         checkAndReconnect,
@@ -147,7 +140,6 @@ describe('Background git reindex reconnect guard', () => {
         '/project',
         gitTracker,
         createMockVectorDB(),
-        createMockEmbeddings(),
         log,
         reindexStateManager,
         checkAndReconnect,
@@ -167,7 +159,6 @@ describe('Background git reindex reconnect guard', () => {
         '/project',
         gitTracker,
         createMockVectorDB(),
-        createMockEmbeddings(),
         log,
         reindexStateManager,
         checkAndReconnect,

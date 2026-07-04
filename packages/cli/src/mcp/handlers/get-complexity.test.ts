@@ -45,13 +45,8 @@ describe('handleGetComplexity', () => {
     indexDate: '2025-12-19',
   }));
 
-  const mockEmbeddings = {
-    embed: vi.fn(),
-  };
-
   const mockCtx: ToolContext = {
     vectorDB: mockVectorDB as any,
-    embeddings: mockEmbeddings as any,
     log: mockLog,
     checkAndReconnect: mockCheckAndReconnect,
     getIndexMetadata: mockGetIndexMetadata,

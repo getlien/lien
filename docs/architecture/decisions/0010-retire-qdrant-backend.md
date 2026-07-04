@@ -4,6 +4,13 @@
 **Date**: 2026-07-02
 **Deciders**: Core Team
 
+> **Forward note (2026-07-04):** This ADR left LanceDB as the sole backend behind
+> the `VectorDBInterface` seam. [ADR-011](0011-sqlite-structural-store-fts5-lexical-search.md)
+> subsequently retired LanceDB and the embedding stack too — the same seam now
+> constructs a SQLite structural store. The reasoning below (keep the factory
+> seam, keep the cross-repo stubs, degrade gracefully on retired config values)
+> is exactly the pattern ADR-011 reused.
+
 ## Context and Problem Statement
 
 Lien's thesis is **local-first**: all code analysis, embedding, and search happen on the user's machine. LanceDB is the backend that delivers this — zero-config, local disk, no server.

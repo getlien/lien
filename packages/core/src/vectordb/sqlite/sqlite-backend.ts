@@ -28,9 +28,8 @@ const INSERT_SQL = `INSERT INTO chunks (${CHUNK_COLUMNS.join(', ')}) VALUES (${C
 ).join(', ')})`;
 
 /**
- * A row identity requires a non-empty file and non-empty content. Mirrors
- * query.ts:isValidRecord so scan paths drop empty-content rows identically to
- * LanceDB (content is always a string here — the column is NOT NULL).
+ * A row identity requires a non-empty file and non-empty content. Scan paths
+ * drop empty-content rows (content is always a string here — NOT NULL).
  */
 function isValidRecord(r: SqliteChunkRecord): boolean {
   if (!r.file || r.file.length === 0) return false;
@@ -57,14 +56,9 @@ function normalizeFileFilter(file: string | string[]): string[] {
   return cleaned;
 }
 
-function validateBatchLengths(
-  vectors: Float32Array[],
-  metadatas: ChunkMetadata[],
-  contents: string[],
-): void {
-  if (vectors.length !== metadatas.length || vectors.length !== contents.length) {
-    throw new DatabaseError('Vectors, metadatas, and contents arrays must have the same length', {
-      vectorsLength: vectors.length,
+function validateBatchLengths(metadatas: ChunkMetadata[], contents: string[]): void {
+  if (metadatas.length !== contents.length) {
+    throw new DatabaseError('Metadatas and contents arrays must have the same length', {
       metadatasLength: metadatas.length,
       contentsLength: contents.length,
     });
@@ -74,11 +68,9 @@ function validateBatchLengths(
 /**
  * SQLite + FTS5 structural backend implementing VectorDBInterface.
  *
- * Embeddings are ignored entirely: `vectors` arguments are accepted (for
- * interface parity) but never stored, and `search` runs FTS5 keyword matching
- * on the query text rather than a vector ANN. The `columns` projection is
- * accepted and ignored everywhere — there's no fat vector column to skip, so
- * full metadata is always returned (the interface doc permits this).
+ * There are no embeddings: `search` runs FTS5 keyword matching on the query
+ * text. Full chunk metadata is always returned — there's no fat vector column
+ * to project away.
  */
 export class SqliteBackend implements VectorDBInterface {
   private db: DatabaseType.Database | null = null;
@@ -90,8 +82,8 @@ export class SqliteBackend implements VectorDBInterface {
 
   constructor(projectRoot: string) {
     const repoId = extractRepoId(projectRoot);
-    // Same directory as LanceDB's table dir — the manifest and
-    // .lien-index-version file live here too and must stay put.
+    // The manifest and .lien-index-version file live in this directory
+    // too and must stay put.
     this.dbPath = path.join(getLienHome(), '.lien', 'indices', repoId);
     this.dbFilePath = path.join(this.dbPath, STRUCTURAL_DB_FILENAME);
   }
@@ -113,19 +105,13 @@ export class SqliteBackend implements VectorDBInterface {
     }
   }
 
-  async insertBatch(
-    vectors: Float32Array[],
-    metadatas: ChunkMetadata[],
-    contents: string[],
-  ): Promise<void> {
+  async insertBatch(metadatas: ChunkMetadata[], contents: string[]): Promise<void> {
     const db = this.requireDb();
-    validateBatchLengths(vectors, metadatas, contents);
+    validateBatchLengths(metadatas, contents);
     // Empty batch is a no-op.
     if (metadatas.length === 0) return;
 
-    // Single transaction, one prepared statement. No adaptive half-split retry:
-    // that existed only for LanceDB/Arrow large-batch flakiness, which SQLite
-    // doesn't have.
+    // Single transaction, one prepared statement.
     const insert = db.prepare(INSERT_SQL);
     const insertAll = db.transaction((rows: ReturnType<typeof chunkToRow>[]) => {
       for (const row of rows) insert.run(row);
@@ -133,15 +119,8 @@ export class SqliteBackend implements VectorDBInterface {
     insertAll(metadatas.map((metadata, i) => chunkToRow(contents[i], metadata)));
   }
 
-  async search(
-    _queryVector: Float32Array,
-    limit: number = 5,
-    query?: string,
-    _options: { columns?: string[] } = {},
-  ): Promise<SearchResult[]> {
+  async search(query: string, limit: number = 5): Promise<SearchResult[]> {
     const db = this.requireDb();
-    // No query text → no lexical search possible. LanceDB always had a vector,
-    // so this path has no current caller; keep it total anyway.
     if (!query || query.trim().length === 0) return [];
     return keywordSearch(db, query, limit);
   }
@@ -152,7 +131,6 @@ export class SqliteBackend implements VectorDBInterface {
     pattern?: string;
     symbolType?: 'function' | 'method' | 'class' | 'interface';
     limit?: number;
-    columns?: string[];
   }): Promise<SearchResult[]> {
     const db = this.requireDb();
     const { file, language, pattern, symbolType, limit = 100 } = options;
@@ -184,7 +162,6 @@ export class SqliteBackend implements VectorDBInterface {
     options: {
       language?: string;
       pattern?: string;
-      columns?: string[];
     } = {},
   ): Promise<SearchResult[]> {
     const db = this.requireDb();
@@ -207,7 +184,6 @@ export class SqliteBackend implements VectorDBInterface {
   async *scanPaginated(
     options: {
       pageSize?: number;
-      columns?: string[];
     } = {},
   ): AsyncGenerator<SearchResult[]> {
     const db = this.requireDb();
@@ -235,7 +211,6 @@ export class SqliteBackend implements VectorDBInterface {
     pattern?: string;
     symbolType?: 'function' | 'method' | 'class' | 'interface';
     limit?: number;
-    columns?: string[];
   }): Promise<SearchResult[]> {
     const db = this.requireDb();
     const { language, pattern, symbolType, limit = 50 } = options;
@@ -268,15 +243,13 @@ export class SqliteBackend implements VectorDBInterface {
 
   async updateFile(
     filepath: string,
-    vectors: Float32Array[],
     metadatas: ChunkMetadata[],
     contents: string[],
   ): Promise<void> {
     const db = this.requireDb();
-    validateBatchLengths(vectors, metadatas, contents);
+    validateBatchLengths(metadatas, contents);
 
-    // delete + insert in ONE transaction (an improvement over LanceDB's
-    // non-transactional two-step; same observable outcome).
+    // delete + insert in ONE transaction.
     const del = db.prepare('DELETE FROM chunks WHERE file = ?');
     const insert = db.prepare(INSERT_SQL);
     const apply = db.transaction((rows: ReturnType<typeof chunkToRow>[]) => {
@@ -286,8 +259,8 @@ export class SqliteBackend implements VectorDBInterface {
     apply(metadatas.map((metadata, i) => chunkToRow(contents[i], metadata)));
 
     // Bump the cross-process invalidation token. currentVersion is intentionally
-    // NOT bumped in-memory here — this matches LanceDB (maintenance.updateFile
-    // only writes the file); checkVersion picks the change up on its next poll.
+    // NOT bumped in-memory here — only the file is written; checkVersion picks
+    // the change up on its next poll.
     await writeVersionFile(this.dbPath);
   }
 
@@ -305,7 +278,7 @@ export class SqliteBackend implements VectorDBInterface {
     const db = this.requireDb();
     // Close the handle to release the file, remove the db + WAL/SHM sidecars,
     // then reopen a fresh empty store. Leaves .lien-index-version and the
-    // manifest untouched (LanceDB clear only removes the table dir).
+    // manifest untouched.
     db.close();
     this.db = null;
     await Promise.all(
@@ -366,21 +339,12 @@ export class SqliteBackend implements VectorDBInterface {
     return new Date(this.currentVersion).toLocaleString();
   }
 
-  async searchCrossRepo(
-    _queryVector: Float32Array,
-    _limit?: number,
-    _options?: { repoIds?: string[]; branch?: string; columns?: string[] },
-  ): Promise<SearchResult[]> {
-    return [];
-  }
-
   async scanCrossRepo(_options: {
     language?: string;
     pattern?: string;
     limit?: number;
     repoIds?: string[];
     branch?: string;
-    columns?: string[];
   }): Promise<SearchResult[]> {
     return [];
   }

@@ -1,16 +1,10 @@
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import fs from 'fs/promises';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import {
-  indexCodebase,
-  createVectorDB,
-  NullEmbeddings,
-  WorkerEmbeddings,
-  type VectorDBInterface,
-} from '@liendev/core';
+import { indexCodebase, createVectorDB, type VectorDBInterface } from '@liendev/core';
 import { createTestDir, cleanupTestDir, createTestFile } from '@liendev/core/test';
 import { createMCPServerConfig, registerMCPHandlers } from '../../src/mcp/server-config.js';
 import { createReindexStateManager } from '../../src/mcp/reindex-state-manager.js';
@@ -27,7 +21,7 @@ import type { ToolContext } from '../../src/mcp/types.js';
  * - The structural tools (get_files_context, list_functions) return correct
  *   data over the same real round trip.
  *
- * Uses `NullEmbeddings` and the default sqlite backend, so this runs in the
+ * Uses the default sqlite backend, so this runs in the
  * fast suite (no model download) — unlike test/e2e/mcp-roundtrip.test.ts.
  */
 const TIMEOUT = 30_000;
@@ -70,11 +64,8 @@ describe('Lexical FTS5 search — real MCP round trip', () => {
   let vectorDB: VectorDBInterface;
   let client: Client;
   let server: Server;
-  let workerInitSpy: ReturnType<typeof vi.spyOn>;
 
   beforeAll(async () => {
-    workerInitSpy = vi.spyOn(WorkerEmbeddings.prototype, 'initialize');
-
     fixtureDir = await createTestDir();
     for (const [name, content] of Object.entries(FIXTURE_FILES)) {
       await createTestFile(fixtureDir, name, content);
@@ -93,7 +84,6 @@ describe('Lexical FTS5 search — real MCP round trip', () => {
     const reindexStateManager = createReindexStateManager();
     const toolContext: ToolContext = {
       vectorDB,
-      embeddings: new NullEmbeddings(),
       rootDir: fixtureDir,
       log: () => {},
       checkAndReconnect: async () => {},
@@ -118,7 +108,6 @@ describe('Lexical FTS5 search — real MCP round trip', () => {
   }, TIMEOUT);
 
   afterAll(async () => {
-    workerInitSpy.mockRestore();
     await client?.close();
     await server?.close();
     // SqliteBackend owns a file handle; release it before removing the store.
@@ -129,10 +118,6 @@ describe('Lexical FTS5 search — real MCP round trip', () => {
     if (fixtureDir) {
       await cleanupTestDir(fixtureDir);
     }
-  });
-
-  it('indexed the fixture without ever initializing a real embedding worker', () => {
-    expect(workerInitSpy).not.toHaveBeenCalled();
   });
 
   it(

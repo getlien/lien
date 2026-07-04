@@ -1,15 +1,8 @@
 import fs from 'fs/promises';
 import path from 'path';
 import pLimit from 'p-limit';
-import type { EmbeddingService } from '../embeddings/types.js';
 import type { VectorDBInterface } from '../vectordb/types.js';
-import {
-  DEFAULT_CHUNK_SIZE,
-  DEFAULT_CHUNK_OVERLAP,
-  DEFAULT_CONCURRENCY,
-  EMBEDDING_MICRO_BATCH_SIZE,
-} from '../constants.js';
-import { chunkArray } from '../utils/chunk-array.js';
+import { DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP, DEFAULT_CONCURRENCY } from '../constants.js';
 import { ManifestManager } from './manifest.js';
 import type { Result } from '../utils/result.js';
 import { Ok, Err, isOk } from '../utils/result.js';
@@ -52,11 +45,10 @@ export interface IncrementalIndexOptions {
 }
 
 /**
- * Result of processing a file's content into chunks and embeddings.
+ * Result of processing a file's content into chunks.
  */
 interface ProcessFileResult {
   chunkCount: number;
-  vectors: Float32Array[];
   chunks: CodeChunk[];
   texts: string[];
 }
@@ -79,15 +71,12 @@ interface FileProcessResult {
  *
  * @param filepath - Path to the file being processed
  * @param content - File content
- * @param embeddings - Embeddings service
- * @param config - Lien configuration
  * @param verbose - Whether to log verbose output
  * @returns ProcessFileResult for non-empty files, null for empty files
  */
 async function processFileContent(
   filepath: string,
   content: string,
-  embeddings: EmbeddingService,
   verbose: boolean,
   rootDir?: string,
 ): Promise<ProcessFileResult | null> {
@@ -120,24 +109,10 @@ async function processFileContent(
     return null;
   }
 
-  // Generate embeddings for all chunks
-  // Use micro-batching to prevent event loop blocking
   const texts = chunks.map(c => c.content);
-  const vectors: Float32Array[] = [];
-
-  for (const microBatch of chunkArray(texts, EMBEDDING_MICRO_BATCH_SIZE)) {
-    const microResults = await embeddings.embedBatch(microBatch);
-    vectors.push(...microResults);
-
-    // Yield to event loop for responsiveness
-    if (texts.length > EMBEDDING_MICRO_BATCH_SIZE) {
-      await new Promise(resolve => setImmediate(resolve));
-    }
-  }
 
   return {
     chunkCount: chunks.length,
-    vectors,
     chunks,
     texts,
   };
@@ -150,14 +125,11 @@ async function processFileContent(
  *
  * @param filepath - Absolute path to the file to index
  * @param vectorDB - Initialized VectorDB instance
- * @param embeddings - Initialized embeddings service
- * @param config - Lien configuration
  * @param options - Optional settings
  */
 export async function indexSingleFile(
   filepath: string,
   vectorDB: VectorDBInterface,
-  embeddings: EmbeddingService,
   options: IncrementalIndexOptions = {},
 ): Promise<void> {
   const { verbose, rootDir } = options;
@@ -192,14 +164,8 @@ export async function indexSingleFile(
     // Read file content
     const content = await fs.readFile(absolutePath, 'utf-8');
 
-    // Process file content (chunking + embeddings) - use normalized path for storage
-    const result = await processFileContent(
-      normalizedPath,
-      content,
-      embeddings,
-      verbose || false,
-      rootDir,
-    );
+    // Process file content (chunking) - use normalized path for storage
+    const result = await processFileContent(normalizedPath, content, verbose || false, rootDir);
 
     // Get actual file mtime and compute content hash for manifest
     const stats = await fs.stat(absolutePath);
@@ -221,7 +187,6 @@ export async function indexSingleFile(
     // Non-empty file - update in database (atomic: delete old + insert new)
     await vectorDB.updateFile(
       normalizedPath,
-      result.vectors,
       result.chunks.map(c => c.metadata),
       result.texts,
     );
@@ -253,7 +218,6 @@ export async function indexSingleFile(
 async function processSingleFileForIndexing(
   filepath: string,
   normalizedPath: string,
-  embeddings: EmbeddingService,
   verbose: boolean,
   rootDir?: string,
 ): Promise<Result<FileProcessResult, string>> {
@@ -270,7 +234,7 @@ async function processSingleFileForIndexing(
     const contentHash = await computeContentHash(absolutePath);
 
     // Process content using normalized path (for storage)
-    const result = await processFileContent(normalizedPath, content, embeddings, verbose, rootDir);
+    const result = await processFileContent(normalizedPath, content, verbose, rootDir);
 
     return Ok({
       filepath: normalizedPath, // Store normalized path
@@ -335,7 +299,6 @@ async function handleNonEmptyFile(
 
   // Insert new chunks
   await vectorDB.insertBatch(
-    processResult.vectors,
     processResult.chunks.map(c => c.metadata),
     processResult.texts,
   );
@@ -429,14 +392,12 @@ async function applyFileResult(
  *
  * @param filepaths - Array of absolute file paths to index
  * @param vectorDB - Initialized VectorDB instance
- * @param embeddings - Initialized embeddings service
  * @param options - Optional settings
  * @returns Number of successfully processed files (indexed or deleted)
  */
 export async function indexMultipleFiles(
   filepaths: string[],
   vectorDB: VectorDBInterface,
-  embeddings: EmbeddingService,
   options: IncrementalIndexOptions = {},
 ): Promise<number> {
   const { verbose, rootDir } = options;
@@ -462,7 +423,6 @@ export async function indexMultipleFiles(
       const result = await processSingleFileForIndexing(
         filepath,
         normalizedPath,
-        embeddings,
         verbose || false,
         rootDir,
       );

@@ -2,6 +2,12 @@
 
 This document provides a high-level overview of Lien's architecture, showing the main components and their relationships.
 
+Lien is a **code-intelligence layer** for AI agents. Its storage is a local SQLite
+database: structural queries (dependents, complexity, file context, symbol lookup)
+are served with indexed SQL, and discovery is served with SQLite FTS5/BM25 lexical
+search. There are no embeddings and no vector database — see
+[ADR-011](decisions/0011-sqlite-structural-store-fts5-lexical-search.md).
+
 ## Component Architecture
 
 ```mermaid
@@ -19,7 +25,7 @@ graph TB
     subgraph "MCP Server Layer"
         MCP[MCP Server]
         TOOLS[MCP Tools]
-        SEMANTIC[search_code]
+        SEARCH[search_code]
         SIMILAR[find_similar]
         CONTEXT[get_files_context]
         LIST[list_functions]
@@ -42,12 +48,10 @@ graph TB
     end
 
     subgraph "Data Layer"
-        EMBEDDINGS[Embeddings Service]
-        VECTORDB[VectorDB Factory]
-        QUERY[Query Operations]
-        BATCHINS[Batch Insert]
-        MAINT[Maintenance Ops]
-        CACHE[Embedding Cache]
+        FACTORY[VectorDB Factory]
+        SQLITE[SqliteBackend]
+        STRUCT[Structural queries<br/>indexed SQL]
+        FTS[FTS5 lexical search<br/>BM25]
     end
 
     subgraph "Optional Services"
@@ -57,8 +61,7 @@ graph TB
     end
 
     subgraph "External Dependencies"
-        TRANSFORMERS[transformers.js]
-        LANCEDB[LanceDB]
+        SQLITELIB[better-sqlite3]
         GITCMD[Git CLI]
     end
 
@@ -76,26 +79,24 @@ graph TB
     INDEX --> INDEXER
     SERVE --> MCP
     STATUS --> CONFIG
-    STATUS --> VECTORDB
+    STATUS --> FACTORY
     CONFIGCMD --> GLOBALCONFIG
     COMPLX --> COMPLEXANALYZER
 
     %% MCP to Core
     MCP --> TOOLS
-    TOOLS --> SEMANTIC
+    TOOLS --> SEARCH
     TOOLS --> SIMILAR
     TOOLS --> CONTEXT
     TOOLS --> LIST
     TOOLS --> DEPENDENTS
     TOOLS --> COMPLEXITY
-    SEMANTIC --> EMBEDDINGS
-    SEMANTIC --> VECTORDB
-    SIMILAR --> EMBEDDINGS
-    SIMILAR --> VECTORDB
-    CONTEXT --> VECTORDB
-    LIST --> VECTORDB
-    DEPENDENTS --> VECTORDB
-    COMPLEXITY --> VECTORDB
+    SEARCH --> FACTORY
+    SIMILAR --> FACTORY
+    CONTEXT --> FACTORY
+    LIST --> FACTORY
+    DEPENDENTS --> FACTORY
+    COMPLEXITY --> FACTORY
 
     %% Core Services Relationships
     INDEXER --> CONFIG
@@ -103,8 +104,7 @@ graph TB
     INDEXER --> CHUNKER
     INDEXER --> SYMBOLS
     INDEXER --> TESTASSOC
-    INDEXER --> EMBEDDINGS
-    INDEXER --> VECTORDB
+    INDEXER --> FACTORY
     INDEXER --> MANIFEST
     INDEXER --> COMPLEXANALYZER
     SCANNER --> ECOSYSTEM
@@ -112,14 +112,11 @@ graph TB
     AST --> TRAVERSER
 
     %% Data Layer
-    EMBEDDINGS --> CACHE
-    EMBEDDINGS --> TRANSFORMERS
-    VECTORDB --> QUERY
-    VECTORDB --> BATCHINS
-    VECTORDB --> MAINT
-    QUERY --> LANCEDB
-    BATCHINS --> LANCEDB
-    MAINT --> LANCEDB
+    FACTORY --> SQLITE
+    SQLITE --> STRUCT
+    SQLITE --> FTS
+    STRUCT --> SQLITELIB
+    FTS --> SQLITELIB
 
     %% Optional Services
     MCP --> GIT
@@ -128,7 +125,7 @@ graph TB
     WATCHER --> INDEXER
 
     %% Lien Review — separate product surface, shares only the parser
-    %% package (AST + complexity). Does not depend on core/embeddings/vectordb.
+    %% package (AST + complexity). Does not depend on core.
     GHACTION --> REVIEWENGINE
     REVIEWENGINE --> COMPLEXITYCHECK
     REVIEWENGINE --> AGENTREVIEW
@@ -144,11 +141,11 @@ graph TB
     classDef reviewClass fill:#ede7f6,stroke:#311b92,stroke-width:2px
 
     class CLI,INIT,INDEX,SERVE,STATUS,CONFIGCMD,COMPLX cliClass
-    class MCP,TOOLS,SEMANTIC,SIMILAR,CONTEXT,LIST,DEPENDENTS,COMPLEXITY mcpClass
+    class MCP,TOOLS,SEARCH,SIMILAR,CONTEXT,LIST,DEPENDENTS,COMPLEXITY mcpClass
     class CONFIG,GLOBALCONFIG,INDEXER,SCANNER,CHUNKER,AST,TRAVERSER,SYMBOLS,TESTASSOC,MANIFEST,COMPLEXANALYZER coreClass
-    class EMBEDDINGS,VECTORDB,QUERY,BATCHINS,MAINT,CACHE dataClass
+    class FACTORY,SQLITE,STRUCT,FTS dataClass
     class GIT,WATCHER,ECOSYSTEM optionalClass
-    class TRANSFORMERS,LANCEDB,GITCMD externalClass
+    class SQLITELIB,GITCMD externalClass
     class GHACTION,REVIEWENGINE,COMPLEXITYCHECK,AGENTREVIEW reviewClass
 ```
 
@@ -157,7 +154,7 @@ graph TB
 ### CLI Layer
 - **CLI Commands**: Entry points for user interaction via command line
 - **lien init**: Initializes configuration and detects ecosystem presets
-- **lien index**: Indexes the codebase into the vector database
+- **lien index**: Indexes the codebase into the SQLite structural store
 - **lien serve**: Starts the MCP server for AI assistant integration
 - **lien status**: Shows current index status and configuration
 - **lien config**: Manages global configuration (`set`, `get`, `list`)
@@ -166,8 +163,8 @@ graph TB
 ### MCP Server Layer
 - **MCP Server**: Implements Model Context Protocol for AI assistant communication
 - **MCP Tools**: Six tools exposed to AI assistants
-  - `search_code`: Full-text (BM25) keyword code search
-  - `find_similar`: Find structurally similar code patterns
+  - `search_code`: Full-text (FTS5/BM25) keyword search — lexical, not meaning-based
+  - `find_similar`: Find lexically similar code (BM25 over a snippet's tokens)
   - `get_files_context`: Get file context with dependencies and test associations (supports batch)
   - `list_functions`: Fast symbol lookup by naming pattern
   - `get_dependents`: Reverse dependency lookup for impact analysis
@@ -180,7 +177,6 @@ graph TB
 - **File Scanner**: Scans codebase respecting .gitignore and ecosystem preset boundaries
 - **Code Chunker**: Splits files using AST-based semantic chunking or line-based fallback
 - **AST Parser**: Parses code into Abstract Syntax Trees using Tree-sitter
-- **Language Registry**: Central registry of per-language definitions (grammar, traverser, extractor, complexity data)
 - **Language Traversers**: Language-specific logic for traversing AST nodes (Strategy Pattern)
 - **Symbol Extractor**: Extracts functions, classes, and interfaces from code
 - **Test Association Manager**: Links test files to source files via convention and import analysis
@@ -188,21 +184,18 @@ graph TB
 - **Complexity Analyzer**: Computes cyclomatic, cognitive, and Halstead complexity metrics per function
 
 ### Data Layer
-- **Embeddings Service**: Generates semantic embeddings from code
-- **Embedding Cache**: LRU cache for frequently searched queries
-- **Vector Database**: Main VectorDB class orchestrating operations
-  - **Query Operations**: Semantic search, filtering, and symbol queries
-  - **Batch Insert**: Batch vector insertion with retry logic
-  - **Maintenance Ops**: CRUD operations (clear, delete, update)
+- **VectorDB Factory** (`createVectorDB`): Constructs the storage backend behind the `VectorDBInterface` seam. Always builds `SqliteBackend` today; the seam lets a future backend be introduced without touching call sites.
+- **SqliteBackend**: A single SQLite database (`better-sqlite3`) holding the `chunks` table and its FTS5 index.
+  - **Structural queries**: `get_files_context`, `get_dependents`, `list_functions`, and complexity scans run as indexed SQL over `chunks`.
+  - **FTS5 lexical search**: `chunks_fts` (external-content, `porter unicode61`) over symbol name, identifier-split symbol tokens, and content; ranked with `bm25()`.
 
 ### Optional Services
 - **Git State Tracker**: Monitors repository changes for incremental indexing
 - **File Watcher**: Real-time file change detection (opt-in)
-- **Ecosystem Presets**: Auto-detects project type (Node.js, PHP/Laravel, Python, Rust) and applies include/exclude patterns (replaces former Framework Detector — see [ADR-007](decisions/0007-replace-framework-detection-with-ecosystem-presets.md))
+- **Ecosystem Presets**: Auto-detects project type (Node.js, PHP/Laravel, Python, Rust, …) and applies include/exclude patterns (replaces the former Framework Detector — see [ADR-007](decisions/0007-replace-framework-detection-with-ecosystem-presets.md))
 
 ### External Dependencies
-- **transformers.js**: Local embedding generation (all-MiniLM-L6-v2 model, runs in worker thread — see [ADR-008](decisions/0008-keep-transformers-js-worker-embeddings.md))
-- **LanceDB**: Vector database for semantic search (local, zero-config)
+- **better-sqlite3**: Synchronous SQLite binding — the storage engine (~1.8MB native install)
 - **Git CLI**: For repository state tracking
 
 ### Lien Review (packages/review + packages/action)
@@ -213,18 +206,18 @@ Lien Review is a separate product surface from the CLI/MCP pipeline above: a sel
 - **Complexity Plugin**: Flags new/worsened cyclomatic, cognitive, and Halstead complexity violations on the diff.
 - **Agent Bug/Summary Review**: LLM-driven review (OpenRouter or Anthropic) for correctness bugs, architectural concerns, and a PR summary.
 
-Critically, `packages/review` depends on **`@liendev/parser` only** — it does not import `@liendev/core`, so it carries none of the embeddings/vectordb/LanceDB dependency weight (this is the point of [ADR-009](decisions/0009-extract-parser-package.md)). See [`packages/action/README.md`](../../packages/action/README.md) for the full setup guide, or the [Lien Review site page](../../packages/site/docs/guide/lien-review.md).
+Critically, `packages/review` depends on **`@liendev/parser` only** — it does not import `@liendev/core`, so it carries none of the storage-layer dependency weight (this is the point of [ADR-009](decisions/0009-extract-parser-package.md)). See [`packages/action/README.md`](../../packages/action/README.md) for the full setup guide, or the [Lien Review site page](../../packages/site/docs/guide/lien-review.md).
 
-**Retired**: the earlier hosted-SaaS shape for review — `packages/runner` (a NATS-based review runner) and `platform/` (a Laravel 12 control plane + its K8s infra) — was removed in favor of this self-hostable Action. There's no ADR for this pivot (it predates the ADR log's review coverage); see the retirement commit for the full rationale.
+**Retired**: the earlier hosted-SaaS shape for review — `packages/runner` (a NATS-based review runner) and `platform/` (a Laravel 12 control plane + its K8s infra) — was removed in favor of this self-hostable Action.
 
 ## Data Flow
 
 The system follows a clear data flow pattern:
 
 1. **Configuration** → Read by all services for settings (per-project via ConfigService, global via GlobalConfig)
-2. **Files** → Scanner → Chunker → Complexity Metrics → Embeddings → Vector DB
-3. **Query** → Embeddings → Vector DB → Search Results
-4. **Git Changes** → Git Tracker → Incremental Indexer → Vector DB
+2. **Files** → Scanner → Chunker → Complexity Metrics → SQLite store
+3. **Query** → Structural SQL or FTS5 MATCH → Ranked/looked-up results
+4. **Git Changes** → Git Tracker → Incremental Indexer → SQLite store (FTS5 kept in sync by triggers)
 
 ## Design Principles
 
@@ -232,14 +225,13 @@ The system follows a clear data flow pattern:
 Each component has one clear purpose. For example:
 - Scanner only finds files
 - Chunker only splits content
-- Embeddings only generates vectors
+- SqliteBackend only stores and queries chunks
 
 ### Dependency Injection
 Services accept dependencies as parameters, making testing easy:
 ```typescript
-await indexCodebase({ 
-  vectorDB,      // Injected
-  embeddings,    // Injected
+await indexCodebase({
+  vectorDB,      // Injected (SqliteBackend behind the interface)
   config         // Injected
 });
 ```
@@ -247,7 +239,7 @@ await indexCodebase({
 ### Layered Architecture
 - **CLI/MCP Layer**: User/AI interface
 - **Core Layer**: Business logic
-- **Data Layer**: Storage and retrieval
+- **Data Layer**: Storage and retrieval (SQLite)
 - **External Layer**: Third-party services
 
 ### Optional Features
@@ -258,58 +250,55 @@ Non-essential features (git tracking, file watching) are optional and can be dis
 - **Language**: TypeScript (ESM)
 - **CLI**: Commander.js
 - **MCP**: @modelcontextprotocol/sdk
-- **Vector DB**: LanceDB (local)
-- **Embeddings**: @huggingface/transformers v4 (all-MiniLM-L6-v2, worker thread)
+- **Storage**: SQLite via `better-sqlite3` (structural store)
+- **Search**: SQLite FTS5 with BM25 ranking (`porter unicode61` tokenizer)
+- **Parsing**: Tree-sitter (via `@liendev/parser`)
 - **Testing**: Vitest
 - **Build**: tsup
 
 ## Performance Characteristics
 
 - **Concurrency**: Configurable parallel file processing (default: 4)
-- **Batch Processing**: Embeddings processed in batches (default: 50)
-- **Caching**: LRU cache for embedding queries
-- **Lazy Loading**: Embedding model loads on first use
-- **Incremental Updates**: Only modified files are reindexed
+- **File context lookup**: sub-millisecond (indexed `WHERE file IN (...)`)
+- **No model load**: indexing and serving start immediately — nothing to download
+- **Incremental Updates**: Only modified files are reindexed; FTS5 stays in sync via triggers
 
 ## Scaling Considerations
 
 ### Current Limits
 - Single machine, single process
-- Embeddings generated locally (no API calls)
-- Vector database stored on local disk (LanceDB)
+- All analysis and storage are local (SQLite on local disk)
 
 ### Current Scaling Options
-- **Single-repo, local-first**: LanceDB is the only backend (the Qdrant backend was retired — see [ADR-0010](decisions/0010-retire-qdrant-backend.md))
+- **Single-repo, local-first**: `SqliteBackend` is the only backend (LanceDB + embeddings were removed — see [ADR-011](decisions/0011-sqlite-structural-store-fts5-lexical-search.md); Qdrant was retired earlier — see [ADR-010](decisions/0010-retire-qdrant-backend.md))
 - **VectorDB factory pattern**: The `createVectorDB` factory and `VectorDBInterface` seam are retained so an alternative backend can be reintroduced without touching call sites
 
 ### Future Scaling Options
-- Multiple embedding models
+- Opt-in `sqlite-vec` semantic tier (pending dogfooding signal; see ADR-011)
 - Cloud sync (optional)
 - Team collaboration features
 
 ## Recent Architectural Improvements
 
+### SQLite Structural Store + FTS5 (Replaced LanceDB + Embeddings)
+- **Removed**: The transformers.js embedding stack and the LanceDB vector database, and all code that threaded an embedding service through indexing
+- **Added**: A single SQLite store serving structural queries with indexed SQL and discovery with FTS5/BM25 lexical search
+- **Benefit**: No ~100MB model download, ~52× smaller native install, dramatically faster structural queries, one backend tested in CI
+- **Details**: See [ADR-011](decisions/0011-sqlite-structural-store-fts5-lexical-search.md)
+
 ### Qdrant Backend Retirement
 - **Removed**: The experimental Qdrant vector DB backend, its config keys, and its untested-in-CI test suite
-- **Kept**: The `VectorDBInterface` seam and `createVectorDB` factory, so a future backend can be reintroduced without touching call sites
-- **Benefit**: One backend (LanceDB), fully tested in CI; three latent bugs eliminated at the root
+- **Kept**: The `VectorDBInterface` seam and `createVectorDB` factory
 - **Details**: See [ADR-010](decisions/0010-retire-qdrant-backend.md)
 
 ### Parser Package Extraction
 - **Extracted**: `@liendev/parser` from `@liendev/core` — all AST parsing, chunking, complexity, and scanning code
-- **Benefit**: `@liendev/review` (and the Lien Review GitHub Action) now depends on parsing only, dropping ~100MB of embeddings/vectordb/LanceDB dependency weight it never used
+- **Benefit**: `@liendev/review` (and the Lien Review GitHub Action) now depends on parsing only
 - **Details**: See [ADR-009](decisions/0009-extract-parser-package.md)
 
 ### Ecosystem Presets (Replaced Framework Detection)
 - **Replaced**: Rigid per-framework detection with lightweight ecosystem presets
-- **Benefit**: Zero-config auto-detection of project type; simpler codebase without framework-specific code
 - **Details**: See [ADR-007](decisions/0007-replace-framework-detection-with-ecosystem-presets.md)
-
-### Embedding Backend Simplification
-- **Decision**: Keep transformers.js WorkerEmbeddings as sole embedding backend
-- **Removed**: Unused `embeddings.device` config option (cpu/gpu)
-- **Benefit**: Simpler config, worker thread isolation, no external API dependencies
-- **Details**: See [ADR-008](decisions/0008-keep-transformers-js-worker-embeddings.md)
 
 ### Consolidated Language Files with Import Extractors
 - **Added**: Import extractors alongside export extractors in per-language files
@@ -319,30 +308,18 @@ Non-essential features (git tracking, file watching) are optional and can be dis
 ### AST-Based Semantic Chunking
 - **Replaced**: Line-based chunking with fixed overlap
 - **With**: Tree-sitter AST parsing for semantic boundaries
-- **Benefit**: Functions never split, 30-35% better search quality
 - **Details**: See [ADR-003](decisions/0003-ast-based-chunking.md)
 
 ### Language-Agnostic Traversal (Strategy Pattern)
 - **Extracted**: Language-specific AST logic into traverser classes
-- **Benefit**: Adding new languages (Python, Go, Rust) now takes 2-3 hours instead of 2 days
 - **Details**: See [ADR-002](decisions/0002-strategy-pattern-ast-traversal.md)
 
 ### Per-Language Definition Pattern
-- **Consolidated**: Scattered language data (12-16 files) into single self-contained per-language files
-- **Result**: Each language is one file in `languages/` containing traverser, extractors, and definition. Existing modules consume from a central registry.
-- **Benefit**: Adding a new AST language requires 2 files (definition + registry entry) instead of 12-16
+- **Consolidated**: Scattered language data into single self-contained per-language files
 - **Details**: See [ADR-005](decisions/0005-per-language-definition-pattern.md)
 
-### VectorDB Module Split
-- **Split**: Monolithic 1,119-line `lancedb.ts` into focused modules
-- **Result**: `query.ts` (571L), `batch-insert.ts` (161L), `maintenance.ts` (89L), `lancedb.ts` (267L orchestrator)
-- **Benefit**: Better testability, single responsibility, no AST parsing errors
-- **Details**: See [ADR-001](decisions/0001-split-vectordb-module.md)
-
 ### Test Association Detection
-- **Added**: Automatic detection of test-source relationships
-- **Method**: Hybrid convention-based + import analysis
-- **Accuracy**: 95% for 12+ test frameworks across 7+ languages
+- **Added**: Automatic detection of test-source relationships (convention + import analysis)
 - **Details**: See [ADR-004](decisions/0004-test-association-detection.md)
 
 ## Architectural Decision Records
@@ -355,7 +332,7 @@ All major architectural decisions are documented in [docs/architecture/decisions
 - [ADR-005: Per-Language Definition Pattern](decisions/0005-per-language-definition-pattern.md)
 - [ADR-006: Consolidated Language Files with Import Extractors](decisions/0006-consolidated-language-files-with-import-extractors.md)
 - [ADR-007: Replace Framework Detection with Ecosystem Presets](decisions/0007-replace-framework-detection-with-ecosystem-presets.md)
-- [ADR-008: Keep transformers.js WorkerEmbeddings as Sole Embedding Backend](decisions/0008-keep-transformers-js-worker-embeddings.md)
+- [ADR-008: Keep transformers.js WorkerEmbeddings as Sole Embedding Backend](decisions/0008-keep-transformers-js-worker-embeddings.md) (superseded by ADR-011)
 - [ADR-009: Extract `@liendev/parser` from `@liendev/core`](decisions/0009-extract-parser-package.md)
 - [ADR-010: Retire the Qdrant Backend](decisions/0010-retire-qdrant-backend.md)
-
+- [ADR-011: Replace LanceDB + Embeddings with a SQLite Structural Store and FTS5 Lexical Search](decisions/0011-sqlite-structural-store-fts5-lexical-search.md)

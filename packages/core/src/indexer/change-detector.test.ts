@@ -5,11 +5,10 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { detectChanges } from './change-detector.js';
 import { normalizeToRelativePath } from './incremental.js';
-import { VectorDB } from '../vectordb/lancedb.js';
+import { SqliteBackend } from '../vectordb/sqlite/sqlite-backend.js';
 import type { IndexManifest } from './manifest.js';
 import { ManifestManager } from './manifest.js';
 import { createTestDir, cleanupTestDir } from '../test/helpers/test-db.js';
-import { defaultConfig } from '../config/schema.js';
 import { INDEX_FORMAT_VERSION } from '../constants.js';
 import { getPackageVersion } from '../utils/version.js';
 
@@ -17,7 +16,7 @@ const execAsync = promisify(exec);
 
 describe('Change Detector', () => {
   let testDir: string;
-  let vectorDB: VectorDB;
+  let vectorDB: SqliteBackend;
   let manifest: ManifestManager;
 
   /**
@@ -43,7 +42,7 @@ describe('Change Detector', () => {
   beforeEach(async () => {
     testDir = await createTestDir();
 
-    vectorDB = new VectorDB(testDir);
+    vectorDB = new SqliteBackend(testDir);
     await vectorDB.initialize();
 
     // Use vectorDB.dbPath which is where detectChanges will look for the manifest
@@ -60,7 +59,7 @@ describe('Change Detector', () => {
       await fs.writeFile(path.join(testDir, 'file1.ts'), 'export const a = 1;');
       await fs.writeFile(path.join(testDir, 'file2.ts'), 'export const b = 2;');
 
-      const result = await detectChanges(testDir, vectorDB, defaultConfig);
+      const result = await detectChanges(testDir, vectorDB);
 
       expect(result.reason).toBe('full');
       expect(result.added.length).toBe(2);
@@ -90,7 +89,7 @@ describe('Change Detector', () => {
       const file2 = path.join(testDir, 'file2.ts');
       await fs.writeFile(file2, 'export const b = 2;');
 
-      const result = await detectChanges(testDir, vectorDB, defaultConfig);
+      const result = await detectChanges(testDir, vectorDB);
 
       expect(result.reason).toBe('mtime');
       expect(result.added).toContain(toRelative(file2));
@@ -115,7 +114,7 @@ describe('Change Detector', () => {
       await new Promise(resolve => setTimeout(resolve, 10));
       await fs.writeFile(file1, 'export const a = 2;'); // Modified
 
-      const result = await detectChanges(testDir, vectorDB, defaultConfig);
+      const result = await detectChanges(testDir, vectorDB);
 
       expect(result.reason).toBe('mtime');
       expect(result.modified).toContain(toRelative(file1));
@@ -150,7 +149,7 @@ describe('Change Detector', () => {
       // Delete file2
       await fs.unlink(file2);
 
-      const result = await detectChanges(testDir, vectorDB, defaultConfig);
+      const result = await detectChanges(testDir, vectorDB);
 
       expect(result.reason).toBe('mtime');
       expect(result.deleted).toContain(toRelative(file2));
@@ -186,7 +185,7 @@ describe('Change Detector', () => {
       const file3 = path.join(testDir, 'file3.ts');
       await fs.writeFile(file3, 'export const c = 3;'); // Added
 
-      const result = await detectChanges(testDir, vectorDB, defaultConfig);
+      const result = await detectChanges(testDir, vectorDB);
 
       expect(result.reason).toBe('mtime');
       expect(result.modified).toContain(toRelative(file1));
@@ -246,7 +245,7 @@ describe('Change Detector', () => {
       await execAsync('git add .', { cwd: testDir });
       await execAsync('git commit -m "Feature changes"', { cwd: testDir });
 
-      const result = await detectChanges(testDir, vectorDB, defaultConfig);
+      const result = await detectChanges(testDir, vectorDB);
 
       expect(result.reason).toBe('git-state-changed');
       expect(result.modified).toContain(toRelative(file1)); // Should detect file1 as modified
@@ -297,7 +296,7 @@ describe('Change Detector', () => {
       await execAsync('git add .', { cwd: testDir });
       await execAsync('git commit -m "Delete file2"', { cwd: testDir });
 
-      const result = await detectChanges(testDir, vectorDB, defaultConfig);
+      const result = await detectChanges(testDir, vectorDB);
 
       expect(result.reason).toBe('git-state-changed');
       expect(result.deleted).toContain(toRelative(file2));
@@ -341,7 +340,7 @@ describe('Change Detector', () => {
       await execAsync('git add .', { cwd: testDir });
       await execAsync('git commit -m "Modify file1"', { cwd: testDir });
 
-      const result = await detectChanges(testDir, vectorDB, defaultConfig);
+      const result = await detectChanges(testDir, vectorDB);
 
       expect(result.reason).toBe('git-state-changed');
       expect(result.modified.length).toBe(1); // Only 1 file modified
@@ -382,7 +381,7 @@ describe('Change Detector', () => {
       const file2 = path.join(testDir, 'file2.ts');
       await fs.writeFile(file2, 'export const b = 2;');
 
-      const result = await detectChanges(testDir, vectorDB, defaultConfig);
+      const result = await detectChanges(testDir, vectorDB);
 
       // Should fall back to full reindex when git diff fails
       expect(result.reason).toBe('git-state-changed');
@@ -426,7 +425,7 @@ describe('Change Detector', () => {
       const file3 = path.join(testDir, 'file3.ts');
       await fs.writeFile(file3, 'export const c = 3;');
 
-      const result = await detectChanges(testDir, vectorDB, defaultConfig);
+      const result = await detectChanges(testDir, vectorDB);
 
       expect(result.reason).toBe('git-state-changed');
       expect(result.added).toContain(toRelative(file2)); // From git diff
@@ -436,7 +435,7 @@ describe('Change Detector', () => {
 
   describe('Edge cases', () => {
     it('should handle empty project', async () => {
-      const result = await detectChanges(testDir, vectorDB, defaultConfig);
+      const result = await detectChanges(testDir, vectorDB);
 
       expect(result.reason).toBe('full');
       expect(result.added.length).toBe(0);
@@ -451,7 +450,7 @@ describe('Change Detector', () => {
       const file1 = path.join(testDir, 'file1.ts');
       await fs.writeFile(file1, 'export const a = 1;');
 
-      const result = await detectChanges(testDir, vectorDB, defaultConfig);
+      const result = await detectChanges(testDir, vectorDB);
 
       expect(result.added).toContain(toRelative(file1));
     });

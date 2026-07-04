@@ -36,7 +36,7 @@ vi.mock('@liendev/parser', () => ({
 
 import { setupGitDetection } from './git-detection.js';
 import type { FileWatcher } from '../watcher/index.js';
-import type { VectorDBInterface, EmbeddingService } from '@liendev/core';
+import type { VectorDBInterface } from '@liendev/core';
 
 function makeReindexStateManager() {
   return {
@@ -88,7 +88,6 @@ describe('setupGitDetection — poll gate', () => {
     const result = await setupGitDetection(
       '/tmp/fake-repo',
       {} as VectorDBInterface,
-      {} as EmbeddingService,
       () => {},
       makeReindexStateManager(),
       fileWatcher,
@@ -103,7 +102,6 @@ describe('setupGitDetection — poll gate', () => {
     const result = await setupGitDetection(
       '/tmp/fake-repo',
       {} as VectorDBInterface,
-      {} as EmbeddingService,
       () => {},
       makeReindexStateManager(),
       null,
@@ -119,7 +117,6 @@ describe('setupGitDetection — poll gate', () => {
     const result = await setupGitDetection(
       '/tmp/not-a-repo',
       {} as VectorDBInterface,
-      {} as EmbeddingService,
       () => {},
       makeReindexStateManager(),
       { watchGit: vi.fn() } as unknown as FileWatcher,
@@ -151,7 +148,6 @@ describe('setupGitDetection — poll gate', () => {
       const result = await setupGitDetection(
         '/tmp/fake-repo',
         {} as VectorDBInterface,
-        {} as EmbeddingService,
         () => {},
         reindexStateManager,
         { watchGit: vi.fn() } as unknown as FileWatcher,
