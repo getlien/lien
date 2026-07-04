@@ -1,6 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 // Mock @liendev/core
+//
+// `detectLinkedWorktree` and `resolveIndexStrategy` are mocked here (not left
+// to the `...actual` spread) because `detectLinkedWorktree` shells out to real
+// `git` — running the actual implementation in tests would make status.test.ts
+// behave differently depending on whether it happens to run inside a linked
+// worktree (true for e.g. Claude Code agent worktrees). Default to "not a
+// worktree" so every pre-existing test keeps seeing today's output unchanged.
 vi.mock('@liendev/core', async () => {
   const actual = await vi.importActual<typeof import('@liendev/core')>('@liendev/core');
   return {
@@ -10,6 +17,8 @@ vi.mock('@liendev/core', async () => {
     getCurrentCommit: vi.fn().mockResolvedValue('abc12345def67890'),
     readVersionFile: vi.fn().mockResolvedValue(0),
     loadGlobalConfig: vi.fn().mockResolvedValue({ backend: 'sqlite' }),
+    detectLinkedWorktree: vi.fn().mockResolvedValue({ isLinkedWorktree: false, mainRoot: null }),
+    resolveIndexStrategy: vi.fn().mockResolvedValue({ mode: 'standalone' }),
   };
 });
 
@@ -42,6 +51,8 @@ import {
   getCurrentCommit,
   readVersionFile,
   loadGlobalConfig,
+  detectLinkedWorktree,
+  resolveIndexStrategy,
 } from '@liendev/core';
 import fs from 'fs/promises';
 
@@ -55,10 +66,13 @@ describe('statusCommand', () => {
     vi.mocked(fs.readdir).mockResolvedValue([]);
     vi.mocked(fs.readFile).mockRejectedValue(new Error('ENOENT'));
     vi.mocked(loadGlobalConfig).mockResolvedValue({ backend: 'sqlite' });
+    vi.mocked(detectLinkedWorktree).mockResolvedValue({ isLinkedWorktree: false, mainRoot: null });
+    vi.mocked(resolveIndexStrategy).mockResolvedValue({ mode: 'standalone' });
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    delete process.env.LIEN_WORKTREE_STANDALONE;
   });
 
   it('should show "Not indexed" for project without index', async () => {
@@ -211,5 +225,83 @@ describe('statusCommand', () => {
 
     const allOutput = consoleLogSpy.mock.calls.flat().join(' ');
     expect(allOutput).toContain('3');
+  });
+
+  describe('worktree-aware indexing status', () => {
+    it('should not show a Worktree section in a normal checkout', async () => {
+      // beforeEach already defaults detectLinkedWorktree to { isLinkedWorktree: false }
+      await statusCommand();
+
+      const allOutput = consoleLogSpy.mock.calls.flat().join(' ');
+      expect(allOutput).not.toContain('Worktree:');
+    });
+
+    it('should report overlay mode with base and overlay index locations', async () => {
+      vi.mocked(detectLinkedWorktree).mockResolvedValue({
+        isLinkedWorktree: true,
+        mainRoot: '/repo/main',
+      });
+      vi.mocked(resolveIndexStrategy).mockResolvedValue({
+        mode: 'overlay',
+        mainRoot: '/repo/main',
+        baseIndexDir: '/lien-home/.lien/indices/main-repo-id',
+        overlayIndexDir: '/lien-home/.lien/indices/worktree-repo-id',
+      });
+      vi.mocked(fs.stat).mockResolvedValue({
+        mtime: new Date('2025-01-01'),
+        isDirectory: () => true,
+      } as any);
+      vi.mocked(fs.readdir).mockResolvedValue(['a', 'b'] as any);
+
+      await statusCommand();
+
+      const allOutput = consoleLogSpy.mock.calls.flat().join(' ');
+      expect(allOutput).toContain('Worktree:');
+      expect(allOutput).toContain('Overlay');
+      expect(allOutput).toContain('/repo/main');
+      expect(allOutput).toContain('Base index:');
+      expect(allOutput).toContain('/lien-home/.lien/indices/main-repo-id');
+      expect(allOutput).toContain('Found');
+      expect(allOutput).toContain('Overlay index:');
+      expect(allOutput).toContain('/lien-home/.lien/indices/worktree-repo-id');
+    });
+
+    it('should report standalone mode with the reason when the main checkout has no usable index', async () => {
+      vi.mocked(detectLinkedWorktree).mockResolvedValue({
+        isLinkedWorktree: true,
+        mainRoot: '/repo/main',
+      });
+      vi.mocked(resolveIndexStrategy).mockResolvedValue({ mode: 'standalone' });
+      vi.mocked(fs.stat).mockRejectedValue(new Error('ENOENT'));
+
+      await statusCommand();
+
+      const allOutput = consoleLogSpy.mock.calls.flat().join(' ');
+      expect(allOutput).toContain('Worktree:');
+      expect(allOutput).toContain('Standalone');
+      expect(allOutput).toContain('main checkout has no index yet');
+      expect(allOutput).toContain('/repo/main');
+      expect(allOutput).toContain('Base index:');
+      expect(allOutput).toContain('Not found');
+      expect(allOutput).not.toContain('Escape hatch:');
+    });
+
+    it('should report the LIEN_WORKTREE_STANDALONE escape hatch when it forced standalone mode', async () => {
+      process.env.LIEN_WORKTREE_STANDALONE = '1';
+      vi.mocked(detectLinkedWorktree).mockResolvedValue({
+        isLinkedWorktree: true,
+        mainRoot: '/repo/main',
+      });
+      vi.mocked(resolveIndexStrategy).mockResolvedValue({ mode: 'standalone' });
+
+      await statusCommand();
+
+      const allOutput = consoleLogSpy.mock.calls.flat().join(' ');
+      expect(allOutput).toContain('Worktree:');
+      expect(allOutput).toContain('Standalone');
+      expect(allOutput).toContain('escape hatch forced standalone');
+      expect(allOutput).toContain('Escape hatch:');
+      expect(allOutput).toContain('LIEN_WORKTREE_STANDALONE=1');
+    });
   });
 });
