@@ -139,13 +139,56 @@ Lien tracks four complementary complexity metrics:
 
 All metrics are calculated during indexing using Tree-sitter AST parsing. Cognitive complexity is based on [SonarSource's specification](https://www.sonarsource.com/docs/CognitiveComplexity.pdf), Halstead metrics are based on Maurice Halstead's "Elements of Software Science" (1977).
 
+## Git Worktree Support
+
+A linked git worktree (`git worktree add`) shares the main checkout's index
+instead of building its own full copy. When Lien's root is a linked worktree,
+it opens the main checkout's index as a read-only **base** and stores only a
+small **overlay** at the worktree's own index location — chunk rows for
+whatever files differ from the base (edited or new), plus a small "mask" that
+suppresses base rows for files the worktree changed or deleted. Reads merge
+the two: an unchanged file resolves from the base, a changed or new file
+resolves from the overlay, and a file deleted in the worktree resolves from
+neither.
+
+This is automatic — `lien index` and `lien serve` detect a linked worktree
+(`git rev-parse --git-dir` differs from `--git-common-dir`) and locate the
+main checkout via `git worktree list`, no configuration needed. It's also safe
+by construction: the base is opened read-only, so a worktree process can never
+write to the main checkout's index. Every uncertain case — the main checkout
+has no index yet, its index format doesn't match, or the base becomes
+unavailable mid-session — falls back to a full, independent index rather than
+erroring.
+
+**Escape hatch:** set `LIEN_WORKTREE_STANDALONE=1` to force the old,
+fully-independent behavior for a worktree.
+
+**Known v1 limitations:**
+- Full-text search ranks are merged approximately across the base and overlay
+  corpora — BM25 scores are corpus-relative, so this isn't a single
+  statistically correct ranking. In practice the overlay is small and
+  exact-symbol matches dominate, so this rarely changes what you see.
+- The base index is located by the exact path string the main checkout was
+  indexed under. If that checkout lives behind a symlink and was indexed under
+  a different path spelling than `git worktree list` reports, its worktrees
+  fall back to a standalone index instead of sharing (safe, just not shared).
+
+**Why this matters:** without this, every linked worktree got its own
+complete index. A ~30-worktree agent setup on one repo produced a 21 GB pile
+of near-identical indexes before this existed
+([#651](https://github.com/getlien/lien/pull/651)). Sharing cuts that down to
+the base size once, plus a typically kilobytes-to-low-megabytes overlay per
+worktree.
+
 ## Performance
 
 - **File context lookup:** sub-millisecond (indexed lookup by file)
 - **Small projects** (1k files): minutes to index
 - **Medium projects** (10k files): ~15-20 minutes to index
 - **Native install:** ~1.8MB (SQLite binding) — no model download
-- **Disk usage:** roughly comparable to the source it indexes
+- **Disk usage:** roughly comparable to the source it indexes for a standalone
+  index; a linked git worktree instead pays only for its overlay (see
+  [Git Worktree Support](#git-worktree-support) above)
 
 ---
 

@@ -33,8 +33,11 @@ packages/core/src/          # Structural store, config, git — depends on parse
 ├── vectordb/    # Storage backend behind VectorDBInterface + createVectorDB factory;
 │   └── sqlite/  #   SqliteBackend — SQLite structural store + FTS5/BM25 lexical search
 │                #   (LanceDB + embeddings removed — see ADR-0011)
+│                #   OverlayBackend shares a linked worktree's index with its main
+│                #   checkout (read-only base + writable overlay) — see
+│                #   docs/architecture/worktree-aware-indexing.md
 ├── config/      # Config management & migration (GlobalConfig + per-project ConfigService)
-├── git/         # Git state tracking
+├── git/         # Git state tracking, linked-worktree detection (git/worktree.ts)
 └── insights/    # ComplexityAnalyzer + formatters (text/JSON/SARIF)
 
 packages/cli/src/           # CLI + MCP server — depends on core and parser

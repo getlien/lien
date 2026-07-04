@@ -270,3 +270,40 @@ and correctness is a property of the backend, not of every call site.
 - **Integration**: fixture repo + real `git worktree add`; assert shared-base
   reads (unchanged files resolve from base) and overlay divergence (edited file
   returns worktree content, not base content).
+
+## Verified (2026-07-04)
+
+Independent adversarial verification against the built CLI (`packages/cli/dist/index.js`)
+and MCP over stdio, using scratch `git worktree add` repos plus the real lien
+repo's own worktree/base pair. All scenarios below passed:
+
+- Happy path: modified/added/deleted/unchanged/renamed files each resolve
+  correctly through `get_files_context` over a real MCP stdio round-trip.
+- Churn + revert-to-base: re-diffing after further edits correctly reclassifies
+  a reverted file back to "shared with base" with no stale or duplicate content.
+- Fallbacks: main-has-no-index → standalone + hint; `LIEN_WORKTREE_STANDALONE=1`
+  → forced standalone; base db deleted mid-serve → graceful degrade, no crash.
+- Concurrency: two worktree serves reading while the base was force-reindexed
+  five times in a loop — no `SQLITE_BUSY`, no crashes, correct isolated reads.
+- Real repo: `lien-e96f171e` (base, ~420 files) vs this feature's own
+  development worktree — overlay correctly held only the ~23 files that
+  actually diverged.
+
+**Bug found and fixed**: `OverlayBackend.clear()` used an in-place
+`DELETE FROM chunks` (and mask/meta tables), which leaves freed pages in
+SQLite's freelist instead of shrinking the file. Since `buildOverlay` calls
+`clear()` at the start of every rebuild, an overlay that once held many
+diverged files — e.g. this exact worktree, which had been used standalone
+during Phase 1 development — kept that high-water-mark file size forever even
+after shrinking back down to a handful of live rows. On the real repo this
+made the "small" overlay 11 MB, nearly the size of the 11.5 MB base, defeating
+the feature's point. Fixed by mirroring `SqliteBackend.clear()`'s existing
+pattern (close the handle, delete the db + WAL/SHM files, reopen fresh)
+instead of an in-place `DELETE`; confirmed the same worktree's overlay dropped
+to 1.0 MB after the fix. See `packages/core/src/vectordb/overlay-backend.ts`
+and its new disk-space regression test.
+
+See PR #667's "Verification findings" section for the full scenario matrix,
+including one documented-but-not-fixed edge case (transient state mixing when
+toggling the `LIEN_WORKTREE_STANDALONE=1` escape hatch on and off for the same
+worktree, which self-heals on the next normal-mode `lien index`/`lien serve`).
