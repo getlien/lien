@@ -274,9 +274,17 @@ npm run lint          # ESLint must pass with 0 errors
 npm run typecheck     # Must pass with 0 errors
 npm run build         # Must compile successfully
 npm test              # All tests must pass
+lien delta            # No NEW complexity threshold crossings vs HEAD (exit 0)
 ```
 
 **No exceptions.** This prevents broken builds.
+
+**`lien delta`** is the sixth gate: a ~50 ms deterministic check that fails
+(exit 1) only when your working-tree changes push a function's complexity over a
+threshold it was under at `HEAD` (a new-over-threshold or crossed function).
+Improving, or merely touching a pre-existing violation, never fails. If it
+flags a crossing, simplify the function before committing — do not reach for
+`--soft` (advisory, always exit 0) to silence it.
 
 **Tip:** Run `npm run fix` to auto-fix both ESLint and Prettier issues.
 

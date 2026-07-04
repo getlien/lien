@@ -139,6 +139,26 @@ export type { FileComplexityInfo, DependencyAnalysisResult } from './dependency-
 
 export { analyzeComplexityFromChunks } from './insights/chunk-complexity.js';
 
+// Complexity delta (before/after content → per-function verdicts) — shared by
+// the `lien delta` CLI and (as a follow-up) the PR-review engine.
+export {
+  computeComplexityDelta,
+  computeFileComplexityDelta,
+  resolveComplexityDeltaThresholds,
+  hasRegressions,
+  DEFAULT_COMPLEXITY_DELTA_THRESHOLDS,
+} from './insights/complexity-delta.js';
+export type {
+  ComplexityDeltaThresholds,
+  ComplexityDeltaVerdict,
+  MetricComplexityDelta,
+  FunctionComplexityDelta,
+  FileComplexityDelta,
+  ComplexityDeltaSummary,
+  ComplexityDeltaResult,
+  FileContentChange,
+} from './insights/complexity-delta.js';
+
 // =============================================================================
 // CHUNK-ONLY INDEXING (no embeddings or VectorDB)
 // =============================================================================

@@ -29,6 +29,7 @@ Choose the right tool for each query type:
 | "What does this file do?" / "What tests cover this?" | \`get_files_context\` |
 | "What depends on this?" / "Safe to change?" | \`get_dependents\` |
 | "Most complex functions?" / "Tech debt hotspots?" | \`get_complexity\` |
+| "Did my change add complexity?" / "Safe to commit?" | \`lien delta\` (via \`Bash\`) — new complexity crossings in the working tree vs HEAD |
 | "Find similar code to this pattern" | \`find_similar\` |
 
 ### Fallback Tools (when Lien tools are insufficient)
