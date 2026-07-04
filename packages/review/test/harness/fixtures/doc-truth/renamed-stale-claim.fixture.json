@@ -1,0 +1,79 @@
+{
+  "chunks": [
+    {
+      "content": "export function resolveSearchMode(hasEmbeddings: boolean): SearchMode {\n  // No embeddings: fall back to lexical BM25 keyword search.\n  return hasEmbeddings ? 'semantic' : 'lexical';\n}",
+      "metadata": {
+        "file": "packages/core/src/config/schema.ts",
+        "startLine": 40,
+        "endLine": 43,
+        "type": "function",
+        "language": "typescript",
+        "symbolName": "resolveSearchMode",
+        "symbolType": "function",
+        "complexity": 1,
+        "parameters": ["hasEmbeddings: boolean"],
+        "signature": "function resolveSearchMode(hasEmbeddings: boolean): SearchMode",
+        "returnType": "SearchMode",
+        "exports": ["resolveSearchMode"]
+      }
+    }
+  ],
+  "changedFiles": ["packages/core/src/config/schema.ts"],
+  "allChangedFiles": ["packages/core/src/config/schema.ts"],
+  "complexityReport": {
+    "summary": {
+      "filesAnalyzed": 1,
+      "totalViolations": 0,
+      "bySeverity": { "error": 0, "warning": 0 },
+      "avgComplexity": 1,
+      "maxComplexity": 1
+    },
+    "files": {}
+  },
+  "baselineReport": null,
+  "deltas": null,
+  "pluginConfigs": {},
+  "config": {},
+  "pr": {
+    "owner": "getlien",
+    "repo": "lien",
+    "pullNumber": 9002,
+    "title": "refactor: rename semantic_search tool to search_code",
+    "body": "Mechanical rename of the MCP tool across the codebase and its docs. No behavior change.",
+    "baseSha": "0000000000000000000000000000000000000000",
+    "headSha": "1111111111111111111111111111111111111111",
+    "patches": {
+      "__type": "Map",
+      "entries": [
+        [
+          "packages/core/src/config/schema.ts",
+          "@@ -32,13 +32,13 @@ export type SearchMode = 'semantic' | 'lexical';\n \n export interface EmbeddingsConfig {\n   enabled: boolean;\n }\n \n /**\n- * When embeddings are absent, semantic_search reports as disabled\n- * and returns no results.\n+ * When embeddings are absent, search_code reports as disabled\n+ * and returns no results.\n  */\n export function resolveSearchMode(hasEmbeddings: boolean): SearchMode {\n   // No embeddings: fall back to lexical BM25 keyword search.\n   return hasEmbeddings ? 'semantic' : 'lexical';\n }"
+        ]
+      ]
+    },
+    "diffLines": {
+      "__type": "Map",
+      "entries": [["packages/core/src/config/schema.ts", { "__type": "Set", "values": [38, 39] }]]
+    }
+  },
+  "repoChunks": [
+    {
+      "content": "export function resolveSearchMode(hasEmbeddings: boolean): SearchMode {\n  // No embeddings: fall back to lexical BM25 keyword search.\n  return hasEmbeddings ? 'semantic' : 'lexical';\n}",
+      "metadata": {
+        "file": "packages/core/src/config/schema.ts",
+        "startLine": 40,
+        "endLine": 43,
+        "type": "function",
+        "language": "typescript",
+        "symbolName": "resolveSearchMode",
+        "symbolType": "function",
+        "complexity": 1,
+        "parameters": ["hasEmbeddings: boolean"],
+        "signature": "function resolveSearchMode(hasEmbeddings: boolean): SearchMode",
+        "returnType": "SearchMode",
+        "exports": ["resolveSearchMode"]
+      }
+    }
+  ],
+  "repoRootDir": "/repo"
+}

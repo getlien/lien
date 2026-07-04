@@ -665,6 +665,110 @@ matches.`,
   source: 'builtin',
 };
 
+const DOC_TRUTH: ReviewRule = {
+  id: 'doc-truth',
+  name: 'Documentation / Guidance Truthfulness',
+  description:
+    'Flag doc comments, docstrings, tool descriptions, and agent-guidance prose whose behavioral claims are contradicted by the code the diff touches',
+  prompt: `### Documentation / Guidance Truthfulness Check
+
+**This rule is a deliberate exception to the general "do NOT report
+documentation" policy.** A doc comment, docstring, tool description, or
+agent-guidance file (CLAUDE.md, a plugin hook, a \`.mdc\` rule) that makes a
+FALSE behavioral claim is a real bug, not a style nit — especially for a
+tool whose product IS agent guidance, where wrong guidance actively
+misroutes the agents that read it. Silence is not a safe default here: if
+the diff touches prose making a behavioral claim, verify the claim before
+staying quiet.
+
+Scope: only prose the diff TOUCHED — comments, docstrings, string/Markdown
+descriptions, or shell \`echo\`/comment text on \`+\` (or removed \`-\`)
+lines — INCLUDING any \`<guidance_surface_changes>\` block in your initial
+message (those files are not code-analyzed, so their prose is reviewed only
+here). Ignore prose the diff did not touch, and ignore pure wording/style
+preferences.
+
+Concrete claim shapes to check — report ONLY when the code contradicts the
+claim (or the diff itself just changed the described behavior and left the
+prose describing the OLD behavior):
+- **State claim** — "X is disabled/enabled/inactive/inert when Y",
+  "reports as disabled without Z". Falsified when the code path shows the
+  opposite (e.g. the feature still runs / still reports as active).
+- **Mechanism claim** — "X is meaning-based / semantic / embedding-based"
+  when the implementation is lexical/keyword/substring (or the reverse).
+- **Requirement claim** — "X requires Z", "X never does Z", "always
+  returns …". Falsified when the code imposes no such requirement or does
+  the forbidden thing.
+- **Default claim** — "default: true", "defaults to N". Falsified when the
+  schema / constructor / config default in the code is a different value.
+
+MANDATORY protocol when this rule is active:
+
+1. List every claim-bearing line the diff touched (from \`<diff>\` and from
+   \`<guidance_surface_changes>\`). If there are none, the rule has nothing
+   to do — that is the only clean way to finish with zero findings.
+2. For EACH claim, locate the code it describes using material ALREADY in
+   your prompt: the diff hunks, \`<changed_functions>\`, and — for symbols in
+   changed code — \`get_files_context\` (it reads the indexed chunks). Do
+   NOT depend on \`grep_codebase\` / \`read_file\` alone to confirm a claim:
+   in some review modes those tools return no content, so a claim you cannot
+   otherwise check is "unverified", not "fine".
+3. Emit a finding when the claim is CONTRADICTED by the code you can see, OR
+   when the diff changed the described behavior and left the prose describing
+   the old behavior (a mechanical rename/refactor that made a neighbouring
+   comment stale is the canonical case). The \`message\` must QUOTE the
+   stale/false claim and state the actual behavior; the \`evidence\` must
+   cite the code fact that falsifies it (file:line, signature, return value,
+   or the specific diff hunk) — not "the comment looks wrong".
+4. Stay silent on a claim only after locating the code and confirming it
+   still matches. A claim you genuinely could not locate is reported as a
+   \`warning\` "unverifiable behavioral claim in touched prose" — do not
+   silently pass it.`,
+  example: `### Good finding — mechanical rename left a doc comment describing removed behavior:
+{
+  "filepath": "packages/core/src/config/schema.ts",
+  "line": 42,
+  "symbolName": "embeddingsConfig",
+  "severity": "warning",
+  "category": "bug",
+  "ruleId": "doc-truth",
+  "message": "The touched doc comment claims code search \\"reports as disabled\\" when embeddings are absent, but the code no longer disables it: without embeddings, search falls back to lexical BM25 and still reports as active. The comment describes pre-refactor behavior the code path no longer has.",
+  "suggestion": "Reword to: without embeddings, search falls back to lexical BM25 (it does not report as disabled).",
+  "evidence": "Doc-truth check — comment at line 42 says 'reports as disabled'; the resolver in the same file returns 'lexical', never 'disabled', so the claim is falsified by the code."
+}
+
+### Good finding — guidance-surface hook mislabels a lexical tool as semantic:
+{
+  "filepath": "plugins/claude/hooks/augment-explore-task.sh",
+  "line": 12,
+  "severity": "warning",
+  "category": "bug",
+  "ruleId": "doc-truth",
+  "message": "The hook's guidance text calls search_code \\"meaning-based discovery\\", but the tool now performs lexical keyword (BM25) search. Agents reading this hook will expect semantic ranking and mis-use the tool.",
+  "suggestion": "Reword to 'keyword-based code search (BM25)' to match the tool's actual behavior.",
+  "evidence": "Doc-truth check — the <guidance_surface_changes> hunk describes 'meaning-based'; the tool is lexical per this PR's rename and the search implementation."
+}`,
+  triggers: {
+    // Guidance surfaces (matched against allChangedFiles, so the invisible
+    // .sh/.mdc/CLAUDE.md cases still activate the rule)...
+    filePatterns: ['**/CLAUDE.md', 'plugins/**', '.cursor/**', '**/*.mdc'],
+    // ...OR claim-shaped prose anywhere in the diff (doc comments/docstrings in
+    // otherwise-analyzable code, e.g. the schema.ts miss on PR #658).
+    keywords: [
+      'reports?\\s+as\\s+(disabled|enabled|inactive|unavailable)',
+      '(disabled|enabled|inactive|inert|no-?op|ignored)\\s+(when|unless|if|without)',
+      'meaning-based',
+      'semantic(ally)?\\s+(search|match|matching|similar|discovery)',
+      'default:\\s*(true|false|\\d)',
+      '(always|never)\\s+(returns?|throws?|requires?|uses?|does|disables?|enables?)',
+    ],
+  },
+  severity: 'warning',
+  category: 'bug',
+  enabled: true,
+  source: 'builtin',
+};
+
 /** All built-in review rules. */
 export const BUILTIN_RULES: ReviewRule[] = [
   STRUCTURAL_ANALYSIS,
@@ -675,4 +779,5 @@ export const BUILTIN_RULES: ReviewRule[] = [
   BOUNDARY_CHANGE,
   STALE_DUPLICATE,
   UNTRUSTED_INPUT_VALIDATION,
+  DOC_TRUTH,
 ];
