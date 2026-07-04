@@ -258,27 +258,25 @@ export class OverlayBackend implements VectorDBInterface {
   }
 
   async clear(): Promise<void> {
-    // Reset the OVERLAY only — never the base. Close the handle, remove the
-    // db + WAL/SHM sidecars, then reopen a fresh empty store — mirrors
-    // SqliteBackend.clear(). An in-place `DELETE FROM chunks` leaves the
-    // freed pages in SQLite's freelist rather than shrinking the file, and
-    // buildOverlay calls clear() at the start of every rebuild: an overlay
-    // that once held many diverged files (e.g. a branch that has since been
-    // merged back, or a worktree indexed standalone before this feature
-    // existed) would keep that high-water-mark file size forever even after
-    // shrinking back to a handful of rows — defeating the point of the
-    // overlay staying small.
-    this.requireOverlay();
-    this.overlayDb?.close();
-    this.overlayDb = null;
-    await Promise.all(
-      [
-        this.overlayDbFilePath,
-        `${this.overlayDbFilePath}-wal`,
-        `${this.overlayDbFilePath}-shm`,
-      ].map(f => fs.rm(f, { force: true })),
-    );
-    this.overlayDb = openOverlayDatabase(this.overlayDbFilePath);
+    // Reset the OVERLAY only — never the base. A plain `DELETE FROM chunks`
+    // leaves the freed pages in SQLite's freelist rather than shrinking the
+    // file, and buildOverlay calls clear() at the start of every rebuild: an
+    // overlay that once held many diverged files (e.g. a worktree previously
+    // indexed standalone, or a branch that has since been merged back) would
+    // keep that high-water-mark file size forever even after shrinking back
+    // to a handful of rows — defeating the point of the overlay staying
+    // small. VACUUM reclaims that space in place.
+    //
+    // Deliberately NOT close+delete+recreate-the-file (as SqliteBackend.clear()
+    // does): that swaps the file's identity out from under any other process
+    // with the same overlay open (e.g. two `lien index` runs racing on one
+    // worktree), which reproduced real `SQLITE_IOERR` failures under
+    // concurrent load in testing. VACUUM + a WAL checkpoint keep the same
+    // file identity throughout and proved safe under the same stress test.
+    const db = this.requireOverlay();
+    db.exec('DELETE FROM chunks; DELETE FROM overlay_mask; DELETE FROM overlay_meta;');
+    db.exec('VACUUM');
+    db.pragma('wal_checkpoint(TRUNCATE)');
   }
 
   async hasData(): Promise<boolean> {
