@@ -364,6 +364,34 @@ both statements inside **one deferred read transaction**, pinning a single WAL
 snapshot. Without this, an atomic writer commit landing *between* the reader's
 two statements would still be observed half-applied.
 
+**Accepted limitation: the base read is a separate snapshot.** A union read is
+overlay-rows + mask from one overlay snapshot `S`, merged with base rows read
+afterwards on the base connection (a *different database file*). SQLite
+transactions are per-connection, so no code structure can extend `S` across the
+base — true cross-database snapshot atomicity is impossible in the
+two-connection design (and `ATTACH` was rejected above to keep the base
+provably read-only). This window is accepted, not mitigated, because it cannot
+produce the mask-without-replacement bug or duplicates:
+
+- Base hits are filtered against the mask from the **same** snapshot `S` as the
+  overlay hits. Per `S`'s build invariant, any file with overlay rows that also
+  exists in base is masked in `S` — so its base row is dropped no matter when
+  the base read runs, including across a concurrent `applyRebuild` commit.
+  A rebuild un-masking a file (revert-to-base) also removes its overlay rows in
+  the same transaction, so a reader on `S` serves the old overlay row and drops
+  the base row (consistent old state); a reader on the new snapshot drops the
+  overlay row and serves the base row (consistent new state). No interleaving
+  yields both.
+- The only residual effect is that base rows may come from a base commit that
+  landed mid-query: the result is overlay@`S` ∪ base@now, each side internally
+  consistent, per-file single-source preserved. But a mid-serve base write
+  already implies the overlay is stale-until-rebuild *regardless of intra-query
+  timing* (see "Staleness & revalidation" — the base-stamp compare triggers the
+  reconciling rebuild). A retry-on-base-stamp-change would re-run the query into
+  the same stale-until-rebuild state, buying nothing for two extra fs reads per
+  query. Cross-corpus BM25 ranking is likewise already approximate by design
+  (see "FTS caveat (v1)").
+
 ### 2. Rebuild livelock → identical rebuilds churned the version stamp
 
 `recordBaseBuild` bumped `.lien-index-version` on **every** rebuild. The only
@@ -375,8 +403,11 @@ other** serves' version poll reconnect; restart/re-spawn churn kept new serves
 rebuilding — a self-amplifying reconnect/rebuild storm with no file edits.
 
 **Fix (no-op → no bump).** `buildOverlay` computes a cheap **content
-signature** — a hash over the sorted (diverged file → content hash) pairs plus
-the sorted mask set, reusing hashes already computed during the diff. If it
+signature** — a hash over an indexing-format salt (`INDEX_FORMAT_VERSION` +
+chunk size/overlap, so a Lien upgrade that changes the chunking contract forces
+one real rebuild instead of skipping forever) plus the sorted (diverged file →
+content hash) pairs plus the sorted mask set, reusing hashes already computed
+during the diff. If it
 matches the signature stored at the last build, the rebuild is a no-op: it
 refreshes only the base stamp (so `needsRebuild()` still settles after a base
 reindex) and returns `changed: false` **without bumping**. So once any serve has

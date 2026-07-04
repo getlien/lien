@@ -4,7 +4,12 @@ import { createHash } from 'crypto';
 import pLimit from 'p-limit';
 import { chunkFile, computeContentHash, extractRepoId } from '@liendev/parser';
 import type { ChunkMetadata } from '@liendev/parser';
-import { DEFAULT_CONCURRENCY, DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP } from '../constants.js';
+import {
+  DEFAULT_CONCURRENCY,
+  DEFAULT_CHUNK_SIZE,
+  DEFAULT_CHUNK_OVERLAP,
+  INDEX_FORMAT_VERSION,
+} from '../constants.js';
 import type { OverlayBackend } from '../vectordb/overlay-backend.js';
 import { ManifestManager, type FileEntry } from './manifest.js';
 import { scanFilesToIndex } from './index.js';
@@ -37,16 +42,36 @@ interface DivergedFile {
   hash: string; // current content hash (drives the content signature)
 }
 
+/** Indexing-format inputs baked into the overlay signature. If any of these
+ *  change (a Lien upgrade bumps `INDEX_FORMAT_VERSION`, or the chunking
+ *  parameters move), the same worktree content chunks differently — so the
+ *  signature must differ and force one real rebuild, or the no-op fast path
+ *  would keep serving stale-format chunk rows forever. */
+export interface OverlaySignatureFormat {
+  formatVersion: number;
+  chunkSize: number;
+  chunkOverlap: number;
+}
+
 /**
- * Content signature of an overlay: a hash over the sorted (diverged file →
- * content hash) pairs plus the sorted mask set. Two builds with the same
- * signature would produce a byte-identical overlay, so the second can skip the
- * swap + version bump. Cheap: reuses hashes already computed during the diff.
+ * Content signature of an overlay: a hash over the indexing-format salt plus
+ * the sorted (diverged file → content hash) pairs plus the sorted mask set.
+ * Two builds with the same signature would produce a byte-identical overlay,
+ * so the second can skip the swap + version bump. Cheap: reuses hashes already
+ * computed during the diff.
+ *
+ * Exported for tests; production callers go through `buildOverlay`, which
+ * supplies the real format constants.
  */
-function computeOverlaySignature(diverged: DivergedFile[], maskFiles: string[]): string {
+export function computeOverlaySignature(
+  diverged: Array<{ rel: string; hash: string }>,
+  maskFiles: readonly string[],
+  format: OverlaySignatureFormat,
+): string {
+  const salt = `format=${format.formatVersion};chunk=${format.chunkSize}/${format.chunkOverlap}`;
   const files = diverged.map(d => `${d.rel}\t${d.hash}`).sort();
   const masks = [...maskFiles].sort();
-  const canonical = `${files.join('\n')}\n--mask--\n${masks.join('\n')}`;
+  const canonical = `${salt}\n${files.join('\n')}\n--mask--\n${masks.join('\n')}`;
   return createHash('sha256').update(canonical).digest('hex').slice(0, 32);
 }
 
@@ -125,7 +150,11 @@ export async function buildOverlay(
     deleted,
     unchanged: currentPaths.size - added - modified,
   };
-  const signature = computeOverlaySignature(diverged, maskFiles);
+  const signature = computeOverlaySignature(diverged, maskFiles, {
+    formatVersion: INDEX_FORMAT_VERSION,
+    chunkSize: DEFAULT_CHUNK_SIZE,
+    chunkOverlap: DEFAULT_CHUNK_OVERLAP,
+  });
   const baseIndexDir = overlay.baseIndexDir;
   const baseStamp = await overlay.getBaseStamp();
 
