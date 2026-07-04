@@ -9,7 +9,7 @@
 
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { readFile } from 'node:fs/promises';
+import { readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { getSupportedExtensions, type FileContentChange } from '@liendev/parser';
 
@@ -166,4 +166,57 @@ export async function collectFileChanges(rootDir: string): Promise<FileContentCh
 
   const filtered = raw.filter(r => isSupported(r.path, supported));
   return Promise.all(filtered.map(r => toContentChange(rootDir, r, !born)));
+}
+
+/**
+ * Resolve symlinked path segments so lexical `path.relative` comparisons are
+ * sound. Falls back gracefully when the target does not exist yet (e.g. a
+ * deleted file): realpath the parent directory and re-attach the basename;
+ * failing that, return the input unchanged.
+ */
+async function canonicalize(p: string): Promise<string> {
+  try {
+    return await realpath(p);
+  } catch {
+    try {
+      return path.join(await realpath(path.dirname(p)), path.basename(p));
+    } catch {
+      return p;
+    }
+  }
+}
+
+/**
+ * Build the before/after content pair for a SINGLE file (working tree vs HEAD).
+ * This is the fast path for the per-edit hook: it avoids the full `git diff`
+ * scan and touches only the one file that was just edited.
+ *
+ * `filePath` may be absolute or relative to `rootDir`. Returns `null` — meaning
+ * "nothing to analyze, stay silent" — when the path is outside the repo, its
+ * extension is not parser-supported, or it exists on neither side (before and
+ * after both absent). Read errors other than ENOENT propagate (operational
+ * failure), matching `readWorktree`'s contract.
+ */
+export async function collectFileChange(
+  rootDir: string,
+  filePath: string,
+): Promise<FileContentChange | null> {
+  // Resolve to a repo-relative POSIX path; reject anything outside the repo.
+  // Canonicalize symlinked path segments on BOTH sides first — otherwise a
+  // symlinked ancestor (macOS /tmp → /private/tmp, or a symlinked project dir)
+  // makes an absolute input path lexically "escape" the repo and get rejected.
+  const canonRoot = await canonicalize(rootDir);
+  const abs = await canonicalize(path.resolve(rootDir, filePath));
+  const rel = path.relative(canonRoot, abs);
+  if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) return null;
+  const relPosix = rel.split(path.sep).join('/');
+
+  const supported = new Set(getSupportedExtensions().map(ext => `.${ext}`));
+  if (!isSupported(relPosix, supported)) return null;
+
+  const before = await showHead(rootDir, relPosix); // null => not in HEAD (added/new)
+  const after = await readWorktree(rootDir, relPosix); // null => deleted (ENOENT only)
+  if (before === null && after === null) return null;
+
+  return { filepath: relPosix, before, after };
 }

@@ -4,7 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { getRepoRoot, collectFileChanges, readWorktree } from './delta-git.js';
+import { getRepoRoot, collectFileChanges, collectFileChange, readWorktree } from './delta-git.js';
 import type { FileContentChange } from '@liendev/parser';
 
 const execFileAsync = promisify(execFile);
@@ -161,6 +161,73 @@ describe('delta-git', () => {
     await write('a.ts', SIMPLE);
     await commitAll('init');
     expect(await collectFileChanges(dir)).toEqual([]);
+  });
+
+  describe('collectFileChange — single-file fast path (edit hook)', () => {
+    it('builds before/after for a modified file (relative path)', async () => {
+      await initRepo();
+      await write('a.ts', SIMPLE);
+      await commitAll('init');
+      await write('a.ts', COMPLEX);
+
+      const c = await collectFileChange(dir, 'a.ts');
+      expect(c).not.toBeNull();
+      expect(c!.filepath).toBe('a.ts');
+      expect(c!.before).toBe(SIMPLE);
+      expect(c!.after).toBe(COMPLEX);
+    });
+
+    it('accepts an absolute path (the shape Claude Code sends) and maps it repo-relative', async () => {
+      await initRepo();
+      await write('src/a.ts', SIMPLE);
+      await commitAll('init');
+      await write('src/a.ts', COMPLEX);
+
+      const c = await collectFileChange(dir, path.join(dir, 'src/a.ts'));
+      expect(c).not.toBeNull();
+      expect(c!.filepath).toBe('src/a.ts');
+      expect(c!.after).toBe(COMPLEX);
+    });
+
+    it('treats an untracked new file as added (before = null)', async () => {
+      await initRepo();
+      await write('a.ts', SIMPLE);
+      await commitAll('init');
+      await write('b.ts', COMPLEX);
+
+      const c = await collectFileChange(dir, 'b.ts');
+      expect(c!.before).toBeNull();
+      expect(c!.after).toBe(COMPLEX);
+    });
+
+    it('handles a deleted file (after = null, before = HEAD)', async () => {
+      await initRepo();
+      await write('a.ts', COMPLEX);
+      await commitAll('init');
+      await fs.rm(path.join(dir, 'a.ts'));
+
+      const c = await collectFileChange(dir, 'a.ts');
+      expect(c!.before).toBe(COMPLEX);
+      expect(c!.after).toBeNull();
+    });
+
+    it('returns null for an unsupported extension (non-code file → hook silent)', async () => {
+      await initRepo();
+      await write('notes.txt', 'hello');
+      expect(await collectFileChange(dir, 'notes.txt')).toBeNull();
+    });
+
+    it('returns null for a path outside the repo', async () => {
+      await initRepo();
+      expect(await collectFileChange(dir, '/etc/hosts')).toBeNull();
+    });
+
+    it('returns null when the file exists on neither side', async () => {
+      await initRepo();
+      await write('a.ts', SIMPLE);
+      await commitAll('init');
+      expect(await collectFileChange(dir, 'ghost.ts')).toBeNull();
+    });
   });
 
   describe('readWorktree — only ENOENT maps to null (Phase-1 finding #4)', () => {

@@ -94,6 +94,7 @@ program
   .option('--format <type>', 'Output format: text, json', 'text')
   .option('--threshold <n>', 'Override cyclomatic + cognitive thresholds (default: from config)')
   .option('--soft', 'Advisory mode: always exit 0 (still prints the report)')
+  .option('--file <path>', 'Analyze only this file vs HEAD (fast path for edit hooks)')
   .action(deltaCommand);
 
 const configCmd = program

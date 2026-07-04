@@ -16,12 +16,18 @@ import {
   type MetricComplexityDelta,
   type ComplexityDeltaVerdict,
 } from '@liendev/parser';
-import { getRepoRoot, collectFileChanges } from './delta-git.js';
+import { getRepoRoot, collectFileChanges, collectFileChange } from './delta-git.js';
 
 export interface DeltaOptions {
   soft?: boolean;
   format: 'text' | 'json';
   threshold?: string;
+  /**
+   * Restrict analysis to a single file (working tree vs HEAD). The fast path
+   * the PostToolUse edit hook uses — bounds the work to the one edited file
+   * instead of scanning the whole working tree on every keystroke.
+   */
+  file?: string;
 }
 
 const VALID_FORMATS = ['text', 'json'];
@@ -228,7 +234,14 @@ export async function deltaCommand(options: DeltaOptions): Promise<void> {
 
   let changes;
   try {
-    changes = await collectFileChanges(rootDir);
+    if (options.file !== undefined) {
+      // Single-file fast path (the edit hook). An out-of-repo / unsupported /
+      // absent file yields no change → empty result → clean exit 0.
+      const single = await collectFileChange(rootDir, options.file);
+      changes = single ? [single] : [];
+    } else {
+      changes = await collectFileChanges(rootDir);
+    }
   } catch (error) {
     console.error(
       chalk.red(
