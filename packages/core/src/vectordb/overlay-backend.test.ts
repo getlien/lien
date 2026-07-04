@@ -119,6 +119,75 @@ describe('OverlayBackend read union', () => {
   });
 });
 
+describe('OverlayBackend.clear() reclaims disk space', () => {
+  let baseDir: string;
+  let worktreeDir: string;
+  let overlay: OverlayBackend;
+
+  beforeEach(async () => {
+    baseDir = await createTestDir();
+    worktreeDir = await createTestDir();
+    await writeFiles(baseDir, BASE_FILES);
+    const result = await indexCodebase({ rootDir: baseDir });
+    expect(result.success).toBe(true);
+
+    overlay = new OverlayBackend(worktreeDir, getIndexDir(baseDir));
+    await overlay.initialize();
+  });
+
+  afterEach(async () => {
+    overlay.close();
+    await cleanupTestDir(baseDir);
+    await cleanupTestDir(worktreeDir);
+  });
+
+  it('shrinks the overlay db file after clearing a large number of rows', async () => {
+    // A prior standalone index, or a since-shrunk overlay, can leave the
+    // overlay holding many more rows than it currently needs. `clear()` must
+    // physically reclaim that space, not just mark it free in SQLite's
+    // freelist (which leaves the file at its high-water-mark size forever —
+    // exactly the bloat this feature exists to avoid).
+    const bigContent = 'x'.repeat(2000);
+    const metadatas = Array.from({ length: 500 }, (_, i) => ({
+      file: `synthetic-${i}.ts`,
+      startLine: 1,
+      endLine: 1,
+      type: 'block' as const,
+      language: 'typescript',
+    }));
+    const contents = metadatas.map(() => bigContent);
+    await overlay.insertBatch(metadatas, contents);
+
+    // WAL mode: writes may sit in the `-wal` sidecar rather than the main
+    // file until a checkpoint, so measure the pair together.
+    const dbFilePath = path.join(getIndexDir(worktreeDir), 'structural.db');
+    const totalSize = async () => {
+      const sizes = await Promise.all(
+        [dbFilePath, `${dbFilePath}-wal`].map(async f => {
+          try {
+            return (await fs.stat(f)).size;
+          } catch {
+            return 0;
+          }
+        }),
+      );
+      return sizes.reduce((a, b) => a + b, 0);
+    };
+
+    const sizeBeforeClear = await totalSize();
+    expect(sizeBeforeClear).toBeGreaterThan(100_000); // sanity: rows actually landed on disk
+
+    await overlay.clear();
+
+    const sizeAfterClear = await totalSize();
+    expect(sizeAfterClear).toBeLessThan(sizeBeforeClear / 4);
+    // clear() resets the overlay only — base rows (keep.ts, change.ts, gone.ts
+    // were indexed into baseDir in beforeEach) are untouched and still union in.
+    const files = new Set((await overlay.scanAll()).map(r => r.metadata.file));
+    expect([...files].some(f => f.startsWith('synthetic-'))).toBe(false);
+  });
+});
+
 describe('OverlayBackend degrades gracefully when the base is unavailable', () => {
   let bogusBaseDir: string;
   let worktreeDir: string;
