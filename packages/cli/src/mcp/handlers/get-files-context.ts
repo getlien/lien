@@ -8,6 +8,7 @@ import {
   getCanonicalPath,
   isTestFile,
   MAX_CHUNKS_PER_FILE,
+  DEFAULT_COMPLEXITY_DELTA_THRESHOLDS,
 } from '@liendev/parser';
 import type { SearchResult, VectorDBInterface } from '@liendev/core';
 
@@ -28,10 +29,22 @@ interface HandlerContext {
   workspaceRoot: string;
 }
 
-/** File data with chunks and test associations */
+/** A single near-or-over-budget function, as surfaced to the agent. */
+export interface ComplexityHeadroomEntry {
+  symbol: string;
+  metric: 'cyclomatic' | 'cognitive';
+  value: number;
+  threshold: number;
+}
+
+/** File data with chunks, test associations, and complexity headroom. */
 interface FileData {
   chunks: SearchResult[];
   testAssociations: string[];
+  /** Functions at >= 80% of a threshold, worst-first, capped. May be empty. */
+  headroom: ComplexityHeadroomEntry[];
+  /** Count of near/over-budget functions beyond the capped list. */
+  headroomOverflow: number;
 }
 
 /** Path cache for normalized path lookups */
@@ -257,6 +270,87 @@ export function findTestAssociations(
   });
 }
 
+// ============================================================================
+// Complexity headroom (Mechanism 3 — prevention)
+// ============================================================================
+
+/** A function is "near budget" once it reaches this fraction of a threshold. */
+const NEAR_BUDGET_RATIO = 0.8;
+/** Cap the per-file headroom list so the payload stays lean. */
+const MAX_HEADROOM_PER_FILE = 5;
+
+/**
+ * The metrics surfaced as headroom. Deliberately just cyclomatic + cognitive —
+ * the integer, intuitive, agent-actionable ones (and the pair `--threshold`
+ * tunes). Halstead is left out to keep the payload lean; the write-time
+ * `lien delta` gate still scores all four. Thresholds are the delta primitive's
+ * defaults (handler stays zero-I/O; it does not load per-project config).
+ */
+const HEADROOM_METRICS: ReadonlyArray<{
+  metric: ComplexityHeadroomEntry['metric'];
+  value: (m: SearchResult['metadata']) => number | undefined;
+  threshold: number;
+}> = [
+  {
+    metric: 'cyclomatic',
+    value: m => m.complexity,
+    threshold: DEFAULT_COMPLEXITY_DELTA_THRESHOLDS.testPaths,
+  },
+  {
+    metric: 'cognitive',
+    value: m => m.cognitiveComplexity,
+    threshold: DEFAULT_COMPLEXITY_DELTA_THRESHOLDS.mentalLoad,
+  },
+];
+
+/**
+ * Compute the complexity headroom for a file from its already-fetched chunks.
+ *
+ * No re-parse: cyclomatic/cognitive metrics are stored per chunk in the index
+ * and are carried on `SearchResult.metadata`. For each function/method at
+ * >= 80% of a threshold, emit its single worst metric (highest value/threshold
+ * ratio) — one entry per function, never two. Sorted worst-first and capped at
+ * MAX_HEADROOM_PER_FILE, with an overflow count for the remainder.
+ */
+export function computeComplexityHeadroom(chunks: SearchResult[]): {
+  entries: ComplexityHeadroomEntry[];
+  overflow: number;
+} {
+  const bySymbol = new Map<string, ComplexityHeadroomEntry & { ratio: number }>();
+
+  for (const { metadata: m } of chunks) {
+    if (m.symbolType !== 'function' && m.symbolType !== 'method') continue;
+    if (!m.symbolName) continue;
+    const symbol = m.parentClass ? `${m.parentClass}.${m.symbolName}` : m.symbolName;
+
+    let best: (ComplexityHeadroomEntry & { ratio: number }) | null = null;
+    for (const spec of HEADROOM_METRICS) {
+      const value = spec.value(m);
+      if (value === undefined || spec.threshold <= 0) continue;
+      const ratio = value / spec.threshold;
+      if (ratio < NEAR_BUDGET_RATIO) continue;
+      if (!best || ratio > best.ratio) {
+        best = { symbol, metric: spec.metric, value, threshold: spec.threshold, ratio };
+      }
+    }
+    if (!best) continue;
+
+    // A function normally maps to one chunk; if it somehow appears twice, keep
+    // the worst reading.
+    const existing = bySymbol.get(symbol);
+    if (!existing || best.ratio > existing.ratio) bySymbol.set(symbol, best);
+  }
+
+  const sorted = [...bySymbol.values()].sort((a, b) => b.ratio - a.ratio);
+  const entries = sorted
+    .slice(0, MAX_HEADROOM_PER_FILE)
+    // Drop the internal ratio — keep the payload minimal.
+    .map(({ symbol, metric, value, threshold }) => ({ symbol, metric, value, threshold }));
+  const overflow = Math.max(0, sorted.length - MAX_HEADROOM_PER_FILE);
+
+  return { entries, overflow };
+}
+
 /**
  * Deduplicate chunks by file path and line range.
  *
@@ -297,10 +391,16 @@ export function buildFilesData(
 
   filepaths.forEach((filepath, i) => {
     const dedupedChunks = deduplicateChunks(fileChunksMap[i], relatedChunksMap[i] || []);
+    // Headroom is computed from the file's OWN chunks (fileChunksMap[i]), not the
+    // deduped set — related chunks belong to other files and must not leak into
+    // this file's budget view.
+    const { entries, overflow } = computeComplexityHeadroom(fileChunksMap[i]);
 
     filesData[filepath] = {
       chunks: dedupedChunks,
       testAssociations: testAssociationsMap[i],
+      headroom: entries,
+      headroomOverflow: overflow,
     };
   });
 
@@ -328,6 +428,9 @@ function buildSingleFileResponse(
     file: filepath,
     chunks: shapeResults(data.chunks, 'get_files_context'),
     testAssociations: data.testAssociations,
+    // Omit entirely when nothing is near budget (the common case → zero bytes).
+    ...(data.headroom.length > 0 && { complexityHeadroom: data.headroom }),
+    ...(data.headroomOverflow > 0 && { complexityHeadroomMore: data.headroomOverflow }),
     ...(note && { note }),
   };
 }
@@ -342,12 +445,19 @@ function buildMultiFileResponse(
 ) {
   const shaped: Record<
     string,
-    { chunks: ReturnType<typeof shapeResults>; testAssociations: string[] }
+    {
+      chunks: ReturnType<typeof shapeResults>;
+      testAssociations: string[];
+      complexityHeadroom?: ComplexityHeadroomEntry[];
+      complexityHeadroomMore?: number;
+    }
   > = {};
   for (const [filepath, data] of Object.entries(filesData)) {
     shaped[filepath] = {
       chunks: shapeResults(data.chunks, 'get_files_context'),
       testAssociations: data.testAssociations,
+      ...(data.headroom.length > 0 && { complexityHeadroom: data.headroom }),
+      ...(data.headroomOverflow > 0 && { complexityHeadroomMore: data.headroomOverflow }),
     };
   }
   return {

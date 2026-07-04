@@ -4,9 +4,40 @@ import {
   findRelatedChunks,
   handleGetFilesContext,
   clearTestAssociationScanCache,
+  computeComplexityHeadroom,
 } from './get-files-context.js';
 import type { ToolContext } from '../types.js';
 import type { SearchResult } from '@liendev/core';
+
+/** Build a function/method chunk carrying stored complexity metrics. */
+function makeFnChunk(
+  symbolName: string,
+  opts: {
+    cyclomatic?: number;
+    cognitive?: number;
+    parentClass?: string;
+    symbolType?: 'function' | 'method' | 'class' | 'block';
+    file?: string;
+  } = {},
+): SearchResult {
+  return {
+    content: '',
+    metadata: {
+      file: opts.file ?? 'src/target.ts',
+      startLine: 1,
+      endLine: 20,
+      type: 'function',
+      language: 'typescript',
+      symbolName,
+      symbolType: opts.symbolType ?? 'function',
+      parentClass: opts.parentClass,
+      complexity: opts.cyclomatic,
+      cognitiveComplexity: opts.cognitive,
+    },
+    score: 0,
+    relevance: 'not_relevant',
+  };
+}
 
 describe('searchFileChunks', () => {
   const mockLog = vi.fn();
@@ -273,5 +304,127 @@ describe('handleGetFilesContext - test-association scan (scanAll fast path + cac
     await handleGetFilesContext({ filepaths: 'src/b.ts', includeRelated: false }, ctx);
 
     expect(scanAll).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('computeComplexityHeadroom (Mechanism 3)', () => {
+  // Default thresholds: cyclomatic 15, cognitive 15. Near-budget = >= 80% (>=12).
+
+  it('flags a function over threshold', () => {
+    const { entries, overflow } = computeComplexityHeadroom([
+      makeFnChunk('over', { cognitive: 18 }),
+    ]);
+    expect(overflow).toBe(0);
+    expect(entries).toEqual([{ symbol: 'over', metric: 'cognitive', value: 18, threshold: 15 }]);
+  });
+
+  it('flags a function at/near budget (>= 80%) and excludes one below', () => {
+    const { entries } = computeComplexityHeadroom([
+      makeFnChunk('near', { cognitive: 12 }), // 12/15 = 0.80 → included
+      makeFnChunk('comfortable', { cognitive: 11 }), // 11/15 = 0.73 → excluded
+    ]);
+    expect(entries.map(e => e.symbol)).toEqual(['near']);
+  });
+
+  it('returns nothing when every function is comfortably under budget', () => {
+    const { entries, overflow } = computeComplexityHeadroom([
+      makeFnChunk('a', { cognitive: 5, cyclomatic: 4 }),
+      makeFnChunk('b', { cognitive: 8 }),
+    ]);
+    expect(entries).toEqual([]);
+    expect(overflow).toBe(0);
+  });
+
+  it('emits ONE entry per function — its worst metric by value/threshold ratio', () => {
+    // cyclomatic 13 (0.87) vs cognitive 16 (1.07) → cognitive wins.
+    const { entries } = computeComplexityHeadroom([
+      makeFnChunk('mixed', { cyclomatic: 13, cognitive: 16 }),
+    ]);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toEqual({ symbol: 'mixed', metric: 'cognitive', value: 16, threshold: 15 });
+  });
+
+  it('qualifies methods with their parent class', () => {
+    const { entries } = computeComplexityHeadroom([
+      makeFnChunk('doThing', { cognitive: 20, parentClass: 'MyService', symbolType: 'method' }),
+    ]);
+    expect(entries[0].symbol).toBe('MyService.doThing');
+  });
+
+  it('ignores non-function chunks (blocks, classes, unnamed)', () => {
+    const { entries } = computeComplexityHeadroom([
+      makeFnChunk('blockish', { cognitive: 30, symbolType: 'block' }),
+      makeFnChunk('classish', { cognitive: 30, symbolType: 'class' }),
+    ]);
+    expect(entries).toEqual([]);
+  });
+
+  it('sorts worst-first and caps at 5 with an overflow count', () => {
+    const chunks = [
+      makeFnChunk('f1', { cognitive: 13 }),
+      makeFnChunk('f2', { cognitive: 14 }),
+      makeFnChunk('f3', { cognitive: 15 }),
+      makeFnChunk('f4', { cognitive: 16 }),
+      makeFnChunk('f5', { cognitive: 17 }),
+      makeFnChunk('f6', { cognitive: 18 }),
+      makeFnChunk('f7', { cognitive: 19 }),
+    ];
+    const { entries, overflow } = computeComplexityHeadroom(chunks);
+    expect(entries).toHaveLength(5);
+    expect(entries.map(e => e.symbol)).toEqual(['f7', 'f6', 'f5', 'f4', 'f3']); // worst-first
+    expect(overflow).toBe(2);
+  });
+});
+
+describe('handleGetFilesContext — complexityHeadroom in the response', () => {
+  const mockLog = vi.fn();
+
+  function ctxReturning(chunks: SearchResult[]): ToolContext {
+    return {
+      vectorDB: {
+        scanWithFilter: vi.fn().mockResolvedValue(chunks),
+        scanAll: vi.fn().mockResolvedValue([]),
+        search: vi.fn().mockResolvedValue([]),
+      } as any,
+      rootDir: process.cwd(),
+      log: mockLog,
+      checkAndReconnect: vi.fn().mockResolvedValue(undefined),
+      getIndexMetadata: vi.fn(() => ({ indexVersion: 1, indexDate: '2026-07-01' })),
+      getReindexState: vi.fn(() => ({
+        inProgress: false,
+        pendingFiles: [],
+        lastReindexTimestamp: null,
+        lastReindexDurationMs: null,
+      })),
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearTestAssociationScanCache();
+  });
+
+  it('includes complexityHeadroom for a file with a near/over-budget function', async () => {
+    const ctx = ctxReturning([makeFnChunk('extractSymbols', { cognitive: 18, file: 'src/a.ts' })]);
+    const result = await handleGetFilesContext(
+      { filepaths: 'src/a.ts', includeRelated: false },
+      ctx,
+    );
+    const parsed = JSON.parse(result.content![0].text);
+    expect(parsed.complexityHeadroom).toEqual([
+      { symbol: 'extractSymbols', metric: 'cognitive', value: 18, threshold: 15 },
+    ]);
+    expect(parsed.complexityHeadroomMore).toBeUndefined();
+  });
+
+  it('omits complexityHeadroom entirely when nothing is near budget', async () => {
+    const ctx = ctxReturning([makeFnChunk('tidy', { cognitive: 4, file: 'src/a.ts' })]);
+    const result = await handleGetFilesContext(
+      { filepaths: 'src/a.ts', includeRelated: false },
+      ctx,
+    );
+    const parsed = JSON.parse(result.content![0].text);
+    expect(parsed).not.toHaveProperty('complexityHeadroom');
+    expect(parsed).not.toHaveProperty('complexityHeadroomMore');
   });
 });

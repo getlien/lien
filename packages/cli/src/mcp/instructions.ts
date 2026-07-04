@@ -13,6 +13,8 @@ REQUIRED before Edit/Write on any file:
   get_files_context({ filepaths }) — returns imports, callSites, and test
   associations. Batch form: { filepaths: [...] } for multi-file edits.
   Always check testAssociations and run those tests after changes.
+  If it returns complexityHeadroom, those functions are at/near their
+  complexity budget — avoid adding complexity to them.
 
 REQUIRED before renaming, removing, or changing the signature of any exported
 symbol:
