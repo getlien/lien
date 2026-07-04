@@ -10,12 +10,15 @@ import {
   getCurrentCommit,
   readVersionFile,
   loadGlobalConfig,
+  detectLinkedWorktree,
+  resolveIndexStrategy,
   DEFAULT_CONCURRENCY,
   DEFAULT_GIT_POLL_INTERVAL_MS,
 } from '@liendev/core';
 import {
   extractRepoId,
   getLienHome,
+  getIndexDir,
   DEFAULT_CHUNK_SIZE,
   DEFAULT_CHUNK_OVERLAP,
 } from '@liendev/parser';
@@ -147,6 +150,78 @@ async function printGitStatus(rootDir: string, indexPath: string) {
   }
 }
 
+/**
+ * Report worktree-aware indexing status. A no-op (prints nothing) outside a
+ * linked git worktree, so a normal checkout's output is unchanged.
+ *
+ * Reuses `resolveIndexStrategy` as the sole source of truth for the mode
+ * (overlay vs standalone) — this only adds display-only facts (does the base
+ * index dir exist, how big is the overlay) on top of that decision.
+ */
+async function printWorktreeStatus(rootDir: string) {
+  const { isLinkedWorktree, mainRoot } = await detectLinkedWorktree(rootDir);
+  if (!isLinkedWorktree) return;
+
+  const strategy = await resolveIndexStrategy(rootDir);
+  const escapeHatchOn = process.env.LIEN_WORKTREE_STANDALONE === '1';
+
+  const effectiveMainRoot = strategy.mode === 'overlay' ? strategy.mainRoot : mainRoot;
+  const baseIndexDir =
+    strategy.mode === 'overlay'
+      ? strategy.baseIndexDir
+      : effectiveMainRoot
+        ? getIndexDir(effectiveMainRoot)
+        : null;
+  const baseFound = baseIndexDir ? (await getFileStats(baseIndexDir)) !== null : false;
+
+  console.log(chalk.bold('\nWorktree:'));
+
+  if (strategy.mode === 'overlay') {
+    console.log(
+      chalk.dim('Mode:'),
+      chalk.green('✓ Overlay'),
+      chalk.dim('(sharing base index from main checkout)'),
+    );
+  } else {
+    const reason = escapeHatchOn
+      ? 'escape hatch forced standalone'
+      : !effectiveMainRoot
+        ? 'main checkout could not be located'
+        : !baseFound
+          ? 'main checkout has no index yet — run `lien index` there'
+          : 'main checkout index is incompatible with this version';
+    console.log(chalk.dim('Mode:'), chalk.yellow('✗ Standalone'), chalk.dim(`(${reason})`));
+  }
+
+  if (effectiveMainRoot) {
+    console.log(chalk.dim('Main checkout:'), effectiveMainRoot);
+  }
+
+  if (baseIndexDir) {
+    console.log(chalk.dim('Base index:'), baseIndexDir);
+    console.log(
+      chalk.dim('  Status:'),
+      baseFound ? chalk.green('✓ Found') : chalk.yellow('✗ Not found'),
+    );
+  }
+
+  if (strategy.mode === 'overlay') {
+    console.log(chalk.dim('Overlay index:'), strategy.overlayIndexDir);
+    const overlayFileCount = await getFileCount(strategy.overlayIndexDir);
+    if (overlayFileCount !== null) {
+      console.log(chalk.dim('  Files:'), overlayFileCount);
+    }
+  }
+
+  if (escapeHatchOn) {
+    console.log(
+      chalk.dim('Escape hatch:'),
+      chalk.yellow('ON'),
+      chalk.dim('(LIEN_WORKTREE_STANDALONE=1)'),
+    );
+  }
+}
+
 function printWatchStatus() {
   console.log(chalk.dim('File watching:'), chalk.green('✓ Enabled (default)'));
   console.log(chalk.dim('  Batch window:'), '500ms (collects rapid changes, force-flush after 5s)');
@@ -192,6 +267,7 @@ export async function statusCommand(options: { verbose?: boolean; format?: strin
   console.log(chalk.dim('Backend:'), backend);
 
   await printIndexStatus(indexPath);
+  await printWorktreeStatus(rootDir);
 
   console.log(chalk.bold('\nFeatures:'));
   await printGitStatus(rootDir, indexPath);
