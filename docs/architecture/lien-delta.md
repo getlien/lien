@@ -424,11 +424,12 @@ Kill switch: `LIEN_DELTA_HOOK=off`.
 
 The hook cost is dominated by **CLI process startup** (Node + loading the bundled
 `@liendev/lien` image), not the delta compute — the single-file delta itself is a
-few ms. Measured end-to-end on this repo (see PR body for the transcript);
-target is well under 1 s and it clears it comfortably. Because the cost is
-startup, not work, the honest optimisation levers (if it ever matters) are a
-persistent/daemon `lien` or a slimmer entrypoint — **not** pursued now (YAGNI;
-the measured number is already inside budget).
+few ms. Measured end-to-end (hook script + `lien delta --file` incl. CLI
+startup): **~215 ms warm, ~410 ms cold** — well under the 1 s aim and the 5 s
+hook timeout. Because the cost is startup, not work, the honest optimisation
+levers (if it ever matters) are a persistent/daemon `lien` or a slimmer
+entrypoint — **not** pursued now (YAGNI; the measured number is already inside
+budget).
 
 ### Subagent caveat (dogfooding item for the maintainer)
 
@@ -531,4 +532,4 @@ the distinction the hook relies on to stay silent on non-regressions.
 - [x] 2. Fix Phase-1 review findings (5) + tests — separate commit
 - [x] 3. Mechanism 2: `lien delta --file` flag + `delta-write.sh` hook + hooks.json + unit tests
 - [x] 4. Mechanism 3: `complexityHeadroom` in `get_files_context` + description/instructions + unit tests
-- [ ] 5. Verification: drive hook (3 transcripts) + MCP headroom response + latency; full gate green; changeset
+- [x] 5. Verification: drive hook (3 transcripts) + MCP headroom response + latency; full gate green; changeset

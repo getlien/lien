@@ -152,16 +152,16 @@ describe('formatDeltaText', () => {
 });
 
 describe('deltaCommand — operational failures exit 2 (Phase-1 findings #2, #3)', () => {
-  let exitSpy: ReturnType<typeof vi.spyOn>;
   let errSpy: ReturnType<typeof vi.spyOn>;
   let logSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    // Throw a sentinel so a mocked process.exit actually halts deltaCommand,
-    // exactly as the real one would (rather than letting it run on).
-    exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+    // Throw a sentinel encoding the exit code so a mocked process.exit actually
+    // halts deltaCommand (as the real one would) — the sentinel `__exit__:2`
+    // asserted below is what proves exit(2) was reached.
+    vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
       throw new Error(`__exit__:${code}`);
     }) as never);
   });

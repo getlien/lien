@@ -16,7 +16,7 @@ function makeFnChunk(
     cyclomatic?: number;
     cognitive?: number;
     parentClass?: string;
-    symbolType?: 'function' | 'method' | 'class' | 'block';
+    symbolType?: 'function' | 'method' | 'class' | 'interface';
     file?: string;
   } = {},
 ): SearchResult {
@@ -351,10 +351,10 @@ describe('computeComplexityHeadroom (Mechanism 3)', () => {
     expect(entries[0].symbol).toBe('MyService.doThing');
   });
 
-  it('ignores non-function chunks (blocks, classes, unnamed)', () => {
+  it('ignores non-function chunks (classes, interfaces)', () => {
     const { entries } = computeComplexityHeadroom([
-      makeFnChunk('blockish', { cognitive: 30, symbolType: 'block' }),
-      makeFnChunk('classish', { cognitive: 30, symbolType: 'class' }),
+      makeFnChunk('SomeClass', { cognitive: 30, symbolType: 'class' }),
+      makeFnChunk('SomeInterface', { cognitive: 30, symbolType: 'interface' }),
     ]);
     expect(entries).toEqual([]);
   });
