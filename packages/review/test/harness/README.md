@@ -108,13 +108,13 @@ prompt/pipeline from reaching it.
 
 | Rule | PR | Fixture | Why |
 |---|---|---|---|
-| `stale-duplicate` | #658 | `stale-duplicate/pr658-search-code-rename` | `schema.ts:62`'s `embeddings.enabled` doc comment claims `search_code` "reports as disabled" — stale since #657 made `search_code` lexical/BM25 with no embeddings dependency. The pre-computed `<stale_literal_candidates>` scan only matches quoted string literals, not bare identifiers in prose comments, so this shape needs either a prompt change or a pre-scan extension. A second real finding on the same PR (`plugins/claude/hooks/augment-explore-task.sh:64`, [thread](https://github.com/getlien/lien/pull/658#discussion_r3522630331)) is documented in the fixture's `.assertions.ts` but intentionally not asserted — `.sh` has no parser support, so it produces zero chunks regardless of prompt quality; that's a visibility gap, not something a rule/prompt change can fix. |
+| `doc-truth` | #658 | `doc-truth/pr658-search-code-rename` | `schema.ts:62`'s `embeddings.enabled` doc comment claims `search_code` "reports as disabled" — stale since #657 made `search_code` lexical/BM25 with no embeddings dependency. Originally captured under `stale-duplicate` (the nearest rule at the time) as a documented miss: the `<stale_literal_candidates>` scan only matches quoted string literals, so bare identifiers in prose comments got no deterministic assist. RESOLVED by the `<rename_sweep>` signal (#663) + the `doc-truth` rule (#665): the 2026-07-04 post-merge sweep caught this finding on 3/3 votes, all attributed to `doc-truth` — the fixture was retargeted and relocated accordingly. A second real finding on the same PR (`plugins/claude/hooks/augment-explore-task.sh:64`, [thread](https://github.com/getlien/lien/pull/658#discussion_r3522630331)) is documented in the fixture's `.assertions.ts` but still not asserted — `.sh` has no parser support so it produces zero chunks; #665's guidance-surface passthrough now surfaces its raw hunks, so asserting it is a candidate follow-up once evidence shows it fires reliably. |
 
 Regenerate:
 
 ```bash
 npx tsx packages/review/test/harness/capture-pr.ts 658 \
-  packages/review/test/harness/fixtures/stale-duplicate/pr658-search-code-rename.fixture.json
+  packages/review/test/harness/fixtures/doc-truth/pr658-search-code-rename.fixture.json
 ```
 
 Run the full multi-model sweep:
