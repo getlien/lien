@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs/promises';
 import path from 'path';
+import Database from 'better-sqlite3';
 import { getIndexDir } from '@liendev/parser';
 import { createTestDir, cleanupTestDir } from '../test/helpers/test-db.js';
 import { indexCodebase } from './index.js';
-import { buildOverlay } from './overlay-index.js';
+import { buildOverlay, computeOverlaySignature } from './overlay-index.js';
 import { OverlayBackend } from '../vectordb/overlay-backend.js';
 import { writeVersionFile } from '../vectordb/version.js';
 
@@ -67,7 +68,7 @@ describe('buildOverlay', () => {
 
   it('classifies added / modified / unchanged / deleted correctly', async () => {
     const res = await buildOverlay(overlay);
-    expect(res).toEqual({ added: 1, modified: 1, deleted: 1, unchanged: 1 });
+    expect(res).toEqual({ added: 1, modified: 1, deleted: 1, unchanged: 1, changed: true });
   });
 
   it('serves unchanged files from base, diverged from overlay, and drops deleted', async () => {
@@ -101,11 +102,62 @@ describe('buildOverlay', () => {
     expect(await overlay.needsRebuild()).toBe(true);
   });
 
-  it('is idempotent — a rebuild yields the same classification', async () => {
+  it('is idempotent — a rebuild yields the same classification without a bump', async () => {
     await buildOverlay(overlay);
     const second = await buildOverlay(overlay);
-    expect(second).toEqual({ added: 1, modified: 1, deleted: 1, unchanged: 1 });
+    // Same classification, but an identical overlay must NOT re-bump the stamp.
+    expect(second).toEqual({ added: 1, modified: 1, deleted: 1, unchanged: 1, changed: false });
     const files = await filesInIndex(overlay);
     expect(files).toEqual(new Set(['a.ts', 'b.ts', 'd.ts']));
+  });
+
+  it('rebuilds when the stored signature predates a format change (no eternal skip)', async () => {
+    await buildOverlay(overlay);
+
+    // Simulate a signature recorded under a previous indexing format (older
+    // INDEX_FORMAT_VERSION / different chunk params): overwrite the stored
+    // value so it can no longer match the currently computed signature.
+    const dbFile = path.join(getIndexDir(worktreeDir), 'structural.db');
+    const raw = new Database(dbFile);
+    raw
+      .prepare('UPDATE overlay_meta SET v = ? WHERE k = ?')
+      .run('signature-from-older-format', 'overlaySignature');
+    raw.close();
+
+    // Same worktree content — but the format mismatch must force a real swap.
+    const res = await buildOverlay(overlay);
+    expect(res.changed).toBe(true);
+
+    // And the fast path resumes once the current-format signature is stored.
+    const again = await buildOverlay(overlay);
+    expect(again.changed).toBe(false);
+  });
+});
+
+describe('computeOverlaySignature format salt', () => {
+  const diverged = [
+    { rel: 'b.ts', hash: 'hash-b' },
+    { rel: 'd.ts', hash: 'hash-d' },
+  ];
+  const masks = ['b.ts', 'c.ts'];
+  const format = { formatVersion: 5, chunkSize: 75, chunkOverlap: 10 };
+
+  it('is stable for identical content + format inputs', () => {
+    expect(computeOverlaySignature(diverged, masks, format)).toBe(
+      computeOverlaySignature([...diverged].reverse(), [...masks].reverse(), { ...format }),
+    );
+  });
+
+  it('differs when content differs', () => {
+    const sig = computeOverlaySignature(diverged, masks, format);
+    expect(computeOverlaySignature([{ rel: 'b.ts', hash: 'other' }], masks, format)).not.toBe(sig);
+    expect(computeOverlaySignature(diverged, ['b.ts'], format)).not.toBe(sig);
+  });
+
+  it('differs when any format input changes (forces one rebuild after an upgrade)', () => {
+    const sig = computeOverlaySignature(diverged, masks, format);
+    expect(computeOverlaySignature(diverged, masks, { ...format, formatVersion: 6 })).not.toBe(sig);
+    expect(computeOverlaySignature(diverged, masks, { ...format, chunkSize: 100 })).not.toBe(sig);
+    expect(computeOverlaySignature(diverged, masks, { ...format, chunkOverlap: 20 })).not.toBe(sig);
   });
 });

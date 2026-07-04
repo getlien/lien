@@ -13,6 +13,11 @@ export const OVERLAY_META = {
   BASE_STAMP: 'baseStamp',
   /** Base index format version captured at overlay build time. */
   BASE_FORMAT_VERSION: 'baseFormatVersion',
+  /** Content signature of the overlay (diverged file→hash set + mask set) at
+   *  the last build. Lets a rebuild that reproduces the identical overlay skip
+   *  the version-stamp bump — the guard that breaks the multi-serve rebuild
+   *  livelock. */
+  SIGNATURE: 'overlaySignature',
 } as const;
 
 /**

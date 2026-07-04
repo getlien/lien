@@ -319,3 +319,141 @@ See PR #667's "Verification findings" section for the full scenario matrix,
 including one documented-but-not-fixed edge case (transient state mixing when
 toggling the `LIEN_WORKTREE_STANDALONE=1` escape hatch on and off for the same
 worktree, which self-heals on the next normal-mode `lien index`/`lien serve`).
+
+## Concurrency hardening (2026-07-04)
+
+PR #667 shipped `buildOverlay` as: `clear()` (DELETE + VACUUM + checkpoint) →
+scan → hash → `maskBasePath` for deletions → `indexMultipleFiles` (per-file
+`deleteByFile` then `insertBatch`) → `recordBaseBuild` (which always bumped the
+version stamp). Lien Review flagged the rebuild window on #667; it was
+documented but not fixed. Live dogfooding then reproduced it: in a worktree
+serve, `list_functions` / `querySymbols` intermittently returned **0 results**
+for a class that exists, for minutes. Single-transaction snapshots of the
+overlay db repeatedly caught `overlay_mask` containing the diverged file while
+`chunks` held **zero rows** for it — the file suppressed from base with no
+replacement, invisible to every read path — with the overlay's `indexVersion`
+churning (multiple bumps in minutes with **zero file edits**) while more than
+one serve process had the worktree as cwd.
+
+Two composing root causes, both now fixed:
+
+### 1. Non-atomic rebuild → reader could see mask-without-replacement
+
+The old rebuild mutated the mask and chunks across many autocommitted
+statements spread over async ticks. Between `clear()` and the final
+`insertBatch`, an **added** file had no overlay rows and no base fallback for
+the entire scan/chunk phase; between a **modified** file's `deleteByFile` (which
+sets the mask) and its `insertBatch`, the file was masked with no rows. A
+concurrent reader on another connection (another serve) observed those states.
+
+**Fix (reader-atomic swap).** All async work (scan, hash, chunk) now happens in
+`buildOverlay` *before* any write, producing in-memory chunk batches + the mask
+set. `OverlayBackend.applyRebuild` then applies the **entire swap** — delete old
+chunks + mask, insert new chunks + mask, update meta — in **one
+`BEGIN IMMEDIATE` transaction**. WAL snapshot isolation means another connection
+sees the complete old overlay or the complete new one, never a half-applied
+state. `buildOverlay` no longer calls `clear()`; the transaction's `DELETE`
+reclaims logically and a **post-commit** `VACUUM` + `wal_checkpoint(TRUNCATE)`
+(VACUUM cannot run inside a transaction) reclaim on disk — **same file identity
+throughout**, preserving #667's multi-process safety fix (close+delete+recreate
+stays banned).
+
+The reader side is snapshotted too: overlay reads pair a chunk scan with a mask
+read, so each union read (`unionRecords`, `search`, `scanPaginated`) now runs
+both statements inside **one deferred read transaction**, pinning a single WAL
+snapshot. Without this, an atomic writer commit landing *between* the reader's
+two statements would still be observed half-applied.
+
+**Accepted limitation: the base read is a separate snapshot.** A union read is
+overlay-rows + mask from one overlay snapshot `S`, merged with base rows read
+afterwards on the base connection (a *different database file*). SQLite
+transactions are per-connection, so no code structure can extend `S` across the
+base — true cross-database snapshot atomicity is impossible in the
+two-connection design (and `ATTACH` was rejected above to keep the base
+provably read-only). This window is accepted, not mitigated, because it cannot
+produce the mask-without-replacement bug or duplicates:
+
+- Base hits are filtered against the mask from the **same** snapshot `S` as the
+  overlay hits. Per `S`'s build invariant, any file with overlay rows that also
+  exists in base is masked in `S` — so its base row is dropped no matter when
+  the base read runs, including across a concurrent `applyRebuild` commit.
+  A rebuild un-masking a file (revert-to-base) also removes its overlay rows in
+  the same transaction, so a reader on `S` serves the old overlay row and drops
+  the base row (consistent old state); a reader on the new snapshot drops the
+  overlay row and serves the base row (consistent new state). No interleaving
+  yields both.
+- The only residual effect is that base rows may come from a base commit that
+  landed mid-query: the result is overlay@`S` ∪ base@now, each side internally
+  consistent, per-file single-source preserved. But a mid-serve base write
+  already implies the overlay is stale-until-rebuild *regardless of intra-query
+  timing* (see "Staleness & revalidation" — the base-stamp compare triggers the
+  reconciling rebuild). A retry-on-base-stamp-change would re-run the query into
+  the same stale-until-rebuild state, buying nothing for two extra fs reads per
+  query. Cross-corpus BM25 ranking is likewise already approximate by design
+  (see "FTS caveat (v1)").
+
+### 2. Rebuild livelock → identical rebuilds churned the version stamp
+
+`recordBaseBuild` bumped `.lien-index-version` on **every** rebuild. The only
+overlay-rebuild trigger is each serve's **startup** `handleAutoIndexing`
+(tool handlers and the version/git polls only *reconnect*, never rebuild) — but
+multiple serves per root is a known operational reality (they pile up, three
+install paths). Every startup rebuild bumped the stamp; every bump made **all
+other** serves' version poll reconnect; restart/re-spawn churn kept new serves
+rebuilding — a self-amplifying reconnect/rebuild storm with no file edits.
+
+**Fix (no-op → no bump).** `buildOverlay` computes a cheap **content
+signature** — a hash over an indexing-format salt (`INDEX_FORMAT_VERSION` +
+chunk size/overlap, so a Lien upgrade that changes the chunking contract forces
+one real rebuild instead of skipping forever) plus the sorted (diverged file →
+content hash) pairs plus the sorted mask set, reusing hashes already computed
+during the diff. If it
+matches the signature stored at the last build, the rebuild is a no-op: it
+refreshes only the base stamp (so `needsRebuild()` still settles after a base
+reindex) and returns `changed: false` **without bumping**. So once any serve has
+built the overlay, further startups on an unchanged worktree are silent — the
+storm cannot form. A genuine content change still bumps, so real edits
+propagate. `applyRebuild` re-checks the signature **inside** its `IMMEDIATE`
+transaction, so even under a true race the swap is serialized and only the first
+writer bumps; a peer that already applied the identical overlay makes this a
+no-op.
+
+### Cross-process single-rebuilder guard: what we chose
+
+The brief asked to *consider* a dedicated single-rebuilder advisory lock (e.g.
+`BEGIN IMMEDIATE` held for the whole build with busy-skip, "its result serves
+both"). We chose **not** to hold a long-lived lock, and instead rely on:
+
+- the **in-transaction signature test-and-set** under `BEGIN IMMEDIATE`, which
+  already guarantees a single effective rebuild (one bump, silent no-ops) across
+  any number of concurrent writers, and
+- a lightweight **busy-skip**: if a peer holds the overlay's write lock past the
+  busy timeout, `applyRebuild` catches `SQLITE_BUSY` and returns
+  `changed: false` — the peer's atomic swap serves everyone.
+
+Rejected: a held advisory lock (or a lease row with a staleness timeout) would
+have to span the async chunking phase, blocking the watcher's incremental
+writes for the whole build, and needs fragile cross-async transaction handling
+plus stale-lock/lease heuristics and their own tests. Its only remaining benefit
+over the chosen design is de-duplicating concurrent *chunking CPU* — negligible,
+because the overlay only covers the handful of diverged files and the build is
+already cheap (KISS/YAGNI). Multiple serves are therefore **tolerated** (atomic,
+single-bump, busy-skip), not assumed away.
+
+### Verified
+
+- **Reproduction-first stress test** (`overlay-concurrency.test.ts`): two
+  `OverlayBackend` connections on one overlay db — a writer rebuilding in a loop
+  while a reader polls `querySymbols` for diverged files. Against origin/main it
+  **fails** (the reader observes an added file missing many times; the no-op
+  tests fail because every rebuild bumped); with the fix all four pass. A second
+  case toggles a file between two bodies each iteration so every rebuild is a
+  genuine atomic swap, exercising the reader-snapshot path.
+- No-op-doesn't-bump and two-writers-don't-re-trigger (but a real change still
+  bumps) are asserted directly against the version stamp.
+- Full suite green: parser 963, core 322, review 565, cli 757, action 28.
+
+See `packages/core/src/vectordb/overlay-backend.ts` (`applyRebuild`,
+`overlaySnapshot`, `refreshBaseStamp`), `packages/core/src/indexer/overlay-index.ts`
+(`buildOverlay`, `computeOverlaySignature`), and
+`packages/core/src/vectordb/overlay-concurrency.test.ts`.
