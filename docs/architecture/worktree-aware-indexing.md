@@ -297,11 +297,23 @@ diverged files — e.g. this exact worktree, which had been used standalone
 during Phase 1 development — kept that high-water-mark file size forever even
 after shrinking back down to a handful of live rows. On the real repo this
 made the "small" overlay 11 MB, nearly the size of the 11.5 MB base, defeating
-the feature's point. Fixed by mirroring `SqliteBackend.clear()`'s existing
-pattern (close the handle, delete the db + WAL/SHM files, reopen fresh)
-instead of an in-place `DELETE`; confirmed the same worktree's overlay dropped
-to 1.0 MB after the fix. See `packages/core/src/vectordb/overlay-backend.ts`
-and its new disk-space regression test.
+the feature's point.
+
+The first fix attempt mirrored `SqliteBackend.clear()`'s existing pattern
+(close the handle, delete the db + WAL/SHM files, reopen fresh), which did
+shrink the file (11 MB → 1.0 MB) but turned out to be unsafe: it swaps the
+overlay file's identity out from under any other process that has it open, and
+a 20–30-way concurrent `lien index` stress test on one worktree reproduced
+real `disk I/O error` / "Failed to initialize overlay database" failures in
+roughly half the runs. The same stress test against the original DELETE-only
+code, and against `SqliteBackend`'s own close+delete+recreate path on a
+*standalone* index, produced zero failures — so the hazard is specific to
+swapping the overlay's file identity while multiple processes hold it open
+concurrently. The shipped fix instead does `DELETE` + `VACUUM` + a WAL
+checkpoint: same file identity throughout, same disk-space reclamation
+(confirmed 1.1 MB on the real repo), and zero failures across repeated 20- and
+30-way concurrent runs. See `packages/core/src/vectordb/overlay-backend.ts`
+and its disk-space regression test.
 
 See PR #667's "Verification findings" section for the full scenario matrix,
 including one documented-but-not-fixed edge case (transient state mixing when
