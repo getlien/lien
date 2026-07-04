@@ -1,5 +1,12 @@
 # @liendev/core
 
+## 0.57.0
+
+### Patch Changes
+
+- Updated dependencies [d36fb55]
+  - @liendev/parser@0.57.0
+
 ## 0.55.0
 
 ### Minor Changes
