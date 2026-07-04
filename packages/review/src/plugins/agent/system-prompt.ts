@@ -17,6 +17,7 @@ import type { BlastRadiusReport } from '../../blast-radius.js';
 import { renderBlastRadiusMarkdown } from '../../blast-radius-render.js';
 import { renderStaleLiteralSection } from '../../stale-literal-signals.js';
 import { renderUntrustedInputSection } from '../../untrusted-input-signals.js';
+import { renderRenameSweepSection } from '../../rename-sweep-signals.js';
 import type { ResolvedRules } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -178,6 +179,7 @@ export function buildInitialMessage(
   appendIfPresent(sections, renderDeletedExports(context));
   appendIfPresent(sections, renderStaleLiteralSection(context));
   appendIfPresent(sections, renderUntrustedInputSection(context));
+  appendIfPresent(sections, renderRenameSweepSection(context));
   sections.push(
     'Investigate this PR. Use the investigation strategy described in your instructions, then output findings as JSON.',
   );
