@@ -120,6 +120,9 @@ export {
 export { GitStateTracker } from './git/tracker.js';
 export type { GitState } from './git/tracker.js';
 
+export { detectLinkedWorktree } from './git/worktree.js';
+export type { WorktreeInfo } from './git/worktree.js';
+
 // =============================================================================
 // FRAMEWORK DETECTION (DEPRECATED - replaced by ecosystem presets)
 // =============================================================================
