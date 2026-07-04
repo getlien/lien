@@ -94,6 +94,29 @@ npx tsx packages/review/test/harness/capture-pr.ts 574 "$ROOT/error-swallowing/s
 npx tsx packages/review/test/harness/capture-pr.ts 575 "$ROOT/error-swallowing/harness-gitignore-convention-fp.fixture.json" --sha b1e36fc
 ```
 
+## Documented-miss fixtures (real bugs, not yet reliably caught)
+
+These capture a real bug from a merged PR that another reviewer (CodeRabbit)
+caught but Lien Review missed — filed under the existing rule whose mandate
+is the closest match, so the fixture is ready the moment someone iterates on
+that rule's prompt. Unlike the canary corpus, these are **not** claimed to
+pass `--calibrate 10` today; that's the point of capturing them. Not tagged
+`canary` (no green baseline to protect from drift yet) — see each fixture's
+own doc comment for exactly which mechanism (deterministic-scan gap,
+diff-render truncation, missing parser support, etc.) keeps the current
+prompt/pipeline from reaching it.
+
+| Rule | PR | Fixture | Why |
+|---|---|---|---|
+| `stale-duplicate` | #658 | `stale-duplicate/pr658-search-code-rename` | `schema.ts:62`'s `embeddings.enabled` doc comment claims `search_code` "reports as disabled" — stale since #657 made `search_code` lexical/BM25 with no embeddings dependency. The pre-computed `<stale_literal_candidates>` scan only matches quoted string literals, not bare identifiers in prose comments, so this shape needs either a prompt change or a pre-scan extension. A second real finding on the same PR (`plugins/claude/hooks/augment-explore-task.sh:64`, [thread](https://github.com/getlien/lien/pull/658#discussion_r3522630331)) is documented in the fixture's `.assertions.ts` but intentionally not asserted — `.sh` has no parser support, so it produces zero chunks regardless of prompt quality; that's a visibility gap, not something a rule/prompt change can fix. |
+
+Regenerate:
+
+```bash
+npx tsx packages/review/test/harness/capture-pr.ts 658 \
+  packages/review/test/harness/fixtures/stale-duplicate/pr658-search-code-rename.fixture.json
+```
+
 Run the full multi-model sweep:
 
 ```bash
