@@ -22,7 +22,7 @@ import {
   truncate,
   envDisabled,
   logTurn,
-  extractFindingsFromText,
+  extractFindingsWithReasoningFallback,
 } from './agent-client-shared.js';
 
 // `envDisabled` is re-exported so its existing test import path
@@ -391,7 +391,7 @@ export class OpenAIAgentClient {
     // its own (reasoning-less) trace — that's what we want to surface on bail.
     const lastLoopTurn = turnTraces[turnTraces.length - 1];
 
-    let parsed = extractResponse(lastContent);
+    let parsed = extractResponse(lastContent, lastLoopTurn?.reasoning, this.logger);
     // Fire the summary-retry whenever we have *any* loop history but no
     // findings JSON. The previous guard `lastContent !== null` skipped
     // retry whenever the model emitted reasoning but null content — the
@@ -527,7 +527,11 @@ export class OpenAIAgentClient {
         inputTokens,
         outputTokens,
       };
-      const parsed = extractResponse(choice?.message.content);
+      const parsed = extractResponse(
+        choice?.message.content ?? null,
+        choice?.message.reasoning,
+        this.logger,
+      );
       return { parsed, traceTurn, inputTokens, outputTokens };
     } catch (err) {
       this.logger.warning(
@@ -714,13 +718,18 @@ export function toOpenAITools(
 // ---------------------------------------------------------------------------
 
 /**
- * Extract findings from a chat completion's message content, delegating to the
- * shared fence-priority recovery pipeline (see `extractFindingsFromText`). A
- * null/empty content (e.g. a tool-calls turn) yields no findings.
+ * Extract findings from a chat completion's message, delegating to the shared
+ * fence-priority recovery pipeline. Content is authoritative; the reasoning
+ * channel is a fallback for models (Kimi via OpenRouter) that emit their
+ * verdict there with empty content — see extractFindingsWithReasoningFallback.
  */
-function extractResponse(content: string | null): {
+function extractResponse(
+  content: string | null,
+  reasoning: string | null | undefined,
+  logger?: Logger,
+): {
   findings: AgentFinding[];
   summary?: AgentSummary;
 } {
-  return content ? extractFindingsFromText(content) : { findings: [] };
+  return extractFindingsWithReasoningFallback(content, reasoning, logger);
 }

@@ -118,6 +118,42 @@ export function extractFindingsFromText(text: string): {
   return fallback ?? { findings: [] };
 }
 
+/**
+ * Extract a verdict from a turn's content, falling back to its reasoning
+ * channel when content yields nothing. Kimi (via OpenRouter) sometimes emits
+ * the entire verdict JSON into `message.reasoning` with empty content —
+ * observed twice on PR #668 (run 28705034445, attempts 1 and 2): the full
+ * verdict was visible in the turn log under "Turn 5 reasoning:" while
+ * content-only extraction found nothing, so the review bailed as incomplete
+ * and discarded real findings, surviving even the summary-retry (which hit
+ * the same channel mismatch).
+ *
+ * Content always wins when it carries a summary or findings; reasoning is
+ * consulted only when content produced neither. Both channels go through the
+ * same fence-priority pipeline, so the summary-preference guard against
+ * few-shot example JSON applies to reasoning too.
+ */
+export function extractFindingsWithReasoningFallback(
+  content: string | null | undefined,
+  reasoning: string | null | undefined,
+  logger?: Logger,
+): { findings: AgentFinding[]; summary?: AgentSummary } {
+  const fromContent = content
+    ? extractFindingsFromText(content)
+    : { findings: [] as AgentFinding[], summary: undefined };
+  if (fromContent.summary || fromContent.findings.length > 0) return fromContent;
+
+  const fromReasoning = reasoning
+    ? extractFindingsFromText(reasoning)
+    : { findings: [] as AgentFinding[], summary: undefined };
+  if (fromReasoning.summary || fromReasoning.findings.length > 0) {
+    logger?.info('[agent] Verdict recovered from the reasoning channel (content had none)');
+    return fromReasoning;
+  }
+
+  return { findings: [] };
+}
+
 /** Pull validated findings + summary out of one parsed JSON verdict (array or object). */
 export function readVerdict(parsed: unknown): { findings: AgentFinding[]; summary?: AgentSummary } {
   const obj = (parsed ?? {}) as { findings?: unknown; summary?: unknown };

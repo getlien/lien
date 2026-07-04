@@ -4,12 +4,14 @@ import {
   envDisabled,
   logTurn,
   extractFindingsFromText,
+  extractFindingsWithReasoningFallback,
   readVerdict,
   embeddedJsonObject,
   isValidSummary,
   isValidFinding,
   AGENT_LOG_MAX,
 } from '../src/plugins/agent/agent-client-shared.js';
+import { silentLogger } from '../src/test-helpers.js';
 import type { Logger } from '../src/logger.js';
 import type { TurnTrace } from '../src/plugins/agent/types.js';
 
@@ -244,5 +246,58 @@ describe('extractFindingsFromText (fence-priority verdict recovery)', () => {
     const good = fence({ findings: [], summary });
     const out = extractFindingsFromText(`${good}\n${broken}`);
     expect(out.summary).toEqual(summary);
+  });
+});
+
+describe('extractFindingsWithReasoningFallback (reasoning-channel verdict recovery)', () => {
+  it('content wins when it carries a verdict, even if reasoning has one too', () => {
+    const contentVerdict = fence({ findings: [], summary: { ...summary, overview: 'CONTENT' } });
+    const reasoningVerdict = fence({
+      findings: [],
+      summary: { ...summary, overview: 'REASONING' },
+    });
+    const out = extractFindingsWithReasoningFallback(contentVerdict, reasoningVerdict);
+    expect(out.summary?.overview).toBe('CONTENT');
+  });
+
+  it('content wins with findings-only output (content stays authoritative)', () => {
+    const contentFindings = fence({ findings: [finding] });
+    const reasoningVerdict = fence({ findings: [], summary });
+    const out = extractFindingsWithReasoningFallback(contentFindings, reasoningVerdict);
+    expect(out.findings).toHaveLength(1);
+    expect(out.summary).toBeUndefined();
+  });
+
+  it('recovers a fenced verdict from reasoning when content is null', () => {
+    const out = extractFindingsWithReasoningFallback(null, fence({ findings: [finding], summary }));
+    expect(out.summary).toEqual(summary);
+    expect(out.findings).toHaveLength(1);
+  });
+
+  it('recovers a raw JSON verdict embedded in reasoning prose (the PR #668 incident shape)', () => {
+    const reasoning =
+      'We need output findings JSON now. We have already read key files. ' +
+      JSON.stringify({ findings: [finding], summary });
+    const out = extractFindingsWithReasoningFallback('', reasoning);
+    expect(out.summary).toEqual(summary);
+    expect(out.findings).toHaveLength(1);
+  });
+
+  it('returns empty when neither channel has a verdict', () => {
+    const out = extractFindingsWithReasoningFallback('just prose', 'more prose');
+    expect(out.findings).toHaveLength(0);
+    expect(out.summary).toBeUndefined();
+  });
+
+  it('returns empty when both channels are absent', () => {
+    const out = extractFindingsWithReasoningFallback(null, undefined);
+    expect(out.findings).toHaveLength(0);
+  });
+
+  it('logs the recovery when falling back to reasoning', () => {
+    const infos: string[] = [];
+    const logger = { ...silentLogger, info: (m: string) => void infos.push(m) };
+    extractFindingsWithReasoningFallback(null, fence({ findings: [], summary }), logger);
+    expect(infos.some(m => m.includes('recovered from the reasoning channel'))).toBe(true);
   });
 });
