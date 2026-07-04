@@ -32,6 +32,8 @@
 
 export { indexCodebase } from './indexer/index.js';
 export type { IndexingOptions, IndexingProgress, IndexingResult } from './indexer/index.js';
+export { buildOverlay } from './indexer/overlay-index.js';
+export type { OverlayBuildResult } from './indexer/overlay-index.js';
 export { ManifestManager } from './indexer/manifest.js';
 export type { IndexManifest, FileEntry } from './indexer/manifest.js';
 export {
@@ -64,6 +66,9 @@ export {
 // =============================================================================
 
 export { createVectorDB } from './vectordb/factory.js';
+export { OverlayBackend } from './vectordb/overlay-backend.js';
+export { resolveIndexStrategy } from './vectordb/overlay-resolution.js';
+export type { IndexStrategy } from './vectordb/overlay-resolution.js';
 export type { VectorDBInterface, SearchResult } from './vectordb/types.js';
 export { SYMBOL_TYPE_MATCHES } from './vectordb/types.js';
 export type { RelevanceCategory } from './vectordb/relevance.js';
@@ -119,6 +124,9 @@ export {
 
 export { GitStateTracker } from './git/tracker.js';
 export type { GitState } from './git/tracker.js';
+
+export { detectLinkedWorktree } from './git/worktree.js';
+export type { WorktreeInfo } from './git/worktree.js';
 
 // =============================================================================
 // FRAMEWORK DETECTION (DEPRECATED - replaced by ecosystem presets)

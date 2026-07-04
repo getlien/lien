@@ -34,6 +34,8 @@ export { extractRepoId } from './utils/repo-id.js';
 
 export { getLienHome } from './utils/lien-home.js';
 
+export { getIndexDir } from './utils/index-dir.js';
+
 // =============================================================================
 // AST
 // =============================================================================

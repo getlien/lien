@@ -43,7 +43,7 @@ async function initializeDatabase(
 }> {
   // Create the structural store using global config (auto-detects backend and orgId)
   log('Creating structural store...');
-  const vectorDB = await createVectorDB(rootDir);
+  const vectorDB = await createVectorDB(rootDir, { warn: message => log(message, 'warning') });
 
   // Verify we got a valid instance
   if (!vectorDB) {
@@ -89,8 +89,11 @@ async function handleAutoIndexing(
   rootDir: string,
   log: LogFn,
 ): Promise<void> {
+  // Overlay mode: hasData() is true whenever the shared base has data, so the
+  // usual gate would never (re)build the overlay. Always refresh it in the
+  // background — buildOverlay is cheap when the worktree matches main.
   const hasIndex = await vectorDB.hasData();
-  if (hasIndex) return;
+  if (hasIndex && !vectorDB.isOverlay) return;
 
   const forceIndex = process.env.LIEN_FORCE_INDEX === '1';
   if (!forceIndex && !(await isInsideGitWorkTree(rootDir))) {
@@ -102,7 +105,11 @@ async function handleAutoIndexing(
     return;
   }
 
-  log('📦 No index found - running initial indexing in the background...');
+  if (vectorDB.isOverlay) {
+    log('📦 Linked worktree - refreshing the overlay against the shared base index...');
+  } else {
+    log('📦 No index found - running initial indexing in the background...');
+  }
   log('⏱️  Server is ready; tools will return empty results until indexing completes.');
 
   const { indexCodebase } = await import('@liendev/core');

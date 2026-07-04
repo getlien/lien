@@ -23,7 +23,9 @@ import { detectChanges } from './change-detector.js';
 import type { ChangeDetectionResult } from './change-detector.js';
 import { indexMultipleFiles, normalizeToRelativePath } from './incremental.js';
 import { ChunkBatchProcessor } from './chunk-batch-processor.js';
+import { buildOverlay } from './overlay-index.js';
 import type { VectorDBInterface } from '../vectordb/types.js';
+import type { OverlayBackend } from '../vectordb/overlay-backend.js';
 import {
   extractRepoId,
   scanCodebase,
@@ -449,6 +451,45 @@ async function batchProcessFiles(
 }
 
 /**
+ * Build/refresh a worktree overlay instead of full-indexing the whole tree.
+ *
+ * buildOverlay is idempotent and cheap (hash every worktree file, chunk only
+ * the files that diverge from the shared base), so it doubles as the refresh
+ * path — no separate incremental branch is needed here. The watcher keeps the
+ * overlay current within a serve session via `indexMultipleFiles`.
+ */
+async function performOverlayIndex(
+  overlay: OverlayBackend,
+  options: IndexingOptions,
+  startTime: number,
+): Promise<IndexingResult> {
+  options.onProgress?.({
+    phase: 'scanning',
+    message: 'Diffing worktree against the shared base index...',
+  });
+
+  const res = await buildOverlay(overlay, { verbose: options.verbose });
+  const filesIndexed = res.added + res.modified;
+
+  options.onProgress?.({
+    phase: 'complete',
+    message:
+      `Overlay ready: ${res.added} added, ${res.modified} modified, ` +
+      `${res.deleted} deleted, ${res.unchanged} shared with base`,
+    filesTotal: filesIndexed,
+    filesProcessed: filesIndexed,
+  });
+
+  return {
+    success: true,
+    filesIndexed,
+    chunksCreated: 0,
+    durationMs: Date.now() - startTime,
+    incremental: false,
+  };
+}
+
+/**
  * Perform full indexing of the codebase
  */
 async function performFullIndex(
@@ -565,6 +606,12 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<Inde
     options.onProgress?.({ phase: 'initializing', message: 'Initializing structural store...' });
     const vectorDB = await createVectorDB(rootDir);
     await vectorDB.initialize();
+
+    // Worktree overlay mode: (re)build the small per-worktree overlay against
+    // the shared base instead of full-indexing the whole tree.
+    if (vectorDB.isOverlay) {
+      return await performOverlayIndex(vectorDB as OverlayBackend, options, startTime);
+    }
 
     // Try incremental indexing first (unless forced)
     if (!options.force) {

@@ -107,6 +107,16 @@ That single `uses:` line is the whole integration — Lien self-clones the PR by
 
 **👉 [Lien Review guide](https://lien.dev/guide/lien-review)** · [Action reference](./packages/action/README.md)
 
+## Git Worktrees
+
+A linked git worktree (`git worktree add`) automatically shares the main
+checkout's index instead of building a full independent copy — a read-only
+base plus a small per-worktree overlay for whatever's actually changed. No
+setup required; set `LIEN_WORKTREE_STANDALONE=1` to opt out and get a fully
+independent index for that worktree.
+
+**👉 [How it works](https://lien.dev/how-it-works#git-worktree-support)**
+
 ## Documentation
 
 - **[Installation](https://lien.dev/guide/installation)** - npm, npx, or local setup

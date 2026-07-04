@@ -162,7 +162,9 @@ describe('startMCPServer', () => {
   it('should initialize the vector database (structural store, no embeddings)', async () => {
     await startMCPServer({ rootDir: '/test/project' });
 
-    expect(createVectorDB).toHaveBeenCalledWith('/test/project');
+    expect(createVectorDB).toHaveBeenCalledWith('/test/project', {
+      warn: expect.any(Function),
+    });
     expect(mockVectorDB.initialize).toHaveBeenCalledOnce();
   });
 

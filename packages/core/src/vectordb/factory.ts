@@ -1,5 +1,7 @@
 import type { VectorDBInterface } from './types.js';
 import { SqliteBackend } from './sqlite/sqlite-backend.js';
+import { OverlayBackend } from './overlay-backend.js';
+import { resolveIndexStrategy } from './overlay-resolution.js';
 import { loadGlobalConfig, ConfigValidationError } from '../config/global-config.js';
 
 /**
@@ -24,9 +26,14 @@ function validateVectorDBInterface(db: VectorDBInterface): void {
  * the one-time warning for retired backend settings.
  *
  * @param projectRoot - Root directory of the project
+ * @param options.warn - Optional sink for worktree-fallback hints (e.g. "main
+ *   checkout has no index"). Silent when omitted; `serve`/`index` pass a logger.
  * @returns VectorDBInterface instance for the configured backend
  */
-export async function createVectorDB(projectRoot: string): Promise<VectorDBInterface> {
+export async function createVectorDB(
+  projectRoot: string,
+  options: { warn?: (message: string) => void } = {},
+): Promise<VectorDBInterface> {
   // Load the global config for its side effects only: surface validation
   // errors early and emit the one-time retired-backend warning. The backend
   // choice itself is fixed — sqlite is the only reachable backend.
@@ -50,7 +57,15 @@ export async function createVectorDB(projectRoot: string): Promise<VectorDBInter
     }
   }
 
-  const db: VectorDBInterface = new SqliteBackend(projectRoot);
+  // Worktree-aware: when projectRoot is a linked git worktree with a usable
+  // main-checkout index, back it with an OverlayBackend (shared read-only base
+  // + small writable overlay) instead of a full independent index. Every
+  // uncertain condition resolves to standalone.
+  const strategy = await resolveIndexStrategy(projectRoot, { warn: options.warn });
+  const db: VectorDBInterface =
+    strategy.mode === 'overlay'
+      ? new OverlayBackend(projectRoot, strategy.baseIndexDir)
+      : new SqliteBackend(projectRoot);
   validateVectorDBInterface(db);
   return db;
 }
