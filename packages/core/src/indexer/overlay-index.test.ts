@@ -67,7 +67,7 @@ describe('buildOverlay', () => {
 
   it('classifies added / modified / unchanged / deleted correctly', async () => {
     const res = await buildOverlay(overlay);
-    expect(res).toEqual({ added: 1, modified: 1, deleted: 1, unchanged: 1 });
+    expect(res).toEqual({ added: 1, modified: 1, deleted: 1, unchanged: 1, changed: true });
   });
 
   it('serves unchanged files from base, diverged from overlay, and drops deleted', async () => {
@@ -101,10 +101,11 @@ describe('buildOverlay', () => {
     expect(await overlay.needsRebuild()).toBe(true);
   });
 
-  it('is idempotent — a rebuild yields the same classification', async () => {
+  it('is idempotent — a rebuild yields the same classification without a bump', async () => {
     await buildOverlay(overlay);
     const second = await buildOverlay(overlay);
-    expect(second).toEqual({ added: 1, modified: 1, deleted: 1, unchanged: 1 });
+    // Same classification, but an identical overlay must NOT re-bump the stamp.
+    expect(second).toEqual({ added: 1, modified: 1, deleted: 1, unchanged: 1, changed: false });
     const files = await filesInIndex(overlay);
     expect(files).toEqual(new Set(['a.ts', 'b.ts', 'd.ts']));
   });

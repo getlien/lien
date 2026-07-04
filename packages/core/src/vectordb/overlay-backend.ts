@@ -38,6 +38,14 @@ import {
 
 const MANIFEST_FILE = 'manifest.json';
 
+/** True for the lock-contention error codes BEGIN IMMEDIATE can raise when a
+ *  peer process holds the overlay's write lock past the busy timeout. */
+function isSqliteBusy(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return false;
+  const code = (error as { code: unknown }).code;
+  return code === 'SQLITE_BUSY' || code === 'SQLITE_BUSY_SNAPSHOT';
+}
+
 /**
  * Worktree overlay backend: reads = writable overlay UNION read-only base
  * (minus masked base files); writes touch the overlay only.
@@ -146,12 +154,31 @@ export class OverlayBackend implements VectorDBInterface {
     return new Set(rows.map(r => r.file));
   }
 
-  /** Overlay records ∪ (base records not in the mask). */
+  /**
+   * Run `fn` against the overlay inside one deferred (read-only) transaction so
+   * every statement it issues sees the SAME WAL snapshot. Overlay reads pair a
+   * chunk scan with a mask read; without a shared snapshot a concurrent atomic
+   * rebuild committing between the two statements could be observed half-applied
+   * (rows from the old snapshot, mask from the new — or vice versa), which is
+   * exactly the masked-but-unreplaced window this backend must never expose.
+   * A deferred transaction pins the snapshot at its first read and never blocks
+   * (or is blocked by) the single WAL writer.
+   */
+  private overlaySnapshot<T>(fn: (db: DatabaseType.Database) => T): T {
+    const db = this.requireOverlay();
+    return db.transaction(fn)(db);
+  }
+
+  /** Overlay records ∪ (base records not in the mask). Overlay rows + mask are
+   *  read from one snapshot; the base read is on a separate, immutable-from-here
+   *  connection. */
   private unionRecords(
     read: (db: DatabaseType.Database) => SqliteChunkRecord[],
   ): SqliteChunkRecord[] {
-    const overlayRecords = read(this.requireOverlay());
-    const mask = this.loadMask();
+    const { overlayRecords, mask } = this.overlaySnapshot(db => ({
+      overlayRecords: read(db),
+      mask: this.loadMask(),
+    }));
     const baseRecords = this.baseRead(read).filter(r => !mask.has(r.file));
     return [...overlayRecords, ...baseRecords];
   }
@@ -160,8 +187,10 @@ export class OverlayBackend implements VectorDBInterface {
 
   async search(query: string, limit = 5): Promise<SearchResult[]> {
     if (!query || query.trim().length === 0) return [];
-    const overlayHits = keywordSearch(this.requireOverlay(), query, limit);
-    const mask = this.loadMask();
+    const { overlayHits, mask } = this.overlaySnapshot(db => ({
+      overlayHits: keywordSearch(db, query, limit),
+      mask: this.loadMask(),
+    }));
     const baseHits = this.baseRead(db => keywordSearch(db, query, limit)).filter(
       h => !mask.has(h.metadata.file),
     );
@@ -217,13 +246,18 @@ export class OverlayBackend implements VectorDBInterface {
 
   async *scanPaginated(options: { pageSize?: number } = {}): AsyncGenerator<SearchResult[]> {
     const pageSize = options.pageSize ?? 1000;
-    // Overlay pages first, then masked base pages — each store paginated
-    // independently so neither is fully materialized in memory.
-    for (const page of paginateRecords(this.requireOverlay(), pageSize)) {
-      yield page.map(recordToUnscoredResult);
+    // Snapshot the overlay rows + mask together (one WAL snapshot) so the mask
+    // matches the rows even if a rebuild commits mid-iteration. The overlay is
+    // small by design (only diverged files), so materializing it is cheap; the
+    // large base side stays paginated to bound memory.
+    const { overlayRecords, mask } = this.overlaySnapshot(db => ({
+      overlayRecords: readAllRecords(db),
+      mask: this.loadMask(),
+    }));
+    for (let i = 0; i < overlayRecords.length; i += pageSize) {
+      yield overlayRecords.slice(i, i + pageSize).map(recordToUnscoredResult);
     }
     if (this.baseDb) {
-      const mask = this.loadMask();
       for (const page of paginateRecords(this.baseDb, pageSize)) {
         const kept = page.filter(r => !mask.has(r.file)).map(recordToUnscoredResult);
         if (kept.length > 0) yield kept;
@@ -328,13 +362,105 @@ export class OverlayBackend implements VectorDBInterface {
     return row ? row.v : null;
   }
 
-  /** Record which base build this overlay was diffed against + stamp the
-   *  overlay version file. Called at the end of a build. */
-  async recordBaseBuild(): Promise<void> {
-    const stamp = await readVersionFile(this.baseIndexDir);
-    this.setMeta(OVERLAY_META.BASE_INDEX_DIR, this.baseIndexDir);
-    this.setMeta(OVERLAY_META.BASE_STAMP, String(stamp));
+  /** True when the given content signature matches the one recorded at the last
+   *  build — i.e. a rebuild would reproduce the identical overlay. */
+  overlaySignatureMatches(signature: string): boolean {
+    return this.getMeta(OVERLAY_META.SIGNATURE) === signature;
+  }
+
+  /** Base `.lien-index-version` stamp as a string (for staleness comparison). */
+  async getBaseStamp(): Promise<string> {
+    return String(await readVersionFile(this.baseIndexDir));
+  }
+
+  /** Refresh only the base-build stamp — no content change, no version bump.
+   *  Used on the no-op rebuild path so `needsRebuild()` settles after a base
+   *  reindex that left the overlay content identical. */
+  refreshBaseStamp(baseIndexDir: string, baseStamp: string): void {
+    const db = this.requireOverlay();
+    db.transaction(() => {
+      this.setMeta(OVERLAY_META.BASE_INDEX_DIR, baseIndexDir);
+      this.setMeta(OVERLAY_META.BASE_STAMP, baseStamp);
+    })();
+  }
+
+  /** Bump the overlay's version stamp so other connections reconnect. */
+  async bumpVersion(): Promise<void> {
     await writeVersionFile(this.dbPath);
+  }
+
+  /**
+   * Atomically replace the overlay's entire content — chunk rows, suppression
+   * mask, and base-build metadata — in ONE transaction, so other connections
+   * observe the swap all-or-nothing (WAL snapshot isolation): a reader sees the
+   * complete old overlay or the complete new one, never a base file masked with
+   * no replacement rows yet (the bug this method exists to kill).
+   *
+   * The transaction is `BEGIN IMMEDIATE` and re-reads the stored signature
+   * INSIDE the write lock: if a concurrent writer (another `lien serve` on the
+   * same worktree) already applied the identical overlay, this is a no-op that
+   * reports `changed: false`, so the caller skips the version bump — no
+   * reconnect / rebuild cascade forms. If a peer holds the write lock past the
+   * busy timeout we skip as well (busy-skip: the peer's swap serves us).
+   *
+   * VACUUM + a WAL checkpoint run AFTER commit (VACUUM cannot run inside a
+   * transaction) to reclaim pages freed by the DELETE — keeping the same file
+   * identity throughout (never close+delete+recreate, which is unsafe when
+   * other processes hold the overlay open). Correctness never depends on them.
+   */
+  applyRebuild(plan: {
+    chunkBatches: ReadonlyArray<{ metadatas: ChunkMetadata[]; contents: string[] }>;
+    maskFiles: readonly string[];
+    baseIndexDir: string;
+    baseStamp: string;
+    signature: string;
+  }): { changed: boolean } {
+    const db = this.requireOverlay();
+
+    const swap = db.transaction((): boolean => {
+      // Always keep the base-build stamp current so needsRebuild() settles even
+      // when the content itself is unchanged.
+      this.setMeta(OVERLAY_META.BASE_INDEX_DIR, plan.baseIndexDir);
+      this.setMeta(OVERLAY_META.BASE_STAMP, plan.baseStamp);
+      if (this.getMeta(OVERLAY_META.SIGNATURE) === plan.signature) {
+        return false; // identical overlay already applied (possibly by a peer)
+      }
+      db.exec('DELETE FROM chunks; DELETE FROM overlay_mask;');
+      for (const batch of plan.chunkBatches) {
+        insertChunks(db, batch.metadatas, batch.contents);
+      }
+      const maskInsert = db.prepare('INSERT OR IGNORE INTO overlay_mask(file) VALUES (?)');
+      for (const file of plan.maskFiles) maskInsert.run(file);
+      this.setMeta(OVERLAY_META.SIGNATURE, plan.signature);
+      return true;
+    });
+
+    let changed: boolean;
+    try {
+      changed = swap.immediate();
+    } catch (error) {
+      if (isSqliteBusy(error)) return { changed: false }; // a peer is rebuilding
+      throw error;
+    }
+
+    if (changed) this.reclaimSpace();
+    return { changed };
+  }
+
+  /** Best-effort in-place disk reclamation after a content swap (same file
+   *  identity — see applyRebuild). */
+  private reclaimSpace(): void {
+    const db = this.requireOverlay();
+    try {
+      db.exec('VACUUM');
+    } catch {
+      // A concurrent connection may hold a lock; the next rebuild reclaims.
+    }
+    try {
+      db.pragma('wal_checkpoint(TRUNCATE)');
+    } catch {
+      // best-effort
+    }
   }
 
   /**
