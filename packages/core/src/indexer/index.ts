@@ -348,6 +348,7 @@ async function processFileForIndexing(
       astFallback: indexConfig.astFallback,
       repoId: indexConfig.repoId,
       orgId: indexConfig.orgId,
+      workspaceRoot: rootDir,
     });
 
     if (chunks.length === 0) {

@@ -99,6 +99,7 @@ async function processFileContent(
     astFallback,
     repoId,
     orgId,
+    workspaceRoot: rootDir,
   });
 
   if (chunks.length === 0) {

@@ -13,6 +13,12 @@ export interface ChunkOptions {
   // Multi-tenant fields (optional for backward compatibility)
   repoId?: string; // Repository identifier for multi-tenant scenarios
   orgId?: string; // Organization identifier for multi-tenant scenarios
+  /**
+   * Absolute path to the workspace/monorepo root. Enables cross-package
+   * import resolution for JS/TS monorepos — see `ASTChunkOptions.workspaceRoot`.
+   * Optional; omit for non-monorepo projects (zero behavior change).
+   */
+  workspaceRoot?: string;
 }
 
 export function chunkFile(
@@ -27,6 +33,7 @@ export function chunkFile(
     astFallback = 'line-based',
     repoId,
     orgId,
+    workspaceRoot,
   } = options;
 
   // Special handling for Liquid files
@@ -49,6 +56,7 @@ export function chunkFile(
         minChunkSize: Math.floor(chunkSize / 10),
         repoId,
         orgId,
+        workspaceRoot,
       });
     } catch (error) {
       // Handle AST errors based on configuration

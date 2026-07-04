@@ -287,6 +287,31 @@ export function resolveRelativeImport(importerFile: string, specifier: string): 
 }
 
 /**
+ * Resolve a bare workspace package specifier (`@scope/pkg`, `pkg`) to that
+ * package's workspace-relative source entry file, when `workspacePackages`
+ * has an entry for it. See `resolveWorkspacePackageEntries` in
+ * `../workspace-packages.ts` for how the map is built.
+ *
+ * Only exact bare-specifier matches resolve — deep imports into a package's
+ * subpath (`@scope/pkg/subpath`) pass through unchanged (see that module's
+ * doc comment for why this is the deliberate v1 scope). Specifiers with no
+ * matching workspace package (external npm deps, or an empty/absent map for
+ * non-monorepo projects) also pass through unchanged, so this is a no-op
+ * everywhere it doesn't apply.
+ *
+ * @param specifier - The raw (or already relative-resolved) import specifier
+ * @param workspacePackages - Map of package name -> workspace-relative entry file
+ * @returns The resolved entry file path, or `specifier` unchanged
+ */
+export function resolveWorkspaceImport(
+  specifier: string,
+  workspacePackages: ReadonlyMap<string, string>,
+): string {
+  if (workspacePackages.size === 0) return specifier;
+  return workspacePackages.get(specifier) ?? specifier;
+}
+
+/**
  * Gets a canonical path representation (relative to workspace, with extension).
  *
  * @param filepath - The file path to canonicalize

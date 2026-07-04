@@ -75,6 +75,7 @@ async function chunkFileForCollection(
       useAST: true,
       astFallback: 'line-based',
       repoId: config.repoId,
+      workspaceRoot: rootDir,
     });
 
     if (chunks.length > 0) {
