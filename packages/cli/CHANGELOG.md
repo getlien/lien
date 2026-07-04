@@ -1,5 +1,32 @@
 # @liendev/lien
 
+## 0.52.0
+
+### Minor Changes
+
+- 5e6890e: **BREAKING with graceful degradation:** SQLite is now the only backend and lexical FTS5 search replaces semantic search.
+  - `sqlite` is now the default (and only reachable) backend. A config or `LIEN_BACKEND` pinned to the retired `lancedb` value no longer errors — it warns once and falls back to `sqlite`. On first run the index rebuilds automatically (fast, and nothing is downloaded).
+  - `semantic_search` is now full-text lexical search: BM25 over code, docstrings, and camelCase-split identifiers. Query with concrete keywords and identifiers that appear in the code, not natural-language questions — there are no embeddings, so meaning-only paraphrases won't match. The tool keeps its name for compatibility; `find_similar` and `get_files_context`'s related-chunks now use the same lexical matching.
+  - Embeddings are no longer computed. Indexing never downloads a model or spawns an embedding worker. The `embeddings.enabled` config key and `lien index --no-embeddings` flag are still accepted but are inert.
+
+- 36c14e3: Add an opt-in SQLite structural backend behind the existing vector-DB factory seam. Set `backend: sqlite` in the global config (`~/.lien/config.json`) or `LIEN_BACKEND=sqlite` to store chunks in a better-sqlite3 database with an FTS5 lexical index instead of LanceDB; the SqliteBackend implements the same `VectorDBInterface`, so no handler or indexer changes are needed. The default backend is unchanged (`lancedb`), so this release is purely additive.
+
+### Patch Changes
+
+- 297883e: Exclude `.claude/worktrees/**` from indexing by default. Claude Code agent
+  worktrees are full nested repo clones used as scratch space — indexing them
+  duplicates the entire project once per worktree (seen in production: ~30
+  worktrees produced a 21 GB index and pegged 8 CPU cores). This directory is
+  now added to `ALWAYS_IGNORE_PATTERNS`, the shared exclude list used by the
+  scanner, watcher, and gitignore filter, so it's never indexed regardless of
+  user configuration — the same treatment `node_modules/**` and `.lien/**`
+  already get.
+- Updated dependencies [297883e]
+- Updated dependencies [5e6890e]
+- Updated dependencies [36c14e3]
+  - @liendev/parser@0.52.0
+  - @liendev/core@0.52.0
+
 ## 0.51.2
 
 ### Patch Changes

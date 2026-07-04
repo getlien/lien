@@ -1,5 +1,12 @@
 # @liendev/review
 
+## 0.1.3
+
+### Patch Changes
+
+- Updated dependencies [297883e]
+  - @liendev/parser@0.52.0
+
 ## 0.1.2
 
 ### Patch Changes

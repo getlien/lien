@@ -1,6 +1,6 @@
 {
   "name": "@liendev/core",
-  "version": "0.51.2",
+  "version": "0.52.0",
   "description": "Core indexing and analysis engine for Lien",
   "type": "module",
   "main": "./dist/index.js",
@@ -25,7 +25,7 @@
   },
   "dependencies": {
     "@huggingface/transformers": "^3.8.1",
-    "@liendev/parser": "^0.51.2",
+    "@liendev/parser": "^0.52.0",
     "@lancedb/lancedb": "^0.23.0",
     "better-sqlite3": "^12.11.1",
     "chalk": "^5.6.2",

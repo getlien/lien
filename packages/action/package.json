@@ -1,6 +1,6 @@
 {
   "name": "@liendev/action",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "type": "module",
   "description": "Self-contained GitHub Action for Lien Review — review a PR and post findings, no server required",
@@ -13,8 +13,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@liendev/parser": "^0.51.2",
-    "@liendev/review": "^0.1.2"
+    "@liendev/parser": "^0.52.0",
+    "@liendev/review": "^0.1.3"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
