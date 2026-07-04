@@ -27,9 +27,12 @@
  *   stale claim baked into the same PR's rename and wasn't flagged by
  *   either reviewer). The accurate fix is that NEITHER tool reports as
  *   disabled any more — the disabled-status behavior described here was
- *   fully retired, not partially. This is exactly the shape the
- *   `stale-duplicate` rule exists to catch: a site the diff touched still
- *   asserts something that no longer tracks reality. Corroborating GitHub
+ *   fully retired, not partially. This is exactly the shape the `doc-truth`
+ *   rule (#665) exists to catch: a prose claim the diff touched that no
+ *   longer tracks the code's real behavior. (This fixture was originally
+ *   captured under stale-duplicate — the nearest rule at the time — and
+ *   retargeted after the 2026-07-04 post-merge sweep showed all 3 votes
+ *   catching this finding via doc-truth.) Corroborating GitHub
  *   thread: https://github.com/getlien/lien/pull/658#discussion_r3522630327
  *
  * Finding B (documented, NOT asserted — see below):
@@ -82,31 +85,30 @@
  *
  * Capture command:
  *   npx tsx packages/review/test/harness/capture-pr.ts 658 \
- *     packages/review/test/harness/fixtures/stale-duplicate/pr658-search-code-rename.fixture.json
+ *     packages/review/test/harness/fixtures/doc-truth/pr658-search-code-rename.fixture.json
  *
- * Calibration status: NOT YET RUN. This fixture was captured and validated
- * structurally (fixture-loader round-trip, build-prompts render) only —
- * no OpenRouter/paid run has been made against it. Given the deterministic
- * `<stale_literal_candidates>` pre-scan (packages/review/src/stale-literal-signals.ts)
- * only extracts QUOTED string literals from diff lines
- * (`extractQuotedValues` requires a quote character), and the offending
- * text here is a bare identifier inside a JSDoc-style block comment with
- * no quotes, the pre-scan will NOT surface this candidate — the agent would
- * have to notice the stale claim through general investigation alone, with
- * no deterministic assist. Expect this to need prompt work (or a pre-scan
- * extension to comment-embedded identifiers) before it reliably clears the
- * 9/10 bar; that calibration is a follow-up, human-approved step, not part
- * of this capture.
+ * Calibration status: post-merge sweep 2026-07-04, after the rename-sweep
+ * signal (#663) and the doc-truth rule + guidance passthrough (#665)
+ * merged: 3/3 votes caught Finding A — every vote attributed it to
+ * `doc-truth` (the original `stale-duplicate` Tier-1 expectation written
+ * before #665 existed failed only on rule attribution, never on detection).
+ * The concern documented at capture time — that the
+ * `<stale_literal_candidates>` pre-scan only extracts QUOTED literals and
+ * would give no deterministic assist for a bare identifier in a JSDoc
+ * comment — was addressed by #663's `<rename_sweep>` signal, which lists
+ * exactly these prose-touched renamed lines. Retargeted to doc-truth
+ * accordingly; kept at votes-based assertion (not yet canary) pending a
+ * dedicated calibrate-10.
  */
 
 import type { FixtureAssertions } from '../../assertions.js';
 
 const assertions: FixtureAssertions = {
   description:
-    'PR #658 b24fa33 — schema.ts embeddings.enabled doc comment falsely claims search_code reports as disabled (stale since #657); CodeRabbit caught it, Lien Review did not',
-  rule: 'stale-duplicate',
+    'PR #658 b24fa33 — schema.ts embeddings.enabled doc comment falsely claims search_code reports as disabled (stale since #657); CodeRabbit caught it, Lien Review did not (pre-#663/#665)',
+  rule: 'doc-truth',
   expect: (result, h) => {
-    h.expectRuleFired('stale-duplicate', result);
+    h.expectRuleFired('doc-truth', result);
     h.expectFindingMentions(
       [
         // File / symbol anchors
