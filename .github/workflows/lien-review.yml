@@ -14,9 +14,19 @@ name: Lien Review
 # The review is advisory by default (fail-on defaults to 'never'), so the check
 # stays green whenever the action *runs*; findings show as annotations + comments.
 # Set fail-on: error/any here (or in any consumer workflow) to gate the PR.
+#
+# `types` is pinned explicitly rather than left as GitHub's pull_request default
+# (opened/synchronize/reopened) so nobody can widen it to `edited` without
+# noticing the footgun: the review engine unconditionally rewrites the PR body's
+# `<!-- lien:* -->` stats section on every run (updatePRDescription() in
+# packages/review/src/github-api.ts), so an `edited`-triggered rerun would
+# re-edit the body, re-trigger itself, and loop indefinitely at ~one review's
+# wall-clock time per cycle. `ready_for_review` is added on top of the default
+# set so a draft PR marked ready without a new commit still gets reviewed.
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
