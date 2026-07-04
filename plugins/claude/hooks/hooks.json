@@ -1,5 +1,5 @@
 {
-  "description": "Lien Read-time impact annotator: surfaces dependents/coverage/complexity as a system reminder when the model reads an indexed file. Suppresses repeats per session for 5 minutes.",
+  "description": "Lien Read-time impact annotator: surfaces dependents/coverage/complexity as a system reminder when the model reads an indexed file. Plus a write-time delta warning: after an Edit/Write, flags any function whose complexity newly crossed a threshold. Suppresses repeats per session for 5 minutes.",
   "hooks": {
     "PreToolUse": [
       {
@@ -20,6 +20,16 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/annotate-read.sh",
+            "timeout": 5000
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/delta-write.sh",
             "timeout": 5000
           }
         ]

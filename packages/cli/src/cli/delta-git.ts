@@ -9,7 +9,7 @@
 
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { readFile } from 'node:fs/promises';
+import { readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { getSupportedExtensions, type FileContentChange } from '@liendev/parser';
 
@@ -88,15 +88,25 @@ async function showHead(rootDir: string, gitPath: string): Promise<string | null
   try {
     return await git(rootDir, ['show', `HEAD:${gitPath}`]);
   } catch {
+    // `null` here means "no version of this path in HEAD" — i.e. the file is
+    // added/untracked. That is the intended, correct meaning of a `git show`
+    // failure for this path (unlike readWorktree below, where null must be
+    // reserved for genuine absence), so all errors legitimately map to null.
     return null;
   }
 }
 
-async function readWorktree(rootDir: string, gitPath: string): Promise<string | null> {
+// Exported for unit testing of the ENOENT-only null-mapping (Phase-1 finding #4).
+export async function readWorktree(rootDir: string, gitPath: string): Promise<string | null> {
   try {
     return await readFile(path.join(rootDir, gitPath), 'utf-8');
-  } catch {
-    return null;
+  } catch (error) {
+    // Downstream, a null `after` is read as "file deleted". Only a genuinely
+    // absent file (ENOENT) means that. Any other failure — EACCES, EISDIR, an
+    // I/O error — must NOT masquerade as a deletion; surface it as an
+    // operational error (the caller maps thrown errors to exit 2).
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return null;
+    throw error;
   }
 }
 
@@ -156,4 +166,67 @@ export async function collectFileChanges(rootDir: string): Promise<FileContentCh
 
   const filtered = raw.filter(r => isSupported(r.path, supported));
   return Promise.all(filtered.map(r => toContentChange(rootDir, r, !born)));
+}
+
+/**
+ * Resolve symlinked path segments so lexical `path.relative` comparisons are
+ * sound. Falls back gracefully when the target does not exist yet (e.g. a
+ * deleted file): realpath the parent directory and re-attach the basename;
+ * failing that, return the input unchanged.
+ */
+async function canonicalize(p: string): Promise<string> {
+  try {
+    return await realpath(p);
+  } catch {
+    try {
+      return path.join(await realpath(path.dirname(p)), path.basename(p));
+    } catch {
+      return p;
+    }
+  }
+}
+
+/**
+ * Build the before/after content pair for a SINGLE file (working tree vs HEAD).
+ * This is the fast path for the per-edit hook: it avoids the full `git diff`
+ * scan and touches only the one file that was just edited.
+ *
+ * `filePath` may be absolute or relative to `rootDir`. Returns `null` — meaning
+ * "nothing to analyze, stay silent" — when the path is outside the repo, its
+ * extension is not parser-supported, or it exists on neither side (before and
+ * after both absent). Read errors other than ENOENT propagate (operational
+ * failure), matching `readWorktree`'s contract.
+ */
+export async function collectFileChange(
+  rootDir: string,
+  filePath: string,
+): Promise<FileContentChange | null> {
+  // Resolve to a repo-relative POSIX path; reject anything outside the repo.
+  // Canonicalize symlinked path segments on BOTH sides first — otherwise a
+  // symlinked ancestor (macOS /tmp → /private/tmp, or a symlinked project dir)
+  // makes an absolute input path lexically "escape" the repo and get rejected.
+  //
+  // Resolve filePath against the CANONICAL root, not the raw rootDir: when the
+  // repo root itself sits behind a symlinked ancestor AND the target no longer
+  // exists on disk (deleted file in a deleted directory), canonicalize() falls
+  // back to the identity — resolving against the raw root would then leave the
+  // symlinked prefix in place and path.relative(canonRoot, …) would falsely
+  // escape. Residual (accepted) edge: an *absolute* input path through a
+  // symlinked ancestor whose file AND parent dir are both gone can still hit
+  // the identity fallback and be rejected — that fails silent-safe, and hook
+  // payloads reference files that were just edited (they exist).
+  const canonRoot = await canonicalize(rootDir);
+  const abs = await canonicalize(path.resolve(canonRoot, filePath));
+  const rel = path.relative(canonRoot, abs);
+  if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) return null;
+  const relPosix = rel.split(path.sep).join('/');
+
+  const supported = new Set(getSupportedExtensions().map(ext => `.${ext}`));
+  if (!isSupported(relPosix, supported)) return null;
+
+  const before = await showHead(rootDir, relPosix); // null => not in HEAD (added/new)
+  const after = await readWorktree(rootDir, relPosix); // null => deleted (ENOENT only)
+  if (before === null && after === null) return null;
+
+  return { filepath: relPosix, before, after };
 }

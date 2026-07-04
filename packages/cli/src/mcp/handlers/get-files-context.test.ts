@@ -4,9 +4,40 @@ import {
   findRelatedChunks,
   handleGetFilesContext,
   clearTestAssociationScanCache,
+  computeComplexityHeadroom,
 } from './get-files-context.js';
 import type { ToolContext } from '../types.js';
 import type { SearchResult } from '@liendev/core';
+
+/** Build a function/method chunk carrying stored complexity metrics. */
+function makeFnChunk(
+  symbolName: string,
+  opts: {
+    cyclomatic?: number;
+    cognitive?: number;
+    parentClass?: string;
+    symbolType?: 'function' | 'method' | 'class' | 'interface';
+    file?: string;
+  } = {},
+): SearchResult {
+  return {
+    content: '',
+    metadata: {
+      file: opts.file ?? 'src/target.ts',
+      startLine: 1,
+      endLine: 20,
+      type: 'function',
+      language: 'typescript',
+      symbolName,
+      symbolType: opts.symbolType ?? 'function',
+      parentClass: opts.parentClass,
+      complexity: opts.cyclomatic,
+      cognitiveComplexity: opts.cognitive,
+    },
+    score: 0,
+    relevance: 'not_relevant',
+  };
+}
 
 describe('searchFileChunks', () => {
   const mockLog = vi.fn();
@@ -273,5 +304,159 @@ describe('handleGetFilesContext - test-association scan (scanAll fast path + cac
     await handleGetFilesContext({ filepaths: 'src/b.ts', includeRelated: false }, ctx);
 
     expect(scanAll).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('computeComplexityHeadroom (Mechanism 3)', () => {
+  // Default thresholds: cyclomatic 15, cognitive 15. Near-budget = >= 80% (>=12).
+
+  it('flags a function over threshold', () => {
+    const { entries, overflow } = computeComplexityHeadroom([
+      makeFnChunk('over', { cognitive: 18 }),
+    ]);
+    expect(overflow).toBe(0);
+    expect(entries).toEqual([{ symbol: 'over', metric: 'cognitive', value: 18, threshold: 15 }]);
+  });
+
+  it('flags a function at/near budget (>= 80%) and excludes one below', () => {
+    const { entries } = computeComplexityHeadroom([
+      makeFnChunk('near', { cognitive: 12 }), // 12/15 = 0.80 → included
+      makeFnChunk('comfortable', { cognitive: 11 }), // 11/15 = 0.73 → excluded
+    ]);
+    expect(entries.map(e => e.symbol)).toEqual(['near']);
+  });
+
+  it('returns nothing when every function is comfortably under budget', () => {
+    const { entries, overflow } = computeComplexityHeadroom([
+      makeFnChunk('a', { cognitive: 5, cyclomatic: 4 }),
+      makeFnChunk('b', { cognitive: 8 }),
+    ]);
+    expect(entries).toEqual([]);
+    expect(overflow).toBe(0);
+  });
+
+  it('emits ONE entry per function — its worst metric by value/threshold ratio', () => {
+    // cyclomatic 13 (0.87) vs cognitive 16 (1.07) → cognitive wins.
+    const { entries } = computeComplexityHeadroom([
+      makeFnChunk('mixed', { cyclomatic: 13, cognitive: 16 }),
+    ]);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toEqual({ symbol: 'mixed', metric: 'cognitive', value: 16, threshold: 15 });
+  });
+
+  it('qualifies methods with their parent class', () => {
+    const { entries } = computeComplexityHeadroom([
+      makeFnChunk('doThing', { cognitive: 20, parentClass: 'MyService', symbolType: 'method' }),
+    ]);
+    expect(entries[0].symbol).toBe('MyService.doThing');
+  });
+
+  it('ignores non-function chunks (classes, interfaces)', () => {
+    const { entries } = computeComplexityHeadroom([
+      makeFnChunk('SomeClass', { cognitive: 30, symbolType: 'class' }),
+      makeFnChunk('SomeInterface', { cognitive: 30, symbolType: 'interface' }),
+    ]);
+    expect(entries).toEqual([]);
+  });
+
+  it('includes over-budget constructors (chunked as symbolType "method", name "constructor")', () => {
+    // Regression lock for a review finding that suggested 'constructor' /
+    // 'arrow_function' symbolTypes escape headroom: neither exists in the
+    // parser's symbolType vocabulary. Verified against the real chunker —
+    // constructors chunk as { symbolName: 'constructor', symbolType: 'method',
+    // parentClass: <Class> } and arrow functions as symbolType 'function', so
+    // the function|method filter (identical to the delta primitive's) covers
+    // every callable kind the chunker emits.
+    const { entries } = computeComplexityHeadroom([
+      makeFnChunk('constructor', { cognitive: 18, parentClass: 'Svc', symbolType: 'method' }),
+      makeFnChunk('arrowFn', { cognitive: 16, symbolType: 'function' }),
+    ]);
+    expect(entries.map(e => e.symbol)).toEqual(['Svc.constructor', 'arrowFn']);
+  });
+
+  it('skips non-finite metric values — NaN and Infinity never reach the payload', () => {
+    // Mirrors fmtValue's display guard: NaN slips past `ratio < 0.8` (NaN
+    // comparisons are false) and Infinity passes it outright — without the
+    // explicit guard either would leak into the MCP response.
+    const { entries, overflow } = computeComplexityHeadroom([
+      makeFnChunk('nanFn', { cognitive: Number.NaN }),
+      makeFnChunk('infFn', { cyclomatic: Number.POSITIVE_INFINITY }),
+      // Mixed: one corrupt metric, one valid over-budget metric — the valid one
+      // must still be reported.
+      makeFnChunk('mixedFn', { cognitive: Number.NaN, cyclomatic: 18 }),
+    ]);
+    expect(entries).toEqual([
+      { symbol: 'mixedFn', metric: 'cyclomatic', value: 18, threshold: 15 },
+    ]);
+    expect(overflow).toBe(0);
+  });
+
+  it('sorts worst-first and caps at 5 with an overflow count', () => {
+    const chunks = [
+      makeFnChunk('f1', { cognitive: 13 }),
+      makeFnChunk('f2', { cognitive: 14 }),
+      makeFnChunk('f3', { cognitive: 15 }),
+      makeFnChunk('f4', { cognitive: 16 }),
+      makeFnChunk('f5', { cognitive: 17 }),
+      makeFnChunk('f6', { cognitive: 18 }),
+      makeFnChunk('f7', { cognitive: 19 }),
+    ];
+    const { entries, overflow } = computeComplexityHeadroom(chunks);
+    expect(entries).toHaveLength(5);
+    expect(entries.map(e => e.symbol)).toEqual(['f7', 'f6', 'f5', 'f4', 'f3']); // worst-first
+    expect(overflow).toBe(2);
+  });
+});
+
+describe('handleGetFilesContext — complexityHeadroom in the response', () => {
+  const mockLog = vi.fn();
+
+  function ctxReturning(chunks: SearchResult[]): ToolContext {
+    return {
+      vectorDB: {
+        scanWithFilter: vi.fn().mockResolvedValue(chunks),
+        scanAll: vi.fn().mockResolvedValue([]),
+        search: vi.fn().mockResolvedValue([]),
+      } as any,
+      rootDir: process.cwd(),
+      log: mockLog,
+      checkAndReconnect: vi.fn().mockResolvedValue(undefined),
+      getIndexMetadata: vi.fn(() => ({ indexVersion: 1, indexDate: '2026-07-01' })),
+      getReindexState: vi.fn(() => ({
+        inProgress: false,
+        pendingFiles: [],
+        lastReindexTimestamp: null,
+        lastReindexDurationMs: null,
+      })),
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearTestAssociationScanCache();
+  });
+
+  it('includes complexityHeadroom for a file with a near/over-budget function', async () => {
+    const ctx = ctxReturning([makeFnChunk('extractSymbols', { cognitive: 18, file: 'src/a.ts' })]);
+    const result = await handleGetFilesContext(
+      { filepaths: 'src/a.ts', includeRelated: false },
+      ctx,
+    );
+    const parsed = JSON.parse(result.content![0].text);
+    expect(parsed.complexityHeadroom).toEqual([
+      { symbol: 'extractSymbols', metric: 'cognitive', value: 18, threshold: 15 },
+    ]);
+    expect(parsed.complexityHeadroomMore).toBeUndefined();
+  });
+
+  it('omits complexityHeadroom entirely when nothing is near budget', async () => {
+    const ctx = ctxReturning([makeFnChunk('tidy', { cognitive: 4, file: 'src/a.ts' })]);
+    const result = await handleGetFilesContext(
+      { filepaths: 'src/a.ts', includeRelated: false },
+      ctx,
+    );
+    const parsed = JSON.parse(result.content![0].text);
+    expect(parsed).not.toHaveProperty('complexityHeadroom');
+    expect(parsed).not.toHaveProperty('complexityHeadroomMore');
   });
 });

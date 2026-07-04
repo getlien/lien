@@ -96,6 +96,8 @@ Returns for each file:
 ALWAYS check testAssociations before modifying source code.
 After changes, remind the user to run the associated tests.
 
+May include complexityHeadroom: functions already at/near their complexity budget (cyclomatic/cognitive) — steer clear of adding to them.
+
 Batch calls are more efficient than multiple single-file calls.`,
   ),
   toMCPToolSchema(
