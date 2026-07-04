@@ -1,5 +1,40 @@
 # @liendev/core
 
+## 0.59.0
+
+### Patch Changes
+
+- 62d12ec: fix(core): make worktree overlay rebuilds reader-atomic and livelock-free
+
+  Two composing concurrency bugs in worktree overlay indexing (shipped in #667)
+  could make `list_functions` / `querySymbols` intermittently return 0 results for
+  a file that exists, while the overlay's `indexVersion` churned with zero file
+  edits when more than one `lien serve` had the worktree as cwd.
+  - **Reader atomicity.** `buildOverlay` no longer clears then repopulates the
+    overlay across many autocommitted statements. It now does all scan/hash/chunk
+    work up front, then applies the whole swap (delete + insert of chunks and
+    mask, plus metadata) in ONE `BEGIN IMMEDIATE` transaction via
+    `OverlayBackend.applyRebuild`, so other connections observe the rebuild
+    all-or-nothing under WAL snapshot isolation — never a base file masked with no
+    replacement rows. Disk reclamation moves to a best-effort post-commit
+    `VACUUM` + WAL checkpoint (same file identity, preserving #667's multi-process
+    safety fix). Union reads (`unionRecords`, `search`, `scanPaginated`) now read
+    overlay rows + mask inside one deferred snapshot so a commit landing between
+    the two statements can't be seen half-applied.
+  - **Rebuild livelock.** A rebuild that reproduces a byte-identical overlay
+    (same diverged-file/hash set + mask) no longer bumps the version stamp — a
+    cheap content signature, checked inside the swap transaction, makes redundant
+    rebuilds silent. So piled-up serves stop mutually re-triggering reconnects and
+    rebuilds; genuine content changes still bump. A `SQLITE_BUSY` busy-skip lets a
+    peer's in-flight rebuild serve everyone rather than contending.
+
+- 68e98ef: Resolve workspace package specifiers (`import { X } from '@scope/pkg'`) to the package's source entry file during chunking, closing a monorepo blind spot in dependency analysis. Previously, imports written as a workspace package specifier (rather than a relative path) were stored raw and never matched any indexed file, so `get_dependents` couldn't see across package boundaries in npm-workspaces monorepos — e.g. a CLI package consuming a symbol from a sibling library package showed 0 dependents.
+
+  Workspace packages are now detected generically from the root `package.json`'s `workspaces` globs (supporting nested globs and negated excludes) and each member's declared source entry (`main`/`module`, falling back to the `src/index.<ext>` convention) — nothing is hardcoded to `@liendev`. The resulting map is applied the same way `./`/`../` specifiers already are, so file-level dependents, the transitive re-export BFS, and symbol-level usage tracking all pick up cross-package edges automatically. Deep/subpath imports (`@scope/pkg/subpath`) are out of scope for this pass and continue to pass through unresolved. Non-monorepo projects and external npm packages are unaffected.
+
+- Updated dependencies [68e98ef]
+  - @liendev/parser@0.59.0
+
 ## 0.58.0
 
 ### Patch Changes
