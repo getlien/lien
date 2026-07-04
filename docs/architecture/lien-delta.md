@@ -166,7 +166,7 @@ Given a metric's `before` value `b`, `after` value `a`, and threshold `t`
 a === null                 -> 'removed'
 b === null                 -> a >= t ? 'new-over-threshold' : 'new-under-threshold'
 b <  t && a >= t           -> 'crossed'
-b >= t                     -> a <  b ? 'improved' : 'pre-existing'   // pre-existing violation
+b >= t                     -> a < b ? 'improved' : a > b ? 'pre-existing' : 'unchanged'
 otherwise (both < t)       -> a > b ? 'worsened' : a < b ? 'improved' : 'unchanged'
 ```
 
