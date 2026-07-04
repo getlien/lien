@@ -6,7 +6,7 @@ import { z } from 'zod';
  * Validates query strings and result limits for full-text (BM25) code search.
  * Includes rich descriptions to guide AI assistants on proper usage.
  */
-export const SemanticSearchSchema = z.object({
+export const SearchCodeSchema = z.object({
   query: z
     .string()
     .min(3, 'Query must be at least 3 characters')
@@ -56,6 +56,6 @@ export const SemanticSearchSchema = z.object({
 });
 
 /**
- * Inferred TypeScript type for semantic search input
+ * Inferred TypeScript type for code search input
  */
-export type SemanticSearchInput = z.infer<typeof SemanticSearchSchema>;
+export type SearchCodeInput = z.infer<typeof SearchCodeSchema>;

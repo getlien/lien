@@ -6,7 +6,7 @@ import type { ChunkMetadata } from '@liendev/parser';
  * Tool names that support metadata shaping.
  * get_dependents and get_complexity use their own response formats.
  */
-export type ToolName = 'semantic_search' | 'find_similar' | 'get_files_context' | 'list_functions';
+export type ToolName = 'search_code' | 'find_similar' | 'get_files_context' | 'list_functions';
 
 /**
  * Slim metadata included in MCP tool responses.
@@ -60,7 +60,7 @@ type AllowlistKey = keyof ChunkMetadata & keyof ToolResultMetadata;
  * to the AI assistant is trimmed to reduce context window usage.
  */
 const FIELD_ALLOWLISTS: Record<ToolName, ReadonlySet<AllowlistKey>> = {
-  semantic_search: new Set<AllowlistKey>([
+  search_code: new Set<AllowlistKey>([
     'language',
     'type',
     'symbolName',

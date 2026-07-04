@@ -71,7 +71,7 @@ export interface IndexMetadata {
 }
 
 /**
- * Response for semantic_search tool
+ * Response for search_code tool
  */
 export interface SearchResultResponse {
   indexInfo: IndexMetadata;

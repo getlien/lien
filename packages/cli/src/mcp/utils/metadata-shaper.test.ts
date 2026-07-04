@@ -35,8 +35,8 @@ function createFullResult(): SearchResult {
 }
 
 describe('shapeResultMetadata', () => {
-  it('semantic_search: keeps core fields and exports, strips everything else', () => {
-    const result = shapeResultMetadata(createFullResult(), 'semantic_search');
+  it('search_code: keeps core fields and exports, strips everything else', () => {
+    const result = shapeResultMetadata(createFullResult(), 'search_code');
     const m = result.metadata;
 
     // Kept
@@ -108,7 +108,7 @@ describe('shapeResultMetadata', () => {
   });
 
   it('preserves content, score, and relevance', () => {
-    const result = shapeResultMetadata(createFullResult(), 'semantic_search');
+    const result = shapeResultMetadata(createFullResult(), 'search_code');
 
     expect(result.content).toBe('function example() { return true; }');
     expect(result.score).toBe(0.5);
@@ -129,7 +129,7 @@ describe('shapeResultMetadata', () => {
       relevance: 'loosely_related',
     };
 
-    const result = shapeResultMetadata(sparse, 'semantic_search');
+    const result = shapeResultMetadata(sparse, 'search_code');
     expect(result.metadata.file).toBe('src/x.ts');
     expect(result.metadata.symbolName).toBeUndefined();
     expect(Object.keys(result.metadata)).not.toContain('imports');
@@ -138,21 +138,21 @@ describe('shapeResultMetadata', () => {
   it('strips empty string symbolType', () => {
     const result = createFullResult();
     (result.metadata as any).symbolType = '';
-    const shaped = shapeResultMetadata(result, 'semantic_search');
+    const shaped = shapeResultMetadata(result, 'search_code');
     expect(Object.keys(shaped.metadata)).not.toContain('symbolType');
   });
 
   it('strips parameters with only empty strings', () => {
     const result = createFullResult();
     result.metadata.parameters = [''];
-    const shaped = shapeResultMetadata(result, 'semantic_search');
+    const shaped = shapeResultMetadata(result, 'search_code');
     expect(Object.keys(shaped.metadata)).not.toContain('parameters');
   });
 
   it('filters empty strings from parameters but keeps non-empty', () => {
     const result = createFullResult();
     result.metadata.parameters = ['', 'a: string', ''];
-    const shaped = shapeResultMetadata(result, 'semantic_search');
+    const shaped = shapeResultMetadata(result, 'search_code');
     expect(shaped.metadata.parameters).toEqual(['a: string']);
   });
 
@@ -172,14 +172,14 @@ describe('shapeResultMetadata', () => {
 
   it('derives enclosingSymbol as parentClass.symbolName for methods', () => {
     const result = createFullResult();
-    const shaped = shapeResultMetadata(result, 'semantic_search');
+    const shaped = shapeResultMetadata(result, 'search_code');
     expect(shaped.metadata.enclosingSymbol).toBe('ExampleClass.example');
   });
 
   it('derives enclosingSymbol as symbolName for standalone functions', () => {
     const result = createFullResult();
     delete (result.metadata as any).parentClass;
-    const shaped = shapeResultMetadata(result, 'semantic_search');
+    const shaped = shapeResultMetadata(result, 'search_code');
     expect(shaped.metadata.enclosingSymbol).toBe('example');
   });
 
@@ -196,7 +196,7 @@ describe('shapeResultMetadata', () => {
       score: 0.8,
       relevance: 'loosely_related',
     };
-    const shaped = shapeResultMetadata(sparse, 'semantic_search');
+    const shaped = shapeResultMetadata(sparse, 'search_code');
     expect(Object.keys(shaped.metadata)).not.toContain('enclosingSymbol');
   });
 });
@@ -204,7 +204,7 @@ describe('shapeResultMetadata', () => {
 describe('shapeResults', () => {
   it('maps over an array of results', () => {
     const results = [createFullResult(), createFullResult()];
-    const shaped = shapeResults(results, 'semantic_search');
+    const shaped = shapeResults(results, 'search_code');
 
     expect(shaped).toHaveLength(2);
     for (const r of shaped) {
@@ -215,7 +215,7 @@ describe('shapeResults', () => {
   });
 
   it('handles empty array', () => {
-    expect(shapeResults([], 'semantic_search')).toEqual([]);
+    expect(shapeResults([], 'search_code')).toEqual([]);
   });
 });
 

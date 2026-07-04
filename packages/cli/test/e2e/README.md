@@ -225,7 +225,7 @@ a real LanceDB index of a small in-memory fixture repo built via the real
 `indexCodebase()` path. Unlike `server.test.ts` (which mocks the SDK's
 `Server`/transport classes and only asserts setup calls) and the handler
 unit tests (which mock the vector DB), this proves a client can actually
-connect and get a real `tools/call` response for `semantic_search` and
+connect and get a real `tools/call` response for `search_code` and
 `get_files_context`.
 
 Uses `LocalEmbeddings` (in-process, no worker thread) loaded once for the
@@ -238,7 +238,7 @@ npm run test:e2e:mcp -w @liendev/lien
 
 ## Future Enhancements
 
-- [x] Add semantic search validation (requires MCP server) — see `mcp-roundtrip.test.ts`
+- [x] Add code search validation (requires MCP server) — see `mcp-roundtrip.test.ts`
 - [ ] Add performance benchmarks (index time, search latency)
 - [ ] Add multi-language project test (e.g., Django + React)
 - [ ] Cache git clones between runs

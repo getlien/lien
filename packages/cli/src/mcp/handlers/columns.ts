@@ -208,7 +208,7 @@ export const TEST_ASSOCIATIONS_COLUMNS: ColumnName[] = [...BASE, 'imports'];
 export const RELATED_CHUNKS_COLUMNS: ColumnName[] = FILE_CONTEXT_COLUMNS;
 
 /**
- * `semantic_search` + `find_similar` — must satisfy the corresponding
+ * `search_code` + `find_similar` — must satisfy the corresponding
  * `shapeResults` allowlists (both include `exports`, `parentClass`,
  * `parameters`). `_distance` is auto-injected by the `search()` wrapper.
  */

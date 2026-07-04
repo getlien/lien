@@ -70,7 +70,7 @@ Comprehensive sequence diagrams showing:
 
 Detailed diagrams of:
 - Server initialization sequence
-- Tool request handling (semantic_search, find_similar, get_files_context, list_functions, get_dependents, get_complexity)
+- Tool request handling (search_code, find_similar, get_files_context, list_functions, get_dependents, get_complexity)
 - Background update monitoring
 - Version checking and reconnection
 - Error handling

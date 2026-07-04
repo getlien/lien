@@ -17,7 +17,7 @@ import { EMBEDDING_DIMENSION } from './types.js';
  * keep working against a normally-persisted index.
  *
  * Semantic search over all-zero vectors is meaningless by design. Callers
- * must gate `semantic_search`/`find_similar` on whether embeddings are
+ * must gate `search_code`/`find_similar` on whether embeddings are
  * enabled rather than relying on the vectors themselves (see
  * `mcp/handlers/semantic-search.ts` and `mcp/handlers/find-similar.ts`).
  *

@@ -23,7 +23,7 @@ Choose the right tool for each query type:
 
 | Query Type | Tool |
 |------------|------|
-| "Where is X?" / "How does X work?" | \`semantic_search\` — query with concrete keywords/identifiers |
+| "Where is X?" / "How does X work?" | \`search_code\` — query with concrete keywords/identifiers |
 | "Find all controllers/services" | \`list_functions\` with pattern regex |
 | "Show all classes/interfaces" | \`list_functions\` with symbolType filter |
 | "What does this file do?" / "What tests cover this?" | \`get_files_context\` |
@@ -42,13 +42,13 @@ Choose the right tool for each query type:
 
 ### Rules
 
-1. **Start with Lien tools.** For any "where/how/what" question, use \`semantic_search\` first.
-2. **Use \`list_functions\` for structural queries.** 10x faster than semantic_search for name-based lookups.
+1. **Start with Lien tools.** For any "where/how/what" question, use \`search_code\` first.
+2. **Use \`list_functions\` for structural queries.** 10x faster than search_code for name-based lookups.
 3. **Fall back to Grep only for exact strings** — literal text, config keys, error messages, TODOs.
-4. **Combine tools for depth.** semantic_search to locate, Read to examine, get_dependents for impact.
+4. **Combine tools for depth.** search_code to locate, Read to examine, get_dependents for impact.
 5. **Be concise.** Return the answer with file paths and line numbers, not a narration of your search.
 
-### semantic_search tips
+### search_code tips
 
 Full-text (FTS5/BM25) lexical search — there are no embeddings, so paraphrase
 queries won't match. Query with vocabulary that actually appears in the code.

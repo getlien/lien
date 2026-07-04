@@ -21,8 +21,8 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
  *
  * const tool = toMCPToolSchema(
  *   SearchSchema,
- *   'semantic_search',
- *   'Search the codebase semantically'
+ *   'search_code',
+ *   'Full-text code search'
  * );
  * ```
  */

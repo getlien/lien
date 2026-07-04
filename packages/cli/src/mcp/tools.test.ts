@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { tools } from './tools.js';
 import {
-  SemanticSearchSchema,
+  SearchCodeSchema,
   FindSimilarSchema,
   GetFilesContextSchema,
   ListFunctionsSchema,
@@ -32,13 +32,13 @@ describe('MCP Tools Schema', () => {
     });
   });
 
-  describe('semantic_search tool', () => {
+  describe('search_code tool', () => {
     it('should have correct schema', () => {
-      const tool = tools.find(t => t.name === 'semantic_search');
+      const tool = tools.find(t => t.name === 'search_code');
 
       expect(tool).toBeDefined();
-      expect(tool!.name).toBe('semantic_search');
-      expect(tool!.description).toContain('semantic');
+      expect(tool!.name).toBe('search_code');
+      expect(tool!.description).toContain('keyword search');
       const schema = tool!.inputSchema as any;
       expect(schema.type).toBe('object');
       expect(schema.properties).toHaveProperty('query');
@@ -47,19 +47,19 @@ describe('MCP Tools Schema', () => {
     });
 
     it('should mention relevance categories in description', () => {
-      const tool = tools.find(t => t.name === 'semantic_search');
+      const tool = tools.find(t => t.name === 'search_code');
       expect(tool!.description).toContain('relevance');
       expect(tool!.description).toContain('highly_relevant');
     });
 
     it('should have query as required field', () => {
-      const tool = tools.find(t => t.name === 'semantic_search');
+      const tool = tools.find(t => t.name === 'search_code');
       const schema = tool?.inputSchema as any;
       expect(schema.required).toContain('query');
     });
 
     it('should have limit with default value', () => {
-      const tool = tools.find(t => t.name === 'semantic_search');
+      const tool = tools.find(t => t.name === 'search_code');
       const schema = tool?.inputSchema as any;
       expect(schema.properties.limit?.default).toBe(5);
     });
@@ -250,9 +250,9 @@ describe('MCP Tools Schema', () => {
   });
 
   describe('Zod schema validation integration', () => {
-    describe('semantic_search validation', () => {
+    describe('search_code validation', () => {
       it('should accept valid input', () => {
-        const valid = SemanticSearchSchema.safeParse({
+        const valid = SearchCodeSchema.safeParse({
           query: 'test query',
           limit: 10,
         });
@@ -260,7 +260,7 @@ describe('MCP Tools Schema', () => {
       });
 
       it('should reject invalid input', () => {
-        const invalid = SemanticSearchSchema.safeParse({
+        const invalid = SearchCodeSchema.safeParse({
           query: 'ab', // too short
           limit: 10,
         });
@@ -268,7 +268,7 @@ describe('MCP Tools Schema', () => {
       });
 
       it('should apply defaults', () => {
-        const result = SemanticSearchSchema.parse({ query: 'test' });
+        const result = SearchCodeSchema.parse({ query: 'test' });
         expect(result.limit).toBe(5);
       });
     });

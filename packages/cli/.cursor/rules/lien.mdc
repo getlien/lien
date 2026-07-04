@@ -6,14 +6,14 @@ alwaysApply: true
 
 # MANDATORY: Use Lien MCP for Code Search
 
-You have access to Lien semantic search tools. USE THEM INSTEAD OF grep/ripgrep/built-in search.
+You have access to Lien code search tools (lexical FTS5). USE THEM INSTEAD OF grep/ripgrep/built-in search.
 
 ## Tool Selection (FOLLOW THIS)
 
 | User wants... | Use this | NOT this |
 |---------------|----------|----------|
-| "Where is X implemented?" | `semantic_search` | grep |
-| "How does X work?" | `semantic_search` | reading random files |
+| "Where is X implemented?" | `search_code` | grep |
+| "How does X work?" | `search_code` | reading random files |
 | "Find all Controllers" | `list_functions` | grep |
 | Edit a file | `get_files_context` FIRST | direct edit |
 | Find similar code | `find_similar` | manual search |
@@ -23,14 +23,14 @@ You have access to Lien semantic search tools. USE THEM INSTEAD OF grep/ripgrep/
 ## Before ANY Code Change
 
 REQUIRED sequence:
-1. `semantic_search` → find relevant files
+1. `search_code` → find relevant files
 2. `get_files_context` → understand the file + check `testAssociations`
 3. Make changes
 4. Remind user to run affected tests
 
 ## Tool Reference
 
-**`semantic_search({ query: "How does the code do X?", limit: 5 })`**
+**`search_code({ query: "How does the code do X?", limit: 5 })`**
 - Phrase queries as FULL QUESTIONS: "How does the code handle authentication?", "Where are email addresses validated?"
 - Full questions produce significantly better relevance than keyword phrases
 - NOT function names (use grep for exact names)
@@ -47,7 +47,7 @@ REQUIRED sequence:
 **`list_functions({ pattern: ".*Controller.*" })`**
 - Fast symbol lookup by naming pattern
 - Use for structural queries: "show all services", "find handlers"
-- 10x faster than semantic_search for name-based lookups
+- 10x faster than search_code for name-based lookups
 
 **`find_similar({ code: "snippet to match" })`**
 - Find similar implementations for consistency
@@ -94,7 +94,7 @@ get_files_context({ filepaths: ["src/auth.ts", "src/user.ts"] })
 
 ### Pattern 1: "Where is X?" / "How does X work?"
 ```
-1. semantic_search({ query: "How is X implemented?" })
+1. search_code({ query: "How is X implemented?" })
 2. Review results (check relevance scores)
 3. get_files_context({ filepaths: "identified/file.ts" })
 4. Answer with specific code locations
@@ -102,7 +102,7 @@ get_files_context({ filepaths: ["src/auth.ts", "src/user.ts"] })
 
 ### Pattern 2: Edit or Change Code
 ```
-1. semantic_search({ query: "How does the code handle [area being modified]?" })
+1. search_code({ query: "How does the code handle [area being modified]?" })
 2. get_files_context({ filepaths: "target/file.ts" })
 3. Check testAssociations in response
 4. Make changes
@@ -150,10 +150,10 @@ Use for filtering:
 ONLY use grep/ripgrep when:
 - User provides an exact string/function name to find
 - Looking for specific imports or string literals
-- Semantic search returned no results
+- Code search returned no results
 
 For everything else: **Lien first.**
 
 ---
 
-REMINDER: semantic_search and get_files_context FIRST. grep is the fallback, not the default.
+REMINDER: search_code and get_files_context FIRST. grep is the fallback, not the default.
