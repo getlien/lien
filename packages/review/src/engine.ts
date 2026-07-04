@@ -571,7 +571,13 @@ async function postPluginInlineComments(
   const markerPrefix = `${PLUGIN_MARKER_PREFIX}${pluginId}:`;
 
   const diffResult = await filterToDiffLines(octokit, pr, findings, logger);
-  if (!diffResult) return { posted: 0, skipped: findings.length };
+  if (!diffResult) {
+    logger.info(
+      `postInlineComments(${pluginId}): posting 0 of ${findings.length} finding(s) ` +
+        `(diff fetch failed — see warning above)`,
+    );
+    return { posted: 0, skipped: findings.length };
+  }
 
   const { inDiff, outOfDiffCount } = diffResult;
 
@@ -889,6 +895,11 @@ function extractPluginCommentKey(body: string, markerPrefix: string): string | n
  * 461, 483, and 486 by three consecutive runs), so exact-line keys re-post
  * near-duplicates. Same file + same category within this many lines counts
  * as the same finding.
+ *
+ * Deliberate tradeoff: two genuinely distinct same-category findings within
+ * this window in one file are collapsed into one comment. That costs less
+ * than re-posting the same finding on every run — the surviving comment
+ * still points a reviewer at the right region.
  */
 export const DEDUP_LINE_TOLERANCE = 30;
 

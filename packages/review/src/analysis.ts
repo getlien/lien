@@ -127,8 +127,12 @@ export async function runComplexityAnalysis(
     try {
       await access(join(rootDir, file));
       present.push(file);
-    } catch {
-      // absent in this checkout
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        // Not "absent" — a real filesystem problem (EACCES, EMFILE, ...).
+        // Keep the file so the parser surfaces the actual error loudly.
+        present.push(file);
+      }
     }
   }
   const absentCount = files.length - present.length;
