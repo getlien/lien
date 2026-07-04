@@ -127,7 +127,7 @@ export async function handleListFunctions(args: unknown, ctx: ToolContext): Prom
     const notes: string[] = [];
     if (queryResult.results.length === 0) {
       notes.push(
-        '0 results. Try a broader regex pattern (e.g. ".*") or omit the symbolType filter. Use semantic_search for behavior-based queries.',
+        '0 results. Try a broader regex pattern (e.g. ".*") or omit the symbolType filter. Use search_code for behavior-based queries.',
       );
     } else if (paginatedResults.length === 0 && offset > 0) {
       notes.push(

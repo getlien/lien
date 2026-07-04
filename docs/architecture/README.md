@@ -70,7 +70,7 @@ Comprehensive sequence diagrams showing:
 
 Detailed diagrams of:
 - Server initialization sequence
-- Tool request handling (semantic_search, find_similar, get_files_context, list_functions, get_dependents, get_complexity)
+- Tool request handling (search_code, find_similar, get_files_context, list_functions, get_dependents, get_complexity)
 - Background update monitoring
 - Version checking and reconnection
 - Error handling
@@ -216,7 +216,7 @@ packages/core/src/       # @liendev/core — depends on parser; SQLite store, co
 packages/cli/src/        # @liendev/lien — depends on core and parser
 ├── cli/              # CLI commands (init, index, serve, status, config, complexity, path, annotate)
 ├── mcp/              # MCP server, tools, and handlers
-│   ├── handlers/     # Tool handlers (semantic-search, find-similar, get-files-context, etc.)
+│   ├── handlers/     # Tool handlers (search-code, find-similar, get-files-context, etc.)
 │   ├── schemas/      # Zod schemas for tool input validation
 │   └── utils/        # Response budgeting, metadata shaping, path matching
 ├── watcher/          # File watching (uses ecosystem presets for patterns)

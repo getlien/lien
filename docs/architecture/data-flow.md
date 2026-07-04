@@ -92,7 +92,7 @@ flowchart TB
 
 ## Search Data Flow
 
-The `semantic_search` / `find_similar` tools run FTS5/BM25 lexical search. The query text is turned into an FTS5 MATCH expression, matched against the FTS index, ranked by BM25, and mapped back to results — no embedding step.
+The `search_code` / `find_similar` tools run FTS5/BM25 lexical search. The query text is turned into an FTS5 MATCH expression, matched against the FTS index, ranked by BM25, and mapped back to results — no embedding step.
 
 ```mermaid
 flowchart TB

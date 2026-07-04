@@ -530,7 +530,7 @@ describe('handleListFunctions', () => {
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.results).toHaveLength(0);
       expect(parsed.note).toContain('0 results');
-      expect(parsed.note).toContain('semantic_search');
+      expect(parsed.note).toContain('search_code');
       expect(parsed.note).toContain('symbolType');
     });
   });

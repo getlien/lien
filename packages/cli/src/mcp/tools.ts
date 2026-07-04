@@ -1,6 +1,6 @@
 import { toMCPToolSchema } from './utils/zod-to-json-schema.js';
 import {
-  SemanticSearchSchema,
+  SearchCodeSchema,
   FindSimilarSchema,
   GetFilesContextSchema,
   ListFunctionsSchema,
@@ -16,13 +16,13 @@ import {
  */
 export const tools = [
   toMCPToolSchema(
-    SemanticSearchSchema,
-    'semantic_search',
+    SearchCodeSchema,
+    'search_code',
     `Full-text keyword search over the codebase (BM25 over code, docstrings, and camelCase-split identifiers). Complements grep - use this for discovery, grep for exact literal strings.
 
 Examples:
-- "Where is authentication handled?" → semantic_search({ query: "authenticate user session token" })
-- "How does payment work?" → semantic_search({ query: "payment transaction charge refund" })
+- "Where is authentication handled?" → search_code({ query: "authenticate user session token" })
+- "How does payment work?" → search_code({ query: "payment transaction charge refund" })
 
 IMPORTANT: Query with concrete KEYWORDS, identifiers, and domain terms that actually appear in the code — NOT natural-language questions. There are no embeddings: a meaning-only paraphrase that shares no words with the code will not match. For an exact symbol name, use list_functions.
 
@@ -111,7 +111,7 @@ Examples:
 
 Filter by symbol type (function, method, class, interface) to narrow results.
 
-10x faster than semantic_search for structural/architectural queries. Use semantic_search instead when searching by what code DOES.
+10x faster than search_code for structural/architectural queries. Use search_code instead when searching by what code DOES.
 
 Results are paginated (default: 50, max: 200). Use \`offset\` to page through large result sets.
 

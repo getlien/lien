@@ -15,7 +15,7 @@ import type { ToolContext } from '../../src/mcp/types.js';
  *
  * - `indexCodebase()` builds a real SQLite index of a tiny fixture repo
  *   without ever computing embeddings (no model, no worker thread).
- * - `semantic_search` runs a real FTS5 keyword query against that index and
+ * - `search_code` runs a real FTS5 keyword query against that index and
  *   returns real chunks with a populated relevance category — proving the
  *   lexical path is live (not the old "embeddings disabled" stub).
  * - The structural tools (get_files_context, list_functions) return correct
@@ -121,10 +121,10 @@ describe('Lexical FTS5 search — real MCP round trip', () => {
   });
 
   it(
-    'semantic_search returns real FTS5 results with a populated relevance category',
+    'search_code returns real FTS5 results with a populated relevance category',
     async () => {
       const response = await client.callTool({
-        name: 'semantic_search',
+        name: 'search_code',
         arguments: { query: 'addNumbers', limit: 10 },
       });
 

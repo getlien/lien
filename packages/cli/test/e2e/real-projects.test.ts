@@ -605,7 +605,7 @@ describe('E2E: Real Open Source Projects', () => {
       );
 
       it(
-        'should return relevant results for semantic search',
+        'should return relevant results for code search',
         async () => {
           const db = await loadDb(fsSync.realpathSync(projectDir));
           const results = await db.search(project.sampleSearchQuery, 5);

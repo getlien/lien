@@ -1,5 +1,5 @@
 import { wrapToolHandler } from '../utils/tool-wrapper.js';
-import { SemanticSearchSchema } from '../schemas/index.js';
+import { SearchCodeSchema } from '../schemas/index.js';
 import { shapeResults, deduplicateResults } from '../utils/metadata-shaper.js';
 import type { ToolContext, MCPToolResult, LogFn } from '../types.js';
 import type { VectorDBInterface, SearchResult } from '@liendev/core';
@@ -76,19 +76,16 @@ function processResults(
 }
 
 /**
- * Handle semantic_search tool calls.
+ * Handle search_code tool calls.
  *
  * Runs lexical full-text (FTS5/BM25) search over code, docstrings, and
  * camelCase-split identifiers via `vectorDB.search`. Cross-repo search is
  * unsupported by the bundled single-repo SQLite backend.
  */
-export async function handleSemanticSearch(
-  args: unknown,
-  ctx: ToolContext,
-): Promise<MCPToolResult> {
+export async function handleSearchCode(args: unknown, ctx: ToolContext): Promise<MCPToolResult> {
   const { vectorDB, log, checkAndReconnect, getIndexMetadata } = ctx;
 
-  return await wrapToolHandler(SemanticSearchSchema, async validatedArgs => {
+  return await wrapToolHandler(SearchCodeSchema, async validatedArgs => {
     const { crossRepo, query, limit } = validatedArgs;
 
     log(`Searching for: "${query}"${crossRepo ? ' (cross-repo)' : ''}`);
@@ -104,7 +101,7 @@ export async function handleSemanticSearch(
 
     log(`Returning ${results.length} results`);
 
-    const shaped = shapeResults(results, 'semantic_search');
+    const shaped = shapeResults(results, 'search_code');
 
     if (shaped.length === 0) {
       notes.push(

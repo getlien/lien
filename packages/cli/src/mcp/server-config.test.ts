@@ -94,7 +94,7 @@ describe('registerMCPHandlers', () => {
     const result = await listHandler();
 
     const toolNames = result.tools.map((t: { name: string }) => t.name);
-    expect(toolNames).toContain('semantic_search');
+    expect(toolNames).toContain('search_code');
     expect(toolNames).toContain('find_similar');
     expect(toolNames).toContain('get_files_context');
     expect(toolNames).toContain('list_functions');
@@ -161,7 +161,7 @@ describe('registerMCPHandlers', () => {
     const errorPayload = JSON.parse(result.content[0].text);
     const availableTools = errorPayload.context.availableTools;
     expect(availableTools).toHaveLength(6);
-    expect(availableTools).toContain('semantic_search');
+    expect(availableTools).toContain('search_code');
     expect(availableTools).toContain('find_similar');
     expect(availableTools).toContain('get_files_context');
     expect(availableTools).toContain('list_functions');

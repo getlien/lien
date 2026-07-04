@@ -30,7 +30,7 @@ import type { ToolContext } from '../../src/mcp/types.js';
  *   pair — faster and more hermetic than spawning a stdio subprocess, and
  *   exercises the exact same request/response wire format)
  *
- * `semantic_search` runs a real FTS5 lexical query — no model, no worker.
+ * `search_code` runs a real FTS5 lexical query — no model, no worker.
  * Run directly with `npm run test:e2e:mcp -w @liendev/lien`.
  */
 const TIMEOUT = 60_000;
@@ -138,7 +138,7 @@ describe('MCP protocol round trip (real server, real client, real index)', () =>
 
     expect(names).toEqual(
       expect.arrayContaining([
-        'semantic_search',
+        'search_code',
         'get_files_context',
         'find_similar',
         'list_functions',
@@ -147,10 +147,10 @@ describe('MCP protocol round trip (real server, real client, real index)', () =>
   });
 
   it(
-    'semantic_search round-trips through the real handler to real indexed chunks (lexical FTS5)',
+    'search_code round-trips through the real handler to real indexed chunks (lexical FTS5)',
     async () => {
       const response = await client.callTool({
-        name: 'semantic_search',
+        name: 'search_code',
         arguments: { query: 'addNumbers', limit: 10 },
       });
 

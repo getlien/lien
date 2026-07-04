@@ -4,7 +4,7 @@ Lien exposes six powerful tools via the Model Context Protocol (MCP) that enable
 
 Lien exposes these tools through the Model Context Protocol (MCP), making them available in Cursor, Claude Code, and other MCP-compatible AI assistants.
 
-## semantic_search
+## search_code
 
 Full-text keyword search over your codebase (FTS5/BM25). Despite the name, this is
 **lexical** search — it does not embed your query. It matches query terms against
@@ -15,7 +15,7 @@ comments/docstrings), ranked by BM25.
 Query with concrete keywords, identifiers, and domain terms that actually appear in
 the code — not natural-language questions. A paraphrase that shares no words with
 the code will not match (e.g. "auth" will not surface `login`/`hashPassword`). For
-an exact symbol name, prefer `list_functions`. The tool keeps the `semantic_search`
+an exact symbol name, prefer `list_functions`. The tool keeps the `search_code`
 name for backward compatibility.
 :::
 
@@ -112,7 +112,7 @@ find_similar({
 
 ### Response
 
-Similar format to `semantic_search`. Matching is lexical (BM25 over the snippet's tokens), not semantic — it finds code that shares identifiers and keywords with your snippet.
+Similar format to `search_code`. Matching is lexical (BM25 over the snippet's tokens), not semantic — it finds code that shares identifiers and keywords with your snippet.
 
 When filters are applied or low-relevance results are pruned, the response includes:
 
@@ -541,7 +541,7 @@ All search results include test association metadata:
 
 ## Tool Selection Guide
 
-### Use `semantic_search` when:
+### Use `search_code` when:
 - Discovering code by keyword — identifiers and domain terms that appear in the source
 - You need to find where a concept lives before editing (query with the code's own vocabulary)
 - Looking for patterns, implementations, handlers, validators by their terminology
@@ -576,7 +576,7 @@ All search results include test association metadata:
 
 ## Performance Tips
 
-1. **Start broad**: Use `semantic_search` with a higher limit (10-15) for exploration
+1. **Start broad**: Use `search_code` with a higher limit (10-15) for exploration
 2. **Use the code's words**: query with identifiers and domain terms that appear in the source, not paraphrases
 3. **Use context**: Check related files with `get_files_context` before editing
 4. **Chain tools**: search → get context → check dependents → make changes is a powerful pattern

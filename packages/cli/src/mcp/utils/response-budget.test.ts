@@ -11,7 +11,7 @@ function bigContent(chars: number): string {
   return Array(lines).fill(line).join('');
 }
 
-/** Create a results-shaped response (semantic_search, list_functions, find_similar). */
+/** Create a results-shaped response (search_code, list_functions, find_similar). */
 function makeResultsResponse(count: number, contentSize: number) {
   return {
     indexInfo: { indexVersion: 1, indexDate: '2025-01-01' },

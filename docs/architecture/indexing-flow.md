@@ -161,7 +161,7 @@ sequenceDiagram
     end
 
     Note over Client: Next Query
-    Client->>MCP: semantic_search("new code terms")
+    Client->>MCP: search_code("new code terms")
     MCP->>Store: search(query text)
     Store-->>MCP: Results (includes newly indexed code)
     MCP-->>Client: Return results

@@ -25,7 +25,7 @@ graph TB
     subgraph "MCP Server Layer"
         MCP[MCP Server]
         TOOLS[MCP Tools]
-        SEMANTIC[semantic_search]
+        SEARCH[search_code]
         SIMILAR[find_similar]
         CONTEXT[get_files_context]
         LIST[list_functions]
@@ -85,13 +85,13 @@ graph TB
 
     %% MCP to Core
     MCP --> TOOLS
-    TOOLS --> SEMANTIC
+    TOOLS --> SEARCH
     TOOLS --> SIMILAR
     TOOLS --> CONTEXT
     TOOLS --> LIST
     TOOLS --> DEPENDENTS
     TOOLS --> COMPLEXITY
-    SEMANTIC --> FACTORY
+    SEARCH --> FACTORY
     SIMILAR --> FACTORY
     CONTEXT --> FACTORY
     LIST --> FACTORY
@@ -141,7 +141,7 @@ graph TB
     classDef reviewClass fill:#ede7f6,stroke:#311b92,stroke-width:2px
 
     class CLI,INIT,INDEX,SERVE,STATUS,CONFIGCMD,COMPLX cliClass
-    class MCP,TOOLS,SEMANTIC,SIMILAR,CONTEXT,LIST,DEPENDENTS,COMPLEXITY mcpClass
+    class MCP,TOOLS,SEARCH,SIMILAR,CONTEXT,LIST,DEPENDENTS,COMPLEXITY mcpClass
     class CONFIG,GLOBALCONFIG,INDEXER,SCANNER,CHUNKER,AST,TRAVERSER,SYMBOLS,TESTASSOC,MANIFEST,COMPLEXANALYZER coreClass
     class FACTORY,SQLITE,STRUCT,FTS dataClass
     class GIT,WATCHER,ECOSYSTEM optionalClass
@@ -163,7 +163,7 @@ graph TB
 ### MCP Server Layer
 - **MCP Server**: Implements Model Context Protocol for AI assistant communication
 - **MCP Tools**: Six tools exposed to AI assistants
-  - `semantic_search`: Full-text (FTS5/BM25) keyword search — lexical, not meaning-based
+  - `search_code`: Full-text (FTS5/BM25) keyword search — lexical, not meaning-based
   - `find_similar`: Find lexically similar code (BM25 over a snippet's tokens)
   - `get_files_context`: Get file context with dependencies and test associations (supports batch)
   - `list_functions`: Fast symbol lookup by naming pattern

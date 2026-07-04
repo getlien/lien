@@ -63,7 +63,7 @@ name, use `list_functions`. For structure and impact, use the structural tools
 above.
 
 ::: tip Coming from the semantic era?
-The MCP tool is still named `semantic_search` for backward compatibility, but it
+The MCP tool is still named `search_code` for backward compatibility, but it
 now performs full-text keyword search — it does not embed your query. Phrase
 queries as keywords, not questions.
 :::

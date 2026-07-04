@@ -56,7 +56,7 @@ Lien exposes **6 powerful tools** via Model Context Protocol:
 
 | Tool | Description |
 |------|-------------|
-| `semantic_search` | Full-text (BM25) keyword code search |
+| `search_code` | Full-text (BM25) keyword code search |
 | `find_similar` | Find similar code patterns |
 | `get_files_context` | Get file context with test associations |
 | `list_functions` | List symbols by pattern |

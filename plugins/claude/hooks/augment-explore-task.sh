@@ -61,7 +61,7 @@ injection='
 [Lien] MCP tools are REQUIRED for meaning-based and structural codebase queries in this repo. Use Lien tools as your primary discovery mechanism — grep/glob/Read are fallbacks ONLY for exact-literal lookups (error strings, config keys, TODOs).
 
 Required tools:
-  • mcp__plugin_lien_lien__semantic_search — REQUIRED for meaning-based discovery. Full-text (BM25) search: phrase queries with concrete keywords/identifiers/domain terms that appear in the code ("chunk overlap config", "parse import statement"), NOT full natural-language questions — there are no embeddings, so paraphrase queries score worse.
+  • mcp__plugin_lien_lien__search_code — REQUIRED for meaning-based discovery. Full-text (BM25) search: phrase queries with concrete keywords/identifiers/domain terms that appear in the code ("chunk overlap config", "parse import statement"), NOT full natural-language questions — there are no embeddings, so paraphrase queries score worse.
   • mcp__plugin_lien_lien__list_functions — REQUIRED for "find all X" / pattern-based structural lookup (10× faster than grep).
   • mcp__plugin_lien_lien__get_files_context — REQUIRED before reporting on any file you exploratively read (returns imports, callers, test associations).
   • mcp__plugin_lien_lien__get_dependents — REQUIRED before reporting an exported symbol change is "safe" or complete.

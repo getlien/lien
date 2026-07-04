@@ -5,12 +5,7 @@ describe('MCP Server Error Handling', () => {
   describe('Unknown tool error', () => {
     it('should create structured error for unknown tool', () => {
       const toolName = 'non_existent_tool';
-      const availableTools = [
-        'semantic_search',
-        'find_similar',
-        'get_files_context',
-        'list_functions',
-      ];
+      const availableTools = ['search_code', 'find_similar', 'get_files_context', 'list_functions'];
 
       const error = new LienError(
         `Unknown tool: ${toolName}`,
@@ -47,12 +42,12 @@ describe('MCP Server Error Handling', () => {
     it('should provide helpful context with available tools', () => {
       const error = new LienError('Unknown tool: typo_search', LienErrorCode.INVALID_INPUT, {
         requestedTool: 'typo_search',
-        availableTools: ['semantic_search', 'find_similar', 'get_files_context', 'list_functions'],
+        availableTools: ['search_code', 'find_similar', 'get_files_context', 'list_functions'],
       });
 
       const json = error.toJSON();
       expect(json.context?.availableTools).toHaveLength(4);
-      expect(json.context?.availableTools).toContain('semantic_search');
+      expect(json.context?.availableTools).toContain('search_code');
     });
   });
 });

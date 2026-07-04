@@ -26,7 +26,7 @@ symbol:
   'truncated: true' means the BFS stopped at 'maxNodes' (default 500).
   Symbol-level queries stay at depth 1 — pass depth only for file-level.
 
-For discovery ("where is X?", "how does Y work?"), call semantic_search FIRST.
+For discovery ("where is X?", "how does Y work?"), call search_code FIRST.
 It runs full-text BM25 keyword search over code, docstrings, and camelCase-split
 identifiers. Query with concrete KEYWORDS, identifiers, and domain terms
 ("chunk overlap config", "parse import statement") — NOT natural-language
@@ -35,7 +35,7 @@ words with the code will not match; use vocabulary that appears in the code or
 comments. For an exact symbol name, prefer list_functions.
 
 Tool selection:
-  semantic_search   — keyword/full-text discovery
+  search_code       — keyword/full-text discovery
   list_functions    — exact by-name/pattern lookup; fastest for structural queries
   find_similar      — before adding new code, check for existing patterns
   get_complexity    — before refactoring; identify real hotspots
