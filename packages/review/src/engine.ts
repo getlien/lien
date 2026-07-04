@@ -574,24 +574,31 @@ async function postPluginInlineComments(
   if (!diffResult) return { posted: 0, skipped: findings.length };
 
   const { inDiff, outOfDiffCount } = diffResult;
-  if (inDiff.length === 0) return { posted: 0, skipped: findings.length };
 
-  const comments: LineComment[] = inDiff.map(f => ({
-    path: f.filepath,
-    line: f.line,
-    body: buildPluginCommentBody(f, markerPrefix),
-  }));
+  let toPost: LineComment[] = [];
+  let dedupSkipped = 0;
+  if (inDiff.length > 0) {
+    const comments: LineComment[] = inDiff.map(f => ({
+      path: f.filepath,
+      line: f.line,
+      body: buildPluginCommentBody(f, markerPrefix),
+    }));
 
-  const { toPost, dedupSkipped } = await deduplicateComments(
-    octokit,
-    pr,
-    pluginId,
-    comments,
-    markerPrefix,
-    logger,
-  );
+    ({ toPost, dedupSkipped } = await deduplicateComments(
+      octokit,
+      pr,
+      pluginId,
+      comments,
+      markerPrefix,
+      logger,
+    ));
+  }
 
   const skipped = outOfDiffCount + dedupSkipped;
+  logger.info(
+    `postInlineComments(${pluginId}): posting ${toPost.length} of ${findings.length} finding(s) ` +
+      `(${outOfDiffCount} outside diff, ${dedupSkipped} already commented)`,
+  );
   if (toPost.length === 0) return { posted: 0, skipped };
 
   await postPRReview(octokit, pr, toPost, summaryBody, logger, 'COMMENT');
@@ -630,7 +637,7 @@ async function deduplicateComments(
     let dedupSkipped = 0;
     const toPost = comments.filter(c => {
       const key = extractPluginCommentKey(c.body, markerPrefix);
-      if (key && existingKeys.has(key)) {
+      if (key && isDuplicateOfExistingComment(key, existingKeys)) {
         dedupSkipped++;
         return false;
       }
@@ -873,4 +880,60 @@ function extractPluginCommentKey(body: string, markerPrefix: string): string | n
   const end = body.indexOf(' -->', keyStart);
   if (end === -1) return null;
   return body.slice(keyStart, end);
+}
+
+/**
+ * Line drift tolerance when matching a finding against an existing comment's
+ * dedup key. Agent line attribution drifts between runs on unchanged code
+ * (observed on PR #667: the same chunksCreated finding was posted at lines
+ * 461, 483, and 486 by three consecutive runs), so exact-line keys re-post
+ * near-duplicates. Same file + same category within this many lines counts
+ * as the same finding.
+ */
+export const DEDUP_LINE_TOLERANCE = 30;
+
+interface PluginCommentKey {
+  filepath: string;
+  line: number;
+  category: string;
+}
+
+/** Parse a `filepath::line::category` dedup key. Null if malformed. */
+export function parsePluginCommentKey(key: string): PluginCommentKey | null {
+  const parts = key.split('::');
+  if (parts.length < 3) return null;
+  const category = parts[parts.length - 1];
+  const line = Number(parts[parts.length - 2]);
+  const filepath = parts.slice(0, -2).join('::');
+  if (!filepath || !category || !Number.isInteger(line)) return null;
+  return { filepath, line, category };
+}
+
+/**
+ * True if a candidate dedup key matches an existing comment's key exactly,
+ * or matches one on the same file + category within DEDUP_LINE_TOLERANCE
+ * lines (line-drift tolerant dedup).
+ */
+export function isDuplicateOfExistingComment(
+  candidateKey: string,
+  existingKeys: ReadonlySet<string>,
+  tolerance: number = DEDUP_LINE_TOLERANCE,
+): boolean {
+  if (existingKeys.has(candidateKey)) return true;
+
+  const candidate = parsePluginCommentKey(candidateKey);
+  if (!candidate) return false;
+
+  for (const existingKey of existingKeys) {
+    const existing = parsePluginCommentKey(existingKey);
+    if (!existing) continue;
+    if (
+      existing.filepath === candidate.filepath &&
+      existing.category === candidate.category &&
+      Math.abs(existing.line - candidate.line) <= tolerance
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
