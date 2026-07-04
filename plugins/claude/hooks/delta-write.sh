@@ -15,7 +15,7 @@
 set -u
 
 command -v jq >/dev/null 2>&1 || exit 0
-command -v lien >/dev/null 2>&1 || exit 0
+. "$(dirname "${BASH_SOURCE[0]}")/lien-resolve.sh" || exit 0
 
 # Env kill switch.
 if [ "${LIEN_DELTA_HOOK:-}" = "off" ]; then
@@ -39,9 +39,9 @@ cwd="$(printf '%s' "$input" | jq -r '.cwd // empty')"
 # (not a git repo, unsupported file, git error → exit 2) yields empty/non-JSON
 # output and we stay silent.
 if [ -n "$cwd" ] && [ -d "$cwd" ]; then
-  json="$(cd "$cwd" && lien delta --file "$file_path" --format json 2>/dev/null)"
+  json="$(cd "$cwd" && "${LIEN_CMD[@]}" delta --file "$file_path" --format json 2>/dev/null)"
 else
-  json="$(lien delta --file "$file_path" --format json 2>/dev/null)"
+  json="$("${LIEN_CMD[@]}" delta --file "$file_path" --format json 2>/dev/null)"
 fi
 [ -n "$json" ] || exit 0
 

@@ -6,7 +6,7 @@
 set -u
 
 command -v jq >/dev/null 2>&1 || exit 0
-command -v lien >/dev/null 2>&1 || exit 0
+. "$(dirname "${BASH_SOURCE[0]}")/lien-resolve.sh" || exit 0
 
 input="$(cat)"
 session_id="$(printf '%s' "$input" | jq -r '.session_id // empty')"
@@ -21,9 +21,9 @@ case "$session_id" in
 esac
 
 if [ -n "$cwd" ] && [ -d "$cwd" ]; then
-  store="$(cd "$cwd" && lien path --store 2>/dev/null)"
+  store="$(cd "$cwd" && "${LIEN_CMD[@]}" path --store 2>/dev/null)"
 else
-  store="$(lien path --store 2>/dev/null)"
+  store="$("${LIEN_CMD[@]}" path --store 2>/dev/null)"
 fi
 [ -n "$store" ] || exit 0
 

@@ -10,7 +10,7 @@
 set -u
 
 command -v jq >/dev/null 2>&1 || exit 0
-command -v lien >/dev/null 2>&1 || exit 0
+. "$(dirname "${BASH_SOURCE[0]}")/lien-resolve.sh" || exit 0
 
 input="$(cat)"
 file_path="$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty')"
@@ -29,9 +29,9 @@ esac
 
 # Resolve store from the session's cwd so multi-repo setups work correctly.
 if [ -n "$cwd" ] && [ -d "$cwd" ]; then
-  store="$(cd "$cwd" && lien path --store 2>/dev/null)"
+  store="$(cd "$cwd" && "${LIEN_CMD[@]}" path --store 2>/dev/null)"
 else
-  store="$(lien path --store 2>/dev/null)"
+  store="$("${LIEN_CMD[@]}" path --store 2>/dev/null)"
 fi
 [ -n "$store" ] || exit 0
 
@@ -41,7 +41,7 @@ if [ "$ext" = "$file_path" ]; then
   # No extension at all.
   exit 0
 fi
-if ! lien path --extensions 2>/dev/null | grep -Fxq "$ext"; then
+if ! "${LIEN_CMD[@]}" path --extensions 2>/dev/null | grep -Fxq "$ext"; then
   exit 0
 fi
 
@@ -75,12 +75,12 @@ fi
 
 # Invoke from cwd so resolveProjectRoot works under subdirectory cwds.
 if [ -n "$cwd" ] && [ -d "$cwd" ]; then
-  annotation="$(cd "$cwd" && lien annotate "$file_path" 2>/dev/null)"
+  annotation="$(cd "$cwd" && "${LIEN_CMD[@]}" annotate "$file_path" 2>/dev/null)"
 else
-  annotation="$(lien annotate "$file_path" 2>/dev/null)"
+  annotation="$("${LIEN_CMD[@]}" annotate "$file_path" 2>/dev/null)"
 fi
 
-# Trivial impact → lien annotate prints nothing → stay silent.
+# Trivial impact → `lien annotate` prints nothing → stay silent.
 [ -n "$annotation" ] || exit 0
 
 # Record the annotation so suppression kicks in next time. Truncating an

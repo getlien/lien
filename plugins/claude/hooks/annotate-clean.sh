@@ -6,15 +6,15 @@
 set -u
 
 command -v jq >/dev/null 2>&1 || exit 0
-command -v lien >/dev/null 2>&1 || exit 0
+. "$(dirname "${BASH_SOURCE[0]}")/lien-resolve.sh" || exit 0
 
 input="$(cat)"
 cwd="$(printf '%s' "$input" | jq -r '.cwd // empty')"
 
 if [ -n "$cwd" ] && [ -d "$cwd" ]; then
-  store="$(cd "$cwd" && lien path --store 2>/dev/null)"
+  store="$(cd "$cwd" && "${LIEN_CMD[@]}" path --store 2>/dev/null)"
 else
-  store="$(lien path --store 2>/dev/null)"
+  store="$("${LIEN_CMD[@]}" path --store 2>/dev/null)"
 fi
 [ -n "$store" ] || exit 0
 
@@ -25,5 +25,11 @@ sessions_root="$store/annotated-sessions"
 if [ -d "$sessions_root" ]; then
   find "$sessions_root" -mindepth 1 -maxdepth 1 -type d -mmin +1440 -exec rm -rf {} + 2>/dev/null
 fi
+
+# Pre-warm the resolver's npx fallback in the background (detached, so this
+# SessionStart hook returns immediately). Without a global lien install the
+# first real hook invocation would otherwise pay npx's cold package install
+# and blow its timeout; after this warm-up every later call is ~300ms.
+("${LIEN_CMD[@]}" --version >/dev/null 2>&1 &)
 
 exit 0
