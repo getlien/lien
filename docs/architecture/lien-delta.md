@@ -527,8 +527,8 @@ the distinction the hook relies on to stay silent on non-regressions.
 
 ## Phase 2 milestones
 
-- [ ] 1. Phase-2 design doc section + draft PR (this section)
-- [ ] 2. Fix Phase-1 review findings (5) + tests — separate commit
+- [x] 1. Phase-2 design doc section + draft PR (this section)
+- [x] 2. Fix Phase-1 review findings (5) + tests — separate commit
 - [ ] 3. Mechanism 2: `lien delta --file` flag + `delta-write.sh` hook + hooks.json + unit tests
 - [ ] 4. Mechanism 3: `complexityHeadroom` in `get_files_context` + description/instructions + unit tests
 - [ ] 5. Verification: drive hook (3 transcripts) + MCP headroom response + latency; full gate green; changeset
