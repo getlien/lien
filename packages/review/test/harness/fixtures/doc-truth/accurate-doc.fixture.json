@@ -1,0 +1,79 @@
+{
+  "chunks": [
+    {
+      "content": "export function getSearchStatus(index: Index | null): SearchStatus {\n  if (!index || index.isEmpty()) {\n    return { mode: 'disabled' };\n  }\n  return { mode: 'active' };\n}",
+      "metadata": {
+        "file": "packages/core/src/search/status.ts",
+        "startLine": 18,
+        "endLine": 23,
+        "type": "function",
+        "language": "typescript",
+        "symbolName": "getSearchStatus",
+        "symbolType": "function",
+        "complexity": 2,
+        "parameters": ["index: Index | null"],
+        "signature": "function getSearchStatus(index: Index | null): SearchStatus",
+        "returnType": "SearchStatus",
+        "exports": ["getSearchStatus"]
+      }
+    }
+  ],
+  "changedFiles": ["packages/core/src/search/status.ts"],
+  "allChangedFiles": ["packages/core/src/search/status.ts"],
+  "complexityReport": {
+    "summary": {
+      "filesAnalyzed": 1,
+      "totalViolations": 0,
+      "bySeverity": { "error": 0, "warning": 0 },
+      "avgComplexity": 2,
+      "maxComplexity": 2
+    },
+    "files": {}
+  },
+  "baselineReport": null,
+  "deltas": null,
+  "pluginConfigs": {},
+  "config": {},
+  "pr": {
+    "owner": "getlien",
+    "repo": "lien",
+    "pullNumber": 9003,
+    "title": "docs: clarify when search status is disabled",
+    "body": "Expand the doc comment to note the empty-index case. No behavior change.",
+    "baseSha": "0000000000000000000000000000000000000000",
+    "headSha": "1111111111111111111111111111111111111111",
+    "patches": {
+      "__type": "Map",
+      "entries": [
+        [
+          "packages/core/src/search/status.ts",
+          "@@ -14,10 +14,10 @@ export interface SearchStatus {\n   mode: 'disabled' | 'active';\n }\n \n /**\n- * Search is disabled when the index is missing.\n+ * Search is disabled when the index is missing or empty.\n  */\n export function getSearchStatus(index: Index | null): SearchStatus {\n   if (!index || index.isEmpty()) {\n     return { mode: 'disabled' };\n   }\n   return { mode: 'active' };\n }"
+        ]
+      ]
+    },
+    "diffLines": {
+      "__type": "Map",
+      "entries": [["packages/core/src/search/status.ts", { "__type": "Set", "values": [18] }]]
+    }
+  },
+  "repoChunks": [
+    {
+      "content": "export function getSearchStatus(index: Index | null): SearchStatus {\n  if (!index || index.isEmpty()) {\n    return { mode: 'disabled' };\n  }\n  return { mode: 'active' };\n}",
+      "metadata": {
+        "file": "packages/core/src/search/status.ts",
+        "startLine": 18,
+        "endLine": 23,
+        "type": "function",
+        "language": "typescript",
+        "symbolName": "getSearchStatus",
+        "symbolType": "function",
+        "complexity": 2,
+        "parameters": ["index: Index | null"],
+        "signature": "function getSearchStatus(index: Index | null): SearchStatus",
+        "returnType": "SearchStatus",
+        "exports": ["getSearchStatus"]
+      }
+    }
+  ],
+  "repoRootDir": "/repo"
+}

@@ -99,5 +99,9 @@ coverage/
 # placeholder fixtures stay committed via the negation rule below.
 packages/review/test/harness/fixtures/**/*.fixture.json
 !packages/review/test/harness/fixtures/**/placeholder*.fixture.json
+# doc-truth fixtures are hand-authored (small, self-contained) — they can't be
+# regenerated via capture-pr.ts, so they're committed like placeholders. The
+# real-PR calibration fixture (PR #658) still lands under the ignore rule above.
+!packages/review/test/harness/fixtures/doc-truth/*.fixture.json
 
 packages/cli/README.md

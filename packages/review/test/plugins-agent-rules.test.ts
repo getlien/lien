@@ -257,6 +257,37 @@ describe('selectRules', () => {
     expect(selectRules([rule], match).active.map(r => r.id)).toContain('test-lang');
   });
 
+  it('activates doc-truth when a guidance surface changed (invisible-file case)', () => {
+    // The .sh hook is not analyzable, so it only reaches the rule via
+    // allChangedFiles → filePatterns. It must still activate the rule.
+    const hookOnly = makeTriggerContext({
+      changedFiles: ['plugins/claude/hooks/augment-explore-task.sh'],
+      diffText: '+echo "run the tool"',
+    });
+    expect(selectRules(BUILTIN_RULES, hookOnly).active.map(r => r.id)).toContain('doc-truth');
+
+    const claudeMd = makeTriggerContext({ changedFiles: ['packages/core/CLAUDE.md'] });
+    expect(selectRules(BUILTIN_RULES, claudeMd).active.map(r => r.id)).toContain('doc-truth');
+  });
+
+  it('activates doc-truth on claim-shaped prose in an otherwise-analyzable diff', () => {
+    // The schema.ts miss: a doc comment making a falsifiable "reports as
+    // disabled" claim, in a code file (no guidance-surface path match).
+    const ctx = makeTriggerContext({
+      changedFiles: ['packages/core/src/config/schema.ts'],
+      diffText: '+  /** Without embeddings, code search reports as disabled. */',
+    });
+    expect(selectRules(BUILTIN_RULES, ctx).active.map(r => r.id)).toContain('doc-truth');
+  });
+
+  it('skips doc-truth for a plain code change with no guidance surface or claim prose', () => {
+    const ctx = makeTriggerContext({
+      changedFiles: ['src/utils/math.ts'],
+      diffText: 'const total = a + b;\nreturn total;',
+    });
+    expect(selectRules(BUILTIN_RULES, ctx).skipped).toContain('doc-truth');
+  });
+
   it('matches filePatterns triggers', () => {
     const rule: ReviewRule = {
       id: 'test-patterns',
