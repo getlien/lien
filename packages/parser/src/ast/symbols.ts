@@ -4,7 +4,7 @@ import type { LanguageSymbolExtractor } from './extractors/types.js';
 import { getExtractor, getImportExtractor, getSymbolExtractor } from './extractors/index.js';
 import { getLanguage } from './languages/registry.js';
 
-import { resolveRelativeImport } from '../utils/path-matching.js';
+import { resolveRelativeImport, resolveWorkspaceImport } from '../utils/path-matching.js';
 
 /**
  * Extract symbol information from an AST node using language-specific extractors.
@@ -58,17 +58,36 @@ function collectImportNodes(
 }
 
 /**
+ * Resolve a single raw import specifier: relative specifiers first (against
+ * the importer's directory), then workspace package specifiers (against the
+ * `workspacePackages` map). Both steps are no-ops when their respective
+ * input isn't provided, so behavior for existing callers is unchanged.
+ */
+function resolveImportSpecifier(
+  specifier: string,
+  filepath: string | undefined,
+  workspacePackages: ReadonlyMap<string, string> | undefined,
+): string {
+  const relResolved = filepath ? resolveRelativeImport(filepath, specifier) : specifier;
+  return workspacePackages ? resolveWorkspaceImport(relResolved, workspacePackages) : relResolved;
+}
+
+/**
  * Extract import paths using the language-specific extractor.
  *
  * When `filepath` is provided, relative specifiers (`./foo`, `../bar`) are
  * resolved against the importer's directory so that cross-package files with
- * the same basename don't collide downstream. Non-relative specifiers pass
- * through unchanged.
+ * the same basename don't collide downstream. When `workspacePackages` is
+ * also provided, bare specifiers naming a workspace package (`@scope/pkg`)
+ * resolve to that package's source entry file, enabling cross-package
+ * dependency analysis in monorepos. Everything else passes through
+ * unchanged.
  */
 function extractImportPaths(
   rootNode: Parser.SyntaxNode,
   importExtractor: ReturnType<typeof getImportExtractor>,
   filepath?: string,
+  workspacePackages?: ReadonlyMap<string, string>,
 ): string[] {
   if (!importExtractor) return [];
 
@@ -77,7 +96,7 @@ function extractImportPaths(
 
   for (const node of collectImportNodes(rootNode, nodeTypeSet)) {
     const result = importExtractor.extractImportPath(node);
-    if (result) imports.push(filepath ? resolveRelativeImport(filepath, result) : result);
+    if (result) imports.push(resolveImportSpecifier(result, filepath, workspacePackages));
   }
 
   return imports;
@@ -92,14 +111,18 @@ function extractImportPaths(
  * @param filepath - Optional path of the file being chunked. Enables resolution
  *   of `./` / `../` specifiers so they store workspace-relative paths instead
  *   of bare basenames.
+ * @param workspacePackages - Optional map of workspace package name -> source
+ *   entry file (see `resolveWorkspacePackageEntries`). Enables resolution of
+ *   bare `@scope/pkg` specifiers that reference sibling workspace packages.
  */
 export function extractImports(
   rootNode: Parser.SyntaxNode,
   language?: SupportedLanguage,
   filepath?: string,
+  workspacePackages?: ReadonlyMap<string, string>,
 ): string[] {
   if (!language) return [];
-  return extractImportPaths(rootNode, getImportExtractor(language), filepath);
+  return extractImportPaths(rootNode, getImportExtractor(language), filepath, workspacePackages);
 }
 
 /**
@@ -123,11 +146,14 @@ function addSymbolsToMap(
  *
  * When `filepath` is provided, relative import paths in the returned map's
  * keys are resolved to workspace-relative paths via `resolveRelativeImport`.
+ * When `workspacePackages` is also provided, bare workspace-package keys are
+ * further resolved to their source entry file (see `extractImportPaths`).
  */
 function extractSymbolsWithExtractor(
   rootNode: Parser.SyntaxNode,
   importExtractor: ReturnType<typeof getImportExtractor>,
   filepath?: string,
+  workspacePackages?: ReadonlyMap<string, string>,
 ): Record<string, string[]> {
   if (!importExtractor) return {};
 
@@ -137,7 +163,7 @@ function extractSymbolsWithExtractor(
   for (const node of collectImportNodes(rootNode, nodeTypeSet)) {
     const result = importExtractor.processImportSymbols(node);
     if (result) {
-      const key = filepath ? resolveRelativeImport(filepath, result.importPath) : result.importPath;
+      const key = resolveImportSpecifier(result.importPath, filepath, workspacePackages);
       addSymbolsToMap(importedSymbols, key, result.symbols);
     }
   }
@@ -154,14 +180,22 @@ function extractSymbolsWithExtractor(
  *
  * @param filepath - Optional path of the file being chunked. Enables resolution
  *   of `./` / `../` specifiers into workspace-relative keys.
+ * @param workspacePackages - Optional map of workspace package name -> source
+ *   entry file. Enables resolution of bare `@scope/pkg` keys.
  */
 export function extractImportedSymbols(
   rootNode: Parser.SyntaxNode,
   language?: SupportedLanguage,
   filepath?: string,
+  workspacePackages?: ReadonlyMap<string, string>,
 ): Record<string, string[]> {
   if (!language) return {};
-  return extractSymbolsWithExtractor(rootNode, getImportExtractor(language), filepath);
+  return extractSymbolsWithExtractor(
+    rootNode,
+    getImportExtractor(language),
+    filepath,
+    workspacePackages,
+  );
 }
 
 /**

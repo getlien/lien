@@ -1,5 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import fs from 'fs/promises';
+import os from 'os';
+import path from 'path';
 import { chunkByAST, shouldUseAST } from './chunker.js';
+import { clearWorkspacePackageCache } from '../workspace-packages.js';
 
 describe('AST Chunker', () => {
   describe('shouldUseAST', () => {
@@ -191,6 +195,119 @@ pub fn run() {
       expect(funcChunk?.metadata.imports).toContain('../utils/helper');
       // Explicitly NOT resolved against crates/app/src/foo.rs.
       expect(funcChunk?.metadata.imports).not.toContain('crates/app/utils/helper');
+    });
+
+    describe('cross-package workspace imports', () => {
+      let testDir: string;
+
+      beforeEach(async () => {
+        testDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-test-chunker-workspace-'));
+      });
+
+      afterEach(async () => {
+        clearWorkspacePackageCache();
+        await fs.rm(testDir, { recursive: true, force: true }).catch(() => {});
+      });
+
+      async function writeJson(relPath: string, data: unknown): Promise<void> {
+        const abs = path.join(testDir, relPath);
+        await fs.mkdir(path.dirname(abs), { recursive: true });
+        await fs.writeFile(abs, JSON.stringify(data, null, 2));
+      }
+
+      async function writeFile(relPath: string, content = ''): Promise<void> {
+        const abs = path.join(testDir, relPath);
+        await fs.mkdir(path.dirname(abs), { recursive: true });
+        await fs.writeFile(abs, content);
+      }
+
+      it('resolves a bare workspace-package import to the package source entry (monorepo fixture)', async () => {
+        // Reproduces the dogfooding gap: a consumer package imports a symbol
+        // from a sibling workspace package by its package specifier, not a
+        // relative path.
+        await writeJson('package.json', { name: 'root', workspaces: ['packages/*'] });
+        await writeJson('packages/parser/package.json', {
+          name: '@liendev/parser',
+          main: './dist/index.js',
+        });
+        await writeFile(
+          'packages/parser/src/index.ts',
+          "export { computeComplexityDelta } from './insights/complexity-delta.js';",
+        );
+
+        const content = `
+import { computeComplexityDelta } from '@liendev/parser';
+
+function run() {
+  return computeComplexityDelta();
+}
+        `.trim();
+
+        const chunks = chunkByAST('packages/cli/src/delta-cmd.ts', content, {
+          workspaceRoot: testDir,
+        });
+        const funcChunk = chunks.find(c => c.metadata.symbolName === 'run');
+
+        expect(funcChunk?.metadata.imports).toContain('packages/parser/src/index.ts');
+        expect(funcChunk?.metadata.importedSymbols).toMatchObject({
+          'packages/parser/src/index.ts': ['computeComplexityDelta'],
+        });
+      });
+
+      it('leaves external package specifiers untouched even when workspaceRoot is set', async () => {
+        await writeJson('package.json', { name: 'root', workspaces: ['packages/*'] });
+        await writeJson('packages/parser/package.json', { name: '@liendev/parser' });
+        await writeFile('packages/parser/src/index.ts', 'export const x = 1;');
+
+        const content = `
+import chalk from 'chalk';
+
+function run() {
+  return chalk.red('x');
+}
+        `.trim();
+
+        const chunks = chunkByAST('packages/cli/src/delta-cmd.ts', content, {
+          workspaceRoot: testDir,
+        });
+        const funcChunk = chunks.find(c => c.metadata.symbolName === 'run');
+
+        expect(funcChunk?.metadata.imports).toContain('chalk');
+      });
+
+      it('leaves imports unresolved for a non-workspace repo (no workspaces field)', async () => {
+        await writeJson('package.json', { name: 'standalone-app' });
+
+        const content = `
+import { computeComplexityDelta } from '@liendev/parser';
+
+function run() {
+  return computeComplexityDelta();
+}
+        `.trim();
+
+        const chunks = chunkByAST('src/delta-cmd.ts', content, { workspaceRoot: testDir });
+        const funcChunk = chunks.find(c => c.metadata.symbolName === 'run');
+
+        // No workspaces field → resolveWorkspacePackageEntries returns an
+        // empty map → zero behavior change from the pre-fix raw specifier.
+        expect(funcChunk?.metadata.imports).toContain('@liendev/parser');
+      });
+
+      it('is a no-op when workspaceRoot is omitted (existing callers unaffected)', () => {
+        const content = `
+import { computeComplexityDelta } from '@liendev/parser';
+
+function run() {
+  return computeComplexityDelta();
+}
+        `.trim();
+
+        const chunks = chunkByAST('packages/cli/src/delta-cmd.ts', content);
+        const funcChunk = chunks.find(c => c.metadata.symbolName === 'run');
+
+        expect(funcChunk?.metadata.imports).toContain('@liendev/parser');
+      });
     });
 
     it('should calculate cyclomatic complexity', () => {

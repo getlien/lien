@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { normalizePath, matchesFile, isTestFile, resolveRelativeImport } from './path-matching.js';
+import {
+  normalizePath,
+  matchesFile,
+  isTestFile,
+  resolveRelativeImport,
+  resolveWorkspaceImport,
+} from './path-matching.js';
 
 /**
  * Test cases for path matching logic in get_dependents tool.
@@ -458,5 +464,43 @@ describe('resolveRelativeImport', () => {
     expect(aResolved).toBe('packages/cli/src/mcp/handlers/dependency-analyzer');
     expect(bResolved).toBe('packages/parser/src/dependency-analyzer');
     expect(aResolved).not.toBe(bResolved);
+  });
+});
+
+describe('resolveWorkspaceImport', () => {
+  const workspacePackages = new Map([
+    ['@liendev/parser', 'packages/parser/src/index.ts'],
+    ['@liendev/core', 'packages/core/src/index.ts'],
+  ]);
+
+  it('resolves a bare specifier that matches a known workspace package', () => {
+    expect(resolveWorkspaceImport('@liendev/parser', workspacePackages)).toBe(
+      'packages/parser/src/index.ts',
+    );
+  });
+
+  it('leaves external (non-workspace) package specifiers untouched', () => {
+    expect(resolveWorkspaceImport('lodash', workspacePackages)).toBe('lodash');
+    expect(resolveWorkspaceImport('react', workspacePackages)).toBe('react');
+  });
+
+  it('leaves an empty map (non-monorepo project) fully unaffected', () => {
+    const empty = new Map<string, string>();
+    expect(resolveWorkspaceImport('@liendev/parser', empty)).toBe('@liendev/parser');
+    expect(resolveWorkspaceImport('./relative/path', empty)).toBe('./relative/path');
+  });
+
+  it('does not resolve deep/subpath imports into a workspace package (v1 scope)', () => {
+    // Only the bare specifier is a map key; a subpath is a different string
+    // and deliberately passes through unresolved.
+    expect(resolveWorkspaceImport('@liendev/parser/dist/index', workspacePackages)).toBe(
+      '@liendev/parser/dist/index',
+    );
+  });
+
+  it('leaves already-relative-resolved specifiers untouched', () => {
+    expect(resolveWorkspaceImport('packages/parser/src/foo', workspacePackages)).toBe(
+      'packages/parser/src/foo',
+    );
   });
 });

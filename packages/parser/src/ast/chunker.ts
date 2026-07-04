@@ -10,6 +10,7 @@ import {
 } from './symbols.js';
 import { calculateCognitiveComplexity, calculateHalstead } from './complexity/index.js';
 import { getTraverser } from './traversers/index.js';
+import { resolveWorkspacePackageEntries } from '../workspace-packages.js';
 
 export interface ASTChunkOptions {
   maxChunkSize?: number; // Reserved for future use (smart splitting of large functions)
@@ -17,6 +18,15 @@ export interface ASTChunkOptions {
   // Multi-tenant fields (optional for backward compatibility)
   repoId?: string; // Repository identifier for multi-tenant scenarios
   orgId?: string; // Organization identifier for multi-tenant scenarios
+  /**
+   * Absolute path to the workspace/monorepo root. When provided (and the
+   * root has an npm `workspaces` field), bare package specifiers that name a
+   * sibling workspace package (e.g. `@scope/pkg`) are resolved to that
+   * package's source entry file, so cross-package imports participate in
+   * dependency analysis. Omit for non-monorepo projects — behavior is
+   * unchanged.
+   */
+  workspaceRoot?: string;
 }
 
 /**
@@ -74,18 +84,30 @@ const RESOLVE_RELATIVE_IMPORTS: ReadonlySet<SupportedLanguage> = new Set([
  * specifiers (`./foo`, `../bar`) are resolved to workspace-relative paths at
  * index time. This prevents cross-package basename collisions in the downstream
  * dependency analysis (see #525).
+ *
+ * When `workspaceRoot` is also provided, bare package specifiers naming a
+ * sibling workspace package (`@scope/pkg`) are resolved the same way, to that
+ * package's source entry file — closing the monorepo cross-package blind
+ * spot in `get_dependents`. Gated to the same JS/TS language set as relative
+ * import resolution: npm workspaces is a JS-ecosystem mechanism, and other
+ * languages' import syntax could otherwise coincidentally collide with a
+ * workspace package name.
  */
 function prepareASTContext(
   content: string,
   rootNode: Parser.SyntaxNode,
   language: SupportedLanguage,
   filepath: string,
+  workspaceRoot?: string,
 ): ASTContext {
-  const resolutionPath = RESOLVE_RELATIVE_IMPORTS.has(language) ? filepath : undefined;
+  const resolvesImports = RESOLVE_RELATIVE_IMPORTS.has(language);
+  const resolutionPath = resolvesImports ? filepath : undefined;
+  const workspacePackages =
+    resolvesImports && workspaceRoot ? resolveWorkspacePackageEntries(workspaceRoot) : undefined;
   return {
     lines: content.split('\n'),
-    fileImports: extractImports(rootNode, language, resolutionPath),
-    importedSymbols: extractImportedSymbols(rootNode, language, resolutionPath),
+    fileImports: extractImports(rootNode, language, resolutionPath, workspacePackages),
+    importedSymbols: extractImportedSymbols(rootNode, language, resolutionPath, workspacePackages),
     fileExports: extractExports(rootNode, language),
     traverser: getTraverser(language),
   };
@@ -169,14 +191,14 @@ export function chunkByAST(
   content: string,
   options: ASTChunkOptions = {},
 ): ASTChunk[] {
-  const { minChunkSize = 5, repoId, orgId } = options;
+  const { minChunkSize = 5, repoId, orgId, workspaceRoot } = options;
   const tenantContext = { repoId, orgId };
 
   // Parse and validate
   const { language, rootNode } = parseAndValidate(filepath, content);
 
   // Prepare context
-  const context = prepareASTContext(content, rootNode, language, filepath);
+  const context = prepareASTContext(content, rootNode, language, filepath, workspaceRoot);
 
   // Find and process top-level nodes
   const topLevelNodes = findTopLevelNodes(rootNode, context.traverser);
