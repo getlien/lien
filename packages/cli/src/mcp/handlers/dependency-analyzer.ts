@@ -634,9 +634,6 @@ export async function findDependents(
     maxNodes,
   });
 
-  const fileComplexities = calculateFileComplexities(chunksByFile);
-  const complexityMetrics = calculateOverallComplexityMetrics(fileComplexities);
-
   const targetFileChunks = symbol ? (allChunksByFile.get(normalizedTarget) ?? []) : [];
   const { dependents, totalUsageCount } = buildDependentsList(
     chunksByFile,
@@ -649,6 +646,18 @@ export async function findDependents(
     reExporterPaths,
   );
   stampHopsAndSort(dependents, hopsByFile);
+
+  // Complexity metrics must be joined against the *resolved* dependents, not
+  // the broader import-graph candidate set (`chunksByFile`) considered before
+  // symbol filtering. For file-level queries the two are identical, but for
+  // symbol queries `chunksByFile` can contain files that import the target
+  // file yet don't use the requested symbol — `buildDependentsList` drops
+  // those. Reading complexity from `chunksByFile` directly let an unrelated
+  // file's complexity leak into `complexityMetrics`/`riskReasoning` even when
+  // `dependents` came back empty.
+  const dependentChunksByFile = restrictToDependents(chunksByFile, dependents);
+  const fileComplexities = calculateFileComplexities(dependentChunksByFile);
+  const complexityMetrics = calculateOverallComplexityMetrics(fileComplexities);
 
   const testDependentCount = dependents.filter(f => f.isTestFile).length;
   const productionDependentCount = dependents.length - testDependentCount;
@@ -942,6 +951,25 @@ function findDependentChunks(
   }
 
   return dependentChunks;
+}
+
+/**
+ * Restrict a file-level chunk map down to exactly the resolved dependent
+ * filepaths. Used to join complexity metrics against `dependents` rather
+ * than the wider pre-symbol-filter candidate set (see `findDependents`).
+ */
+function restrictToDependents(
+  chunksByFile: Map<string, SearchResult[]>,
+  dependents: DependentInfo[],
+): Map<string, SearchResult[]> {
+  const dependentPaths = new Set(dependents.map(d => d.filepath));
+  const restricted = new Map<string, SearchResult[]>();
+  for (const [filepath, chunks] of chunksByFile.entries()) {
+    if (dependentPaths.has(filepath)) {
+      restricted.set(filepath, chunks);
+    }
+  }
+  return restricted;
 }
 
 /**

@@ -273,6 +273,67 @@ describe('findDependents', () => {
       expect(result.complexityMetrics.filesWithComplexityData).toBe(0);
       expect(result.complexityMetrics.complexityRiskBoost).toBe('low');
     });
+
+    // Regression: a file can import the target file (landing in the
+    // pre-symbol-filter candidate set) without importing the requested
+    // symbol, so `buildDependentsList` correctly drops it from `dependents`.
+    // Complexity metrics used to be computed from that wider candidate set
+    // instead of the resolved `dependents`, so an unrelated high-complexity
+    // file could inflate `complexityMetrics`/`complexityRiskBoost` even when
+    // zero dependents were returned.
+    it('should return neutral complexity metrics when the symbol filter leaves zero dependents', async () => {
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/target.ts', { exports: ['Foo', 'Bar'] }),
+        createChunk('src/unrelated.ts', {
+          imports: ['src/target.ts'],
+          importedSymbols: { 'src/target': ['Bar'] }, // does not import 'Foo'
+          complexity: 17,
+        }),
+      ]);
+
+      const result = await findDependents(mockDB as any, 'src/target.ts', false, mockLog, 'Foo');
+
+      expect(result.dependents).toHaveLength(0);
+      expect(result.fileComplexities).toHaveLength(0);
+      expect(result.complexityMetrics).toEqual({
+        averageComplexity: 0,
+        maxComplexity: 0,
+        filesWithComplexityData: 0,
+        highComplexityDependents: [],
+        complexityRiskBoost: 'low',
+      });
+    });
+
+    // Regression: when some (but not all) files pass the symbol filter,
+    // complexity metrics must be restricted to exactly those files — not the
+    // wider import-graph candidate set that also matched the target file.
+    it('should restrict complexity metrics to exactly the resolved symbol dependents', async () => {
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/target.ts', { exports: ['Foo', 'Bar'] }),
+        createChunk('src/uses-foo.ts', {
+          imports: ['src/target.ts'],
+          importedSymbols: { 'src/target': ['Foo'] },
+          complexity: 4,
+        }),
+        createChunk('src/uses-bar.ts', {
+          imports: ['src/target.ts'],
+          importedSymbols: { 'src/target': ['Bar'] }, // does not import 'Foo'
+          complexity: 20, // high complexity, but must not leak into the result
+        }),
+      ]);
+
+      const result = await findDependents(mockDB as any, 'src/target.ts', false, mockLog, 'Foo');
+
+      expect(result.dependents).toHaveLength(1);
+      expect(result.dependents[0].filepath).toBe('src/uses-foo.ts');
+
+      expect(result.fileComplexities).toHaveLength(1);
+      expect(result.fileComplexities[0].filepath).toBe('src/uses-foo.ts');
+
+      expect(result.complexityMetrics.filesWithComplexityData).toBe(1);
+      expect(result.complexityMetrics.maxComplexity).toBe(4);
+      expect(result.complexityMetrics.highComplexityDependents).toHaveLength(0);
+    });
   });
 
   describe('production vs test split', () => {
