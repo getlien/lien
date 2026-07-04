@@ -22,10 +22,6 @@ describe('handleGetDependents', () => {
     indexDate: '2025-12-19',
   }));
 
-  const mockEmbeddings = {
-    embed: vi.fn(),
-  };
-
   let mockVectorDB: {
     scanWithFilter: ReturnType<typeof vi.fn>;
     scanCrossRepo: ReturnType<typeof vi.fn>;
@@ -96,7 +92,6 @@ describe('handleGetDependents', () => {
 
     mockCtx = {
       vectorDB: mockVectorDB as any,
-      embeddings: mockEmbeddings as any,
       log: mockLog,
       checkAndReconnect: mockCheckAndReconnect,
       getIndexMetadata: mockGetIndexMetadata,
@@ -326,7 +321,6 @@ describe('handleGetDependents', () => {
 
       mockCtx = {
         vectorDB: mockCrossRepoDB,
-        embeddings: mockEmbeddings as any,
         log: mockLog,
         checkAndReconnect: mockCheckAndReconnect,
         getIndexMetadata: mockGetIndexMetadata,

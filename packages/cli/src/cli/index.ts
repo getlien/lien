@@ -55,10 +55,6 @@ program
   .description('Index the codebase for lexical (FTS5) search and dependency analysis')
   .option('-f, --force', 'Force full reindex (skip incremental)')
   .option('-v, --verbose', 'Show detailed logging during indexing')
-  .option(
-    '--no-embeddings',
-    '[deprecated, no-op] Embeddings are never computed; search is lexical FTS5',
-  )
   .action(indexCommand);
 
 program

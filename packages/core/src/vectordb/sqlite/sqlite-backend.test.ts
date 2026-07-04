@@ -8,9 +8,6 @@ import { SqliteBackend } from './sqlite-backend.js';
 import { readVersionFile } from '../version.js';
 import { DatabaseError } from '../../errors/index.js';
 
-const DIM = 384;
-const zeroVec = () => new Float32Array(DIM);
-
 /** A metadata fixture exercising every persisted field. */
 function makeChunk(overrides: Partial<ChunkMetadata> = {}, content = 'function foo() {}') {
   const metadata: ChunkMetadata = {
@@ -46,7 +43,7 @@ function makeChunk(overrides: Partial<ChunkMetadata> = {}, content = 'function f
 }
 
 async function insertOne(db: SqliteBackend, metadata: ChunkMetadata, content: string) {
-  await db.insertBatch([zeroVec()], [metadata], [content]);
+  await db.insertBatch([metadata], [content]);
 }
 
 describe('SqliteBackend', () => {
@@ -107,7 +104,7 @@ describe('SqliteBackend', () => {
           { symbol: 'baz', line: 10 },
         ],
       });
-      // returnType is intentionally lossy (not persisted, matching LanceDB).
+      // returnType is intentionally lossy (not persisted).
       expect((r.metadata as ChunkMetadata).returnType).toBeUndefined();
     });
 
@@ -233,12 +230,7 @@ describe('SqliteBackend', () => {
     it('replaces a file’s chunks in one transaction and bumps the version file', async () => {
       await insertOne(db, makeChunk({ file: 'a.ts' }).metadata, 'old content');
 
-      await db.updateFile(
-        'a.ts',
-        [zeroVec()],
-        [makeChunk({ file: 'a.ts' }).metadata],
-        ['new content'],
-      );
+      await db.updateFile('a.ts', [makeChunk({ file: 'a.ts' }).metadata], ['new content']);
 
       const results = await db.scanWithFilter({ file: 'a.ts' });
       expect(results).toHaveLength(1);
@@ -275,7 +267,7 @@ describe('SqliteBackend', () => {
     });
 
     it('leaves the version file intact', async () => {
-      await db.updateFile('a.ts', [zeroVec()], [makeChunk({ file: 'a.ts' }).metadata], ['c']);
+      await db.updateFile('a.ts', [makeChunk({ file: 'a.ts' }).metadata], ['c']);
       const before = await readVersionFile(db.dbPath);
       expect(before).toBeGreaterThan(0);
 
@@ -288,7 +280,7 @@ describe('SqliteBackend', () => {
   describe('checkVersion', () => {
     it('detects a newer version once, then throttles for 1 second', async () => {
       // updateFile writes a fresh version file (currentVersion starts at 0).
-      await db.updateFile('a.ts', [zeroVec()], [makeChunk({ file: 'a.ts' }).metadata], ['c']);
+      await db.updateFile('a.ts', [makeChunk({ file: 'a.ts' }).metadata], ['c']);
 
       expect(await db.checkVersion()).toBe(true); // detects the bump
       expect(await db.checkVersion()).toBe(false); // throttled within 1s
@@ -315,19 +307,18 @@ describe('SqliteBackend', () => {
 
   describe('insertBatch edge cases', () => {
     it('is a no-op for an empty batch', async () => {
-      await db.insertBatch([], [], []);
+      await db.insertBatch([], []);
       expect(await db.hasData()).toBe(false);
     });
 
     it('throws when array lengths mismatch', async () => {
-      await expect(db.insertBatch([zeroVec()], [], ['c'])).rejects.toThrow(DatabaseError);
+      await expect(db.insertBatch([makeChunk().metadata], [])).rejects.toThrow(DatabaseError);
     });
   });
 
   describe('cross-repo stubs', () => {
     it('reports no cross-repo support and returns [] from cross-repo methods', async () => {
       expect(db.supportsCrossRepo).toBe(false);
-      expect(await db.searchCrossRepo(zeroVec())).toEqual([]);
       expect(await db.scanCrossRepo({})).toEqual([]);
     });
   });
@@ -337,7 +328,7 @@ describe('SqliteBackend', () => {
       expect(db.getVersionDate()).toBe('Unknown');
       expect(db.getCurrentVersion()).toBe(0);
 
-      await db.updateFile('a.ts', [zeroVec()], [makeChunk({ file: 'a.ts' }).metadata], ['c']);
+      await db.updateFile('a.ts', [makeChunk({ file: 'a.ts' }).metadata], ['c']);
       await db.checkVersion(); // bumps in-memory currentVersion from the file
       expect(db.getCurrentVersion()).toBeGreaterThan(0);
       expect(db.getVersionDate()).not.toBe('Unknown');

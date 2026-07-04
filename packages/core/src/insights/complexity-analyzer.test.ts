@@ -1,11 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ComplexityAnalyzer } from './complexity-analyzer.js';
-import type { VectorDB } from '../vectordb/lancedb.js';
 import type { ChunkMetadata, CodeChunk } from '@liendev/parser';
-import type { SearchResult } from '../vectordb/types.js';
+import type { SearchResult, VectorDBInterface } from '../vectordb/types.js';
 
 describe('ComplexityAnalyzer', () => {
-  let mockVectorDB: VectorDB;
+  let mockVectorDB: VectorDBInterface;
 
   beforeEach(() => {
     // Create mock VectorDB

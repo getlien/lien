@@ -54,7 +54,6 @@ describe('registerMCPHandlers', () => {
 
     mockToolContext = {
       vectorDB: {} as any,
-      embeddings: {} as any,
       rootDir: '/test',
       log: vi.fn(),
       checkAndReconnect: vi.fn(),

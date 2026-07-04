@@ -4,12 +4,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import {
-  indexCodebase,
-  createVectorDB,
-  NullEmbeddings,
-  type VectorDBInterface,
-} from '@liendev/core';
+import { indexCodebase, createVectorDB, type VectorDBInterface } from '@liendev/core';
 import { createTestDir, cleanupTestDir, createTestFile } from '@liendev/core/test';
 import { createMCPServerConfig, registerMCPHandlers } from '../../src/mcp/server-config.js';
 import { createReindexStateManager } from '../../src/mcp/reindex-state-manager.js';
@@ -97,7 +92,6 @@ describe('MCP protocol round trip (real server, real client, real index)', () =>
     const reindexStateManager = createReindexStateManager();
     const toolContext: ToolContext = {
       vectorDB,
-      embeddings: new NullEmbeddings(),
       rootDir: fixtureDir,
       // No live file watcher/version-file churn in this test, so reconnect
       // is a real no-op function rather than a mock assertion target.

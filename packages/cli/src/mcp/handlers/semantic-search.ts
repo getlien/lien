@@ -3,7 +3,6 @@ import { SemanticSearchSchema } from '../schemas/index.js';
 import { shapeResults, deduplicateResults } from '../utils/metadata-shaper.js';
 import type { ToolContext, MCPToolResult, LogFn } from '../types.js';
 import type { VectorDBInterface, SearchResult } from '@liendev/core';
-import { SYMBOL_SEARCH_COLUMNS } from './columns.js';
 
 /**
  * Group search results by repository ID.
@@ -26,30 +25,18 @@ interface SearchParams {
   query: string;
   limit: number;
   crossRepo?: boolean;
-  repoIds?: string[];
 }
 
 /**
- * Execute the vector search, choosing cross-repo or single-repo strategy.
+ * Execute the lexical search. Cross-repo search is unsupported by the bundled
+ * SQLite backend, so a crossRepo request falls back to a single-repo search.
  */
 async function executeSearch(
   vectorDB: VectorDBInterface,
-  queryEmbedding: Float32Array,
   params: SearchParams,
   log: LogFn,
 ): Promise<{ results: SearchResult[]; crossRepoFallback: boolean }> {
-  const { query, limit, crossRepo, repoIds } = params;
-
-  if (crossRepo && vectorDB.supportsCrossRepo) {
-    const results = await vectorDB.searchCrossRepo(queryEmbedding, limit, {
-      repoIds,
-      columns: SYMBOL_SEARCH_COLUMNS,
-    });
-    log(
-      `Found ${results.length} results across ${Object.keys(groupResultsByRepo(results)).length} repos`,
-    );
-    return { results, crossRepoFallback: false };
-  }
+  const { query, limit, crossRepo } = params;
 
   if (crossRepo) {
     log(
@@ -57,9 +44,7 @@ async function executeSearch(
       'warning',
     );
   }
-  const results = await vectorDB.search(queryEmbedding, limit, query, {
-    columns: SYMBOL_SEARCH_COLUMNS,
-  });
+  const results = await vectorDB.search(query, limit);
   log(`Found ${results.length} results`);
   return { results, crossRepoFallback: !!crossRepo };
 }
@@ -94,10 +79,8 @@ function processResults(
  * Handle semantic_search tool calls.
  *
  * Runs lexical full-text (FTS5/BM25) search over code, docstrings, and
- * camelCase-split identifiers via `vectorDB.search`. The `queryVector`
- * argument is vestigial — the SqliteBackend matches the `query` text and
- * ignores the vector — so an empty Float32Array is passed. Supports cross-repo
- * search when using a cross-repo-capable backend.
+ * camelCase-split identifiers via `vectorDB.search`. Cross-repo search is
+ * unsupported by the bundled single-repo SQLite backend.
  */
 export async function handleSemanticSearch(
   args: unknown,
@@ -106,15 +89,14 @@ export async function handleSemanticSearch(
   const { vectorDB, log, checkAndReconnect, getIndexMetadata } = ctx;
 
   return await wrapToolHandler(SemanticSearchSchema, async validatedArgs => {
-    const { crossRepo, repoIds, query, limit } = validatedArgs;
+    const { crossRepo, query, limit } = validatedArgs;
 
     log(`Searching for: "${query}"${crossRepo ? ' (cross-repo)' : ''}`);
     await checkAndReconnect();
 
     const { results: rawResults, crossRepoFallback } = await executeSearch(
       vectorDB,
-      new Float32Array(0),
-      { query, limit: limit ?? 5, crossRepo, repoIds },
+      { query, limit: limit ?? 5, crossRepo },
       log,
     );
 

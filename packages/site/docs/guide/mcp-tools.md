@@ -6,25 +6,36 @@ Lien exposes these tools through the Model Context Protocol (MCP), making them a
 
 ## semantic_search
 
-Search your codebase using natural language queries.
+Full-text keyword search over your codebase (FTS5/BM25). Despite the name, this is
+**lexical** search — it does not embed your query. It matches query terms against
+symbol names, identifier-split symbol tokens, and chunk content (including
+comments/docstrings), ranked by BM25.
+
+::: warning Keyword search, not meaning search
+Query with concrete keywords, identifiers, and domain terms that actually appear in
+the code — not natural-language questions. A paraphrase that shares no words with
+the code will not match (e.g. "auth" will not surface `login`/`hashPassword`). For
+an exact symbol name, prefer `list_functions`. The tool keeps the `semantic_search`
+name for backward compatibility.
+:::
 
 ### Parameters
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `query` | string | Yes | - | Natural language search query |
+| `query` | string | Yes | - | Keyword search query (identifiers and domain terms that appear in the code) |
 | `limit` | number | No | 5 | Maximum number of results to return |
-| `crossRepo` | boolean | No | false | Search across all repos in the organization. Requires a cross-repo-capable backend (the bundled LanceDB backend is single-repo); unsupported backends fall back to single-repo search |
+| `crossRepo` | boolean | No | false | Search across all repos in the organization. Requires a cross-repo-capable backend (the bundled SQLite backend is single-repo); unsupported backends fall back to single-repo search |
 | `repoIds` | string[] | No | - | Restrict cross-repo search to these repo IDs. Only applied when `crossRepo=true` with a supporting backend; ignored otherwise |
 
 ### Usage
 
 ```
-Search for "user authentication flow"
+Search for "authenticate user session token"
 ```
 
 ```
-Find code that handles JWT token validation
+Find code with terms: jwt token validation verify
 ```
 
 ### Response
@@ -48,23 +59,24 @@ When `crossRepo=true` with a cross-repo-capable backend, the response also inclu
 
 ### Best Practices
 
-- Use full sentences describing what the code does
-- Focus on behavior: "handles user login", "validates email addresses"
-- Avoid exact function names (use `grep` for that)
+- Query with keywords and identifiers that appear in the code, not questions
+- Include several related terms — they are OR-joined, and BM25 ranks multi-term matches highest
+- Lean on domain vocabulary the code actually uses ("token", "session", "retry", "backoff")
+- For an exact symbol name, use `list_functions`; for exact literal strings, use `grep`
 - Increase `limit` for broader exploration (up to 15)
 
 ### Examples
 
 **Good queries:**
-- "handles user authentication"
-- "validates email addresses"
-- "processes payment transactions"
-- "parses JSON responses"
-- "middleware for authorization"
+- "authenticate user session token"
+- "validate email address regex"
+- "payment transaction charge refund"
+- "parse json response body"
+- "authorization middleware guard"
 
 **Poor queries:**
-- "auth" (too vague)
-- "validateEmail" (use grep for exact names)
+- "how does login work?" (a question — use the code's own terms instead)
+- "is the user allowed in?" (paraphrase — no shared vocabulary with the code)
 - "code" (way too generic)
 
 ## find_similar
@@ -100,7 +112,7 @@ find_similar({
 
 ### Response
 
-Similar format to `semantic_search`, returns semantically similar code chunks.
+Similar format to `semantic_search`. Matching is lexical (BM25 over the snippet's tokens), not semantic — it finds code that shares identifiers and keywords with your snippet.
 
 When filters are applied or low-relevance results are pruned, the response includes:
 
@@ -287,7 +299,7 @@ Find all files that depend on a given file (reverse dependency lookup). Essentia
 | `filepath` | string | Yes | - | Path to file (relative to project root) |
 | `depth` | number | No | 1 | Dependency depth (currently only 1 supported) |
 | `symbol` | string | No | - | Specific exported symbol to find usages of (returns call sites instead of just importing files) |
-| `crossRepo` | boolean | No | false | Find dependents across all repos. Requires a cross-repo-capable backend (the bundled LanceDB backend is single-repo) |
+| `crossRepo` | boolean | No | false | Find dependents across all repos. Requires a cross-repo-capable backend (the bundled SQLite backend is single-repo) |
 
 ### Usage
 
@@ -366,7 +378,7 @@ Analyze code complexity for tech debt identification and refactoring prioritizat
 | `files` | string[] | No | - | Specific files to analyze (analyzes all if omitted) |
 | `top` | number | No | 10 | Return top N most complex functions |
 | `threshold` | number | No | config | Only return functions above this complexity |
-| `crossRepo` | boolean | No | false | Analyze across all repos in the organization. Requires a cross-repo-capable backend (the bundled LanceDB backend is single-repo) |
+| `crossRepo` | boolean | No | false | Analyze across all repos in the organization. Requires a cross-repo-capable backend (the bundled SQLite backend is single-repo) |
 | `repoIds` | string[] | No | - | Filter to specific repos when `crossRepo=true` |
 
 ### Usage
@@ -480,17 +492,22 @@ Show functions with complexity > 15
 
 ## Understanding Relevance Categories
 
-All search tools include a **relevance category** alongside the numeric similarity score:
+All search tools include a **relevance category** alongside a numeric `score`. Both
+are derived from the BM25 rank: each result's rank is compared to the best hit in
+the result set, producing a category and a lower-is-better `score` (best hit ≈ 0).
+An exact match on a symbol name is always promoted to `highly_relevant`.
 
-| Category | Score Range | Meaning |
-|----------|-------------|---------|
-| `highly_relevant` | < 1.0 | Very close semantic match, top-quality result |
-| `relevant` | 1.0 - 1.3 | Good match, useful context for the query |
-| `loosely_related` | 1.3 - 1.5 | Tangentially related, may provide background context |
-| `not_relevant` | ≥ 1.5 | Weak match, likely not useful |
+| Category | Meaning |
+|----------|---------|
+| `highly_relevant` | Strong BM25 match relative to the best hit (or an exact symbol-name match) |
+| `relevant` | Good match — useful context for the query |
+| `loosely_related` | Weaker match — may provide background context |
+| `not_relevant` | Weak match — automatically filtered out of results |
 
 ::: tip
-Lower scores indicate higher semantic similarity (closer in vector space). Use relevance categories to quickly assess result quality.
+Because bands are relative to the best hit in each result set, the top result is
+always `highly_relevant`. Categories are keyword-match strength, not semantic
+similarity — a match means your query terms appear in the code or its comments.
 :::
 
 ## Test Associations
@@ -525,9 +542,9 @@ All search results include test association metadata:
 ## Tool Selection Guide
 
 ### Use `semantic_search` when:
-- User asks about functionality, features, or "how X works"
-- You need to understand what code exists before editing
-- Looking for patterns, implementations, handlers, validators
+- Discovering code by keyword — identifiers and domain terms that appear in the source
+- You need to find where a concept lives before editing (query with the code's own vocabulary)
+- Looking for patterns, implementations, handlers, validators by their terminology
 
 ### Use `list_functions` when:
 - User asks "show me all Controllers" or similar structural queries
@@ -559,8 +576,8 @@ All search results include test association metadata:
 
 ## Performance Tips
 
-1. **Start broad**: Use `semantic_search` with higher limit (10-15) for exploration
-2. **Be specific**: More specific queries return more relevant results
+1. **Start broad**: Use `semantic_search` with a higher limit (10-15) for exploration
+2. **Use the code's words**: query with identifiers and domain terms that appear in the source, not paraphrases
 3. **Use context**: Check related files with `get_files_context` before editing
 4. **Chain tools**: search → get context → check dependents → make changes is a powerful pattern
 

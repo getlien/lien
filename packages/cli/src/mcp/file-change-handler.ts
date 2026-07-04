@@ -1,5 +1,5 @@
 import fs from 'fs/promises';
-import type { VectorDBInterface, EmbeddingService } from '@liendev/core';
+import type { VectorDBInterface } from '@liendev/core';
 import {
   indexMultipleFiles,
   indexSingleFile,
@@ -106,7 +106,6 @@ async function handleSingleFileChange(
   type: 'add' | 'change',
   rootDir: string,
   vectorDB: VectorDBInterface,
-  embeddings: EmbeddingService,
   manifest: ManifestManager,
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>,
@@ -126,7 +125,7 @@ async function handleSingleFileChange(
   log(`📝 File ${action}: ${filepath}`);
 
   try {
-    await indexSingleFile(filepath, vectorDB, embeddings, { verbose: false, rootDir });
+    await indexSingleFile(filepath, vectorDB, { verbose: false, rootDir });
     const duration = Date.now() - startTime;
     reindexStateManager.completeReindex(duration);
   } catch (error) {
@@ -285,13 +284,12 @@ async function executeReindexOperations(
   deletedFiles: string[],
   rootDir: string,
   vectorDB: VectorDBInterface,
-  embeddings: EmbeddingService,
   manifest: ManifestManager,
   log: LogFn,
 ): Promise<void> {
   if (filesToIndex.length > 0) {
     log(`📁 ${filesToIndex.length} file(s) changed, reindexing...`);
-    await indexMultipleFiles(filesToIndex, vectorDB, embeddings, { verbose: false, rootDir });
+    await indexMultipleFiles(filesToIndex, vectorDB, { verbose: false, rootDir });
   }
 
   if (deletedFiles.length > 0) {
@@ -307,7 +305,6 @@ async function handleBatchEvent(
   event: FileChangeEvent,
   rootDir: string,
   vectorDB: VectorDBInterface,
-  embeddings: EmbeddingService,
   manifest: ManifestManager,
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>,
@@ -330,15 +327,7 @@ async function handleBatchEvent(
   reindexStateManager.startReindex(allFiles);
 
   try {
-    await executeReindexOperations(
-      filesToIndex,
-      deletedFiles,
-      rootDir,
-      vectorDB,
-      embeddings,
-      manifest,
-      log,
-    );
+    await executeReindexOperations(filesToIndex, deletedFiles, rootDir, vectorDB, manifest, log);
 
     const duration = Date.now() - startTime;
     reindexStateManager.completeReindex(duration);
@@ -427,7 +416,6 @@ function hasGitignoreChange(event: FileChangeEvent): boolean {
 export function createFileChangeHandler(
   rootDir: string,
   vectorDB: VectorDBInterface,
-  embeddings: EmbeddingService,
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>,
   checkAndReconnect: () => Promise<void>,
@@ -454,15 +442,7 @@ export function createFileChangeHandler(
         filtered.added!.length + filtered.modified!.length + filtered.deleted!.length;
       if (totalToProcess === 0) return;
       await checkAndReconnect();
-      await handleBatchEvent(
-        filtered,
-        rootDir,
-        vectorDB,
-        embeddings,
-        manifest,
-        log,
-        reindexStateManager,
-      );
+      await handleBatchEvent(filtered, rootDir, vectorDB, manifest, log, reindexStateManager);
     } else if (type === 'unlink') {
       // Always process deletions — a previously-indexed file must be removed
       // from the index even if it's now gitignored
@@ -477,7 +457,6 @@ export function createFileChangeHandler(
         type,
         rootDir,
         vectorDB,
-        embeddings,
         manifest,
         log,
         reindexStateManager,

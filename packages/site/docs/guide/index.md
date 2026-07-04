@@ -1,12 +1,12 @@
 # Introduction
 
-Lien _(French for "link" or "connection")_ is a local-first semantic code search tool that provides deep codebase context to AI coding assistants like Cursor and Claude Code through the Model Context Protocol (MCP).
+Lien _(French for "link" or "connection")_ is a local-first **code-intelligence layer** for AI coding assistants like Cursor and Claude Code, delivered through the Model Context Protocol (MCP).
 
 ## What is Lien?
 
-Lien indexes your codebase locally and enables AI assistants to understand your code through natural language queries. Unlike cloud-based solutions, everything runs on your machine—your code never leaves your computer.
+Lien indexes your codebase locally and gives AI assistants the structural context they need to work safely: reverse dependencies and blast radius, complexity hotspots, and test associations — plus fast lexical code search for discovery. Unlike cloud-based solutions, everything runs on your machine—your code never leaves your computer.
 
-**Setup takes 30 seconds:** Install globally, add one config file, restart your AI assistant. That's it.
+**Setup takes 30 seconds:** Install globally, run `lien init`, restart your AI assistant. There's no model to download — the first index runs instantly and offline.
 
 ## Key Benefits
 
@@ -16,8 +16,11 @@ Lien auto-detects your project structure and "just works." No config files, no f
 ### Privacy First
 Your code is precious intellectual property. Lien processes everything locally with no external API calls, no data collection, and no telemetry.
 
-### Semantic Understanding
-Instead of simple text search, Lien understands code semantically. Ask "how does authentication work?" and get relevant results even if the code doesn't contain those exact words.
+### Structural Intelligence
+The questions an agent needs answered before editing your code — "what depends on this?", "how complex is this?", "what tests cover it?" — are answered from an accurate import graph and per-symbol metrics, not guessed.
+
+### Explainable Lexical Search
+For discovery, Lien runs full-text (FTS5/BM25) keyword search over code, docstrings, and identifier-split symbol names. It's keyword-based, not meaning-based — query with terms that appear in the code, and you can always see *why* a result matched.
 
 ### AI-Powered Development
 Integrate with Cursor, Claude Code, and other MCP-compatible tools to give AI assistants deep context about your codebase, enabling better suggestions and answers.
@@ -32,12 +35,12 @@ Additionally, 15+ languages (including Liquid, Go, Rust, Python, and more) are i
 
 ## How Does It Work?
 
-1. **Scan**: Lien walks your codebase and identifies source files based on framework detection
-2. **Chunk**: Files are split into semantic chunks (functions, classes, logical blocks)
-3. **Embed**: Each chunk is converted to a vector embedding using a local ML model
-4. **Store**: Embeddings are stored in a local vector database (LanceDB)
-5. **Query**: When you search, your query is embedded and matched against stored chunks
-6. **Retrieve**: The most relevant code chunks are returned with context
+1. **Scan**: Lien walks your codebase and identifies source files based on ecosystem detection
+2. **Chunk**: Files are split into semantic chunks (functions, classes, logical blocks) via Tree-sitter AST parsing
+3. **Enrich**: Each chunk gets complexity metrics, imports/exports, call sites, and test associations
+4. **Store**: Chunks and the import graph are written to a local SQLite database — no embeddings, no model
+5. **Answer**: Structural queries (dependents, complexity, context) are served with indexed SQL; discovery is served with FTS5/BM25 keyword search
+6. **Retrieve**: Relevant chunks and structural facts are returned with context
 
 ## Use Cases
 
@@ -70,8 +73,8 @@ Understand what tests cover specific code:
 Lien is built with modern, performant tools:
 
 - **TypeScript** for type-safe development
-- **transformers.js** for local embeddings (no external API)
-- **LanceDB** for vector storage
+- **Tree-sitter** for AST-based chunking and complexity analysis
+- **SQLite** (`better-sqlite3`) for the structural store, with **FTS5/BM25** for lexical search
 - **MCP SDK** for AI assistant integration
 - **Commander.js** for CLI
 
@@ -89,7 +92,7 @@ Lien is built with modern, performant tools:
 - Kotlin
 - Swift
 
-**Semantic Search** (chunking and embeddings):
+**Indexed for lexical search** (chunking + FTS5):
 - All of the above, plus Vue, Liquid, C/C++, Scala, Markdown
 
 ## Next Steps

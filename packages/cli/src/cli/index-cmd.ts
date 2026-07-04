@@ -4,11 +4,7 @@ import type { Ora } from 'ora';
 import { indexCodebase } from '@liendev/core';
 import type { IndexingProgress } from '@liendev/core';
 import { showCompactBanner } from '../utils/banner.js';
-import {
-  getIndexingMessage,
-  getEmbeddingMessage,
-  getModelLoadingMessage,
-} from '../utils/loading-messages.js';
+import { getIndexingMessage, getModelLoadingMessage } from '../utils/loading-messages.js';
 import { formatDuration } from './utils.js';
 
 /**
@@ -93,7 +89,7 @@ function updateSpinner(spinner: Ora, tracker: ProgressTracker, forceUpdate = fal
  */
 function updateWittyMessage(tracker: ProgressTracker): void {
   const { current } = tracker;
-  if (current.phase === 'embedding' || current.phase === 'indexing') {
+  if (current.phase === 'indexing') {
     tracker.wittyMessage = getIndexingMessage();
   } else if (current.phase === 'initializing') {
     tracker.wittyMessage = getModelLoadingMessage();
@@ -133,8 +129,6 @@ function createProgressCallback(
     // Update witty message based on phase changes
     if (progress.phase === 'initializing' && !tracker.messageRotationInterval) {
       tracker.wittyMessage = getModelLoadingMessage();
-    } else if (progress.phase === 'embedding') {
-      tracker.wittyMessage = getEmbeddingMessage();
     } else if (progress.phase === 'indexing') {
       tracker.wittyMessage = getIndexingMessage();
     }
@@ -178,11 +172,7 @@ function displayFinalResult(
   }
 }
 
-export async function indexCommand(options: {
-  verbose?: boolean;
-  force?: boolean;
-  embeddings?: boolean;
-}) {
+export async function indexCommand(options: { verbose?: boolean; force?: boolean }) {
   showCompactBanner();
 
   try {
@@ -200,18 +190,11 @@ export async function indexCommand(options: {
     const tracker = createProgressTracker();
     startMessageRotation(spinner, tracker);
 
-    // Commander's --no-embeddings negatable flag defaults `embeddings` to
-    // true when omitted, so only force skipEmbeddings when the flag was
-    // explicitly passed. Leave it undefined otherwise so indexCodebase()
-    // falls back to the project config's embeddings.enabled setting.
-    const skipEmbeddings = options.embeddings === false ? true : undefined;
-
     // Run indexing with progress callback
     const result = await indexCodebase({
       rootDir: process.cwd(),
       verbose: options.verbose || false,
       force: options.force || false,
-      skipEmbeddings,
       onProgress: createProgressCallback(spinner, tracker),
     });
 

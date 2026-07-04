@@ -129,7 +129,6 @@ describe('statusCommand', () => {
     const allOutput = consoleLogSpy.mock.calls.flat().join(' ');
     expect(allOutput).toContain('Indexing Settings');
     expect(allOutput).toContain('Concurrency:');
-    expect(allOutput).toContain('Batch size:');
     expect(allOutput).toContain('Chunk size:');
     expect(allOutput).toContain('Chunk overlap:');
   });

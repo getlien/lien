@@ -2,7 +2,6 @@ import {
   DEFAULT_CHUNK_SIZE,
   DEFAULT_CHUNK_OVERLAP,
   DEFAULT_CONCURRENCY,
-  DEFAULT_EMBEDDING_BATCH_SIZE,
   DEFAULT_PORT,
   DEFAULT_GIT_POLL_INTERVAL_MS,
   DEFAULT_DEBOUNCE_MS,
@@ -34,7 +33,6 @@ export interface LienConfig {
     chunkSize: number;
     chunkOverlap: number;
     concurrency: number;
-    embeddingBatchSize: number;
   };
   chunking: {
     useAST: boolean; // Enable AST-based chunking (v0.13.0)
@@ -53,18 +51,6 @@ export interface LienConfig {
     enabled: boolean;
     debounceMs: number;
   };
-  embeddings: {
-    /**
-     * Compute embeddings for semantic search (default: true).
-     * Set to false for structural-only mode: no model download, no
-     * embedding worker, no CPU cost on index/reindex. Structural tools
-     * (get_files_context, get_dependents, list_functions, get_complexity)
-     * keep working; semantic_search and find_similar report as disabled.
-     * Toggling this requires a full reindex (`lien index --force`) to take
-     * effect on already-indexed files.
-     */
-    enabled: boolean;
-  };
   complexity?: {
     enabled: boolean;
     thresholds: {
@@ -76,7 +62,7 @@ export interface LienConfig {
     // Severity multipliers are hardcoded: warning = 1x threshold, error = 2x threshold
   };
   storage?: {
-    backend?: 'lancedb'; // LanceDB is the only supported backend
+    backend?: 'sqlite'; // sqlite is the only supported backend
   };
   /** @deprecated Frameworks are replaced by ecosystem presets. Kept for old config compat. */
   frameworks?: FrameworkInstance[];
@@ -94,7 +80,6 @@ export interface LegacyLienConfig {
     chunkSize: number;
     chunkOverlap: number;
     concurrency: number;
-    embeddingBatchSize: number;
   };
   mcp: {
     port: number;
@@ -138,7 +123,6 @@ export const defaultConfig: LienConfig = {
     chunkSize: DEFAULT_CHUNK_SIZE,
     chunkOverlap: DEFAULT_CHUNK_OVERLAP,
     concurrency: DEFAULT_CONCURRENCY,
-    embeddingBatchSize: DEFAULT_EMBEDDING_BATCH_SIZE,
   },
   chunking: {
     useAST: true, // AST-based chunking enabled by default (v0.13.0)
@@ -157,9 +141,6 @@ export const defaultConfig: LienConfig = {
     enabled: true, // Enabled by default (fast with incremental indexing!)
     debounceMs: DEFAULT_DEBOUNCE_MS,
   },
-  embeddings: {
-    enabled: true, // Embeddings on by default — no behavior change for existing users
-  },
   complexity: {
     enabled: true,
     thresholds: {
@@ -169,5 +150,5 @@ export const defaultConfig: LienConfig = {
       estimatedBugs: 1.5, // 🐛 Functions estimated to have >1.5 bugs
     },
   },
-  storage: undefined, // Defaults to LanceDB (backward compatible)
+  storage: undefined, // Defaults to sqlite
 };

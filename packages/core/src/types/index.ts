@@ -7,7 +7,6 @@
 // Re-export from modules
 export type { ChunkMetadata, CodeChunk, ScanOptions } from '@liendev/parser';
 export type { SearchResult, VectorDBInterface } from '../vectordb/types.js';
-export type { EmbeddingService } from '../embeddings/types.js';
 export type {
   LienConfig,
   LegacyLienConfig,

@@ -61,10 +61,6 @@ function createMockVectorDB(dbPath = '/project/.lien/indices/abc') {
   } as any;
 }
 
-function createMockEmbeddings() {
-  return {} as any;
-}
-
 describe('isFileIgnored', () => {
   it('should return true when the filter says the file is ignored', () => {
     const isIgnored = (relativePath: string) => relativePath === 'node_modules/foo.js';
@@ -119,7 +115,6 @@ describe('createFileChangeHandler', () => {
     const handler = createFileChangeHandler(
       '/project',
       createMockVectorDB(),
-      createMockEmbeddings(),
       log,
       reindexStateManager,
       checkAndReconnect,
@@ -132,7 +127,6 @@ describe('createFileChangeHandler', () => {
     const handler = createFileChangeHandler(
       '/project',
       vectorDB,
-      createMockEmbeddings(),
       log,
       reindexStateManager,
       checkAndReconnect,
@@ -153,7 +147,6 @@ describe('createFileChangeHandler', () => {
     const handler = createFileChangeHandler(
       '/project',
       createMockVectorDB(),
-      createMockEmbeddings(),
       log,
       reindexStateManager,
       checkAndReconnect,
@@ -179,7 +172,6 @@ describe('createFileChangeHandler', () => {
     const handler = createFileChangeHandler(
       '/project',
       vectorDB,
-      createMockEmbeddings(),
       log,
       reindexStateManager,
       checkAndReconnect,
@@ -215,7 +207,6 @@ describe('createFileChangeHandler', () => {
     const handler = createFileChangeHandler(
       '/project',
       vectorDB,
-      createMockEmbeddings(),
       log,
       reindexStateManager,
       checkAndReconnect,
@@ -247,7 +238,6 @@ describe('createFileChangeHandler', () => {
     const handler = createFileChangeHandler(
       '/project',
       createMockVectorDB(),
-      createMockEmbeddings(),
       log,
       reindexStateManager,
       checkAndReconnect,

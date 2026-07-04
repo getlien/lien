@@ -5,7 +5,6 @@ import { shapeResults, deduplicateResults } from '../utils/metadata-shaper.js';
 import type { ToolContext, MCPToolResult, LogFn } from '../types.js';
 import { safeRegex } from '@liendev/core';
 import type { VectorDBInterface, SearchResult } from '@liendev/core';
-import { LIST_FUNCTIONS_COLUMNS } from './columns.js';
 
 interface QueryResult {
   results: SearchResult[];
@@ -34,7 +33,6 @@ async function performContentScan(
     language: args.language,
     symbolType: args.symbolType,
     limit: fetchLimit,
-    columns: LIST_FUNCTIONS_COLUMNS,
   });
 
   // Filter by symbolName (not content) to match only actual functions/symbols
@@ -72,7 +70,6 @@ async function queryWithFallback(
       pattern: args.pattern,
       symbolType: args.symbolType,
       limit: fetchLimit,
-      columns: LIST_FUNCTIONS_COLUMNS,
     });
 
     if (results.length === 0 && (args.language || args.pattern || args.symbolType)) {

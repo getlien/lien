@@ -81,7 +81,7 @@ export const GetDependentsSchema = z.object({
     .boolean()
     .default(false)
     .describe(
-      'If true, find dependents across all repos in the organization (requires a cross-repo-capable backend; the bundled LanceDB backend is single-repo).\n\n' +
+      'If true, find dependents across all repos in the organization (requires a cross-repo-capable backend; the bundled SQLite backend is single-repo).\n\n' +
         'Default: false (single-repo search)\n' +
         'When enabled, results are grouped by repository.',
     ),

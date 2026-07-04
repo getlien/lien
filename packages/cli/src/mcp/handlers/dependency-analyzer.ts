@@ -6,7 +6,6 @@ import {
   getCanonicalPath,
   isTestFile,
 } from '@liendev/parser';
-import { DEPENDENCY_GRAPH_COLUMNS } from './columns.js';
 
 /**
  * Complexity metrics for a single dependent file.
@@ -312,7 +311,7 @@ function addChunkToFileMap(
 /**
  * Scan chunks from the database and build the import index + per-file
  * chunk groupings. Uses a single full-table read rather than offset-based
- * pagination — LanceDB's OFFSET cost is O(N²) in chunk count, and a
+ * pagination — offset-based paging cost is O(N²) in chunk count, and a
  * single `.toArray()` is ~24x faster on monorepo-scale indexes (5.3s →
  * 217ms locally). Memory is unchanged in practice since this function
  * already accumulates every chunk into JS-side maps.
@@ -336,7 +335,6 @@ async function scanAllChunks(
     const CROSS_REPO_LIMIT = 100000;
     const allChunks = await vectorDB.scanCrossRepo({
       limit: CROSS_REPO_LIMIT,
-      columns: DEPENDENCY_GRAPH_COLUMNS,
     });
     const hitLimit = allChunks.length >= CROSS_REPO_LIMIT;
     if (hitLimit) {
@@ -359,7 +357,7 @@ async function scanAllChunks(
     );
   }
 
-  const allChunks = await vectorDB.scanAll({ columns: DEPENDENCY_GRAPH_COLUMNS });
+  const allChunks = await vectorDB.scanAll();
   for (const chunk of allChunks) {
     addChunkToImportIndex(chunk, normalizePathCached, importIndex);
     addChunkToFileMap(chunk, normalizePathCached, allChunksByFile, seenRanges);

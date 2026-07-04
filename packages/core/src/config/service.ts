@@ -196,11 +196,6 @@ export class ConfigService {
       this.validateFileWatchingConfig(config.fileWatching, errors, warnings);
     }
 
-    // Validate embeddings settings if present
-    if (config.embeddings) {
-      this.validateEmbeddingsConfig(config.embeddings, errors);
-    }
-
     return {
       valid: errors.length === 0,
       errors,
@@ -246,13 +241,6 @@ export class ConfigService {
       return;
     }
     this.validateFileWatchingConfig(config.fileWatching, errors, warnings);
-
-    // Validate embeddings settings
-    if (!config.embeddings) {
-      errors.push('Missing required field: embeddings');
-      return;
-    }
-    this.validateEmbeddingsConfig(config.embeddings, errors);
   }
 
   /**
@@ -291,10 +279,6 @@ export class ConfigService {
       errors.push('indexing.concurrency must be between 1 and 16');
     }
 
-    if (typeof indexing.embeddingBatchSize !== 'number' || indexing.embeddingBatchSize <= 0) {
-      errors.push('indexing.embeddingBatchSize must be a positive number');
-    }
-
     // Validate MCP settings (same for both)
     if (config.mcp) {
       this.validateMCPConfig(config.mcp, errors, warnings);
@@ -330,14 +314,6 @@ export class ConfigService {
     if (core.concurrency !== undefined) {
       if (typeof core.concurrency !== 'number' || core.concurrency < 1 || core.concurrency > 16) {
         errors.push('core.concurrency must be between 1 and 16');
-      }
-    }
-
-    if (core.embeddingBatchSize !== undefined) {
-      if (typeof core.embeddingBatchSize !== 'number' || core.embeddingBatchSize <= 0) {
-        errors.push('core.embeddingBatchSize must be a positive number');
-      } else if (core.embeddingBatchSize > 100) {
-        warnings.push('core.embeddingBatchSize is very large (>100). This may cause memory issues');
       }
     }
   }
@@ -415,20 +391,6 @@ export class ConfigService {
         warnings.push(
           'fileWatching.debounceMs is very short (<100ms). This may cause excessive reindexing',
         );
-      }
-    }
-  }
-
-  /**
-   * Validate embeddings configuration settings
-   */
-  private validateEmbeddingsConfig(
-    embeddings: Partial<LienConfig['embeddings']>,
-    errors: string[],
-  ): void {
-    if (embeddings.enabled !== undefined) {
-      if (typeof embeddings.enabled !== 'boolean') {
-        errors.push('embeddings.enabled must be a boolean');
       }
     }
   }

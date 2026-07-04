@@ -14,7 +14,7 @@ If Lien is working well for you, skip this page! Configuration is only needed fo
 
 ## Global Configuration
 
-Global settings live in `~/.lien/config.json` and control the vector database backend. You can manage them via the CLI:
+Global settings live in `~/.lien/config.json` and control the storage backend. You can manage them via the CLI:
 
 ```bash
 lien config get backend
@@ -25,16 +25,23 @@ Or edit the file directly:
 
 ```json
 {
-  "backend": "lancedb"
+  "backend": "sqlite"
 }
 ```
 
 | Key | Values | Description |
 |-----|--------|-------------|
-| `backend` | `lancedb` (default) | Vector database backend |
+| `backend` | `sqlite` (default) | Storage backend (SQLite structural store + FTS5 lexical search) |
 
-::: info Qdrant backend removed
-The experimental Qdrant backend was removed in v0.49. Lien is local-first — LanceDB is the only backend. Existing configs with `backend: "qdrant"` or `qdrant.*` keys keep working: Lien warns once and falls back to local LanceDB.
+::: info Retired backends
+Lien is local-first: the SQLite structural store is the only backend. The earlier
+LanceDB + embeddings backend was removed in favor of it (see
+[ADR-011](https://github.com/getlien/lien/blob/main/docs/architecture/decisions/0011-sqlite-structural-store-fts5-lexical-search.md)),
+and the Qdrant backend was retired before that. Existing configs that name a
+retired backend (`backend: "lancedb"` / `"qdrant"`, or the old `qdrant.*` keys) do
+not crash — Lien warns once and uses the SQLite backend. Old `code_chunks.lance`
+directories left under `~/.lien/indices/` are inert after reindexing and can be
+deleted to reclaim disk space.
 :::
 
 ## Per-Project Configuration
@@ -44,8 +51,7 @@ Per-project settings live in `.lien.config.json` in your project root. Most user
 ```json
 {
   "core": {
-    "concurrency": 4,
-    "embeddingBatchSize": 50
+    "concurrency": 4
   },
   "complexity": {
     "enabled": true,
@@ -63,7 +69,7 @@ You can also configure Lien via environment variables:
 
 ```bash
 # Backend selection
-export LIEN_BACKEND=lancedb
+export LIEN_BACKEND=sqlite
 
 # Index location
 export LIEN_HOME=/custom/path
@@ -165,8 +171,7 @@ These options go in the per-project `.lien.config.json` under the `core` key:
 ```json
 {
   "core": {
-    "concurrency": 4,
-    "embeddingBatchSize": 50
+    "concurrency": 4
   }
 }
 ```
@@ -174,7 +179,6 @@ These options go in the per-project `.lien.config.json` under the `core` key:
 | Option | Default | Description |
 |--------|---------|-------------|
 | `concurrency` | 4 | Files processed in parallel. Use 6-8 for 8+ cores. |
-| `embeddingBatchSize` | 50 | Chunks per embedding batch. Reduce to 25 for <8GB RAM. |
 
 ## Complexity Analysis
 
@@ -235,12 +239,12 @@ Control how Lien splits your source files into semantic chunks:
 
 These settings go in per-project `.lien.config.json` under the `core` key:
 
-| Use Case | `concurrency` | `embeddingBatchSize` |
-|----------|---------------|---------------------|
-| Large codebases (50k+ files) | 8 | 100 |
-| Limited RAM (<8GB) | 2 | 25 |
-| Modern machine (SSD, 8+ cores) | 6 | 75 |
-| Default (works for most) | 4 | 50 |
+| Use Case | `concurrency` |
+|----------|---------------|
+| Large codebases (50k+ files) | 8 |
+| Limited RAM (<8GB) | 2 |
+| Modern machine (SSD, 8+ cores) | 6 |
+| Default (works for most) | 4 |
 
 ## Migrating from Old Config Files
 

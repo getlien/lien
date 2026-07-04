@@ -203,14 +203,16 @@ export async function initCommand(options: InitOptions = {}) {
     console.log(JSON.stringify(snippet, null, 2));
   }
 
-  // Check if a project config exists and note what it's used for.
-  // Most settings in it are legacy/unused — only `embeddings.enabled` is
-  // currently read (see `lien config set embeddings.enabled false`).
+  // Check if a project config exists and note that most of it is legacy.
+  // Indexing/search run on built-in defaults; only the complexity thresholds
+  // are still read from it.
   const projectConfigPath = path.join(rootDir, '.lien.config.json');
   try {
     await fs.access(projectConfigPath);
     console.log(
-      chalk.dim('  Note: .lien.config.json found — only its "embeddings.enabled" setting is used.'),
+      chalk.dim(
+        '  Note: .lien.config.json found — most of it is legacy; only complexity thresholds are read.',
+      ),
     );
   } catch {
     // Config doesn't exist - that's fine

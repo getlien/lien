@@ -28,10 +28,11 @@ packages/parser/src/        # AST parsing, chunking, complexity, scanning — ze
 └── scanner.ts, gitignore.ts, chunker.ts, dependency-analyzer.ts,
     test-associations.ts, symbol-extractor.ts, content-hash.ts
 
-packages/core/src/          # Embeddings, vector DB, config, git — depends on parser
+packages/core/src/          # Structural store, config, git — depends on parser
 ├── indexer/     # Indexing orchestration: manifest, incremental updates, scanning glue
-├── embeddings/  # Local embeddings (transformers.js, worker thread)
-├── vectordb/    # LanceDB vector storage
+├── vectordb/    # Storage backend behind VectorDBInterface + createVectorDB factory;
+│   └── sqlite/  #   SqliteBackend — SQLite structural store + FTS5/BM25 lexical search
+│                #   (LanceDB + embeddings removed — see ADR-0011)
 ├── config/      # Config management & migration (GlobalConfig + per-project ConfigService)
 ├── git/         # Git state tracking
 └── insights/    # ComplexityAnalyzer + formatters (text/JSON/SARIF)
@@ -229,7 +230,7 @@ import fs from 'fs/promises';
 // 2. External dependencies
 import { Command } from 'commander';
 // 3. Internal modules
-import { VectorDB } from '../vectordb/lancedb.js';
+import { createVectorDB } from '../vectordb/factory.js';
 ```
 
 ### Tree-sitter Node Iteration

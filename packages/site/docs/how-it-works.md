@@ -1,33 +1,72 @@
 # How It Works
 
-Lien provides local-first semantic code search through a simple four-step process:
+Lien is a local-first **code-intelligence layer** for AI agents. Its core value is
+structural — dependency graphs, complexity metrics, and test associations — with
+fast lexical search alongside for discovery. Everything runs on your machine, and
+there is **no embedding model to download**.
 
 ## The Journey of Your Code
 
 ### 1. 🔍 Indexing
-When you run `lien index`, Lien scans your codebase and breaks it down into manageable chunks. Each chunk contains a logical piece of code - a function, a class, or a related block of logic.
+When you run `lien index`, Lien scans your codebase and breaks each file into
+manageable chunks using Tree-sitter AST parsing. Each chunk is a logical unit — a
+function, a method, a class, or a related block — enriched with its symbol name,
+signature, complexity metrics, imports/exports, and call sites.
 
-### 2. 🧠 Embedding
-Each code chunk is converted into a **vector embedding** - a mathematical representation that captures its semantic meaning. This happens entirely on your machine using a local ML model (all-MiniLM-L6-v2). No external API calls, no cloud services.
+### 2. 💾 Storage
+Chunks and the import graph are written to a local **SQLite** database in
+`~/.lien/indices/`. There is no vector step and no model: indexing is CPU-bound
+parsing plus a SQLite write, so it starts instantly and works fully offline.
 
-### 3. 💾 Storage
-These embeddings are stored in a vector database — LanceDB, locally in `~/.lien/indices/`. Think of it as a semantic index of your entire codebase that enables lightning-fast searches.
+### 3. 🧩 Structural answers
+Most of what an AI agent asks Lien is structural, and those questions are answered
+directly from SQLite with indexed queries:
+- **`get_files_context`** — chunks + test associations for a file (sub-millisecond)
+- **`get_dependents`** — reverse dependencies and blast-radius risk
+- **`get_complexity`** — complexity hotspots ranked by metric
+- **`list_functions`** — symbols matching a name pattern
 
-### 4. 🎯 Search
-When you ask your AI assistant a question like "how does authentication work?", Lien:
-- Converts your query into a vector embedding
-- Finds the most semantically similar code chunks
-- Returns relevant results to your AI assistant
-- Your AI assistant uses this context to give you better answers
+### 4. 🎯 Lexical search
+For discovery ("where is the retry backoff handled?"), Lien runs **FTS5/BM25**
+full-text search over three indexed columns: the symbol name, an identifier-split
+copy of the symbol name (`parseImportStatement` → `parse import statement`), and
+the chunk content (including comments and docstrings). Results are ranked by BM25,
+weighting symbol-name matches highest.
 
-All in under 500ms! ⚡
+## Why Lexical + Structural (Not Semantic)
 
-## Why Semantic Search?
+Lien used to embed code into vectors for meaning-based search. Dogfooding showed
+that the queries that actually make Lien valuable to an agent are **structural**,
+not semantic — and that the embedding model imposed a ~100MB download and a heavy
+install for a secondary capability. So Lien dropped embeddings entirely (see
+[ADR-011](https://github.com/getlien/lien/blob/main/docs/architecture/decisions/0011-sqlite-structural-store-fts5-lexical-search.md)).
 
-Traditional text search looks for exact matches. Semantic search understands **meaning**:
+**What lexical search does well:**
+- Exact and near-exact terminology — as good as embeddings, and **explainable**
+  (you can see which query terms matched)
+- Symbol/identifier lookup, including substrings of camelCase identifiers
+- Joining relevance to structure (complexity thresholds, import graph, type/language)
+- Code with good comments — docstrings bridge natural-language terms to identifiers
 
-**Text search:** "JWT authentication" → only finds code with those exact words  
-**Semantic search:** "user login security" → finds JWT auth, OAuth, session management, and more!
+**Where lexical search cannot help (the honest gaps):**
+- **Paraphrase/synonym queries that share no words with the code.** Searching
+  "auth" will not surface `login`, `hashPassword`, or `verifyToken`; "check if the
+  user is logged in" will not surface `verifyToken()`. There is no vocabulary in
+  common, and no amount of stemming bridges a genuine synonym gap.
+- **Sparsely-commented code.** When a match succeeds on natural-language phrasing,
+  it usually succeeded because a nearby comment reused the query's words. Strip the
+  comments and recall degrades.
+
+**Practical guidance:** query with concrete keywords, identifiers, and domain
+terms that appear in the code — not natural-language questions. For an exact symbol
+name, use `list_functions`. For structure and impact, use the structural tools
+above.
+
+::: tip Coming from the semantic era?
+The MCP tool is still named `semantic_search` for backward compatibility, but it
+now performs full-text keyword search — it does not embed your query. Phrase
+queries as keywords, not questions.
+:::
 
 ## Privacy First
 
@@ -35,14 +74,14 @@ Everything runs locally:
 - ✅ Your code never leaves your machine
 - ✅ No external API calls
 - ✅ No telemetry or tracking
-- ✅ No internet required (after initial model download)
+- ✅ No internet required — not even for first-run setup
 
 ## Architecture
 
 Lien is built with modern, performant tools:
 - **TypeScript** for type-safe development
-- **@huggingface/transformers** for local embeddings (runs in worker thread)
-- **LanceDB** for local vector storage
+- **Tree-sitter** for AST-based semantic chunking and complexity analysis
+- **SQLite** (`better-sqlite3`) for the structural store, with **FTS5/BM25** for lexical search
 - **Model Context Protocol (MCP)** for AI assistant integration (Cursor, Claude Code, etc.)
 
 ## Want to Learn More?
@@ -84,8 +123,8 @@ Lien indexes and understands code in:
 - Kotlin
 - Swift
 
-**Semantic Search** (chunking and embeddings):
-- All of the above, plus C/C++, Vue, Scala, and more!
+**Indexed for lexical search** (chunking + FTS5):
+- All of the above, plus C/C++, Vue, Scala, Markdown, and more!
 
 ## Complexity Analysis
 
@@ -102,14 +141,12 @@ All metrics are calculated during indexing using Tree-sitter AST parsing. Cognit
 
 ## Performance
 
-- **Query time:** < 500ms
-- **Small projects** (1k files): ~5 minutes to index
-- **Medium projects** (10k files): ~20 minutes to index
-- **Large projects** (50k files): ~30-60 minutes to index
-- **Disk usage:** ~500MB per 100k chunks
-- **RAM usage:** ~200-500MB during indexing, ~100-200MB during queries
+- **File context lookup:** sub-millisecond (indexed lookup by file)
+- **Small projects** (1k files): minutes to index
+- **Medium projects** (10k files): ~15-20 minutes to index
+- **Native install:** ~1.8MB (SQLite binding) — no model download
+- **Disk usage:** roughly comparable to the source it indexes
 
 ---
 
 Ready to get started? Check out our [Quick Start Guide](/guide/getting-started)!
-

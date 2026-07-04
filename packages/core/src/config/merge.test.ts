@@ -10,7 +10,6 @@ describe('deepMergeConfig', () => {
         chunkSize: 100,
         chunkOverlap: 20,
         concurrency: 8,
-        embeddingBatchSize: 100,
       },
     };
 
@@ -89,29 +88,12 @@ describe('deepMergeConfig', () => {
     expect(result.fileWatching.debounceMs).toBe(500);
   });
 
-  it('should merge embeddings config', () => {
-    const userConfig: Partial<LienConfig> = {
-      embeddings: { enabled: false },
-    };
-
-    const result = deepMergeConfig(defaultConfig, userConfig);
-
-    expect(result.embeddings.enabled).toBe(false);
-  });
-
-  it('should default embeddings.enabled to true when unspecified', () => {
-    const result = deepMergeConfig(defaultConfig, {});
-
-    expect(result.embeddings).toEqual({ enabled: true });
-  });
-
   it('should work with actual Lien config', () => {
     const userConfig: Partial<LienConfig> = {
       core: {
         chunkSize: 100,
         chunkOverlap: 20,
         concurrency: 8,
-        embeddingBatchSize: 100,
       },
       frameworks: [
         {
@@ -192,7 +174,6 @@ describe('detectNewFields', () => {
         chunkSize: 75,
         chunkOverlap: 10,
         concurrency: 4,
-        embeddingBatchSize: 50,
       },
       mcp: {
         port: 7133,

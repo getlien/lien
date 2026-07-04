@@ -54,13 +54,13 @@
   },
   "keywords": [
     "mcp",
-    "semantic-search",
+    "lexical-search",
     "codebase",
     "ai",
     "cursor",
     "code-intelligence",
-    "vector-search",
-    "embeddings",
+    "structural-analysis",
+    "dependency-analysis",
     "local-first",
     "privacy"
   ],

@@ -13,16 +13,7 @@ import pLimit from 'p-limit';
 import path from 'path';
 import type { LienConfig } from '../config/schema.js';
 import type { ProgressTracker } from './progress-tracker.js';
-import {
-  DEFAULT_CHUNK_SIZE,
-  DEFAULT_CHUNK_OVERLAP,
-  DEFAULT_CONCURRENCY,
-  DEFAULT_EMBEDDING_BATCH_SIZE,
-} from '../constants.js';
-import { WorkerEmbeddings } from '../embeddings/worker-embeddings.js';
-import { NullEmbeddings } from '../embeddings/null-embeddings.js';
-// resolveEmbeddingsEnabled is no longer consulted — embeddings are never
-// computed (lexical FTS5 search replaces semantic search).
+import { DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP, DEFAULT_CONCURRENCY } from '../constants.js';
 import { createVectorDB } from '../vectordb/factory.js';
 import { writeVersionFile } from '../vectordb/version.js';
 import { ManifestManager } from './manifest.js';
@@ -31,7 +22,6 @@ import { GitStateTracker } from '../git/tracker.js';
 import { detectChanges } from './change-detector.js';
 import type { ChangeDetectionResult } from './change-detector.js';
 import { indexMultipleFiles, normalizeToRelativePath } from './incremental.js';
-import type { EmbeddingService } from '../embeddings/types.js';
 import { ChunkBatchProcessor } from './chunk-batch-processor.js';
 import type { VectorDBInterface } from '../vectordb/types.js';
 import {
@@ -53,29 +43,17 @@ export interface IndexingOptions {
   verbose?: boolean;
   /** Force full reindex, skip incremental */
   force?: boolean;
-  /**
-   * Accepted for back-compat but inert: embeddings are never computed, so any
-   * service passed here is discarded and a `NullEmbeddings` is used instead.
-   */
-  embeddings?: EmbeddingService;
   /** Pre-loaded config (skip loading from disk) */
   config?: LienConfig;
   /** Progress callback for external UI */
   onProgress?: (progress: IndexingProgress) => void;
-  /**
-   * Accepted for back-compat but inert: embeddings are never computed
-   * regardless of this flag or the project config's `embeddings.enabled`
-   * setting. Indexing always runs in structural-only mode (chunking + full
-   * persistence, zero-vector placeholders). Search is lexical FTS5.
-   */
-  skipEmbeddings?: boolean;
 }
 
 /**
  * Progress information during indexing
  */
 export interface IndexingProgress {
-  phase: 'initializing' | 'scanning' | 'embedding' | 'indexing' | 'saving' | 'complete';
+  phase: 'initializing' | 'scanning' | 'indexing' | 'saving' | 'complete';
   message: string;
   filesTotal?: number;
   filesProcessed?: number;
@@ -97,7 +75,6 @@ export interface IndexingResult {
 /** Extracted config values with defaults for indexing */
 interface IndexingConfig {
   concurrency: number;
-  embeddingBatchSize: number;
   chunkSize: number;
   chunkOverlap: number;
   useAST: boolean;
@@ -116,7 +93,6 @@ function getIndexingConfig(rootDir: string): IndexingConfig {
 
   return {
     concurrency: DEFAULT_CONCURRENCY,
-    embeddingBatchSize: DEFAULT_EMBEDDING_BATCH_SIZE,
     chunkSize: DEFAULT_CHUNK_SIZE,
     chunkOverlap: DEFAULT_CHUNK_OVERLAP,
     useAST: true, // Always use AST-based chunking
@@ -203,7 +179,6 @@ async function handleUpdates(
   addedFiles: string[],
   modifiedFiles: string[],
   vectorDB: VectorDBInterface,
-  embeddings: EmbeddingService,
   options: IndexingOptions,
   rootDir: string,
 ): Promise<number> {
@@ -213,36 +188,13 @@ async function handleUpdates(
     return 0;
   }
 
-  const count = await indexMultipleFiles(filesToIndex, vectorDB, embeddings, {
+  const count = await indexMultipleFiles(filesToIndex, vectorDB, {
     verbose: options.verbose,
     rootDir,
   });
 
   await writeVersionFile(vectorDB.dbPath);
   return count;
-}
-
-/**
- * Manage embedding service lifecycle around an operation.
- * Handles init/dispose when no pre-initialized service is provided.
- */
-async function withEmbeddings<T>(
-  preInitialized: EmbeddingService | undefined,
-  operation: (embeddings: EmbeddingService) => Promise<T>,
-): Promise<T> {
-  const ownEmbeddings = !preInitialized;
-  const embeddings = preInitialized ?? new WorkerEmbeddings();
-  if (ownEmbeddings) {
-    await embeddings.initialize();
-  }
-
-  try {
-    return await operation(embeddings);
-  } finally {
-    if (ownEmbeddings) {
-      await embeddings.dispose();
-    }
-  }
 }
 
 /** Result of checking whether incremental indexing is possible */
@@ -333,38 +285,35 @@ async function tryIncrementalIndex(
   }
 
   options.onProgress?.({
-    phase: 'embedding',
+    phase: 'indexing',
     message: `Detected ${totalChanges} files to index, ${totalDeleted} to remove`,
   });
 
-  return await withEmbeddings(options.embeddings, async embeddings => {
-    await handleDeletions(changes.deleted, vectorDB, manifest);
-    const indexedCount = await handleUpdates(
-      changes.added,
-      changes.modified,
-      vectorDB,
-      embeddings,
-      options,
-      rootDir,
-    );
+  await handleDeletions(changes.deleted, vectorDB, manifest);
+  const indexedCount = await handleUpdates(
+    changes.added,
+    changes.modified,
+    vectorDB,
+    options,
+    rootDir,
+  );
 
-    await updateGitState(rootDir, vectorDB, manifest);
+  await updateGitState(rootDir, vectorDB, manifest);
 
-    options.onProgress?.({
-      phase: 'complete',
-      message: `Updated ${indexedCount} file${indexedCount !== 1 ? 's' : ''}, removed ${totalDeleted}`,
-      filesTotal: totalChanges + totalDeleted,
-      filesProcessed: indexedCount + totalDeleted,
-    });
-
-    return {
-      success: true,
-      filesIndexed: indexedCount,
-      chunksCreated: 0, // Not tracked in incremental mode
-      durationMs: Date.now() - startTime,
-      incremental: true,
-    };
+  options.onProgress?.({
+    phase: 'complete',
+    message: `Updated ${indexedCount} file${indexedCount !== 1 ? 's' : ''}, removed ${totalDeleted}`,
+    filesTotal: totalChanges + totalDeleted,
+    filesProcessed: indexedCount + totalDeleted,
   });
+
+  return {
+    success: true,
+    filesIndexed: indexedCount,
+    chunksCreated: 0, // Not tracked in incremental mode
+    durationMs: Date.now() - startTime,
+    incremental: true,
+  };
 }
 
 /**
@@ -475,27 +424,18 @@ async function saveIndexResults(
 }
 
 /**
- * Process all files through chunking, embedding, and vector DB insertion.
+ * Process all files through chunking and structural-store insertion.
  */
 async function batchProcessFiles(
   files: string[],
   rootDir: string,
   vectorDB: VectorDBInterface,
-  embeddings: EmbeddingService,
   progressTracker: ProgressTracker,
   verbose: boolean,
 ): Promise<ChunkBatchProcessor> {
   const indexConfig = getIndexingConfig(rootDir);
 
-  const bp = new ChunkBatchProcessor(
-    vectorDB,
-    embeddings,
-    {
-      batchThreshold: 100,
-      embeddingBatchSize: indexConfig.embeddingBatchSize,
-    },
-    progressTracker,
-  );
+  const bp = new ChunkBatchProcessor(vectorDB, { batchThreshold: 100 }, progressTracker);
 
   const limit = pLimit(indexConfig.concurrency);
   await Promise.all(
@@ -536,16 +476,10 @@ async function performFullIndex(
     };
   }
 
-  options.onProgress?.({
-    phase: 'embedding',
-    message: 'Loading embedding model...',
-    filesTotal: files.length,
-  });
-
   const progressTracker = createProgressTracker(files, options.onProgress);
 
   try {
-    // 3. Process files with managed embedding service
+    // 3. Process files (chunk + persist)
     options.onProgress?.({
       phase: 'indexing',
       message: `Processing ${files.length} files...`,
@@ -553,15 +487,12 @@ async function performFullIndex(
       filesProcessed: 0,
     });
 
-    const batchProcessor = await withEmbeddings(options.embeddings, embeddings =>
-      batchProcessFiles(
-        files,
-        rootDir,
-        vectorDB,
-        embeddings,
-        progressTracker,
-        options.verbose ?? false,
-      ),
+    const batchProcessor = await batchProcessFiles(
+      files,
+      rootDir,
+      vectorDB,
+      progressTracker,
+      options.verbose ?? false,
     );
 
     // 4. Save results
@@ -604,11 +535,9 @@ async function performFullIndex(
  * - Falls back to full indexing if needed
  * - Provides progress callbacks for UI integration
  *
- * Embeddings are never computed. Indexing runs the normal chunking +
- * persistence pipeline but always substitutes a `NullEmbeddings` service (no
- * model download, no embedding worker). Search is lexical FTS5 over the
- * persisted structural store; the `skipEmbeddings` option and
- * `--no-embeddings` flag are accepted for back-compat but are now inert.
+ * Indexing chunks each file and persists structural metadata to the SQLite
+ * store; search is lexical FTS5. No embeddings are computed and nothing is
+ * downloaded.
  *
  * @param options - Indexing options
  * @returns Indexing result with stats
@@ -632,31 +561,21 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<Inde
   try {
     options.onProgress?.({ phase: 'initializing', message: 'Loading configuration...' });
 
-    // Embeddings are never computed. Substitute NullEmbeddings even if the
-    // caller passed a real `options.embeddings` instance — no real vectors are
-    // ever produced (lexical FTS5 search replaces semantic search).
-    const effectiveOptions: IndexingOptions = { ...options, embeddings: new NullEmbeddings() };
-
-    // Initialize vector database (use factory to select backend from global config)
-    options.onProgress?.({ phase: 'initializing', message: 'Initializing vector database...' });
+    // Initialize the structural store (factory selects the backend from global config)
+    options.onProgress?.({ phase: 'initializing', message: 'Initializing structural store...' });
     const vectorDB = await createVectorDB(rootDir);
     await vectorDB.initialize();
 
     // Try incremental indexing first (unless forced)
     if (!options.force) {
-      const incrementalResult = await tryIncrementalIndex(
-        rootDir,
-        vectorDB,
-        effectiveOptions,
-        startTime,
-      );
+      const incrementalResult = await tryIncrementalIndex(rootDir, vectorDB, options, startTime);
       if (incrementalResult) {
         return incrementalResult;
       }
     }
 
     // Fall back to full index
-    return await performFullIndex(rootDir, vectorDB, effectiveOptions, startTime);
+    return await performFullIndex(rootDir, vectorDB, options, startTime);
   } catch (error) {
     return {
       success: false,

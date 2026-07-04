@@ -5,20 +5,15 @@ export interface SearchResult {
   content: string;
   metadata: ChunkMetadata;
   /**
-   * Similarity score from vector search.
-   *
-   * For semantic search operations, this is the distance metric (e.g., cosine distance)
-   * returned by the vector database, where lower values indicate more similar results.
-   * For scroll/scan-based operations (e.g. scanWithFilter, scanAll, querySymbols),
-   * this is always 0 because no scoring is performed.
+   * Search score. For lexical `search`, a BM25-derived value where lower
+   * means a better match. For scroll/scan operations (scanWithFilter, scanAll,
+   * querySymbols) this is always 0 because no scoring is performed.
    */
   score: number;
   /**
-   * Relevance category derived from the score.
-   *
-   * For scroll/scan-based operations that do not compute scores, this is
-   * always 'not_relevant' to indicate that results are unscored rather than
-   * semantically irrelevant.
+   * Relevance category derived from the score. For scroll/scan operations that
+   * do not compute scores this is always 'not_relevant' to indicate the
+   * results are unscored rather than irrelevant.
    */
   relevance: RelevanceCategory;
 }
@@ -32,70 +27,38 @@ export const SYMBOL_TYPE_MATCHES: Record<string, Set<string>> = {
 };
 
 export interface VectorDBInterface {
-  /** Path to local storage (used for manifest and version files, even with remote backends) */
+  /** Path to local storage (used for manifest and version files) */
   readonly dbPath: string;
   initialize(): Promise<void>;
-  insertBatch(
-    vectors: Float32Array[],
-    metadatas: ChunkMetadata[],
-    contents: string[],
-  ): Promise<void>;
-  search(
-    queryVector: Float32Array,
-    limit?: number,
-    query?: string,
-    options?: { columns?: string[] },
-  ): Promise<SearchResult[]>;
+  insertBatch(metadatas: ChunkMetadata[], contents: string[]): Promise<void>;
+  /** Lexical (FTS5/BM25) full-text search over the query string. */
+  search(query: string, limit?: number): Promise<SearchResult[]>;
   scanWithFilter(options: {
     file?: string | string[];
     language?: string;
     pattern?: string;
     symbolType?: 'function' | 'method' | 'class' | 'interface';
     limit?: number;
-    /**
-     * LanceDB column projection — return only these columns. When omitted,
-     * all columns are returned. Backends other than LanceDB may ignore.
-     */
-    columns?: string[];
   }): Promise<SearchResult[]>;
-  scanAll(options?: {
-    language?: string;
-    pattern?: string;
-    columns?: string[];
-  }): Promise<SearchResult[]>;
+  scanAll(options?: { language?: string; pattern?: string }): Promise<SearchResult[]>;
   querySymbols(options: {
     language?: string;
     pattern?: string;
     symbolType?: 'function' | 'method' | 'class' | 'interface';
     limit?: number;
-    columns?: string[];
   }): Promise<SearchResult[]>;
   clear(): Promise<void>;
   deleteByFile(filepath: string): Promise<void>;
-  updateFile(
-    filepath: string,
-    vectors: Float32Array[],
-    metadatas: ChunkMetadata[],
-    contents: string[],
-  ): Promise<void>;
+  updateFile(filepath: string, metadatas: ChunkMetadata[], contents: string[]): Promise<void>;
   hasData(): Promise<boolean>;
   checkVersion(): Promise<boolean>;
   /** Scan all chunks using paginated iteration. Yields pages to avoid loading everything into memory. */
-  scanPaginated(options?: {
-    pageSize?: number;
-    columns?: string[];
-  }): AsyncGenerator<SearchResult[]>;
+  scanPaginated(options?: { pageSize?: number }): AsyncGenerator<SearchResult[]>;
   reconnect(): Promise<void>;
   getCurrentVersion(): number;
   getVersionDate(): string;
   /** Whether this backend supports cross-repo operations. */
   readonly supportsCrossRepo: boolean;
-  /** Search across all repos in the organization. Returns [] if unsupported. */
-  searchCrossRepo(
-    queryVector: Float32Array,
-    limit?: number,
-    options?: { repoIds?: string[]; branch?: string; columns?: string[] },
-  ): Promise<SearchResult[]>;
   /** Scan across all repos in the organization. Returns [] if unsupported. */
   scanCrossRepo(options: {
     language?: string;
@@ -103,6 +66,5 @@ export interface VectorDBInterface {
     limit?: number;
     repoIds?: string[];
     branch?: string;
-    columns?: string[];
   }): Promise<SearchResult[]>;
 }

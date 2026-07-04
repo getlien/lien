@@ -1,23 +1,21 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { createTestDir, cleanupTestDir, createTestFile, MockEmbeddings } from '@liendev/core/test';
-import { VectorDB, scanCodebase, chunkFile } from '@liendev/core';
+import { createTestDir, cleanupTestDir, createTestFile } from '@liendev/core/test';
+import { createVectorDB, scanCodebase, chunkFile } from '@liendev/core';
+import type { VectorDBInterface } from '@liendev/core';
 import fs from 'fs/promises';
 
 describe('Indexing Flow Integration', () => {
   let testDir: string;
-  let embeddings: MockEmbeddings;
-  let vectorDB: VectorDB;
+  let vectorDB: VectorDBInterface;
 
   beforeEach(async () => {
     testDir = await createTestDir();
-    embeddings = new MockEmbeddings();
-    vectorDB = new VectorDB(testDir);
-
-    await embeddings.initialize();
+    vectorDB = await createVectorDB(testDir);
     await vectorDB.initialize();
   });
 
   afterEach(async () => {
+    await vectorDB.clear();
     await cleanupTestDir(testDir);
   });
 
@@ -48,23 +46,16 @@ export function calculateProduct(a: number, b: number): number {
     const chunks = chunkFile(files[0], content);
     expect(chunks.length).toBeGreaterThan(0);
 
-    // Step 3: Generate embeddings
+    // Step 3: Insert into the structural store (no embeddings — lexical FTS5)
     const texts = chunks.map(chunk => chunk.content);
-    const vectors = await embeddings.embedBatch(texts);
-    expect(vectors).toHaveLength(chunks.length);
-
-    // Step 4: Insert into vector DB
     const metadatas = chunks.map(chunk => chunk.metadata);
-    await vectorDB.insertBatch(vectors, metadatas, texts);
+    await vectorDB.insertBatch(metadatas, texts);
 
-    // Step 5: Search for relevant code
-    const queryVector = await embeddings.embed('function that adds numbers');
-    const results = await vectorDB.search(queryVector, 5);
+    // Step 4: Lexical search for relevant code
+    const results = await vectorDB.search('calculateSum', 5);
 
     // Verify results
     expect(results.length).toBeGreaterThan(0);
-    // With AST chunking, both functions are separate chunks
-    // Check that calculateSum is in the results (may not be first due to semantic similarity)
     const hasCalculateSum = results.some(r => r.content.includes('calculateSum'));
     expect(hasCalculateSum).toBe(true);
   });
@@ -91,14 +82,12 @@ export function calculateProduct(a: number, b: number): number {
       const content = await fs.readFile(file, 'utf-8');
       const chunks = chunkFile(file, content);
       const texts = chunks.map(chunk => chunk.content);
-      const vectors = await embeddings.embedBatch(texts);
       const metadatas = chunks.map(chunk => chunk.metadata);
-      await vectorDB.insertBatch(vectors, metadatas, texts);
+      await vectorDB.insertBatch(metadatas, texts);
     }
 
     // Search
-    const queryVector = await embeddings.embed('API URL constant');
-    const results = await vectorDB.search(queryVector, 5);
+    const results = await vectorDB.search('API_URL constant', 5);
 
     expect(results.length).toBeGreaterThan(0);
     const hasConstantsFile = results.some(r => r.metadata.file.includes('constants.ts'));

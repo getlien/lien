@@ -1,9 +1,8 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs/promises';
 import path from 'path';
 import { indexCodebase } from './index.js';
 import { createVectorDB } from '../vectordb/factory.js';
-import { WorkerEmbeddings } from '../embeddings/worker-embeddings.js';
 import { createTestDir, cleanupTestDir, createTestFile } from '../test/helpers/test-db.js';
 
 const MATH_TS = `export function add(a: number, b: number): number {
@@ -18,48 +17,24 @@ export function sumAll(values: number[]): number {
 }
 `;
 
-describe('indexCodebase - never computes embeddings (lexical FTS5 mode)', () => {
+describe('indexCodebase (lexical FTS5 structural index)', () => {
   let testDir: string;
-  let workerInitSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(async () => {
     testDir = await createTestDir();
     await createTestFile(testDir, 'src/math.ts', MATH_TS);
     await createTestFile(testDir, 'src/main.ts', MAIN_TS);
-
-    // Proves the real embedding worker (model download + worker thread) is
-    // never touched — indexing is always structural-only now.
-    workerInitSpy = vi.spyOn(WorkerEmbeddings.prototype, 'initialize');
   });
 
   afterEach(async () => {
-    workerInitSpy.mockRestore();
     await cleanupTestDir(testDir);
   });
 
-  it('indexes successfully without constructing/initializing a real embedding worker', async () => {
+  it('indexes successfully and creates chunks', async () => {
     const result = await indexCodebase({ rootDir: testDir, force: true });
 
     expect(result.success).toBe(true);
     expect(result.chunksCreated).toBeGreaterThan(0);
-    expect(workerInitSpy).not.toHaveBeenCalled();
-  });
-
-  it('never spawns a worker even when a real embeddings instance is passed (NullEmbeddings wins)', async () => {
-    // A caller may still thread an embeddings argument through legacy call
-    // sites; indexing must ignore it and never compute real vectors.
-    const workerEmbeddings = new WorkerEmbeddings();
-    const embedBatchSpy = vi.spyOn(workerEmbeddings, 'embedBatch');
-
-    const result = await indexCodebase({
-      rootDir: testDir,
-      force: true,
-      embeddings: workerEmbeddings,
-    });
-
-    expect(result.success).toBe(true);
-    expect(workerInitSpy).not.toHaveBeenCalled();
-    expect(embedBatchSpy).not.toHaveBeenCalled();
   });
 
   it('persists chunks with real structural metadata (imports/exports/symbolName)', async () => {

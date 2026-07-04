@@ -11,7 +11,6 @@ import {
   readVersionFile,
   loadGlobalConfig,
   DEFAULT_CONCURRENCY,
-  DEFAULT_EMBEDDING_BATCH_SIZE,
   DEFAULT_GIT_POLL_INTERVAL_MS,
 } from '@liendev/core';
 import {
@@ -73,13 +72,16 @@ async function getGitState(rootDir: string): Promise<{ branch: string; commit: s
   }
 }
 
-/** Resolve the configured backend, defaulting to sqlite on any error. */
+/**
+ * Resolve the configured backend.
+ *
+ * `loadGlobalConfig` already treats a missing config file as the default
+ * (ENOENT is swallowed inside it). Any error it throws is a real problem — e.g.
+ * a malformed `~/.lien/config.json` surfacing as a ConfigValidationError — and
+ * must propagate rather than being silently reported as the default backend.
+ */
 async function resolveBackend(): Promise<string> {
-  try {
-    return (await loadGlobalConfig()).backend ?? 'sqlite';
-  } catch {
-    return 'sqlite';
-  }
+  return (await loadGlobalConfig()).backend ?? 'sqlite';
 }
 
 async function getStoredGitState(
@@ -159,7 +161,6 @@ function printSearchStatus() {
 function printIndexingSettings() {
   console.log(chalk.bold('\nIndexing Settings (defaults):'));
   console.log(chalk.dim('Concurrency:'), DEFAULT_CONCURRENCY);
-  console.log(chalk.dim('Batch size:'), DEFAULT_EMBEDDING_BATCH_SIZE);
   console.log(chalk.dim('Chunk size:'), DEFAULT_CHUNK_SIZE);
   console.log(chalk.dim('Chunk overlap:'), DEFAULT_CHUNK_OVERLAP);
 }
@@ -218,7 +219,6 @@ async function outputJson(rootDir: string, indexPath: string) {
     search: 'lexical',
     settings: {
       concurrency: DEFAULT_CONCURRENCY,
-      batchSize: DEFAULT_EMBEDDING_BATCH_SIZE,
       chunkSize: DEFAULT_CHUNK_SIZE,
       chunkOverlap: DEFAULT_CHUNK_OVERLAP,
     },

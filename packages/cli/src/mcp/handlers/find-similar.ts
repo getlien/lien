@@ -3,7 +3,6 @@ import { FindSimilarSchema } from '../schemas/index.js';
 import { shapeResults, deduplicateResults } from '../utils/metadata-shaper.js';
 import type { ToolContext, MCPToolResult } from '../types.js';
 import type { SearchResult } from '@liendev/core';
-import { SYMBOL_SEARCH_COLUMNS } from './columns.js';
 
 interface FiltersApplied {
   language?: string;
@@ -43,9 +42,7 @@ function pruneIrrelevantResults(results: SearchResult[]): {
  * Handle find_similar tool calls.
  *
  * Finds code similar to a given snippet via lexical full-text (FTS5/BM25)
- * matching on the snippet's tokens. The `queryVector` argument to
- * `vectorDB.search` is vestigial (SqliteBackend matches the code text and
- * ignores the vector), so an empty Float32Array is passed.
+ * matching on the snippet's tokens.
  */
 export async function handleFindSimilar(args: unknown, ctx: ToolContext): Promise<MCPToolResult> {
   const { vectorDB, log, checkAndReconnect, getIndexMetadata } = ctx;
@@ -56,9 +53,7 @@ export async function handleFindSimilar(args: unknown, ctx: ToolContext): Promis
 
     const limit = validatedArgs.limit ?? 5;
     const extraLimit = limit + 10;
-    let results = await vectorDB.search(new Float32Array(0), extraLimit, validatedArgs.code, {
-      columns: SYMBOL_SEARCH_COLUMNS,
-    });
+    let results = await vectorDB.search(validatedArgs.code, extraLimit);
 
     // Deduplicate and filter out self-matches
     results = deduplicateResults(results);

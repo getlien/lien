@@ -48,7 +48,7 @@ Lien is a 6-package monorepo. `CLAUDE.md`'s ["What is Lien?"](./CLAUDE.md#what-i
 lien/
 ├── packages/
 │   ├── parser/    # @liendev/parser — AST parsing, chunking, complexity, scanning
-│   ├── core/      # @liendev/core — embeddings, vector DB, config, git (depends on parser)
+│   ├── core/      # @liendev/core — SQLite structural store + FTS5 search, config, git (depends on parser)
 │   ├── cli/       # @liendev/lien — CLI + MCP server (depends on core and parser)
 │   ├── review/    # @liendev/review (private) — PR review engine (depends on parser only)
 │   ├── action/    # @liendev/action (private) — self-hostable GitHub Action wrapping review

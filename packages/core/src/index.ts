@@ -11,7 +11,7 @@
  * ```typescript
  * import {
  *   indexCodebase,
- *   VectorDB,
+ *   createVectorDB,
  *   ComplexityAnalyzer,
  * } from '@liendev/core';
  *
@@ -19,7 +19,8 @@
  * const result = await indexCodebase({ rootDir: '/path/to/project' });
  *
  * // Run complexity analysis
- * const db = await VectorDB.load('/path/to/project');
+ * const db = await createVectorDB('/path/to/project');
+ * await db.initialize();
  * const analyzer = new ComplexityAnalyzer(db);
  * const report = await analyzer.analyze();
  * ```
@@ -59,25 +60,12 @@ export {
 } from './indexer/incremental.js';
 
 // =============================================================================
-// EMBEDDINGS
+// STRUCTURAL STORE (SQLite + FTS5)
 // =============================================================================
 
-export { LocalEmbeddings } from './embeddings/local.js';
-export { WorkerEmbeddings } from './embeddings/worker-embeddings.js';
-export { CachedEmbeddings } from './embeddings/cache.js';
-export { NullEmbeddings } from './embeddings/null-embeddings.js';
-export type { EmbeddingService } from './embeddings/types.js';
-export { EMBEDDING_DIMENSION, EMBEDDING_DIMENSIONS } from './embeddings/types.js';
-
-// =============================================================================
-// VECTOR DATABASE
-// =============================================================================
-
-export { VectorDB } from './vectordb/lancedb.js';
 export { createVectorDB } from './vectordb/factory.js';
 export type { VectorDBInterface, SearchResult } from './vectordb/types.js';
 export { SYMBOL_TYPE_MATCHES } from './vectordb/types.js';
-export { calculateRelevance } from './vectordb/relevance.js';
 export type { RelevanceCategory } from './vectordb/relevance.js';
 export { readVersionFile, writeVersionFile } from './vectordb/version.js';
 
@@ -115,7 +103,6 @@ export { configService, ConfigService } from './config/service.js';
 export type { ValidationResult } from './config/service.js';
 export { defaultConfig } from './config/schema.js';
 export type { LienConfig } from './config/schema.js';
-export { resolveEmbeddingsEnabled } from './config/embeddings-enabled.js';
 
 // =============================================================================
 // GIT UTILITIES
@@ -186,11 +173,6 @@ export {
   DEFAULT_CHUNK_SIZE,
   DEFAULT_CHUNK_OVERLAP,
   DEFAULT_CONCURRENCY,
-  DEFAULT_EMBEDDING_BATCH_SIZE,
-  EMBEDDING_MICRO_BATCH_SIZE,
-  VECTOR_DB_MAX_BATCH_SIZE,
-  VECTOR_DB_MIN_BATCH_SIZE,
-  DEFAULT_EMBEDDING_MODEL,
   DEFAULT_PORT,
   VERSION_CHECK_INTERVAL_MS,
   DEFAULT_GIT_POLL_INTERVAL_MS,

@@ -4,13 +4,13 @@
 
 ## Global Configuration (Current)
 
-The global config manages settings that apply across all projects — primarily the vector database backend.
+The global config manages settings that apply across all projects — primarily the storage backend.
 
 ### GlobalConfig Interface
 
 ```typescript
 interface GlobalConfig {
-  backend?: 'lancedb'; // Default: 'lancedb'
+  backend?: 'sqlite'; // Default: 'sqlite'
 }
 ```
 
@@ -18,12 +18,12 @@ interface GlobalConfig {
 
 1. **Environment variables** (highest priority): `LIEN_BACKEND`
 2. **Global config file**: `~/.lien/config.json`
-3. **Defaults**: `{ backend: 'lancedb' }`
+3. **Defaults**: `{ backend: 'sqlite' }`
 
 ### CLI: `lien config`
 
 ```bash
-lien config set backend lancedb    # Set vector DB backend
+lien config set backend sqlite     # Set the storage backend
 lien config get backend            # Read a config value
 lien config list                   # Show all config values
 ```
@@ -32,9 +32,9 @@ lien config list                   # Show all config values
 
 | Key | Values | Description |
 |-----|--------|-------------|
-| `backend` | `lancedb` | Vector database backend |
+| `backend` | `sqlite` | Storage backend (SQLite structural store + FTS5 search) |
 
-> **Note:** The experimental Qdrant backend was retired in v0.49 (see [ADR-0010](decisions/0010-retire-qdrant-backend.md)). Existing configs with `backend: "qdrant"` or `qdrant.*` keys do not crash: Lien warns once and falls back to local LanceDB.
+> **Note:** The SQLite structural store is the only backend. The LanceDB + embeddings backend was removed (see [ADR-011](decisions/0011-sqlite-structural-store-fts5-lexical-search.md)) and the Qdrant backend was retired before it (see [ADR-0010](decisions/0010-retire-qdrant-backend.md)). Existing configs that name a retired backend (`backend: "lancedb"` / `"qdrant"`, or `qdrant.*` keys) do not crash: Lien warns once and uses the SQLite backend.
 
 ---
 
@@ -265,7 +265,6 @@ flowchart TD
     "chunkSize": 75,
     "chunkOverlap": 10,
     "concurrency": 4,
-    "embeddingBatchSize": 50,
     "indexTests": true,
     "useImportAnalysis": true
   },
@@ -288,8 +287,7 @@ flowchart TD
   "core": {
     "chunkSize": 75,
     "chunkOverlap": 10,
-    "concurrency": 4,
-    "embeddingBatchSize": 50
+    "concurrency": 4
   },
   "mcp": {...},
   "gitDetection": {...},
@@ -403,7 +401,6 @@ await service.save('/path/to/project', config);
 | chunkSize | number | > 0 | < 50: too small<br/>> 500: too large |
 | chunkOverlap | number | ≥ 0 | - |
 | concurrency | number | 1-16 | - |
-| embeddingBatchSize | number | > 0 | > 100: may cause memory issues |
 
 ### MCP Settings
 

@@ -45,7 +45,7 @@ Unlike previous versions, `lien init` no longer creates `.lien.config.json`. Lie
 
 ## lien index
 
-Index your codebase for semantic search. **Automatically uses incremental indexing** to only process changed files.
+Index your codebase for lexical search and structural analysis. **Automatically uses incremental indexing** to only process changed files.
 
 ```bash
 lien index [options]
@@ -65,9 +65,9 @@ lien index [options]
 1. **Checks for changes** (if manifest exists from previous index)
    - mtime-based detection (simple and reliable)
 2. **Only indexes changed files** (17x faster!)
-3. Chunks code into semantic units
-4. Generates embeddings using local ML model
-5. Stores in `~/.lien/indices/[project-hash]/`
+3. Chunks code into semantic units (Tree-sitter AST)
+4. Computes complexity metrics and dependency metadata
+5. Stores in the SQLite index at `~/.lien/indices/[project-hash]/`
 6. Updates index manifest for future incremental runs
 
 **With `--force` (clean rebuild):**
@@ -92,7 +92,7 @@ lien index [options]
 
 ### First Run
 
-On first run, Lien downloads the embedding model (~100MB). This requires an internet connection and happens only once.
+On first run, Lien indexes your codebase. There's no model to download and no network required — indexing starts immediately.
 
 ### Output
 
@@ -103,7 +103,7 @@ On first run, Lien downloads the embedding model (~100MB). This requires an inte
 ⚡ Processing files...
 ████████████████████ 100% | 1,234/1,234 files
 
-🧠 Generating embeddings...
+💾 Writing index...
 ████████████████████ 100% | 5,678/5,678 chunks
 
 ✅ Indexing complete!
@@ -271,7 +271,7 @@ lien config <command> [key] [value]
 
 | Key | Values | Description |
 |-----|--------|-------------|
-| `backend` | `lancedb` | Vector database backend |
+| `backend` | `sqlite` | Storage backend (SQLite structural store + FTS5 search) |
 
 ### Examples
 
@@ -517,7 +517,7 @@ Quick start: run 'lien serve' in your project directory
 
 Usage: lien [options] [command]
 
-Local semantic code search for AI assistants via MCP
+Local code intelligence (structural analysis + lexical search) for AI assistants via MCP
 
 Options:
   -V, --version         output the version number
@@ -525,7 +525,7 @@ Options:
 
 Commands:
   init [options]        Initialize Lien in the current directory
-  index [options]       Index the codebase for semantic search
+  index [options]       Index the codebase for lexical search and structural analysis
   serve [options]       Start the MCP server (works with Cursor, Claude Code, Windsurf, and any MCP client)
   status [options]      Show indexing status and statistics
   complexity [options]  Analyze code complexity
@@ -566,7 +566,7 @@ NODE_ENV=development lien index
 | 1 | General error |
 | 2 | Configuration error |
 | 3 | Index error |
-| 4 | Network error (model download) |
+| 4 | Network error |
 
 ## Common Workflows
 

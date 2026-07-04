@@ -4,9 +4,8 @@ import type { RelevanceCategory } from '../relevance.js';
 import { parseRow, buildSearchResultMetadata } from './row-mapping.js';
 
 /**
- * Over-fetch beyond the requested limit before trimming (parity with the
- * LanceDB search path, which fetches limit+20). Gives the caller's dedup pass
- * headroom without changing the top-ranked results.
+ * Over-fetch beyond the requested limit before trimming. Gives the caller's
+ * dedup pass headroom without changing the top-ranked results.
  */
 const FTS_OVERFETCH = 20;
 
@@ -33,7 +32,7 @@ function round4(n: number): number {
 }
 
 /**
- * Map a bm25 rank into the LanceDB-style score/relevance contract.
+ * Map a bm25 rank into the score/relevance contract.
  *
  * bm25() is NEGATIVE (more negative = better), so ORDER BY rank ASC is correct.
  * ratio = rank / rankBest lands in (0, 1] with the best hit = 1.0. Bands:

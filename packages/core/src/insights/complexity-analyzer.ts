@@ -48,43 +48,12 @@ export class ComplexityAnalyzer {
     // 1. Get all chunks from index
     // For cross-repo, use scanCrossRepo
     // Note: We fetch all chunks even with --files filter because dependency analysis
-    // needs the complete dataset to find dependents accurately
-    // Inline column list (rather than importing from cli/handlers/columns.ts —
-    // wrong package-direction dependency). Must satisfy:
-    //   - findViolations: complexity, cognitiveComplexity, halstead*,
-    //     symbolName, symbolType, language, startLine, endLine, file
-    //   - enrichWithDependencies → analyzeDependencies: imports,
-    //     importedSymbolPaths, importedSymbolNames, exports, file
-    //   - getUniqueFunctionChunks: keys on repoId (required for cross-repo
-    //     dedupe; filtered out by LanceDB wrapper since not in Arrow schema)
-    const ANALYZER_COLUMNS = [
-      'file',
-      'startLine',
-      'endLine',
-      'language',
-      'symbolName',
-      'symbolType',
-      'complexity',
-      'cognitiveComplexity',
-      'halsteadVolume',
-      'halsteadDifficulty',
-      'halsteadEffort',
-      'halsteadBugs',
-      'imports',
-      'importedSymbolPaths',
-      'importedSymbolNames',
-      'exports',
-      'repoId',
-    ];
+    // needs the complete dataset to find dependents accurately.
     let allChunks: SearchResult[];
     if (crossRepo && this.vectorDB.supportsCrossRepo) {
-      allChunks = await this.vectorDB.scanCrossRepo({
-        limit: 100000,
-        repoIds,
-        columns: ANALYZER_COLUMNS,
-      });
+      allChunks = await this.vectorDB.scanCrossRepo({ limit: 100000, repoIds });
     } else {
-      allChunks = await this.vectorDB.scanAll({ columns: ANALYZER_COLUMNS });
+      allChunks = await this.vectorDB.scanAll();
     }
 
     // 2. Filter to specified files if provided
@@ -105,8 +74,8 @@ export class ComplexityAnalyzer {
   }
 
   /**
-   * Analyze complexity from in-memory chunks (no VectorDB needed).
-   * Use with indexCodebase({ skipEmbeddings: true }) for fast complexity-only analysis.
+   * Analyze complexity from in-memory chunks (no structural store needed).
+   * Fast path for complexity-only analysis without a persisted index.
    */
   static analyzeFromChunks(
     chunks: CodeChunk[],

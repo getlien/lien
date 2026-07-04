@@ -10,11 +10,6 @@ import {
   MAX_CHUNKS_PER_FILE,
 } from '@liendev/parser';
 import type { SearchResult, VectorDBInterface } from '@liendev/core';
-import {
-  FILE_CONTEXT_COLUMNS,
-  RELATED_CHUNKS_COLUMNS,
-  TEST_ASSOCIATIONS_COLUMNS,
-} from './columns.js';
 
 // ============================================================================
 // Types
@@ -75,12 +70,10 @@ export function clearTestAssociationScanCache(): void {
  * Scan all chunks for test-association analysis, using the indexVersion-keyed
  * cache when available.
  *
- * Uses `scanAll` — a direct column-projected `table.query()` — instead of
- * `scanWithFilter` with no file filter. Without a file filter,
- * `scanWithFilter` routes through a full-table zero-vector ANN search
- * (`table.search(...).where(...)`), which is roughly 10x slower than
- * `scanAll`'s direct scan on large indexes (see the fast-path comment on
- * `scanAll` in packages/core/src/vectordb/query.ts).
+ * Uses `scanAll` (a direct full-table read) instead of `scanWithFilter` with
+ * no file filter, and caches the result by indexVersion so repeated
+ * get_files_context calls within one session skip the scan when nothing has
+ * changed.
  */
 async function getOrScanAllChunksForTestAssociations(
   vectorDB: VectorDBInterface,
@@ -96,7 +89,7 @@ async function getOrScanAllChunksForTestAssociations(
     return testAssociationScanCache.chunks;
   }
 
-  const chunks = await vectorDB.scanAll({ columns: TEST_ASSOCIATIONS_COLUMNS });
+  const chunks = await vectorDB.scanAll();
 
   if (indexVersion !== undefined) {
     testAssociationScanCache = { indexVersion, chunks };
@@ -132,7 +125,6 @@ export async function searchFileChunks(
   const allResults = await vectorDB.scanWithFilter({
     file: filepaths,
     limit: filepaths.length * MAX_CHUNKS_PER_FILE,
-    columns: FILE_CONTEXT_COLUMNS,
   });
 
   // Group results by target file using canonical path matching
@@ -149,9 +141,7 @@ export async function searchFileChunks(
  * Find related chunks for files based on lexical similarity.
  *
  * Runs an FTS5 keyword search using the first chunk of each file as the query
- * text, surfacing lexically similar code in other files. The `queryVector`
- * argument is vestigial (SqliteBackend matches the text and ignores it), so an
- * empty Float32Array is passed.
+ * text, surfacing lexically similar code in other files.
  *
  * @param filepaths - Array of file paths
  * @param fileChunksMap - Chunks already found for each file
@@ -176,11 +166,7 @@ export async function findRelatedChunks(
 
   // Batch all related chunk searches (lexical FTS5 on each first chunk's text)
   const relatedSearches = await Promise.all(
-    filesWithChunks.map(({ chunks }) =>
-      vectorDB.search(new Float32Array(0), 5, chunks[0].content, {
-        columns: RELATED_CHUNKS_COLUMNS,
-      }),
-    ),
+    filesWithChunks.map(({ chunks }) => vectorDB.search(chunks[0].content, 5)),
   );
 
   // Map back to original indices

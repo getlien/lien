@@ -9,41 +9,35 @@ sequenceDiagram
     actor User
     participant CLI as CLI (lien serve)
     participant Config as GlobalConfig + ConfigService
-    participant Embeddings as Embedding Service
-    participant VectorDB as Vector Database
+    participant Store as SqliteBackend
     participant MCP as MCP Server
     participant Git as Git Tracker (optional)
     participant Watcher as File Watcher (optional)
     participant Stdio as Stdio Transport
     participant AI as AI Assistant (Cursor/etc)
-    
+
     User->>CLI: lien serve
     CLI->>CLI: Show banner
-    
+
     Note over CLI,Config: Phase 1: Configuration
     CLI->>Config: loadGlobalConfig() + ConfigService.load(rootDir)
     Config-->>CLI: GlobalConfig + LienConfig
-    
-    Note over CLI,Embeddings: Phase 2: Initialize Services
-    CLI->>Embeddings: initialize()
-    Note right of Embeddings: WorkerEmbeddings runs in worker thread<br/>Downloads model if first run (~100MB, cached)
-    Embeddings->>Embeddings: Load all-MiniLM-L6-v2
-    Embeddings-->>CLI: Ready (takes 3-5s)
-    
-    CLI->>VectorDB: initialize()
-    VectorDB->>VectorDB: Connect to LanceDB
-    VectorDB->>VectorDB: Load index
-    VectorDB-->>CLI: Ready (takes 1-2s)
-    
+
+    Note over CLI,Store: Phase 2: Open Store
+    CLI->>Store: initialize()
+    Store->>Store: Open SQLite (WAL), ensure schema + FTS triggers
+    Note right of Store: No model to download — starts instantly
+    Store-->>CLI: Ready (< 1s)
+
     Note over CLI,MCP: Phase 3: Create MCP Server
     CLI->>MCP: new Server({name, version, capabilities})
     MCP->>MCP: Register tool list handler
     MCP->>MCP: Register tool call handler
     MCP-->>CLI: Server instance
-    
-    Note over CLI,VectorDB: Phase 4: Auto-Index Check
-    CLI->>VectorDB: hasData()
-    VectorDB-->>CLI: false (no index)
+
+    Note over CLI,Store: Phase 4: Auto-Index Check
+    CLI->>Store: hasData()
+    Store-->>CLI: false (no index)
     
     alt autoIndexOnFirstRun = true
         CLI->>CLI: Log: "No index found, running initial indexing..."
@@ -95,8 +89,8 @@ The server exposes six tools to AI assistants:
 
 | Tool | Description |
 |------|-------------|
-| `semantic_search` | Natural language code search by meaning |
-| `find_similar` | Find structurally similar code patterns |
+| `semantic_search` | Full-text (FTS5/BM25) keyword code search — lexical, not meaning-based |
+| `find_similar` | Find lexically similar code (BM25 over a snippet's tokens) |
 | `get_files_context` | Get file context with dependencies and test associations (supports batch) |
 | `list_functions` | Fast symbol lookup by naming pattern |
 | `get_dependents` | Reverse dependency lookup for impact analysis |
@@ -110,57 +104,43 @@ The server exposes six tools to AI assistants:
 sequenceDiagram
     participant AI as AI Assistant
     participant MCP as MCP Server
-    participant Cache as Embedding Cache
-    participant Embeddings as Embedding Service
-    participant VectorDB as Vector Database
-    participant Version as Version Tracker
-    
+    participant Store as SqliteBackend
+    participant FTS as chunks_fts (FTS5)
+
     AI->>MCP: Tool Call: semantic_search
-    Note right of AI: {<br/>  query: "authentication logic",<br/>  limit: 5<br/>}
-    
+    Note right of AI: {<br/>  query: "authenticate session token",<br/>  limit: 5<br/>}
+
     rect rgb(225, 245, 255)
         Note over MCP: Request Validation
         MCP->>MCP: Validate query parameter (required)
         MCP->>MCP: Validate limit (default: 5)
     end
-    
+
     rect rgb(255, 243, 224)
-        Note over MCP,Embeddings: Embedding Generation
-        MCP->>Cache: get(query)
-        
-        alt Cache hit
-            Cache-->>MCP: Cached vector
-            Note right of Cache: ~1ms
-        else Cache miss
-            MCP->>Embeddings: embed(query)
-            Embeddings->>Embeddings: Tokenize
-            Embeddings->>Embeddings: Generate embedding
-            Embeddings-->>MCP: Float32Array[384]
-            MCP->>Cache: set(query, vector)
-            Note right of Embeddings: ~200ms
-        end
+        Note over MCP,Store: Build MATCH expression
+        MCP->>Store: search(queryText, limit)
+        Store->>Store: orQuery: quote + OR-join terms
+        Note right of Store: no embedding — the query text is the input
     end
-    
+
     rect rgb(232, 245, 233)
-        Note over MCP,VectorDB: Vector Search
-        MCP->>VectorDB: search(vector, limit)
-        VectorDB->>VectorDB: Calculate cosine similarity
-        VectorDB->>VectorDB: Rank results
-        VectorDB->>VectorDB: Apply limit
-        VectorDB-->>MCP: SearchResult[]
-        Note right of VectorDB: ~50-100ms
+        Note over Store,FTS: FTS5 Lexical Search
+        Store->>FTS: chunks_fts MATCH ?
+        FTS->>FTS: Rank by bm25 (symbolName > tokens > content)
+        FTS-->>Store: rows JOIN chunks, ordered best-first
+        Store->>Store: Map bm25 rank → score + relevance band
+        Store-->>MCP: SearchResult[]
     end
-    
+
     rect rgb(243, 229, 245)
         Note over MCP: Response Formatting
-        MCP->>MCP: Get index metadata
-        MCP->>MCP: Format results with metadata
-        MCP->>MCP: Build JSON response
+        MCP->>MCP: Get index metadata, attach test associations
+        MCP->>MCP: Prune not_relevant, build JSON response
     end
-    
+
     MCP-->>AI: MCP Response
     Note right of MCP: {<br/>  indexInfo: {...},<br/>  results: [...]<br/>}
-    
+
     AI->>AI: Process results
     AI->>AI: Present to user
 ```
@@ -171,41 +151,33 @@ sequenceDiagram
 sequenceDiagram
     participant AI as AI Assistant
     participant MCP as MCP Server
-    participant VectorDB as Vector Database
-    participant Embeddings as Embedding Service
-    
+    participant Store as SqliteBackend
+
     AI->>MCP: Tool Call: get_files_context
-    Note right of AI: {<br/>  filepath: "src/auth.ts",<br/>  includeRelated: true<br/>}
-    
+    Note right of AI: {<br/>  filepaths: "src/auth.ts",<br/>  includeRelated: true<br/>}
+
     Note over MCP: Validate Parameters
-    MCP->>MCP: Check filepath is provided
+    MCP->>MCP: Check filepath(s) provided
     MCP->>MCP: Set includeRelated (default: true)
-    
-    Note over MCP,VectorDB: Fetch File Chunks
-    MCP->>VectorDB: getChunksByFile(filepath)
-    VectorDB->>VectorDB: SELECT * WHERE file = ?
-    VectorDB-->>MCP: chunks[]
-    
+
+    Note over MCP,Store: Fetch File Chunks (hot path)
+    MCP->>Store: scanWithFilter({ file })
+    Store->>Store: SELECT ... WHERE file IN (?) — idx_chunks_file
+    Store-->>MCP: chunks[] (sub-millisecond)
+
     alt chunks.length = 0
         MCP->>MCP: Build "file not indexed" response
         MCP-->>AI: Not found response
     else includeRelated = true
-        Note over MCP,Embeddings: Find Related Chunks
-        MCP->>MCP: Get first chunk content
-        MCP->>Embeddings: embed(firstChunk)
-        Embeddings-->>MCP: queryVector
-        
-        MCP->>VectorDB: search(queryVector, limit: 10)
-        Note right of VectorDB: Exclude chunks from same file
-        VectorDB-->>MCP: relatedChunks[]
-        
+        Note over MCP,Store: Find Related Chunks
+        MCP->>Store: search(terms from file's symbols, limit)
+        Note right of Store: FTS5 keyword match; exclude same file
+        Store-->>MCP: relatedChunks[]
         MCP->>MCP: Combine file chunks + related chunks
         MCP->>MCP: Add test associations from metadata
-        MCP->>MCP: Format response
         MCP-->>AI: Complete context response
     else includeRelated = false
-        MCP->>MCP: Format chunks only
-        MCP->>MCP: Add test associations
+        MCP->>MCP: Format chunks only + test associations
         MCP-->>AI: File-only response
     end
 ```
@@ -248,11 +220,11 @@ flowchart TB
         REINDEX_DONE[Log: Reindex complete]
     end
     
-    subgraph "Vector DB Reconnection"
-        RECONNECT_START[Trigger reconnection]
-        CLOSE_CONN[Close old connection]
-        REOPEN_CONN[Open new connection]
-        RELOAD_INDEX[Reload vector index]
+    subgraph "SQLite Handle Reopen"
+        RECONNECT_START[Trigger reopen]
+        CLOSE_CONN[Close old handle]
+        REOPEN_CONN[Open new handle]
+        RELOAD_INDEX[Read updated index]
         RECONNECT_DONE[Log: Reconnected]
         NOTIFY_CLIENT[Next query uses new index]
     end
@@ -359,7 +331,7 @@ flowchart TD
 {
   "content": [{
     "type": "text",
-    "text": "{\"error\":\"Vector database not initialized\",\"tool\":\"semantic_search\"}"
+    "text": "{\"error\":\"Index not initialized\",\"tool\":\"semantic_search\"}"
   }],
   "isError": true
 }
@@ -386,7 +358,7 @@ flowchart TD
     "tools": [
       {
         "name": "semantic_search",
-        "description": "Search the codebase semantically...",
+        "description": "Full-text keyword search over the codebase (BM25)...",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -435,33 +407,25 @@ flowchart TD
 
 ## Performance Optimizations
 
-### 1. Embedding Cache
+### 1. Indexed Lookups
 
 ```
-First query: "authentication logic"
-  → Generate embedding: 200ms
-  → Search: 50ms
-  → Total: 250ms
+get_files_context("src/auth.ts")
+  → SELECT ... WHERE file IN (?) via idx_chunks_file
+  → sub-millisecond
 
-Same query again:
-  → Get from cache: 1ms
-  → Search: 50ms
-  → Total: 51ms
-
-Improvement: 5x faster
+FTS5 keyword search
+  → chunks_fts MATCH ?, ORDER BY bm25
+  → single-digit milliseconds on typical indexes
 ```
 
-### 2. Lazy Initialization
+### 2. Fast Startup
 
 ```
 Server Start:
   ✓ Load config: 0.5s
-  ✓ Load embedding model: 3-5s
-  ✓ Connect vector DB: 1-2s
-  Total: 5-7s
-
-Without lazy init (if we initialized on every query):
-  ✗ Would take 5-7s per query
+  ✓ Open SQLite store: < 1s   (no model to download or load)
+  Total: ~1s
 ```
 
 ### 3. Background Reindexing
@@ -484,9 +448,8 @@ User Experience: No downtime, seamless updates
 
 ```
 [Lien MCP] Initializing MCP server...
-[Lien MCP] Loading embedding model...
-[Lien MCP] Loading vector database...
-[Lien MCP] Embeddings and vector DB ready
+[Lien MCP] Opening SQLite store...
+[Lien MCP] Index ready
 [Lien MCP] MCP server running on stdio
 ```
 
@@ -498,7 +461,7 @@ sequenceDiagram
     participant Process as Node Process
     participant MCP as MCP Server
     participant Intervals as Timers/Intervals
-    participant VectorDB as Vector Database
+    participant Store as SqliteBackend
     participant Git as Git Tracker
     participant Watcher as File Watcher
     
@@ -516,9 +479,9 @@ sequenceDiagram
     Watcher->>Watcher: watcher.close()
     Watcher-->>Process: Closed
     
-    Process->>VectorDB: close() [implicit]
-    VectorDB->>VectorDB: Close connection
-    VectorDB-->>Process: Closed
+    Process->>Store: close() [implicit]
+    Store->>Store: Close SQLite handle
+    Store-->>Process: Closed
     
     Process->>MCP: shutdown() [implicit]
     MCP->>MCP: Close stdio transport
@@ -554,8 +517,8 @@ sequenceDiagram
 4. Lien MCP server initializes
 5. Cursor connects via stdio
 6. User asks: "Where is the authentication logic?"
-7. Cursor calls: semantic_search("authentication logic")
-8. Lien returns: Relevant code chunks
+7. Cursor calls: semantic_search("authenticate session token") — keywords the code uses
+8. Lien returns: Relevant code chunks (BM25-ranked)
 9. Cursor uses results to answer user
 ```
 

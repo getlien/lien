@@ -9,22 +9,6 @@ export { DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP, MAX_CHUNKS_PER_FILE } from '
 // Concurrency and batching
 export const DEFAULT_CONCURRENCY = 4;
 export const DEFAULT_STAT_CONCURRENCY = 32; // Higher concurrency for I/O-bound stat calls
-export const DEFAULT_EMBEDDING_BATCH_SIZE = 50;
-
-// Micro-batching for event loop yielding
-// Process N embeddings at a time, then yield to event loop
-// This prevents UI freezing during CPU-intensive embedding generation
-export const EMBEDDING_MICRO_BATCH_SIZE = 10;
-
-// Vector database batch size limits
-// Maximum batch size before splitting (prevents LanceDB errors on very large batches)
-export const VECTOR_DB_MAX_BATCH_SIZE = 1000;
-// Minimum batch size for retry logic (stop splitting below this size)
-export const VECTOR_DB_MIN_BATCH_SIZE = 10;
-
-// Embedding model configuration
-export const EMBEDDING_DIMENSIONS = 384; // all-MiniLM-L6-v2
-export const DEFAULT_EMBEDDING_MODEL = 'Xenova/all-MiniLM-L6-v2';
 
 // MCP server configuration
 export const DEFAULT_PORT = 7133; // LIEN in leetspeak
@@ -39,8 +23,7 @@ export const DEFAULT_DEBOUNCE_MS = 1000;
 // Index format version - bump on ANY breaking change to indexing
 // Examples that require version bump:
 // - Chunking algorithm changes
-// - Embedding model changes (e.g., switch from all-MiniLM-L6-v2 to another model)
-// - Vector DB schema changes (new metadata fields)
+// - Structural store schema changes (new metadata fields/columns)
 // - Metadata structure changes
 // v2: AST-based chunking + enhanced metadata (symbolName, complexity, etc.)
 // v3: Added cognitiveComplexity field to schema

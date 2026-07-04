@@ -221,7 +221,7 @@ A: Speed. We only need latest code to validate Lien works.
 
 Drives a real `@modelcontextprotocol/sdk` `Client` against a real MCP
 `Server` (connected over `InMemoryTransport.createLinkedPair()`), backed by
-a real LanceDB index of a small in-memory fixture repo built via the real
+a real SQLite index of a small in-memory fixture repo built via the real
 `indexCodebase()` path. Unlike `server.test.ts` (which mocks the SDK's
 `Server`/transport classes and only asserts setup calls) and the handler
 unit tests (which mock the vector DB), this proves a client can actually

@@ -14,20 +14,19 @@ sequenceDiagram
     participant Scanner as File Scanner
     participant Framework as Ecosystem Presets
     participant TestAssoc as Test Association Manager
-    participant Embeddings as Embedding Service
-    participant VectorDB as Vector Database
+    participant Store as SqliteBackend
     participant VersionFile as Version File
-    
+
     User->>CLI: lien index
     CLI->>CLI: Show spinner
-    
+
     Note over CLI,Config: Phase 1: Configuration
     CLI->>Config: load(rootDir)
     Config->>Config: Read .lien.config.json
     Config->>Config: Merge with defaults
     Config->>Config: Validate config
     Config-->>CLI: LienConfig
-    
+
     Note over CLI,Scanner: Phase 2: File Discovery
     CLI->>Scanner: scanFilesToIndex()
     Scanner->>Framework: detectEcosystems()
@@ -37,113 +36,67 @@ sequenceDiagram
     Scanner->>Scanner: Filter .gitignore
     Scanner-->>CLI: File list (e.g., 1000 files)
     CLI->>CLI: Update spinner: "Found 1000 files"
-    
+
     Note over CLI,TestAssoc: Phase 3: Test Associations
     CLI->>TestAssoc: buildAssociations(files)
-    
+
     rect rgb(255, 243, 224)
         Note right of TestAssoc: Pass 1: Convention-Based
-        TestAssoc->>TestAssoc: Partition by framework
         loop For each file
-            TestAssoc->>TestAssoc: Check file patterns
-            TestAssoc->>TestAssoc: Check directory patterns
+            TestAssoc->>TestAssoc: Check file + directory patterns
             TestAssoc->>TestAssoc: Match test ↔ source
         end
-        TestAssoc->>TestAssoc: Build association map
     end
-    
+
     rect rgb(252, 228, 236)
         Note right of TestAssoc: Pass 2: Import Analysis
-        TestAssoc->>TestAssoc: Filter Tier 1 languages
         loop For each test file
-            TestAssoc->>TestAssoc: Parse import statements
-            TestAssoc->>TestAssoc: Resolve file paths
-            TestAssoc->>TestAssoc: Link to source files
+            TestAssoc->>TestAssoc: Parse imports, resolve paths, link to source
         end
         TestAssoc->>TestAssoc: Merge with convention map
     end
-    
+
     TestAssoc-->>CLI: Test association map
     CLI->>CLI: Update spinner: "Analyzed test associations"
-    
-    Note over CLI,Embeddings: Phase 4: Initialize Services
-    CLI->>Embeddings: initialize()
-    Embeddings->>Embeddings: Load all-MiniLM-L6-v2 model
-    Embeddings->>Embeddings: Cache model in memory
-    Embeddings-->>CLI: Ready
-    CLI->>CLI: Update spinner: "Embedding model loaded"
-    
-    CLI->>VectorDB: initialize()
-    VectorDB->>VectorDB: Connect to LanceDB
-    VectorDB->>VectorDB: Create table if not exists
-    VectorDB-->>CLI: Ready
-    CLI->>CLI: Update spinner: "Vector database initialized"
-    
-    Note over CLI,VectorDB: Phase 5: File Processing (Concurrent)
+
+    Note over CLI,Store: Phase 4: Open Store
+    CLI->>Store: initialize()
+    Store->>Store: Open SQLite (WAL), ensure schema + FTS triggers
+    Store-->>CLI: Ready (no model to load)
+
+    Note over CLI,Store: Phase 5: File Processing (Concurrent)
     CLI->>CLI: Start progress tracking
-    
-    par Process File 1
+
+    par Process File 1..N (p-limit concurrency)
         CLI->>CLI: Read file content
-        CLI->>CLI: Detect language (TS/JS/etc.)
+        CLI->>CLI: Detect language
         alt Language supports AST
-            CLI->>CLI: Parse with Tree-sitter
-            CLI->>CLI: Get LanguageTraverser
+            CLI->>CLI: Parse with Tree-sitter, get LanguageTraverser
             CLI->>CLI: Extract semantic chunks (functions, methods)
             CLI->>CLI: Calculate complexity metrics
         else Unsupported or fallback
             CLI->>CLI: Chunk by lines (75 lines, 10 overlap)
         end
-        CLI->>CLI: Extract symbols
-        CLI->>CLI: Add test associations
-        CLI->>CLI: Accumulate chunks
-    and Process File 2
-        CLI->>CLI: Read file content
-        CLI->>CLI: Detect language
-        CLI->>CLI: Chunk file (AST or line-based)
-        CLI->>CLI: Extract symbols
-        CLI->>CLI: Add test associations
-        CLI->>CLI: Accumulate chunks
-    and Process File 3
-        CLI->>CLI: Read file content
-        CLI->>CLI: Detect language
-        CLI->>CLI: Chunk file
-        CLI->>CLI: Extract symbols
-        CLI->>CLI: Add test associations
-        CLI->>CLI: Accumulate chunks
-    and Process File N
-        CLI->>CLI: Read file content
-        CLI->>CLI: Detect language
-        CLI->>CLI: Chunk file
-        CLI->>CLI: Extract symbols
+        CLI->>CLI: Extract symbols + imports/exports
         CLI->>CLI: Add test associations
         CLI->>CLI: Accumulate chunks
     end
-    
-    Note over CLI,VectorDB: Phase 6: Batch Embedding & Storage
-    loop For each batch (50 chunks)
-        CLI->>Embeddings: embedBatch(texts[])
-        Embeddings->>Embeddings: Tokenize texts
-        Embeddings->>Embeddings: Generate embeddings
-        Embeddings->>Embeddings: Normalize vectors
-        Embeddings-->>CLI: Float32Array[] (384 dims each)
-        
-        CLI->>VectorDB: insertBatch(vectors, metadata, texts)
-        VectorDB->>VectorDB: Prepare records
-        VectorDB->>VectorDB: Batch insert to LanceDB
-        VectorDB-->>CLI: Success
-        
+
+    Note over CLI,Store: Phase 6: Storage
+    loop For each batch of chunks
+        CLI->>Store: insertBatch(metadatas, contents)
+        Store->>Store: Serialize chunk → row, INSERT INTO chunks
+        Store->>Store: Triggers sync chunks_fts (FTS5)
+        Store-->>CLI: Success
         CLI->>CLI: Update progress
     end
-    
+
     Note over CLI,VersionFile: Phase 7: Finalization
     CLI->>VersionFile: writeVersionFile()
-    VersionFile->>VersionFile: Generate timestamp
-    VersionFile->>VersionFile: Write version.json
     VersionFile-->>CLI: Success
-    
+
     CLI->>CLI: Calculate statistics
-    CLI->>CLI: Show success message
-    CLI-->>User: ✓ Indexed 1000 files (2500 chunks) in 45s
+    CLI-->>User: ✓ Indexed 1000 files (2500 chunks) in 30s
 ```
 
 ## Incremental Indexing Flow
@@ -156,84 +109,61 @@ sequenceDiagram
     participant MCP as MCP Server
     participant Config as ConfigService
     participant Incremental as Incremental Indexer
-    participant Embeddings as Embedding Service
-    participant VectorDB as Vector Database
+    participant Store as SqliteBackend
     participant VersionFile as Version File
     participant Client as MCP Client (AI)
-    
+
     Note over Source,MCP: Change Detection
     Source->>Source: Detect file change
     Source->>MCP: Notify: files changed
     MCP->>MCP: Debounce changes (1s)
-    
+
     Note over MCP,Incremental: Background Reindex
     MCP->>Config: load(rootDir)
     Config-->>MCP: LienConfig
-    
+
     loop For each changed file
         MCP->>Incremental: indexSingleFile(filepath)
-        
-        alt File exists
-            Incremental->>Incremental: Read file content
-            Incremental->>Incremental: Check if binary
-            
-            alt Is valid code file
-                Note over Incremental: Same as full indexing
-                Incremental->>Incremental: Chunk file
-                Incremental->>Incremental: Extract symbols
-                Incremental->>Embeddings: embedBatch(chunks)
-                Embeddings-->>Incremental: vectors
-                
-                Note over Incremental,VectorDB: Atomic Update
-                Incremental->>VectorDB: updateFile(filepath, vectors, metadata)
-                VectorDB->>VectorDB: Begin transaction
-                VectorDB->>VectorDB: Delete old chunks (WHERE file = ?)
-                VectorDB->>VectorDB: Insert new chunks
-                VectorDB->>VectorDB: Commit transaction
-                VectorDB-->>Incremental: Success
-                
-                Incremental->>MCP: Log: ✓ Updated filepath
-            else Is binary or empty
-                Incremental->>VectorDB: deleteByFile(filepath)
-                VectorDB->>VectorDB: DELETE WHERE file = ?
-                VectorDB-->>Incremental: Success
-                Incremental->>MCP: Log: Removed empty/binary file
-            end
-        else File deleted
-            Incremental->>VectorDB: deleteByFile(filepath)
-            VectorDB->>VectorDB: DELETE WHERE file = ?
-            VectorDB-->>Incremental: Success
-            Incremental->>MCP: Log: Removed deleted file
+
+        alt File exists and is valid code
+            Incremental->>Incremental: Read + chunk file, extract symbols/metadata
+            Note over Incremental,Store: Atomic Update
+            Incremental->>Store: updateFile(filepath, metadatas, contents)
+            Store->>Store: Begin transaction
+            Store->>Store: DELETE old rows (WHERE file = ?)
+            Store->>Store: INSERT new rows
+            Store->>Store: Triggers sync chunks_fts
+            Store->>Store: Commit transaction
+            Store-->>Incremental: Success
+            Incremental->>MCP: Log: ✓ Updated filepath
+        else Binary/empty or deleted
+            Incremental->>Store: deleteByFile(filepath)
+            Store->>Store: DELETE WHERE file = ? (triggers clean FTS)
+            Store-->>Incremental: Success
+            Incremental->>MCP: Log: Removed file
         end
     end
-    
+
     Note over MCP,VersionFile: Update Version
     MCP->>VersionFile: writeVersionFile()
-    VersionFile->>VersionFile: Increment version
-    VersionFile->>VersionFile: Write version.json
     VersionFile-->>MCP: Success
-    
+
     Note over MCP,Client: Version Check & Reconnect
     loop Every 2 seconds
         MCP->>VersionFile: Check version
         VersionFile-->>MCP: Current version
-        
         alt Version changed
-            MCP->>VectorDB: reconnect()
-            VectorDB->>VectorDB: Close old connection
-            VectorDB->>VectorDB: Open new connection
-            VectorDB->>VectorDB: Reload index
-            VectorDB-->>MCP: Reconnected
-            MCP->>MCP: Log: Reconnected to updated index
+            MCP->>Store: reopen SQLite handle
+            Store-->>MCP: Reconnected to updated index
         else No change
             MCP->>MCP: Continue polling
         end
     end
-    
+
     Note over Client: Next Query
-    Client->>MCP: semantic_search("new code")
-    MCP->>VectorDB: search(query)
-    VectorDB-->>MCP: Results (includes newly indexed code)
+    Client->>MCP: semantic_search("new code terms")
+    MCP->>Store: search(query text)
+    Store-->>MCP: Results (includes newly indexed code)
     MCP-->>Client: Return results
 ```
 
@@ -383,24 +313,20 @@ Typical performance on a medium-sized project:
 
 ```
 Project Size: 1,000 files, 100,000 lines of code
-Configuration: 
+Configuration:
   - concurrency: 4
   - chunkSize: 75
-  - embeddingBatchSize: 50
 
 Timeline:
   Configuration:        ~0.5s
   File Discovery:       ~2s
   Test Associations:    ~3s (Pass 1) + ~2s (Pass 2)
-  Embedding Model Load: ~5s (first time only)
-  Vector DB Init:       ~1s
-  File Processing:      ~25s (4 concurrent workers)
-  Embedding Generation: ~15s (batched)
-  Storage:              ~5s
-  Total:                ~58s
+  Store Open:           ~0s (no model to load)
+  File Processing:      ~25s (4 concurrent workers, AST parsing)
+  SQLite Storage:       ~2s
+  Total:                ~35s
 
 Chunks Created: ~2,000
-Average: 17 files/second
 ```
 
 ### Incremental Indexing
@@ -410,15 +336,9 @@ Typical performance for file changes:
 ```
 Single File Change (100 lines):
   Read & Chunk:      ~50ms
-  Generate Embeddings: ~200ms
-  Update Database:   ~100ms
+  Update SQLite:     ~10ms (delete + insert; triggers keep FTS in sync)
   Update Version:    ~10ms
-  Total:             ~360ms
-
-10 Files Changed:
-  Sequential Processing: ~3.6s
-  Version Update:        ~10ms
-  Total:                 ~3.61s
+  Total:             ~70ms
 
 Note: Runs in background, doesn't block MCP server
 ```
@@ -434,35 +354,27 @@ flowchart TD
     BINARY{Is Binary?}
     PARSE{Can Parse?}
     CHUNK[Chunk File]
-    EMBED[Generate Embeddings]
-    STORE[Store in DB]
+    STORE[INSERT into SQLite]
     SUCCESS[✓ Success]
-    
+
     READ -->|Success| BINARY
     READ -->|Error| SKIP1[Skip: Cannot read]
-    
+
     BINARY -->|No| PARSE
     BINARY -->|Yes| SKIP2[Skip: Binary file]
-    
+
     PARSE -->|Yes| CHUNK
-    PARSE -->|No| WARN[Warn: Parse error, continue]
+    PARSE -->|No| WARN[Warn: Parse error, fall back / skip]
     WARN --> CHUNK
-    
-    CHUNK --> EMBED
-    EMBED -->|Success| STORE
-    EMBED -->|Error| RETRY{Retry?}
-    
-    RETRY -->|First attempt| EMBED
-    RETRY -->|Failed twice| SKIP3[Skip: Embedding failed]
-    
+
+    CHUNK --> STORE
     STORE -->|Success| SUCCESS
     STORE -->|Error| FAIL[✗ Fail: DB error]
-    
+
     style SUCCESS fill:#c8e6c9
     style FAIL fill:#ffcdd2
     style SKIP1 fill:#fff9c4
     style SKIP2 fill:#fff9c4
-    style SKIP3 fill:#fff9c4
     style WARN fill:#ffe0b2
 ```
 
@@ -470,15 +382,10 @@ flowchart TD
 
 1. **Non-critical errors** (binary files, parse errors):
    - Log warning
-   - Skip file
+   - Skip the file (or fall back to line-based chunking on a parse error)
    - Continue with remaining files
 
-2. **Retryable errors** (embedding generation):
-   - Retry once
-   - If fails again, skip file
-   - Continue with remaining files
-
-3. **Critical errors** (database connection, disk full):
+2. **Critical errors** (database write failure, disk full):
    - Log error
    - Rollback transaction if in progress
    - Throw error to user
@@ -506,27 +413,21 @@ await Promise.all(promises);
 - Balances CPU and I/O
 - Configurable via `core.concurrency`
 
-### 2. Batch Processing
+### 2. Batched Writes
 
 ```typescript
-// Instead of one-by-one:
+// Instead of one INSERT per chunk:
 for (const chunk of chunks) {
-  const vector = await embed(chunk); // ❌ Slow: N × 200ms
-  await store(vector);
+  store.insertOne(chunk); // ❌ more transaction overhead
 }
 
-// Process in batches:
-for (let i = 0; i < chunks.length; i += batchSize) {
-  const batch = chunks.slice(i, i + batchSize);
-  const vectors = await embedBatch(batch); // ✅ Fast: 200ms per batch
-  await storeBatch(vectors);
-}
+// Insert chunks as a batch (one transaction):
+store.insertBatch(metadatas, contents); // ✅ single transaction
 ```
 
 **Benefits:**
-- Reduces overhead
-- Better GPU/CPU utilization
-- Configurable via `core.embeddingBatchSize`
+- Fewer transactions, less overhead
+- Indices are maintained by SQLite; FTS5 rows are added by triggers
 
 ### 3. Accumulator Pattern
 
@@ -552,7 +453,7 @@ if (accumulator.length > 0) {
 
 **Benefits:**
 - Maximizes batch sizes
-- Reduces number of API/DB calls
+- Reduces number of DB writes
 - More efficient resource usage
 
 ## Monitoring & Progress
@@ -564,19 +465,17 @@ Starting indexing process...
 ✓ Configuration loaded
 ✓ Found 1,000 files
 ✓ Analyzed test associations (250 tests → 400 sources)
-✓ Embedding model loaded
-✓ Vector database initialized
+✓ Opened SQLite store
 ⏳ Processing files... [==============    ] 650/1000 (65%)
 ✓ Indexed 1,000 files
 ✓ Generated 2,500 chunks
-✓ Stored embeddings (384 dimensions)
-✓ Completed in 58.2s
+✓ Written to SQLite store
+✓ Completed in 35.1s
 
 Statistics:
   Files processed: 1,000
   Chunks created: 2,500
   Average chunk size: 40 lines
-  Processing speed: 17 files/s
 ```
 
 ### Verbose Mode
@@ -590,8 +489,7 @@ lien index --verbose
 [Lien] Chunked into 3 chunks
 [Lien] Extracted 5 functions, 2 classes
 [Lien] ✓ Indexed src/app.ts (3 chunks)
-[Lien] Batch embedding: 50 chunks
-[Lien] Batch insert: 50 vectors
+[Lien] Batch insert: 50 chunks → SQLite
 [Lien] ⚠️ Skipping src/image.png: Binary file
 [Lien] ⚠️ Skipping src/broken.ts: Parse error
 ```
@@ -603,7 +501,7 @@ lien index --verbose
 ```json
 {
   "version": 1731785400000,
-  "timestamp": "2025-11-16T20:30:00.000Z",
+  "timestamp": "2026-07-04T20:30:00.000Z",
   "config": {
     "chunkSize": 75,
     "chunkOverlap": 10,
@@ -611,8 +509,7 @@ lien index --verbose
   },
   "stats": {
     "filesIndexed": 1000,
-    "chunksCreated": 2500,
-    "embeddingModel": "all-MiniLM-L6-v2"
+    "chunksCreated": 2500
   }
 }
 ```

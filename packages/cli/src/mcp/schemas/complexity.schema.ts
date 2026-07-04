@@ -57,7 +57,7 @@ export const GetComplexitySchema = z.object({
     .boolean()
     .default(false)
     .describe(
-      'If true, analyze complexity across all repos in the organization (requires a cross-repo-capable backend; the bundled LanceDB backend is single-repo).\n\n' +
+      'If true, analyze complexity across all repos in the organization (requires a cross-repo-capable backend; the bundled SQLite backend is single-repo).\n\n' +
         'Default: false (single-repo analysis)\n' +
         'When enabled, results are aggregated by repository.',
     ),

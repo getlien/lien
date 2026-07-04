@@ -1,4 +1,4 @@
-import { VectorDB } from '../../vectordb/lancedb.js';
+import { SqliteBackend } from '../../vectordb/sqlite/sqlite-backend.js';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
@@ -32,17 +32,19 @@ export async function cleanupTestDir(testDir: string): Promise<void> {
 }
 
 /**
- * Creates a VectorDB instance for testing with automatic cleanup
+ * Creates a SqliteBackend instance for testing with automatic cleanup.
+ * Name kept as createTestVectorDB for the large test fan-out that imports it.
  */
 export async function createTestVectorDB(): Promise<{
-  db: VectorDB;
+  db: SqliteBackend;
   cleanup: () => Promise<void>;
 }> {
   const testDir = await createTestDir();
-  const db = new VectorDB(testDir);
+  const db = new SqliteBackend(testDir);
   await db.initialize();
 
   const cleanup = async () => {
+    db.close();
     await cleanupTestDir(testDir);
   };
 

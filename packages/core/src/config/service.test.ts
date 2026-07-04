@@ -55,7 +55,6 @@ describe('ConfigService', () => {
           chunkSize: 100,
           chunkOverlap: 20,
           concurrency: 8,
-          embeddingBatchSize: 75,
         },
         frameworks: [],
       };
@@ -87,7 +86,6 @@ describe('ConfigService', () => {
           chunkSize: 100,
           chunkOverlap: 15,
           concurrency: 6,
-          embeddingBatchSize: 60,
         },
         mcp: {
           port: 7133,
@@ -287,7 +285,6 @@ describe('ConfigService', () => {
           chunkSize: 75,
           chunkOverlap: 10,
           concurrency: 4,
-          embeddingBatchSize: 50,
         },
         mcp: {
           port: 7133,
@@ -309,40 +306,6 @@ describe('ConfigService', () => {
       expect(result.valid).toBe(true);
       expect(result.warnings.some(w => w.includes('legacy'))).toBe(true);
     });
-
-    it('should accept embeddings.enabled: false', () => {
-      const config: LienConfig = {
-        ...defaultConfig,
-        embeddings: { enabled: false },
-      };
-
-      const result = service.validate(config);
-
-      expect(result.valid).toBe(true);
-      expect(result.errors).toHaveLength(0);
-    });
-
-    it('should reject a non-boolean embeddings.enabled', () => {
-      const invalidConfig = {
-        ...defaultConfig,
-        embeddings: { enabled: 'false' as unknown as boolean },
-      };
-
-      const result = service.validate(invalidConfig);
-
-      expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.includes('embeddings.enabled'))).toBe(true);
-    });
-
-    it('should reject a config missing the required embeddings field', () => {
-      const invalidConfig = { ...defaultConfig } as Partial<LienConfig>;
-      delete invalidConfig.embeddings;
-
-      const result = service.validate(invalidConfig);
-
-      expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.includes('embeddings'))).toBe(true);
-    });
   });
 
   describe('validatePartial', () => {
@@ -352,7 +315,6 @@ describe('ConfigService', () => {
           chunkSize: 100,
           chunkOverlap: 15,
           concurrency: 6,
-          embeddingBatchSize: 60,
         },
       };
 
@@ -368,7 +330,6 @@ describe('ConfigService', () => {
           chunkSize: -10, // Invalid
           chunkOverlap: 10,
           concurrency: 4,
-          embeddingBatchSize: 50,
         },
       };
 
@@ -376,17 +337,6 @@ describe('ConfigService', () => {
 
       expect(result.valid).toBe(false);
       expect(result.errors.some(e => e.includes('chunkSize'))).toBe(true);
-    });
-
-    it('should validate partial config with only embeddings settings', () => {
-      const partialConfig: Partial<LienConfig> = {
-        embeddings: { enabled: false },
-      };
-
-      const result = service.validatePartial(partialConfig);
-
-      expect(result.valid).toBe(true);
-      expect(result.errors).toHaveLength(0);
     });
 
     it('should allow missing fields in partial config', () => {
@@ -442,7 +392,6 @@ describe('ConfigService', () => {
           chunkSize: 90,
           chunkOverlap: 12,
           concurrency: 6,
-          embeddingBatchSize: 55,
         },
         mcp: {
           port: 7200,
