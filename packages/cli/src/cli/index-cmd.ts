@@ -4,11 +4,7 @@ import type { Ora } from 'ora';
 import { indexCodebase } from '@liendev/core';
 import type { IndexingProgress } from '@liendev/core';
 import { showCompactBanner } from '../utils/banner.js';
-import {
-  getIndexingMessage,
-  getEmbeddingMessage,
-  getModelLoadingMessage,
-} from '../utils/loading-messages.js';
+import { getIndexingMessage } from '../utils/loading-messages.js';
 import { formatDuration } from './utils.js';
 
 /**
@@ -89,23 +85,11 @@ function updateSpinner(spinner: Ora, tracker: ProgressTracker, forceUpdate = fal
 }
 
 /**
- * Updates witty message based on current phase.
- */
-function updateWittyMessage(tracker: ProgressTracker): void {
-  const { current } = tracker;
-  if (current.phase === 'embedding' || current.phase === 'indexing') {
-    tracker.wittyMessage = getIndexingMessage();
-  } else if (current.phase === 'initializing') {
-    tracker.wittyMessage = getModelLoadingMessage();
-  }
-}
-
-/**
  * Starts rotating witty messages every 8 seconds.
  */
 function startMessageRotation(spinner: Ora, tracker: ProgressTracker): void {
   tracker.messageRotationInterval = setInterval(() => {
-    updateWittyMessage(tracker);
+    tracker.wittyMessage = getIndexingMessage();
     updateSpinner(spinner, tracker, true);
   }, 8000);
 }
@@ -129,15 +113,6 @@ function createProgressCallback(
 ): (progress: IndexingProgress) => void {
   return (progress: IndexingProgress) => {
     tracker.current = progress;
-
-    // Update witty message based on phase changes
-    if (progress.phase === 'initializing' && !tracker.messageRotationInterval) {
-      tracker.wittyMessage = getModelLoadingMessage();
-    } else if (progress.phase === 'embedding') {
-      tracker.wittyMessage = getEmbeddingMessage();
-    } else if (progress.phase === 'indexing') {
-      tracker.wittyMessage = getIndexingMessage();
-    }
 
     if (progress.phase === 'complete') {
       tracker.completedViaProgress = true;
