@@ -38,5 +38,6 @@ export { runAutoGc, AUTO_GC_INTERVAL_MS, GC_STAMP_FILE, GC_LOCK_FILE } from './a
 export type { AutoGcOptions, AutoGcResult } from './auto-gc.js';
 
 export { writeAccessStamp, readAccessStamp, ACCESS_STAMP_FILE } from './access-stamp.js';
-export { isIndexLocked } from './live-handle.js';
+export { probeIndexLock } from './live-handle.js';
+export type { LockProbeResult } from './live-handle.js';
 export { computeDirSize, formatBytes } from './dir-size.js';

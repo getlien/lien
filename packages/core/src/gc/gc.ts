@@ -5,7 +5,7 @@ import { readVersionFile } from '../vectordb/version.js';
 import type { IndexManifest } from '../indexer/manifest.js';
 import { readAccessStamp } from './access-stamp.js';
 import { computeDirSize } from './dir-size.js';
-import { isIndexLocked } from './live-handle.js';
+import { probeIndexLock } from './live-handle.js';
 
 const MANIFEST_FILE = 'manifest.json';
 
@@ -26,6 +26,7 @@ export type GcRemovalKind = 'orphan' | 'stale';
 export type GcSkipReason =
   | 'current-project' // the cwd's own project — never deleted
   | 'in-use' // a live process holds its structural store open
+  | 'unprobeable' // couldn't verify the store is free — fail closed, skip
   | 'volume-offline' // source root's backing volume is unavailable (not orphan)
   | 'unknown-provenance' // legacy index with no recorded source root
   | 'present'; // source root still exists on disk
@@ -144,23 +145,34 @@ async function isDirectory(p: string): Promise<boolean> {
   }
 }
 
+/** Well-known removable-media mount-root prefixes, checked as POSIX ('/'-
+ *  separated) paths regardless of the host OS's `path.sep` — a manifest's
+ *  `sourceRoot` is a recorded string that may have been captured on a
+ *  different OS than the one GC is currently running on (e.g. a macOS
+ *  `/Volumes/...` path inspected from a Linux CI runner). */
+const MOUNT_ROOT_PREFIXES = ['Volumes', 'media', 'mnt'] as const;
+
 /**
  * Whether a missing source root sits on a currently-unavailable volume rather
  * than having been deleted — the pragmatic mitigation against the
  * unmounted-drive false positive.
  *
  * Two guards (documented design choice):
- *  1. macOS external drives mount at `/Volumes/<name>`; if the source root is
- *     under one and that mount point is absent, the drive is unplugged.
+ *  1. Removable-media mount roots (macOS `/Volumes/<name>`, Linux
+ *     `/media/<name>`, `/mnt/<name>`); if the source root is under one and
+ *     that mount point is absent, the drive is unplugged.
  *  2. General: we only trust a "gone" verdict when the nearest EXISTING
  *     ancestor is a real directory. If the nearest existing ancestor is the
  *     filesystem root (an entire network/volume mount vanished), we decline.
  */
 async function isSourceRootUnavailable(sourceRoot: string): Promise<boolean> {
-  // Guard 1: macOS /Volumes mount check.
-  const segments = sourceRoot.split(path.sep);
-  if (segments[1] === 'Volumes' && segments[2]) {
-    const mountPoint = path.join(path.sep, 'Volumes', segments[2]);
+  // Guard 1: removable-media mount-root check. Always split on '/' — the
+  // recorded path's separator reflects where it was captured, not the host
+  // GC is running on.
+  const segments = sourceRoot.split('/');
+  const mountRoot = segments[1];
+  if (mountRoot && (MOUNT_ROOT_PREFIXES as readonly string[]).includes(mountRoot) && segments[2]) {
+    const mountPoint = `/${mountRoot}/${segments[2]}`;
     if (!(await pathExists(mountPoint))) return true;
   }
 
@@ -222,13 +234,25 @@ interface ClassifyContext {
   protectedSet: Set<string>;
 }
 
-/** Decide the fate of a single index dir. Never deletes — pure decision. */
+/**
+ * Decide the fate of a single index dir. Never deletes — pure decision.
+ *
+ * Precedence is deliberate and deletion-safety-first:
+ *   current-project > volume-offline > live-handle-locked/unprobeable >
+ *   orphan > stale (age-eligible, regardless of provenance) > skip-with-reason.
+ *
+ * volume-offline is checked before the lock probe because it is itself a skip
+ * (never a removal), so nothing unsafe happens by not probing the lock first.
+ * The lock probe then runs before orphan/stale so a live process always wins
+ * over any removal reason, even an orphaned source root. Stale eligibility is
+ * evaluated identically for 'present' and 'unknown' provenance — --stale must
+ * be able to reclaim a legacy (unknown-provenance) index once it is actually
+ * old enough, not just a present-root one; provenance only decides the *label*
+ * when an index is left in place because it isn't old enough yet.
+ */
 async function classifyIndex(indexDir: string, ctx: ClassifyContext): Promise<Classification> {
   if (ctx.protectedSet.has(path.resolve(indexDir))) {
     return { type: 'skip', reason: 'current-project', detail: 'current project' };
-  }
-  if (isIndexLocked(indexDir)) {
-    return { type: 'skip', reason: 'in-use', detail: 'held open by a live process' };
   }
 
   const manifest = await readManifest(indexDir);
@@ -242,6 +266,19 @@ async function classifyIndex(indexDir: string, ctx: ClassifyContext): Promise<Cl
       detail: `source root on an unavailable volume: ${sourceRoot}`,
     };
   }
+
+  const lockProbe = probeIndexLock(indexDir);
+  if (lockProbe === 'locked') {
+    return { type: 'skip', reason: 'in-use', detail: 'held open by a live process' };
+  }
+  if (lockProbe === 'unprobeable') {
+    return {
+      type: 'skip',
+      reason: 'unprobeable',
+      detail: 'could not verify the structural store is free — skipping to be safe',
+    };
+  }
+
   if (provenance === 'orphan') {
     return {
       type: 'remove',
@@ -250,7 +287,7 @@ async function classifyIndex(indexDir: string, ctx: ClassifyContext): Promise<Cl
     };
   }
 
-  // 'present' or 'unknown' → removable only via --stale.
+  // 'present' or 'unknown' → age-eligible removal only via --stale.
   if (ctx.staleDays !== undefined) {
     const lastAccess = await resolveLastAccess(indexDir, manifest);
     const ageDays = Math.floor((ctx.now - lastAccess) / DAY_MS);

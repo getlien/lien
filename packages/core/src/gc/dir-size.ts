@@ -40,14 +40,16 @@ export async function computeDirSize(dir: string): Promise<number> {
 
 /**
  * Format a byte count as a short human-readable string (e.g. "0 B", "512 B",
- * "1.5 KB", "136.4 MB", "2.0 GB").
+ * "1.5 KB", "136.4 MB", "2.0 GB"). Tops out at PB — index dirs never
+ * realistically get there, but the unit list still rolls over correctly
+ * instead of rendering an out-of-range value like "1024.0 TB".
  *
  * @param bytes - Byte count
  * @returns Formatted string
  */
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
-  const units = ['KB', 'MB', 'GB', 'TB'];
+  const units = ['KB', 'MB', 'GB', 'TB', 'PB'];
   let value = bytes / 1024;
   let unitIndex = 0;
   while (value >= 1024 && unitIndex < units.length - 1) {

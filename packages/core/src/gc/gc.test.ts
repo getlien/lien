@@ -7,7 +7,7 @@ import Database from 'better-sqlite3';
 import { openDatabase, STRUCTURAL_DB_FILENAME } from '../vectordb/sqlite/schema.js';
 import { planGc, executeGc, runGc, getIndicesRoot, LEGACY_LANCE_DIRNAME } from './gc.js';
 import { writeAccessStamp, readAccessStamp } from './access-stamp.js';
-import { isIndexLocked } from './live-handle.js';
+import { probeIndexLock } from './live-handle.js';
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -186,7 +186,7 @@ describe('planGc — safety rails', () => {
     holder.pragma('busy_timeout = 0');
     holder.exec('BEGIN IMMEDIATE');
     try {
-      expect(isIndexLocked(dir)).toBe(true);
+      expect(probeIndexLock(dir)).toBe('locked');
 
       const plan = await planGc();
       expect(plan.removals.find(r => r.repoId === 'orphan-live')).toBeUndefined();
@@ -197,7 +197,7 @@ describe('planGc — safety rails', () => {
     }
 
     // Lock released → probe reports free again.
-    expect(isIndexLocked(dir)).toBe(false);
+    expect(probeIndexLock(dir)).toBe('unlocked');
   });
 
   it('never removes a protected (current-project) index', async () => {
@@ -219,5 +219,125 @@ describe('planGc — safety rails', () => {
 
     expect(plan.removals).toHaveLength(0);
     expect(plan.skipped.find(s => s.repoId === 'vol-1')?.reason).toBe('volume-offline');
+  });
+
+  it('recognizes Linux mount roots (/media, /mnt) split as POSIX paths regardless of host', async () => {
+    await makeIndex('media-1', {
+      sourceRoot: '/media/NonexistentDrive12345/project',
+      withDb: true,
+    });
+    await makeIndex('mnt-1', {
+      sourceRoot: '/mnt/NonexistentDrive12345/project',
+      withDb: true,
+    });
+
+    const plan = await planGc();
+
+    expect(plan.removals).toHaveLength(0);
+    expect(plan.skipped.find(s => s.repoId === 'media-1')?.reason).toBe('volume-offline');
+    expect(plan.skipped.find(s => s.repoId === 'mnt-1')?.reason).toBe('volume-offline');
+  });
+
+  it('does not misclassify an unrelated top-level dir as a mount root', async () => {
+    await makeIndex('unrelated-1', {
+      sourceRoot: goneRoot('unrelated/deep/nested'),
+      withDb: true,
+    });
+
+    const plan = await planGc();
+
+    // Not under /Volumes, /media, or /mnt — falls through to the ancestor-dir
+    // guard and, since `home` (the nearest existing ancestor) is a real dir,
+    // resolves as a genuine orphan rather than volume-offline.
+    expect(plan.removals.map(r => r.repoId)).toContain('unrelated-1');
+  });
+
+  it('skips an index whose structural store cannot be probed (fails closed)', async () => {
+    const dir = await makeIndex('unprobeable-1', {
+      sourceRoot: goneRoot('unprobeable'),
+      withDb: true,
+    });
+    const dbPath = path.join(dir, STRUCTURAL_DB_FILENAME);
+
+    if (process.getuid && process.getuid() === 0) {
+      // Running as root bypasses file permissions — chmod 000 is ineffective.
+      return;
+    }
+
+    await fs.chmod(dbPath, 0o000);
+    try {
+      expect(probeIndexLock(dir)).toBe('unprobeable');
+
+      const plan = await planGc();
+      expect(plan.removals.find(r => r.repoId === 'unprobeable-1')).toBeUndefined();
+      expect(plan.skipped.find(s => s.repoId === 'unprobeable-1')?.reason).toBe('unprobeable');
+    } finally {
+      await fs.chmod(dbPath, 0o600);
+    }
+  });
+});
+
+describe('classifyIndex — precedence', () => {
+  it('volume-offline outranks a locked structural store', async () => {
+    const dir = await makeIndex('vol-locked', {
+      sourceRoot: '/Volumes/NonexistentDrive99999/project',
+      withDb: true,
+    });
+    const holder = new Database(path.join(dir, STRUCTURAL_DB_FILENAME));
+    holder.pragma('busy_timeout = 0');
+    holder.exec('BEGIN IMMEDIATE');
+    try {
+      const plan = await planGc();
+      // volume-offline is decided before the lock is ever probed.
+      expect(plan.skipped.find(s => s.repoId === 'vol-locked')?.reason).toBe('volume-offline');
+    } finally {
+      holder.exec('ROLLBACK');
+      holder.close();
+    }
+  });
+
+  it('a live lock outranks an orphaned source root — never removed while locked', async () => {
+    const dir = await makeIndex('orphan-locked', {
+      sourceRoot: goneRoot('orphan-locked'),
+      withDb: true,
+    });
+    const holder = new Database(path.join(dir, STRUCTURAL_DB_FILENAME));
+    holder.pragma('busy_timeout = 0');
+    holder.exec('BEGIN IMMEDIATE');
+    try {
+      const plan = await planGc();
+      expect(plan.removals.find(r => r.repoId === 'orphan-locked')).toBeUndefined();
+      expect(plan.skipped.find(s => s.repoId === 'orphan-locked')?.reason).toBe('in-use');
+    } finally {
+      holder.exec('ROLLBACK');
+      holder.close();
+    }
+  });
+
+  it('--stale reclaims an unknown-provenance index once old enough, not before', async () => {
+    await makeIndex('legacy-not-old', { withDb: true, accessMs: Date.now() - 5 * DAY });
+    await makeIndex('legacy-old-enough', { withDb: true, accessMs: Date.now() - 90 * DAY });
+
+    const plan = await planGc({ staleDays: 60 });
+
+    expect(plan.skipped.find(s => s.repoId === 'legacy-not-old')?.reason).toBe(
+      'unknown-provenance',
+    );
+    const removal = plan.removals.find(r => r.repoId === 'legacy-old-enough');
+    expect(removal?.kind).toBe('stale');
+  });
+
+  it('a present-root index that is not old enough is labeled "present", never "stale"', async () => {
+    const root = await presentRoot('not-old-enough');
+    await makeIndex('present-not-old', {
+      sourceRoot: root,
+      withDb: true,
+      accessMs: Date.now() - 5 * DAY,
+    });
+
+    const plan = await planGc({ staleDays: 60 });
+
+    expect(plan.removals.find(r => r.repoId === 'present-not-old')).toBeUndefined();
+    expect(plan.skipped.find(s => s.repoId === 'present-not-old')?.reason).toBe('present');
   });
 });

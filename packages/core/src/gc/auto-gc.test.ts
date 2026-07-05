@@ -5,7 +5,10 @@ import os from 'os';
 import path from 'path';
 import { openDatabase, STRUCTURAL_DB_FILENAME } from '../vectordb/sqlite/schema.js';
 import { getIndicesRoot, LEGACY_LANCE_DIRNAME } from './gc.js';
-import { runAutoGc, GC_STAMP_FILE, GC_LOCK_FILE } from './auto-gc.js';
+import { runAutoGc, acquireLock, GC_STAMP_FILE, GC_LOCK_FILE } from './auto-gc.js';
+
+/** Older than auto-gc's internal STALE_LOCK_MS (1h), so reclaim kicks in. */
+const STALE_LOCK_AGE_MS = 2 * 60 * 60 * 1000;
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -112,5 +115,41 @@ describe('runAutoGc', () => {
 
     expect(res.ran).toBe(false);
     expect(res.reason).toBe('locked');
+  });
+});
+
+describe('acquireLock — concurrent stale reclaim', () => {
+  it('exactly one of two racing acquires wins a stale lock', async () => {
+    const lienDir = path.join(home, '.lien');
+    await fs.mkdir(lienDir, { recursive: true });
+    const lockPath = path.join(lienDir, GC_LOCK_FILE);
+    await fs.writeFile(lockPath, 'stale', 'utf-8');
+    const staleTime = new Date(Date.now() - STALE_LOCK_AGE_MS);
+    await fs.utimes(lockPath, staleTime, staleTime);
+
+    const [a, b] = await Promise.all([acquireLock(lockPath), acquireLock(lockPath)]);
+    const winners = [a, b].filter((handle): handle is fs.FileHandle => handle !== null);
+
+    expect(winners).toHaveLength(1);
+    await winners[0].close();
+    // No leftover reclaim artifact from either racer.
+    const entries = await fs.readdir(lienDir);
+    expect(entries.filter(name => name.startsWith(`${GC_LOCK_FILE}.reclaim-`))).toHaveLength(0);
+  });
+
+  it('reclaims a stale lock and lets a fresh acquire proceed afterward', async () => {
+    const lienDir = path.join(home, '.lien');
+    await fs.mkdir(lienDir, { recursive: true });
+    const lockPath = path.join(lienDir, GC_LOCK_FILE);
+    await fs.writeFile(lockPath, 'stale', 'utf-8');
+    const staleTime = new Date(Date.now() - STALE_LOCK_AGE_MS);
+    await fs.utimes(lockPath, staleTime, staleTime);
+
+    const handle = await acquireLock(lockPath);
+    expect(handle).not.toBeNull();
+    await handle?.close();
+
+    // A fresh (non-stale) lock is respected, not reclaimed.
+    expect(await acquireLock(lockPath)).toBeNull();
   });
 });

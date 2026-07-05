@@ -25,6 +25,7 @@ const VALID_FORMATS = ['text', 'json'];
 const SKIP_LABELS: Record<GcSkipReason, string> = {
   'current-project': 'current project',
   'in-use': 'in use by a live process',
+  unprobeable: 'could not verify (skipped for safety)',
   'volume-offline': 'source volume offline',
   'unknown-provenance': 'unknown provenance (legacy)',
   present: 'source root present',
@@ -32,14 +33,16 @@ const SKIP_LABELS: Record<GcSkipReason, string> = {
 
 /**
  * Resolve the `--stale [days]` flag into a day count, or undefined when the flag
- * was not passed. `--stale` alone means the default window.
+ * was not passed. `--stale` alone means the default window. Requires an
+ * integer >= 1 — `--stale 0` would make every index (including ones accessed
+ * moments ago) an immediate removal candidate, which is never what's meant.
  */
 function parseStaleDays(stale: string | boolean | undefined): number | undefined {
   if (stale === undefined) return undefined;
   if (stale === true) return DEFAULT_STALE_DAYS;
-  const days = parseInt(String(stale), 10);
-  if (Number.isNaN(days) || days < 0) {
-    throw new Error(`--stale expects a non-negative number of days, got "${String(stale)}"`);
+  const days = Number(stale);
+  if (!Number.isInteger(days) || days < 1) {
+    throw new Error(`--stale expects a whole number of days >= 1, got "${String(stale)}"`);
   }
   return days;
 }
@@ -127,8 +130,15 @@ export async function gcCommand(options: GcCommandOptions = {}): Promise<void> {
     process.exit(1);
   }
 
+  let staleDays: number | undefined;
   try {
-    const staleDays = parseStaleDays(options.stale);
+    staleDays = parseStaleDays(options.stale);
+  } catch (error) {
+    console.error(chalk.red(error instanceof Error ? error.message : String(error)));
+    process.exit(2);
+  }
+
+  try {
     const currentIndexDir = getIndexDir(resolveProjectRoot(process.cwd()));
     const dryRun = options.dryRun ?? false;
 

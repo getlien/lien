@@ -87,10 +87,35 @@ describe('gcCommand', () => {
     expect(parsed.summary.dryRun).toBe(true);
   });
 
-  it('rejects an invalid --stale value', async () => {
+  it('rejects a non-numeric --stale value', async () => {
     await gcCommand({ stale: 'not-a-number' });
 
-    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(errorSpy).toHaveBeenCalled();
+    expect(exitSpy).toHaveBeenCalledWith(2);
+  });
+
+  it('rejects --stale 0 — it would make every index an immediate candidate', async () => {
+    await gcCommand({ stale: '0' });
+
+    expect(exitSpy).toHaveBeenCalledWith(2);
+  });
+
+  it('rejects a negative --stale value', async () => {
+    await gcCommand({ stale: '-1' });
+
+    expect(exitSpy).toHaveBeenCalledWith(2);
+  });
+
+  it('rejects a fractional --stale value', async () => {
+    await gcCommand({ stale: '1.5' });
+
+    expect(exitSpy).toHaveBeenCalledWith(2);
+  });
+
+  it('accepts --stale 1', async () => {
+    await gcCommand({ stale: '1', dryRun: true });
+
+    expect(exitSpy).not.toHaveBeenCalled();
   });
 
   it('rejects an invalid --format', async () => {

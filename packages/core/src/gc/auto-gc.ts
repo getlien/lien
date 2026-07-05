@@ -43,22 +43,52 @@ async function readStampMs(stampPath: string): Promise<number> {
  * Try to grab the machine-wide GC lock via exclusive create. Returns a handle
  * on success, or null when a peer holds it. Reclaims a lock left behind by a
  * crashed serve once it is older than STALE_LOCK_MS.
+ *
+ * Reclaiming is race-prone: two peers can both stat the same stale lock and
+ * decide to reclaim it. An unconditional rm+open lets the second peer's rm
+ * delete the first peer's brand-new lock, so both end up believing they hold
+ * it. Renaming the stale file aside instead of removing it is atomic — the
+ * rename only succeeds for whichever caller finds the file still at
+ * `lockPath`, so at most one caller proceeds to recreate the lock. A caller
+ * that loses the rename (or the subsequent open, if it's beaten to that too)
+ * treats the lock as held.
+ *
+ * Exported for the concurrency test — not part of the public GC surface.
  */
-async function acquireLock(lockPath: string): Promise<fs.FileHandle | null> {
+export async function acquireLock(lockPath: string): Promise<fs.FileHandle | null> {
   try {
     return await fs.open(lockPath, 'wx');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'EEXIST') return null;
+
+    let stat;
     try {
-      const stat = await fs.stat(lockPath);
-      if (Date.now() - stat.mtimeMs > STALE_LOCK_MS) {
-        await fs.rm(lockPath, { force: true });
-        return await fs.open(lockPath, 'wx'); // reclaim: retry once
-      }
+      stat = await fs.stat(lockPath);
     } catch {
-      // lost a race with a peer that grabbed/removed it — treat as locked
+      // A peer released it between our open and this stat — retry once.
+      try {
+        return await fs.open(lockPath, 'wx');
+      } catch {
+        return null;
+      }
     }
-    return null;
+    if (Date.now() - stat.mtimeMs <= STALE_LOCK_MS) return null; // held, not stale
+
+    const reclaimPath = `${lockPath}.reclaim-${process.pid}`;
+    try {
+      await fs.rename(lockPath, reclaimPath);
+    } catch {
+      return null; // lost the reclaim race — a peer now owns the lock
+    }
+
+    try {
+      return await fs.open(lockPath, 'wx');
+    } catch {
+      // A peer's fresh acquire (or reclaim) beat us to recreating the file.
+      return null;
+    } finally {
+      await fs.rm(reclaimPath, { force: true });
+    }
   }
 }
 

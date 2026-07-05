@@ -87,7 +87,7 @@ export {
   enumerateIndexDirs,
   writeAccessStamp,
   readAccessStamp,
-  isIndexLocked,
+  probeIndexLock,
   computeDirSize,
   formatBytes,
   LEGACY_LANCE_DIRNAME,
@@ -109,6 +109,7 @@ export type {
   GcSkipReason,
   AutoGcOptions,
   AutoGcResult,
+  LockProbeResult,
 } from './gc/index.js';
 
 // =============================================================================

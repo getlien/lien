@@ -12,6 +12,12 @@ describe('formatBytes', () => {
     expect(formatBytes(1536)).toBe('1.5 KB');
     expect(formatBytes(1024 * 1024)).toBe('1.0 MB');
     expect(formatBytes(1024 * 1024 * 1024)).toBe('1.0 GB');
+    expect(formatBytes(1024 * 1024 * 1024 * 1024)).toBe('1.0 TB');
+  });
+
+  it('rolls TB over into PB instead of rendering an out-of-range value', () => {
+    expect(formatBytes(1024 * 1024 * 1024 * 1024 * 1024)).toBe('1.0 PB');
+    expect(formatBytes(1536 * 1024 * 1024 * 1024 * 1024)).toBe('1.5 PB');
   });
 });
 
