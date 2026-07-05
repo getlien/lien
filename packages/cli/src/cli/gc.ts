@@ -128,6 +128,7 @@ export async function gcCommand(options: GcCommandOptions = {}): Promise<void> {
   if (!VALID_FORMATS.includes(format)) {
     console.error(chalk.red(`Invalid format: ${format}. Valid: ${VALID_FORMATS.join(', ')}`));
     process.exit(1);
+    return;
   }
 
   let staleDays: number | undefined;
@@ -136,6 +137,7 @@ export async function gcCommand(options: GcCommandOptions = {}): Promise<void> {
   } catch (error) {
     console.error(chalk.red(error instanceof Error ? error.message : String(error)));
     process.exit(2);
+    return;
   }
 
   try {

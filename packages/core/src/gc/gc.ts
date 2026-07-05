@@ -122,7 +122,13 @@ export async function enumerateIndexDirs(): Promise<string[]> {
 async function readManifest(indexDir: string): Promise<Partial<IndexManifest> | null> {
   try {
     const raw = await fs.readFile(path.join(indexDir, MANIFEST_FILE), 'utf-8');
-    return JSON.parse(raw) as Partial<IndexManifest>;
+    const parsed = JSON.parse(raw) as Partial<IndexManifest>;
+    // A malformed sourceRoot (wrong type) must not crash the whole GC run in
+    // analyzeProvenance — treat it as unrecorded (unknown provenance) instead.
+    if (parsed.sourceRoot !== undefined && typeof parsed.sourceRoot !== 'string') {
+      return { ...parsed, sourceRoot: undefined };
+    }
+    return parsed;
   } catch {
     return null;
   }

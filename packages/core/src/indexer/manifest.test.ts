@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import fs from 'fs/promises';
+import path from 'path';
 import { ManifestManager } from './manifest.js';
 import { createTestDir, cleanupTestDir } from '../test/helpers/test-db.js';
 
@@ -72,6 +74,29 @@ describe('ManifestManager', () => {
       const manifest = await manifestManager.load();
       expect(manifest?.sourceRoot).toBe('/abs/project/root');
       expect(manifest?.files['test.ts']).toBeTruthy();
+    });
+
+    it('no-ops on a format-version mismatch instead of wiping the files map', async () => {
+      // Regression test: recordSourceRoot used to fall back to load() || createEmpty(),
+      // and load() clears an incompatible-format manifest and returns null — so
+      // recordSourceRoot would write back a fresh, empty files map on top of an
+      // otherwise-valid legacy index.
+      const manifestPath = path.join(testDir, 'manifest.json');
+      const legacyManifest = {
+        formatVersion: 1, // stale relative to current INDEX_FORMAT_VERSION
+        lienVersion: 'old',
+        lastIndexed: Date.now(),
+        files: { 'kept.ts': { filepath: 'kept.ts', lastModified: Date.now(), chunkCount: 7 } },
+      };
+      await fs.writeFile(manifestPath, JSON.stringify(legacyManifest), 'utf-8');
+
+      await manifestManager.recordSourceRoot('/abs/project/root');
+
+      // No-op: the incompatible manifest is left exactly as-is on disk — not
+      // cleared, not overwritten with an empty files map.
+      const onDisk = JSON.parse(await fs.readFile(manifestPath, 'utf-8'));
+      expect(onDisk.files['kept.ts']).toBeTruthy();
+      expect(onDisk.sourceRoot).toBeUndefined();
     });
   });
 

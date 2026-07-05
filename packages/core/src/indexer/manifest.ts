@@ -248,7 +248,28 @@ export class ManifestManager {
     // Chain this operation to the lock to ensure atomicity
     this.updateLock = this.updateLock
       .then(async () => {
-        const manifest = (await this.load()) || this.createEmpty();
+        let existing: IndexManifest | null;
+        try {
+          const content = await fs.readFile(this.manifestPath, 'utf-8');
+          const parsed = JSON.parse(content) as IndexManifest;
+          if (parsed.formatVersion !== INDEX_FORMAT_VERSION) {
+            // Incompatible format: load() would clear the manifest and return
+            // null here, and we'd write back a fresh-but-empty manifest with
+            // just sourceRoot set — silently losing the files map. No-op and
+            // let the normal full-reindex path (which owns the clear+rebuild)
+            // repopulate it instead.
+            return;
+          }
+          existing = parsed;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+            existing = null; // genuinely no manifest yet — safe to start fresh
+          } else {
+            throw error;
+          }
+        }
+
+        const manifest = existing || this.createEmpty();
         if (manifest.sourceRoot === sourceRoot) {
           return; // already current — skip the write
         }

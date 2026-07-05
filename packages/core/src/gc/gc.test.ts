@@ -114,6 +114,26 @@ describe('planGc — unknown provenance (legacy indices)', () => {
     const removal = plan.removals.find(r => r.repoId === 'legacy-old');
     expect(removal?.kind).toBe('stale');
   });
+
+  it('treats a malformed (non-string) sourceRoot as unknown provenance instead of crashing', async () => {
+    // Regression test: readManifest used to cast JSON.parse() straight to
+    // Partial<IndexManifest> with no validation. A non-string sourceRoot would
+    // reach isSourceRootUnavailable's sourceRoot.split('/') and throw, aborting
+    // the entire GC run rather than just skipping this one index.
+    const dir = path.join(getIndicesRoot(), 'malformed-1');
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(
+      path.join(dir, 'manifest.json'),
+      JSON.stringify({ formatVersion: 5, lienVersion: 'test', files: {}, sourceRoot: 12345 }),
+      'utf-8',
+    );
+    await makeIndex('present-2', { sourceRoot: await presentRoot('live-repo-2'), withDb: true });
+
+    const plan = await planGc();
+
+    expect(plan.skipped.find(s => s.repoId === 'malformed-1')?.reason).toBe('unknown-provenance');
+    expect(plan.skipped.find(s => s.repoId === 'present-2')?.reason).toBe('present');
+  });
 });
 
 describe('planGc — stale threshold + access stamp', () => {

@@ -5,7 +5,13 @@ import os from 'os';
 import path from 'path';
 import { openDatabase, STRUCTURAL_DB_FILENAME } from '../vectordb/sqlite/schema.js';
 import { getIndicesRoot, LEGACY_LANCE_DIRNAME } from './gc.js';
-import { runAutoGc, acquireLock, GC_STAMP_FILE, GC_LOCK_FILE } from './auto-gc.js';
+import {
+  runAutoGc,
+  acquireLock,
+  startLockHeartbeat,
+  GC_STAMP_FILE,
+  GC_LOCK_FILE,
+} from './auto-gc.js';
 
 /** Older than auto-gc's internal STALE_LOCK_MS (1h), so reclaim kicks in. */
 const STALE_LOCK_AGE_MS = 2 * 60 * 60 * 1000;
@@ -151,5 +157,31 @@ describe('acquireLock — concurrent stale reclaim', () => {
 
     // A fresh (non-stale) lock is respected, not reclaimed.
     expect(await acquireLock(lockPath)).toBeNull();
+  });
+});
+
+describe('startLockHeartbeat', () => {
+  it('refreshes the lock mtime on each tick, and stops once cleared', async () => {
+    // Regression test: without a heartbeat, a live-but-slow GC run's lock
+    // mtime never advances past acquisition time, so a peer could mistake it
+    // for a crashed holder's stale lock once STALE_LOCK_MS elapses.
+    const lienDir = path.join(home, '.lien');
+    await fs.mkdir(lienDir, { recursive: true });
+    const lockPath = path.join(lienDir, GC_LOCK_FILE);
+    await fs.writeFile(lockPath, '', 'utf-8');
+    const past = new Date(Date.now() - 60 * 60 * 1000);
+    await fs.utimes(lockPath, past, past);
+
+    const timer = startLockHeartbeat(lockPath, 20);
+    await new Promise(resolve => setTimeout(resolve, 80));
+
+    const refreshedMtime = (await fs.stat(lockPath)).mtimeMs;
+    expect(refreshedMtime).toBeGreaterThan(past.getTime());
+
+    clearInterval(timer);
+    const mtimeAfterStop = (await fs.stat(lockPath)).mtimeMs;
+    await new Promise(resolve => setTimeout(resolve, 80));
+
+    expect((await fs.stat(lockPath)).mtimeMs).toBe(mtimeAfterStop);
   });
 });

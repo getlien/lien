@@ -124,4 +124,23 @@ describe('gcCommand', () => {
     expect(errorSpy).toHaveBeenCalled();
     expect(exitSpy).toHaveBeenCalledWith(1);
   });
+
+  it('does not run GC when --format is invalid, even with process.exit mocked as a no-op', async () => {
+    // Regression test: process.exit(1) wasn't followed by a `return`, so with
+    // process.exit mocked (as in this test file), execution fell through into
+    // a real, non-dry-run GC pass despite the format being rejected.
+    const dir = await makeOrphan('orphan-invalid-format');
+
+    await gcCommand({ format: 'yaml' });
+
+    expect(fsSync.existsSync(dir)).toBe(true);
+  });
+
+  it('does not run GC when --stale is invalid, even with process.exit mocked as a no-op', async () => {
+    const dir = await makeOrphan('orphan-invalid-stale');
+
+    await gcCommand({ stale: 'not-a-number' });
+
+    expect(fsSync.existsSync(dir)).toBe(true);
+  });
 });

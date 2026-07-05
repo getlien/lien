@@ -1,5 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
+import { randomUUID } from 'crypto';
 import { getLienHome } from '@liendev/parser';
 import { runGc, type GcSummary } from './gc.js';
 
@@ -12,6 +13,11 @@ export const GC_LOCK_FILE = 'gc.lock';
 export const AUTO_GC_INTERVAL_MS = 24 * 60 * 60 * 1000;
 /** A lock older than this is assumed abandoned by a crashed serve and reclaimed. */
 const STALE_LOCK_MS = 60 * 60 * 1000;
+/** How often the lock holder refreshes its mtime while GC runs, so a live but
+ *  unusually slow run is never mistaken for a crashed one and reclaimed out
+ *  from under it. Well under STALE_LOCK_MS. The lock is otherwise held only
+ *  for the duration of a single GC run. */
+const LOCK_HEARTBEAT_MS = 5 * 60 * 1000;
 
 export interface AutoGcOptions {
   /** Index dirs to never touch (absolute paths; e.g. the serving project's). */
@@ -40,6 +46,27 @@ async function readStampMs(stampPath: string): Promise<number> {
 }
 
 /**
+ * After renaming a presumed-stale lock aside, confirm we moved the SAME file
+ * we inspected (by inode) rather than a fresh lock a peer recreated in the
+ * gap between our stat and our rename. Restores the file on a mismatch so we
+ * don't clobber a peer's live lock.
+ */
+async function verifyReclaimedLock(
+  reclaimPath: string,
+  lockPath: string,
+  originalIno: number,
+): Promise<boolean> {
+  try {
+    const moved = await fs.stat(reclaimPath);
+    if (moved.ino === originalIno) return true;
+  } catch {
+    return false;
+  }
+  await fs.rename(reclaimPath, lockPath).catch(() => {});
+  return false;
+}
+
+/**
  * Try to grab the machine-wide GC lock via exclusive create. Returns a handle
  * on success, or null when a peer holds it. Reclaims a lock left behind by a
  * crashed serve once it is older than STALE_LOCK_MS.
@@ -53,6 +80,15 @@ async function readStampMs(stampPath: string): Promise<number> {
  * that loses the rename (or the subsequent open, if it's beaten to that too)
  * treats the lock as held.
  *
+ * That alone isn't sufficient: a rename doesn't check WHICH file is at
+ * `lockPath`, only that something is. If caller A reclaims, recreates a fresh
+ * lock, and finishes before caller B's own (later) rename runs, B's rename
+ * would yank A's brand-new live lock out from under it and both would end up
+ * holding a handle. Comparing the inode captured by the initial stat against
+ * the inode actually moved detects this: a mismatch means a peer replaced the
+ * file between our stat and our rename, so we restore it (rename back) and
+ * treat the lock as held rather than stealing a live one.
+ *
  * Exported for the concurrency test — not part of the public GC surface.
  */
 export async function acquireLock(lockPath: string): Promise<fs.FileHandle | null> {
@@ -60,36 +96,67 @@ export async function acquireLock(lockPath: string): Promise<fs.FileHandle | nul
     return await fs.open(lockPath, 'wx');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'EEXIST') return null;
-
-    let stat;
-    try {
-      stat = await fs.stat(lockPath);
-    } catch {
-      // A peer released it between our open and this stat — retry once.
-      try {
-        return await fs.open(lockPath, 'wx');
-      } catch {
-        return null;
-      }
-    }
-    if (Date.now() - stat.mtimeMs <= STALE_LOCK_MS) return null; // held, not stale
-
-    const reclaimPath = `${lockPath}.reclaim-${process.pid}`;
-    try {
-      await fs.rename(lockPath, reclaimPath);
-    } catch {
-      return null; // lost the reclaim race — a peer now owns the lock
-    }
-
-    try {
-      return await fs.open(lockPath, 'wx');
-    } catch {
-      // A peer's fresh acquire (or reclaim) beat us to recreating the file.
-      return null;
-    } finally {
-      await fs.rm(reclaimPath, { force: true });
-    }
+    return await reclaimIfStale(lockPath);
   }
+}
+
+/** The EEXIST branch of {@link acquireLock}, split out to keep each function's
+ *  branching manageable. */
+async function reclaimIfStale(lockPath: string): Promise<fs.FileHandle | null> {
+  let stat;
+  try {
+    stat = await fs.stat(lockPath);
+  } catch {
+    // A peer released it between our open and this stat — retry once.
+    return await fs.open(lockPath, 'wx').catch(() => null);
+  }
+  if (Date.now() - stat.mtimeMs <= STALE_LOCK_MS) return null; // held, not stale
+
+  // Unique per call, not just per pid — two racing reclaims from the SAME
+  // process (e.g. concurrent runAutoGc invocations) would otherwise compute
+  // an identical reclaim path and could both end up believing they hold the
+  // lock (one renames the other's freshly-created lock file out from under it).
+  const reclaimPath = `${lockPath}.reclaim-${process.pid}-${randomUUID()}`;
+  try {
+    await fs.rename(lockPath, reclaimPath);
+  } catch {
+    return null; // lost the reclaim race — a peer now owns the lock
+  }
+
+  // Verify we actually moved the file we inspected, not a fresh lock a peer
+  // recreated in the gap between our stat and our rename.
+  if (!(await verifyReclaimedLock(reclaimPath, lockPath, stat.ino))) return null;
+
+  try {
+    return await fs.open(lockPath, 'wx');
+  } catch {
+    // A peer's fresh acquire (or reclaim) beat us to recreating the file.
+    return null;
+  } finally {
+    await fs.rm(reclaimPath, { force: true });
+  }
+}
+
+/**
+ * Periodically refresh the lock's mtime so a live GC run isn't reclaimed
+ * mid-run by a peer that only sees an old mtime. Unref'd so it can never keep
+ * the process alive if `clearInterval` is somehow skipped.
+ *
+ * Exported (with a configurable interval) for the heartbeat test — not part
+ * of the public GC surface.
+ */
+export function startLockHeartbeat(
+  lockPath: string,
+  intervalMs: number = LOCK_HEARTBEAT_MS,
+): NodeJS.Timeout {
+  const timer = setInterval(() => {
+    const now = new Date();
+    fs.utimes(lockPath, now, now).catch(() => {
+      // Best-effort — if this fails the lock just ages normally.
+    });
+  }, intervalMs);
+  timer.unref?.();
+  return timer;
 }
 
 async function releaseLock(handle: fs.FileHandle, lockPath: string): Promise<void> {
@@ -151,6 +218,7 @@ export async function runAutoGc(options: AutoGcOptions = {}): Promise<AutoGcResu
     const lock = await acquireLock(lockPath);
     if (!lock) return { ran: false, reason: 'locked' };
 
+    const heartbeat = startLockHeartbeat(lockPath);
     try {
       // Re-check under the lock: a peer may have just finished.
       if (await isThrottled(stampPath)) return { ran: false, reason: 'throttled' };
@@ -161,6 +229,7 @@ export async function runAutoGc(options: AutoGcOptions = {}): Promise<AutoGcResu
       logCollected(summary, options.log);
       return { ran: true, summary };
     } finally {
+      clearInterval(heartbeat);
       await releaseLock(lock, lockPath);
     }
   } catch {
