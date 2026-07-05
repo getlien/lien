@@ -37,6 +37,16 @@ describe('indexCodebase (lexical FTS5 structural index)', () => {
     expect(result.chunksCreated).toBeGreaterThan(0);
   });
 
+  it('records the source root in the manifest (GC provenance)', async () => {
+    await indexCodebase({ rootDir: testDir, force: true });
+
+    const db = await createVectorDB(testDir);
+    const manifestPath = path.join(db.dbPath, 'manifest.json');
+    const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf-8'));
+
+    expect(manifest.sourceRoot).toBe(path.resolve(testDir));
+  });
+
   it('persists chunks with real structural metadata (imports/exports/symbolName)', async () => {
     const result = await indexCodebase({ rootDir: testDir, force: true });
     expect(result.success).toBe(true);

@@ -4,7 +4,13 @@ import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { dirname, join, resolve } from 'path';
 import type { VectorDBInterface, GitState } from '@liendev/core';
-import { VERSION_CHECK_INTERVAL_MS, createVectorDB, isGitRepo } from '@liendev/core';
+import {
+  VERSION_CHECK_INTERVAL_MS,
+  createVectorDB,
+  isGitRepo,
+  writeAccessStamp,
+  runAutoGc,
+} from '@liendev/core';
 import { FileWatcher } from '../watcher/index.js';
 import { createMCPServerConfig, registerMCPHandlers } from './server-config.js';
 import { createReindexStateManager } from './reindex-state-manager.js';
@@ -326,6 +332,18 @@ function createMCPServer(): Server {
 /**
  * Setup server features and connect transport.
  */
+/**
+ * Fire-and-forget maintenance kicked off once the server is up. NEVER awaited —
+ * it must not delay serve readiness (mirrors handleAutoIndexing's rationale):
+ *  1. Touch the index's access stamp so `lien gc --stale` sees a fresh use.
+ *  2. Run throttled orphan GC + legacy lance sweep (at most once/24h across all
+ *     serves; opt out with LIEN_AUTO_GC=off). Protects the serving index.
+ */
+function startBackgroundMaintenance(vectorDB: VectorDBInterface, log: LogFn): void {
+  void writeAccessStamp(vectorDB.dbPath).catch(() => {});
+  void runAutoGc({ protectedDirs: [vectorDB.dbPath], log }).catch(() => {});
+}
+
 async function setupAndConnectServer(
   server: Server,
   toolContext: ToolContext,
@@ -388,6 +406,8 @@ async function setupAndConnectServer(
   try {
     await server.connect(transport);
     log('MCP server started and listening on stdio');
+    // Server is ready and listening — kick off non-blocking maintenance.
+    startBackgroundMaintenance(vectorDB, log);
   } catch (error) {
     console.error(`Failed to connect MCP transport: ${error}`);
     process.exit(1);

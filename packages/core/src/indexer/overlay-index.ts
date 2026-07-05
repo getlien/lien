@@ -212,9 +212,13 @@ export async function buildOverlay(
   });
 
   if (changed) {
+    const overlayManifest = new ManifestManager(overlay.dbPath);
     if (manifestEntries.length > 0) {
-      await new ManifestManager(overlay.dbPath).updateFiles(manifestEntries);
+      await overlayManifest.updateFiles(manifestEntries);
     }
+    // Provenance for `lien gc`: the overlay's source root is the worktree, so a
+    // deleted worktree leaves an orphan-detectable overlay index.
+    await overlayManifest.recordSourceRoot(path.resolve(overlay.worktreeRoot));
     await overlay.bumpVersion();
   }
 
