@@ -125,22 +125,35 @@ describe('runAutoGc', () => {
 });
 
 describe('acquireLock — concurrent stale reclaim', () => {
-  it('exactly one of two racing acquires wins a stale lock', async () => {
+  it('exactly one of two racing acquires wins a stale lock, repeated to catch the race reliably', async () => {
+    // A single race is a weak regression guard: the double-acquire bug this
+    // test guards against (a slow reclaimer renaming a peer's brand-new live
+    // lock out from under it — fixed by the inode check in acquireLock's
+    // verifyReclaimedLock) reproduced in roughly half of individual runs
+    // before that fix. Looping within one test body, rather than spawning a
+    // process per iteration, keeps the added cost under 1ms/iteration (~90ms
+    // for 200 iterations, measured), so a reintroduced race fails reliably
+    // instead of flaking occasionally.
     const lienDir = path.join(home, '.lien');
     await fs.mkdir(lienDir, { recursive: true });
-    const lockPath = path.join(lienDir, GC_LOCK_FILE);
-    await fs.writeFile(lockPath, 'stale', 'utf-8');
-    const staleTime = new Date(Date.now() - STALE_LOCK_AGE_MS);
-    await fs.utimes(lockPath, staleTime, staleTime);
+    const ITERATIONS = 100;
 
-    const [a, b] = await Promise.all([acquireLock(lockPath), acquireLock(lockPath)]);
-    const winners = [a, b].filter((handle): handle is fs.FileHandle => handle !== null);
+    for (let i = 0; i < ITERATIONS; i++) {
+      const lockPath = path.join(lienDir, `${GC_LOCK_FILE}-${i}`);
+      await fs.writeFile(lockPath, 'stale', 'utf-8');
+      const staleTime = new Date(Date.now() - STALE_LOCK_AGE_MS);
+      await fs.utimes(lockPath, staleTime, staleTime);
 
-    expect(winners).toHaveLength(1);
-    await winners[0].close();
-    // No leftover reclaim artifact from either racer.
+      const [a, b] = await Promise.all([acquireLock(lockPath), acquireLock(lockPath)]);
+      const winners = [a, b].filter((handle): handle is fs.FileHandle => handle !== null);
+
+      expect(winners).toHaveLength(1);
+      await winners[0].close();
+    }
+
+    // No leftover reclaim artifact from any racer, across all iterations.
     const entries = await fs.readdir(lienDir);
-    expect(entries.filter(name => name.startsWith(`${GC_LOCK_FILE}.reclaim-`))).toHaveLength(0);
+    expect(entries.filter(name => name.includes('.reclaim-'))).toHaveLength(0);
   });
 
   it('reclaims a stale lock and lets a fresh acquire proceed afterward', async () => {
