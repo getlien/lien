@@ -8,7 +8,7 @@ allowed-tools: Bash(git *), Read, Glob, Grep, Write, AskUserQuestion
 
 # Create Changeset for Next Release
 
-You are creating a changeset file (`.changeset/<name>.md`) that will trigger the Changesets CI workflow to version and publish the `@liendev/core` and `@liendev/lien` packages.
+You are creating a changeset file (`.changeset/<name>.md`) that will trigger the Changesets CI workflow to version and publish the three linked packages: `@liendev/parser`, `@liendev/core`, and `@liendev/lien` (see `.changeset/config.json`'s `linked` group — `review`, `action`, and `site` are `"private": true` and not part of it).
 
 ## Step 1: Find the Last Release
 
@@ -68,6 +68,8 @@ Categorize commits by their conventional commit prefix:
 The **highest bump wins**: if there's at least one `feat`, bump is `minor`. If there's a breaking change, bump is `major`. Otherwise `patch`.
 
 Skip commits that are purely internal (`chore`, `test`, `docs`, `ci`) unless they have user-facing impact.
+
+**Warning:** commits scoped `(review)` or `(action)` touch private, unpublished packages — exclude them from changeset content even if they use a `feat`/`fix` prefix, unless they *also* touch `packages/parser`, `packages/core`, or `packages/cli` (check with the Step 3 directory diff, not just the commit scope label — e.g. `(delta)` commits look feature-scoped but land in published cli/parser).
 
 ## Step 5: Build the Changeset Content
 
@@ -156,6 +158,7 @@ For reference, here's what a real changeset looked like (v0.41.0):
 - The three published packages are `@liendev/parser`, `@liendev/core`, and `@liendev/lien` — they are **linked** and always get the same version bump
 - Always read `.changeset/config.json` to verify the linked group — do not hardcode assumptions about which packages exist
 - Commits with scope `(parser)` affect `@liendev/parser`, scope `(core)` affect `@liendev/core`, scope `(cli)` or `(mcp)` affect `@liendev/lien`, no scope or `(security)` may affect all three
+- Commits with scope `(review)` or `(action)` affect private/unpublished packages — exclude from changeset content unless they also touch parser/core/cli
 - Skip merge commits (`chore: version packages`, `Merge pull request`)
 - Skip CI-only changes (`ci:`, workflow files)
 - When in doubt about whether to include a commit, include it — better to over-document than under-document

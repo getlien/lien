@@ -1,6 +1,6 @@
 ---
 name: test-harness
-description: Run the agent-review prompt harness in CC iteration mode against a rule or fixture. Free, low-fidelity. Use for prompt-authoring inner loop. The 9/10 reliability bar must still be measured via `npm run test:harness --calibrate 10` against OpenRouter/Gemini before shipping any prompt change.
+description: Run the agent-review prompt harness in CC iteration mode against a rule or fixture. Free, low-fidelity. Use for prompt-authoring inner loop. The 9/10 reliability bar must still be measured via `npm run test:harness -w @liendev/review -- --calibrate 10` against OpenRouter (the prod default model) before shipping any prompt change.
 disable-model-invocation: true
 user-invocable: true
 allowed-tools: Bash, Read, Write, Glob, Agent
@@ -10,7 +10,7 @@ allowed-tools: Bash, Read, Write, Glob, Agent
 
 You are running the test harness for the agent-review plugin's rule prompts. This is the **free, fast iteration** path. It uses Claude (you, via subagents) to drive the same system + initial prompts the agent plugin would build in production. Output is a qualitative pass/fail per fixture.
 
-**Critical caveat — relay this to the user once per invocation:** CC mode is *not* a substitute for the OpenRouter calibration run. A passing CC run means "Claude reading this prompt produces the expected behavior." Production runs Gemini 2.5 Flash, which is materially less capable. Before merging a prompt change, the user must run `OPENROUTER_API_KEY=… npm run test:harness -w @liendev/review -- --calibrate 10 --rule <rule>` and meet the 9/10 bar (per issue #538).
+**Critical caveat — relay this to the user once per invocation:** CC mode is *not* a substitute for the OpenRouter calibration run. A passing CC run means "Claude reading this prompt produces the expected behavior." Production runs the prod default model (see `DEFAULT_REVIEW_MODEL` in `packages/review/src/defaults.ts`, currently `moonshotai/kimi-k2.7-code`), which may behave differently than Claude on the same prompt. Before merging a prompt change, the user must run `OPENROUTER_API_KEY=… npm run test:harness -w @liendev/review -- --calibrate 10 --rule <rule>` and meet the 9/10 bar (per issue #538). A couple of existing canaries were calibrated on a different model (Gemini) and are known-red on the current default — see the harness README's "Known-red reconciliation" note before treating one of those as a new regression.
 
 ## Step 1: Resolve the argument
 

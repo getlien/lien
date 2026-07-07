@@ -3,12 +3,12 @@ name: dogfood
 description: Build Lien, restart MCP, then use a 7-agent team to test tools, review docs, audit code quality, evaluate architecture, review tests, audit security, and assess DX — all in parallel.
 disable-model-invocation: true
 user-invocable: true
-allowed-tools: Bash(npm run build), Bash(npm run typecheck), Bash(npm test), Bash(npm audit *), Bash(npx lien *), Bash(kill *), Bash(lsof *), Bash(node *), mcp__lien__search_code, mcp__lien__list_functions, mcp__lien__get_complexity, mcp__lien__get_files_context, mcp__lien__get_dependents, mcp__lien__find_similar, Read, Glob, Grep, Write, Edit, Task, TeamCreate, TeamDelete, TaskCreate, TaskUpdate, TaskList, TaskGet, SendMessage
+allowed-tools: Bash(npm run build), Bash(npm run typecheck), Bash(npm test), Bash(npm audit *), Bash(npx lien *), Bash(kill *), Bash(lsof *), Bash(node *), mcp__plugin_lien_lien__search_code, mcp__plugin_lien_lien__list_functions, mcp__plugin_lien_lien__get_complexity, mcp__plugin_lien_lien__get_files_context, mcp__plugin_lien_lien__get_dependents, mcp__plugin_lien_lien__find_similar, Read, Glob, Grep, Write, Edit, Agent, TaskCreate, TaskUpdate, TaskList, TaskGet
 ---
 
-# Lien Dogfooding Session (Team Edition)
+# Lien Dogfooding Session
 
-You are running a full dogfooding session for Lien. This session uses a **7-agent team** to run seven review workstreams **in parallel**.
+You are running a full dogfooding session for Lien. This session spawns **seven agents** to run seven review workstreams **in parallel**.
 
 ## Phase 1: Build & Verify
 
@@ -27,30 +27,28 @@ The Lien MCP server needs to be restarted so it picks up the fresh build.
 
 **IMPORTANT:** Wait for the user to confirm the MCP server is back before proceeding to Phase 3.
 
-## Phase 3: Spawn Agent Team
+## Phase 3: Spawn Seven Agents in Parallel
 
-Create a team called `dogfood` and spawn **seven agents in parallel**:
+| # | Agent | Report File |
+|---|------------|-------------|
+| 1 | `mcp-tester` | `.wip/dogfood-mcp-report.md` |
+| 2 | `docs-reviewer` | `.wip/dogfood-docs-report.md` |
+| 3 | `code-quality` | `.wip/dogfood-quality-report.md` |
+| 4 | `architect` | `.wip/dogfood-architecture-report.md` |
+| 5 | `test-reviewer` | `.wip/dogfood-tests-report.md` |
+| 6 | `security-auditor` | `.wip/dogfood-security-report.md` |
+| 7 | `dx-reviewer` | `.wip/dogfood-dx-report.md` |
 
-| # | Agent Name | Type | Report File |
-|---|------------|------|-------------|
-| 1 | `mcp-tester` | general-purpose | `.wip/dogfood-mcp-report.md` |
-| 2 | `docs-reviewer` | general-purpose | `.wip/dogfood-docs-report.md` |
-| 3 | `code-quality` | general-purpose | `.wip/dogfood-quality-report.md` |
-| 4 | `architect` | general-purpose | `.wip/dogfood-architecture-report.md` |
-| 5 | `test-reviewer` | general-purpose | `.wip/dogfood-tests-report.md` |
-| 6 | `security-auditor` | general-purpose | `.wip/dogfood-security-report.md` |
-| 7 | `dx-reviewer` | general-purpose | `.wip/dogfood-dx-report.md` |
-
-Prompt each agent with its full plan from the corresponding section below. Create tasks for all seven agents using `TaskCreate`, spawn them with the `Task` tool using `team_name: "dogfood"`, and assign tasks via `TaskUpdate`.
+Create one task per agent with `TaskCreate`, then spawn all seven with the `Agent` tool **in a single message** (parallel Agent calls), each prompted with its full plan from the corresponding section below. Mark each task `in_progress` via `TaskUpdate` as its agent starts.
 
 ## Phase 4: Wait & Collect Results
 
-Wait for all seven agents to complete their tasks. Once all are done:
+Wait for all seven agents to return. Once all are done:
 
-1. Read all seven report files
-2. Produce the combined summary report (see "Combined Report" section)
-3. Save it to `.wip/dogfood-report.md`
-4. Shut down all agents and delete the team
+1. Mark each task `completed` via `TaskUpdate`
+2. Read all seven report files
+3. Produce the combined summary report (see "Combined Report" section)
+4. Save it to `.wip/dogfood-report.md`
 
 ---
 
@@ -86,7 +84,7 @@ Run at least 3 pattern queries:
 Test with single and batch calls:
 
 - Single: `get_files_context({ filepaths: "packages/cli/src/mcp/tools.ts" })`
-- Batch: `get_files_context({ filepaths: ["packages/core/src/indexer/incremental.ts", "packages/core/src/vectordb/query.ts"] })`
+- Batch: `get_files_context({ filepaths: ["packages/core/src/indexer/incremental.ts", "packages/core/src/vectordb/factory.ts"] })`
 
 **Check:** Verify `testAssociations` are returned and point to actual test files. Verify chunks contain meaningful code sections.
 
@@ -94,9 +92,9 @@ Test with single and batch calls:
 
 Test impact analysis:
 
-- `get_dependents({ filepath: "packages/core/src/vectordb/query.ts" })`
+- `get_dependents({ filepath: "packages/core/src/vectordb/factory.ts" })`
 - `get_dependents({ filepath: "packages/core/src/indexer/incremental.ts" })`
-- With symbol: `get_dependents({ filepath: "packages/core/src/vectordb/query.ts", symbol: "search" })`
+- With symbol: `get_dependents({ filepath: "packages/core/src/vectordb/sqlite/fts-search.ts", symbol: "keywordSearch" })`
 
 **Check:** Dependents should be files that actually import the target. Verify a few by reading the import statements.
 
@@ -220,9 +218,10 @@ You are a **senior JavaScript/TypeScript developer** performing a code quality a
 
 ### Scope
 
-Review the source code in both packages:
-- `packages/core/src/` — AST parsing, indexing, vector DB, complexity analysis
-- `packages/cli/src/` — CLI commands, MCP server, embeddings, config, git integration
+Review the source code across the three published packages:
+- `packages/parser/src/` — AST parsing, chunking, complexity metrics, ecosystem detection
+- `packages/core/src/` — structural store (SQLite + FTS5/BM25 lexical search), config, git state, indexing orchestration
+- `packages/cli/src/` — CLI commands, MCP server, file watcher
 
 ### What to look for
 
@@ -258,10 +257,10 @@ Review the source code in both packages:
 
 1. Start with `get_complexity({ top: 20 })` to identify the most complex functions — these are where bugs hide
 2. Use `list_functions({ symbolType: "class" })` and `list_functions({ symbolType: "function", limit: 100 })` to get an overview of the codebase structure
-3. Read the highest-complexity files and the core modules (MCP handlers, indexer, vector DB)
+3. Read the highest-complexity files and the core modules (MCP handlers, indexer, structural store)
 4. Use `find_similar` to check for duplicated patterns
 5. Use `get_dependents` on core files to understand which modules are most critical
-6. Spot-check error handling in I/O-heavy code (file scanning, embedding generation, DB operations)
+6. Spot-check error handling in I/O-heavy code (file scanning, chunking, structural-store writes)
 
 ### What NOT to flag
 
@@ -306,19 +305,21 @@ You are a **senior software architect** evaluating the overall architecture of L
 
 ### Context
 
-Lien is a local-first lexical (FTS5) code search and dependency-analysis tool with two packages:
-- `@liendev/core` — AST parsing, language definitions, vector DB operations, complexity analysis
-- `@liendev/lien` (cli) — CLI commands, MCP server, embeddings, config, indexing pipeline, git integration
+Lien is a local-first structural code search tool (lexical FTS5/BM25 search + dependency analysis), split into three published packages plus three unpublished ones:
+- `@liendev/parser` — AST parsing, language definitions, chunking, complexity analysis. Zero deps on core.
+- `@liendev/core` — structural store (`SqliteBackend` behind a `VectorDBInterface`, plus `OverlayBackend` for worktree-shared indices), config, git state tracking
+- `@liendev/lien` (cli) — CLI commands, MCP server, file watcher
+- `review` / `action` / `site` (private, unpublished) — PR review engine, self-hostable GitHub Action, docs site
 
-It serves AI coding assistants (Cursor, Claude Code) via MCP.
+Dependency chain: `parser` ← `core` ← `cli`. It serves AI coding assistants (Cursor, Claude Code) via MCP.
 
 ### What to evaluate
 
 **Package boundaries & responsibilities:**
-- Is the `core` vs `cli` split clean? Are responsibilities correctly assigned?
+- Is the `parser` / `core` / `cli` split clean? Are responsibilities correctly assigned? (`parser` must have zero deps on `core`)
 - Are there things in `cli` that belong in `core` (or vice versa)?
 - Would any additional package splits improve the architecture?
-- Check `get_dependents` on key modules to see if dependency flow is healthy (core should not depend on cli)
+- Check `get_dependents` on key modules to see if dependency flow is healthy (parser should not depend on core; core should not depend on cli)
 
 **Module cohesion & coupling:**
 - Do modules have clear, single responsibilities?
@@ -329,36 +330,36 @@ It serves AI coding assistants (Cursor, Claude Code) via MCP.
 **Extensibility & plugin points:**
 - Is the language system (AST languages) properly extensible? Review the registry pattern
 - Is the MCP tool system easy to extend with new tools?
-- Is the vector DB layer properly abstracted (LanceDB vs Qdrant)?
-- Are embedding models swappable?
+- Is the structural store properly abstracted behind `VectorDBInterface` (`createVectorDB` factory)? Would swapping the backend (beyond `SqliteBackend`/`OverlayBackend`) require touching callers?
 
 **Data flow & pipeline design:**
-- Trace the indexing pipeline end-to-end: file discovery -> AST parsing -> chunking -> embedding -> storage
+- Trace the indexing pipeline end-to-end: file discovery -> AST parsing -> chunking -> structural-store write
 - Is the pipeline clear, or are there hidden side effects or implicit ordering?
 - How does incremental indexing work? Is it robust?
 - How does the MCP server handle concurrent requests?
+- For worktrees: does the `OverlayBackend` (read-only base + writable overlay) correctly isolate a linked worktree's index from the main checkout's?
 
 **Error resilience & failure modes:**
 - What happens when indexing fails mid-way? Is there recovery?
-- What happens when the vector DB is corrupted or missing?
+- What happens when the structural store (SQLite file) is corrupted or missing?
 - How does the system handle a codebase too large for memory?
 - Are there graceful degradation paths?
 
 **Scalability concerns:**
 - What are the current bottlenecks? (Use `get_complexity` for computation hotspots)
 - How does performance scale with codebase size? (file count, LOC, languages)
-- Is the embedding pipeline the bottleneck, or is it the vector DB?
+- Is FTS5/BM25 lexical search the bottleneck, or is chunking/parsing?
 - Are there O(n^2) operations hiding anywhere?
 
 ### How to review
 
 1. Read `CLAUDE.md` and `docs/architecture/` to understand the intended architecture
-2. Use `search_code` to find key architectural components: indexing pipeline, MCP server, vector DB, config system
+2. Use `search_code` to find key architectural components: indexing pipeline, MCP server, structural store, config system
 3. Use `list_functions({ symbolType: "class" })` and `list_functions({ symbolType: "interface" })` to map out the type system
 4. Use `get_dependents` on core modules to trace dependency flow
 5. Read the entry points: CLI commands, MCP server setup, indexer pipeline
 6. Use `get_complexity({ top: 20 })` to identify structural complexity
-7. Check the `languages/` directory for the extensibility pattern
+7. Check `packages/parser/src/ast/languages/` for the extensibility pattern
 
 ### Output
 
@@ -399,16 +400,17 @@ You are a **senior QA engineer** auditing the test suite of the Lien codebase. Y
 
 ### Scope
 
-Review all test files across both packages:
+Review all test files across the three published packages:
+- `packages/parser/src/**/*.test.ts`
 - `packages/core/src/**/*.test.ts`
 - `packages/cli/src/**/*.test.ts`
 
 ### What to evaluate
 
 **Coverage gaps:**
-- Use `get_files_context` on key source files and check their `testAssociations`. Flag any source files with **zero test associations**, especially in critical modules (MCP handlers, indexer, vector DB, config)
+- Use `get_files_context` on key source files and check their `testAssociations`. Flag any source files with **zero test associations**, especially in critical modules (MCP handlers, indexer, structural store, config)
 - Systematically check: for each major source directory, are there corresponding test files?
-- Focus on: `packages/cli/src/mcp/`, `packages/cli/src/indexer/`, `packages/cli/src/vectordb/`, `packages/cli/src/config/`, `packages/core/src/indexer/ast/`, `packages/core/src/vectordb/`
+- Focus on: `packages/cli/src/mcp/`, `packages/core/src/indexer/`, `packages/core/src/vectordb/`, `packages/core/src/config/`, `packages/parser/src/ast/`
 
 **Test quality:**
 - Are tests testing behavior or implementation details? (behavior is better)
@@ -440,7 +442,7 @@ Review all test files across both packages:
 
 1. Use `Glob` to find all test files: `**/*.test.ts`, `**/*.spec.ts`
 2. Use `get_files_context` on critical source files to check `testAssociations`
-3. Read test files for the most critical modules (MCP handlers, indexer, vector DB)
+3. Read test files for the most critical modules (MCP handlers, indexer, structural store)
 4. Use `search_code({ query: "MCP tool test coverage vi.mock handler" })` to find test patterns
 5. Use `find_similar` on a well-written test to see if the pattern is consistent
 6. Check for test utilities: `Grep` for `beforeEach`, `afterEach`, `jest.mock`, `vi.mock` patterns
@@ -454,11 +456,10 @@ Write a detailed report to `.wip/dogfood-tests-report.md` with:
 | Module | Source Files | Test Files | Coverage Gap |
 |--------|-------------|------------|--------------|
 | `cli/mcp/` | N | N | list untested files |
-| `cli/indexer/` | N | N | ... |
-| `cli/vectordb/` | N | N | ... |
-| `cli/config/` | N | N | ... |
-| `core/indexer/ast/` | N | N | ... |
+| `core/indexer/` | N | N | ... |
 | `core/vectordb/` | N | N | ... |
+| `core/config/` | N | N | ... |
+| `parser/ast/` | N | N | ... |
 | ... | ... | ... | ... |
 
 **Test Quality Assessment:**
@@ -496,7 +497,7 @@ Lien's attack surface includes:
 - **MCP tool inputs** — AI assistants send file paths, search queries, code snippets, and regex patterns. These are the primary untrusted input.
 - **File system access** — Lien reads files from the user's codebase during indexing. Malicious file content (crafted source files) could exploit the parser.
 - **Network** — The MCP server listens on port 7133. Who can connect? Is it localhost-only?
-- **Dependencies** — Third-party npm packages (tree-sitter, LanceDB, transformers.js, etc.)
+- **Dependencies** — Third-party npm packages (tree-sitter grammars, better-sqlite3, etc.)
 - **Config files** — `lien.config.json` is read and parsed. Can a malicious config cause harm?
 
 ### What to check
@@ -509,7 +510,7 @@ Lien's attack surface includes:
 
 **Input validation on MCP requests:**
 - Are MCP tool parameters validated before use? (types, lengths, allowed characters)
-- Can a malicious `query` string in `search_code` cause issues? (injection into vector DB queries)
+- Can a malicious `query` string in `search_code` cause issues? (FTS5 query-syntax injection into the structural store)
 - Can a malicious `pattern` in `list_functions` cause ReDoS (catastrophic regex backtracking)?
 - Can a malicious `code` snippet in `find_similar` cause issues?
 - What happens with extremely large inputs? (memory exhaustion)

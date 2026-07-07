@@ -11,7 +11,10 @@ Local-first structural code search tool (lexical FTS5 search + dependency analys
 
 **Monorepo Structure:**
 - `packages/` — TypeScript packages: `parser` and `core` publish as `@liendev/parser`/`@liendev/core`; `cli` publishes as `@liendev/lien`; `review`, `action`, and `site` are private (unpublished).
-- Dependency chain: `parser` ← `core` ← `cli`; `review` depends on `parser` only (not `core`); `action` wraps `review` as a self-hostable GitHub Action ([ADR-009](docs/architecture/decisions/0009-extract-parser-package.md)).
+- Dependency chain: `parser` ← `core` ← `cli`; `review` depends on `parser` only (not `core`); `action` wraps `review` as a self-hostable GitHub Action ([ADR-012](docs/architecture/decisions/0012-self-hostable-review-action.md)).
+- `plugins/claude/` — the dogfooded Claude Code plugin (MCP server config + hooks). Hooks auto-annotate reads and run the `lien delta` gate on writes, i.e. they automate two of this file's own MANDATORY policies — see `plugins/claude/README.md`.
+- `lien-review-testbed/` — tracked, multi-language fixture app used by the review-agent test harness. Not a demo to clean up.
+- `platform/` and `packages/runner` — retired hosted-platform remnants (see [ADR-012](docs/architecture/decisions/0012-self-hostable-review-action.md)); safe to ignore.
 
 **Package Structure:**
 ```
@@ -25,6 +28,7 @@ packages/parser/src/        # AST parsing, chunking, complexity, scanning — ze
 ├── insights/        # Complexity report types
 ├── ecosystem-presets.ts  # Project-type detection — replaced the old frameworks/
 │                         # plugin system (ADR-007); NOT a `frameworks/` directory
+├── workspace-packages.ts # Workspace specifier resolution for cross-package dependents (#681)
 └── scanner.ts, gitignore.ts, chunker.ts, dependency-analyzer.ts,
     test-associations.ts, symbol-extractor.ts, content-hash.ts
 
@@ -32,12 +36,14 @@ packages/core/src/          # Structural store, config, git — depends on parse
 ├── indexer/     # Indexing orchestration: manifest, incremental updates, scanning glue
 ├── vectordb/    # Storage backend behind VectorDBInterface + createVectorDB factory;
 │   └── sqlite/  #   SqliteBackend — SQLite structural store + FTS5/BM25 lexical search
-│                #   (LanceDB + embeddings removed — see ADR-0011)
+│                #   (LanceDB + embeddings removed — see ADR-011)
 │                #   OverlayBackend shares a linked worktree's index with its main
 │                #   checkout (read-only base + writable overlay) — see
 │                #   docs/architecture/worktree-aware-indexing.md
 ├── config/      # Config management & migration (GlobalConfig + per-project ConfigService)
 ├── git/         # Git state tracking, linked-worktree detection (git/worktree.ts)
+├── errors/      # Error codes + typed error classes
+├── utils/       # Shared helpers (chunk-array, safe-regex, version)
 └── insights/    # ComplexityAnalyzer + formatters (text/JSON/SARIF)
 
 packages/cli/src/           # CLI + MCP server — depends on core and parser
@@ -56,6 +62,8 @@ packages/site/              # VitePress docs site (lien.dev)
 ---
 
 ## Lien MCP Tools — MANDATORY Usage
+
+<!-- Keep in sync with SERVER_INSTRUCTIONS in packages/cli/src/mcp/instructions.ts — it re-injects this same policy into every connecting MCP client. -->
 
 Lien provides lexical (FTS5) code search and dependency analysis via MCP. These tools are **not optional** — they MUST be used as described below. Using grep/glob when a Lien tool is appropriate is a violation of this project's workflow.
 
@@ -102,7 +110,7 @@ exists specifically to make that cycle ~30 minutes instead of hours.
 
 - Inner loop: invoke `/test-harness <rule-id>` from CC for free
   Claude-subagent iteration on existing fixtures.
-- Shipping gate: `npm run test:harness -- --rule <rule-id> --calibrate 10`
+- Shipping gate: `npm run test:harness -w @liendev/review -- --rule <rule-id> --calibrate 10`
   must hit ≥ 9/10 against OpenRouter, on the prod default model
   (`moonshotai/kimi-k2.7-code` — omit `--model` to use it) before merging
   the change. The harness auto-loads `OPENROUTER_API_KEY` from `.env` at
@@ -117,6 +125,13 @@ exists specifically to make that cycle ~30 minutes instead of hours.
 A rule is not shippable until its calibration meets the bar. CC mode is
 necessary but not sufficient.
 
+**Design principle:** if a rule's detection is really a deterministic
+index/diff query wearing an LLM-reasoning costume (e.g. "does this literal
+still appear unconditionally elsewhere?"), precompute it and inject it as a
+signal block — same pattern as `blast_radius` — instead of asking the agent
+to grep-and-reason. Deterministic signals are unit-testable with zero LLM
+spend; see `packages/review/src/stale-literal-signals.ts` for the template.
+
 ## Workflow Orchestration
 
 ### 1. Plan Mode Default
@@ -130,11 +145,16 @@ necessary but not sufficient.
 - Offload research, exploration, and parallel analysis to subagents
 - For complex problems, throw more compute at it via subagents
 - One task per subagent for focused execution
+- Model policy: dispatch subagents on Sonnet by default (build, fix, verify,
+  cleanup, exploration probes). Reserve Opus for orchestration and adversarial
+  review (verifying/attacking another agent's work, judging rebuttals).
 
 ### 3. Self-Improvement Loop
 - At the start of each session, read `.claude/lessons.md` if it exists
 - After ANY correction from the user: update `.claude/lessons.md` with the pattern
-- Write rules that prevent the same mistake from recurring
+- `.claude/lessons.md` is git-tracked — lessons that prove durable should be
+  promoted into this file or `docs/` and removed from lessons.md, not left to
+  accumulate indefinitely
 
 ### 4. Verification Before Done
 - Never mark a task complete without proving it works
@@ -171,7 +191,7 @@ Examples of temporary docs:
 
 These live in project root and are tracked in git:
 - `README.md` - Main project documentation
-- `CHANGELOG.md` - Release history (maintained by release script)
+- `CHANGELOG.md` - Historical release notes (frozen; current changelogs are per-package, generated by changesets)
 - `CONTRIBUTING.md` - Contributor guidelines
 - `docs/` - Architecture and design documentation
 
@@ -196,6 +216,8 @@ These live in project root and are tracked in git:
 - Don't build "just in case"
 - Wait for actual need
 - Delete unused code aggressively
+- Perf work: profile against the real workload first. Prefer a surgical fix
+  to existing code over a new daemon/process/file
 
 ### DRY (Don't Repeat Yourself)
 - But don't abstract too early (wait for 3rd use)
@@ -277,16 +299,48 @@ npm test              # All tests must pass
 lien delta            # No NEW complexity threshold crossings vs HEAD (exit 0)
 ```
 
-**No exceptions.** This prevents broken builds.
+**No exceptions.** This prevents broken builds. Gates 1-5 are CI-backstopped
+(`.github/workflows/ci.yml`) on every PR; gate 6 (`lien delta`) is **not** —
+there is no CI step for it, so it's agent-honor-only. Don't skip it just
+because CI would still go green without it.
+
+`npm run build` doesn't cover `packages/site`; for docs/site changes also run
+`npm run docs:build`. `npm test` excludes `packages/cli`'s E2E suite
+(`vitest run --exclude 'test/e2e/**'`); cross-language AST changes should also
+run the relevant `npm run test:e2e:<lang> -w packages/cli`.
 
 **`lien delta`** is the sixth gate: a ~50 ms deterministic check that fails
 (exit 1) only when your working-tree changes push a function's complexity over a
 threshold it was under at `HEAD` (a new-over-threshold or crossed function).
 Improving, or merely touching a pre-existing violation, never fails. If it
 flags a crossing, simplify the function before committing — do not reach for
-`--soft` (advisory, always exit 0) to silence it.
+`--soft` (advisory, always exit 0) to silence it. `lien` isn't on PATH until a
+one-time `cd packages/cli && npm link` (see CONTRIBUTING.md); without that,
+use `node packages/cli/dist/index.js delta`.
 
 **Tip:** Run `npm run fix` to auto-fix both ESLint and Prettier issues.
+
+**Fast inner loop:** while iterating, scope tests to the touched package
+(`npm run test -w @liendev/<pkg> -- path/to/file.test.ts`) — the full gate
+chain above is for the final pre-commit run, not every edit.
+
+**Working in a git worktree:** a fresh `npm install` fails there (native
+tree-sitter won't compile) — see `docs/development/worktree-development.md`.
+
+---
+
+## Before Merging a PR
+
+- **CI-green ≠ review-clean.** The Lien Review check can pass even with
+  findings — fetch and triage the `lien-stats` block and inline comments
+  before merging: `gh pr view N --json body` (look for the `lien-stats`
+  block) and `gh api repos/getlien/lien/pulls/N/comments`. Fix or explicitly
+  dismiss each finding first.
+- Never `gh pr merge --admin` to bypass checks. Wait for CI.
+- Stacked PRs: squash-merging a parent with `--delete-branch` auto-closes
+  child PRs whose base was that branch, and a closed PR with a deleted base
+  can't be reopened. Rebase children onto main first:
+  `git rebase --onto origin/main <old-parent-tip> <child-branch>`.
 
 ---
 
