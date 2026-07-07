@@ -34,7 +34,7 @@ lien config list                   # Show all config values
 |-----|--------|-------------|
 | `backend` | `sqlite` | Storage backend (SQLite structural store + FTS5 search) |
 
-> **Note:** The SQLite structural store is the only backend. The LanceDB + embeddings backend was removed (see [ADR-011](decisions/0011-sqlite-structural-store-fts5-lexical-search.md)) and the Qdrant backend was retired before it (see [ADR-010](decisions/0010-retire-qdrant-backend.md)). Existing configs that name a retired backend (`backend: "lancedb"` / `"qdrant"`, or `qdrant.*` keys) do not crash: Lien warns once and uses the SQLite backend.
+> **Note:** The SQLite structural store is the only backend. The LanceDB + embeddings backend was removed (see [ADR-011](decisions/0011-sqlite-structural-store-fts5-lexical-search.md)) and the Qdrant backend was retired before it (see [ADR-010](decisions/0010-retire-qdrant-backend.md)). Existing configs that name a retired backend (`backend: "lancedb"` / `"qdrant"`, or `qdrant.*` keys) do not crash: Lien warns once and uses the SQLite backend. Retired per-project keys (`embeddings.*`, `core.embeddingBatchSize`) also still load — they are inert and dropped on the next config save.
 
 ---
 
