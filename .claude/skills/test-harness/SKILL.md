@@ -153,7 +153,7 @@ Auto-loads `OPENROUTER_API_KEY` from `.env` at the repo root via
 
 ## What this skill does NOT do
 
-- Run the actual `AgentReviewPlugin.analyze()` code path. (That requires OpenRouter mode, `npm run test:harness`.)
+- Run the actual `AgentReviewPlugin.analyze()` code path. (That requires OpenRouter mode, `npm run test:harness -w @liendev/review`.)
 - Measure cost or token usage. (Subagents don't expose this back to the parent.)
 - Hit the 9/10 reliability bar. (CC fidelity is too high; only OpenRouter calibration counts toward shipping decisions.)
 

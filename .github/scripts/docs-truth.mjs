@@ -136,6 +136,26 @@ if (fs.existsSync(packagesDir)) {
 const NPM_RUN_RE = /npm run ([\w.-]+(?::[\w.-]+)*)(?:\s+-w[= ]([^\s`"')]+))?/g;
 const PLACEHOLDER_RE = /[<>$*]/;
 
+function workspaceViolation(scriptName, workspace) {
+  const scripts = workspaceScripts.get(workspace);
+  if (!scripts) return `'npm run ${scriptName} -w ${workspace}' references an unknown workspace`;
+  if (scriptName in scripts) return null;
+  return `'npm run ${scriptName}' has no matching script in workspace '${workspace}'`;
+}
+
+// Without -w, a doc inside packages/<pkg>/ assumes that package's cwd —
+// resolve against the containing package's scripts first, then root.
+function bareViolation(scriptName, relPath) {
+  const pkgDir = relPath.match(/^packages\/([^/]+)\//)?.[1];
+  const containing = pkgDir ? workspaceScripts.get(`packages/${pkgDir}`) : undefined;
+  if (containing && scriptName in containing) return null;
+  if (scriptName in rootScripts) return null;
+  const where = containing
+    ? `the root package.json or workspace 'packages/${pkgDir}'`
+    : 'the root package.json';
+  return `'npm run ${scriptName}' has no matching script in ${where}`;
+}
+
 function checkNpmRunRefs(relPath, lines) {
   lines.forEach((line, idx) => {
     for (const match of line.matchAll(NPM_RUN_RE)) {
@@ -145,19 +165,10 @@ function checkNpmRunRefs(relPath, lines) {
       if (PLACEHOLDER_RE.test(line.slice(match.index))) continue;
 
       const [, scriptName, workspace] = match;
-      const scripts = workspace ? workspaceScripts.get(workspace) : rootScripts;
-      if (!scripts) {
-        report(
-          relPath,
-          idx + 1,
-          `'npm run ${scriptName} -w ${workspace}' references an unknown workspace`,
-        );
-        continue;
-      }
-      if (!(scriptName in scripts)) {
-        const where = workspace ? `workspace '${workspace}'` : 'the root package.json';
-        report(relPath, idx + 1, `'npm run ${scriptName}' has no matching script in ${where}`);
-      }
+      const violation = workspace
+        ? workspaceViolation(scriptName, workspace)
+        : bareViolation(scriptName, relPath);
+      if (violation) report(relPath, idx + 1, violation);
     }
   });
 }
