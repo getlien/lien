@@ -16,6 +16,9 @@ jobs:
       contents: write # Create releases
       pull-requests: write # Create "Version Packages" PR
       id-token: write # OIDC for npm provenance
+    outputs:
+      published: ${{ steps.changesets.outputs.published }}
+      published-packages: ${{ steps.changesets.outputs.publishedPackages }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -40,6 +43,7 @@ jobs:
       - run: npm run build
 
       - name: Create Release PR or Publish
+        id: changesets
         uses: changesets/action@v1
         with:
           publish: npm run release
@@ -54,3 +58,41 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # No NPM_TOKEN needed - uses OIDC provenance
+
+  registry-smoke:
+    name: Post-publish registry smoke test
+    needs: release
+    if: needs.release.outputs.published == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    # `release`, above, only ever installs @liendev/* from the local npm
+    # workspace (via `npm ci`) and the CI `release-smoke-test` job
+    # (.github/workflows/ci.yml) only ever installs packed LOCAL tarballs —
+    # neither can detect resolution skew against what's actually live on the
+    # registry. That blind spot is exactly what shipped @liendev/core
+    # 0.55.0/0.56.0: they imported `getIndexDir` from @liendev/parser, but
+    # parser had not been republished with that export, so every fresh
+    # `npx @liendev/lien@latest serve` crashed at startup with a
+    # missing-export SyntaxError. This job installs the version(s) that were
+    # JUST published FROM THE REGISTRY, in a directory with no workspace or
+    # lockfile to fall back on, and boot-probes the result — the same path a
+    # real first-time `npx @liendev/lien` user takes. A red job here is a
+    # post-publish alarm: the release cannot be rolled back (npm publishes
+    # are immutable), so the manual remediation is `npm deprecate` on the
+    # broken version(s) (see the script's failure banner) followed by a
+    # fixed patch release.
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run registry smoke test
+        env:
+          PUBLISHED_PACKAGES: ${{ needs.release.outputs.published-packages }}
+        run: .github/scripts/registry-smoke.sh
