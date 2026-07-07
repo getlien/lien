@@ -67,7 +67,13 @@ if [ -n "${LIEN_VERSION:-}" ]; then
 elif [ -n "${PUBLISHED_PACKAGES:-}" ]; then
   REQUESTED="$(node -e "
     const pkgs = JSON.parse(process.env.PUBLISHED_PACKAGES);
-    const lien = pkgs.find(p => p.name === '@liendev/lien');
+    if (!Array.isArray(pkgs)) {
+      throw new Error('PUBLISHED_PACKAGES is not a JSON array: ' + process.env.PUBLISHED_PACKAGES);
+    }
+    const lien = pkgs.find(p => p && p.name === '@liendev/lien');
+    if (lien && typeof lien.version !== 'string') {
+      throw new Error('publishedPackages entry for @liendev/lien has no version: ' + JSON.stringify(lien));
+    }
     console.log(lien ? lien.version : 'latest');
   ")"
   if [ "$REQUESTED" = "latest" ]; then

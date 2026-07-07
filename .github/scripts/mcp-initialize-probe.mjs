@@ -22,7 +22,10 @@ if (!command) {
   process.exit(1);
 }
 
-const TIMEOUT_MS = Number(process.env.MCP_PROBE_TIMEOUT_MS ?? 90_000);
+// A malformed override (empty, non-numeric) must not collapse the timeout to
+// 0ms/NaN and fail a healthy server instantly — fall back to the default.
+const rawTimeout = Number(process.env.MCP_PROBE_TIMEOUT_MS ?? '');
+const TIMEOUT_MS = Number.isFinite(rawTimeout) && rawTimeout > 0 ? rawTimeout : 90_000;
 
 const request = {
   jsonrpc: '2.0',
