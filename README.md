@@ -32,7 +32,7 @@ Lien connects AI coding assistants like Cursor and Claude Code to your codebase 
 /plugin install lien
 ```
 
-That's it. Lien's MCP tools and the Explore agent are now available in every Claude Code session, in every repo. First use in a new git repo triggers a one-time index automatically — no `lien init` per project.
+That's it. Lien's MCP tools and hooks are now available in every Claude Code session, in every repo — including a hook that enhances Claude Code's built-in Explore agent with Lien-tool guidance. First use in a new git repo triggers a one-time index automatically — no `lien init` per project.
 
 ### Other editors (Cursor, Windsurf, OpenCode, Kilo Code, Antigravity)
 

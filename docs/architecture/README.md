@@ -127,6 +127,43 @@ Explains how Lien links test files to source files:
 
 ---
 
+### 🌳 [Worktree-Aware Indexing](./worktree-aware-indexing.md)
+**Sharing one index between a git worktree and its main checkout**
+
+Explains how a linked worktree avoids building a full independent index:
+- Read-only base (main checkout's index) + small writable overlay (worktree-only diffs)
+- Detection via `git rev-parse --git-dir` vs `--git-common-dir`
+- Fallback to standalone indexing when the base is missing or incompatible
+
+**Read this** if you're touching `OverlayBackend` or debugging worktree index staleness.
+
+---
+
+### 📉 [lien delta](./lien-delta.md)
+**Complexity-delta gate: catch new threshold crossings before commit**
+
+Explains the write-time/commit-time complexity-delta gate:
+- `lien delta` CLI — compares the working tree vs `HEAD`, flags only NEW crossings
+- `plugins/claude/hooks/delta-write.sh` — the same check as a PostToolUse edit-hook warning
+- Shared `computeComplexityDelta` primitive in `@liendev/parser` (also used by PR review)
+
+**Read this** to understand CLAUDE.md's sixth pre-commit gate.
+
+---
+
+### 🪝 [Claude Code Hook Output Channels](./claude-code-hook-channels.md)
+**Which hook output actually reaches the model**
+
+Reference for `plugins/claude/hooks/*` authors: which Claude Code hook output channels
+(`additionalContext`, `updatedInput.prompt`, exit-2 stderr) surface to the model on its
+next turn, and which are silently dropped (bare `systemMessage`, `updatedToolOutput` for
+`Read`). Verified behaviorally against a specific Claude Code version — re-verify if the
+hook protocol changes.
+
+**Read this** before adding or changing a plugin hook.
+
+---
+
 ## 🎯 Quick Reference
 
 ### For New Contributors
@@ -147,6 +184,9 @@ Explains how Lien links test files to source files:
 | File watching & git tracking | [MCP Server Flow](./mcp-server-flow.md) → Background monitoring |
 | Dependency analysis (`get_dependents`) | [MCP Server Flow](./mcp-server-flow.md) → Available MCP Tools |
 | Complexity analysis (`get_complexity`) | [MCP Server Flow](./mcp-server-flow.md) → Available MCP Tools |
+| Worktree-shared indexing | [Worktree-Aware Indexing](./worktree-aware-indexing.md) |
+| Pre-commit complexity gate (`lien delta`) | [lien delta](./lien-delta.md) |
+| Plugin hook design (what reaches the model) | [Claude Code Hook Output Channels](./claude-code-hook-channels.md) |
 
 ### For Debugging
 
@@ -249,7 +289,7 @@ packages/site/           # @liendev/site (private) — VitePress docs site (lien
 - **Memory:** modest — no embedding model resident
 
 ### Current Scaling
-- **Single-repo, local-first**: `SqliteBackend` is the only backend (LanceDB + embeddings were removed — see [ADR-011](decisions/0011-sqlite-structural-store-fts5-lexical-search.md); Qdrant was retired earlier — see [ADR-0010](decisions/0010-retire-qdrant-backend.md))
+- **Single-repo, local-first**: `SqliteBackend` is the only backend (LanceDB + embeddings were removed — see [ADR-011](decisions/0011-sqlite-structural-store-fts5-lexical-search.md); Qdrant was retired earlier — see [ADR-010](decisions/0010-retire-qdrant-backend.md))
 - **VectorDB factory**: The `createVectorDB` factory and `VectorDBInterface` seam are retained so an alternative backend can be reintroduced
 
 ### Future Scaling
@@ -291,16 +331,18 @@ Our Mermaid diagrams follow these conventions:
 
 ## 🔄 Version History
 
-### v0.50.x (Current)
-- ✅ LanceDB + embeddings removed; SQLite structural store + FTS5/BM25 lexical search is the only backend (ADR-011)
-- ✅ No embedding model download — instant, offline first index; ~1.8MB native install
-- ✅ ADR-008 superseded by ADR-011; ADR-011 added
+### v0.60.x (Current)
+- ✅ Structural-first pivot complete (0.52.0-0.54.0): SQLite + FTS5/BM25 lexical search becomes the default, then the *only* backend; LanceDB + the embeddings stack deleted; `semantic_search` renamed to `search_code` (ADR-011)
+- ✅ Worktree-aware indexing shipped (0.55.0) and hardened for concurrency (0.59.0): a linked git worktree shares its main checkout's index instead of building a full independent copy — see [Worktree-Aware Indexing](./worktree-aware-indexing.md)
+- ✅ `lien delta` shipped in two phases (0.57.0-0.58.0): a pre-commit complexity-delta CLI gate, then a write-time edit-hook warning — see [lien delta](./lien-delta.md)
+- ✅ `lien gc` added (0.60.0): garbage-collects stale and orphaned `~/.lien/indices` directories
+- ✅ ADR-008 superseded by ADR-011; ADR-011, ADR-012 added
 
 ### v0.49.x
 - ✅ Docs resynced to match current package layout and product surface
 - ✅ `@liendev/parser` extracted from `@liendev/core` (ADR-009)
 - ✅ Qdrant backend retired; LanceDB is the only backend at this version (ADR-010)
-- ✅ Lien Review shipped as a self-hostable GitHub Action (`packages/review` + `packages/action`), replacing the retired hosted runner/platform
+- ✅ Lien Review shipped as a self-hostable GitHub Action (`packages/review` + `packages/action`), replacing the retired hosted runner/platform (ADR-012)
 - ✅ `lien path` and `lien annotate` commands added (hook-facing)
 - ✅ ADR-009, ADR-010 added
 
@@ -352,7 +394,7 @@ If something in the architecture is unclear:
 
 ---
 
-**Last Updated:** July 4, 2026
+**Last Updated:** July 7, 2026
 **Maintained By:** Lien contributors
-**Status:** ✅ Complete and up-to-date (v0.50.x)
+**Status:** ✅ Complete and up-to-date (v0.60.x)
 

@@ -55,9 +55,6 @@
   "engines": {
     "node": ">=22.21.0"
   },
-  "dependencies": {
-    "@liendev/core": "*"
-  },
   "devDependencies": {
     "@changesets/cli": "^2.29.8",
     "eslint": "^9.39.2",

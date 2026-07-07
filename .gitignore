@@ -7,11 +7,15 @@ node_modules/
 dist/
 build/
 *.tsbuildinfo
-docs/
+# Per-package generated docs (e.g. packages/cli's `npm run docs` -> typedoc
+# output at packages/cli/docs/). Anchored to packages/*/ so it never shadows
+# the tracked root docs/ (architecture) — an unanchored `docs/` here previously
+# made `!docs/architecture/` a no-op for new files, since git can't re-include
+# a path whose parent directory is excluded.
+packages/*/docs/
 
-# Exception: VitePress docs site
+# Exception: VitePress docs site content (tracked, not generated)
 !packages/site/docs/
-!docs/architecture/
 
 # VitePress build artifacts
 packages/site/docs/.vitepress/cache/
@@ -72,6 +76,10 @@ target/
 
 # Misc
 *.orig
+*.bak
+
+# Retired hosted-platform (Laravel) checkout — see ADR-012. Never re-add.
+/platform/
 
 # Ad-hoc screenshots dropped at repo root (competitive analysis, dogfooding,
 # manual QA) — not build output, just scratch. Root-only (not recursive) so

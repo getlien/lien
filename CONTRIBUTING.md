@@ -40,6 +40,13 @@ Instead, register Lien per-project against your local `dist/`:
 
 Rebuild (`npm run build`) and restart your MCP client to pick up changes.
 
+### Working in a git worktree
+
+A fresh `npm install`/`npm ci` in a linked git worktree fails to compile
+(native `tree-sitter` bindings won't build there). See
+[docs/development/worktree-development.md](docs/development/worktree-development.md)
+for the symlink-from-main workaround.
+
 ## Project Structure
 
 Lien is a 6-package monorepo. `CLAUDE.md`'s ["What is Lien?"](./CLAUDE.md#what-is-lien) section (which contains "Package Structure") is the single source of truth for the per-package directory layout — start there. In short:
@@ -54,7 +61,7 @@ lien/
 │   ├── action/    # @liendev/action (private) — self-hostable GitHub Action wrapping review
 │   └── site/      # @liendev/site (private) — VitePress docs site (lien.dev)
 ├── docs/architecture/     # Architecture docs and ADRs
-├── scripts/               # Build and release automation
+├── docs/development/      # Contributor how-tos (worktrees, adding a language)
 └── .cursor/               # Cursor AI rules and guidelines
 ```
 
@@ -78,11 +85,25 @@ lien --help
 
 ### 2. Testing
 
-Before committing, ensure:
-- [ ] Code builds successfully (`npm run build`)
-- [ ] No TypeScript errors (`npm run typecheck`)
-- [ ] Manual testing with `lien` CLI
-- [ ] Test with a real project/codebase
+`CLAUDE.md`'s ["Before EVERY Commit"](./CLAUDE.md#before-every-commit-mandatory)
+section is the single source of truth for the 6 mandatory pre-commit gates
+(`format:check`, `lint`, `typecheck`, `build`, `test`, `lien delta`) — run
+that exact list before committing, no subset of it.
+
+**Fast inner loop** while iterating, instead of the full suite each time:
+
+```bash
+# Single test file in one workspace
+npm run test -w @liendev/<pkg> -- path/to/file.test.ts
+
+# Full suite before committing
+npm test
+```
+
+`npm test` excludes `packages/cli`'s e2e tests (`vitest run --exclude
+'test/e2e/**'`). Those run separately via `npm run test:e2e:<lang>` (e.g.
+`test:e2e:python`, `test:e2e:swift` — see `packages/cli/package.json` for the
+full list) and in CI only when a PR carries a changeset or the `e2e` label.
 
 ### 3. Commit Guidelines
 
@@ -108,73 +129,21 @@ git commit -m "chore: update dependencies"
 
 ## Releasing
 
-### Automated Release Process
+Lien versions and publishes via [Changesets](https://github.com/changesets/changesets), driven by `.changeset/config.json` and `.github/workflows/release.yml`. Published packages: `@liendev/parser`, `@liendev/core`, `@liendev/lien` (the `cli` package). `review`, `action`, and `site` are `"private": true` and never published. The three published packages are `linked` — they always bump together, even when only one has code changes.
 
-Lien uses an automated release script that handles version bumping, building, changelog updates, commits, and tagging.
+### Flow
 
-#### Usage
+1. **In your PR**, run `npm run changeset` (or invoke the `/changeset` skill to draft one from your commits). Pick the affected packages and bump type, write a summary, commit the generated `.changeset/<name>.md` alongside your change. Skip this for changes scoped only to `packages/review`, `packages/action`, or `packages/site` — they're unpublished and never need one.
+2. **Merge to main.** The release workflow runs on every push to main.
+3. If there are pending changesets, the **changesets bot** opens (or updates) a "Version Packages" PR that bumps versions, rewrites each published package's `CHANGELOG.md` from the changeset summaries, and deletes the consumed changeset files.
+4. **Merging the Version Packages PR publishes to npm** — the same workflow, seeing no pending changesets left, runs `npm run release` (`npm run build && changeset publish --provenance`) via npm OIDC trusted publishing (no `NPM_TOKEN` needed).
 
-```bash
-npm run release -- <patch|minor|major> "commit message"
-```
+### Versioning
 
-#### Examples
+Lien follows [Semantic Versioning](https://semver.org/). Pick the bump when running `npm run changeset`:
 
-```bash
-# Patch release (bug fixes, small improvements)
-npm run release -- patch "fix: improve reconnection logic"
-
-# Minor release (new features, backwards compatible)
-npm run release -- minor "feat: add Ruby test detection"
-
-# Major release (breaking changes)
-npm run release -- major "BREAKING: new configuration format"
-```
-
-### What the Script Does
-
-1. ✅ Validates arguments and checks for uncommitted changes
-2. 📦 Bumps version in `packages/cli/package.json`
-3. 🔨 Builds the project (`npm run build`)
-4. 📋 Updates `CHANGELOG.md` with new version entry
-5. 💾 Creates git commit with version number
-6. 🏷️ Creates git tag (e.g., `v0.1.11`)
-7. 📢 Shows next steps (push to origin)
-
-### Manual Release (Not Recommended)
-
-If you need to release manually:
-
-```bash
-# 1. Update version in packages/cli/package.json
-# 2. Build
-npm run build
-
-# 3. Update CHANGELOG.md
-# Add entry with version, date, and changes
-
-# 4. Commit and tag
-git add packages/cli/package.json packages/cli/dist/ CHANGELOG.md
-git commit -m "feat: my feature (v0.1.11)"
-git tag -a v0.1.11 -m "Release v0.1.11: My feature"
-
-# 5. Push
-git push origin main
-git push origin v0.1.11
-```
-
-## Versioning
-
-Lien follows [Semantic Versioning](https://semver.org/):
-
-- **PATCH** (0.1.X → 0.1.X+1): Bug fixes, performance improvements, small changes
-- **MINOR** (0.X.0 → 0.X+1.0): New features, backwards compatible additions
-- **MAJOR** (X.0.0 → X+1.0.0): Breaking changes, major API changes
-
-### When to Bump
-
-| Change Type | Version | Example |
-|-------------|---------|---------|
+| Change Type | Bump | Example |
+|-------------|------|---------|
 | Bug fix | Patch | Fixed reconnection timeout |
 | New tool | Minor | Added `find_tests_for` tool |
 | New language | Minor | Added Ruby support |
@@ -185,30 +154,7 @@ Lien follows [Semantic Versioning](https://semver.org/):
 
 ## Changelog Guidelines
 
-Update `CHANGELOG.md` with every release following [Keep a Changelog](https://keepachangelog.com/):
-
-### Categories
-
-- **Added**: New features
-- **Changed**: Changes to existing functionality
-- **Deprecated**: Soon-to-be removed features
-- **Removed**: Removed features
-- **Fixed**: Bug fixes
-- **Security**: Security fixes
-
-### Example Entry
-
-```markdown
-## [0.1.11] - 2025-01-13
-
-### Added
-- **Ruby test detection**: Added support for RSpec and Minitest test patterns
-- Support for `.rb` files in the indexer
-
-### Fixed
-- **Reconnection timeout**: Fixed issue where MCP server wouldn't reconnect after reindex
-- Improved error handling for missing index files
-```
+Don't hand-edit any `CHANGELOG.md`. Each published package's `CHANGELOG.md` (e.g. `packages/cli/CHANGELOG.md`) is generated automatically from your changeset's body text when the Version Packages PR is created — write a clear, user-facing summary in the changeset itself; that text becomes the changelog entry.
 
 ## Adding a New Ecosystem Preset
 
@@ -224,32 +170,9 @@ No detector classes, confidence levels, or registry — just add an object to th
 
 ## Adding a New AST Language
 
-Each AST-supported language is a **single self-contained file** in `packages/parser/src/ast/languages/` containing everything: traverser class, export extractor class, import extractor class, and the `LanguageDefinition` that wires them together.
+Each AST-supported language is a **single self-contained file** in `packages/parser/src/ast/languages/` — traverser, export extractor, import extractor, and the `LanguageDefinition` that wires them together — registered in `languages/registry.ts`. That's the small part; the real work is verifying the tree-sitter grammar, plus the e2e/docs/changeset follow-through it takes to actually ship.
 
-### Steps
-
-1. **Create definition**: `languages/newlang.ts` with traverser, extractors, and `LanguageDefinition`
-2. **Register it**: Import + add to `definitions` array in `languages/registry.ts`
-
-**2 files total.** All language-specific code (traversal logic, import/export extraction, complexity constants, symbol types) lives in one file per language.
-
-### Re-export / barrel file support
-
-The dependency analyzer tracks transitive dependents through barrel/index files by reading `imports`, `importedSymbols`, and `exports` from chunk metadata. If the new language has a re-export pattern, the export extractor must include re-exported symbols in the `exports` array.
-
-| Language | Re-export pattern | Where to handle |
-|----------|------------------|-----------------|
-| TS/JS | `export { X } from './module'` | Import extractor in `languages/javascript.ts` |
-| Python | `from .auth import X` in `__init__.py` | Export extractor in `languages/python.ts` |
-| Rust | `pub use crate::auth::X` | Export extractor in `languages/rust.ts` |
-
-### Key files
-
-- `languages/types.ts` — `LanguageDefinition` interface
-- `languages/registry.ts` — Central registry (`getLanguage()`, `detectLanguage()`, `getAllLanguages()`, `getSupportedExtensions()`)
-- `languages/{lang}.ts` — One per language; see `languages/typescript.ts` for a complete example
-- `extractors/types.ts` — `LanguageExportExtractor` and `LanguageImportExtractor` interfaces
-- `traversers/types.ts` — `LanguageTraverser` interface
+See [docs/development/adding-a-language.md](docs/development/adding-a-language.md) for the full playbook: the grammar-verification gate, the complete wiring checklist, the 3-PR release arc, and every known gotcha (worktree native builds, lockfile grammar conflicts, no-field-name grammars, e2e project sizing).
 
 ---
 
