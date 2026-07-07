@@ -110,10 +110,21 @@ function checkAdrRefs(relPath, lines) {
 // --- Check 3: `npm run <script>` mentions resolve ----------------------------
 
 function readJson(absPath) {
-  return JSON.parse(fs.readFileSync(absPath, 'utf8'));
+  const parsed = JSON.parse(fs.readFileSync(absPath, 'utf8'));
+  if (parsed === null || typeof parsed !== 'object') {
+    throw new Error(`${absPath} is not a JSON object`);
+  }
+  return parsed;
 }
 
-const rootScripts = readJson(path.join(REPO_ROOT, 'package.json')).scripts ?? {};
+// A malformed `scripts` field (e.g. a string) must degrade to "no scripts",
+// not crash the `in` lookup with a TypeError.
+function getScripts(pkg) {
+  const s = pkg.scripts;
+  return typeof s === 'object' && s !== null ? s : {};
+}
+
+const rootScripts = getScripts(readJson(path.join(REPO_ROOT, 'package.json')));
 
 // Index each workspace's scripts under both forms docs use to reference it:
 // `-w @liendev/core` (package name) and `-w packages/core` (path).
@@ -124,9 +135,9 @@ if (fs.existsSync(packagesDir)) {
     const pkgJsonPath = path.join(packagesDir, dir, 'package.json');
     if (!fs.existsSync(pkgJsonPath)) continue;
     const pkg = readJson(pkgJsonPath);
-    const scripts = pkg.scripts ?? {};
+    const scripts = getScripts(pkg);
     workspaceScripts.set(`packages/${dir}`, scripts);
-    if (pkg.name) workspaceScripts.set(pkg.name, scripts);
+    if (typeof pkg.name === 'string') workspaceScripts.set(pkg.name, scripts);
   }
 }
 
@@ -164,7 +175,10 @@ function checkNpmRunRefs(relPath, lines) {
       // example, not a literal, runnable command.
       if (PLACEHOLDER_RE.test(line.slice(match.index))) continue;
 
-      const [, scriptName, workspace] = match;
+      // Both captures can swallow sentence punctuation ("npm run test -w
+      // @liendev/core." / "run npm run build.") — strip it before lookup.
+      const scriptName = match[1].replace(/[.,;:!?]+$/, '');
+      const workspace = match[2]?.replace(/[.,;:!?]+$/, '');
       const violation = workspace
         ? workspaceViolation(scriptName, workspace)
         : bareViolation(scriptName, relPath);
