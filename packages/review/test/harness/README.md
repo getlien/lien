@@ -303,8 +303,9 @@ The motivating example for #538. To execute:
    under `fixtures/boundary-change/ge-5-threshold-shift.fixture.json` and
    author `ge-5-threshold-shift.assertions.ts` with Tier 1 assertions only
    (`expectRuleFired`, `expectToolCalled('get_files_context')`).
-2. **Baseline calibration** — `npm run test:harness -- --rule boundary-change
-   --calibrate 10`. Confirm ≥ 9/10. If not, tighten assertions.
+2. **Baseline calibration** — `npm run test:harness -w @liendev/review --
+   --rule boundary-change --calibrate 10`. Confirm ≥ 9/10. If not, tighten
+   assertions.
 3. **Apply §4.3 prompt change** — edit `BOUNDARY_CHANGE.prompt` in
    `packages/review/src/plugins/agent/rules.ts`: add a sentence requiring
    tests for **both sides** of the divergence, and update the worked
@@ -327,7 +328,10 @@ harness lets you do it autonomously once `OPENROUTER_API_KEY` is in `.env`.
    of these (#519, #520, #399, #509, #437, #411, #511 are all "test:" or
    small synthetic-bug PRs). `gh pr list --state closed --search "test:"`
    is a good starting query. Pick one with <500 changed lines if possible
-   — the agent's investigation is faster on smaller diffs.
+   — the agent's investigation is faster on smaller diffs. No real PR fits?
+   `lien-review-testbed/` at the repo root is a tracked multi-language sample
+   app kept as fixture material — not wired into any existing fixture, but
+   available to plant a synthetic regression in and capture against.
 
 2. **Capture the fixture.** From the repo root:
 
@@ -447,14 +451,32 @@ fixture writes ~100-500 KB to disk.
 - **`/test-harness <rule>` (CC)** — fast inner loop. Free. Use while
   drafting a prompt change. Catches "the prompt is broken" but not "Kimi
   will misbehave."
-- **`npm run test:harness --votes 3`** — sanity check after iterating in CC.
-  ~$0.18 per fixture. Tells you Kimi (the prod default) agrees with the
-  assertion at K=3.
-- **`npm run test:harness --calibrate 10`** — the 9/10 bar. ~$0.50 per
+- **`npm run test:harness -w @liendev/review -- --votes 3`** — sanity check
+  after iterating in CC. ~$0.18 per fixture. Tells you Kimi (the prod
+  default) agrees with the assertion at K=3.
+- **`npm run test:harness -w @liendev/review -- --calibrate 10`** — the
+  9/10 bar. ~$0.50 per
   fixture. **The only mode that gates merging a prompt change.**
 - **GitHub workflow ("Agent-Rule Test Harness (LLM)")** — same as
   `--calibrate`, in CI, with the result attached to the workflow run for
   audit. Triggered manually via the Actions UI.
+
+### Cost discipline
+
+`--calibrate 10` runs the real model ~10x per fixture against OpenRouter —
+real money, not a free inner loop (~$0.05-0.50/fixture, ~$5-8 for a full
+corpus sweep). Before spending another round:
+
+- **Diagnose from existing `--trace` dumps first** (free) — most "why did
+  this fail" questions are answerable from a trace already on disk without
+  another network call.
+- **Stop after one non-converging iteration.** If a prompt/tool-fallback
+  change doesn't move the pass rate, don't chain another calibration sweep on
+  the same hypothesis — reassess and report the cost spent so far before the
+  next round.
+- **Prefer a zero-LLM deterministic-signal fix** (see `stale-literal-signals.ts`
+  for the pattern) over an LLM-calibration-gated prompt tweak where the
+  failure mode is structural, not a reasoning gap — no spend, no flakiness.
 
 ## Common failure modes
 

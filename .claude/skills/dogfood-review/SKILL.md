@@ -1,14 +1,14 @@
 ---
-name: dogfood-veille
-description: Evaluate Veille AI review quality by creating a PR with known violations, waiting for the review, then scoring output against ground truth.
+name: dogfood-review
+description: Evaluate Lien Review's AI review quality by creating a PR with known violations, waiting for the automated review, then scoring output against ground truth.
 disable-model-invocation: true
 user-invocable: true
 allowed-tools: Bash(git *), Bash(gh *), Bash(sleep *), Bash(date *), Read, Write, Glob, Grep
 ---
 
-# Dogfood Veille Review Quality
+# Dogfood Lien Review Quality
 
-Evaluate the Veille AI code review system by creating a PR with **known complexity violations**, waiting for the automated review, then scoring the output against a ground truth manifest.
+Evaluate the Lien Review AI code review system by creating a PR with **known complexity violations**, waiting for the automated review, then scoring the output against a ground truth manifest.
 
 ## Phase 1: Setup & Generate Test Files
 
@@ -22,17 +22,17 @@ date +%Y%m%d-%H%M%S
 
 ```bash
 git checkout main && git pull origin main
-git checkout -b dogfood-veille/<timestamp>
+git checkout -b dogfood-review/<timestamp>
 ```
 
-3. Create the `_dogfood-veille/` directory and write all 5 test files (see "Test Files" section below).
+3. Create the `_dogfood-review/` directory and write all 5 test files (see "Test Files" section below).
 
 4. Commit and push:
 
 ```bash
-git add _dogfood-veille/
-git commit -m "test: dogfood-veille evaluation files"
-git push -u origin dogfood-veille/<timestamp>
+git add _dogfood-review/
+git commit -m "test: dogfood-review evaluation files"
+git push -u origin dogfood-review/<timestamp>
 ```
 
 ## Phase 2: Open PR
@@ -41,8 +41,8 @@ Create the PR targeting `main`:
 
 ```bash
 gh pr create \
-  --title "[Dogfood] Veille Review Quality Evaluation <timestamp>" \
-  --body "Automated dogfood evaluation of the Veille AI review system. This PR contains intentional complexity violations to test review detection quality. **Do not merge.**"
+  --title "[Dogfood] Lien Review Quality Evaluation <timestamp>" \
+  --body "Automated dogfood evaluation of Lien Review. This PR contains intentional complexity violations to test review detection quality. **Do not merge.**"
 ```
 
 Capture the PR number from the output.
@@ -52,75 +52,85 @@ Capture the PR number from the output.
 Poll the workflow status every 30 seconds, timing out after 10 minutes:
 
 ```bash
-gh run list --branch dogfood-veille/<timestamp> --workflow ai-review.yml --json status,conclusion,databaseId --limit 1
+gh run list --branch dogfood-review/<timestamp> --workflow lien-review.yml --json status,conclusion,databaseId --limit 1
 ```
 
-- If `status` is `completed` and `conclusion` is `success`, proceed to Phase 4.
-- If `status` is `completed` and `conclusion` is `failure`, note the failure but still proceed to Phase 4 (partial results may exist).
+- If `status` is `completed`, proceed to Phase 4 regardless of `conclusion` — the review is advisory by default (`fail-on: never`), so the job stays green whenever the action *ran*; findings surface as annotations/comments/description either way. A `failure` conclusion means the action crashed, not that violations were found — note it but still try to collect partial results.
 - If 10 minutes elapse with no completion, note the timeout and proceed to Phase 4.
 
 ## Phase 4: Fetch & Evaluate
 
-### 4a. Fetch PR summary comment
+Lien Review posts no Checks-API check run of its own — the workflow job itself is the single status check, and findings surface three ways: **workflow annotations** (attached to that job's auto-created check run), **inline PR review comments** (bug findings only — complexity findings never get one), and the **PR description** (aggregate complexity counts + architectural observations, if any). There is no separate `<!-- lien-ai-review -->`-marked summary comment in the current engine — that marker only appears in unused legacy code paths (`buildNoViolationsMessage`/`buildLineSummaryComment` in `packages/review/src/prompt.ts`, dead since the plugin architecture landed).
+
+### 4a. Fetch workflow annotations (primary source for complexity findings)
 
 ```bash
-gh api repos/getlien/lien/issues/<pr>/comments --jq '.[] | select(.body | contains("<!-- lien-ai-review -->"))'
+sha=$(gh pr view <pr> --json headRefOid -q .headRefOid)
+gh api repos/getlien/lien/commits/$sha/check-runs --jq '.check_runs[] | {id, name, conclusion}'
+# Find the run for the "review" job (workflow name "Lien Review"), then:
+gh api repos/getlien/lien/check-runs/<check-run-id>/annotations --paginate
 ```
 
-### 4b. Fetch inline review comments
+Each annotation carries `path`, `start_line`, `annotation_level` (`failure`→error, `warning`→warning, `notice`→info), `title`, and `message`. The `title` format is `{symbolName} — {metricLabel}: {value} (threshold: X)` (see `packages/review/src/plugins/complexity.ts`), where `metricLabel` is the human-readable label from `getMetricLabel` in `packages/review/src/prompt.ts` — `test paths` (cyclomatic), `mental load` (cognitive), `time to understand` (halstead_effort), `estimated bugs` (halstead_bugs) — never the raw metric token, so map labels back to metric types when scoring. There is no dedup marker on annotations — match by `path` + `start_line` against the Ground Truth Manifest.
+
+**Caveat — read before scoring Metric Accuracy:** the engine posts only the single *worst* metric per function (`worstPerFunction()` in `packages/review/src/plugins/complexity.ts`), never all of them. A function the manifest lists under 3-4 metrics will produce exactly **one** annotation. Score Metric Accuracy against the worst-metric-per-symbol subset of the manifest, not the full multi-metric list — treat the other expected metrics for that symbol as "not independently observable," not as misses.
+
+### 4b. Fetch inline PR review comments (agent-review bug findings only)
 
 ```bash
 gh api repos/getlien/lien/pulls/<pr>/comments --paginate
 ```
 
-### 4c. Parse detected violations
+These fixtures are pure complexity/architecture bait with no logic bugs, so expect zero comments here — the agent-review plugin (which owns inline comments) targets `logic_error`/`error_handling`/`breaking_change`-style findings, not complexity. If any appear, extract the dedup marker: current format is `<!-- lien-plugin:{pluginId}:{filepath}::{line}::{category} -->` (`PLUGIN_MARKER_PREFIX` in `packages/review/src/github-api.ts`, matched by `extractPluginCommentKey` in `packages/review/src/engine.ts`), default `pluginId` is `agent-review` — this path has no legacy fallback. Separately, the *complexity summary comment* dedups via `<!-- lien-review:... -->` (`COMMENT_MARKER_PREFIX`), whose `parseCommentMarker()` still recognizes a legacy `<!-- veille:{filepath}::{symbolName} -->` prefix as a fallback that is never freshly emitted — treat any veille hit there as pre-existing, not new.
 
-From inline comments, extract the dedup markers:
-- **Complexity comments:** `<!-- veille:filepath::symbolName -->` — the key is `filepath::symbolName`
-- **Logic comments:** `<!-- veille-logic:filepath::line::category -->` — the key is `filepath::line::category`
+### 4c. Fetch the PR description
 
-Build a set of detected symbols from these markers.
+```bash
+gh pr view <pr> --json body -q .body
+```
+
+Contains an aggregate complexity table (violation **count** per metric type, no per-symbol detail — see `buildMetricTable` in `packages/review/src/prompt.ts`) and, only if the agent-review plugin's `architectural` category fired, a `<details><summary>🏗️ Architectural</summary>` block with a Scope/Observation/Suggestion table. Use this block for the DRY/SRP/KISS/coupling scoring dimension.
 
 ### 4d. Score against ground truth
 
-Compare detected violations against the **Ground Truth Manifest** below. Calculate:
+Compare detected violations (4a annotations, keyed by `path::startLine`, cross-referenced against source to identify the symbol) against the **Ground Truth Manifest** below. Calculate:
 
 | Dimension | Formula |
 |-----------|---------|
 | Detection Rate | `detected_symbols / expected_symbols * 100%` |
-| Metric Accuracy | `correct_metric_types / total_expected_metrics * 100%` |
+| Metric Accuracy | `correct_metric_types / worst_metric_per_symbol_count * 100%` (see 4a caveat) |
 | Severity Accuracy | `correct_severities / total_expected_severities * 100%` |
-| Architectural Detection | Check summary comment for mentions of: DRY, SRP/single responsibility, KISS, coupling/cohesion |
-| Comment Quality | 1-5 scale per comment: specific? actionable? correct? |
-| False Positives | Count of inline comments on symbols NOT in ground truth |
+| Architectural Detection | Check the PR description's Architectural block (4c) for mentions of: DRY, SRP/single responsibility, KISS, coupling/cohesion |
+| Comment Quality | 1-5 scale per annotation/comment: specific? actionable? correct? |
+| False Positives | Count of annotations/comments on symbols NOT in ground truth |
 | Overall Grade | A (>=80% detect, >=60% arch) / B (>=60% detect, >=40% arch) / C (>=40% detect) / D (>=20% detect) / F (<20% detect) |
 
 ### 4e. Write report
 
-Write the full evaluation report to `.wip/veille-dogfood-report.md` (see "Report Format" section below).
+Write the full evaluation report to `.wip/lien-review-dogfood-report.md` (see "Report Format" section below).
 
 ## Phase 5: Cleanup
 
 Close the PR and delete branches:
 
 ```bash
-gh pr close <number> --comment "Dogfood evaluation complete. See .wip/veille-dogfood-report.md for results."
-git push origin --delete dogfood-veille/<timestamp>
+gh pr close <number> --comment "Dogfood evaluation complete. See .wip/lien-review-dogfood-report.md for results."
+git push origin --delete dogfood-review/<timestamp>
 git checkout main
-git branch -D dogfood-veille/<timestamp>
+git branch -D dogfood-review/<timestamp>
 ```
 
 ---
 
 ## Test Files
 
-Write these 5 files into `_dogfood-veille/`. Each is designed to trigger Veille's hardcoded complexity thresholds:
+Write these 5 files into `_dogfood-review/`. Each is designed to trigger Lien's hardcoded complexity thresholds:
 - **Cyclomatic (testPaths):** warning >= 15, error >= 30
 - **Cognitive (mentalLoad):** warning >= 15, error >= 30
 - **Halstead effort (timeToUnderstandMinutes):** warning >= 60min, error >= 120min
 - **Halstead bugs (estimatedBugs):** warning >= 1.5, error >= 3.0
 
-### File 1: `_dogfood-veille/high-complexity.ts`
+### File 1: `_dogfood-review/high-complexity.ts`
 
 A massive request router with 35+ branches and deep nesting. Should trigger **error** on both cyclomatic and cognitive.
 
@@ -255,7 +265,7 @@ export function handleRequest(req: Request): Response {
 }
 ```
 
-### File 2: `_dogfood-veille/dry-violations.ts`
+### File 2: `_dogfood-review/dry-violations.ts`
 
 Three copy-pasted functions that filter, sort, and format data — identical structure, different field names. Should trigger **warning** on each function (cyclomatic ~15-20).
 
@@ -423,7 +433,7 @@ export function filterSortFormatOrders(
 }
 ```
 
-### File 3: `_dogfood-veille/solid-violations.ts`
+### File 3: `_dogfood-review/solid-violations.ts`
 
 God class handling events, notifications, caching, and metrics — violates SRP. The `processEvent` method uses a massive switch with deep nesting. Should trigger **error** on `processEvent`, **warning** on `sendNotification`.
 
@@ -599,7 +609,7 @@ export class EventManager {
 }
 ```
 
-### File 4: `_dogfood-veille/kiss-violations.ts`
+### File 4: `_dogfood-review/kiss-violations.ts`
 
 Over-engineered factory/strategy/chain pattern for 6 simple string operations. Should trigger **warning** on the factory function's switch statement. Architectural observation: KISS violation.
 
@@ -725,7 +735,7 @@ export function processStrings(inputs: string[], configs: TransformerConfig[]): 
 }
 ```
 
-### File 5: `_dogfood-veille/coupling-smells.ts`
+### File 5: `_dogfood-review/coupling-smells.ts`
 
 Monolithic pipeline mixing parsing, validation, transformation, and output into one function via mutable state. Should trigger **error** on cyclomatic, cognitive, and halstead metrics.
 
@@ -928,47 +938,47 @@ This is the complete set of expected violations. Use this to score the review ou
 
 | File | Symbol | Metric | Expected Severity | Notes |
 |------|--------|--------|-------------------|-------|
-| `_dogfood-veille/high-complexity.ts` | `handleRequest` | cyclomatic | error | 35+ branches |
-| `_dogfood-veille/high-complexity.ts` | `handleRequest` | cognitive | error | Deep nesting |
-| `_dogfood-veille/dry-violations.ts` | `filterSortFormatUsers` | cyclomatic | warning | ~15-20 branches |
-| `_dogfood-veille/dry-violations.ts` | `filterSortFormatProducts` | cyclomatic | warning | ~15-20 branches |
-| `_dogfood-veille/dry-violations.ts` | `filterSortFormatOrders` | cyclomatic | warning | ~15-20 branches |
-| `_dogfood-veille/solid-violations.ts` | `processEvent` | cyclomatic | error | 30+ branches in switch |
-| `_dogfood-veille/solid-violations.ts` | `processEvent` | cognitive | error | Deep switch nesting |
-| `_dogfood-veille/solid-violations.ts` | `sendNotification` | cyclomatic | warning | ~15 branches |
-| `_dogfood-veille/kiss-violations.ts` | `createTransformer` | cyclomatic | warning | 15+ if-else branches |
-| `_dogfood-veille/coupling-smells.ts` | `processRecordPipeline` | cyclomatic | error | 30+ branches |
-| `_dogfood-veille/coupling-smells.ts` | `processRecordPipeline` | cognitive | error | Deep nesting across phases |
-| `_dogfood-veille/coupling-smells.ts` | `processRecordPipeline` | halstead_effort | warning+ | Long function, many operands |
-| `_dogfood-veille/coupling-smells.ts` | `processRecordPipeline` | halstead_bugs | warning+ | High volume |
+| `_dogfood-review/high-complexity.ts` | `handleRequest` | cyclomatic | error | 35+ branches |
+| `_dogfood-review/high-complexity.ts` | `handleRequest` | cognitive | error | Deep nesting |
+| `_dogfood-review/dry-violations.ts` | `filterSortFormatUsers` | cyclomatic | warning | ~15-20 branches |
+| `_dogfood-review/dry-violations.ts` | `filterSortFormatProducts` | cyclomatic | warning | ~15-20 branches |
+| `_dogfood-review/dry-violations.ts` | `filterSortFormatOrders` | cyclomatic | warning | ~15-20 branches |
+| `_dogfood-review/solid-violations.ts` | `processEvent` | cyclomatic | error | 30+ branches in switch |
+| `_dogfood-review/solid-violations.ts` | `processEvent` | cognitive | error | Deep switch nesting |
+| `_dogfood-review/solid-violations.ts` | `sendNotification` | cyclomatic | warning | ~15 branches |
+| `_dogfood-review/kiss-violations.ts` | `createTransformer` | cyclomatic | warning | 15+ if-else branches |
+| `_dogfood-review/coupling-smells.ts` | `processRecordPipeline` | cyclomatic | error | 30+ branches |
+| `_dogfood-review/coupling-smells.ts` | `processRecordPipeline` | cognitive | error | Deep nesting across phases |
+| `_dogfood-review/coupling-smells.ts` | `processRecordPipeline` | halstead_effort | warning+ | Long function, many operands |
+| `_dogfood-review/coupling-smells.ts` | `processRecordPipeline` | halstead_bugs | warning+ | High volume |
 
 **Total expected symbols:** 8 unique (`handleRequest`, `filterSortFormatUsers`, `filterSortFormatProducts`, `filterSortFormatOrders`, `processEvent`, `sendNotification`, `createTransformer`, `processRecordPipeline`)
 
-**Total expected metric violations:** ~13-15 (some symbols trigger multiple metrics)
+**Total expected metric violations:** ~13-15 (some symbols trigger multiple metrics) — but per the 4a caveat, the engine only ever *surfaces* one (the worst) per symbol. `processEvent` and `processRecordPipeline` each list 2+ metrics above; expect exactly one annotation for each in practice.
 
 ### Expected Architectural Observations
 
-The summary comment (with `<!-- lien-ai-review -->`) should mention:
+Only surfaces if the agent-review plugin's `architectural` category fires (requires `OPENROUTER_API_KEY`; it's an LLM judgment call, not an AST metric, so it's not guaranteed to fire on every run). Check the PR description's `<details><summary>🏗️ Architectural</summary>` block for:
 
-| Observation | Expected In | Source File |
-|-------------|-------------|-------------|
-| DRY / duplication / repeated pattern | Summary or inline | `dry-violations.ts` |
-| SRP / single responsibility / god class | Summary or inline | `solid-violations.ts` |
-| KISS / over-engineering / unnecessary abstraction | Summary or inline | `kiss-violations.ts` |
-| Coupling / cohesion / mixed responsibilities | Summary or inline | `coupling-smells.ts` |
+| Observation | Source File |
+|-------------|-------------|
+| DRY / duplication / repeated pattern | `dry-violations.ts` |
+| SRP / single responsibility / god class | `solid-violations.ts` |
+| KISS / over-engineering / unnecessary abstraction | `kiss-violations.ts` |
+| Coupling / cohesion / mixed responsibilities | `coupling-smells.ts` |
 
 ---
 
 ## Report Format
 
-Write to `.wip/veille-dogfood-report.md`:
+Write to `.wip/lien-review-dogfood-report.md`:
 
 ```markdown
-# Veille Dogfood Evaluation Report
+# Lien Review Dogfood Evaluation Report
 
 **Date:** <timestamp>
 **PR:** #<number>
-**Branch:** dogfood-veille/<timestamp>
+**Branch:** dogfood-review/<timestamp>
 **Workflow Status:** success | failure | timeout
 
 ## Summary Scorecard
@@ -976,11 +986,11 @@ Write to `.wip/veille-dogfood-report.md`:
 | Dimension | Score | Details |
 |-----------|-------|---------|
 | Detection Rate | X/8 symbols (Y%) | List detected/missed |
-| Metric Accuracy | X/N metrics (Y%) | Correct metric types |
+| Metric Accuracy | X/N metrics (Y%) | Correct metric types (worst-per-symbol only, see manifest note) |
 | Severity Accuracy | X/N severities (Y%) | Correct severity levels |
 | Architectural Detection | X/4 observations (Y%) | Which observed |
 | Comment Quality | X/5 average | See per-file details |
-| False Positives | N | Unexpected comments |
+| False Positives | N | Unexpected annotations/comments |
 | **Overall Grade** | **A/B/C/D/F** | |
 
 ## Per-File Results
@@ -988,7 +998,7 @@ Write to `.wip/veille-dogfood-report.md`:
 ### high-complexity.ts
 - `handleRequest`:
   - Detected: yes/no
-  - Metrics reported: [list]
+  - Metric reported: [worst metric only]
   - Expected metrics: cyclomatic error, cognitive error
   - Comment quality (1-5): X
   - Notes: ...
@@ -1007,22 +1017,22 @@ Write to `.wip/veille-dogfood-report.md`:
 
 ## Architectural Review Assessment
 
-| Observation | Detected | Where | Quality |
-|-------------|----------|-------|---------|
-| DRY | yes/no | summary/inline/both | notes |
-| SRP | yes/no | summary/inline/both | notes |
-| KISS | yes/no | summary/inline/both | notes |
-| Coupling | yes/no | summary/inline/both | notes |
+| Observation | Detected | Quality |
+|-------------|----------|---------|
+| DRY | yes/no | notes |
+| SRP | yes/no | notes |
+| KISS | yes/no | notes |
+| Coupling | yes/no | notes |
 
-## Best & Worst Comments
+## Best & Worst Findings
 
-### Best Comment
-> (quote the most useful, specific, actionable comment)
+### Best Finding
+> (quote the most useful, specific, actionable annotation/comment)
 
 Why it's good: ...
 
-### Worst Comment
-> (quote the least useful or most generic comment)
+### Worst Finding
+> (quote the least useful or most generic annotation/comment)
 
 Why it's weak: ...
 
@@ -1035,11 +1045,14 @@ Why it's weak: ...
 <details>
 <summary>Raw Data</summary>
 
-### Summary Comment (raw)
-(paste full summary comment body)
+### Workflow Annotations (raw)
+(paste the check-run annotations JSON)
 
-### Inline Comments (raw)
-(paste each inline comment with its marker)
+### PR Description (raw)
+(paste the PR body)
+
+### Inline Comments (raw, if any)
+(paste each comment with its marker)
 
 </details>
 ```
