@@ -276,6 +276,35 @@ The asymmetry is the whole point: you are punished only for **making things
 worse than HEAD**, never for pre-existing debt you happened to touch. This keeps
 the gate honest and prevents it from blocking unrelated work in a hot file.
 
+### `--base <ref>` — comparing against something other than HEAD
+
+Everything above compares the working tree to `HEAD`. That is the right
+default for an agent running the gate locally mid-edit, but it has a blind
+spot for CI: by the time a PR's branch is checked out, its commits are already
+`HEAD` and the working tree is clean, so a crossing introduced by an *earlier*
+commit in the same PR produces **no diff at all** against `HEAD` — plain
+`lien delta` sees nothing to flag.
+
+`--base <ref>` compares the current state against any ref instead of `HEAD`:
+
+```bash
+lien delta --base origin/main
+lien delta --base origin/main --format json
+lien delta --base HEAD~3 --file src/foo.ts
+```
+
+Mechanically this is the same pipeline with one substitution: file discovery
+becomes `git diff --name-status --find-renames <ref>` (instead of `... HEAD`),
+and "before" content is read via `git show <ref>:path` (instead of `git show
+HEAD:path`). Untracked files are still additions regardless of the baseline.
+Composes with every other flag — `--file` (single-file fast path vs `<ref>`),
+`--format json`, `--soft`, `--threshold` — and omitting `--base` is
+byte-for-byte identical to the original HEAD-vs-working-tree behaviour.
+
+A `--base` ref that does not resolve to a commit is an operational error
+(clear message, exit 2) — the same convention as an unreadable file or a
+missing git binary, not a silent no-op.
+
 ### Optional MCP variant — deferred
 
 `get_complexity({ diff: true })` is attractive but does **not** fall out of A+B
@@ -533,3 +562,79 @@ the distinction the hook relies on to stay silent on non-regressions.
 - [x] 3. Mechanism 2: `lien delta --file` flag + `delta-write.sh` hook + hooks.json + unit tests
 - [x] 4. Mechanism 3: `complexityHeadroom` in `get_files_context` + description/instructions + unit tests
 - [x] 5. Verification: drive hook (3 transcripts) + MCP headroom response + latency; full gate green; changeset
+
+---
+
+# `--base <ref>` + the CI gate
+
+Phases 1–2 made `lien delta` available and, later, proactive at edit time — but
+it remained, end to end, an **honor-system** gate: nothing outside the agent's
+own discipline stopped a PR from merging with a new complexity crossing
+buried in one of its earlier commits. Every one of the *other* five commit
+gates (`format:check`, `lint`, `typecheck`, `build`, `test`) already runs in CI
+on every PR; `lien delta` was the one gate an agent could simply forget to run
+and nobody would know.
+
+## G. The CI backstop
+
+`.github/workflows/ci.yml` gains a `delta` job that runs only on
+`pull_request` events:
+
+```yaml
+delta:
+  if: github.event_name == 'pull_request'
+  steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0 # need origin/<base> locally to diff against
+    - uses: actions/setup-node@v4
+    - run: npm ci
+    - run: npm run build:core && npm run build -w packages/cli
+    - run: node packages/cli/dist/index.js delta --base "origin/$GITHUB_BASE_REF"
+```
+
+`fetch-depth: 0` is required: a normal PR checkout is shallow and only fetches
+the merge-commit ref, so `origin/<base-branch>` would not exist locally to diff
+against. `$GITHUB_BASE_REF` is the PR's target branch name, populated
+automatically by Actions on `pull_request` events (e.g. `main`); the job
+compares the checked-out PR state against `origin/main`, catching a crossing
+introduced by **any** commit in the PR, not just its latest one — exactly the
+gap `--base` exists to close. A non-zero exit (a new crossing) fails the job.
+
+## H. `--base <ref>` implementation notes
+
+The mode reuses the Phase-1 pipeline (`packages/cli/src/cli/delta-git.ts`)
+with the ref that supplies "before" content generalized from a hardcoded
+`HEAD` to a parameter:
+
+- `collectFileChanges(rootDir, baseRef?)` and `collectFileChange(rootDir, filePath, baseRef?)`
+  both accept an optional ref. Omitted, behavior is byte-for-byte the original
+  (including the unborn-HEAD fallback, which only applies to the no-`--base`
+  default — an explicit `--base` ref is validated to exist, so there is no
+  "unborn base" case to handle).
+- File discovery: `git diff --name-status --find-renames -z <baseRef>`
+  (replaces `... HEAD`) plus the same untracked-file union as before.
+- Content: `git show <baseRef>:path` (replaces `git show HEAD:path`) for the
+  "before" side; the working tree is still read directly for "after" — `--base`
+  only moves the baseline, never the target.
+- A `baseRef` that doesn't resolve to a commit (`git rev-parse --verify --quiet
+  <ref>^{commit}`) throws a clear `base ref "<ref>" not found` error, which
+  `deltaCommand` reports and turns into exit 2 — the same operational-failure
+  convention as an unreadable file or a missing git binary.
+- The CLI report header reflects the comparison point (`lien delta —
+  complexity vs origin/main` instead of `... vs HEAD`) so `--format text`
+  output is honest about what it compared; `--format json` is unaffected
+  (the ref isn't part of `ComplexityDeltaResult`, only the CLI's own report
+  header).
+
+See "`--base <ref>` — comparing against something other than HEAD" above for
+the usage-level writeup.
+
+## Deferred
+
+`CLAUDE.md`'s "Before EVERY Commit (MANDATORY)" section is left untouched here
+even though it now undersells the gate — `lien delta` previously ran purely on
+an agent's honor system, and this PR gives it a CI backstop, which is context
+worth adding there. A parallel in-flight change already owns edits to that
+section's `lien delta` wording; folding this update into it there avoids two
+PRs racing on the same lines.

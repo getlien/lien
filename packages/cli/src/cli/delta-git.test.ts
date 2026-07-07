@@ -163,6 +163,86 @@ describe('delta-git', () => {
     expect(await collectFileChanges(dir)).toEqual([]);
   });
 
+  describe('collectFileChanges — --base <ref>', () => {
+    async function revParse(ref: string): Promise<string> {
+      const { stdout } = await execFileAsync('git', ['rev-parse', ref], { cwd: dir });
+      return stdout.trim();
+    }
+
+    it('baseRef === HEAD produces the same result as the default (no --base)', async () => {
+      await initRepo();
+      await write('a.ts', SIMPLE);
+      await commitAll('init');
+      await write('a.ts', COMPLEX);
+
+      const head = await revParse('HEAD');
+      const withoutBase = await collectFileChanges(dir);
+      const withBase = await collectFileChanges(dir, head);
+      expect(withBase).toEqual(withoutBase);
+      const c = byPath(withBase, 'a.ts')!;
+      expect(c.before).toBe(SIMPLE);
+      expect(c.after).toBe(COMPLEX);
+    });
+
+    it('sees a change committed after the base ref, not just working-tree edits', async () => {
+      // The CI-relevant case: a crossing introduced in an earlier commit of the
+      // PR (already sitting in the working tree at HEAD, no uncommitted diff)
+      // must still show up when compared against origin/main.
+      await initRepo();
+      await write('a.ts', SIMPLE);
+      await commitAll('init');
+      const base = await revParse('HEAD');
+
+      await write('a.ts', COMPLEX);
+      await commitAll('introduce complexity'); // committed, HEAD now == working tree
+
+      // Against HEAD there is no diff at all (working tree matches HEAD).
+      expect(await collectFileChanges(dir)).toEqual([]);
+
+      // Against the earlier base, the committed change is visible.
+      const c = byPath(await collectFileChanges(dir, base), 'a.ts')!;
+      expect(c.before).toBe(SIMPLE);
+      expect(c.after).toBe(COMPLEX);
+    });
+
+    it('layers uncommitted working-tree edits on top of the committed base diff', async () => {
+      await initRepo();
+      await write('a.ts', SIMPLE);
+      await commitAll('init');
+      const base = await revParse('HEAD');
+
+      await write('a.ts', COMPLEX);
+      await commitAll('commit 2');
+      await write('a.ts', COMPLEX + '// further uncommitted edit\n');
+
+      const c = byPath(await collectFileChanges(dir, base), 'a.ts')!;
+      expect(c.before).toBe(SIMPLE);
+      expect(c.after).toContain('further uncommitted edit');
+    });
+
+    it('still reports untracked new files as added, regardless of base', async () => {
+      await initRepo();
+      await write('a.ts', SIMPLE);
+      await commitAll('init');
+      const base = await revParse('HEAD');
+      await write('b.ts', COMPLEX); // untracked
+
+      const c = byPath(await collectFileChanges(dir, base), 'b.ts')!;
+      expect(c.before).toBeNull();
+      expect(c.after).toBe(COMPLEX);
+    });
+
+    it('throws a clear error when the base ref does not resolve to a commit', async () => {
+      await initRepo();
+      await write('a.ts', SIMPLE);
+      await commitAll('init');
+
+      await expect(collectFileChanges(dir, 'does-not-exist-ref')).rejects.toThrow(
+        /base ref "does-not-exist-ref" not found/,
+      );
+    });
+  });
+
   describe('collectFileChange — single-file fast path (edit hook)', () => {
     it('builds before/after for a modified file (relative path)', async () => {
       await initRepo();
@@ -273,6 +353,48 @@ describe('delta-git', () => {
       } finally {
         await fs.rm(linkParent, { recursive: true, force: true });
       }
+    });
+
+    describe('with baseRef', () => {
+      async function revParse(ref: string): Promise<string> {
+        const { stdout } = await execFileAsync('git', ['rev-parse', ref], { cwd: dir });
+        return stdout.trim();
+      }
+
+      it('baseRef === HEAD matches the default (no baseRef)', async () => {
+        await initRepo();
+        await write('a.ts', SIMPLE);
+        await commitAll('init');
+        await write('a.ts', COMPLEX);
+
+        const head = await revParse('HEAD');
+        expect(await collectFileChange(dir, 'a.ts', head)).toEqual(
+          await collectFileChange(dir, 'a.ts'),
+        );
+      });
+
+      it('reads "before" from an earlier ref, seeing a since-committed change', async () => {
+        await initRepo();
+        await write('a.ts', SIMPLE);
+        await commitAll('init');
+        const base = await revParse('HEAD');
+        await write('a.ts', COMPLEX);
+        await commitAll('commit 2');
+
+        const c = await collectFileChange(dir, 'a.ts', base);
+        expect(c!.before).toBe(SIMPLE);
+        expect(c!.after).toBe(COMPLEX);
+      });
+
+      it('throws a clear error when baseRef does not resolve to a commit', async () => {
+        await initRepo();
+        await write('a.ts', SIMPLE);
+        await commitAll('init');
+
+        await expect(collectFileChange(dir, 'a.ts', 'nope-not-a-ref')).rejects.toThrow(
+          /base ref "nope-not-a-ref" not found/,
+        );
+      });
     });
   });
 
