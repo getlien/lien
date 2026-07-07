@@ -66,12 +66,22 @@ function containsFragment(text: string, fragment: string): boolean {
 }
 
 /** True if both terms appear within `window` chars of each other, in either order. */
+function allIndexesOf(haystack: string, needle: string): number[] {
+  const indexes: number[] = [];
+  for (let i = haystack.indexOf(needle); i !== -1; i = haystack.indexOf(needle, i + 1)) {
+    indexes.push(i);
+  }
+  return indexes;
+}
+
+// Any occurrence pair within the window counts — first-occurrence-only would
+// false-fail when a term also appears earlier in an unrelated context (e.g. a
+// tool-selection table above the mandate that actually satisfies the check).
 function mentionsNear(text: string, termA: string, termB: string, window = 150): boolean {
   const lower = text.toLowerCase();
-  const a = lower.indexOf(termA.toLowerCase());
-  const b = lower.indexOf(termB.toLowerCase());
-  if (a === -1 || b === -1) return false;
-  return Math.abs(a - b) <= window;
+  const as = allIndexesOf(lower, termA.toLowerCase());
+  const bs = allIndexesOf(lower, termB.toLowerCase());
+  return as.some(a => bs.some(b => Math.abs(a - b) <= window));
 }
 
 const claudeMdPath = findClaudeMd(dirname(fileURLToPath(import.meta.url)));
