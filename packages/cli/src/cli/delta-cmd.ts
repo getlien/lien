@@ -23,11 +23,18 @@ export interface DeltaOptions {
   format: 'text' | 'json';
   threshold?: string;
   /**
-   * Restrict analysis to a single file (working tree vs HEAD). The fast path
-   * the PostToolUse edit hook uses — bounds the work to the one edited file
-   * instead of scanning the whole working tree on every keystroke.
+   * Restrict analysis to a single file (working tree vs HEAD, or vs `base`
+   * when given). The fast path the PostToolUse edit hook uses — bounds the
+   * work to the one edited file instead of scanning the whole working tree on
+   * every keystroke.
    */
   file?: string;
+  /**
+   * Compare the working tree against this ref instead of `HEAD` (e.g.
+   * `origin/main` in CI, to catch a crossing introduced anywhere in the PR
+   * rather than only in its most recent commit). Composes with `--file`.
+   */
+  base?: string;
 }
 
 const VALID_FORMATS = ['text', 'json'];
@@ -156,8 +163,16 @@ function fmtFunction(fn: FunctionComplexityDelta): string {
   return `${head} ${chalk.dim(METRIC_LABEL[m.metricType])} ${fmtValue(m.before, m.metricType)} → ${fmtValue(m.after, m.metricType)}${limit}`;
 }
 
-/** Render the human-readable report. Pure — no I/O, no process state. */
-export function formatDeltaText(result: ComplexityDeltaResult, elapsedMs: number): string {
+/**
+ * Render the human-readable report. Pure — no I/O, no process state.
+ * `baseLabel` names the comparison point in the header (default `HEAD`;
+ * `--base <ref>` passes `ref` so the report is honest about what it compared).
+ */
+export function formatDeltaText(
+  result: ComplexityDeltaResult,
+  elapsedMs: number,
+  baseLabel = 'HEAD',
+): string {
   const { summary, files } = result;
   const filesWithFindings = files.filter(f => f.functions.length > 0);
 
@@ -166,10 +181,10 @@ export function formatDeltaText(result: ComplexityDeltaResult, elapsedMs: number
       summary.filesChanged === 0
         ? 'no complexity-affecting changes'
         : `no complexity changes across ${summary.filesChanged} file(s)`;
-    return chalk.dim(`lien delta — ${what} vs HEAD (${elapsedMs} ms)`);
+    return chalk.dim(`lien delta — ${what} vs ${baseLabel} (${elapsedMs} ms)`);
   }
 
-  const lines: string[] = [chalk.bold('lien delta — complexity vs HEAD'), ''];
+  const lines: string[] = [chalk.bold(`lien delta — complexity vs ${baseLabel}`), ''];
   for (const file of filesWithFindings) {
     const tag =
       file.status === 'renamed' && file.oldPath ? chalk.dim(` (renamed from ${file.oldPath})`) : '';
@@ -198,20 +213,33 @@ export function formatDeltaText(result: ComplexityDeltaResult, elapsedMs: number
   return lines.join('\n');
 }
 
-/** Analyze the working tree's complexity delta vs HEAD. */
+/**
+ * Validate the simple usage flags before any work: a malformed --format, or an
+ * empty --file / --base, is a usage error (exit 2), not a silent no-op —
+ * silence is reserved for genuinely out-of-scope inputs (a non-code file, a
+ * path outside the repo), never malformed flags. Returns the message to print,
+ * or undefined when every flag is valid.
+ */
+function usageFlagError(options: DeltaOptions): string | undefined {
+  if (!VALID_FORMATS.includes(options.format)) {
+    return `Invalid --format "${options.format}". Must be text or json.`;
+  }
+  if (options.file !== undefined && options.file.trim() === '') {
+    return '--file requires a non-empty path.';
+  }
+  if (options.base !== undefined && options.base.trim() === '') {
+    return '--base requires a non-empty ref.';
+  }
+  return undefined;
+}
+
+/** Analyze the working tree's complexity delta vs HEAD (or `--base <ref>`). */
 export async function deltaCommand(options: DeltaOptions): Promise<void> {
   const start = Date.now();
 
-  if (!VALID_FORMATS.includes(options.format)) {
-    console.error(chalk.red(`Error: Invalid --format "${options.format}". Must be text or json.`));
-    process.exit(2);
-  }
-
-  // Validate --file before doing any work: an empty value is a usage error
-  // (exit 2), not a silent no-op — silence is reserved for genuinely
-  // out-of-scope files (non-code, outside the repo), never malformed input.
-  if (options.file !== undefined && options.file.trim() === '') {
-    console.error(chalk.red('lien delta: --file requires a non-empty path.'));
+  const usageError = usageFlagError(options);
+  if (usageError) {
+    console.error(chalk.red(`lien delta: ${usageError}`));
     process.exit(2);
   }
 
@@ -252,10 +280,10 @@ export async function deltaCommand(options: DeltaOptions): Promise<void> {
     if (options.file !== undefined) {
       // Single-file fast path (the edit hook). An out-of-repo / unsupported /
       // absent file yields no change → empty result → clean exit 0.
-      const single = await collectFileChange(rootDir, options.file);
+      const single = await collectFileChange(rootDir, options.file, options.base);
       changes = single ? [single] : [];
     } else {
-      changes = await collectFileChanges(rootDir);
+      changes = await collectFileChanges(rootDir, options.base);
     }
   } catch (error) {
     console.error(
@@ -272,7 +300,7 @@ export async function deltaCommand(options: DeltaOptions): Promise<void> {
   if (options.format === 'json') {
     console.log(JSON.stringify({ ...result, elapsedMs }, null, 2));
   } else {
-    console.log(formatDeltaText(result, elapsedMs));
+    console.log(formatDeltaText(result, elapsedMs, options.base ?? 'HEAD'));
   }
 
   process.exit(deltaExitCode(result, options.soft));

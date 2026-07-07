@@ -71,6 +71,44 @@ jobs:
       - name: Build Action image (Dockerfile smoke test)
         run: docker build -f packages/action/Dockerfile -t lien-review:ci .
 
+  delta:
+    name: Complexity delta vs base branch (lien delta --base)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    timeout-minutes: 10
+
+    # `lien delta` is the sixth pre-commit gate (see CLAUDE.md), but until now
+    # it only ran on an agent's honor system -- nothing stopped a PR whose
+    # commits raised a function's complexity over threshold from merging, as
+    # long as no individual commit happened to run the gate locally. This job
+    # gives the gate a CI backstop: it compares the checked-out PR state
+    # against the PR's target branch (not just the PR's own last commit, which
+    # a crossing introduced earlier in the same PR could hide from) and fails
+    # the build on any NEW threshold crossing.
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          # Need the target branch's history locally (as `origin/<base>`) to
+          # diff against -- a shallow, single-ref checkout would not have it.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Parser, Core & CLI (required by lien delta)
+        run: npm run build:core && npm run build -w packages/cli
+
+      - name: lien delta --base origin/<target-branch>
+        run: node packages/cli/dist/index.js delta --base "origin/$GITHUB_BASE_REF"
+
   release-smoke-test:
     name: Release smoke test (npm pack -> external install)
     runs-on: ubuntu-latest

@@ -42,6 +42,16 @@ async function hasCommits(rootDir: string): Promise<boolean> {
   }
 }
 
+/** Whether `ref` resolves to a commit in this repository. */
+async function refExists(rootDir: string, ref: string): Promise<boolean> {
+  try {
+    await git(rootDir, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 interface RawChange {
   status: 'A' | 'M' | 'D' | 'R';
   path: string;
@@ -84,14 +94,15 @@ function isSupported(filepath: string, supported: ReadonlySet<string>): boolean 
   return supported.has(filepath.slice(dot));
 }
 
-async function showHead(rootDir: string, gitPath: string): Promise<string | null> {
+async function showAtRef(rootDir: string, ref: string, gitPath: string): Promise<string | null> {
   try {
-    return await git(rootDir, ['show', `HEAD:${gitPath}`]);
+    return await git(rootDir, ['show', `${ref}:${gitPath}`]);
   } catch {
-    // `null` here means "no version of this path in HEAD" — i.e. the file is
-    // added/untracked. That is the intended, correct meaning of a `git show`
-    // failure for this path (unlike readWorktree below, where null must be
-    // reserved for genuine absence), so all errors legitimately map to null.
+    // `null` here means "no version of this path in `ref`" — i.e. the file is
+    // added/untracked (relative to that ref). That is the intended, correct
+    // meaning of a `git show` failure for this path (unlike readWorktree
+    // below, where null must be reserved for genuine absence), so all errors
+    // legitimately map to null.
     return null;
   }
 }
@@ -110,62 +121,99 @@ export async function readWorktree(rootDir: string, gitPath: string): Promise<st
   }
 }
 
-/** Turn a raw git change into a before/after content pair. */
+/**
+ * Turn a raw git change into a before/after content pair.
+ *
+ * `showRef` is the ref "before" content is read from (`git show
+ * ${showRef}:path`); `null` means there is no baseline at all (unborn HEAD,
+ * default mode only) — every change is then treated as an addition.
+ */
 async function toContentChange(
   rootDir: string,
   raw: RawChange,
-  unborn: boolean,
+  showRef: string | null,
 ): Promise<FileContentChange> {
-  if (unborn || raw.status === 'A') {
+  if (showRef === null || raw.status === 'A') {
     return { filepath: raw.path, before: null, after: await readWorktree(rootDir, raw.path) };
   }
   if (raw.status === 'D') {
-    return { filepath: raw.path, before: await showHead(rootDir, raw.path), after: null };
+    return { filepath: raw.path, before: await showAtRef(rootDir, showRef, raw.path), after: null };
   }
   if (raw.status === 'R') {
     const oldPath = raw.oldPath ?? raw.path;
     return {
       filepath: raw.path,
       oldPath,
-      before: await showHead(rootDir, oldPath),
+      before: await showAtRef(rootDir, showRef, oldPath),
       after: await readWorktree(rootDir, raw.path),
     };
   }
   // Modified
   return {
     filepath: raw.path,
-    before: await showHead(rootDir, raw.path),
+    before: await showAtRef(rootDir, showRef, raw.path),
     after: await readWorktree(rootDir, raw.path),
   };
 }
 
-/**
- * Collect before/after content pairs for every changed, parser-supported file
- * (working tree vs HEAD). Returns an empty array when there are no changes.
- */
-export async function collectFileChanges(rootDir: string): Promise<FileContentChange[]> {
-  const supported = new Set(getSupportedExtensions().map(ext => `.${ext}`));
-  const born = await hasCommits(rootDir);
+interface Baseline {
+  raw: RawChange[];
+  /** Ref "before" content is read from; null => no baseline (unborn HEAD). */
+  showRef: string | null;
+}
 
-  let raw: RawChange[];
-  if (born) {
-    raw = parseNameStatusZ(
-      await git(rootDir, ['diff', '--name-status', '--find-renames', '-z', 'HEAD']),
-    );
-  } else {
-    // Unborn HEAD: everything staged is "added"; nothing has a HEAD baseline.
-    const staged = splitZ(await git(rootDir, ['diff', '--cached', '--name-only', '-z']));
-    raw = staged.map(p => ({ status: 'A' as const, path: p }));
+/** Explicit `--base <ref>` baseline: diff working tree against that ref. */
+async function explicitBaseline(rootDir: string, baseRef: string): Promise<Baseline> {
+  if (!(await refExists(rootDir, baseRef))) {
+    throw new Error(`base ref "${baseRef}" not found`);
   }
+  const raw = parseNameStatusZ(
+    await git(rootDir, ['diff', '--name-status', '--find-renames', '-z', baseRef]),
+  );
+  return { raw, showRef: baseRef };
+}
 
-  // Untracked files are additions regardless of HEAD state.
+/** Default baseline: working tree vs `HEAD`, with the unborn-HEAD fallback. */
+async function headBaseline(rootDir: string): Promise<Baseline> {
+  if (!(await hasCommits(rootDir))) {
+    // Unborn HEAD: everything staged is "added"; nothing has a baseline.
+    const staged = splitZ(await git(rootDir, ['diff', '--cached', '--name-only', '-z']));
+    return { raw: staged.map(p => ({ status: 'A' as const, path: p })), showRef: null };
+  }
+  const raw = parseNameStatusZ(
+    await git(rootDir, ['diff', '--name-status', '--find-renames', '-z', 'HEAD']),
+  );
+  return { raw, showRef: 'HEAD' };
+}
+
+/**
+ * Collect before/after content pairs for every changed, parser-supported file.
+ *
+ * Default (`baseRef` omitted): working tree vs `HEAD` — byte-for-byte the
+ * original behaviour, including the unborn-HEAD fallback (no commits yet).
+ *
+ * `baseRef` set: working tree vs the given ref (`git show <ref>:path`), the
+ * mode `lien delta --base <ref>` uses to compare against e.g. `origin/main`
+ * in CI. Throws if `baseRef` does not resolve to a commit.
+ *
+ * Returns an empty array when there are no changes.
+ */
+export async function collectFileChanges(
+  rootDir: string,
+  baseRef?: string,
+): Promise<FileContentChange[]> {
+  const supported = new Set(getSupportedExtensions().map(ext => `.${ext}`));
+  const { raw, showRef } =
+    baseRef !== undefined ? await explicitBaseline(rootDir, baseRef) : await headBaseline(rootDir);
+
+  // Untracked files are additions regardless of baseline state.
   const untracked = splitZ(
     await git(rootDir, ['ls-files', '--others', '--exclude-standard', '-z']),
   );
   for (const p of untracked) raw.push({ status: 'A', path: p });
 
   const filtered = raw.filter(r => isSupported(r.path, supported));
-  return Promise.all(filtered.map(r => toContentChange(rootDir, r, !born)));
+  return Promise.all(filtered.map(r => toContentChange(rootDir, r, showRef)));
 }
 
 /**
@@ -187,19 +235,22 @@ async function canonicalize(p: string): Promise<string> {
 }
 
 /**
- * Build the before/after content pair for a SINGLE file (working tree vs HEAD).
- * This is the fast path for the per-edit hook: it avoids the full `git diff`
- * scan and touches only the one file that was just edited.
+ * Build the before/after content pair for a SINGLE file (working tree vs a
+ * ref — `HEAD` by default, or `baseRef` when given). This is the fast path
+ * for the per-edit hook: it avoids the full `git diff` scan and touches only
+ * the one file that was just edited.
  *
  * `filePath` may be absolute or relative to `rootDir`. Returns `null` — meaning
  * "nothing to analyze, stay silent" — when the path is outside the repo, its
  * extension is not parser-supported, or it exists on neither side (before and
  * after both absent). Read errors other than ENOENT propagate (operational
- * failure), matching `readWorktree`'s contract.
+ * failure), matching `readWorktree`'s contract. Throws if `baseRef` is given
+ * and does not resolve to a commit.
  */
 export async function collectFileChange(
   rootDir: string,
   filePath: string,
+  baseRef?: string,
 ): Promise<FileContentChange | null> {
   // Resolve to a repo-relative POSIX path; reject anything outside the repo.
   // Canonicalize symlinked path segments on BOTH sides first — otherwise a
@@ -224,7 +275,11 @@ export async function collectFileChange(
   const supported = new Set(getSupportedExtensions().map(ext => `.${ext}`));
   if (!isSupported(relPosix, supported)) return null;
 
-  const before = await showHead(rootDir, relPosix); // null => not in HEAD (added/new)
+  if (baseRef !== undefined && !(await refExists(rootDir, baseRef))) {
+    throw new Error(`base ref "${baseRef}" not found`);
+  }
+  const ref = baseRef ?? 'HEAD';
+  const before = await showAtRef(rootDir, ref, relPosix); // null => not in ref (added/new)
   const after = await readWorktree(rootDir, relPosix); // null => deleted (ENOENT only)
   if (before === null && after === null) return null;
 

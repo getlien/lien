@@ -1,4 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import {
   computeComplexityDelta,
   DEFAULT_COMPLEXITY_DELTA_THRESHOLDS,
@@ -12,7 +17,10 @@ import {
   formatDeltaText,
   fmtValue,
   deltaCommand,
+  type DeltaOptions,
 } from './delta-cmd.js';
+
+const execFileAsync = promisify(execFile);
 
 const stripAnsi = (s: string): string => s.replace(/\[[0-9;]*m/g, '');
 
@@ -141,6 +149,16 @@ describe('formatDeltaText', () => {
     expect(text).toContain('5 ms');
   });
 
+  it('renders the header against a custom baseLabel (--base <ref>)', () => {
+    const result = computeComplexityDelta(
+      [{ filepath: 'src/foo.ts', before: BODY.twoNest, after: BODY.threeNest }],
+      COG_ONLY,
+    );
+    const text = stripAnsi(formatDeltaText(result, 7, 'origin/main'));
+    expect(text).toContain('lien delta — complexity vs origin/main');
+    expect(text).not.toContain('vs HEAD');
+  });
+
   it('labels renamed files', () => {
     const result = computeComplexityDelta(
       [{ filepath: 'new.ts', oldPath: 'old.ts', before: BODY.twoNest, after: BODY.threeNest }],
@@ -211,6 +229,11 @@ describe('deltaCommand — operational failures exit 2 (Phase-1 findings #2, #3)
     await expect(deltaCommand({ format: 'text', file: '   ' })).rejects.toThrow('__exit__:2');
   });
 
+  it('exits 2 on an empty --base (usage error, not "use HEAD")', async () => {
+    await expect(deltaCommand({ format: 'text', base: '' })).rejects.toThrow('__exit__:2');
+    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('non-empty ref'));
+  });
+
   it('exits 2 when config fails to load (malformed .lien.config.json)', async () => {
     vi.spyOn(core.configService, 'load').mockRejectedValue(
       new SyntaxError('Unexpected token } in JSON'),
@@ -219,5 +242,127 @@ describe('deltaCommand — operational failures exit 2 (Phase-1 findings #2, #3)
     expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('failed to load config'));
     // No report is printed on the error path.
     expect(logSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('deltaCommand — --base <ref> integration (real git fixtures)', () => {
+  let dir: string;
+  let originalCwd: string;
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  let errSpy: ReturnType<typeof vi.spyOn>;
+
+  async function git(...args: string[]): Promise<void> {
+    await execFileAsync('git', args, { cwd: dir });
+  }
+
+  async function write(rel: string, content: string): Promise<void> {
+    const full = path.join(dir, rel);
+    await fs.mkdir(path.dirname(full), { recursive: true });
+    await fs.writeFile(full, content, 'utf-8');
+  }
+
+  async function initRepo(): Promise<void> {
+    await git('init', '-q');
+    await git('config', 'user.email', 'test@example.com');
+    await git('config', 'user.name', 'Test');
+    await git('config', 'commit.gpgsign', 'false');
+  }
+
+  async function commitAll(msg: string): Promise<void> {
+    await git('add', '-A');
+    await git('-c', 'commit.gpgsign=false', 'commit', '-q', '-m', msg);
+  }
+
+  async function revParse(ref: string): Promise<string> {
+    const { stdout } = await execFileAsync('git', ['rev-parse', ref], { cwd: dir });
+    return stdout.trim();
+  }
+
+  /** Run deltaCommand and resolve to the exit code, instead of throwing the sentinel. */
+  async function runDelta(options: DeltaOptions): Promise<number> {
+    try {
+      await deltaCommand(options);
+    } catch (error) {
+      const match = /__exit__:(\d+)/.exec(error instanceof Error ? error.message : String(error));
+      if (match) return Number(match[1]);
+      throw error;
+    }
+    return 0;
+  }
+
+  /** Parses the last console.log call as JSON, stripping the timing-noise field. */
+  function lastJsonLog(): Record<string, unknown> {
+    const call = logSpy.mock.calls.at(-1);
+    const { elapsedMs: _elapsedMs, ...rest } = JSON.parse(String(call?.[0]));
+    return rest;
+  }
+
+  beforeEach(async () => {
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-delta-cmd-'));
+    dir = await fs.realpath(dir); // resolve macOS /var -> /private/var
+    originalCwd = process.cwd();
+    process.chdir(dir);
+
+    logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      throw new Error(`__exit__:${code}`);
+    }) as never);
+  });
+
+  afterEach(async () => {
+    process.chdir(originalCwd);
+    vi.restoreAllMocks();
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it('--base <HEAD sha> is equivalent to the default (no --base)', async () => {
+    await initRepo();
+    await write('a.ts', BODY.oneIf);
+    await commitAll('init');
+    await write('a.ts', BODY.twoNest); // uncommitted crossing (against threshold 2)
+
+    const head = await revParse('HEAD');
+    const exitDefault = await runDelta({ format: 'json', threshold: '2' });
+    const resultDefault = lastJsonLog();
+    const exitWithBase = await runDelta({ format: 'json', threshold: '2', base: head });
+    const resultWithBase = lastJsonLog();
+
+    expect(exitDefault).toBe(1);
+    expect(exitWithBase).toBe(1);
+    expect(resultWithBase).toEqual(resultDefault);
+  });
+
+  it('catches a crossing introduced relative to base but invisible vs HEAD (the CI case)', async () => {
+    await initRepo();
+    await write('a.ts', BODY.oneIf);
+    await commitAll('init'); // this is the PR's base (e.g. origin/main)
+    const base = await revParse('HEAD');
+
+    await write('a.ts', BODY.twoNest);
+    await commitAll('introduce crossing'); // committed: HEAD === working tree now
+
+    // Plain `lien delta` (vs HEAD) sees no diff at all — nothing to flag.
+    const exitVsHead = await runDelta({ format: 'json', threshold: '2' });
+    expect(exitVsHead).toBe(0);
+    expect((lastJsonLog() as { summary: { regressions: number } }).summary.regressions).toBe(0);
+
+    // `lien delta --base <base>` sees the committed crossing.
+    const exitVsBase = await runDelta({ format: 'json', threshold: '2', base });
+    expect(exitVsBase).toBe(1);
+    const result = lastJsonLog() as { summary: { regressions: number } };
+    expect(result.summary.regressions).toBe(1);
+  });
+
+  it('exits 2 with a clear message when --base does not resolve to a commit', async () => {
+    await initRepo();
+    await write('a.ts', BODY.oneIf);
+    await commitAll('init');
+
+    const exitCode = await runDelta({ format: 'text', base: 'totally-not-a-ref' });
+    expect(exitCode).toBe(2);
+    expect(errSpy).toHaveBeenCalledWith(
+      expect.stringContaining('base ref "totally-not-a-ref" not found'),
+    );
   });
 });
