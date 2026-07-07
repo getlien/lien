@@ -1,0 +1,29 @@
+name: Docs Truth
+
+# Zero-dependency lint over tracked markdown: broken relative links, ADR-XXXX
+# references with no matching decision file, and `npm run <script>` mentions
+# that don't resolve. See .github/scripts/docs-truth.mjs.
+#
+# Deliberately a separate workflow from ci.yml so it can be added without
+# touching that file's in-flight changes.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  docs-truth:
+    name: Lint docs for drift
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run docs-truth linter
+        run: node .github/scripts/docs-truth.mjs
