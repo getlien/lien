@@ -14,6 +14,13 @@ export interface WireNode {
   endCol: number; // UTF-8 byte offset within endRow
   named?: false; // absent means true
   field?: string; // absent means "no field name"
+  // Swift-only: some tree-sitter-swift productions nest field() calls around
+  // a shared hidden rule (e.g. `field("return_type", field("name", ...))`),
+  // so one child position can carry two field names. `field` is whichever
+  // TreeCursor::field_name() reports (empirically the innermost); `field2`,
+  // when present, is the other one. Absent for every other language and for
+  // the vast majority of Swift nodes (single- or no-field positions).
+  field2?: string;
   hasError?: true; // absent means false
   isMissing?: true; // absent means false
   children: WireNode[];

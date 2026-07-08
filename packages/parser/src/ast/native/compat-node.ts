@@ -19,6 +19,21 @@ interface BuiltChildren {
 }
 
 /**
+ * Registers `name -> child` in `fieldMap` (allocating it on first use),
+ * first-match wins (native-parser.md section 2.1: repeated field names keep
+ * the earliest child). Returns the map so callers can thread it back.
+ */
+function registerField(
+  fieldMap: Map<string, CompatSyntaxNode> | null,
+  name: string,
+  child: CompatSyntaxNode,
+): Map<string, CompatSyntaxNode> {
+  const map = fieldMap ?? new Map();
+  if (!map.has(name)) map.set(name, child);
+  return map;
+}
+
+/**
  * Recursively construct `parent`'s children, and derive namedChildren and
  * the field-name lookup map in the same pass (native-parser.md section 2.1:
  * first-match wins on repeated field names). Split out of the constructor
@@ -40,8 +55,12 @@ function buildChildren(
     children.push(child);
     if (child.isNamed) namedChildren.push(child);
     if (wireChild.field) {
-      if (!fieldMap) fieldMap = new Map();
-      if (!fieldMap.has(wireChild.field)) fieldMap.set(wireChild.field, child);
+      fieldMap = registerField(fieldMap, wireChild.field, child);
+      // Swift-only: a child position can carry two field names when the
+      // grammar nests field() around a shared hidden rule (e.g. the
+      // "return_type" position also carries "name") -- see
+      // packages/parser-native/index.d.ts's WireNode.field2 doc comment.
+      if (wireChild.field2) fieldMap = registerField(fieldMap, wireChild.field2, child);
     }
   }
 

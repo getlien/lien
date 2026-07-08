@@ -163,6 +163,41 @@ describe('parseTree', () => {
     });
   });
 
+  describe('swift field2 (multi-field grammar positions)', () => {
+    // tree-sitter-swift's grammar.js nests field() calls around a shared
+    // hidden rule -- e.g. `field("return_type", field("name", $._type))` --
+    // so one child position can carry two field names simultaneously.
+    // TreeCursor::field_name() (the `field` key) only ever surfaces one of
+    // them (empirically "name", never "return_type"); `field2` carries the
+    // other. This is the wire-level fix for the defect where native chunk
+    // metadata silently lost `returnType` for every Swift function/method
+    // with an explicit `-> Type` annotation (legacy node-tree-sitter's
+    // childForFieldName('return_type') found the field via a direct
+    // field-table lookup, not the single-valued cursor API).
+    it('tags a typed function return-type node with field2: "return_type"', () => {
+      const wire: WireNode = JSON.parse(
+        parseTree('swift', 'func add(a: Int, b: Int) -> Int { return a + b }'),
+      );
+      const returnTypeNode = findByPredicate(
+        wire,
+        n => n.field === 'return_type' || n.field2 === 'return_type',
+      );
+      expect(returnTypeNode).not.toBeNull();
+      expect(returnTypeNode?.type).toBe('user_type');
+      // The other field name is still present too -- field2 is additive,
+      // not a replacement for the cursor-reported field.
+      expect(returnTypeNode?.field).toBe('name');
+      expect(returnTypeNode?.field2).toBe('return_type');
+    });
+
+    it('never emits field2 for a language other than swift', () => {
+      const wire: WireNode = JSON.parse(
+        parseTree('typescript', 'function add(a: number, b: number): number { return a + b; }'),
+      );
+      expect(findByPredicate(wire, n => n.field2 !== undefined)).toBeNull();
+    });
+  });
+
   describe('unknown language', () => {
     it('throws an error naming the valid language ids', () => {
       expect(() => parseTree('elixir', 'anything')).toThrowError(/unsupported language/i);

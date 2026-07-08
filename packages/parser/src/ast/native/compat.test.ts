@@ -5,6 +5,7 @@ import Python from 'tree-sitter-python';
 import Kotlin from 'tree-sitter-kotlin';
 import PHPParser from 'tree-sitter-php';
 import Go from 'tree-sitter-go';
+import Swift from 'tree-sitter-swift';
 import { parseAST } from '../parser.js';
 import { chunkByAST } from '../chunker.js';
 import { extractExports, extractImports, extractCallSites } from '../symbols.js';
@@ -25,6 +26,7 @@ const GRAMMARS: Partial<Record<SupportedLanguage, unknown>> = {
   kotlin: Kotlin,
   php: PHPParser.php,
   go: Go,
+  swift: Swift,
 };
 
 function buildLegacyTree(lang: SupportedLanguage, source: string): Parser.Tree {
@@ -160,11 +162,52 @@ class Greeter {
 }
 `;
 
+// Regression fixture for the native-backend defect where every Swift
+// function/method/subscript with an explicit `-> Type` annotation lost
+// `metadata.returnType`: tree-sitter-swift's grammar nests field() calls
+// around a shared hidden rule (e.g. `field("return_type", field("name",
+// $._type))`), so the return-type node carries two field names, but
+// TreeCursor::field_name() -- what the wire's `field` key used -- only
+// surfaces one of them. Covers a protocol's abstract method (no body), a
+// concrete method, an initializer (no return type, must stay unaffected),
+// and a subscript -- all four productions double-tag the same way per
+// tree-sitter-swift's grammar.js.
+const SWIFT_SOURCE = `
+protocol Greeting {
+    func message() -> String
+}
+
+class Greeter: Greeting {
+    private let name: String
+
+    init(name: String) {
+        self.name = name
+    }
+
+    func message() -> String {
+        return "hello " + name
+    }
+
+    func add(a: Int, b: Int) -> Int {
+        return a + b
+    }
+
+    subscript(index: Int) -> String {
+        return message()
+    }
+}
+`;
+
 const FIXTURES: Fixture[] = [
   { name: 'typescript basic', lang: 'typescript', source: TS_SOURCE },
   { name: 'python basic', lang: 'python', source: PYTHON_SOURCE },
   { name: 'kotlin basic', lang: 'kotlin', source: KOTLIN_SOURCE },
   { name: 'php basic (multi-grammar)', lang: 'php', source: PHP_SOURCE },
+  {
+    name: 'swift (protocol method + method + init + subscript, explicit return types)',
+    lang: 'swift',
+    source: SWIFT_SOURCE,
+  },
   {
     name: 'non-ascii (accents + emoji)',
     lang: 'typescript',
@@ -253,6 +296,21 @@ describe('native compat deserializer: real extractor parity', () => {
     process.env.LIEN_PARSER = 'native';
     const nativeChunks = chunkByAST('greeter.ts', TS_SOURCE);
     expect(nativeChunks).toEqual(legacyChunks);
+  });
+
+  it('chunkByAST matches end-to-end between backends (swift), including returnType', () => {
+    delete process.env.LIEN_PARSER;
+    const legacyChunks = chunkByAST('greeter.swift', SWIFT_SOURCE);
+    process.env.LIEN_PARSER = 'native';
+    const nativeChunks = chunkByAST('greeter.swift', SWIFT_SOURCE);
+    expect(nativeChunks).toEqual(legacyChunks);
+
+    // Guard against a vacuous pass: assert the fixture actually exercises
+    // returnType extraction on both sides, so a future regression that
+    // silently dropped returnType from *both* backends wouldn't slip
+    // through toEqual() alone.
+    const returnTypes = legacyChunks.map(c => c.metadata.returnType).filter(Boolean);
+    expect(returnTypes).toEqual(['String', 'String', 'Int', 'String']);
   });
 });
 

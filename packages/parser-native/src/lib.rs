@@ -13,7 +13,7 @@ use napi_derive::napi;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::Write as _;
-use tree_sitter::{Language, Parser, TreeCursor};
+use tree_sitter::{Language, Node, Parser, TreeCursor};
 
 /// Canonical language ids. Must match `LANGUAGE_IDS` in
 /// `packages/parser/src/ast/languages/registry.ts` exactly -- these are the
@@ -106,10 +106,63 @@ fn write_json_string(out: &mut String, s: &str) {
     out.push('"');
 }
 
-/// Writes the omitted-default fields (§1.1): `named`/`field`/`hasError`/
-/// `isMissing` are only emitted when they differ from their common-case
-/// default (true / absent / false / false respectively).
-fn write_optional_fields(out: &mut String, cursor: &TreeCursor) {
+/// Swift-only: a second field name attached to the same child position as
+/// `primary`, if one exists.
+///
+/// Background: tree-sitter lets one child position carry *multiple* field
+/// names when a grammar nests `field()` calls around a shared hidden rule
+/// (`field("return_type", field("name", $._unannotated_type))` is exactly
+/// this pattern in `tree-sitter-swift`'s grammar.js, used for return types,
+/// parameter/property type annotations, `inherits_from`, and `must_equal`).
+/// `TreeCursor::field_name()` (what `write_optional_fields` calls for the
+/// common `field` key) only ever surfaces *one* of them -- empirically the
+/// innermost ("name"), never the outer one lien's extractors actually query
+/// (e.g. `return_type`). `Node::child_by_field_id`, by contrast, does a
+/// direct field-table lookup and finds the child regardless of which name
+/// the cursor would report -- exactly what `node-tree-sitter`'s
+/// `childForFieldName()` uses under the hood, which is why the legacy
+/// backend never showed this bug.
+///
+/// None of the other ten grammars double-tag a field lien's extractors
+/// read, so this extra per-node scan is gated to Swift only -- zero cost for
+/// every other language.
+fn secondary_field_name<'a>(node: &Node<'a>, primary: Option<&str>) -> Option<&'static str> {
+    let parent = node.parent()?;
+    let language = node.language();
+    let field_count = u16::try_from(language.field_count()).unwrap_or(u16::MAX);
+    (1..=field_count).find_map(|id| {
+        let name = language.field_name_for_id(id)?;
+        if Some(name) == primary {
+            return None;
+        }
+        parent
+            .child_by_field_id(id)
+            .filter(|candidate| candidate == node)
+            .map(|_| name)
+    })
+}
+
+/// Writes the `field`/`field2` keys for `node`, given its cursor-reported
+/// `field` name. Split out of `write_optional_fields` to keep that
+/// function's cognitive complexity down -- `field2` is Swift-only, see
+/// `secondary_field_name`.
+fn write_field(out: &mut String, node: &Node, field: &str, lang: &str) {
+    out.push_str(",\"field\":");
+    write_json_string(out, field);
+
+    if lang == "swift" {
+        if let Some(field2) = secondary_field_name(node, Some(field)) {
+            out.push_str(",\"field2\":");
+            write_json_string(out, field2);
+        }
+    }
+}
+
+/// Writes the omitted-default fields (§1.1): `named`/`field`/`field2`/
+/// `hasError`/`isMissing` are only emitted when they differ from their
+/// common-case default (true / absent / absent / false / false
+/// respectively). `field2` is Swift-only -- see `secondary_field_name`.
+fn write_optional_fields(out: &mut String, cursor: &TreeCursor, lang: &str) {
     let node = cursor.node();
 
     // Omitted when true (the common case) -- presence always means false.
@@ -119,8 +172,7 @@ fn write_optional_fields(out: &mut String, cursor: &TreeCursor) {
 
     // Omitted when the node has no field name under its parent.
     if let Some(field) = cursor.field_name() {
-        out.push_str(",\"field\":");
-        write_json_string(out, field);
+        write_field(out, &node, field, lang);
     }
 
     // Omitted when false (the common case) -- presence always means true.
@@ -138,7 +190,7 @@ fn write_optional_fields(out: &mut String, cursor: &TreeCursor) {
 /// array, comma-joined, recursing back into `write_node` for each. Split out
 /// of `write_node` to keep that function's cognitive complexity down -- the
 /// sibling-walk loop and the recursive call are the bulk of its cost.
-fn write_children(out: &mut String, cursor: &mut TreeCursor) {
+fn write_children(out: &mut String, cursor: &mut TreeCursor, lang: &str) {
     out.push_str(",\"children\":[");
     if cursor.goto_first_child() {
         let mut first = true;
@@ -147,7 +199,7 @@ fn write_children(out: &mut String, cursor: &mut TreeCursor) {
                 out.push(',');
             }
             first = false;
-            write_node(out, cursor);
+            write_node(out, cursor, lang);
             if !cursor.goto_next_sibling() {
                 break;
             }
@@ -161,7 +213,9 @@ fn write_children(out: &mut String, cursor: &mut TreeCursor) {
 /// cursor allocation). Node shape matches docs/architecture/native-parser.md
 /// §1 exactly; the omitted-default fields and the children array are
 /// delegated to `write_optional_fields`/`write_children` respectively.
-fn write_node(out: &mut String, cursor: &mut TreeCursor) {
+/// `lang` is threaded through only for `write_optional_fields`'s Swift-only
+/// `field2` check (`secondary_field_name`) -- it plays no other role here.
+fn write_node(out: &mut String, cursor: &mut TreeCursor, lang: &str) {
     let node = cursor.node();
     out.push('{');
 
@@ -179,8 +233,8 @@ fn write_node(out: &mut String, cursor: &mut TreeCursor) {
         node.end_position().column,
     );
 
-    write_optional_fields(out, cursor);
-    write_children(out, cursor);
+    write_optional_fields(out, cursor, lang);
+    write_children(out, cursor, lang);
 
     out.push('}');
 }
@@ -197,7 +251,7 @@ pub fn parse_tree(lang: String, source: String) -> Result<String> {
             .ok_or_else(|| "tree-sitter parse() returned None".to_string())?;
         let mut out = String::with_capacity(source.len() * 2);
         let mut cursor = tree.walk();
-        write_node(&mut out, &mut cursor);
+        write_node(&mut out, &mut cursor, &lang);
         Ok(out)
     })
     .map_err(|e: String| Error::from_reason(e))?
