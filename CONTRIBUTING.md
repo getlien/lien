@@ -112,6 +112,17 @@ first (compiles the Rust crate via `cargo build --release`) — without it,
 `npm test` fails loudly in that suite rather than skipping it. CI always
 builds the native binary before running any test job.
 
+**`LIEN_PARSER=native|legacy`:** selects the AST parser backend; unset or
+`legacy` uses the existing `node-tree-sitter` path. CI runs the whole test
+suite under both — `build-and-test` (legacy, the default) and a dedicated
+`test-native` job — and `e2e.yml` reruns the TypeScript and Kotlin e2e
+projects under native on every changeset-triggered PR (the full 12-project
+suite in both modes is available via that workflow's manual
+`workflow_dispatch`). To reproduce a native-mode failure locally, build the
+binary as above, then run `LIEN_PARSER=native npm test`. See
+[ADR-013](docs/architecture/decisions/0013-prebuilt-native-parser-napi-rs.md)
+for the staged rollout this flag is part of.
+
 ### 3. Commit Guidelines
 
 Follow [Conventional Commits](https://www.conventionalcommits.org/):

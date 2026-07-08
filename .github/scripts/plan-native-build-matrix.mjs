@@ -5,15 +5,13 @@
 // "description" field explicitly asks that nothing "hand-roll a second copy
 // of this list anywhere".
 //
-// Runner selection: for most platforms this uses platforms.json's own
-// "githubRunner" field verbatim. Two entries are overridden here rather than
-// in platforms.json itself (out of scope for the CI/release wiring change
-// that added this script -- see RUNNER_OVERRIDES below): "linux-x64-gnu"
-// uses "ubuntu-latest" instead of the manifest's pinned "ubuntu-22.04", and
-// "linux-arm64-gnu" uses "ubuntu-24.04-arm" instead of "ubuntu-22.04-arm".
-// This is flagged here as a discrepancy to reconcile in platforms.json in a
-// follow-up, the same way ADR-013's C# LANGUAGE_C_SHARP table entry was
-// flagged rather than silently special-cased elsewhere.
+// Runner selection: uses platforms.json's own "githubRunner" field verbatim
+// for every platform. (Until this reconciliation, "linux-x64-gnu" and
+// "linux-arm64-gnu" were overridden here to "ubuntu-latest"/"ubuntu-24.04-arm"
+// because the manifest disagreed -- pinned "ubuntu-22.04"/"ubuntu-22.04-arm"
+// -- with what this script actually ran. The manifest is now updated to match
+// reality instead, the same way ADR-013's C# LANGUAGE_C_SHARP table entry was
+// fixed in place rather than silently special-cased elsewhere.)
 //
 // Usage (from repo root, in CI): node .github/scripts/plan-native-build-matrix.mjs
 // Env: PLATFORMS_INPUT = "required" (default) | "all" | comma-separated platform ids
@@ -30,7 +28,13 @@ const platforms = manifest.platforms;
 // REQUIRED_PLATFORMS constant -- both lists are short (5 entries) and a
 // mismatch fails loudly (a missing artifact aborts the publish script)
 // rather than silently, so the duplication is a low-risk one.
-const REQUIRED_PLATFORMS = ['darwin-arm64', 'darwin-x64', 'linux-x64-gnu', 'linux-arm64-gnu', 'win32-x64-msvc'];
+const REQUIRED_PLATFORMS = [
+  'darwin-arm64',
+  'darwin-x64',
+  'linux-x64-gnu',
+  'linux-arm64-gnu',
+  'win32-x64-msvc',
+];
 
 // Best-effort: attempted when requested, but a failure must not fail the
 // overall workflow (build-native.yml sets continue-on-error for these).
@@ -40,11 +44,6 @@ const REQUIRED_PLATFORMS = ['darwin-arm64', 'darwin-x64', 'linux-x64-gnu', 'linu
 // platforms.json's own "notes" field on these two entries for the same
 // caveat.
 const BEST_EFFORT_PLATFORMS = ['linux-x64-musl', 'linux-arm64-musl'];
-
-const RUNNER_OVERRIDES = {
-  'linux-x64-gnu': 'ubuntu-latest',
-  'linux-arm64-gnu': 'ubuntu-24.04-arm',
-};
 
 function resolveWantedIds() {
   const requested = (process.env.PLATFORMS_INPUT || 'required').trim();
@@ -64,15 +63,18 @@ function buildMatrixEntry(id) {
   })[0];
   if (!platform) {
     throw new Error(
-      'plan-native-build-matrix: unknown platform id "' + id + '" (not present in ' + MANIFEST_PATH + ')',
+      'plan-native-build-matrix: unknown platform id "' +
+        id +
+        '" (not present in ' +
+        MANIFEST_PATH +
+        ')',
     );
   }
-  const runnerOverride = RUNNER_OVERRIDES[platform.platform];
   return {
     platform: platform.platform,
     target: platform.target,
     npmPackage: platform.npmPackage,
-    runner: runnerOverride || platform.githubRunner,
+    runner: platform.githubRunner,
     libc: platform.libc,
     bestEffort: BEST_EFFORT_PLATFORMS.indexOf(platform.platform) !== -1,
   };

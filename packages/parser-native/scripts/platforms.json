@@ -26,7 +26,7 @@
       "nodePlatform": "linux",
       "nodeArch": "x64",
       "libc": "gnu",
-      "githubRunner": "ubuntu-22.04"
+      "githubRunner": "ubuntu-latest"
     },
     {
       "platform": "linux-arm64-gnu",
@@ -35,7 +35,7 @@
       "nodePlatform": "linux",
       "nodeArch": "arm64",
       "libc": "gnu",
-      "githubRunner": "ubuntu-22.04-arm",
+      "githubRunner": "ubuntu-24.04-arm",
       "notes": "cross-compiled via `cross`/gnu cross-linker if a native arm64 runner isn't available"
     },
     {
