@@ -4,3 +4,9 @@
 .git
 .github
 *.md
+
+# parser-native (napi-rs) build artifacts -- never needed in the action image,
+# which only uses the package's JS/TS surface. See packages/action/Dockerfile.
+packages/parser-native/target
+packages/parser-native/vendor
+**/*.node

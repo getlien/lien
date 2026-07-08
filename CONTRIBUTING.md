@@ -105,6 +105,13 @@ npm test
 `test:e2e:python`, `test:e2e:swift` — see `packages/cli/package.json` for the
 full list) and in CI only when a PR carries a changeset or the `e2e` label.
 
+**Native parser binary:** `packages/parser`'s `ast/native/compat.test.ts`
+drives the native backend (`LIEN_PARSER=native`) against the compiled
+`parser-native.node`. Run `npm run build:native -w @liendev/parser-native`
+first (compiles the Rust crate via `cargo build --release`) — without it,
+`npm test` fails loudly in that suite rather than skipping it. CI always
+builds the native binary before running any test job.
+
 ### 3. Commit Guidelines
 
 Follow [Conventional Commits](https://www.conventionalcommits.org/):

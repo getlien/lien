@@ -17,6 +17,7 @@
     "packages/review",
     "packages/cli",
     "packages/action",
+    "packages/parser-native",
     "packages/site"
   ],
   "scripts": {
@@ -31,14 +32,14 @@
     "docs:dev": "npm run docs:dev -w packages/site",
     "docs:build": "npm run docs:build -w packages/site",
     "docs:preview": "npm run docs:preview -w packages/site",
-    "test": "npm run test -w @liendev/parser && npm run test -w @liendev/core && npm run test -w @liendev/review && npm run test -w packages/cli && npm run test -w @liendev/action",
+    "test": "npm run test -w @liendev/parser-native && npm run test -w @liendev/parser && npm run test -w @liendev/core && npm run test -w @liendev/review && npm run test -w packages/cli && npm run test -w @liendev/action",
     "test:coverage": "npm run test:coverage -w @liendev/core",
-    "lint": "eslint packages/*/src/",
-    "lint:fix": "eslint --fix packages/*/src/",
-    "format": "prettier --write packages/*/src/ packages/*/test/",
-    "format:check": "prettier --check packages/*/src/ packages/*/test/",
+    "lint": "eslint --no-error-on-unmatched-pattern packages/*/src/ packages/parser-native/index.js packages/parser-native/index.d.ts packages/parser-native/scripts/*.mjs",
+    "lint:fix": "eslint --fix --no-error-on-unmatched-pattern packages/*/src/ packages/parser-native/index.js packages/parser-native/index.d.ts packages/parser-native/scripts/*.mjs",
+    "format": "prettier --write packages/*/src/ packages/*/test/ packages/parser-native/index.js packages/parser-native/index.d.ts packages/parser-native/scripts/*.mjs",
+    "format:check": "prettier --check packages/*/src/ packages/*/test/ packages/parser-native/index.js packages/parser-native/index.d.ts packages/parser-native/scripts/*.mjs",
     "check": "npm run format:check && npm run lint && npm run typecheck",
-    "fix": "eslint --fix packages/*/src/ && prettier --write packages/*/src/ packages/*/test/"
+    "fix": "eslint --fix --no-error-on-unmatched-pattern packages/*/src/ packages/parser-native/index.js packages/parser-native/index.d.ts packages/parser-native/scripts/*.mjs && prettier --write packages/*/src/ packages/*/test/ packages/parser-native/index.js packages/parser-native/index.d.ts packages/parser-native/scripts/*.mjs"
   },
   "keywords": [
     "mcp",

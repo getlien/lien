@@ -1,0 +1,55 @@
+{
+  "name": "@liendev/parser-native",
+  "version": "0.59.0",
+  "description": "Prebuilt native tree-sitter parser bindings for Lien (napi-rs)",
+  "type": "module",
+  "main": "./index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.js"
+    }
+  },
+  "scripts": {
+    "build": "echo '@liendev/parser-native: no JS build step -- run \"build:native\" to compile the Rust crate'",
+    "build:native": "node scripts/fetch-vendor.mjs && cargo build --release && node scripts/copy-binary.mjs",
+    "typecheck": "echo '@liendev/parser-native: hand-written index.d.ts, no typecheck step'",
+    "test": "vitest run"
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "scripts/platforms.json"
+  ],
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0",
+    "vitest": "^4.0.8"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/getlien/lien.git",
+    "directory": "packages/parser-native"
+  },
+  "homepage": "https://lien.dev",
+  "bugs": {
+    "url": "https://github.com/getlien/lien/issues"
+  },
+  "keywords": [
+    "ast",
+    "tree-sitter",
+    "napi",
+    "native",
+    "parser"
+  ],
+  "author": "Alf Henderson",
+  "license": "AGPL-3.0-only",
+  "engines": {
+    "node": ">=22.21.0"
+  }
+}

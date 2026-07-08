@@ -27,6 +27,24 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Cache Rust build (parser-native)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/parser-native
+          shared-key: parser-native
+
+      # Builds packages/parser-native's Rust crate to ./parser-native.node
+      # (vendors + patches tree-sitter-kotlin, then `cargo build --release`).
+      # Must run before "Run tests (Parser Native)" below -- that suite loads
+      # the compiled binary via index.js's local-dev fallback path. GitHub's
+      # ubuntu-latest runner ships a stable Rust toolchain preinstalled, so
+      # no separate toolchain-install step is needed. Not part of
+      # `npm run build` (see packages/parser-native/package.json's `build`
+      # script, a deliberate no-op) since Phase 1 doesn't wire any other
+      # package to depend on this one yet -- see ADR-013.
+      - name: Build native parser
+        run: npm run build:native -w @liendev/parser-native
+
       - name: Format check
         run: npm run format:check
 
@@ -47,6 +65,9 @@ jobs:
 
       - name: Run tests (Parser)
         run: npm run test --workspace=packages/parser
+
+      - name: Run tests (Parser Native)
+        run: npm run test --workspace=packages/parser-native
 
       - name: Run tests (Core)
         run: npm run test --workspace=packages/core
@@ -128,11 +149,14 @@ jobs:
     # @liendev/lien` gets -- so a phantom dependency fails the PR instead of
     # shipping.
     #
-    # It packs and installs all three PUBLISHED packages together (parser,
-    # core, lien), not just the CLI. A real release publishes them together
-    # (version-linked by changesets), so the CLI's @liendev/* sibling deps
-    # should resolve to those local tarballs, not whatever's currently live
-    # on the registry. Packing only the CLI made "new CLI + old published
+    # It packs and installs all four PUBLISHED packages together (parser,
+    # core, lien, parser-native), not just the CLI. A real release publishes
+    # them together -- all four are in the same `.changeset/config.json`
+    # linked group, so parser-native bumps to the group's max version and
+    # republishes on every release that bumps any linked package, not on a
+    # schedule of its own -- so the CLI's @liendev/* sibling deps should
+    # resolve to those local tarballs, not whatever's currently live on the
+    # registry. Packing only the CLI made "new CLI + old published
     # core/parser" -- a combination that can't happen in production -- the
     # thing this job tested, which false-positived on any PR adding a new
     # cross-package export (see #644: core shipped `NullEmbeddings` but the
@@ -155,29 +179,65 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Cache Rust build (parser-native)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/parser-native
+          shared-key: parser-native
+
+      - name: Build native parser
+        run: npm run build:native -w @liendev/parser-native
+
       - name: Build packages required for the CLI tarball
         run: npm run build:core && npm run build -w packages/cli
 
-      - name: Pack published packages (parser, core, lien)
-        run: npm pack -w @liendev/parser -w @liendev/core -w @liendev/lien
+      # Produces a real, installable @liendev/parser-native-linux-x64-gnu
+      # tarball from the binary built above, WITHOUT touching the npm
+      # registry or packages/parser-native/package.json (that mutation only
+      # happens for real in release.yml, at publish time -- see this
+      # script's own header). This lets the install step below exercise
+      # index.js's platform-package resolution path (resolution order #1 in
+      # packages/parser-native/index.js), not just its local-binary fallback
+      # (#2) -- the two are easy to conflate, and only the first is what a
+      # real end user installing from npm actually hits.
+      - name: Generate local linux-x64-gnu platform package (pack-only)
+        run: |
+          node scripts/publish-platform-packages.mjs \
+            --pack-only \
+            --platform linux-x64-gnu \
+            --binary "$(pwd)/parser-native.node"
+        working-directory: packages/parser-native
+
+      - name: Pack published packages (parser, core, lien, parser-native)
+        run: npm pack -w @liendev/parser -w @liendev/core -w @liendev/lien -w @liendev/parser-native
 
       - name: Install tarballs together as an external consumer
         run: |
           set -euo pipefail
-          PARSER_TARBALL="$(pwd)/$(ls liendev-parser-*.tgz)"
+          PARSER_TARBALL="$(pwd)/$(ls liendev-parser-[0-9]*.tgz)"
           CORE_TARBALL="$(pwd)/$(ls liendev-core-*.tgz)"
           CLI_TARBALL="$(pwd)/$(ls liendev-lien-*.tgz)"
+          PARSER_NATIVE_TARBALL="$(pwd)/$(ls liendev-parser-native-[0-9]*.tgz)"
+          PLATFORM_TARBALL="$(pwd)/$(ls packages/parser-native/platform-packages/linux-x64-gnu/liendev-parser-native-linux-x64-gnu-*.tgz)"
           SCRATCH="$(mktemp -d)"
           echo "SCRATCH_DIR=$SCRATCH" >> "$GITHUB_ENV"
           cd "$SCRATCH"
           npm init -y >/dev/null
-          npm install "$PARSER_TARBALL" "$CORE_TARBALL" "$CLI_TARBALL"
+          npm install "$PARSER_TARBALL" "$CORE_TARBALL" "$CLI_TARBALL" "$PARSER_NATIVE_TARBALL" "$PLATFORM_TARBALL"
 
       - name: Run the installed CLI binary
         run: |
           set -euo pipefail
           "$SCRATCH_DIR/node_modules/.bin/lien" --version
           "$SCRATCH_DIR/node_modules/.bin/lien" --help
+
+      # Proves the loader actually resolved the just-installed platform
+      # package (resolution order #1), not the local-binary fallback (#2) --
+      # see the probe script's own header for why it targets
+      # @liendev/parser-native directly rather than @liendev/parser.
+      - name: Probe native parser platform-package resolution
+        run: node "$GITHUB_WORKSPACE/.github/scripts/probe-parser-native-platform-package.mjs"
+        working-directory: ${{ env.SCRATCH_DIR }}
 
   docs-build:
     name: Docs build (VitePress)
