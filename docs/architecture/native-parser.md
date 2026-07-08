@@ -24,6 +24,7 @@ One JSON object per node, depth-first, `children` nested inline. Defaults are om
 | `endCol` | `number` | `node.end_position().column`. Always present. UTF-8 byte offset within the row. |
 | `named` | `false \| undefined` | `node.is_named()`. **Omitted when `true`** (the common case) — presence always means `false`. |
 | `field` | `string \| undefined` | `cursor.field_name()`. **Omitted** when the node has no field name under its parent. |
+| `field2` | `string \| undefined` | A second field name for the same child, when the grammar tags one child position with two field names. **Omitted** for every language except Swift, and for the large majority of Swift nodes too — see §1.1. |
 | `hasError` | `true \| undefined` | `node.has_error()`. **Omitted when `false`** (the common case) — presence always means `true`. |
 | `isMissing` | `true \| undefined` | `node.is_missing()`. **Omitted when `false`** (the common case) — presence always means `true`. |
 | `children` | `WireNode[]` | Always present (empty array for leaves), in tree-sitter's natural child order, unnamed tokens included. |
@@ -31,6 +32,8 @@ One JSON object per node, depth-first, `children` nested inline. Defaults are om
 ### 1.1 Wire-size optimization: omitted-default encoding
 
 `field` is absent on the majority of nodes (only grammar-field children carry one), `named` is `true` on the large majority of nodes, and `hasError`/`isMissing` are `false` on essentially every node in well-formed source. Emitting all four unconditionally costs roughly 25–30 bytes of pure waste per node, compounding over files with thousands of nodes. Omitting them costs the deserializer three `??`-style fallbacks per node — free next to the one `JSON.parse` call this already requires.
+
+`field2` is a later addition to this same omitted-default scheme, gated one level further: it is only ever considered for Swift, and only for child positions where the grammar tags one child with two field names. Tree-sitter grammars can nest `field()` calls around a shared hidden rule — `tree-sitter-swift`'s grammar does `field("return_type", field("name", $._unannotated_type))` for return types (also for type annotations, `inherits_from`, and `must_equal`), so one child ends up carrying both `return_type` and `name`. `TreeCursor::field_name()` (what produces the primary `field` value) only ever surfaces one of the two — empirically the innermost, `name` — silently dropping `return_type`, the name lien's extractors actually query. `Node::child_by_field_id()`, and therefore `node-tree-sitter`'s `childForFieldName()`, resolves a child under **either** name via direct field-table lookup, which is why the legacy backend never showed this gap. `field2` carries whichever second name `field` didn't, and the compat field map (§2.1) registers both under the same first-match rule, so `childForFieldName()` keeps resolving under either name post-migration. Every other language, and the large majority of Swift nodes (single- or no-field child positions), never emit `field2` at all.
 
 Single-letter keys for every field (`t`, `s`, `e`, `sr`, ...) were considered and rejected: this JSON never crosses a network, only the napi FFI boundary once per file, and the dominant cost is the string-copy-plus-parse (roughly linear in byte count regardless of key length — V8 interns short repeated keys cheaply). The readability cost of single-letter keys is paid by every future contributor reading the Rust serializer or debugging a wire node, forever, for an unmeasured marginal win — not worth it per CLAUDE.md's readability-over-cleverness principle. Position fields (`startIndex`/`endIndex`/`startRow`/`startCol`/`endRow`/`endCol`) are not made optional: they're present on every node with no meaningful default, and their values are already minimal integers, so there is no lever left to pull on them.
 
@@ -48,6 +51,7 @@ export interface WireNode {
   endCol: number; // UTF-8 byte offset within endRow
   named?: false; // absent means true
   field?: string; // absent means "no field name"
+  field2?: string; // Swift-only: second field name for the same child, when the grammar double-tags it — see §1.1; absent for every other language
   hasError?: true; // absent means false
   isMissing?: true; // absent means false
   children: WireNode[];
@@ -61,6 +65,8 @@ export interface WireNode {
 Build **eagerly**, in one recursive pass over the already-`JSON.parse`d `WireNode` tree, immediately after parse. `children`/`namedChildren` must be real, eager `Array`s — **not** lazy getters that reconstruct on each access. Reasons: dozens of call sites chain `.find`/`.filter`/`.forEach`/`.some`/`.slice`/`.findIndex`/`.flatMap`/`.at` and direct index access on these arrays (92 sites for `namedChildren` alone, e.g. `ast/languages/python.ts:278` does `node.namedChildren[index]` right after a `.findIndex(...)` on the same array); a lazy getter would be slower under repeated access and, if it ever produced fresh object instances per call, would silently break the reference-equality invariant in §2.5.
 
 The same pass populates `_fieldMap` with **first-match, not last-match** semantics: `if (!map.has(child.field)) map.set(child.field, child)` for each child that carries a `field`, never an unconditional `map.set()`. This matters because tree-sitter grammars permit multiple children of one parent to share a field name (e.g. repeated arguments under one `argument` field), and `node-tree-sitter`'s `childForFieldName()` returns only the *first* such child. lien only ever calls `childForFieldName` — never `childrenForFieldName` (§3) — so an unconditional insert during a single forward pass would silently resolve every repeated field to the *last* child instead of the first, diverging from the semantics being reconstructed.
+
+The same first-match rule governs `field2` (§1.1): when a child carries both `field` and `field2` (Swift only), both names are registered into the same map through the same guarded insert, so `childForFieldName()` resolves the child correctly under either name.
 
 ```typescript
 class CompatSyntaxNode implements Parser.SyntaxNode {
@@ -115,7 +121,7 @@ interface CompatTree {
 | `node.children` | `ast/complexity/halstead.ts:184`, `ast/languages/rust.ts:153`, `ast/languages/javascript.ts:95,180` | Real eager `Array<CompatSyntaxNode>`, one per `wire.children[i]`, recursively constructed, in wire order. |
 | `node.namedChildCount` | `ast/languages/java.ts:307` | `namedChildren.length`, set once at construction. |
 | `node.namedChild(i)` | `ast/languages/javascript.ts:249,497`, `ast/languages/swift.ts:373` | `namedChildren[i] ?? null`. |
-| `node.childForFieldName(name)` | Pervasive, 154 sites, e.g. `ast/complexity/halstead.ts:128`, `ast/extractors/symbol-helpers.ts:12` | `Map<string, CompatSyntaxNode>` built once at construction from `wire.children[*].field`, **first-match** (`if (!map.has(field)) map.set(...)` — see §2.1), storing the **same object references** already placed in `children`/`namedChildren` (§2.5). Returns `null` on miss. |
+| `node.childForFieldName(name)` | Pervasive, 154 sites, e.g. `ast/complexity/halstead.ts:128`, `ast/extractors/symbol-helpers.ts:12` | `Map<string, CompatSyntaxNode>` built once at construction from `wire.children[*].field` (and `.field2`, when present — Swift only, see §1.1), **first-match** (`if (!map.has(field)) map.set(...)` — see §2.1), storing the **same object references** already placed in `children`/`namedChildren` (§2.5). Returns `null` on miss. |
 | `node.startPosition` (`.row` only) | `ast/chunker.ts:216,303,382`, every `ast/languages/*.ts` (48 sites, all `.row`) | `{ row: wire.startRow, column: <converted, §2.3> }`. |
 | `node.endPosition` (`.row` only) | `ast/chunker.ts:216,304,383` (38 sites, all `.row`) | Same pattern using `endRow`/`endCol`. |
 | `node.startIndex` | `ast/extractors/symbol-helpers.ts:15` (`content.slice(node.startIndex, bodyNode.startIndex)`), `ast/languages/kotlin.ts:81,83` | `byteToUtf16(wire.startIndex)` — must be directly usable as a JS-string index into the original source, since call sites slice `content` with it directly, not via `.text`. See §2.3. |
@@ -237,9 +243,11 @@ Which grammar export each language's `LanguageDefinition` (`packages/parser/src/
 | C# | `cs` | `CSharp` (single default export) | `LANGUAGE` |
 | Ruby | `rb` | `Ruby` (single default export) | `LANGUAGE` |
 | Kotlin | `kt` | `Kotlin` (single default export) | vendored crate's `language()` (old-style `extern "C"` binding, no Rust-side API change needed) |
-| Swift | `swift` | `Swift` (single default export) | `LANGUAGE` |
+| Swift\* | `swift` | `Swift` (single default export) | `LANGUAGE` |
 
 TypeScript and PHP are the only two languages where the npm package (and the Rust crate) expose more than one grammar; lien uses exactly one of the two in both cases.
+
+\* Swift's grammar is also the only one that double-tags some child positions with two field names (`field` + `field2`) — see §1.1.
 
 ## 5. Open questions carried into Phase 1/2
 
