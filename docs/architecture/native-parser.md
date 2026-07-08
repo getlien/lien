@@ -234,7 +234,7 @@ Which grammar export each language's `LanguageDefinition` (`packages/parser/src/
 | Rust | `rs` | `Rust` (single default export) | `LANGUAGE` |
 | Go | `go` | `Go` (single default export) | `LANGUAGE` |
 | Java | `java` | `Java` (single default export) | `LANGUAGE` |
-| C# | `cs` | `CSharp` (single default export) | `LANGUAGE_C_SHARP` |
+| C# | `cs` | `CSharp` (single default export) | `LANGUAGE` |
 | Ruby | `rb` | `Ruby` (single default export) | `LANGUAGE` |
 | Kotlin | `kt` | `Kotlin` (single default export) | vendored crate's `language()` (old-style `extern "C"` binding, no Rust-side API change needed) |
 | Swift | `swift` | `Swift` (single default export) | `LANGUAGE` |
