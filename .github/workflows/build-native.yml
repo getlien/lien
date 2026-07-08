@@ -1,0 +1,118 @@
+name: Build Native Parser
+
+# Builds @liendev/parser-native's per-platform binaries.
+#
+# - Called by release.yml (workflow_call) when a parser-native publish is
+#   pending, to produce the artifacts publish-platform-packages.mjs turns
+#   into per-platform npm packages.
+# - Also invokable directly (workflow_dispatch) to verify a platform build in
+#   isolation -- e.g. after bumping a grammar crate pin -- without cutting a
+#   release.
+#
+# The build matrix is computed from packages/parser-native/scripts/
+# platforms.json by .github/scripts/plan-native-build-matrix.mjs rather than
+# hand-transcribed here -- see that script's header for why (and for the two
+# runner-label overrides it applies on top of the manifest).
+#
+# wasm32 is explicitly OUT OF SCOPE here: ADR-013 names it the designated
+# fallback target for a future platform that can't get a native prebuilt, not
+# a Phase 1 deliverable -- see
+# docs/architecture/decisions/0013-prebuilt-native-parser-napi-rs.md,
+# "Alternatives Considered (d)".
+
+on:
+  workflow_call:
+    inputs:
+      platforms:
+        description: 'required (default) | all | comma-separated platform ids from platforms.json'
+        required: false
+        default: required
+        type: string
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: 'required (default) | all | comma-separated platform ids from platforms.json'
+        required: false
+        default: required
+        type: string
+
+jobs:
+  plan:
+    name: Compute build matrix from platforms.json
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - id: plan
+        run: node .github/scripts/plan-native-build-matrix.mjs
+        env:
+          PLATFORMS_INPUT: ${{ inputs.platforms }}
+
+  build:
+    name: Build (${{ matrix.platform }})
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.plan.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    # musl targets are best-effort (see plan-native-build-matrix.mjs): an
+    # untested toolchain quirk on either musl platform must not fail the
+    # whole build-native run, or block a release that doesn't need them yet.
+    continue-on-error: ${{ matrix.bestEffort }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/parser-native
+          shared-key: parser-native-${{ matrix.platform }}
+
+      - name: Add Rust target ${{ matrix.target }}
+        run: rustup target add ${{ matrix.target }}
+
+      # Only relevant for the musl matrix entries (matrix.libc == 'musl');
+      # a no-op step would still run and print nothing useful for glibc/
+      # darwin/windows targets, so it's gated.
+      - name: Install musl toolchain
+        if: matrix.libc == 'musl'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
+      - name: Fetch + patch vendored crates
+        run: node scripts/fetch-vendor.mjs
+        working-directory: packages/parser-native
+
+      - name: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --target ${{ matrix.target }}
+        working-directory: packages/parser-native
+
+      - name: Copy binary to fixed name
+        run: node scripts/copy-binary.mjs
+        working-directory: packages/parser-native
+        env:
+          CARGO_BUILD_TARGET: ${{ matrix.target }}
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}
+          path: packages/parser-native/parser-native.node
+          if-no-files-found: error
+          retention-days: 7

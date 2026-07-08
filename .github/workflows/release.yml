@@ -9,8 +9,69 @@ on:
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 
 jobs:
+  # Whether @liendev/parser-native has a version bump waiting to be published
+  # in THIS run, decided before changesets/action runs at all.
+  #
+  # Why not just read changesets/action's own `published`/`publishedPackages`
+  # outputs (the `release` job, below)? Those only exist AFTER publish has
+  # already happened -- too late to build the per-platform binaries and
+  # inject them into packages/parser-native/package.json's
+  # optionalDependencies before `changeset publish` packs and publishes it.
+  #
+  # The heuristic: changesets only ever bumps package.json versions on main
+  # via a human merging the auto-opened "Version Packages" PR. By the time
+  # that merge lands (which is what triggers a *publishing* run of this
+  # workflow, as opposed to a run that opens/updates the Version PR), main's
+  # packages/parser-native/package.json version has already diverged from
+  # what's live on the registry -- and there are no longer any pending
+  # changeset files for it (they were consumed by the version bump). So
+  # "local version != registry version" is true exactly on publishing runs
+  # that include a parser-native bump, and false otherwise (including on
+  # version-PR-opening runs, where main's package.json hasn't moved yet).
+  check-parser-native:
+    name: Check for pending @liendev/parser-native publish
+    runs-on: ubuntu-latest
+    outputs:
+      pending: ${{ steps.check.outputs.pending }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - id: check
+        name: Compare local vs registry version
+        run: |
+          set -euo pipefail
+          LOCAL_VERSION="$(node -p "require('./packages/parser-native/package.json').version")"
+          REGISTRY_VERSION="$(npm view --registry https://registry.npmjs.org/ @liendev/parser-native version 2>/dev/null || true)"
+          echo "packages/parser-native: local=$LOCAL_VERSION registry=${REGISTRY_VERSION:-<not published>}"
+          if [ "$LOCAL_VERSION" != "$REGISTRY_VERSION" ]; then
+            echo "pending=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "pending=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # Builds the per-platform binaries this run needs to publish, only when
+  # check-parser-native found a pending bump.
+  build-native:
+    name: Build native parser binaries
+    needs: check-parser-native
+    if: needs.check-parser-native.outputs.pending == 'true'
+    uses: ./.github/workflows/build-native.yml
+    with:
+      platforms: all
+
   release:
     name: Release
+    needs: [check-parser-native, build-native]
+    # `build-native` is skipped entirely (not merely a no-op run) on any run
+    # where parser-native isn't being published -- plain `needs:` would then
+    # skip this job too, so the condition is spelled out by hand instead of
+    # relying on the default "all needs succeeded" behavior.
+    if: |
+      always() &&
+      needs.check-parser-native.result == 'success' &&
+      (needs.build-native.result == 'success' || needs.build-native.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:
       contents: write # Create releases
@@ -41,6 +102,34 @@ jobs:
 
       - run: npm ci
       - run: npm run build
+
+      # The two steps below only run when check-parser-native found a
+      # pending @liendev/parser-native publish, and MUST run before
+      # changesets/action (next step): `changeset publish` packs
+      # packages/parser-native/package.json exactly as it finds it on disk,
+      # so the optionalDependencies injection has to already be there by the
+      # time that step runs. Publishing the per-platform packages first,
+      # then injecting them into the main package's optionalDependencies,
+      # mirrors what @napi-rs/cli's "napi prepublish" does for other
+      # native-addon projects -- this repo hand-rolls the equivalent per
+      # ADR-013's "no @napi-rs/cli" decision.
+      #
+      # NOTE: each new @liendev/parser-native-<platform> package name must
+      # already have npm trusted publishing configured for this repo+
+      # workflow (the same OIDC mechanism the main packages use) before its
+      # very first publish -- that's a one-time, manual npmjs.org setup step
+      # for whoever administers the @liendev org, not something this
+      # workflow can bootstrap on its own.
+      - name: Download native parser platform binaries
+        if: needs.check-parser-native.outputs.pending == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          path: packages/parser-native/artifacts
+
+      - name: Publish per-platform parser-native packages
+        if: needs.check-parser-native.outputs.pending == 'true'
+        run: node scripts/publish-platform-packages.mjs --artifacts-dir artifacts
+        working-directory: packages/parser-native
 
       - name: Create Release PR or Publish
         id: changesets
