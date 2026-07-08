@@ -60,6 +60,8 @@ export interface WireNode {
 
 Build **eagerly**, in one recursive pass over the already-`JSON.parse`d `WireNode` tree, immediately after parse. `children`/`namedChildren` must be real, eager `Array`s — **not** lazy getters that reconstruct on each access. Reasons: dozens of call sites chain `.find`/`.filter`/`.forEach`/`.some`/`.slice`/`.findIndex`/`.flatMap`/`.at` and direct index access on these arrays (92 sites for `namedChildren` alone, e.g. `ast/languages/python.ts:278` does `node.namedChildren[index]` right after a `.findIndex(...)` on the same array); a lazy getter would be slower under repeated access and, if it ever produced fresh object instances per call, would silently break the reference-equality invariant in §2.5.
 
+The same pass populates `_fieldMap` with **first-match, not last-match** semantics: `if (!map.has(child.field)) map.set(child.field, child)` for each child that carries a `field`, never an unconditional `map.set()`. This matters because tree-sitter grammars permit multiple children of one parent to share a field name (e.g. repeated arguments under one `argument` field), and `node-tree-sitter`'s `childForFieldName()` returns only the *first* such child. lien only ever calls `childForFieldName` — never `childrenForFieldName` (§3) — so an unconditional insert during a single forward pass would silently resolve every repeated field to the *last* child instead of the first, diverging from the semantics being reconstructed.
+
 ```typescript
 class CompatSyntaxNode implements Parser.SyntaxNode {
   readonly type: string;
@@ -76,7 +78,7 @@ class CompatSyntaxNode implements Parser.SyntaxNode {
   readonly startPosition: { row: number; column: number };
   readonly endPosition: { row: number; column: number };
 
-  private readonly _fieldMap: Map<string, CompatSyntaxNode> | null;
+  private readonly _fieldMap: Map<string, CompatSyntaxNode> | null; // first-match on repeated field names (§2.1)
   private readonly _source: string;
   private _text: string | undefined; // lazy, memoized
 
@@ -113,7 +115,7 @@ interface CompatTree {
 | `node.children` | `ast/complexity/halstead.ts:184`, `ast/languages/rust.ts:153`, `ast/languages/javascript.ts:95,180` | Real eager `Array<CompatSyntaxNode>`, one per `wire.children[i]`, recursively constructed, in wire order. |
 | `node.namedChildCount` | `ast/languages/java.ts:307` | `namedChildren.length`, set once at construction. |
 | `node.namedChild(i)` | `ast/languages/javascript.ts:249,497`, `ast/languages/swift.ts:373` | `namedChildren[i] ?? null`. |
-| `node.childForFieldName(name)` | Pervasive, 154 sites, e.g. `ast/complexity/halstead.ts:128`, `ast/extractors/symbol-helpers.ts:12` | `Map<string, CompatSyntaxNode>` built once at construction from `wire.children[*].field`, storing the **same object references** already placed in `children`/`namedChildren` (§2.5). Returns `null` on miss. |
+| `node.childForFieldName(name)` | Pervasive, 154 sites, e.g. `ast/complexity/halstead.ts:128`, `ast/extractors/symbol-helpers.ts:12` | `Map<string, CompatSyntaxNode>` built once at construction from `wire.children[*].field`, **first-match** (`if (!map.has(field)) map.set(...)` — see §2.1), storing the **same object references** already placed in `children`/`namedChildren` (§2.5). Returns `null` on miss. |
 | `node.startPosition` (`.row` only) | `ast/chunker.ts:216,303,382`, every `ast/languages/*.ts` (48 sites, all `.row`) | `{ row: wire.startRow, column: <converted, §2.3> }`. |
 | `node.endPosition` (`.row` only) | `ast/chunker.ts:216,304,383` (38 sites, all `.row`) | Same pattern using `endRow`/`endCol`. |
 | `node.startIndex` | `ast/extractors/symbol-helpers.ts:15` (`content.slice(node.startIndex, bodyNode.startIndex)`), `ast/languages/kotlin.ts:81,83` | `byteToUtf16(wire.startIndex)` — must be directly usable as a JS-string index into the original source, since call sites slice `content` with it directly, not via `.text`. See §2.3. |
