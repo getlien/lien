@@ -21,13 +21,14 @@ Build **`@liendev/parser-native`**: a napi-rs Rust crate that statically links `
 
 Distribution follows the esbuild pattern: prebuilt per-platform npm packages wired in via `optionalDependencies`, with **no runtime or build-time dependency on `@napi-rs/cli`** — a hand-rolled loader and build pipeline, per the spike's precedent, keeps the dependency tree in this package as small as the problem it replaces.
 
-Rollout is staged behind an environment flag, `LIEN_PARSER=native|legacy`, defaulting to `legacy` until the parity gate passes:
+Rollout is staged behind an environment flag, `LIEN_PARSER=native|legacy`, which defaulted to `legacy` through Phase 3 and now defaults to `native` as of Phase 4-A:
 
 1. **Audit** (Phase 0, this ADR) — prove every grammar resolves against one core and the wire/compat shape can represent everything lien's AST layer needs.
 2. **Foundation** (Phase 1) — build the crate, the compat deserializer, and the CI prebuild matrix.
 3. **Parity gate** (Phase 2) — diff lien-level output (chunks, symbols, complexity scores) between the legacy and native backends across all 11 languages.
 4. **Flagged swap** (Phase 3) — ship `LIEN_PARSER=native` as an opt-in flag, default still `legacy`, CI running both modes.
-5. **Flip + retire** (Phase 4) — flip the default to `native` and delete `node-tree-sitter` plus all 11 grammar npm packages, which collapses `docs/development/worktree-development.md` to nothing and retires the dual-core-lockfile and Kotlin-no-prebuilds landmines outright.
+5. **Flip** (Phase 4-A, executed 2026-07-09) — flip the default to `native`; `legacy` remains installed and reachable as a transitional, explicit opt-out with an automatic fallback-with-warning if the native binding can't load. CI's second mode job and `e2e.yml`'s representative rerun invert to cover `legacy` instead of `native`.
+6. **Retire** (Phase 4-B, one release later) — delete `legacy`, `node-tree-sitter`, and all 11 grammar npm packages, which collapses `docs/development/worktree-development.md` to nothing and retires the dual-core-lockfile and Kotlin-no-prebuilds landmines outright.
 
 A release/validation pass (changesets, the existing post-publish registry smoke test, and a fresh install on a stock Apple toolchain) follows the flip before general availability. Implementation work lands on `feat/parser-native` starting at Phase 1.
 
@@ -74,7 +75,7 @@ All 11 crates were independently resolved against `tree-sitter` core 0.25.x, com
 ### Positive
 
 - 1.82–2.21x faster end-to-end, and the *reason* is structural (traversal moves from per-node FFI calls to native array/object access on a plain JS tree), not a one-time tuning win.
-- No native compilation at install time once Phase 4 ships — prebuilt per-platform packages fix the exact failure `docs/development/worktree-development.md` documents, and retire the dual-tree-sitter-core lockfile hazard and the Kotlin-no-prebuilds gap outright, rather than working around either.
+- No native compilation at install time once Phase 4-B ships — prebuilt per-platform packages fix the exact failure `docs/development/worktree-development.md` documents, and retire the dual-tree-sitter-core lockfile hazard and the Kotlin-no-prebuilds gap outright, rather than working around either. (Phase 4-A already makes native the default; `node-tree-sitter` itself isn't removed, and its install-time compile risk isn't retired, until 4-B.)
 - Parity was proven empirically (100% TS/Python, 96.7% Kotlin with all divergences explained) *before* committing to the design, not assumed.
 - `SyntaxNode`-typed values already never cross the `@liendev/parser` package boundary (verified by grep across `core`/`cli`/`review`/`action`) — this migration changes an internal implementation detail, not any package's public API.
 
@@ -93,7 +94,7 @@ Six non-blocking issues surfaced by adversarial verification, all of which must 
 
 - Kotlin needs a vendored, patched crate — the only one of the 11 — which is a permanent, if small, maintenance surface (one `Cargo.toml` line, diffable against the unmodified upstream tarball) rather than a one-time cost.
 - No `@napi-rs/cli` dependency: the build and platform-package loader are hand-rolled, consistent with the project's dependency-minimalism, but that logic is now lien's own code to maintain rather than a library's.
-- `LIEN_PARSER` defaults to `legacy` through Phase 3 — no user-visible behavior change until Phase 4 flips the default, and `node-tree-sitter` isn't removed until then either.
+- `LIEN_PARSER` defaulted to `legacy` through Phase 3 — no user-visible behavior change until Phase 4-A flipped the default (2026-07-09). `node-tree-sitter` isn't removed until Phase 4-B; until then, `legacy` stays installed as an explicit, transitional opt-out, and a native binding that fails to load on the default path falls back to it automatically with a warning rather than failing.
 
 ## References
 
