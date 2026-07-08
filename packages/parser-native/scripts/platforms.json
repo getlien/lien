@@ -1,0 +1,71 @@
+{
+  "description": "Canonical platform manifest for @liendev/parser-native. Single source of truth for (1) the CI prebuild matrix that builds and publishes per-platform npm packages, and (2) the runtime resolution table index.js uses to pick which platform package to require. Keep in sync -- do not hand-roll a second copy of this list anywhere.",
+  "platforms": [
+    {
+      "platform": "darwin-arm64",
+      "target": "aarch64-apple-darwin",
+      "npmPackage": "@liendev/parser-native-darwin-arm64",
+      "nodePlatform": "darwin",
+      "nodeArch": "arm64",
+      "libc": null,
+      "githubRunner": "macos-14"
+    },
+    {
+      "platform": "darwin-x64",
+      "target": "x86_64-apple-darwin",
+      "npmPackage": "@liendev/parser-native-darwin-x64",
+      "nodePlatform": "darwin",
+      "nodeArch": "x64",
+      "libc": null,
+      "githubRunner": "macos-13"
+    },
+    {
+      "platform": "linux-x64-gnu",
+      "target": "x86_64-unknown-linux-gnu",
+      "npmPackage": "@liendev/parser-native-linux-x64-gnu",
+      "nodePlatform": "linux",
+      "nodeArch": "x64",
+      "libc": "gnu",
+      "githubRunner": "ubuntu-22.04"
+    },
+    {
+      "platform": "linux-arm64-gnu",
+      "target": "aarch64-unknown-linux-gnu",
+      "npmPackage": "@liendev/parser-native-linux-arm64-gnu",
+      "nodePlatform": "linux",
+      "nodeArch": "arm64",
+      "libc": "gnu",
+      "githubRunner": "ubuntu-22.04-arm",
+      "notes": "cross-compiled via `cross`/gnu cross-linker if a native arm64 runner isn't available"
+    },
+    {
+      "platform": "linux-x64-musl",
+      "target": "x86_64-unknown-linux-musl",
+      "npmPackage": "@liendev/parser-native-linux-x64-musl",
+      "nodePlatform": "linux",
+      "nodeArch": "x64",
+      "libc": "musl",
+      "githubRunner": "ubuntu-22.04",
+      "notes": "built inside an Alpine/musl container or via the musl cross target, for Alpine-based Docker images"
+    },
+    {
+      "platform": "linux-arm64-musl",
+      "target": "aarch64-unknown-linux-musl",
+      "npmPackage": "@liendev/parser-native-linux-arm64-musl",
+      "nodePlatform": "linux",
+      "nodeArch": "arm64",
+      "libc": "musl",
+      "githubRunner": "ubuntu-22.04-arm",
+      "notes": "built inside an Alpine/musl container or via the musl cross target"
+    },
+    {
+      "platform": "win32-x64-msvc",
+      "target": "x86_64-pc-windows-msvc",
+      "npmPackage": "@liendev/parser-native-win32-x64-msvc",
+      "nodePlatform": "win32",
+      "nodeArch": "x64",
+      "libc": null,
+      "githubRunner": "windows-latest"
+    }
+  ]
+}

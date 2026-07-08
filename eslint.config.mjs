@@ -8,6 +8,7 @@ export default tseslint.config(
       '**/dist/',
       '**/node_modules/',
       'packages/site/',
+      'packages/parser-native/src/',
       '.wip/',
       '*.config.*',
     ],

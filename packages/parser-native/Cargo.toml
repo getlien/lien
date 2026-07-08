@@ -1,0 +1,46 @@
+[package]
+name = "parser_native"
+version = "0.59.0"
+edition = "2021"
+license = "AGPL-3.0-only"
+description = "Prebuilt native tree-sitter parser bindings for Lien (napi-rs)"
+repository = "https://github.com/getlien/lien"
+
+[lib]
+name = "parser_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { version = "2", default-features = false, features = ["napi4"] }
+napi-derive = "2"
+tree-sitter = "0.25"
+
+# Pinned exactly per docs/architecture/decisions/0013-prebuilt-native-parser-napi-rs.md's
+# "Per-language crate pins" table (Phase 0 audit, 2026-07-08) -- every one of
+# these was independently resolved against tree-sitter core 0.25.10, compiled,
+# and runtime-verified. Do not loosen these to caret ranges: the parity gate
+# (ADR-013 Phase 2) depends on comparing against these exact versions.
+tree-sitter-typescript = "=0.23.2"
+tree-sitter-javascript = "=0.23.1"
+tree-sitter-python = "=0.25.0"
+tree-sitter-php = "=0.24.2"
+tree-sitter-ruby = "=0.23.1"
+tree-sitter-swift = "=0.7.1"
+tree-sitter-c-sharp = "=0.23.1"
+tree-sitter-go = "=0.23.4"
+tree-sitter-java = "=0.23.5"
+tree-sitter-rust = "=0.24.0"
+
+# Vendored + patched: upstream pins `tree-sitter = ">= 0.21, < 0.23"`, which
+# conflicts (via Cargo's `links = "tree-sitter"` single-version rule) with the
+# 0.25 core the crates above require. See scripts/fetch-vendor.mjs for how
+# vendor/ is populated and patched, and the ADR for the runtime verification
+# that the compiled grammar works unmodified against the newer core.
+tree-sitter-kotlin = { path = "vendor/tree-sitter-kotlin-0.3.8-patched" }
+
+[build-dependencies]
+napi-build = "2"
+
+[profile.release]
+lto = true
+opt-level = 3
