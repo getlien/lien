@@ -22,7 +22,13 @@ export { RISK_ORDER } from './insights/types.js';
 // CONSTANTS
 // =============================================================================
 
-export { DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP, MAX_CHUNKS_PER_FILE } from './constants.js';
+export {
+  DEFAULT_CHUNK_SIZE,
+  DEFAULT_CHUNK_OVERLAP,
+  MAX_CHUNKS_PER_FILE,
+  PARSE_STAGE_MAX_CONCURRENCY,
+  getParseStageConcurrency,
+} from './constants.js';
 
 // =============================================================================
 // UTILITIES

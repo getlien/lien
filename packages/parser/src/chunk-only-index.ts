@@ -6,7 +6,11 @@ import { chunkFile } from './chunker.js';
 import { scanCodebase } from './scanner.js';
 import { detectEcosystems, getEcosystemExcludePatterns } from './ecosystem-presets.js';
 import { extractRepoId } from './utils/repo-id.js';
-import { DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP } from './constants.js';
+import {
+  DEFAULT_CHUNK_SIZE,
+  DEFAULT_CHUNK_OVERLAP,
+  getParseStageConcurrency,
+} from './constants.js';
 
 const DEFAULT_CONCURRENCY = 4;
 
@@ -124,7 +128,9 @@ export async function performChunkOnlyIndex(
     const allChunks: CodeChunk[] = [];
     let filesProcessed = 0;
 
-    const limit = pLimit(options.concurrency ?? DEFAULT_CONCURRENCY);
+    // CPU-bound parse stage (chunkFile) — cap independent of the requested
+    // concurrency; see getParseStageConcurrency's doc comment / ADR-013.
+    const limit = pLimit(getParseStageConcurrency(options.concurrency ?? DEFAULT_CONCURRENCY));
     await Promise.all(
       files.map(file =>
         limit(async () => {

@@ -9,6 +9,7 @@ import {
   DEFAULT_CHUNK_SIZE,
   DEFAULT_CHUNK_OVERLAP,
   INDEX_FORMAT_VERSION,
+  getParseStageConcurrency,
 } from '../constants.js';
 import type { OverlayBackend } from '../vectordb/overlay-backend.js';
 import { ManifestManager, type FileEntry } from './manifest.js';
@@ -171,9 +172,13 @@ export async function buildOverlay(
   const repoId = extractRepoId(rootDir);
   const chunkBatches: Array<{ metadatas: ChunkMetadata[]; contents: string[] }> = [];
   const manifestEntries: FileEntry[] = [];
+  // Separate limiter for this CPU-bound parse/chunk phase (chunkFile below) —
+  // capped independent of the I/O-bound hash-diff `limit` above; see
+  // getParseStageConcurrency's doc comment / ADR-013.
+  const parseLimit = pLimit(getParseStageConcurrency(DEFAULT_CONCURRENCY));
   await Promise.all(
     diverged.map(d =>
-      limit(async () => {
+      parseLimit(async () => {
         const content = await fs.readFile(d.abs, 'utf-8');
         const chunks = chunkFile(d.rel, content, {
           chunkSize: DEFAULT_CHUNK_SIZE,

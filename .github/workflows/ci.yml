@@ -92,6 +92,57 @@ jobs:
       - name: Build Action image (Dockerfile smoke test)
         run: docker build -f packages/action/Dockerfile -t lien-review:ci .
 
+  test-native:
+    name: Run tests (LIEN_PARSER=native)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # ADR-013 Phase 3 ("flagged swap -- CI runs both modes"): build-and-test
+    # above runs the full suite under the default LIEN_PARSER=legacy backend.
+    # This job is the native-backend counterpart, required (no
+    # continue-on-error) exactly like build-and-test. It's a dedicated job
+    # rather than a `parser-mode` matrix axis on build-and-test because most
+    # of that job's steps -- format/lint/typecheck, the full `npm run build`,
+    # the CLI smoke test, the Action Docker build -- are parser-backend
+    # independent; matrixing the whole job would double all of that on every
+    # push/PR for zero extra coverage. This job instead reuses only the setup
+    # `npm test` actually needs: the compiled native binary (loaded via
+    # index.js's local-dev fallback path) and a built parser/core/review
+    # (CLI and Action resolve those via `dist/`, same as build-and-test's
+    # "Build Parser, Core & Review" step) -- then runs the whole workspace
+    # test suite once under LIEN_PARSER=native.
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Cache Rust build (parser-native)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/parser-native
+          shared-key: parser-native
+
+      - name: Build native parser
+        run: npm run build:native -w @liendev/parser-native
+
+      - name: Build Parser, Core & Review (required by CLI & Action)
+        run: npm run build -w @liendev/parser && npm run build -w @liendev/core && npm run build -w @liendev/review
+
+      - name: Run tests (LIEN_PARSER=native)
+        run: npm test
+        env:
+          LIEN_PARSER: native
+
   delta:
     name: Complexity delta vs base branch (lien delta --base)
     runs-on: ubuntu-latest

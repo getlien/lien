@@ -13,7 +13,12 @@ import pLimit from 'p-limit';
 import path from 'path';
 import type { LienConfig } from '../config/schema.js';
 import type { ProgressTracker } from './progress-tracker.js';
-import { DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP, DEFAULT_CONCURRENCY } from '../constants.js';
+import {
+  DEFAULT_CHUNK_SIZE,
+  DEFAULT_CHUNK_OVERLAP,
+  DEFAULT_CONCURRENCY,
+  getParseStageConcurrency,
+} from '../constants.js';
 import { createVectorDB } from '../vectordb/factory.js';
 import { writeVersionFile } from '../vectordb/version.js';
 import { ManifestManager } from './manifest.js';
@@ -446,7 +451,10 @@ async function batchProcessFiles(
 
   const bp = new ChunkBatchProcessor(vectorDB, { batchThreshold: 100 }, progressTracker);
 
-  const limit = pLimit(indexConfig.concurrency);
+  // CPU-bound parse stage (chunkFile below) — cap independent of the
+  // configured concurrency; see getParseStageConcurrency's doc comment /
+  // ADR-013.
+  const limit = pLimit(getParseStageConcurrency(indexConfig.concurrency));
   await Promise.all(
     files.map(file =>
       limit(() => processFileForIndexing(file, rootDir, bp, indexConfig, progressTracker, verbose)),

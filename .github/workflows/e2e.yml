@@ -7,6 +7,16 @@ on:
 
   # Allow manual trigger
   workflow_dispatch:
+    inputs:
+      parser-mode:
+        description: 'LIEN_PARSER backend to run the full 12-project suite under (dispatch only -- the normal trigger always runs legacy for all projects plus a native rerun for TypeScript + Kotlin)'
+        required: false
+        default: legacy
+        type: choice
+        options:
+          - legacy
+          - native
+          - both
 
 # Cancel in-progress runs when a new run is triggered
 concurrency:
@@ -43,53 +53,42 @@ jobs:
             echo "has-changeset=false" >> "$GITHUB_OUTPUT"
           fi
 
+  plan-matrix:
+    name: Plan E2E matrix
+    runs-on: ubuntu-latest
+    needs: check-trigger
+    if: needs.check-trigger.outputs.should-run == 'true'
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # Computes the project/language/mode matrix from
+      # .github/scripts/plan-e2e-matrix.mjs: every normal trigger runs all 12
+      # projects under LIEN_PARSER=legacy plus a native rerun for TypeScript +
+      # Kotlin; a workflow_dispatch run instead honors `parser-mode` (legacy |
+      # native | both) across the full 12-project suite -- see that script's
+      # header for the full rationale (ADR-013 Phase 3).
+      - id: plan
+        run: node .github/scripts/plan-e2e-matrix.mjs
+        env:
+          IS_DISPATCH: ${{ github.event_name == 'workflow_dispatch' }}
+          PARSER_MODE_INPUT: ${{ inputs.parser-mode }}
+
   e2e-tests-parallel:
-    name: E2E - ${{ matrix.project }} (${{ matrix.language }})
+    name: E2E - ${{ matrix.project }} (${{ matrix.language }}, ${{ matrix.mode }})
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: check-trigger
+    needs: [check-trigger, plan-matrix]
     if: needs.check-trigger.outputs.should-run == 'true'
 
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - project: Requests
-            language: Python
-            script: test:e2e:python
-          - project: Zod
-            language: TypeScript
-            script: test:e2e:typescript
-          - project: Express
-            language: JavaScript
-            script: test:e2e:javascript
-          - project: Monolog
-            language: PHP
-            script: test:e2e:php
-          - project: Anyhow
-            language: Rust
-            script: test:e2e:rust
-          - project: Chi
-            language: Go
-            script: test:e2e:go
-          - project: JavaPoet
-            language: Java
-            script: test:e2e:java
-          - project: MediatR
-            language: CSharp
-            script: test:e2e:csharp
-          - project: Sinatra
-            language: Ruby
-            script: test:e2e:ruby
-          - project: Klaxon
-            language: Kotlin
-            script: test:e2e:kotlin
-          - project: SwiftyJSON
-            language: Swift
-            script: test:e2e:swift
-          - project: MCP Round Trip
-            language: Protocol
-            script: test:e2e:mcp
+        include: ${{ fromJson(needs.plan-matrix.outputs.matrix) }}
 
     steps:
       - name: Checkout code
@@ -104,6 +103,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Only needed for the native-mode rerun -- the compiled binary is
+      # loaded via index.js's local-dev fallback path (see CONTRIBUTING.md).
+      - name: Cache Rust build (parser-native)
+        if: matrix.mode == 'native'
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/parser-native
+          shared-key: parser-native
+
+      - name: Build native parser
+        if: matrix.mode == 'native'
+        run: npm run build:native -w @liendev/parser-native
+
       - name: Build Lien
         run: npm run build
 
@@ -111,12 +123,13 @@ jobs:
         run: npm run ${{ matrix.script }} --workspace=packages/cli
         env:
           NODE_OPTIONS: '--max-old-space-size=4096'
+          LIEN_PARSER: ${{ matrix.mode }}
 
       - name: Upload test artifacts on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-${{ matrix.language }}-artifacts
+          name: e2e-${{ matrix.language }}-${{ matrix.mode }}-artifacts
           path: |
             /tmp/lien-e2e-tests/
           retention-days: 7

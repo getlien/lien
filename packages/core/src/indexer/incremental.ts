@@ -2,7 +2,12 @@ import fs from 'fs/promises';
 import path from 'path';
 import pLimit from 'p-limit';
 import type { VectorDBInterface } from '../vectordb/types.js';
-import { DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP, DEFAULT_CONCURRENCY } from '../constants.js';
+import {
+  DEFAULT_CHUNK_SIZE,
+  DEFAULT_CHUNK_OVERLAP,
+  DEFAULT_CONCURRENCY,
+  getParseStageConcurrency,
+} from '../constants.js';
 import { ManifestManager } from './manifest.js';
 import type { Result } from '../utils/result.js';
 import { Ok, Err, isOk } from '../utils/result.js';
@@ -414,7 +419,10 @@ export async function indexMultipleFiles(
 
   // Process files with bounded concurrency, applying each result to the DB as it completes.
   // This avoids collecting all embeddings in memory before writing.
-  const limit = pLimit(DEFAULT_CONCURRENCY);
+  // CPU-bound parse stage (chunkFile inside processSingleFileForIndexing) —
+  // cap independent of the configured concurrency; see
+  // getParseStageConcurrency's doc comment / ADR-013.
+  const limit = pLimit(getParseStageConcurrency(DEFAULT_CONCURRENCY));
   const writeQueue: Promise<void>[] = [];
   let writeChain = Promise.resolve();
 
