@@ -32,14 +32,24 @@ function cdylibName() {
     case 'win32':
       return 'parser_native.dll';
     default:
-      throw new Error('@liendev/parser-native: unsupported build platform "' + process.platform + '"');
+      throw new Error(
+        '@liendev/parser-native: unsupported build platform "' + process.platform + '"',
+      );
   }
 }
 
 const source = join(RELEASE_DIR, cdylibName());
 if (!existsSync(source)) {
-  const cargoCmd = targetTriple ? ('cargo build --release --target ' + targetTriple) : 'cargo build --release';
-  throw new Error('@liendev/parser-native: expected build output at ' + source + ' -- did "' + cargoCmd + '" succeed?');
+  const cargoCmd = targetTriple
+    ? 'cargo build --release --target ' + targetTriple
+    : 'cargo build --release';
+  throw new Error(
+    '@liendev/parser-native: expected build output at ' +
+      source +
+      ' -- did "' +
+      cargoCmd +
+      '" succeed?',
+  );
 }
 
 const dest = join(PACKAGE_ROOT, 'parser-native.node');
