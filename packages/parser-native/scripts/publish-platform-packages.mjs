@@ -93,6 +93,17 @@ function loadPlatforms() {
   return JSON.parse(readFileSync(MANIFEST_PATH, 'utf8')).platforms;
 }
 
+// scripts/platforms.json's `libc` field uses the platform-triple vocabulary
+// ("gnu"/"musl"), which is what index.js's loader match table and
+// .github/scripts/plan-native-build-matrix.mjs's GitHub Actions matrix both
+// expect. npm's own install-time platform check instead validates a
+// package.json `libc` field against detect-libc's vocabulary, where the GNU
+// C library is named "glibc" -- an unmapped "gnu" makes npm treat every
+// glibc host as unsupported (EBADPLATFORM). Translate only here, at
+// package.json-generation time, so platforms.json keeps meaning the same
+// thing everywhere else it's read.
+const NPM_LIBC_NAMES = { gnu: 'glibc', musl: 'musl' };
+
 function writePlatformPackage(dir, platform, version) {
   mkdirSync(dir, { recursive: true });
 
@@ -115,7 +126,7 @@ function writePlatformPackage(dir, platform, version) {
     publishConfig: { access: 'public', provenance: true },
   };
   if (platform.libc) {
-    pkg.libc = [platform.libc];
+    pkg.libc = [NPM_LIBC_NAMES[platform.libc] || platform.libc];
   }
 
   writeFileSync(join(dir, 'package.json'), JSON.stringify(pkg, null, 2) + '\n');

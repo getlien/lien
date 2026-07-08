@@ -32,7 +32,7 @@
     "docs:dev": "npm run docs:dev -w packages/site",
     "docs:build": "npm run docs:build -w packages/site",
     "docs:preview": "npm run docs:preview -w packages/site",
-    "test": "npm run test -w @liendev/parser && npm run test -w @liendev/core && npm run test -w @liendev/review && npm run test -w packages/cli && npm run test -w @liendev/action",
+    "test": "npm run test -w @liendev/parser-native && npm run test -w @liendev/parser && npm run test -w @liendev/core && npm run test -w @liendev/review && npm run test -w packages/cli && npm run test -w @liendev/action",
     "test:coverage": "npm run test:coverage -w @liendev/core",
     "lint": "eslint --no-error-on-unmatched-pattern packages/*/src/",
     "lint:fix": "eslint --fix --no-error-on-unmatched-pattern packages/*/src/",
