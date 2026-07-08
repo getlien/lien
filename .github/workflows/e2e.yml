@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       parser-mode:
-        description: 'LIEN_PARSER backend to run the full 12-project suite under (dispatch only -- the normal trigger always runs legacy for all projects plus a native rerun for TypeScript + Kotlin)'
+        description: 'LIEN_PARSER backend to run the full 12-project suite under (dispatch only -- the normal trigger always runs native for all projects plus a legacy rerun for TypeScript + Kotlin)'
         required: false
         default: legacy
         type: choice
@@ -68,10 +68,10 @@ jobs:
 
       # Computes the project/language/mode matrix from
       # .github/scripts/plan-e2e-matrix.mjs: every normal trigger runs all 12
-      # projects under LIEN_PARSER=legacy plus a native rerun for TypeScript +
+      # projects under LIEN_PARSER=native plus a legacy rerun for TypeScript +
       # Kotlin; a workflow_dispatch run instead honors `parser-mode` (legacy |
       # native | both) across the full 12-project suite -- see that script's
-      # header for the full rationale (ADR-013 Phase 3).
+      # header for the full rationale (ADR-013 Phase 4-A).
       - id: plan
         run: node .github/scripts/plan-e2e-matrix.mjs
         env:

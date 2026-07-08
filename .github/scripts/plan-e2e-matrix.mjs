@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 // Computes the e2e-tests-parallel matrix for e2e.yml.
 //
-// Every normal (changeset- or `e2e`-label-triggered) PR run exercises all 12
-// project/language e2e scripts once under the default LIEN_PARSER=legacy
-// backend, PLUS a LIEN_PARSER=native rerun for exactly two representative
-// jobs -- TypeScript (the most heavily used grammar) and Kotlin (the one
-// vendored, non-npm-prebuilt grammar -- see ADR-013's Phase 0 crate audit)
-// -- so every release-bound PR proves native e2e coverage without doubling
-// all 12 jobs on every run.
+// ADR-013 Phase 4-A flipped the default LIEN_PARSER backend to native.
+// Every normal (changeset- or `e2e`-label-triggered) PR run now exercises
+// all 12 project/language e2e scripts once under native, PLUS a
+// LIEN_PARSER=legacy rerun for exactly two representative jobs --
+// TypeScript (the most heavily used grammar) and Kotlin (the one vendored,
+// non-npm-prebuilt grammar -- see ADR-013's Phase 0 crate audit) -- so
+// every release-bound PR proves the transitional legacy opt-out still
+// works without doubling all 12 jobs on every run.
 //
 // A workflow_dispatch run instead honors the `parser-mode` input, running
 // the full 12-project suite under 'legacy', 'native', or both ('both' = the
@@ -37,24 +38,24 @@ const PROJECTS = [
   { project: 'MCP Round Trip', language: 'Protocol', script: 'test:e2e:mcp' },
 ];
 
-// The two representative jobs that get a native rerun on every normal
+// The two representative jobs that get a legacy rerun on every normal
 // (non-dispatch) trigger -- see header comment above.
-const REPRESENTATIVE_NATIVE_LANGUAGES = ['TypeScript', 'Kotlin'];
+const REPRESENTATIVE_LEGACY_LANGUAGES = ['TypeScript', 'Kotlin'];
 
 function withMode(entry, mode) {
   return Object.assign({}, entry, { mode: mode });
 }
 
 function planNormalRun() {
-  const legacy = PROJECTS.map(function (p) {
-    return withMode(p, 'legacy');
-  });
-  const native = PROJECTS.filter(function (p) {
-    return REPRESENTATIVE_NATIVE_LANGUAGES.indexOf(p.language) !== -1;
-  }).map(function (p) {
+  const native = PROJECTS.map(function (p) {
     return withMode(p, 'native');
   });
-  return legacy.concat(native);
+  const legacy = PROJECTS.filter(function (p) {
+    return REPRESENTATIVE_LEGACY_LANGUAGES.indexOf(p.language) !== -1;
+  }).map(function (p) {
+    return withMode(p, 'legacy');
+  });
+  return native.concat(legacy);
 }
 
 function planDispatchRun(parserMode) {

@@ -9,7 +9,6 @@ import Swift from 'tree-sitter-swift';
 import { parseAST } from '../parser.js';
 import { chunkByAST } from '../chunker.js';
 import { extractExports, extractImports, extractCallSites } from '../symbols.js';
-import { resolveParserBackend } from '../backend.js';
 import type { SupportedLanguage } from '../languages/registry.js';
 
 /**
@@ -314,38 +313,4 @@ describe('native compat deserializer: real extractor parity', () => {
   });
 });
 
-describe('resolveParserBackend', () => {
-  afterEach(() => {
-    delete process.env.LIEN_PARSER;
-  });
-
-  it('defaults to legacy when LIEN_PARSER is unset', () => {
-    delete process.env.LIEN_PARSER;
-    expect(resolveParserBackend()).toBe('legacy');
-  });
-
-  it('accepts an explicit legacy value', () => {
-    process.env.LIEN_PARSER = 'legacy';
-    expect(resolveParserBackend()).toBe('legacy');
-  });
-
-  it('accepts native', () => {
-    process.env.LIEN_PARSER = 'native';
-    expect(resolveParserBackend()).toBe('native');
-  });
-
-  it('throws a clear error for an unknown value', () => {
-    process.env.LIEN_PARSER = 'garbage';
-    expect(() => resolveParserBackend()).toThrowError(/Invalid LIEN_PARSER/);
-
-    try {
-      resolveParserBackend();
-      expect.unreachable('resolveParserBackend should have thrown');
-    } catch (err) {
-      const message = (err as Error).message;
-      expect(message).toContain('garbage');
-      expect(message).toContain('native');
-      expect(message).toContain('legacy');
-    }
-  });
-});
+// resolveParserBackend()/isBackendUnset() unit tests live in ../backend.test.ts.

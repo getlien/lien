@@ -106,20 +106,30 @@ npm test
 full list) and in CI only when a PR carries a changeset or the `e2e` label.
 
 **Native parser binary:** `packages/parser`'s `ast/native/compat.test.ts`
-drives the native backend (`LIEN_PARSER=native`) against the compiled
-`parser-native.node`. Run `npm run build:native -w @liendev/parser-native`
-first (compiles the Rust crate via `cargo build --release`) — without it,
-`npm test` fails loudly in that suite rather than skipping it. CI always
+drives the native backend (`LIEN_PARSER=native`, set explicitly inside that
+suite) against the compiled `parser-native.node`. Run
+`npm run build:native -w @liendev/parser-native` first (compiles the Rust
+crate via `cargo build --release`) — without it, that suite's
+explicit-native assertions fail loudly rather than skipping. CI always
 builds the native binary before running any test job.
 
-**`LIEN_PARSER=native|legacy`:** selects the AST parser backend; unset or
-`legacy` uses the existing `node-tree-sitter` path. CI runs the whole test
-suite under both — `build-and-test` (legacy, the default) and a dedicated
-`test-native` job — and `e2e.yml` reruns the TypeScript and Kotlin e2e
-projects under native on every changeset-triggered PR (the full 12-project
-suite in both modes is available via that workflow's manual
-`workflow_dispatch`). To reproduce a native-mode failure locally, build the
-binary as above, then run `LIEN_PARSER=native npm test`. See
+**`LIEN_PARSER=native|legacy`:** selects the AST parser backend. Unset or
+`native` uses `@liendev/parser-native`, the default since ADR-013 Phase 4-A.
+`legacy` opts out to the previous `node-tree-sitter` path — it is
+**transitional and scheduled for removal in a future release**; don't build
+new work against it. **Fallback:** on the default (unset) path only, if the
+native binding fails to *load* (e.g. an exotic platform with no prebuilt
+package and no local build), lien automatically falls back to legacy for
+the rest of the process and prints one `console.warn` naming the platform
+and the remedy — a per-file parse error from an already-loaded binding is
+unaffected and never triggers this. An **explicit** `LIEN_PARSER=native`
+does not fall back — it fails loud, which is what CI's dedicated
+native-mode coverage relies on. CI runs the whole test suite under both —
+`build-and-test` (native, the default) and a dedicated `test-legacy` job —
+and `e2e.yml` reruns the TypeScript and Kotlin e2e projects under legacy on
+every changeset-triggered PR (the full 12-project suite in both modes is
+available via that workflow's manual `workflow_dispatch`). To reproduce a
+legacy-mode failure locally, run `LIEN_PARSER=legacy npm test`. See
 [ADR-013](docs/architecture/decisions/0013-prebuilt-native-parser-napi-rs.md)
 for the staged rollout this flag is part of.
 
