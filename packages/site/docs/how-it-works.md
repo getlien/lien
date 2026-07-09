@@ -79,8 +79,8 @@ Everything runs locally:
 ## Architecture
 
 Lien is built with modern, performant tools:
+- **Rust** (`@liendev/parser-native`) for parsing — a small native crate that statically links Tree-sitter and all supported language grammars, and returns one serialized tree per file instead of a live object graph, which avoids the per-node call overhead of a JS-to-native binding. It ships as prebuilt binaries for every supported platform, so installing Lien never compiles anything
 - **TypeScript** for type-safe development
-- **Tree-sitter** for AST-based semantic chunking and complexity analysis
 - **SQLite** (`better-sqlite3`) for the structural store, with **FTS5/BM25** for lexical search
 - **Model Context Protocol (MCP)** for AI assistant integration (Cursor, Claude Code, etc.)
 
@@ -185,7 +185,8 @@ worktree.
 - **File context lookup:** sub-millisecond (indexed lookup by file)
 - **Small projects** (1k files): minutes to index
 - **Medium projects** (10k files): ~15-20 minutes to index
-- **Native install:** ~1.8MB (SQLite binding) — no model download
+- **Parsing:** 1.82–2.21x faster end-to-end than Lien's previous `node-tree-sitter`-based parser, measured across benchmarked languages (see [ADR-013](https://github.com/getlien/lien/blob/main/docs/architecture/decisions/0013-prebuilt-native-parser-napi-rs.md))
+- **Native install:** ~1.8MB (SQLite binding) plus a small prebuilt parser binary — no model download, no compiler toolchain
 - **Disk usage:** roughly comparable to the source it indexes for a standalone
   index; a linked git worktree instead pays only for its overlay (see
   [Git Worktree Support](#git-worktree-support) above)
