@@ -1,6 +1,6 @@
 {
   "name": "@liendev/lien",
-  "version": "0.61.0",
+  "version": "0.62.0",
   "description": "Local lexical code search and dependency analysis for AI assistants via MCP",
   "type": "module",
   "bin": {
@@ -68,8 +68,8 @@
   "author": "Alf Henderson",
   "license": "AGPL-3.0-only",
   "dependencies": {
-    "@liendev/core": "^0.61.0",
-    "@liendev/parser": "^0.61.0",
+    "@liendev/core": "^0.62.0",
+    "@liendev/parser": "^0.62.0",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "@types/figlet": "1.7.0",
     "chalk": "5.3.0",
