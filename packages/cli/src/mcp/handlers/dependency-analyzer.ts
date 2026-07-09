@@ -5,6 +5,7 @@ import {
   matchesFile,
   getCanonicalPath,
   isTestFile,
+  COMPLEXITY_THRESHOLDS,
 } from '@liendev/parser';
 
 /**
@@ -33,18 +34,9 @@ export interface ComplexityMetrics {
   complexityRiskBoost: 'low' | 'medium' | 'high' | 'critical';
 }
 
-/**
- * Complexity thresholds for risk assessment.
- */
-const COMPLEXITY_THRESHOLDS = {
-  HIGH_COMPLEXITY_DEPENDENT: 10, // Individual file is complex
-  CRITICAL_AVG: 15, // Average complexity indicates systemic complexity
-  CRITICAL_MAX: 25, // Peak complexity indicates hotspot
-  HIGH_AVG: 10, // Moderately complex on average
-  HIGH_MAX: 20, // Some complex functions exist
-  MEDIUM_AVG: 6, // Slightly above simple code
-  MEDIUM_MAX: 15, // Occasional branching
-} as const;
+// Complexity thresholds for risk assessment live in @liendev/parser
+// (packages/parser/src/dependency-analyzer.ts) — imported above, not
+// re-declared here.
 
 type RiskLevel = 'low' | 'medium' | 'high' | 'critical';
 

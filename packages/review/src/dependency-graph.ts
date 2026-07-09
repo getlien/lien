@@ -8,6 +8,7 @@
 
 import path from 'node:path/posix';
 import type { CodeChunk } from '@liendev/parser';
+import { walkBounded } from '@liendev/parser';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -139,16 +140,30 @@ export function buildDependencyGraph(chunks: CodeChunk[]): DependencyGraph {
 }
 
 // ---------------------------------------------------------------------------
-// Transitive BFS — extracted so buildDependencyGraph stays a thin wire-up.
+// Transitive BFS — thin domain wrapper around @liendev/parser's walkBounded.
+//
+// The generic primitive owns the frontier-expansion loop: dedup, the depth
+// cap, and maxNodes truncation. This wrapper supplies the caller-graph domain
+// (an exported symbol at a filepath as the node identity) and decorates the
+// raw walk results with the hop/viaSymbol fields callers of this module
+// expect — that decoration happens here, not inside walkBounded.
 // ---------------------------------------------------------------------------
 
 const DEFAULT_TRANSITIVE_DEPTH = 2;
 const DEFAULT_TRANSITIVE_MAX_NODES = 30;
 
-interface BfsQueueItem {
+/** Node identity for the caller-graph BFS: an exported symbol at a filepath. */
+interface CallerGraphNode {
   filepath: string;
   symbolName: string;
-  hops: number;
+}
+
+function callerGraphNodeKey(node: CallerGraphNode): string {
+  return `${node.filepath}::${node.symbolName}`;
+}
+
+function callerEdgeKey(edge: CallerEdge): string {
+  return `${edge.caller.filepath}::${edge.caller.symbolName}`;
 }
 
 function bfsTransitiveCallers(
@@ -160,79 +175,23 @@ function bfsTransitiveCallers(
   const depth = opts.depth ?? DEFAULT_TRANSITIVE_DEPTH;
   const maxNodes = opts.maxNodes ?? DEFAULT_TRANSITIVE_MAX_NODES;
 
-  if (depth < 1 || maxNodes < 1) {
-    return { callers: [], truncated: false, visitedSymbols: 0 };
-  }
+  const { results, truncated, visitedCount } = walkBounded<CallerGraphNode, CallerEdge>(
+    { filepath, symbolName },
+    node => getCallers(node.filepath, node.symbolName),
+    edge => ({ filepath: edge.caller.filepath, symbolName: edge.caller.symbolName }),
+    callerEdgeKey,
+    callerGraphNodeKey,
+    { depth, maxNodes },
+  );
 
-  // Seed in emittedCallers ensures cycles can never re-emit the seed.
-  const emittedCallers = new Set<string>([`${filepath}::${symbolName}`]);
-  const expandedSymbols = new Set<string>();
-  const result: TransitiveCallerEdge[] = [];
-  const queue: BfsQueueItem[] = [{ filepath, symbolName, hops: 0 }];
-  const state = { truncated: false };
+  const callers: TransitiveCallerEdge[] = results.map(({ edge, fromNode, hops }) => ({
+    caller: edge.caller,
+    callSiteLine: edge.callSiteLine,
+    hops,
+    viaSymbol: fromNode.symbolName,
+  }));
 
-  while (queue.length > 0 && !state.truncated) {
-    const current = queue.shift();
-    if (!current) break;
-    const currentKey = `${current.filepath}::${current.symbolName}`;
-    if (expandedSymbols.has(currentKey)) continue;
-    expandedSymbols.add(currentKey);
-    expandFrontier(current, getCallers, { depth, maxNodes }, emittedCallers, result, queue, state);
-  }
-
-  return { callers: result, truncated: state.truncated, visitedSymbols: expandedSymbols.size };
-}
-
-interface ExpandLimits {
-  depth: number;
-  maxNodes: number;
-}
-
-/**
- * Process the direct callers of a single frontier symbol.
- *
- * Truncation is deterministic but ordering-dependent: when maxNodes is hit
- * mid-expansion, the remaining callers of the current symbol (and any deeper
- * symbols still in the queue) are dropped silently. Which callers survive
- * therefore depends on the iteration order of getCallers — consumers should
- * not rely on any particular subset appearing in a truncated result.
- */
-function expandFrontier(
-  current: BfsQueueItem,
-  getCallers: (filepath: string, symbolName: string) => CallerEdge[],
-  limits: ExpandLimits,
-  emittedCallers: Set<string>,
-  result: TransitiveCallerEdge[],
-  queue: BfsQueueItem[],
-  state: { truncated: boolean },
-): void {
-  const directCallers = getCallers(current.filepath, current.symbolName);
-  for (const edge of directCallers) {
-    const callerKey = `${edge.caller.filepath}::${edge.caller.symbolName}`;
-    if (emittedCallers.has(callerKey)) continue;
-
-    if (result.length >= limits.maxNodes) {
-      state.truncated = true;
-      return;
-    }
-
-    emittedCallers.add(callerKey);
-    const hops = current.hops + 1;
-    result.push({
-      caller: edge.caller,
-      callSiteLine: edge.callSiteLine,
-      hops,
-      viaSymbol: current.symbolName,
-    });
-
-    if (hops < limits.depth) {
-      queue.push({
-        filepath: edge.caller.filepath,
-        symbolName: edge.caller.symbolName,
-        hops,
-      });
-    }
-  }
+  return { callers, truncated, visitedSymbols: visitedCount };
 }
 
 type ExportEntry = { filepath: string; chunk: CodeChunk };
