@@ -6,64 +6,144 @@ name: Publish Action
 # getlien/lien-review dist repo and moves the floating v1 tag so
 # `uses: getlien/lien-review@v1` resolves to the new release.
 #
-# Trigger note: this repo releases via changesets (see .github/workflows/
-# release.yml), which tags pushes as `<pkg>@<version>` (e.g.
-# `@liendev/lien@0.51.0`), never a bare `v*` tag — so a `v*` trigger would
-# never fire. `@liendev/parser`, `@liendev/core`, and `@liendev/lien` are
-# version-linked (.changeset/config.json), so every monorepo release bumps
-# `@liendev/lien` and creates that tag exactly once. We piggyback on it rather
-# than adding a dedicated `@liendev/action` tag, because `packages/action` and
-# `packages/review` are private/unpublished and changesets' default
-# `privatePackages.tag: false` means changesets never tags them (see
-# https://github.com/changesets/changesets/blob/main/docs/config-file-options.md) —
-# wiring a dedicated tag would mean changing shared `.changeset/config.json`
-# behavior for every private package, out of scope here.
+# Trigger note: this used to fire on `push: tags: '@liendev/lien@*'` (the tag
+# changesets creates on every release that bumps the CLI). That never
+# actually fired: release.yml's changesets/action step pushes with
+# `commitMode: github-api`, using the default GITHUB_TOKEN, and GitHub does
+# not run workflows off of GITHUB_TOKEN-authored pushes (its documented
+# anti-recursion rule) -- so no image published from 0.61.0 or 0.62.0. No
+# human pushes these tags by hand as part of the documented release process
+# either, so there's no live path left that trigger ever serves; it's
+# replaced outright below rather than kept as a dead fallback.
 #
-# Caveat: an action-only change that doesn't also bump the CLI's version won't
-# trigger this automatically. workflow_dispatch does NOT fill that gap — on
-# dispatch, "Resolve tags" below emits only the sha tag, and the dist-repo
-# sync step is gated to `push` only, so dispatch never syncs the dist repo or
-# moves :v1/:latest. It's useful only as an image-only smoke test. To ship an
-# action-only fix, include a changeset that bumps `@liendev/lien` so the next
-# release tag carries it (see the README runbook).
-
+# Fix: trigger on `workflow_run` of the Release workflow instead -- that
+# event fires regardless of which token/actor made the push. The catch:
+# a workflow_run event can't see the triggering run's job outputs (those
+# belong to a different workflow run), so "did this Release run actually
+# publish @liendev/lien, and at what version" has to be derived independently
+# rather than read off release.yml. The most boring, reliable derivation:
+# check out the exact commit that triggered Release
+# (github.event.workflow_run.head_sha), read @liendev/lien's version straight
+# from packages/cli/package.json, and ask GHCR whether an image already
+# exists at that version tag. If it does, this Release run either didn't bump
+# the CLI or already got an image (re-run) -- skip. If it doesn't, this is a
+# new version -- publish it. This also means a Release run that only opens/
+# updates the "Version Packages" PR (no publish) is a correct no-op here: the
+# version on main hasn't moved, so the image for it already exists.
 on:
-  push:
-    tags:
-      - '@liendev/lien@*'
+  workflow_run:
+    workflows: ['Release']
+    types: [completed]
   workflow_dispatch:
 
+# Guards against a workflow_dispatch smoke test racing a real workflow_run
+# publish and pushing the same tags out of order.
+concurrency:
+  group: publish-action
+  cancel-in-progress: false
+
 jobs:
+  resolve:
+    name: Resolve version and decide whether to publish
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      should-publish: ${{ steps.decide.outputs.should-publish }}
+      version: ${{ steps.decide.outputs.version }}
+      sha: ${{ steps.decide.outputs.sha }}
+    steps:
+      # For workflow_run, check out the exact commit that triggered Release
+      # -- NOT whatever main happens to be by the time this job runs -- so
+      # the version we read below matches the run being reacted to.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
+
+      - name: Decide whether a new image needs publishing
+        id: decide
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          SHA="${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # Manual/ad-hoc smoke test: always publish, same as before -- the
+            # sha tag only (see the "Resolve tags" step in publish-image).
+            echo "version=$SHA" >> "$GITHUB_OUTPUT"
+            echo "should-publish=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          VERSION="$(node -p "require('./packages/cli/package.json').version")"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          echo "${GH_TOKEN}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          export DOCKER_CLI_EXPERIMENTAL=enabled
+          if docker manifest inspect "ghcr.io/getlien/lien-review:${VERSION}" >/dev/null 2>&1; then
+            echo "ghcr.io/getlien/lien-review:${VERSION} already exists -- this Release run didn't bump @liendev/lien (or already published). Nothing to do."
+            echo "should-publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ghcr.io/getlien/lien-review:${VERSION} not found -- new version to publish."
+            echo "should-publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
   publish-image:
+    needs: resolve
+    if: needs.resolve.outputs.should-publish == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     steps:
-      # Actions pinned to commit SHAs (supply-chain hardening for a job that
-      # publishes artifacts). persist-credentials:false — this job never needs
-      # the checkout token for a push, so don't leave it in local git config.
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
+          ref: ${{ needs.resolve.outputs.sha }}
           persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.x
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The action image bundles a linux-x64-gnu parser-native.node (see
+      # packages/action/Dockerfile) -- @liendev/parser hard-requires a
+      # loadable native binding at runtime since ADR-013 Phase 4-B deleted
+      # the legacy backend, so it must be built on the runner, in this
+      # workflow, before the docker build step below. Mirrors ci.yml's
+      # "Build native parser" step.
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: packages/parser-native
+          shared-key: parser-native
+
+      - name: Build native parser
+        run: npm run build:native -w @liendev/parser-native
 
       - name: Resolve tags
         id: tags
         run: |
           IMAGE=ghcr.io/getlien/lien-review
           SHA_TAG="${IMAGE}:sha-${GITHUB_SHA::7}"
-          if [ "${{ github.event_name }}" = "push" ]; then
-            # Tagged release: publish the version, the floating major (:v1) and
-            # :latest, and the sha tag. The tag is `@liendev/lien@<version>` —
-            # strip everything up to the last '@' to get the bare semver
-            # (Docker tags can't contain '@' or '/').
-            VERSION="${GITHUB_REF##*@}"
-            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            # Release publish: tag the version, the floating major (:v1), and
+            # :latest, plus the sha tag.
+            VERSION="${{ needs.resolve.outputs.version }}"
             {
               echo "tags<<EOF"
               echo "${IMAGE}:${VERSION}"
               # :v1 is the Action's own public-interface major version (its
-              # inputs/outputs contract), not derived from the CLI's semver —
+              # inputs/outputs contract), not derived from the CLI's semver --
               # bump it manually (v2, ...) only on a breaking action.yml
               # change, the same convention as actions/checkout@v4 et al.
               echo "${IMAGE}:v1"
@@ -74,7 +154,6 @@ jobs:
           else
             # Manual dispatch: publish ONLY the immutable sha tag, so a non-release
             # run can never overwrite :latest, :v1, or a version with an arbitrary commit.
-            echo "version=${{ github.sha }}" >> "$GITHUB_OUTPUT"
             {
               echo "tags<<EOF"
               echo "${SHA_TAG}"
@@ -117,15 +196,15 @@ jobs:
       # of failing the build, so the image publish above still succeeds and this
       # workflow is mergeable before that setup happens.
       - name: Sync action.yml + README to dist repo and move v1 tag
-        if: github.event_name == 'push'
+        if: github.event_name == 'workflow_run'
         env:
           GH_DIST_TOKEN: ${{ secrets.GH_DIST_TOKEN }}
-          VERSION: ${{ steps.tags.outputs.version }}
+          VERSION: ${{ needs.resolve.outputs.version }}
         run: |
           set -euo pipefail
 
           if [ -z "${GH_DIST_TOKEN:-}" ]; then
-            echo "::notice::GH_DIST_TOKEN is not set — skipping the getlien/lien-review dist-repo sync. The GHCR image was published above, but 'uses: getlien/lien-review@v1' will not resolve to it yet. See packages/action/README.md 'Publishing the Action' for the one-time human setup (create the dist repo + add the secret). Once that's done, this step runs automatically on the next @liendev/lien@* release tag push — not on workflow_dispatch, which skips this step entirely."
+            echo "::notice::GH_DIST_TOKEN is not set — skipping the getlien/lien-review dist-repo sync. The GHCR image was published above, but 'uses: getlien/lien-review@v1' will not resolve to it yet. See packages/action/README.md 'Publishing the Action' for the one-time human setup (create the dist repo + add the secret). Once that's done, this step runs automatically on the next Release run that publishes a new @liendev/lien version — not on workflow_dispatch, which skips this step entirely."
             exit 0
           fi
 
