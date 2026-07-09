@@ -24,16 +24,32 @@ RUN npm ci
 
 # Copy source code
 #
-# parser-native is napi-rs (Rust) and isn't built in this image -- @liendev/parser
-# only needs its published JS surface (types + loader) to typecheck and link the
-# workspace symlink; see docs/architecture/native-parser.md. Copying it
-# selectively (not the whole dir) keeps Cargo.toml/target/vendor/*.node out.
+# parser-native is napi-rs (Rust): the crate itself is NOT built in this
+# image (no Rust toolchain here). ADR-013 Phase 4-B deleted the legacy
+# node-tree-sitter backend entirely, so @liendev/parser now hard-requires a
+# loadable native binding at runtime -- it can no longer fall back. The
+# workflow that docker-builds this image runs `npm run build:native -w
+# @liendev/parser-native` on the RUNNER first (see .github/workflows/ci.yml's
+# "Build native parser" step), which drops a linux-x64-gnu
+# parser-native.node at the fixed path below; we COPY that prebuilt binary
+# in alongside the package's JS surface (types + loader), same as we do for
+# index.js/index.d.ts/scripts/ -- see docs/architecture/native-parser.md.
+# Everything else under parser-native/ (Cargo.toml, target/, vendor/) stays
+# out via .dockerignore.
 COPY packages/parser-native/index.js packages/parser-native/index.d.ts packages/parser-native/
 COPY packages/parser-native/scripts/ packages/parser-native/scripts/
+COPY packages/parser-native/parser-native.node packages/parser-native/
 COPY packages/parser/ packages/parser/
 COPY packages/core/ packages/core/
 COPY packages/review/ packages/review/
 COPY packages/action/ packages/action/
+
+# Fail loudly and immediately if the runner didn't produce the binary above
+# (e.g. someone docker-builds this image directly, skipping the "Build
+# native parser" step) -- much cheaper than discovering it via a
+# NativeBindingLoadError several minutes into `npm run build`/test below.
+RUN test -f packages/parser-native/parser-native.node || \
+    (echo "Missing packages/parser-native/parser-native.node -- run 'npm run build:native -w @liendev/parser-native' before docker build" >&2 && exit 1)
 
 # Build packages in dependency order
 RUN npm run build -w packages/parser && \
@@ -72,6 +88,7 @@ COPY --from=builder /app/packages/parser-native/package.json packages/parser-nat
 COPY --from=builder /app/packages/parser-native/index.js packages/parser-native/
 COPY --from=builder /app/packages/parser-native/index.d.ts packages/parser-native/
 COPY --from=builder /app/packages/parser-native/scripts/ packages/parser-native/scripts/
+COPY --from=builder /app/packages/parser-native/parser-native.node packages/parser-native/
 COPY --from=builder /app/packages/parser/package.json packages/parser/
 COPY --from=builder /app/packages/parser/dist/ packages/parser/dist/
 COPY --from=builder /app/packages/core/package.json packages/core/
@@ -82,5 +99,18 @@ COPY --from=builder /app/packages/action/package.json packages/action/
 COPY --from=builder /app/packages/action/dist/ packages/action/dist/
 
 ENV GIT_TERMINAL_PROMPT=0
+
+# Runtime gate: actually load the native binding and parse one real snippet
+# through it, in the exact final-stage layout that ships (index.js's local-
+# dev fallback resolves ./parser-native.node next to itself -- see
+# packages/parser-native/index.js's "Resolution order" comment). A present-
+# but-wrong-platform, corrupted, or otherwise unloadable binary fails the
+# docker build here instead of surfacing as a NativeBindingLoadError the
+# first time the shipped Action tries to review a PR.
+RUN node -e "import('./packages/parser-native/index.js').then(({ parseTree }) => { \
+    const wire = parseTree('javascript', 'const x = 1;'); \
+    if (!wire || !JSON.parse(wire).type) throw new Error('parseTree returned an empty/invalid result'); \
+    console.log('native parser binding OK'); \
+  }).catch((err) => { console.error(err); process.exit(1); })"
 
 ENTRYPOINT ["node", "packages/action/dist/index.js"]

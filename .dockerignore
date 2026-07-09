@@ -10,3 +10,10 @@
 packages/parser-native/target
 packages/parser-native/vendor
 **/*.node
+
+# ...except the one prebuilt linux-x64-gnu binary the action image actually
+# ships: it's built on the runner (npm run build:native -w
+# @liendev/parser-native) BEFORE the docker build step, landing at this fixed
+# path (see packages/parser-native/scripts/copy-binary.mjs), then COPYed into
+# the image -- see packages/action/Dockerfile.
+!packages/parser-native/parser-native.node
