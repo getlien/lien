@@ -8,7 +8,7 @@ This document details how the MCP (Model Context Protocol) server initializes, h
 sequenceDiagram
     actor User
     participant CLI as CLI (lien serve)
-    participant Config as GlobalConfig + ConfigService
+    participant Config as GlobalConfig
     participant Store as SqliteBackend
     participant MCP as MCP Server
     participant Git as Git Tracker (optional)
@@ -20,8 +20,9 @@ sequenceDiagram
     CLI->>CLI: Show banner
 
     Note over CLI,Config: Phase 1: Configuration
-    CLI->>Config: loadGlobalConfig() + ConfigService.load(rootDir)
-    Config-->>CLI: GlobalConfig + LienConfig
+    CLI->>Config: loadGlobalConfig()
+    Config-->>CLI: GlobalConfig
+    Note right of Config: ConfigService/.lien.config.json is NOT loaded here —<br/>only `lien delta` reads it (complexity.thresholds)
 
     Note over CLI,Store: Phase 2: Open Store
     CLI->>Store: initialize()
@@ -39,33 +40,29 @@ sequenceDiagram
     CLI->>Store: hasData()
     Store-->>CLI: false (no index)
     
-    alt autoIndexOnFirstRun = true
+    alt not inside a git work tree (and LIEN_FORCE_INDEX unset)
+        CLI->>CLI: Log: "Skipped auto-indexing: ... Set LIEN_FORCE_INDEX=1 to index anyway."
+    else
         CLI->>CLI: Log: "No index found, running initial indexing..."
         CLI->>CLI: Import indexCodebase()
-        CLI->>CLI: await indexCodebase({rootDir, verbose: true})
-        Note right of CLI: This may take 5-20 minutes<br/>depending on project size
+        CLI->>CLI: void indexCodebase({rootDir, verbose: true}) — fired without await
+        Note right of CLI: Runs in the background; tools return empty<br/>results until it completes (5-20 min for large repos)
         CLI->>CLI: Log: "✅ Initial indexing complete!"
-    else autoIndexOnFirstRun = false
-        CLI->>CLI: Log: "⚠️ No index found. Run 'lien index'"
     end
     
-    Note over CLI,Git: Phase 5: Optional Features
+    Note over CLI,Git: Phase 5: Optional Features (always on, no config gate)
     
-    alt gitDetection.enabled = true
-        CLI->>Git: Check if git available
-        Git-->>CLI: Yes
-        CLI->>Git: Initialize GitStateTracker
-        Git->>Git: Read current commit hash
-        Git->>Git: Start polling (every 5s)
-        Git-->>CLI: Tracking enabled
-    end
-    
-    alt fileWatching.enabled = true
-        CLI->>Watcher: Initialize FileWatcher
-        Watcher->>Watcher: Watch codebase directories
-        Watcher->>Watcher: Apply debounce (1s)
-        Watcher-->>CLI: Watching enabled
-    end
+    CLI->>Git: Check if git available
+    Git-->>CLI: Yes
+    CLI->>Git: Initialize GitStateTracker
+    Git->>Git: Read current commit hash
+    Git->>Git: Start polling (every 10s — DEFAULT_GIT_POLL_INTERVAL_MS)
+    Git-->>CLI: Tracking enabled
+
+    CLI->>Watcher: Initialize FileWatcher (unless --no-watch)
+    Watcher->>Watcher: Watch codebase directories
+    Watcher->>Watcher: Apply batching (500ms window)
+    Watcher-->>CLI: Watching enabled
     
     Note over MCP,Stdio: Phase 6: Start Transport
     MCP->>Stdio: Connect stdio transport
@@ -197,25 +194,24 @@ flowchart TB
         CURRENT[Store current version]
     end
     
-    subgraph "Git Detection (If Enabled)"
-        GIT_POLL[Poll Git Status: 5s]
+    subgraph "Git Detection (always on)"
+        GIT_POLL[Poll Git Status: 10s]
         CHECK_COMMIT[Get current commit hash]
         COMMIT_CHANGED{Commit<br/>Changed?}
         GET_CHANGED_FILES[git diff --name-only]
         FILTER_FILES[Filter by include patterns]
     end
     
-    subgraph "File Watcher (If Enabled)"
+    subgraph "File Watcher (on by default, --no-watch to disable)"
         WATCH_FILES[chokidar.watch()]
         FILE_EVENT[File change event]
-        DEBOUNCE[Debounce: 1000ms]
+        DEBOUNCE[Batch window: 500ms]
         GET_FILEPATH[Get changed file path]
     end
     
     subgraph "Incremental Reindex"
         REINDEX_START[Start background reindex]
-        LOAD_CONFIG[Load config]
-        INDEX_FILES[indexMultipleFiles()]
+        INDEX_FILES[indexMultipleFiles() — no .lien.config.json load; AST chunking is hardcoded]
         UPDATE_VERSION[Update version.json]
         REINDEX_DONE[Log: Reindex complete]
     end
@@ -255,8 +251,7 @@ flowchart TB
     GET_FILEPATH --> REINDEX_START
     
     %% Reindex flow
-    REINDEX_START --> LOAD_CONFIG
-    LOAD_CONFIG --> INDEX_FILES
+    REINDEX_START --> INDEX_FILES
     INDEX_FILES --> UPDATE_VERSION
     UPDATE_VERSION --> REINDEX_DONE
     REINDEX_DONE --> INTERVAL
@@ -279,7 +274,7 @@ flowchart TB
     class INTERVAL,READ_VERSION,COMPARE,CURRENT versionClass
     class GIT_POLL,CHECK_COMMIT,COMMIT_CHANGED,GET_CHANGED_FILES,FILTER_FILES gitClass
     class WATCH_FILES,FILE_EVENT,DEBOUNCE,GET_FILEPATH watchClass
-    class REINDEX_START,LOAD_CONFIG,INDEX_FILES,UPDATE_VERSION,REINDEX_DONE reindexClass
+    class REINDEX_START,INDEX_FILES,UPDATE_VERSION,REINDEX_DONE reindexClass
     class RECONNECT_START,CLOSE_CONN,REOPEN_CONN,RELOAD_INDEX,RECONNECT_DONE,NOTIFY_CLIENT reconnectClass
 ```
 

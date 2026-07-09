@@ -154,14 +154,7 @@ To disable for a session:
 lien serve --no-watch
 ```
 
-To disable permanently, set in `~/.lien/config.json` (global config):
-```json
-{
-  "fileWatching": {
-    "enabled": false
-  }
-}
-```
+There's no config file setting for this — `--no-watch` (or omitting it) is the only control, decided fresh each time you run `lien serve`. If you're launching via an editor's MCP config (see below), add `--no-watch` to the `args` array there to make it permanent for that integration.
 
 ::: tip
 Usually run via Cursor's MCP configuration, not manually.

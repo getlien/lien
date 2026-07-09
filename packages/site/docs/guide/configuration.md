@@ -46,12 +46,11 @@ deleted to reclaim disk space.
 
 ## Per-Project Configuration
 
-Per-project settings live in `.lien.config.json` in your project root. Most users don't need this — Lien works with sensible defaults.
+Per-project settings live in `.lien.config.json` in your project root. It supports exactly one field — `complexity.thresholds`, read by `lien delta` — so most users don't need this at all.
 
 ```json
 {
   "complexity": {
-    "enabled": true,
     "thresholds": {
       "testPaths": 15,
       "mentalLoad": 15
@@ -59,6 +58,8 @@ Per-project settings live in `.lien.config.json` in your project root. Most user
   }
 }
 ```
+
+Any other key in this file is ignored with a one-time warning telling you what to delete.
 
 ## Environment Variables
 
@@ -173,7 +174,6 @@ Configure complexity analysis for the `lien complexity` command and `get_complex
 ```json
 {
   "complexity": {
-    "enabled": true,
     "thresholds": {
       "testPaths": 15,
       "mentalLoad": 15,
@@ -198,32 +198,14 @@ Configure complexity analysis for the `lien complexity` command and `get_complex
 - **Error**: When value exceeds 2× threshold (e.g., testPaths ≥ 30)
 :::
 
-## Chunking
-
-Control how Lien splits your source files into semantic chunks:
-
-```json
-{
-  "chunking": {
-    "useAST": true,
-    "astFallback": "line-based"
-  }
-}
-```
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `useAST` | `true` | Use AST-based chunking for supported languages. When `false`, falls back to line-based chunking. |
-| `astFallback` | `"line-based"` | What to do when AST parsing fails. `"line-based"` falls back to line-based chunking; `"error"` throws an error. |
-
 ## Migrating from Old Config Files
 
-If you have an existing `.lien.config.json` with a `frameworks` array from older versions, the `frameworks` field is deprecated. Lien now uses:
+Older versions of `.lien.config.json` supported a lot more: `core`, `chunking`, `mcp`, `gitDetection`, `fileWatching`, `storage`, a deprecated `frameworks` array, and an even older `indexing`-based shape. None of it ever affected indexing, search, chunking, or the MCP server in practice — Lien now uses:
 
-1. **Ecosystem presets** for auto-detecting project type and patterns
+1. **Ecosystem presets** for auto-detecting project type and patterns (automatic, not configurable)
 2. **Global config** at `~/.lien/config.json` for backend selection (managed via `lien config`)
-3. **Per-project config** at `.lien.config.json` for indexing/chunking tuning (optional)
+3. **Per-project config** at `.lien.config.json` for `complexity.thresholds` only (optional)
 
-Your indices will continue to work—no need to re-index.
+If your `.lien.config.json` still has any of the retired sections, Lien won't fail — it warns once per section, telling you what to delete, and ignores the rest. Your indices will continue to work — no need to re-index.
 
 
