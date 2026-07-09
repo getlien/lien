@@ -68,7 +68,7 @@ describe('LienError', () => {
   it('should correctly report retryable status', () => {
     const retryable = new LienError(
       'Retryable error',
-      LienErrorCode.EMBEDDING_GENERATION_FAILED,
+      LienErrorCode.INTERNAL_ERROR,
       undefined,
       'medium',
       true,
@@ -131,8 +131,6 @@ describe('LienError', () => {
       LienErrorCode.CONFIG_INVALID,
       LienErrorCode.INDEX_NOT_FOUND,
       LienErrorCode.INDEX_CORRUPTED,
-      LienErrorCode.EMBEDDING_MODEL_FAILED,
-      LienErrorCode.EMBEDDING_GENERATION_FAILED,
       LienErrorCode.FILE_NOT_FOUND,
       LienErrorCode.FILE_NOT_READABLE,
       LienErrorCode.INVALID_PATH,

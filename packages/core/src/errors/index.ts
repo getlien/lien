@@ -82,16 +82,6 @@ export class IndexingError extends LienError {
 }
 
 /**
- * Embedding generation errors
- */
-export class EmbeddingError extends LienError {
-  constructor(message: string, context?: Record<string, unknown>) {
-    super(message, LienErrorCode.EMBEDDING_GENERATION_FAILED, context, 'high', true, true);
-    this.name = 'EmbeddingError';
-  }
-}
-
-/**
  * Vector database errors (connection, query, storage)
  */
 export class DatabaseError extends LienError {

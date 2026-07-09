@@ -297,7 +297,7 @@ describe('buildDependencyGraph — cross-package fallback', () => {
 
     const caller = createTestChunk({
       metadata: {
-        file: 'packages/runner/src/handlers/pr-review.ts',
+        file: 'packages/action/src/index.ts',
         startLine: 50,
         endLine: 80,
         type: 'function',
@@ -313,7 +313,7 @@ describe('buildDependencyGraph — cross-package fallback', () => {
 
     expect(callers).toHaveLength(1);
     expect(callers[0].caller.symbolName).toBe('handlePRReview');
-    expect(callers[0].caller.filepath).toBe('packages/runner/src/handlers/pr-review.ts');
+    expect(callers[0].caller.filepath).toBe('packages/action/src/index.ts');
   });
 
   it('resolves PHP namespace import (use App\\Services\\...)', () => {
