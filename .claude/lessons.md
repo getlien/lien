@@ -36,8 +36,10 @@ Durable, git-tracked record of corrections. Read this at the start of every sess
   list. When adding a package, grep `.github/` + Dockerfiles + root
   scripts for explicit `packages/...` enumerations before pushing.
 - **Every CI job whose code path reaches `parseAST`/`chunkFile` must build
-  the native binary first** (`npm run build:native -w
-  @liendev/parser-native` after `npm ci`). There is no legacy fallback:
+  the native binary first**, via
+  `npm run build:native -w @liendev/parser-native` after `npm ci`
+  (keep that command on one line in docs — the docs-truth linter cannot
+  resolve a wrapped `-w` workspace). There is no legacy fallback:
   a missing binding throws `NativeBindingLoadError` loudly by design.
   Audit new workflows for this — `npm test`, `lien delta`, review runs,
   and anything importing `@liendev/parser` all parse.
