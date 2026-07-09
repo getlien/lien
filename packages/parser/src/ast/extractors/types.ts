@@ -1,5 +1,4 @@
-import type Parser from 'tree-sitter';
-import type { SymbolInfo } from '../types.js';
+import type { SymbolInfo, SyntaxNode } from '../types.js';
 
 /**
  * Language-specific symbol extraction strategy
@@ -13,10 +12,10 @@ export interface LanguageSymbolExtractor {
   readonly symbolNodeTypes: string[];
 
   /** Extract symbol info (name, type, signature, etc.) from an AST node */
-  extractSymbol(node: Parser.SyntaxNode, content: string, parentClass?: string): SymbolInfo | null;
+  extractSymbol(node: SyntaxNode, content: string, parentClass?: string): SymbolInfo | null;
 
   /** Extract symbol name and line from a call expression node */
-  extractCallSite(node: Parser.SyntaxNode): { symbol: string; line: number; key: string } | null;
+  extractCallSite(node: SyntaxNode): { symbol: string; line: number; key: string } | null;
 }
 
 /**
@@ -67,7 +66,7 @@ export interface LanguageExportExtractor {
    * extractExports(rootNode) // => ['foo', 'bar', 'default']
    * ```
    */
-  extractExports(rootNode: Parser.SyntaxNode): string[];
+  extractExports(rootNode: SyntaxNode): string[];
 }
 
 /**
@@ -95,7 +94,7 @@ export interface LanguageImportExtractor {
    * @param node - AST node matching one of importNodeTypes
    * @returns The import path string, or null to skip
    */
-  extractImportPath(node: Parser.SyntaxNode): string | null;
+  extractImportPath(node: SyntaxNode): string | null;
 
   /**
    * Extract imported symbols mapped to their source path.
@@ -103,5 +102,5 @@ export interface LanguageImportExtractor {
    * @param node - AST node matching one of importNodeTypes
    * @returns Object with importPath and symbols, or null to skip
    */
-  processImportSymbols(node: Parser.SyntaxNode): { importPath: string; symbols: string[] } | null;
+  processImportSymbols(node: SyntaxNode): { importPath: string; symbols: string[] } | null;
 }

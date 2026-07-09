@@ -1,4 +1,4 @@
-import type Parser from 'tree-sitter';
+import type { SyntaxNode } from '../types.js';
 import { getAllLanguages } from '../languages/registry.js';
 
 /**
@@ -29,11 +29,11 @@ function getDecisionPoints(): Set<string> {
  * @param node - AST node to analyze (typically a function/method)
  * @returns Cyclomatic complexity score (minimum 1)
  */
-export function calculateComplexity(node: Parser.SyntaxNode): number {
+export function calculateComplexity(node: SyntaxNode): number {
   let complexity = 1; // Base complexity
   const decisionPoints = getDecisionPoints();
 
-  function traverse(n: Parser.SyntaxNode) {
+  function traverse(n: SyntaxNode) {
     if (decisionPoints.has(n.type)) {
       // For binary expressions, only count && and ||
       if (n.type === 'binary_expression') {

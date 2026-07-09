@@ -1,4 +1,4 @@
-import type Parser from 'tree-sitter';
+import type { SyntaxNode } from '../types.js';
 
 /**
  * Language-specific node traversal configuration
@@ -50,7 +50,7 @@ export interface LanguageTraverser {
    * @param node - AST node to check
    * @returns True if we should extract children (e.g., class methods), false otherwise
    */
-  shouldExtractChildren(node: Parser.SyntaxNode): boolean;
+  shouldExtractChildren(node: SyntaxNode): boolean;
 
   /**
    * Check if a node is a declaration that might contain a function
@@ -58,7 +58,7 @@ export interface LanguageTraverser {
    * @param node - AST node to check
    * @returns True if this is a variable declaration that might contain a function
    */
-  isDeclarationWithFunction(node: Parser.SyntaxNode): boolean;
+  isDeclarationWithFunction(node: SyntaxNode): boolean;
 
   /**
    * Extract the container body node (e.g., class body) for child traversal
@@ -66,7 +66,7 @@ export interface LanguageTraverser {
    * @param node - Container node (e.g., class_declaration)
    * @returns The body node containing children, or null if not found
    */
-  getContainerBody(node: Parser.SyntaxNode): Parser.SyntaxNode | null;
+  getContainerBody(node: SyntaxNode): SyntaxNode | null;
 
   /**
    * Check if traversal should continue into this node's children
@@ -74,7 +74,7 @@ export interface LanguageTraverser {
    * @param node - AST node to check
    * @returns True if we should traverse children (e.g., for 'program', 'export_statement')
    */
-  shouldTraverseChildren(node: Parser.SyntaxNode): boolean;
+  shouldTraverseChildren(node: SyntaxNode): boolean;
 
   /**
    * Find the parent container name for a node (e.g., class name for a method)
@@ -82,7 +82,7 @@ export interface LanguageTraverser {
    * @param node - AST node (e.g., method)
    * @returns Container name (e.g., class name), or undefined if not in a container
    */
-  findParentContainerName(node: Parser.SyntaxNode): string | undefined;
+  findParentContainerName(node: SyntaxNode): string | undefined;
 
   /**
    * Find a function inside a declaration node (e.g., arrow function in const declaration)
@@ -90,7 +90,7 @@ export interface LanguageTraverser {
    * @param node - Declaration node to search
    * @returns Information about whether a function was found and the function node itself
    */
-  findFunctionInDeclaration(node: Parser.SyntaxNode): DeclarationFunctionInfo;
+  findFunctionInDeclaration(node: SyntaxNode): DeclarationFunctionInfo;
 }
 
 /**
@@ -105,5 +105,5 @@ export interface DeclarationFunctionInfo {
   /**
    * The actual function node if found
    */
-  functionNode: Parser.SyntaxNode | null;
+  functionNode: SyntaxNode | null;
 }

@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import Parser from 'tree-sitter';
-import TypeScript from 'tree-sitter-typescript';
+import { mustParse } from '../test/helpers/parse-fixture.js';
 import { chunkByAST } from '../chunker.js';
 import {
   TypeScriptTraverser,
@@ -10,8 +9,6 @@ import {
 } from './javascript.js';
 
 describe('TypeScript Language', () => {
-  const parser = new Parser();
-  parser.setLanguage(TypeScript.typescript);
   const traverser = new TypeScriptTraverser();
   const exportExtractor = new TypeScriptExportExtractor();
   const importExtractor = new TypeScriptImportExtractor();
@@ -26,8 +23,8 @@ describe('TypeScript Language', () => {
 
     it('should detect arrow functions in lexical declarations', () => {
       const code = 'const foo = () => {};';
-      const tree = parser.parse(code);
-      const declNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'typescript');
+      const declNode = root.namedChild(0)!;
       const result = traverser.findFunctionInDeclaration(declNode);
       expect(result.hasFunction).toBe(true);
       expect(result.functionNode?.type).toBe('arrow_function');
@@ -35,8 +32,8 @@ describe('TypeScript Language', () => {
 
     it('should find parent class name for methods', () => {
       const code = 'class MyClass { myMethod() {} }';
-      const tree = parser.parse(code);
-      const classBody = tree.rootNode.namedChild(0)!.childForFieldName('body')!;
+      const root = mustParse(code, 'typescript');
+      const classBody = root.namedChild(0)!.childForFieldName('body')!;
       const methodNode = classBody.namedChild(0)!;
       expect(traverser.findParentContainerName(methodNode)).toBe('MyClass');
     });
@@ -47,8 +44,8 @@ describe('TypeScript Language', () => {
       const code = `export function validate() {}
 export default class App {}
 export { foo } from './module';`;
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'typescript');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toContain('validate');
       expect(exports).toContain('default');
       expect(exports).toContain('App');
@@ -56,17 +53,18 @@ export { foo } from './module';`;
     });
 
     it('should extract interface and type alias exports', () => {
-      const tree = parser.parse(
+      const root = mustParse(
         'export interface User { name: string; }\nexport type ID = string;',
+        'typescript',
       );
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toContain('User');
       expect(exports).toContain('ID');
     });
 
     it('should deduplicate exports', () => {
-      const tree = parser.parse('export function foo() {}\nexport { foo };');
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse('export function foo() {}\nexport { foo };', 'typescript');
+      const exports = exportExtractor.extractExports(root);
       expect(exports.filter((e: string) => e === 'foo')).toHaveLength(1);
     });
   });
@@ -79,8 +77,8 @@ export { foo } from './module';`;
         { code: "import * as utils from './utils';", expected: ['* as utils'] },
       ];
       for (const { code, expected } of cases) {
-        const tree = parser.parse(code);
-        const result = importExtractor.processImportSymbols(tree.rootNode.namedChild(0)!);
+        const root = mustParse(code, 'typescript');
+        const result = importExtractor.processImportSymbols(root.namedChild(0)!);
         for (const sym of expected) {
           expect(result!.symbols).toContain(sym);
         }
@@ -90,9 +88,9 @@ export { foo } from './module';`;
 
   describe('Symbol Extraction', () => {
     it('should extract interface declarations', () => {
-      const tree = parser.parse('interface Config { port: number; }');
+      const root = mustParse('interface Config { port: number; }', 'typescript');
       const symbol = symbolExtractor.extractSymbol(
-        tree.rootNode.namedChild(0)!,
+        root.namedChild(0)!,
         'interface Config { port: number; }',
       );
       expect(symbol!.name).toBe('Config');
@@ -100,8 +98,8 @@ export { foo } from './module';`;
     });
 
     it('should extract call sites from member expressions', () => {
-      const tree = parser.parse('obj.method();');
-      const callExpr = tree.rootNode.namedChild(0)!.namedChild(0)!;
+      const root = mustParse('obj.method();', 'typescript');
+      const callExpr = root.namedChild(0)!.namedChild(0)!;
       const callSite = symbolExtractor.extractCallSite(callExpr);
       expect(callSite!.symbol).toBe('method');
     });
@@ -143,24 +141,24 @@ interface User { name: string; }`;
     describe('Traverser', () => {
       it('should treat abstract_class_declaration as a container', () => {
         const code = 'abstract class Base { work() {} }';
-        const tree = parser.parse(code);
-        const classNode = tree.rootNode.namedChild(0)!;
+        const root = mustParse(code, 'typescript');
+        const classNode = root.namedChild(0)!;
         expect(classNode.type).toBe('abstract_class_declaration');
         expect(traverser.shouldExtractChildren(classNode)).toBe(true);
       });
 
       it('should resolve the class_body for an abstract class', () => {
         const code = 'abstract class Base { work() {} }';
-        const tree = parser.parse(code);
-        const classNode = tree.rootNode.namedChild(0)!;
+        const root = mustParse(code, 'typescript');
+        const classNode = root.namedChild(0)!;
         const body = traverser.getContainerBody(classNode);
         expect(body?.type).toBe('class_body');
       });
 
       it('should find the parent container name through an abstract class', () => {
         const code = 'abstract class Base { work() {} }';
-        const tree = parser.parse(code);
-        const classNode = tree.rootNode.namedChild(0)!;
+        const root = mustParse(code, 'typescript');
+        const classNode = root.namedChild(0)!;
         const classBody = classNode.childForFieldName('body')!;
         const methodNode = classBody.namedChild(0)!;
         expect(traverser.findParentContainerName(methodNode)).toBe('Base');
@@ -181,8 +179,8 @@ interface User { name: string; }`;
     describe('Symbol Extraction', () => {
       it('should extract the abstract class itself as a class symbol', () => {
         const code = 'abstract class BaseService { doWork() {} }';
-        const tree = parser.parse(code);
-        const classNode = tree.rootNode.namedChild(0)!;
+        const root = mustParse(code, 'typescript');
+        const classNode = root.namedChild(0)!;
         const symbol = symbolExtractor.extractSymbol(classNode, code);
         expect(symbol?.name).toBe('BaseService');
         expect(symbol?.type).toBe('class');
@@ -192,8 +190,8 @@ interface User { name: string; }`;
         const code = `abstract class BaseService {
   abstract doWork(x: number): void;
 }`;
-        const tree = parser.parse(code);
-        const classBody = tree.rootNode.namedChild(0)!.childForFieldName('body')!;
+        const root = mustParse(code, 'typescript');
+        const classBody = root.namedChild(0)!.childForFieldName('body')!;
         const methodNode = classBody.namedChild(0)!;
         expect(methodNode.type).toBe('abstract_method_signature');
 
@@ -343,8 +341,8 @@ abstract class Pet extends Animal {
   describe('Other TS-only surface', () => {
     it('should extract type-only named imports like regular named imports', () => {
       const code = "import type { Foo } from './foo';";
-      const tree = parser.parse(code);
-      const result = importExtractor.processImportSymbols(tree.rootNode.namedChild(0)!);
+      const root = mustParse(code, 'typescript');
+      const result = importExtractor.processImportSymbols(root.namedChild(0)!);
       expect(result).not.toBeNull();
       expect(result!.importPath).toBe('./foo');
       expect(result!.symbols).toContain('Foo');
@@ -352,8 +350,8 @@ abstract class Pet extends Animal {
 
     it('should extract inline type-qualified named imports alongside value imports', () => {
       const code = "import { type Bar, baz } from './bar';";
-      const tree = parser.parse(code);
-      const result = importExtractor.processImportSymbols(tree.rootNode.namedChild(0)!);
+      const root = mustParse(code, 'typescript');
+      const result = importExtractor.processImportSymbols(root.namedChild(0)!);
       expect(result).not.toBeNull();
       expect(result!.symbols).toContain('Bar');
       expect(result!.symbols).toContain('baz');
@@ -361,8 +359,8 @@ abstract class Pet extends Animal {
 
     it('should extract type-only re-exports and type alias exports', () => {
       const code = "export type { Foo } from './foo';\nexport type Bar = string;";
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'typescript');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toContain('Foo');
       expect(exports).toContain('Bar');
     });

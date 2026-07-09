@@ -1,4 +1,3 @@
-import TypeScript from 'tree-sitter-typescript';
 import type { LanguageDefinition } from './types.js';
 import {
   TypeScriptTraverser,
@@ -11,7 +10,6 @@ import {
 export const typescriptDefinition: LanguageDefinition = {
   id: 'typescript',
   extensions: ['ts', 'tsx'],
-  grammar: TypeScript.typescript,
   traverser: new TypeScriptTraverser(),
   exportExtractor: new TypeScriptExportExtractor(),
   importExtractor: new TypeScriptImportExtractor(),

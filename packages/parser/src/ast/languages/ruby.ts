@@ -1,6 +1,4 @@
-import Ruby from 'tree-sitter-ruby';
-import type Parser from 'tree-sitter';
-import type { SymbolInfo } from '../types.js';
+import type { SymbolInfo, SyntaxNode } from '../types.js';
 import type { LanguageDefinition } from './types.js';
 import type { LanguageTraverser, DeclarationFunctionInfo } from '../traversers/types.js';
 import type {
@@ -27,7 +25,7 @@ const REQUIRE_METHODS = new Set(['require', 'require_relative', 'load', 'autoloa
  * Return the content of the first string literal in an `argument_list`
  * (e.g. the `'json'` in `require 'json'`). Returns null if absent or empty.
  */
-function firstStringArgument(argsNode: Parser.SyntaxNode | null): string | null {
+function firstStringArgument(argsNode: SyntaxNode | null): string | null {
   if (!argsNode) return null;
   const stringNode = argsNode.namedChildren.find(c => c.type === 'string');
   const contentNode = stringNode?.namedChildren.find(c => c.type === 'string_content');
@@ -38,7 +36,7 @@ function firstStringArgument(argsNode: Parser.SyntaxNode | null): string | null 
  * Extract the require path from a `call` node if it is a require-like call,
  * otherwise null (so non-import calls are skipped by the import extractor).
  */
-function extractRequirePath(node: Parser.SyntaxNode): string | null {
+function extractRequirePath(node: SyntaxNode): string | null {
   if (node.type !== 'call') return null;
   const method = node.childForFieldName('method');
   if (!method || !REQUIRE_METHODS.has(method.text)) return null;
@@ -78,22 +76,22 @@ export class RubyTraverser implements LanguageTraverser {
 
   functionTypes = ['method', 'singleton_method'];
 
-  shouldExtractChildren(node: Parser.SyntaxNode): boolean {
+  shouldExtractChildren(node: SyntaxNode): boolean {
     return this.containerTypes.includes(node.type);
   }
 
-  isDeclarationWithFunction(_node: Parser.SyntaxNode): boolean {
+  isDeclarationWithFunction(_node: SyntaxNode): boolean {
     return false;
   }
 
-  getContainerBody(node: Parser.SyntaxNode): Parser.SyntaxNode | null {
+  getContainerBody(node: SyntaxNode): SyntaxNode | null {
     if (this.containerTypes.includes(node.type)) {
       return node.childForFieldName('body');
     }
     return null;
   }
 
-  shouldTraverseChildren(node: Parser.SyntaxNode): boolean {
+  shouldTraverseChildren(node: SyntaxNode): boolean {
     // `module` is treated as a transparent namespace: we traverse *through* it
     // (without it counting as a container nesting level) so that the common
     // `module → class → method` shape still yields method chunks. The shared
@@ -102,7 +100,7 @@ export class RubyTraverser implements LanguageTraverser {
     return node.type === 'program' || node.type === 'body_statement' || node.type === 'module';
   }
 
-  findParentContainerName(node: Parser.SyntaxNode): string | undefined {
+  findParentContainerName(node: SyntaxNode): string | undefined {
     let current = node.parent;
     while (current) {
       if (current.type === 'class' || current.type === 'module') {
@@ -114,7 +112,7 @@ export class RubyTraverser implements LanguageTraverser {
     return undefined;
   }
 
-  findFunctionInDeclaration(_node: Parser.SyntaxNode): DeclarationFunctionInfo {
+  findFunctionInDeclaration(_node: SyntaxNode): DeclarationFunctionInfo {
     return {
       hasFunction: false,
       functionNode: null,
@@ -139,7 +137,7 @@ export class RubyTraverser implements LanguageTraverser {
 export class RubyExportExtractor implements LanguageExportExtractor {
   private readonly exportableTypes = new Set(['method', 'singleton_method', 'class', 'module']);
 
-  extractExports(rootNode: Parser.SyntaxNode): string[] {
+  extractExports(rootNode: SyntaxNode): string[] {
     const exports: string[] = [];
     const seen = new Set<string>();
 
@@ -186,11 +184,11 @@ export class RubyImportExtractor implements LanguageImportExtractor {
   // Require statements are method calls in Ruby; we filter by method name.
   readonly importNodeTypes = ['call'];
 
-  extractImportPath(node: Parser.SyntaxNode): string | null {
+  extractImportPath(node: SyntaxNode): string | null {
     return extractRequirePath(node);
   }
 
-  processImportSymbols(node: Parser.SyntaxNode): { importPath: string; symbols: string[] } | null {
+  processImportSymbols(node: SyntaxNode): { importPath: string; symbols: string[] } | null {
     const importPath = extractRequirePath(node);
     if (!importPath) return null;
     return { importPath, symbols: [moduleBasename(importPath)] };
@@ -215,7 +213,7 @@ export class RubyImportExtractor implements LanguageImportExtractor {
 export class RubySymbolExtractor implements LanguageSymbolExtractor {
   readonly symbolNodeTypes = ['method', 'singleton_method', 'class', 'module'];
 
-  extractSymbol(node: Parser.SyntaxNode, content: string, parentClass?: string): SymbolInfo | null {
+  extractSymbol(node: SyntaxNode, content: string, parentClass?: string): SymbolInfo | null {
     switch (node.type) {
       case 'method':
       case 'singleton_method':
@@ -229,7 +227,7 @@ export class RubySymbolExtractor implements LanguageSymbolExtractor {
     }
   }
 
-  extractCallSite(node: Parser.SyntaxNode): { symbol: string; line: number; key: string } | null {
+  extractCallSite(node: SyntaxNode): { symbol: string; line: number; key: string } | null {
     if (node.type !== 'call') return null;
 
     const line = node.startPosition.row + 1;
@@ -243,7 +241,7 @@ export class RubySymbolExtractor implements LanguageSymbolExtractor {
   }
 
   private extractMethodInfo(
-    node: Parser.SyntaxNode,
+    node: SyntaxNode,
     content: string,
     parentClass?: string,
   ): SymbolInfo | null {
@@ -262,10 +260,7 @@ export class RubySymbolExtractor implements LanguageSymbolExtractor {
     };
   }
 
-  private extractClassInfo(
-    node: Parser.SyntaxNode,
-    keyword: 'class' | 'module',
-  ): SymbolInfo | null {
+  private extractClassInfo(node: SyntaxNode, keyword: 'class' | 'module'): SymbolInfo | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
@@ -292,7 +287,6 @@ export class RubySymbolExtractor implements LanguageSymbolExtractor {
 export const rubyDefinition: LanguageDefinition = {
   id: 'ruby',
   extensions: ['rb'],
-  grammar: Ruby,
   traverser: new RubyTraverser(),
   exportExtractor: new RubyExportExtractor(),
   importExtractor: new RubyImportExtractor(),

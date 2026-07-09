@@ -1,12 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import Parser from 'tree-sitter';
-import Go from 'tree-sitter-go';
+import { mustParse } from '../test/helpers/parse-fixture.js';
+import type { SyntaxNode } from '../types.js';
 import { chunkByAST } from '../chunker.js';
 import { GoTraverser, GoExportExtractor, GoImportExtractor, GoSymbolExtractor } from './go.js';
 
 describe('Go Language', () => {
-  const parser = new Parser();
-  parser.setLanguage(Go);
   const traverser = new GoTraverser();
   const exportExtractor = new GoExportExtractor();
   const importExtractor = new GoImportExtractor();
@@ -29,35 +27,35 @@ describe('Go Language', () => {
 
     it('should traverse source_file root', () => {
       const code = 'package main\nfunc main() {}';
-      const tree = parser.parse(code);
-      expect(traverser.shouldTraverseChildren(tree.rootNode)).toBe(true);
+      const root = mustParse(code, 'go');
+      expect(traverser.shouldTraverseChildren(root)).toBe(true);
     });
 
     it('should not traverse non-root nodes', () => {
       const code = 'package main\nfunc main() { if true {} }';
-      const tree = parser.parse(code);
-      const funcNode = tree.rootNode.namedChild(1)!;
+      const root = mustParse(code, 'go');
+      const funcNode = root.namedChild(1)!;
       expect(traverser.shouldTraverseChildren(funcNode)).toBe(false);
     });
 
     it('should detect func_literal in var_declaration', () => {
       const code = 'package main\nvar handler = func() {}';
-      const tree = parser.parse(code);
-      const varNode = tree.rootNode.namedChild(1)!;
+      const root = mustParse(code, 'go');
+      const varNode = root.namedChild(1)!;
       expect(traverser.isDeclarationWithFunction(varNode)).toBe(true);
     });
 
     it('should not detect non-function var declarations', () => {
       const code = 'package main\nvar x = 42';
-      const tree = parser.parse(code);
-      const varNode = tree.rootNode.namedChild(1)!;
+      const root = mustParse(code, 'go');
+      const varNode = root.namedChild(1)!;
       expect(traverser.isDeclarationWithFunction(varNode)).toBe(false);
     });
 
     it('should find func_literal node in var_declaration', () => {
       const code = 'package main\nvar handler = func() {}';
-      const tree = parser.parse(code);
-      const varNode = tree.rootNode.namedChild(1)!;
+      const root = mustParse(code, 'go');
+      const varNode = root.namedChild(1)!;
       const result = traverser.findFunctionInDeclaration(varNode);
       expect(result.hasFunction).toBe(true);
       expect(result.functionNode).not.toBeNull();
@@ -66,15 +64,15 @@ describe('Go Language', () => {
 
     it('should always return undefined for findParentContainerName', () => {
       const code = 'package main\nfunc main() {}';
-      const tree = parser.parse(code);
-      const funcNode = tree.rootNode.namedChild(1)!;
+      const root = mustParse(code, 'go');
+      const funcNode = root.namedChild(1)!;
       expect(traverser.findParentContainerName(funcNode)).toBeUndefined();
     });
 
     it('should not extract children from any node', () => {
       const code = 'package main\ntype User struct { Name string }';
-      const tree = parser.parse(code);
-      const typeNode = tree.rootNode.namedChild(1)!;
+      const root = mustParse(code, 'go');
+      const typeNode = root.namedChild(1)!;
       expect(traverser.shouldExtractChildren(typeNode)).toBe(false);
     });
   });
@@ -82,64 +80,64 @@ describe('Go Language', () => {
   describe('Export Extraction', () => {
     it('should extract exported function (uppercase)', () => {
       const code = 'package main\nfunc NewUser() {}';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'go');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toEqual(['NewUser']);
     });
 
     it('should not export unexported function (lowercase)', () => {
       const code = 'package main\nfunc helper() {}';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'go');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toEqual([]);
     });
 
     it('should extract exported method', () => {
       const code = 'package main\nfunc (u *User) GetName() string { return u.Name }';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'go');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toEqual(['GetName']);
     });
 
     it('should not export unexported method', () => {
       const code = 'package main\nfunc (u *User) getName() string { return u.Name }';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'go');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toEqual([]);
     });
 
     it('should extract exported struct', () => {
       const code = 'package main\ntype User struct { Name string }';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'go');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toEqual(['User']);
     });
 
     it('should extract exported interface', () => {
       const code = 'package main\ntype Validator interface { Validate() error }';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'go');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toEqual(['Validator']);
     });
 
     it('should not export unexported types', () => {
       const code = 'package main\ntype user struct { name string }';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'go');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toEqual([]);
     });
 
     it('should extract exported constants', () => {
       const code = 'package main\nconst MaxSize = 100';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'go');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toEqual(['MaxSize']);
     });
 
     it('should extract exported variables', () => {
       const code = 'package main\nvar GlobalVar = "hello"';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'go');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toEqual(['GlobalVar']);
     });
 
@@ -150,8 +148,8 @@ const (
   statusInactive = 2
   MaxRetries = 3
 )`;
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'go');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toContain('StatusActive');
       expect(exports).toContain('MaxRetries');
       expect(exports).not.toContain('statusInactive');
@@ -164,8 +162,8 @@ var (
   debug = false
   Build = "123"
 )`;
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'go');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toContain('Version');
       expect(exports).toContain('Build');
       expect(exports).not.toContain('debug');
@@ -180,8 +178,8 @@ type User struct {}
 type config struct {}
 const MaxSize = 100
 const minSize = 5`;
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'go');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toEqual(['NewUser', 'User', 'MaxSize']);
       expect(exports).not.toContain('helper');
       expect(exports).not.toContain('config');
@@ -196,24 +194,24 @@ const minSize = 5`;
 
     it('should return null for stdlib imports', () => {
       const code = 'package main\nimport "fmt"';
-      const tree = parser.parse(code);
-      const importNode = tree.rootNode.namedChild(1)!;
+      const root = mustParse(code, 'go');
+      const importNode = root.namedChild(1)!;
       const path = importExtractor.extractImportPath(importNode);
       expect(path).toBeNull();
     });
 
     it('should return null for stdlib imports in groups', () => {
       const code = 'package main\nimport (\n  "fmt"\n  "net/http"\n)';
-      const tree = parser.parse(code);
-      const importNode = tree.rootNode.namedChild(1)!;
+      const root = mustParse(code, 'go');
+      const importNode = root.namedChild(1)!;
       const path = importExtractor.extractImportPath(importNode);
       expect(path).toBeNull();
     });
 
     it('should extract external module import path', () => {
       const code = 'package main\nimport "github.com/gin-gonic/gin"';
-      const tree = parser.parse(code);
-      const importNode = tree.rootNode.namedChild(1)!;
+      const root = mustParse(code, 'go');
+      const importNode = root.namedChild(1)!;
       const path = importExtractor.extractImportPath(importNode);
       expect(path).toBe('github.com/gin-gonic/gin');
     });
@@ -225,16 +223,16 @@ import (
   "github.com/gin-gonic/gin"
   "github.com/pkg/errors"
 )`;
-      const tree = parser.parse(code);
-      const importNode = tree.rootNode.namedChild(1)!;
+      const root = mustParse(code, 'go');
+      const importNode = root.namedChild(1)!;
       const path = importExtractor.extractImportPath(importNode);
       expect(path).toBe('github.com/gin-gonic/gin');
     });
 
     it('should process import symbols for external packages', () => {
       const code = 'package main\nimport "github.com/gin-gonic/gin"';
-      const tree = parser.parse(code);
-      const importNode = tree.rootNode.namedChild(1)!;
+      const root = mustParse(code, 'go');
+      const importNode = root.namedChild(1)!;
       const result = importExtractor.processImportSymbols(importNode);
       expect(result).not.toBeNull();
       expect(result!.importPath).toBe('github.com/gin-gonic/gin');
@@ -243,8 +241,8 @@ import (
 
     it('should process aliased import symbols', () => {
       const code = 'package main\nimport router "github.com/gin-gonic/gin"';
-      const tree = parser.parse(code);
-      const importNode = tree.rootNode.namedChild(1)!;
+      const root = mustParse(code, 'go');
+      const importNode = root.namedChild(1)!;
       const result = importExtractor.processImportSymbols(importNode);
       expect(result).not.toBeNull();
       expect(result!.symbols).toEqual(['router']);
@@ -252,16 +250,16 @@ import (
 
     it('should return null for stdlib import symbols', () => {
       const code = 'package main\nimport "fmt"';
-      const tree = parser.parse(code);
-      const importNode = tree.rootNode.namedChild(1)!;
+      const root = mustParse(code, 'go');
+      const importNode = root.namedChild(1)!;
       const result = importExtractor.processImportSymbols(importNode);
       expect(result).toBeNull();
     });
 
     it('should handle dot imports (skip alias)', () => {
       const code = 'package main\nimport . "github.com/onsi/gomega"';
-      const tree = parser.parse(code);
-      const importNode = tree.rootNode.namedChild(1)!;
+      const root = mustParse(code, 'go');
+      const importNode = root.namedChild(1)!;
       const result = importExtractor.processImportSymbols(importNode);
       expect(result).not.toBeNull();
       expect(result!.importPath).toBe('github.com/onsi/gomega');
@@ -271,8 +269,8 @@ import (
 
     it('should handle blank imports (skip alias)', () => {
       const code = 'package main\nimport _ "github.com/lib/pq"';
-      const tree = parser.parse(code);
-      const importNode = tree.rootNode.namedChild(1)!;
+      const root = mustParse(code, 'go');
+      const importNode = root.namedChild(1)!;
       const result = importExtractor.processImportSymbols(importNode);
       expect(result).not.toBeNull();
       expect(result!.importPath).toBe('github.com/lib/pq');
@@ -283,8 +281,8 @@ import (
   describe('Symbol Extraction', () => {
     it('should extract function_declaration info', () => {
       const code = 'package main\nfunc NewUser(name string, age int) *User { return nil }';
-      const tree = parser.parse(code);
-      const funcNode = tree.rootNode.namedChild(1)!;
+      const root = mustParse(code, 'go');
+      const funcNode = root.namedChild(1)!;
       const symbol = symbolExtractor.extractSymbol(funcNode, code);
       expect(symbol).not.toBeNull();
       expect(symbol!.name).toBe('NewUser');
@@ -294,8 +292,8 @@ import (
 
     it('should extract method with pointer receiver and parentClass', () => {
       const code = 'package main\nfunc (u *User) GetName() string { return u.Name }';
-      const tree = parser.parse(code);
-      const methodNode = tree.rootNode.namedChild(1)!;
+      const root = mustParse(code, 'go');
+      const methodNode = root.namedChild(1)!;
       const symbol = symbolExtractor.extractSymbol(methodNode, code);
       expect(symbol).not.toBeNull();
       expect(symbol!.name).toBe('GetName');
@@ -305,8 +303,8 @@ import (
 
     it('should extract method with value receiver and parentClass', () => {
       const code = 'package main\nfunc (u User) String() string { return u.Name }';
-      const tree = parser.parse(code);
-      const methodNode = tree.rootNode.namedChild(1)!;
+      const root = mustParse(code, 'go');
+      const methodNode = root.namedChild(1)!;
       const symbol = symbolExtractor.extractSymbol(methodNode, code);
       expect(symbol).not.toBeNull();
       expect(symbol!.name).toBe('String');
@@ -316,8 +314,8 @@ import (
 
     it('should extract struct as class', () => {
       const code = 'package main\ntype User struct { Name string }';
-      const tree = parser.parse(code);
-      const typeNode = tree.rootNode.namedChild(1)!;
+      const root = mustParse(code, 'go');
+      const typeNode = root.namedChild(1)!;
       const symbol = symbolExtractor.extractSymbol(typeNode, code);
       expect(symbol).not.toBeNull();
       expect(symbol!.name).toBe('User');
@@ -327,8 +325,8 @@ import (
 
     it('should use actual type text for type alias signatures', () => {
       const code = 'package main\ntype UserID int64';
-      const tree = parser.parse(code);
-      const typeNode = tree.rootNode.namedChild(1)!;
+      const root = mustParse(code, 'go');
+      const typeNode = root.namedChild(1)!;
       const symbol = symbolExtractor.extractSymbol(typeNode, code);
       expect(symbol).not.toBeNull();
       expect(symbol!.name).toBe('UserID');
@@ -338,8 +336,8 @@ import (
 
     it('should extract interface as interface', () => {
       const code = 'package main\ntype Validator interface { Validate() error }';
-      const tree = parser.parse(code);
-      const typeNode = tree.rootNode.namedChild(1)!;
+      const root = mustParse(code, 'go');
+      const typeNode = root.namedChild(1)!;
       const symbol = symbolExtractor.extractSymbol(typeNode, code);
       expect(symbol).not.toBeNull();
       expect(symbol!.name).toBe('Validator');
@@ -349,8 +347,8 @@ import (
 
     it('should extract return type from result field', () => {
       const code = 'package main\nfunc GetName() string { return "" }';
-      const tree = parser.parse(code);
-      const funcNode = tree.rootNode.namedChild(1)!;
+      const root = mustParse(code, 'go');
+      const funcNode = root.namedChild(1)!;
       const symbol = symbolExtractor.extractSymbol(funcNode, code);
       expect(symbol).not.toBeNull();
       expect(symbol!.returnType).toBe('string');
@@ -358,8 +356,8 @@ import (
 
     it('should handle functions with no return type', () => {
       const code = 'package main\nfunc doWork() {}';
-      const tree = parser.parse(code);
-      const funcNode = tree.rootNode.namedChild(1)!;
+      const root = mustParse(code, 'go');
+      const funcNode = root.namedChild(1)!;
       const symbol = symbolExtractor.extractSymbol(funcNode, code);
       expect(symbol).not.toBeNull();
       expect(symbol!.returnType).toBeUndefined();
@@ -367,9 +365,9 @@ import (
 
     it('should extract call site from direct function call', () => {
       const code = 'package main\nfunc main() { doSomething() }';
-      const tree = parser.parse(code);
+      const root = mustParse(code, 'go');
 
-      const callNode = findNode(tree.rootNode, 'call_expression');
+      const callNode = findNode(root, 'call_expression');
       expect(callNode).not.toBeNull();
       const callSite = symbolExtractor.extractCallSite(callNode!);
       expect(callSite).not.toBeNull();
@@ -378,9 +376,9 @@ import (
 
     it('should extract call site from selector expression (method call)', () => {
       const code = 'package main\nfunc main() { user.GetName() }';
-      const tree = parser.parse(code);
+      const root = mustParse(code, 'go');
 
-      const callNode = findNode(tree.rootNode, 'call_expression');
+      const callNode = findNode(root, 'call_expression');
       expect(callNode).not.toBeNull();
       const callSite = symbolExtractor.extractCallSite(callNode!);
       expect(callSite).not.toBeNull();
@@ -389,9 +387,9 @@ import (
 
     it('should extract call site from package function call', () => {
       const code = 'package main\nimport "fmt"\nfunc main() { fmt.Println("hi") }';
-      const tree = parser.parse(code);
+      const root = mustParse(code, 'go');
 
-      const callNode = findNode(tree.rootNode, 'call_expression');
+      const callNode = findNode(root, 'call_expression');
       expect(callNode).not.toBeNull();
       const callSite = symbolExtractor.extractCallSite(callNode!);
       expect(callSite).not.toBeNull();
@@ -573,7 +571,7 @@ func Serve() {
 });
 
 /** Helper to recursively find a node of a given type */
-function findNode(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
+function findNode(node: SyntaxNode, type: string): SyntaxNode | null {
   if (node.type === type) return node;
   for (const child of node.namedChildren) {
     const result = findNode(child, type);

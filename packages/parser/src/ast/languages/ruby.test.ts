@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import Parser from 'tree-sitter';
-import Ruby from 'tree-sitter-ruby';
+import { mustParse } from '../test/helpers/parse-fixture.js';
 import { chunkByAST } from '../chunker.js';
 import {
   RubyTraverser,
@@ -10,14 +9,12 @@ import {
 } from './ruby.js';
 
 describe('Ruby Language', () => {
-  const parser = new Parser();
-  parser.setLanguage(Ruby);
   const traverser = new RubyTraverser();
   const exportExtractor = new RubyExportExtractor();
   const importExtractor = new RubyImportExtractor();
   const symbolExtractor = new RubySymbolExtractor();
 
-  const parse = (code: string) => parser.parse(code).rootNode;
+  const parse = (code: string) => mustParse(code, 'ruby');
 
   describe('Traverser', () => {
     it('should identify method and singleton_method as target nodes', () => {

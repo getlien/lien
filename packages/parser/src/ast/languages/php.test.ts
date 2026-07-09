@@ -1,12 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import Parser from 'tree-sitter';
-import PHP from 'tree-sitter-php';
+import { mustParse } from '../test/helpers/parse-fixture.js';
+import type { SyntaxNode } from '../types.js';
 import { chunkByAST } from '../chunker.js';
 import { PHPTraverser, PHPExportExtractor, PHPImportExtractor, PHPSymbolExtractor } from './php.js';
 
 describe('PHP Language', () => {
-  const parser = new Parser();
-  parser.setLanguage(PHP.php);
   const traverser = new PHPTraverser();
   const exportExtractor = new PHPExportExtractor();
   const importExtractor = new PHPImportExtractor();
@@ -26,10 +24,10 @@ describe('PHP Language', () => {
 
     it('should extract children from class declarations', () => {
       const code = '<?php\nclass Foo { public function bar() {} }';
-      const tree = parser.parse(code);
+      const root = mustParse(code, 'php');
       // PHP AST: rootNode > program > php_tag, class_declaration
-      const programNode = tree.rootNode;
-      let classNode: Parser.SyntaxNode | null = null;
+      const programNode = root;
+      let classNode: SyntaxNode | null = null;
       for (const child of programNode.namedChildren) {
         if (child.type === 'class_declaration') {
           classNode = child;
@@ -51,32 +49,32 @@ describe('PHP Language', () => {
 
     it('should traverse program and php node types', () => {
       const code = '<?php\nfunction foo() {}';
-      const tree = parser.parse(code);
-      expect(traverser.shouldTraverseChildren(tree.rootNode)).toBe(true);
+      const root = mustParse(code, 'php');
+      expect(traverser.shouldTraverseChildren(root)).toBe(true);
     });
 
     it('should not treat any nodes as declarations with functions', () => {
       const code = '<?php\n$x = 42;';
-      const tree = parser.parse(code);
-      tree.rootNode.namedChildren.forEach(child => {
+      const root = mustParse(code, 'php');
+      root.namedChildren.forEach(child => {
         expect(traverser.isDeclarationWithFunction(child)).toBe(false);
       });
     });
 
     it('should return no function from findFunctionInDeclaration', () => {
       const code = '<?php\n$x = 42;';
-      const tree = parser.parse(code);
-      const result = traverser.findFunctionInDeclaration(tree.rootNode);
+      const root = mustParse(code, 'php');
+      const result = traverser.findFunctionInDeclaration(root);
       expect(result.hasFunction).toBe(false);
       expect(result.functionNode).toBeNull();
     });
 
     it('should find parent class name for methods', () => {
       const code = '<?php\nclass MyClass { public function myMethod() {} }';
-      const tree = parser.parse(code);
+      const root = mustParse(code, 'php');
 
       // Find the method_declaration node
-      function findNode(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
+      function findNode(node: SyntaxNode, type: string): SyntaxNode | null {
         if (node.type === type) return node;
         for (const child of node.namedChildren) {
           const result = findNode(child, type);
@@ -85,7 +83,7 @@ describe('PHP Language', () => {
         return null;
       }
 
-      const methodNode = findNode(tree.rootNode, 'method_declaration');
+      const methodNode = findNode(root, 'method_declaration');
       if (methodNode) {
         expect(traverser.findParentContainerName(methodNode)).toBe('MyClass');
       }
@@ -95,36 +93,36 @@ describe('PHP Language', () => {
   describe('Export Extraction', () => {
     it('should extract class exports', () => {
       const code = '<?php\nclass User {}';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'php');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toEqual(['User']);
     });
 
     it('should extract trait exports', () => {
       const code = '<?php\ntrait HasTimestamps {}';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'php');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toEqual(['HasTimestamps']);
     });
 
     it('should extract interface exports', () => {
       const code = '<?php\ninterface Repository {}';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'php');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toEqual(['Repository']);
     });
 
     it('should extract function exports', () => {
       const code = '<?php\nfunction helper() {}';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'php');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toEqual(['helper']);
     });
 
     it('should extract namespaced class exports', () => {
       const code = '<?php\nnamespace App\\Models;\nclass User {}';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'php');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toEqual(['User']);
     });
 
@@ -133,8 +131,8 @@ describe('PHP Language', () => {
 class User {}
 function helper() {}
 interface Repository {}`;
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'php');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toEqual(['User', 'helper', 'Repository']);
     });
 
@@ -143,8 +141,8 @@ interface Repository {}`;
 class User {
     public function getName() {}
 }`;
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'php');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toEqual(['User']);
       expect(exports).not.toContain('getName');
     });
@@ -157,9 +155,9 @@ class User {
 
     it('should extract use declaration path', () => {
       const code = '<?php\nuse App\\Models\\User;';
-      const tree = parser.parse(code);
+      const root = mustParse(code, 'php');
 
-      function findNode(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
+      function findNode(node: SyntaxNode, type: string): SyntaxNode | null {
         if (node.type === type) return node;
         for (const child of node.namedChildren) {
           const result = findNode(child, type);
@@ -168,7 +166,7 @@ class User {
         return null;
       }
 
-      const useNode = findNode(tree.rootNode, 'namespace_use_declaration');
+      const useNode = findNode(root, 'namespace_use_declaration');
       if (useNode) {
         const path = importExtractor.extractImportPath(useNode);
         expect(path).toBe('App\\Models\\User');
@@ -177,9 +175,9 @@ class User {
 
     it('should extract import symbol from use declaration', () => {
       const code = '<?php\nuse App\\Models\\User;';
-      const tree = parser.parse(code);
+      const root = mustParse(code, 'php');
 
-      function findNode(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
+      function findNode(node: SyntaxNode, type: string): SyntaxNode | null {
         if (node.type === type) return node;
         for (const child of node.namedChildren) {
           const result = findNode(child, type);
@@ -188,7 +186,7 @@ class User {
         return null;
       }
 
-      const useNode = findNode(tree.rootNode, 'namespace_use_declaration');
+      const useNode = findNode(root, 'namespace_use_declaration');
       if (useNode) {
         const result = importExtractor.processImportSymbols(useNode);
         expect(result).not.toBeNull();
@@ -199,9 +197,9 @@ class User {
 
     it('should extract aliased import symbol', () => {
       const code = '<?php\nuse App\\Services\\AuthService as Auth;';
-      const tree = parser.parse(code);
+      const root = mustParse(code, 'php');
 
-      function findNode(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
+      function findNode(node: SyntaxNode, type: string): SyntaxNode | null {
         if (node.type === type) return node;
         for (const child of node.namedChildren) {
           const result = findNode(child, type);
@@ -210,7 +208,7 @@ class User {
         return null;
       }
 
-      const useNode = findNode(tree.rootNode, 'namespace_use_declaration');
+      const useNode = findNode(root, 'namespace_use_declaration');
       if (useNode) {
         const result = importExtractor.processImportSymbols(useNode);
         expect(result).not.toBeNull();
@@ -222,9 +220,9 @@ class User {
   describe('Symbol Extraction', () => {
     it('should extract function definition info', () => {
       const code = '<?php\nfunction processData($items) { return $items; }';
-      const tree = parser.parse(code);
+      const root = mustParse(code, 'php');
 
-      function findNode(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
+      function findNode(node: SyntaxNode, type: string): SyntaxNode | null {
         if (node.type === type) return node;
         for (const child of node.namedChildren) {
           const result = findNode(child, type);
@@ -233,7 +231,7 @@ class User {
         return null;
       }
 
-      const funcNode = findNode(tree.rootNode, 'function_definition');
+      const funcNode = findNode(root, 'function_definition');
       if (funcNode) {
         const symbol = symbolExtractor.extractSymbol(funcNode, code);
         expect(symbol).not.toBeNull();
@@ -247,9 +245,9 @@ class User {
 class User {
     public function getName() { return $this->name; }
 }`;
-      const tree = parser.parse(code);
+      const root = mustParse(code, 'php');
 
-      function findNode(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
+      function findNode(node: SyntaxNode, type: string): SyntaxNode | null {
         if (node.type === type) return node;
         for (const child of node.namedChildren) {
           const result = findNode(child, type);
@@ -258,7 +256,7 @@ class User {
         return null;
       }
 
-      const methodNode = findNode(tree.rootNode, 'method_declaration');
+      const methodNode = findNode(root, 'method_declaration');
       if (methodNode) {
         const symbol = symbolExtractor.extractSymbol(methodNode, code, 'User');
         expect(symbol).not.toBeNull();
@@ -270,9 +268,9 @@ class User {
 
     it('should extract class declaration info', () => {
       const code = '<?php\nclass UserService {}';
-      const tree = parser.parse(code);
+      const root = mustParse(code, 'php');
 
-      function findNode(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
+      function findNode(node: SyntaxNode, type: string): SyntaxNode | null {
         if (node.type === type) return node;
         for (const child of node.namedChildren) {
           const result = findNode(child, type);
@@ -281,7 +279,7 @@ class User {
         return null;
       }
 
-      const classNode = findNode(tree.rootNode, 'class_declaration');
+      const classNode = findNode(root, 'class_declaration');
       if (classNode) {
         const symbol = symbolExtractor.extractSymbol(classNode, code);
         expect(symbol).not.toBeNull();
@@ -293,9 +291,9 @@ class User {
 
     it('should extract call site from function call', () => {
       const code = '<?php\nhelper();';
-      const tree = parser.parse(code);
+      const root = mustParse(code, 'php');
 
-      function findNode(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
+      function findNode(node: SyntaxNode, type: string): SyntaxNode | null {
         if (node.type === type) return node;
         for (const child of node.namedChildren) {
           const result = findNode(child, type);
@@ -304,7 +302,7 @@ class User {
         return null;
       }
 
-      const callNode = findNode(tree.rootNode, 'function_call_expression');
+      const callNode = findNode(root, 'function_call_expression');
       if (callNode) {
         const callSite = symbolExtractor.extractCallSite(callNode);
         expect(callSite).not.toBeNull();
@@ -314,9 +312,9 @@ class User {
 
     it('should extract call site from member call', () => {
       const code = '<?php\n$user->getName();';
-      const tree = parser.parse(code);
+      const root = mustParse(code, 'php');
 
-      function findNode(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
+      function findNode(node: SyntaxNode, type: string): SyntaxNode | null {
         if (node.type === type) return node;
         for (const child of node.namedChildren) {
           const result = findNode(child, type);
@@ -325,7 +323,7 @@ class User {
         return null;
       }
 
-      const callNode = findNode(tree.rootNode, 'member_call_expression');
+      const callNode = findNode(root, 'member_call_expression');
       if (callNode) {
         const callSite = symbolExtractor.extractCallSite(callNode);
         expect(callSite).not.toBeNull();
@@ -335,9 +333,9 @@ class User {
 
     it('should extract call site from scoped call', () => {
       const code = '<?php\nUser::find(1);';
-      const tree = parser.parse(code);
+      const root = mustParse(code, 'php');
 
-      function findNode(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
+      function findNode(node: SyntaxNode, type: string): SyntaxNode | null {
         if (node.type === type) return node;
         for (const child of node.namedChildren) {
           const result = findNode(child, type);
@@ -346,7 +344,7 @@ class User {
         return null;
       }
 
-      const callNode = findNode(tree.rootNode, 'scoped_call_expression');
+      const callNode = findNode(root, 'scoped_call_expression');
       if (callNode) {
         const callSite = symbolExtractor.extractCallSite(callNode);
         expect(callSite).not.toBeNull();

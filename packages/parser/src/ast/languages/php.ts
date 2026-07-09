@@ -1,6 +1,4 @@
-import PHPParser from 'tree-sitter-php';
-import type Parser from 'tree-sitter';
-import type { SymbolInfo } from '../types.js';
+import type { SymbolInfo, SyntaxNode } from '../types.js';
 import type { LanguageDefinition } from './types.js';
 import type { LanguageTraverser, DeclarationFunctionInfo } from '../traversers/types.js';
 import type {
@@ -41,15 +39,15 @@ export class PHPTraverser implements LanguageTraverser {
 
   functionTypes = ['function_definition', 'method_declaration'];
 
-  shouldExtractChildren(node: Parser.SyntaxNode): boolean {
+  shouldExtractChildren(node: SyntaxNode): boolean {
     return this.containerTypes.includes(node.type);
   }
 
-  isDeclarationWithFunction(_node: Parser.SyntaxNode): boolean {
+  isDeclarationWithFunction(_node: SyntaxNode): boolean {
     return false;
   }
 
-  getContainerBody(node: Parser.SyntaxNode): Parser.SyntaxNode | null {
+  getContainerBody(node: SyntaxNode): SyntaxNode | null {
     if (
       node.type === 'class_declaration' ||
       node.type === 'trait_declaration' ||
@@ -60,11 +58,11 @@ export class PHPTraverser implements LanguageTraverser {
     return null;
   }
 
-  shouldTraverseChildren(node: Parser.SyntaxNode): boolean {
+  shouldTraverseChildren(node: SyntaxNode): boolean {
     return node.type === 'program' || node.type === 'php' || node.type === 'declaration_list';
   }
 
-  findParentContainerName(node: Parser.SyntaxNode): string | undefined {
+  findParentContainerName(node: SyntaxNode): string | undefined {
     let current = node.parent;
     while (current) {
       if (current.type === 'class_declaration' || current.type === 'trait_declaration') {
@@ -76,7 +74,7 @@ export class PHPTraverser implements LanguageTraverser {
     return undefined;
   }
 
-  findFunctionInDeclaration(_node: Parser.SyntaxNode): DeclarationFunctionInfo {
+  findFunctionInDeclaration(_node: SyntaxNode): DeclarationFunctionInfo {
     return {
       hasFunction: false,
       functionNode: null,
@@ -107,7 +105,7 @@ export class PHPExportExtractor implements LanguageExportExtractor {
     'function_definition',
   ]);
 
-  extractExports(rootNode: Parser.SyntaxNode): string[] {
+  extractExports(rootNode: SyntaxNode): string[] {
     const exports: string[] = [];
     const seen = new Set<string>();
 
@@ -124,7 +122,7 @@ export class PHPExportExtractor implements LanguageExportExtractor {
     return exports;
   }
 
-  private extractExportsFromNode(node: Parser.SyntaxNode): string[] {
+  private extractExportsFromNode(node: SyntaxNode): string[] {
     if (node.type === 'namespace_definition') {
       return this.extractExportsFromNamespace(node);
     }
@@ -133,7 +131,7 @@ export class PHPExportExtractor implements LanguageExportExtractor {
     return name ? [name] : [];
   }
 
-  private extractExportsFromNamespace(node: Parser.SyntaxNode): string[] {
+  private extractExportsFromNamespace(node: SyntaxNode): string[] {
     const body = node.childForFieldName('body');
     if (!body) return [];
 
@@ -142,7 +140,7 @@ export class PHPExportExtractor implements LanguageExportExtractor {
       .filter((name): name is string => name !== null);
   }
 
-  private extractExportableDeclaration(node: Parser.SyntaxNode): string | null {
+  private extractExportableDeclaration(node: SyntaxNode): string | null {
     if (this.exportableTypes.has(node.type)) {
       const nameNode = node.childForFieldName('name');
       return nameNode ? nameNode.text : null;
@@ -166,11 +164,11 @@ export class PHPExportExtractor implements LanguageExportExtractor {
 export class PHPImportExtractor implements LanguageImportExtractor {
   readonly importNodeTypes = ['namespace_use_declaration'];
 
-  extractImportPath(node: Parser.SyntaxNode): string | null {
+  extractImportPath(node: SyntaxNode): string | null {
     return this.extractPHPUseDeclarationPath(node);
   }
 
-  processImportSymbols(node: Parser.SyntaxNode): { importPath: string; symbols: string[] } | null {
+  processImportSymbols(node: SyntaxNode): { importPath: string; symbols: string[] } | null {
     for (const clause of node.namedChildren) {
       if (clause.type !== 'namespace_use_clause') continue;
 
@@ -193,18 +191,18 @@ export class PHPImportExtractor implements LanguageImportExtractor {
     return null;
   }
 
-  private extractPHPUseDeclarationPath(node: Parser.SyntaxNode): string | null {
+  private extractPHPUseDeclarationPath(node: SyntaxNode): string | null {
     const clause = node.namedChildren.find(child => child.type === 'namespace_use_clause');
     return clause ? this.extractPHPQualifiedName(clause) : null;
   }
 
-  private extractNamespaceParts(namespaceNode: Parser.SyntaxNode): string[] {
+  private extractNamespaceParts(namespaceNode: SyntaxNode): string[] {
     return namespaceNode.namedChildren
       .filter(child => child.type === 'name')
       .map(child => child.text);
   }
 
-  private extractQualifiedNameParts(qualifiedName: Parser.SyntaxNode): string[] {
+  private extractQualifiedNameParts(qualifiedName: SyntaxNode): string[] {
     return qualifiedName.namedChildren.flatMap(part => {
       if (part.type === 'namespace_name') return this.extractNamespaceParts(part);
       if (part.type === 'name') return [part.text];
@@ -212,7 +210,7 @@ export class PHPImportExtractor implements LanguageImportExtractor {
     });
   }
 
-  private extractPHPQualifiedName(clause: Parser.SyntaxNode): string | null {
+  private extractPHPQualifiedName(clause: SyntaxNode): string | null {
     const qualifiedName = clause.namedChildren.find(child => child.type === 'qualified_name');
     if (!qualifiedName) return null;
     return this.extractQualifiedNameParts(qualifiedName).join('\\');
@@ -236,7 +234,7 @@ export class PHPImportExtractor implements LanguageImportExtractor {
 export class PHPSymbolExtractor implements LanguageSymbolExtractor {
   readonly symbolNodeTypes = ['function_definition', 'method_declaration', 'class_declaration'];
 
-  extractSymbol(node: Parser.SyntaxNode, content: string, parentClass?: string): SymbolInfo | null {
+  extractSymbol(node: SyntaxNode, content: string, parentClass?: string): SymbolInfo | null {
     switch (node.type) {
       case 'function_definition':
         return this.extractFunctionInfo(node, content, parentClass);
@@ -249,7 +247,7 @@ export class PHPSymbolExtractor implements LanguageSymbolExtractor {
     }
   }
 
-  extractCallSite(node: Parser.SyntaxNode): { symbol: string; line: number; key: string } | null {
+  extractCallSite(node: SyntaxNode): { symbol: string; line: number; key: string } | null {
     const line = node.startPosition.row + 1;
 
     // function_call_expression - helper_function()
@@ -280,7 +278,7 @@ export class PHPSymbolExtractor implements LanguageSymbolExtractor {
   }
 
   private extractFunctionInfo(
-    node: Parser.SyntaxNode,
+    node: SyntaxNode,
     content: string,
     parentClass?: string,
   ): SymbolInfo | null {
@@ -301,7 +299,7 @@ export class PHPSymbolExtractor implements LanguageSymbolExtractor {
   }
 
   private extractMethodInfo(
-    node: Parser.SyntaxNode,
+    node: SyntaxNode,
     content: string,
     parentClass?: string,
   ): SymbolInfo | null {
@@ -321,7 +319,7 @@ export class PHPSymbolExtractor implements LanguageSymbolExtractor {
     };
   }
 
-  private extractClassInfo(node: Parser.SyntaxNode): SymbolInfo | null {
+  private extractClassInfo(node: SyntaxNode): SymbolInfo | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
@@ -342,7 +340,6 @@ export class PHPSymbolExtractor implements LanguageSymbolExtractor {
 export const phpDefinition: LanguageDefinition = {
   id: 'php',
   extensions: ['php'],
-  grammar: PHPParser.php,
   traverser: new PHPTraverser(),
   exportExtractor: new PHPExportExtractor(),
   importExtractor: new PHPImportExtractor(),

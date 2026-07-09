@@ -1,6 +1,4 @@
-import Swift from 'tree-sitter-swift';
-import type Parser from 'tree-sitter';
-import type { SymbolInfo } from '../types.js';
+import type { SymbolInfo, SyntaxNode } from '../types.js';
 import type { LanguageDefinition } from './types.js';
 import type { LanguageTraverser, DeclarationFunctionInfo } from '../traversers/types.js';
 import type {
@@ -24,12 +22,12 @@ import { calculateComplexity } from '../complexity/index.js';
 // =============================================================================
 
 /** First named child of a given type. */
-function childByType(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
+function childByType(node: SyntaxNode, type: string): SyntaxNode | null {
   return node.namedChildren.find(child => child.type === type) ?? null;
 }
 
 /** First descendant of a given type (depth-first), or null. */
-function findFirst(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
+function findFirst(node: SyntaxNode, type: string): SyntaxNode | null {
   for (const child of node.namedChildren) {
     if (child.type === type) return child;
     const found = findFirst(child, type);
@@ -42,12 +40,12 @@ function findFirst(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | n
  * The `class_declaration` keyword (`class` / `struct` / `actor` / `enum` /
  * `extension`), read from the `declaration_kind` field. Defaults to `class`.
  */
-function declarationKeyword(node: Parser.SyntaxNode): string {
+function declarationKeyword(node: SyntaxNode): string {
   return node.childForFieldName('declaration_kind')?.text ?? 'class';
 }
 
 /** The declared name of a class/protocol declaration (handles `extension`'s `user_type`). */
-function declarationName(node: Parser.SyntaxNode): string | undefined {
+function declarationName(node: SyntaxNode): string | undefined {
   return node.childForFieldName('name')?.text;
 }
 
@@ -55,7 +53,7 @@ function declarationName(node: Parser.SyntaxNode): string | undefined {
  * The name of a function-like node. Swift's `init`/`deinit`/`subscript`
  * declarations have no `name` field — fall back to the keyword.
  */
-function functionLikeName(node: Parser.SyntaxNode): string | undefined {
+function functionLikeName(node: SyntaxNode): string | undefined {
   const name = node.childForFieldName('name')?.text;
   if (name) return name;
   switch (node.type) {
@@ -71,7 +69,7 @@ function functionLikeName(node: Parser.SyntaxNode): string | undefined {
 }
 
 /** Parameter texts. Swift function params are bare `parameter` children (no field). */
-function swiftParameters(node: Parser.SyntaxNode): string[] {
+function swiftParameters(node: SyntaxNode): string[] {
   return node.namedChildren.filter(c => c.type === 'parameter' && c.text.trim()).map(c => c.text);
 }
 
@@ -81,13 +79,13 @@ function swiftParameters(node: Parser.SyntaxNode): string[] {
  * than any descendant, so a closure passed as a call argument
  * (`let n = xs.map { … }`) is NOT treated as a function-valued property.
  */
-function propertyInitializerFunction(node: Parser.SyntaxNode): Parser.SyntaxNode | null {
+function propertyInitializerFunction(node: SyntaxNode): SyntaxNode | null {
   const value = node.childForFieldName('value');
   return value?.type === 'lambda_literal' ? value : null;
 }
 
 /** Visibility modifier text (`public` / `private` / `fileprivate` / `internal` / `open`), if any. */
-function visibilityModifier(node: Parser.SyntaxNode): string | null {
+function visibilityModifier(node: SyntaxNode): string | null {
   const modifiers = childByType(node, 'modifiers');
   if (!modifiers) return null;
   return modifiers.namedChildren.find(c => c.type === 'visibility_modifier')?.text ?? null;
@@ -99,13 +97,13 @@ function visibilityModifier(node: Parser.SyntaxNode): string | null {
  * explicitly `private` or `fileprivate` — so default/`internal`/`public`/`open`
  * are surfaced. (Analogous to Kotlin's "public unless private/internal".)
  */
-function isExported(node: Parser.SyntaxNode): boolean {
+function isExported(node: SyntaxNode): boolean {
   const visibility = visibilityModifier(node);
   return visibility !== 'private' && visibility !== 'fileprivate';
 }
 
 /** The property's bound identifier (`let foo = …` → `foo`). */
-function propertyName(node: Parser.SyntaxNode): string | undefined {
+function propertyName(node: SyntaxNode): string | undefined {
   const pattern = node.childForFieldName('name');
   if (!pattern) return undefined;
   return findFirst(pattern, 'simple_identifier')?.text ?? pattern.text;
@@ -138,20 +136,20 @@ export class SwiftTraverser implements LanguageTraverser {
 
   functionTypes = ['lambda_literal'];
 
-  shouldExtractChildren(node: Parser.SyntaxNode): boolean {
+  shouldExtractChildren(node: SyntaxNode): boolean {
     return this.containerTypes.includes(node.type);
   }
 
-  isDeclarationWithFunction(node: Parser.SyntaxNode): boolean {
+  isDeclarationWithFunction(node: SyntaxNode): boolean {
     return node.type === 'property_declaration' && propertyInitializerFunction(node) !== null;
   }
 
-  getContainerBody(node: Parser.SyntaxNode): Parser.SyntaxNode | null {
+  getContainerBody(node: SyntaxNode): SyntaxNode | null {
     if (!this.containerTypes.includes(node.type)) return null;
     return node.childForFieldName('body');
   }
 
-  shouldTraverseChildren(node: Parser.SyntaxNode): boolean {
+  shouldTraverseChildren(node: SyntaxNode): boolean {
     return (
       node.type === 'source_file' ||
       node.type === 'class_body' ||
@@ -160,7 +158,7 @@ export class SwiftTraverser implements LanguageTraverser {
     );
   }
 
-  findParentContainerName(node: Parser.SyntaxNode): string | undefined {
+  findParentContainerName(node: SyntaxNode): string | undefined {
     let current = node.parent;
     while (current) {
       if (current.type === 'class_declaration' || current.type === 'protocol_declaration') {
@@ -171,7 +169,7 @@ export class SwiftTraverser implements LanguageTraverser {
     return undefined;
   }
 
-  findFunctionInDeclaration(node: Parser.SyntaxNode): DeclarationFunctionInfo {
+  findFunctionInDeclaration(node: SyntaxNode): DeclarationFunctionInfo {
     if (node.type !== 'property_declaration') {
       return { hasFunction: false, functionNode: null };
     }
@@ -194,7 +192,7 @@ export class SwiftTraverser implements LanguageTraverser {
  * implicitly part of the protocol's surface.
  */
 export class SwiftExportExtractor implements LanguageExportExtractor {
-  extractExports(rootNode: Parser.SyntaxNode): string[] {
+  extractExports(rootNode: SyntaxNode): string[] {
     const exports: string[] = [];
     const seen = new Set<string>();
 
@@ -210,7 +208,7 @@ export class SwiftExportExtractor implements LanguageExportExtractor {
     return exports;
   }
 
-  private extractFromNode(node: Parser.SyntaxNode, addExport: (name?: string) => void): void {
+  private extractFromNode(node: SyntaxNode, addExport: (name?: string) => void): void {
     switch (node.type) {
       case 'function_declaration':
       case 'init_declaration':
@@ -232,7 +230,7 @@ export class SwiftExportExtractor implements LanguageExportExtractor {
     }
   }
 
-  private extractMembers(container: Parser.SyntaxNode, addExport: (name?: string) => void): void {
+  private extractMembers(container: SyntaxNode, addExport: (name?: string) => void): void {
     const body = container.childForFieldName('body');
     if (!body) return;
 
@@ -285,13 +283,13 @@ function isSwiftStdLib(importPath: string): boolean {
 export class SwiftImportExtractor implements LanguageImportExtractor {
   readonly importNodeTypes = ['import_declaration'];
 
-  extractImportPath(node: Parser.SyntaxNode): string | null {
+  extractImportPath(node: SyntaxNode): string | null {
     const path = this.getImportPath(node);
     if (!path || isSwiftStdLib(path)) return null;
     return path;
   }
 
-  processImportSymbols(node: Parser.SyntaxNode): { importPath: string; symbols: string[] } | null {
+  processImportSymbols(node: SyntaxNode): { importPath: string; symbols: string[] } | null {
     const path = this.getImportPath(node);
     if (!path || isSwiftStdLib(path)) return null;
 
@@ -300,7 +298,7 @@ export class SwiftImportExtractor implements LanguageImportExtractor {
     return { importPath: path, symbols: [lastPart] };
   }
 
-  private getImportPath(node: Parser.SyntaxNode): string | null {
+  private getImportPath(node: SyntaxNode): string | null {
     return childByType(node, 'identifier')?.text ?? null;
   }
 }
@@ -334,7 +332,7 @@ export class SwiftSymbolExtractor implements LanguageSymbolExtractor {
     'protocol_declaration',
   ];
 
-  extractSymbol(node: Parser.SyntaxNode, content: string, parentClass?: string): SymbolInfo | null {
+  extractSymbol(node: SyntaxNode, content: string, parentClass?: string): SymbolInfo | null {
     switch (node.type) {
       case 'function_declaration':
       case 'protocol_function_declaration':
@@ -366,7 +364,7 @@ export class SwiftSymbolExtractor implements LanguageSymbolExtractor {
    * symbols are definitions for search/listing (as Java emits constructor
    * symbols); they intentionally carry no implicit-`Foo()` caller edges.
    */
-  extractCallSite(node: Parser.SyntaxNode): { symbol: string; line: number; key: string } | null {
+  extractCallSite(node: SyntaxNode): { symbol: string; line: number; key: string } | null {
     if (node.type !== 'call_expression') return null;
     const line = node.startPosition.row + 1;
 
@@ -388,7 +386,7 @@ export class SwiftSymbolExtractor implements LanguageSymbolExtractor {
   }
 
   private extractFunctionInfo(
-    node: Parser.SyntaxNode,
+    node: SyntaxNode,
     content: string,
     parentClass?: string,
   ): SymbolInfo | null {
@@ -408,21 +406,21 @@ export class SwiftSymbolExtractor implements LanguageSymbolExtractor {
     };
   }
 
-  private extractClassInfo(node: Parser.SyntaxNode): SymbolInfo | null {
+  private extractClassInfo(node: SyntaxNode): SymbolInfo | null {
     const name = declarationName(node);
     if (!name) return null;
     const keyword = declarationKeyword(node);
     return this.makeSymbol(node, name, 'class', `${keyword} ${name}`);
   }
 
-  private extractProtocolInfo(node: Parser.SyntaxNode): SymbolInfo | null {
+  private extractProtocolInfo(node: SyntaxNode): SymbolInfo | null {
     const name = declarationName(node);
     if (!name) return null;
     return this.makeSymbol(node, name, 'interface', `protocol ${name}`);
   }
 
   private makeSymbol(
-    node: Parser.SyntaxNode,
+    node: SyntaxNode,
     name: string,
     type: SymbolInfo['type'],
     signature: string,
@@ -444,7 +442,6 @@ export class SwiftSymbolExtractor implements LanguageSymbolExtractor {
 export const swiftDefinition: LanguageDefinition = {
   id: 'swift',
   extensions: ['swift'],
-  grammar: Swift,
   traverser: new SwiftTraverser(),
   exportExtractor: new SwiftExportExtractor(),
   importExtractor: new SwiftImportExtractor(),

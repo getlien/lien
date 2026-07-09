@@ -1,0 +1,6960 @@
+{
+  "typescript basic": {
+    "hasError": false,
+    "nodes": [
+      {
+        "type": "program",
+        "isNamed": true,
+        "startIndex": 1,
+        "endIndex": 204,
+        "startPosition": {
+          "row": 1,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 12,
+          "column": 0
+        },
+        "namedChildCount": 3,
+        "childCount": 3,
+        "text": null
+      },
+      {
+        "type": "import_statement",
+        "isNamed": true,
+        "startIndex": 1,
+        "endIndex": 35,
+        "startPosition": {
+          "row": 1,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 1,
+          "column": 34
+        },
+        "namedChildCount": 2,
+        "childCount": 5,
+        "text": null
+      },
+      {
+        "type": "import",
+        "isNamed": false,
+        "startIndex": 1,
+        "endIndex": 7,
+        "startPosition": {
+          "row": 1,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 1,
+          "column": 6
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "import_clause",
+        "isNamed": true,
+        "startIndex": 8,
+        "endIndex": 18,
+        "startPosition": {
+          "row": 1,
+          "column": 7
+        },
+        "endPosition": {
+          "row": 1,
+          "column": 17
+        },
+        "namedChildCount": 1,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "named_imports",
+        "isNamed": true,
+        "startIndex": 8,
+        "endIndex": 18,
+        "startPosition": {
+          "row": 1,
+          "column": 7
+        },
+        "endPosition": {
+          "row": 1,
+          "column": 17
+        },
+        "namedChildCount": 1,
+        "childCount": 3,
+        "text": null
+      },
+      {
+        "type": "{",
+        "isNamed": false,
+        "startIndex": 8,
+        "endIndex": 9,
+        "startPosition": {
+          "row": 1,
+          "column": 7
+        },
+        "endPosition": {
+          "row": 1,
+          "column": 8
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "import_specifier",
+        "isNamed": true,
+        "startIndex": 10,
+        "endIndex": 16,
+        "startPosition": {
+          "row": 1,
+          "column": 9
+        },
+        "endPosition": {
+          "row": 1,
+          "column": 15
+        },
+        "namedChildCount": 1,
+        "childCount": 1,
+        "text": null,
+        "fields": {
+          "name": {
+            "type": "identifier",
+            "text": "helper"
+          }
+        }
+      },
+      {
+        "type": "identifier",
+        "isNamed": true,
+        "startIndex": 10,
+        "endIndex": 16,
+        "startPosition": {
+          "row": 1,
+          "column": 9
+        },
+        "endPosition": {
+          "row": 1,
+          "column": 15
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "helper"
+      },
+      {
+        "type": "}",
+        "isNamed": false,
+        "startIndex": 17,
+        "endIndex": 18,
+        "startPosition": {
+          "row": 1,
+          "column": 16
+        },
+        "endPosition": {
+          "row": 1,
+          "column": 17
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "from",
+        "isNamed": false,
+        "startIndex": 19,
+        "endIndex": 23,
+        "startPosition": {
+          "row": 1,
+          "column": 18
+        },
+        "endPosition": {
+          "row": 1,
+          "column": 22
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "string",
+        "isNamed": true,
+        "startIndex": 24,
+        "endIndex": 34,
+        "startPosition": {
+          "row": 1,
+          "column": 23
+        },
+        "endPosition": {
+          "row": 1,
+          "column": 33
+        },
+        "namedChildCount": 1,
+        "childCount": 3,
+        "text": null
+      },
+      {
+        "type": "'",
+        "isNamed": false,
+        "startIndex": 24,
+        "endIndex": 25,
+        "startPosition": {
+          "row": 1,
+          "column": 23
+        },
+        "endPosition": {
+          "row": 1,
+          "column": 24
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "string_fragment",
+        "isNamed": true,
+        "startIndex": 25,
+        "endIndex": 33,
+        "startPosition": {
+          "row": 1,
+          "column": 24
+        },
+        "endPosition": {
+          "row": 1,
+          "column": 32
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "./helper"
+      },
+      {
+        "type": "'",
+        "isNamed": false,
+        "startIndex": 33,
+        "endIndex": 34,
+        "startPosition": {
+          "row": 1,
+          "column": 32
+        },
+        "endPosition": {
+          "row": 1,
+          "column": 33
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": ";",
+        "isNamed": false,
+        "startIndex": 34,
+        "endIndex": 35,
+        "startPosition": {
+          "row": 1,
+          "column": 33
+        },
+        "endPosition": {
+          "row": 1,
+          "column": 34
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "export_statement",
+        "isNamed": true,
+        "startIndex": 37,
+        "endIndex": 96,
+        "startPosition": {
+          "row": 3,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 5,
+          "column": 1
+        },
+        "namedChildCount": 1,
+        "childCount": 2,
+        "text": null
+      },
+      {
+        "type": "export",
+        "isNamed": false,
+        "startIndex": 37,
+        "endIndex": 43,
+        "startPosition": {
+          "row": 3,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 3,
+          "column": 6
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "interface_declaration",
+        "isNamed": true,
+        "startIndex": 44,
+        "endIndex": 96,
+        "startPosition": {
+          "row": 3,
+          "column": 7
+        },
+        "endPosition": {
+          "row": 5,
+          "column": 1
+        },
+        "namedChildCount": 2,
+        "childCount": 3,
+        "text": null,
+        "fields": {
+          "body": {
+            "type": "interface_body",
+            "text": "{\n  greet(name: string): string;\n}"
+          },
+          "name": {
+            "type": "type_identifier",
+            "text": "Greeter"
+          }
+        }
+      },
+      {
+        "type": "interface",
+        "isNamed": false,
+        "startIndex": 44,
+        "endIndex": 53,
+        "startPosition": {
+          "row": 3,
+          "column": 7
+        },
+        "endPosition": {
+          "row": 3,
+          "column": 16
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "type_identifier",
+        "isNamed": true,
+        "startIndex": 54,
+        "endIndex": 61,
+        "startPosition": {
+          "row": 3,
+          "column": 17
+        },
+        "endPosition": {
+          "row": 3,
+          "column": 24
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "Greeter"
+      },
+      {
+        "type": "interface_body",
+        "isNamed": true,
+        "startIndex": 62,
+        "endIndex": 96,
+        "startPosition": {
+          "row": 3,
+          "column": 25
+        },
+        "endPosition": {
+          "row": 5,
+          "column": 1
+        },
+        "namedChildCount": 1,
+        "childCount": 4,
+        "text": null
+      },
+      {
+        "type": "{",
+        "isNamed": false,
+        "startIndex": 62,
+        "endIndex": 63,
+        "startPosition": {
+          "row": 3,
+          "column": 25
+        },
+        "endPosition": {
+          "row": 3,
+          "column": 26
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "method_signature",
+        "isNamed": true,
+        "startIndex": 66,
+        "endIndex": 93,
+        "startPosition": {
+          "row": 4,
+          "column": 2
+        },
+        "endPosition": {
+          "row": 4,
+          "column": 29
+        },
+        "namedChildCount": 3,
+        "childCount": 3,
+        "text": null,
+        "fields": {
+          "name": {
+            "type": "property_identifier",
+            "text": "greet"
+          },
+          "parameters": {
+            "type": "formal_parameters",
+            "text": "(name: string)"
+          },
+          "return_type": {
+            "type": "type_annotation",
+            "text": ": string"
+          }
+        }
+      },
+      {
+        "type": "property_identifier",
+        "isNamed": true,
+        "startIndex": 66,
+        "endIndex": 71,
+        "startPosition": {
+          "row": 4,
+          "column": 2
+        },
+        "endPosition": {
+          "row": 4,
+          "column": 7
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "greet"
+      },
+      {
+        "type": "formal_parameters",
+        "isNamed": true,
+        "startIndex": 71,
+        "endIndex": 85,
+        "startPosition": {
+          "row": 4,
+          "column": 7
+        },
+        "endPosition": {
+          "row": 4,
+          "column": 21
+        },
+        "namedChildCount": 1,
+        "childCount": 3,
+        "text": null
+      },
+      {
+        "type": "(",
+        "isNamed": false,
+        "startIndex": 71,
+        "endIndex": 72,
+        "startPosition": {
+          "row": 4,
+          "column": 7
+        },
+        "endPosition": {
+          "row": 4,
+          "column": 8
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "required_parameter",
+        "isNamed": true,
+        "startIndex": 72,
+        "endIndex": 84,
+        "startPosition": {
+          "row": 4,
+          "column": 8
+        },
+        "endPosition": {
+          "row": 4,
+          "column": 20
+        },
+        "namedChildCount": 2,
+        "childCount": 2,
+        "text": null
+      },
+      {
+        "type": "identifier",
+        "isNamed": true,
+        "startIndex": 72,
+        "endIndex": 76,
+        "startPosition": {
+          "row": 4,
+          "column": 8
+        },
+        "endPosition": {
+          "row": 4,
+          "column": 12
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "name"
+      },
+      {
+        "type": "type_annotation",
+        "isNamed": true,
+        "startIndex": 76,
+        "endIndex": 84,
+        "startPosition": {
+          "row": 4,
+          "column": 12
+        },
+        "endPosition": {
+          "row": 4,
+          "column": 20
+        },
+        "namedChildCount": 1,
+        "childCount": 2,
+        "text": null
+      },
+      {
+        "type": ":",
+        "isNamed": false,
+        "startIndex": 76,
+        "endIndex": 77,
+        "startPosition": {
+          "row": 4,
+          "column": 12
+        },
+        "endPosition": {
+          "row": 4,
+          "column": 13
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "predefined_type",
+        "isNamed": true,
+        "startIndex": 78,
+        "endIndex": 84,
+        "startPosition": {
+          "row": 4,
+          "column": 14
+        },
+        "endPosition": {
+          "row": 4,
+          "column": 20
+        },
+        "namedChildCount": 0,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "string",
+        "isNamed": false,
+        "startIndex": 78,
+        "endIndex": 84,
+        "startPosition": {
+          "row": 4,
+          "column": 14
+        },
+        "endPosition": {
+          "row": 4,
+          "column": 20
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": ")",
+        "isNamed": false,
+        "startIndex": 84,
+        "endIndex": 85,
+        "startPosition": {
+          "row": 4,
+          "column": 20
+        },
+        "endPosition": {
+          "row": 4,
+          "column": 21
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "type_annotation",
+        "isNamed": true,
+        "startIndex": 85,
+        "endIndex": 93,
+        "startPosition": {
+          "row": 4,
+          "column": 21
+        },
+        "endPosition": {
+          "row": 4,
+          "column": 29
+        },
+        "namedChildCount": 1,
+        "childCount": 2,
+        "text": null
+      },
+      {
+        "type": ":",
+        "isNamed": false,
+        "startIndex": 85,
+        "endIndex": 86,
+        "startPosition": {
+          "row": 4,
+          "column": 21
+        },
+        "endPosition": {
+          "row": 4,
+          "column": 22
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "predefined_type",
+        "isNamed": true,
+        "startIndex": 87,
+        "endIndex": 93,
+        "startPosition": {
+          "row": 4,
+          "column": 23
+        },
+        "endPosition": {
+          "row": 4,
+          "column": 29
+        },
+        "namedChildCount": 0,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "string",
+        "isNamed": false,
+        "startIndex": 87,
+        "endIndex": 93,
+        "startPosition": {
+          "row": 4,
+          "column": 23
+        },
+        "endPosition": {
+          "row": 4,
+          "column": 29
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": ";",
+        "isNamed": false,
+        "startIndex": 93,
+        "endIndex": 94,
+        "startPosition": {
+          "row": 4,
+          "column": 29
+        },
+        "endPosition": {
+          "row": 4,
+          "column": 30
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "}",
+        "isNamed": false,
+        "startIndex": 95,
+        "endIndex": 96,
+        "startPosition": {
+          "row": 5,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 5,
+          "column": 1
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "export_statement",
+        "isNamed": true,
+        "startIndex": 98,
+        "endIndex": 203,
+        "startPosition": {
+          "row": 7,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 11,
+          "column": 1
+        },
+        "namedChildCount": 1,
+        "childCount": 2,
+        "text": null
+      },
+      {
+        "type": "export",
+        "isNamed": false,
+        "startIndex": 98,
+        "endIndex": 104,
+        "startPosition": {
+          "row": 7,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 7,
+          "column": 6
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "class_declaration",
+        "isNamed": true,
+        "startIndex": 105,
+        "endIndex": 203,
+        "startPosition": {
+          "row": 7,
+          "column": 7
+        },
+        "endPosition": {
+          "row": 11,
+          "column": 1
+        },
+        "namedChildCount": 3,
+        "childCount": 4,
+        "text": null,
+        "fields": {
+          "body": {
+            "type": "class_body",
+            "text": "{\n  greet(name: string): string {\n    return helper(name);\n  }\n}"
+          },
+          "name": {
+            "type": "type_identifier",
+            "text": "Greeting"
+          }
+        }
+      },
+      {
+        "type": "class",
+        "isNamed": false,
+        "startIndex": 105,
+        "endIndex": 110,
+        "startPosition": {
+          "row": 7,
+          "column": 7
+        },
+        "endPosition": {
+          "row": 7,
+          "column": 12
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "type_identifier",
+        "isNamed": true,
+        "startIndex": 111,
+        "endIndex": 119,
+        "startPosition": {
+          "row": 7,
+          "column": 13
+        },
+        "endPosition": {
+          "row": 7,
+          "column": 21
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "Greeting"
+      },
+      {
+        "type": "class_heritage",
+        "isNamed": true,
+        "startIndex": 120,
+        "endIndex": 138,
+        "startPosition": {
+          "row": 7,
+          "column": 22
+        },
+        "endPosition": {
+          "row": 7,
+          "column": 40
+        },
+        "namedChildCount": 1,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "implements_clause",
+        "isNamed": true,
+        "startIndex": 120,
+        "endIndex": 138,
+        "startPosition": {
+          "row": 7,
+          "column": 22
+        },
+        "endPosition": {
+          "row": 7,
+          "column": 40
+        },
+        "namedChildCount": 1,
+        "childCount": 2,
+        "text": null
+      },
+      {
+        "type": "implements",
+        "isNamed": false,
+        "startIndex": 120,
+        "endIndex": 130,
+        "startPosition": {
+          "row": 7,
+          "column": 22
+        },
+        "endPosition": {
+          "row": 7,
+          "column": 32
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "type_identifier",
+        "isNamed": true,
+        "startIndex": 131,
+        "endIndex": 138,
+        "startPosition": {
+          "row": 7,
+          "column": 33
+        },
+        "endPosition": {
+          "row": 7,
+          "column": 40
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "Greeter"
+      },
+      {
+        "type": "class_body",
+        "isNamed": true,
+        "startIndex": 139,
+        "endIndex": 203,
+        "startPosition": {
+          "row": 7,
+          "column": 41
+        },
+        "endPosition": {
+          "row": 11,
+          "column": 1
+        },
+        "namedChildCount": 1,
+        "childCount": 3,
+        "text": null
+      },
+      {
+        "type": "{",
+        "isNamed": false,
+        "startIndex": 139,
+        "endIndex": 140,
+        "startPosition": {
+          "row": 7,
+          "column": 41
+        },
+        "endPosition": {
+          "row": 7,
+          "column": 42
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "method_definition",
+        "isNamed": true,
+        "startIndex": 143,
+        "endIndex": 201,
+        "startPosition": {
+          "row": 8,
+          "column": 2
+        },
+        "endPosition": {
+          "row": 10,
+          "column": 3
+        },
+        "namedChildCount": 4,
+        "childCount": 4,
+        "text": null,
+        "fields": {
+          "body": {
+            "type": "statement_block",
+            "text": "{\n    return helper(name);\n  }"
+          },
+          "name": {
+            "type": "property_identifier",
+            "text": "greet"
+          },
+          "parameters": {
+            "type": "formal_parameters",
+            "text": "(name: string)"
+          },
+          "return_type": {
+            "type": "type_annotation",
+            "text": ": string"
+          }
+        }
+      },
+      {
+        "type": "property_identifier",
+        "isNamed": true,
+        "startIndex": 143,
+        "endIndex": 148,
+        "startPosition": {
+          "row": 8,
+          "column": 2
+        },
+        "endPosition": {
+          "row": 8,
+          "column": 7
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "greet"
+      },
+      {
+        "type": "formal_parameters",
+        "isNamed": true,
+        "startIndex": 148,
+        "endIndex": 162,
+        "startPosition": {
+          "row": 8,
+          "column": 7
+        },
+        "endPosition": {
+          "row": 8,
+          "column": 21
+        },
+        "namedChildCount": 1,
+        "childCount": 3,
+        "text": null
+      },
+      {
+        "type": "(",
+        "isNamed": false,
+        "startIndex": 148,
+        "endIndex": 149,
+        "startPosition": {
+          "row": 8,
+          "column": 7
+        },
+        "endPosition": {
+          "row": 8,
+          "column": 8
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "required_parameter",
+        "isNamed": true,
+        "startIndex": 149,
+        "endIndex": 161,
+        "startPosition": {
+          "row": 8,
+          "column": 8
+        },
+        "endPosition": {
+          "row": 8,
+          "column": 20
+        },
+        "namedChildCount": 2,
+        "childCount": 2,
+        "text": null
+      },
+      {
+        "type": "identifier",
+        "isNamed": true,
+        "startIndex": 149,
+        "endIndex": 153,
+        "startPosition": {
+          "row": 8,
+          "column": 8
+        },
+        "endPosition": {
+          "row": 8,
+          "column": 12
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "name"
+      },
+      {
+        "type": "type_annotation",
+        "isNamed": true,
+        "startIndex": 153,
+        "endIndex": 161,
+        "startPosition": {
+          "row": 8,
+          "column": 12
+        },
+        "endPosition": {
+          "row": 8,
+          "column": 20
+        },
+        "namedChildCount": 1,
+        "childCount": 2,
+        "text": null
+      },
+      {
+        "type": ":",
+        "isNamed": false,
+        "startIndex": 153,
+        "endIndex": 154,
+        "startPosition": {
+          "row": 8,
+          "column": 12
+        },
+        "endPosition": {
+          "row": 8,
+          "column": 13
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "predefined_type",
+        "isNamed": true,
+        "startIndex": 155,
+        "endIndex": 161,
+        "startPosition": {
+          "row": 8,
+          "column": 14
+        },
+        "endPosition": {
+          "row": 8,
+          "column": 20
+        },
+        "namedChildCount": 0,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "string",
+        "isNamed": false,
+        "startIndex": 155,
+        "endIndex": 161,
+        "startPosition": {
+          "row": 8,
+          "column": 14
+        },
+        "endPosition": {
+          "row": 8,
+          "column": 20
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": ")",
+        "isNamed": false,
+        "startIndex": 161,
+        "endIndex": 162,
+        "startPosition": {
+          "row": 8,
+          "column": 20
+        },
+        "endPosition": {
+          "row": 8,
+          "column": 21
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "type_annotation",
+        "isNamed": true,
+        "startIndex": 162,
+        "endIndex": 170,
+        "startPosition": {
+          "row": 8,
+          "column": 21
+        },
+        "endPosition": {
+          "row": 8,
+          "column": 29
+        },
+        "namedChildCount": 1,
+        "childCount": 2,
+        "text": null
+      },
+      {
+        "type": ":",
+        "isNamed": false,
+        "startIndex": 162,
+        "endIndex": 163,
+        "startPosition": {
+          "row": 8,
+          "column": 21
+        },
+        "endPosition": {
+          "row": 8,
+          "column": 22
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "predefined_type",
+        "isNamed": true,
+        "startIndex": 164,
+        "endIndex": 170,
+        "startPosition": {
+          "row": 8,
+          "column": 23
+        },
+        "endPosition": {
+          "row": 8,
+          "column": 29
+        },
+        "namedChildCount": 0,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "string",
+        "isNamed": false,
+        "startIndex": 164,
+        "endIndex": 170,
+        "startPosition": {
+          "row": 8,
+          "column": 23
+        },
+        "endPosition": {
+          "row": 8,
+          "column": 29
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "statement_block",
+        "isNamed": true,
+        "startIndex": 171,
+        "endIndex": 201,
+        "startPosition": {
+          "row": 8,
+          "column": 30
+        },
+        "endPosition": {
+          "row": 10,
+          "column": 3
+        },
+        "namedChildCount": 1,
+        "childCount": 3,
+        "text": null
+      },
+      {
+        "type": "{",
+        "isNamed": false,
+        "startIndex": 171,
+        "endIndex": 172,
+        "startPosition": {
+          "row": 8,
+          "column": 30
+        },
+        "endPosition": {
+          "row": 8,
+          "column": 31
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "return_statement",
+        "isNamed": true,
+        "startIndex": 177,
+        "endIndex": 197,
+        "startPosition": {
+          "row": 9,
+          "column": 4
+        },
+        "endPosition": {
+          "row": 9,
+          "column": 24
+        },
+        "namedChildCount": 1,
+        "childCount": 3,
+        "text": null
+      },
+      {
+        "type": "return",
+        "isNamed": false,
+        "startIndex": 177,
+        "endIndex": 183,
+        "startPosition": {
+          "row": 9,
+          "column": 4
+        },
+        "endPosition": {
+          "row": 9,
+          "column": 10
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "call_expression",
+        "isNamed": true,
+        "startIndex": 184,
+        "endIndex": 196,
+        "startPosition": {
+          "row": 9,
+          "column": 11
+        },
+        "endPosition": {
+          "row": 9,
+          "column": 23
+        },
+        "namedChildCount": 2,
+        "childCount": 2,
+        "text": null,
+        "fields": {
+          "function": {
+            "type": "identifier",
+            "text": "helper"
+          }
+        }
+      },
+      {
+        "type": "identifier",
+        "isNamed": true,
+        "startIndex": 184,
+        "endIndex": 190,
+        "startPosition": {
+          "row": 9,
+          "column": 11
+        },
+        "endPosition": {
+          "row": 9,
+          "column": 17
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "helper"
+      },
+      {
+        "type": "arguments",
+        "isNamed": true,
+        "startIndex": 190,
+        "endIndex": 196,
+        "startPosition": {
+          "row": 9,
+          "column": 17
+        },
+        "endPosition": {
+          "row": 9,
+          "column": 23
+        },
+        "namedChildCount": 1,
+        "childCount": 3,
+        "text": null
+      },
+      {
+        "type": "(",
+        "isNamed": false,
+        "startIndex": 190,
+        "endIndex": 191,
+        "startPosition": {
+          "row": 9,
+          "column": 17
+        },
+        "endPosition": {
+          "row": 9,
+          "column": 18
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "identifier",
+        "isNamed": true,
+        "startIndex": 191,
+        "endIndex": 195,
+        "startPosition": {
+          "row": 9,
+          "column": 18
+        },
+        "endPosition": {
+          "row": 9,
+          "column": 22
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "name"
+      },
+      {
+        "type": ")",
+        "isNamed": false,
+        "startIndex": 195,
+        "endIndex": 196,
+        "startPosition": {
+          "row": 9,
+          "column": 22
+        },
+        "endPosition": {
+          "row": 9,
+          "column": 23
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": ";",
+        "isNamed": false,
+        "startIndex": 196,
+        "endIndex": 197,
+        "startPosition": {
+          "row": 9,
+          "column": 23
+        },
+        "endPosition": {
+          "row": 9,
+          "column": 24
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "}",
+        "isNamed": false,
+        "startIndex": 200,
+        "endIndex": 201,
+        "startPosition": {
+          "row": 10,
+          "column": 2
+        },
+        "endPosition": {
+          "row": 10,
+          "column": 3
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "}",
+        "isNamed": false,
+        "startIndex": 202,
+        "endIndex": 203,
+        "startPosition": {
+          "row": 11,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 11,
+          "column": 1
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      }
+    ]
+  },
+  "python basic": {
+    "hasError": false,
+    "nodes": [
+      {
+        "type": "module",
+        "isNamed": true,
+        "startIndex": 0,
+        "endIndex": 114,
+        "startPosition": {
+          "row": 0,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 8,
+          "column": 0
+        },
+        "namedChildCount": 3,
+        "childCount": 3,
+        "text": null
+      },
+      {
+        "type": "import_statement",
+        "isNamed": true,
+        "startIndex": 0,
+        "endIndex": 9,
+        "startPosition": {
+          "row": 0,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 0,
+          "column": 9
+        },
+        "namedChildCount": 1,
+        "childCount": 2,
+        "text": null,
+        "fields": {
+          "name": {
+            "type": "dotted_name",
+            "text": "os"
+          }
+        }
+      },
+      {
+        "type": "import",
+        "isNamed": false,
+        "startIndex": 0,
+        "endIndex": 6,
+        "startPosition": {
+          "row": 0,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 0,
+          "column": 6
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "dotted_name",
+        "isNamed": true,
+        "startIndex": 7,
+        "endIndex": 9,
+        "startPosition": {
+          "row": 0,
+          "column": 7
+        },
+        "endPosition": {
+          "row": 0,
+          "column": 9
+        },
+        "namedChildCount": 1,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "identifier",
+        "isNamed": true,
+        "startIndex": 7,
+        "endIndex": 9,
+        "startPosition": {
+          "row": 0,
+          "column": 7
+        },
+        "endPosition": {
+          "row": 0,
+          "column": 9
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "os"
+      },
+      {
+        "type": "function_definition",
+        "isNamed": true,
+        "startIndex": 11,
+        "endIndex": 42,
+        "startPosition": {
+          "row": 2,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 3,
+          "column": 16
+        },
+        "namedChildCount": 3,
+        "childCount": 5,
+        "text": null,
+        "fields": {
+          "body": {
+            "type": "block",
+            "text": "return x + 1"
+          },
+          "name": {
+            "type": "identifier",
+            "text": "helper"
+          },
+          "parameters": {
+            "type": "parameters",
+            "text": "(x)"
+          }
+        }
+      },
+      {
+        "type": "def",
+        "isNamed": false,
+        "startIndex": 11,
+        "endIndex": 14,
+        "startPosition": {
+          "row": 2,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 2,
+          "column": 3
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "identifier",
+        "isNamed": true,
+        "startIndex": 15,
+        "endIndex": 21,
+        "startPosition": {
+          "row": 2,
+          "column": 4
+        },
+        "endPosition": {
+          "row": 2,
+          "column": 10
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "helper"
+      },
+      {
+        "type": "parameters",
+        "isNamed": true,
+        "startIndex": 21,
+        "endIndex": 24,
+        "startPosition": {
+          "row": 2,
+          "column": 10
+        },
+        "endPosition": {
+          "row": 2,
+          "column": 13
+        },
+        "namedChildCount": 1,
+        "childCount": 3,
+        "text": null
+      },
+      {
+        "type": "(",
+        "isNamed": false,
+        "startIndex": 21,
+        "endIndex": 22,
+        "startPosition": {
+          "row": 2,
+          "column": 10
+        },
+        "endPosition": {
+          "row": 2,
+          "column": 11
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "identifier",
+        "isNamed": true,
+        "startIndex": 22,
+        "endIndex": 23,
+        "startPosition": {
+          "row": 2,
+          "column": 11
+        },
+        "endPosition": {
+          "row": 2,
+          "column": 12
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "x"
+      },
+      {
+        "type": ")",
+        "isNamed": false,
+        "startIndex": 23,
+        "endIndex": 24,
+        "startPosition": {
+          "row": 2,
+          "column": 12
+        },
+        "endPosition": {
+          "row": 2,
+          "column": 13
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": ":",
+        "isNamed": false,
+        "startIndex": 24,
+        "endIndex": 25,
+        "startPosition": {
+          "row": 2,
+          "column": 13
+        },
+        "endPosition": {
+          "row": 2,
+          "column": 14
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "block",
+        "isNamed": true,
+        "startIndex": 30,
+        "endIndex": 42,
+        "startPosition": {
+          "row": 3,
+          "column": 4
+        },
+        "endPosition": {
+          "row": 3,
+          "column": 16
+        },
+        "namedChildCount": 1,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "return_statement",
+        "isNamed": true,
+        "startIndex": 30,
+        "endIndex": 42,
+        "startPosition": {
+          "row": 3,
+          "column": 4
+        },
+        "endPosition": {
+          "row": 3,
+          "column": 16
+        },
+        "namedChildCount": 1,
+        "childCount": 2,
+        "text": null
+      },
+      {
+        "type": "return",
+        "isNamed": false,
+        "startIndex": 30,
+        "endIndex": 36,
+        "startPosition": {
+          "row": 3,
+          "column": 4
+        },
+        "endPosition": {
+          "row": 3,
+          "column": 10
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "binary_operator",
+        "isNamed": true,
+        "startIndex": 37,
+        "endIndex": 42,
+        "startPosition": {
+          "row": 3,
+          "column": 11
+        },
+        "endPosition": {
+          "row": 3,
+          "column": 16
+        },
+        "namedChildCount": 2,
+        "childCount": 3,
+        "text": null,
+        "fields": {
+          "operator": {
+            "type": "+",
+            "text": "+"
+          }
+        }
+      },
+      {
+        "type": "identifier",
+        "isNamed": true,
+        "startIndex": 37,
+        "endIndex": 38,
+        "startPosition": {
+          "row": 3,
+          "column": 11
+        },
+        "endPosition": {
+          "row": 3,
+          "column": 12
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "x"
+      },
+      {
+        "type": "+",
+        "isNamed": false,
+        "startIndex": 39,
+        "endIndex": 40,
+        "startPosition": {
+          "row": 3,
+          "column": 13
+        },
+        "endPosition": {
+          "row": 3,
+          "column": 14
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "integer",
+        "isNamed": true,
+        "startIndex": 41,
+        "endIndex": 42,
+        "startPosition": {
+          "row": 3,
+          "column": 15
+        },
+        "endPosition": {
+          "row": 3,
+          "column": 16
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "1"
+      },
+      {
+        "type": "class_definition",
+        "isNamed": true,
+        "startIndex": 44,
+        "endIndex": 113,
+        "startPosition": {
+          "row": 5,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 7,
+          "column": 27
+        },
+        "namedChildCount": 2,
+        "childCount": 4,
+        "text": null,
+        "fields": {
+          "body": {
+            "type": "block",
+            "text": "def greet(self, name):\n        return helper(name)"
+          },
+          "name": {
+            "type": "identifier",
+            "text": "Greeter"
+          }
+        }
+      },
+      {
+        "type": "class",
+        "isNamed": false,
+        "startIndex": 44,
+        "endIndex": 49,
+        "startPosition": {
+          "row": 5,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 5,
+          "column": 5
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "identifier",
+        "isNamed": true,
+        "startIndex": 50,
+        "endIndex": 57,
+        "startPosition": {
+          "row": 5,
+          "column": 6
+        },
+        "endPosition": {
+          "row": 5,
+          "column": 13
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "Greeter"
+      },
+      {
+        "type": ":",
+        "isNamed": false,
+        "startIndex": 57,
+        "endIndex": 58,
+        "startPosition": {
+          "row": 5,
+          "column": 13
+        },
+        "endPosition": {
+          "row": 5,
+          "column": 14
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "block",
+        "isNamed": true,
+        "startIndex": 63,
+        "endIndex": 113,
+        "startPosition": {
+          "row": 6,
+          "column": 4
+        },
+        "endPosition": {
+          "row": 7,
+          "column": 27
+        },
+        "namedChildCount": 1,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "function_definition",
+        "isNamed": true,
+        "startIndex": 63,
+        "endIndex": 113,
+        "startPosition": {
+          "row": 6,
+          "column": 4
+        },
+        "endPosition": {
+          "row": 7,
+          "column": 27
+        },
+        "namedChildCount": 3,
+        "childCount": 5,
+        "text": null,
+        "fields": {
+          "body": {
+            "type": "block",
+            "text": "return helper(name)"
+          },
+          "name": {
+            "type": "identifier",
+            "text": "greet"
+          },
+          "parameters": {
+            "type": "parameters",
+            "text": "(self, name)"
+          }
+        }
+      },
+      {
+        "type": "def",
+        "isNamed": false,
+        "startIndex": 63,
+        "endIndex": 66,
+        "startPosition": {
+          "row": 6,
+          "column": 4
+        },
+        "endPosition": {
+          "row": 6,
+          "column": 7
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "identifier",
+        "isNamed": true,
+        "startIndex": 67,
+        "endIndex": 72,
+        "startPosition": {
+          "row": 6,
+          "column": 8
+        },
+        "endPosition": {
+          "row": 6,
+          "column": 13
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "greet"
+      },
+      {
+        "type": "parameters",
+        "isNamed": true,
+        "startIndex": 72,
+        "endIndex": 84,
+        "startPosition": {
+          "row": 6,
+          "column": 13
+        },
+        "endPosition": {
+          "row": 6,
+          "column": 25
+        },
+        "namedChildCount": 2,
+        "childCount": 5,
+        "text": null
+      },
+      {
+        "type": "(",
+        "isNamed": false,
+        "startIndex": 72,
+        "endIndex": 73,
+        "startPosition": {
+          "row": 6,
+          "column": 13
+        },
+        "endPosition": {
+          "row": 6,
+          "column": 14
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "identifier",
+        "isNamed": true,
+        "startIndex": 73,
+        "endIndex": 77,
+        "startPosition": {
+          "row": 6,
+          "column": 14
+        },
+        "endPosition": {
+          "row": 6,
+          "column": 18
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "self"
+      },
+      {
+        "type": ",",
+        "isNamed": false,
+        "startIndex": 77,
+        "endIndex": 78,
+        "startPosition": {
+          "row": 6,
+          "column": 18
+        },
+        "endPosition": {
+          "row": 6,
+          "column": 19
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "identifier",
+        "isNamed": true,
+        "startIndex": 79,
+        "endIndex": 83,
+        "startPosition": {
+          "row": 6,
+          "column": 20
+        },
+        "endPosition": {
+          "row": 6,
+          "column": 24
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "name"
+      },
+      {
+        "type": ")",
+        "isNamed": false,
+        "startIndex": 83,
+        "endIndex": 84,
+        "startPosition": {
+          "row": 6,
+          "column": 24
+        },
+        "endPosition": {
+          "row": 6,
+          "column": 25
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": ":",
+        "isNamed": false,
+        "startIndex": 84,
+        "endIndex": 85,
+        "startPosition": {
+          "row": 6,
+          "column": 25
+        },
+        "endPosition": {
+          "row": 6,
+          "column": 26
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "block",
+        "isNamed": true,
+        "startIndex": 94,
+        "endIndex": 113,
+        "startPosition": {
+          "row": 7,
+          "column": 8
+        },
+        "endPosition": {
+          "row": 7,
+          "column": 27
+        },
+        "namedChildCount": 1,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "return_statement",
+        "isNamed": true,
+        "startIndex": 94,
+        "endIndex": 113,
+        "startPosition": {
+          "row": 7,
+          "column": 8
+        },
+        "endPosition": {
+          "row": 7,
+          "column": 27
+        },
+        "namedChildCount": 1,
+        "childCount": 2,
+        "text": null
+      },
+      {
+        "type": "return",
+        "isNamed": false,
+        "startIndex": 94,
+        "endIndex": 100,
+        "startPosition": {
+          "row": 7,
+          "column": 8
+        },
+        "endPosition": {
+          "row": 7,
+          "column": 14
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "call",
+        "isNamed": true,
+        "startIndex": 101,
+        "endIndex": 113,
+        "startPosition": {
+          "row": 7,
+          "column": 15
+        },
+        "endPosition": {
+          "row": 7,
+          "column": 27
+        },
+        "namedChildCount": 2,
+        "childCount": 2,
+        "text": null,
+        "fields": {
+          "function": {
+            "type": "identifier",
+            "text": "helper"
+          }
+        }
+      },
+      {
+        "type": "identifier",
+        "isNamed": true,
+        "startIndex": 101,
+        "endIndex": 107,
+        "startPosition": {
+          "row": 7,
+          "column": 15
+        },
+        "endPosition": {
+          "row": 7,
+          "column": 21
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "helper"
+      },
+      {
+        "type": "argument_list",
+        "isNamed": true,
+        "startIndex": 107,
+        "endIndex": 113,
+        "startPosition": {
+          "row": 7,
+          "column": 21
+        },
+        "endPosition": {
+          "row": 7,
+          "column": 27
+        },
+        "namedChildCount": 1,
+        "childCount": 3,
+        "text": null
+      },
+      {
+        "type": "(",
+        "isNamed": false,
+        "startIndex": 107,
+        "endIndex": 108,
+        "startPosition": {
+          "row": 7,
+          "column": 21
+        },
+        "endPosition": {
+          "row": 7,
+          "column": 22
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "identifier",
+        "isNamed": true,
+        "startIndex": 108,
+        "endIndex": 112,
+        "startPosition": {
+          "row": 7,
+          "column": 22
+        },
+        "endPosition": {
+          "row": 7,
+          "column": 26
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "name"
+      },
+      {
+        "type": ")",
+        "isNamed": false,
+        "startIndex": 112,
+        "endIndex": 113,
+        "startPosition": {
+          "row": 7,
+          "column": 26
+        },
+        "endPosition": {
+          "row": 7,
+          "column": 27
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      }
+    ]
+  },
+  "kotlin basic": {
+    "hasError": false,
+    "nodes": [
+      {
+        "type": "source_file",
+        "isNamed": true,
+        "startIndex": 0,
+        "endIndex": 126,
+        "startPosition": {
+          "row": 0,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 7,
+          "column": 0
+        },
+        "namedChildCount": 2,
+        "childCount": 2,
+        "text": null
+      },
+      {
+        "type": "import_list",
+        "isNamed": true,
+        "startIndex": 0,
+        "endIndex": 33,
+        "startPosition": {
+          "row": 0,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 2,
+          "column": 0
+        },
+        "namedChildCount": 1,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "import_header",
+        "isNamed": true,
+        "startIndex": 0,
+        "endIndex": 31,
+        "startPosition": {
+          "row": 0,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 0,
+          "column": 31
+        },
+        "namedChildCount": 1,
+        "childCount": 2,
+        "text": null
+      },
+      {
+        "type": "import",
+        "isNamed": false,
+        "startIndex": 0,
+        "endIndex": 6,
+        "startPosition": {
+          "row": 0,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 0,
+          "column": 6
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "identifier",
+        "isNamed": true,
+        "startIndex": 7,
+        "endIndex": 31,
+        "startPosition": {
+          "row": 0,
+          "column": 7
+        },
+        "endPosition": {
+          "row": 0,
+          "column": 31
+        },
+        "namedChildCount": 3,
+        "childCount": 5,
+        "text": null
+      },
+      {
+        "type": "simple_identifier",
+        "isNamed": true,
+        "startIndex": 7,
+        "endIndex": 14,
+        "startPosition": {
+          "row": 0,
+          "column": 7
+        },
+        "endPosition": {
+          "row": 0,
+          "column": 14
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "kotlinx"
+      },
+      {
+        "type": ".",
+        "isNamed": false,
+        "startIndex": 14,
+        "endIndex": 15,
+        "startPosition": {
+          "row": 0,
+          "column": 14
+        },
+        "endPosition": {
+          "row": 0,
+          "column": 15
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "simple_identifier",
+        "isNamed": true,
+        "startIndex": 15,
+        "endIndex": 25,
+        "startPosition": {
+          "row": 0,
+          "column": 15
+        },
+        "endPosition": {
+          "row": 0,
+          "column": 25
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "coroutines"
+      },
+      {
+        "type": ".",
+        "isNamed": false,
+        "startIndex": 25,
+        "endIndex": 26,
+        "startPosition": {
+          "row": 0,
+          "column": 25
+        },
+        "endPosition": {
+          "row": 0,
+          "column": 26
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "simple_identifier",
+        "isNamed": true,
+        "startIndex": 26,
+        "endIndex": 31,
+        "startPosition": {
+          "row": 0,
+          "column": 26
+        },
+        "endPosition": {
+          "row": 0,
+          "column": 31
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "delay"
+      },
+      {
+        "type": "class_declaration",
+        "isNamed": true,
+        "startIndex": 33,
+        "endIndex": 125,
+        "startPosition": {
+          "row": 2,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 6,
+          "column": 1
+        },
+        "namedChildCount": 2,
+        "childCount": 3,
+        "text": null
+      },
+      {
+        "type": "class",
+        "isNamed": false,
+        "startIndex": 33,
+        "endIndex": 38,
+        "startPosition": {
+          "row": 2,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 2,
+          "column": 5
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "type_identifier",
+        "isNamed": true,
+        "startIndex": 39,
+        "endIndex": 46,
+        "startPosition": {
+          "row": 2,
+          "column": 6
+        },
+        "endPosition": {
+          "row": 2,
+          "column": 13
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "Greeter"
+      },
+      {
+        "type": "class_body",
+        "isNamed": true,
+        "startIndex": 47,
+        "endIndex": 125,
+        "startPosition": {
+          "row": 2,
+          "column": 14
+        },
+        "endPosition": {
+          "row": 6,
+          "column": 1
+        },
+        "namedChildCount": 1,
+        "childCount": 3,
+        "text": null
+      },
+      {
+        "type": "{",
+        "isNamed": false,
+        "startIndex": 47,
+        "endIndex": 48,
+        "startPosition": {
+          "row": 2,
+          "column": 14
+        },
+        "endPosition": {
+          "row": 2,
+          "column": 15
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "function_declaration",
+        "isNamed": true,
+        "startIndex": 53,
+        "endIndex": 123,
+        "startPosition": {
+          "row": 3,
+          "column": 4
+        },
+        "endPosition": {
+          "row": 5,
+          "column": 5
+        },
+        "namedChildCount": 4,
+        "childCount": 6,
+        "text": null
+      },
+      {
+        "type": "fun",
+        "isNamed": false,
+        "startIndex": 53,
+        "endIndex": 56,
+        "startPosition": {
+          "row": 3,
+          "column": 4
+        },
+        "endPosition": {
+          "row": 3,
+          "column": 7
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "simple_identifier",
+        "isNamed": true,
+        "startIndex": 57,
+        "endIndex": 62,
+        "startPosition": {
+          "row": 3,
+          "column": 8
+        },
+        "endPosition": {
+          "row": 3,
+          "column": 13
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "greet"
+      },
+      {
+        "type": "function_value_parameters",
+        "isNamed": true,
+        "startIndex": 62,
+        "endIndex": 76,
+        "startPosition": {
+          "row": 3,
+          "column": 13
+        },
+        "endPosition": {
+          "row": 3,
+          "column": 27
+        },
+        "namedChildCount": 1,
+        "childCount": 3,
+        "text": null
+      },
+      {
+        "type": "(",
+        "isNamed": false,
+        "startIndex": 62,
+        "endIndex": 63,
+        "startPosition": {
+          "row": 3,
+          "column": 13
+        },
+        "endPosition": {
+          "row": 3,
+          "column": 14
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "parameter",
+        "isNamed": true,
+        "startIndex": 63,
+        "endIndex": 75,
+        "startPosition": {
+          "row": 3,
+          "column": 14
+        },
+        "endPosition": {
+          "row": 3,
+          "column": 26
+        },
+        "namedChildCount": 2,
+        "childCount": 3,
+        "text": null
+      },
+      {
+        "type": "simple_identifier",
+        "isNamed": true,
+        "startIndex": 63,
+        "endIndex": 67,
+        "startPosition": {
+          "row": 3,
+          "column": 14
+        },
+        "endPosition": {
+          "row": 3,
+          "column": 18
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "name"
+      },
+      {
+        "type": ":",
+        "isNamed": false,
+        "startIndex": 67,
+        "endIndex": 68,
+        "startPosition": {
+          "row": 3,
+          "column": 18
+        },
+        "endPosition": {
+          "row": 3,
+          "column": 19
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "user_type",
+        "isNamed": true,
+        "startIndex": 69,
+        "endIndex": 75,
+        "startPosition": {
+          "row": 3,
+          "column": 20
+        },
+        "endPosition": {
+          "row": 3,
+          "column": 26
+        },
+        "namedChildCount": 1,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "type_identifier",
+        "isNamed": true,
+        "startIndex": 69,
+        "endIndex": 75,
+        "startPosition": {
+          "row": 3,
+          "column": 20
+        },
+        "endPosition": {
+          "row": 3,
+          "column": 26
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "String"
+      },
+      {
+        "type": ")",
+        "isNamed": false,
+        "startIndex": 75,
+        "endIndex": 76,
+        "startPosition": {
+          "row": 3,
+          "column": 26
+        },
+        "endPosition": {
+          "row": 3,
+          "column": 27
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": ":",
+        "isNamed": false,
+        "startIndex": 76,
+        "endIndex": 77,
+        "startPosition": {
+          "row": 3,
+          "column": 27
+        },
+        "endPosition": {
+          "row": 3,
+          "column": 28
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "user_type",
+        "isNamed": true,
+        "startIndex": 78,
+        "endIndex": 84,
+        "startPosition": {
+          "row": 3,
+          "column": 29
+        },
+        "endPosition": {
+          "row": 3,
+          "column": 35
+        },
+        "namedChildCount": 1,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "type_identifier",
+        "isNamed": true,
+        "startIndex": 78,
+        "endIndex": 84,
+        "startPosition": {
+          "row": 3,
+          "column": 29
+        },
+        "endPosition": {
+          "row": 3,
+          "column": 35
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "String"
+      },
+      {
+        "type": "function_body",
+        "isNamed": true,
+        "startIndex": 85,
+        "endIndex": 123,
+        "startPosition": {
+          "row": 3,
+          "column": 36
+        },
+        "endPosition": {
+          "row": 5,
+          "column": 5
+        },
+        "namedChildCount": 1,
+        "childCount": 3,
+        "text": null
+      },
+      {
+        "type": "{",
+        "isNamed": false,
+        "startIndex": 85,
+        "endIndex": 86,
+        "startPosition": {
+          "row": 3,
+          "column": 36
+        },
+        "endPosition": {
+          "row": 3,
+          "column": 37
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "statements",
+        "isNamed": true,
+        "startIndex": 95,
+        "endIndex": 117,
+        "startPosition": {
+          "row": 4,
+          "column": 8
+        },
+        "endPosition": {
+          "row": 4,
+          "column": 30
+        },
+        "namedChildCount": 1,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "jump_expression",
+        "isNamed": true,
+        "startIndex": 95,
+        "endIndex": 117,
+        "startPosition": {
+          "row": 4,
+          "column": 8
+        },
+        "endPosition": {
+          "row": 4,
+          "column": 30
+        },
+        "namedChildCount": 1,
+        "childCount": 2,
+        "text": null
+      },
+      {
+        "type": "return",
+        "isNamed": false,
+        "startIndex": 95,
+        "endIndex": 101,
+        "startPosition": {
+          "row": 4,
+          "column": 8
+        },
+        "endPosition": {
+          "row": 4,
+          "column": 14
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "additive_expression",
+        "isNamed": true,
+        "startIndex": 102,
+        "endIndex": 117,
+        "startPosition": {
+          "row": 4,
+          "column": 15
+        },
+        "endPosition": {
+          "row": 4,
+          "column": 30
+        },
+        "namedChildCount": 2,
+        "childCount": 3,
+        "text": null
+      },
+      {
+        "type": "string_literal",
+        "isNamed": true,
+        "startIndex": 102,
+        "endIndex": 110,
+        "startPosition": {
+          "row": 4,
+          "column": 15
+        },
+        "endPosition": {
+          "row": 4,
+          "column": 23
+        },
+        "namedChildCount": 1,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "string_content",
+        "isNamed": true,
+        "startIndex": 103,
+        "endIndex": 109,
+        "startPosition": {
+          "row": 4,
+          "column": 16
+        },
+        "endPosition": {
+          "row": 4,
+          "column": 22
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "hello "
+      },
+      {
+        "type": "+",
+        "isNamed": false,
+        "startIndex": 111,
+        "endIndex": 112,
+        "startPosition": {
+          "row": 4,
+          "column": 24
+        },
+        "endPosition": {
+          "row": 4,
+          "column": 25
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "simple_identifier",
+        "isNamed": true,
+        "startIndex": 113,
+        "endIndex": 117,
+        "startPosition": {
+          "row": 4,
+          "column": 26
+        },
+        "endPosition": {
+          "row": 4,
+          "column": 30
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "name"
+      },
+      {
+        "type": "}",
+        "isNamed": false,
+        "startIndex": 122,
+        "endIndex": 123,
+        "startPosition": {
+          "row": 5,
+          "column": 4
+        },
+        "endPosition": {
+          "row": 5,
+          "column": 5
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "}",
+        "isNamed": false,
+        "startIndex": 124,
+        "endIndex": 125,
+        "startPosition": {
+          "row": 6,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 6,
+          "column": 1
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      }
+    ]
+  },
+  "php basic (multi-grammar)": {
+    "hasError": false,
+    "nodes": [
+      {
+        "type": "program",
+        "isNamed": true,
+        "startIndex": 0,
+        "endIndex": 144,
+        "startPosition": {
+          "row": 0,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 10,
+          "column": 0
+        },
+        "namedChildCount": 4,
+        "childCount": 4,
+        "text": null
+      },
+      {
+        "type": "php_tag",
+        "isNamed": true,
+        "startIndex": 0,
+        "endIndex": 5,
+        "startPosition": {
+          "row": 0,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 0,
+          "column": 5
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "<?php"
+      },
+      {
+        "type": "namespace_definition",
+        "isNamed": true,
+        "startIndex": 6,
+        "endIndex": 20,
+        "startPosition": {
+          "row": 1,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 1,
+          "column": 14
+        },
+        "namedChildCount": 1,
+        "childCount": 3,
+        "text": null,
+        "fields": {
+          "name": {
+            "type": "namespace_name",
+            "text": "App"
+          }
+        }
+      },
+      {
+        "type": "namespace",
+        "isNamed": false,
+        "startIndex": 6,
+        "endIndex": 15,
+        "startPosition": {
+          "row": 1,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 1,
+          "column": 9
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "namespace_name",
+        "isNamed": true,
+        "startIndex": 16,
+        "endIndex": 19,
+        "startPosition": {
+          "row": 1,
+          "column": 10
+        },
+        "endPosition": {
+          "row": 1,
+          "column": 13
+        },
+        "namedChildCount": 1,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "name",
+        "isNamed": true,
+        "startIndex": 16,
+        "endIndex": 19,
+        "startPosition": {
+          "row": 1,
+          "column": 10
+        },
+        "endPosition": {
+          "row": 1,
+          "column": 13
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "App"
+      },
+      {
+        "type": ";",
+        "isNamed": false,
+        "startIndex": 19,
+        "endIndex": 20,
+        "startPosition": {
+          "row": 1,
+          "column": 13
+        },
+        "endPosition": {
+          "row": 1,
+          "column": 14
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "namespace_use_declaration",
+        "isNamed": true,
+        "startIndex": 22,
+        "endIndex": 45,
+        "startPosition": {
+          "row": 3,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 3,
+          "column": 23
+        },
+        "namedChildCount": 1,
+        "childCount": 3,
+        "text": null
+      },
+      {
+        "type": "use",
+        "isNamed": false,
+        "startIndex": 22,
+        "endIndex": 25,
+        "startPosition": {
+          "row": 3,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 3,
+          "column": 3
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "namespace_use_clause",
+        "isNamed": true,
+        "startIndex": 26,
+        "endIndex": 44,
+        "startPosition": {
+          "row": 3,
+          "column": 4
+        },
+        "endPosition": {
+          "row": 3,
+          "column": 22
+        },
+        "namedChildCount": 1,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "qualified_name",
+        "isNamed": true,
+        "startIndex": 26,
+        "endIndex": 44,
+        "startPosition": {
+          "row": 3,
+          "column": 4
+        },
+        "endPosition": {
+          "row": 3,
+          "column": 22
+        },
+        "namedChildCount": 2,
+        "childCount": 3,
+        "text": null
+      },
+      {
+        "type": "namespace_name",
+        "isNamed": true,
+        "startIndex": 26,
+        "endIndex": 37,
+        "startPosition": {
+          "row": 3,
+          "column": 4
+        },
+        "endPosition": {
+          "row": 3,
+          "column": 15
+        },
+        "namedChildCount": 2,
+        "childCount": 3,
+        "text": null
+      },
+      {
+        "type": "name",
+        "isNamed": true,
+        "startIndex": 26,
+        "endIndex": 29,
+        "startPosition": {
+          "row": 3,
+          "column": 4
+        },
+        "endPosition": {
+          "row": 3,
+          "column": 7
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "App"
+      },
+      {
+        "type": "\\",
+        "isNamed": false,
+        "startIndex": 29,
+        "endIndex": 30,
+        "startPosition": {
+          "row": 3,
+          "column": 7
+        },
+        "endPosition": {
+          "row": 3,
+          "column": 8
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "name",
+        "isNamed": true,
+        "startIndex": 30,
+        "endIndex": 37,
+        "startPosition": {
+          "row": 3,
+          "column": 8
+        },
+        "endPosition": {
+          "row": 3,
+          "column": 15
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "Support"
+      },
+      {
+        "type": "\\",
+        "isNamed": false,
+        "startIndex": 37,
+        "endIndex": 38,
+        "startPosition": {
+          "row": 3,
+          "column": 15
+        },
+        "endPosition": {
+          "row": 3,
+          "column": 16
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "name",
+        "isNamed": true,
+        "startIndex": 38,
+        "endIndex": 44,
+        "startPosition": {
+          "row": 3,
+          "column": 16
+        },
+        "endPosition": {
+          "row": 3,
+          "column": 22
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "Helper"
+      },
+      {
+        "type": ";",
+        "isNamed": false,
+        "startIndex": 44,
+        "endIndex": 45,
+        "startPosition": {
+          "row": 3,
+          "column": 22
+        },
+        "endPosition": {
+          "row": 3,
+          "column": 23
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "class_declaration",
+        "isNamed": true,
+        "startIndex": 47,
+        "endIndex": 143,
+        "startPosition": {
+          "row": 5,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 9,
+          "column": 1
+        },
+        "namedChildCount": 2,
+        "childCount": 3,
+        "text": null,
+        "fields": {
+          "body": {
+            "type": "declaration_list",
+            "text": "{\n    public function greet($name) {\n        return Helper::format($name);\n    }\n}"
+          },
+          "name": {
+            "type": "name",
+            "text": "Greeter"
+          }
+        }
+      },
+      {
+        "type": "class",
+        "isNamed": false,
+        "startIndex": 47,
+        "endIndex": 52,
+        "startPosition": {
+          "row": 5,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 5,
+          "column": 5
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "name",
+        "isNamed": true,
+        "startIndex": 53,
+        "endIndex": 60,
+        "startPosition": {
+          "row": 5,
+          "column": 6
+        },
+        "endPosition": {
+          "row": 5,
+          "column": 13
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "Greeter"
+      },
+      {
+        "type": "declaration_list",
+        "isNamed": true,
+        "startIndex": 61,
+        "endIndex": 143,
+        "startPosition": {
+          "row": 5,
+          "column": 14
+        },
+        "endPosition": {
+          "row": 9,
+          "column": 1
+        },
+        "namedChildCount": 1,
+        "childCount": 3,
+        "text": null
+      },
+      {
+        "type": "{",
+        "isNamed": false,
+        "startIndex": 61,
+        "endIndex": 62,
+        "startPosition": {
+          "row": 5,
+          "column": 14
+        },
+        "endPosition": {
+          "row": 5,
+          "column": 15
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "method_declaration",
+        "isNamed": true,
+        "startIndex": 67,
+        "endIndex": 141,
+        "startPosition": {
+          "row": 6,
+          "column": 4
+        },
+        "endPosition": {
+          "row": 8,
+          "column": 5
+        },
+        "namedChildCount": 4,
+        "childCount": 5,
+        "text": null,
+        "fields": {
+          "body": {
+            "type": "compound_statement",
+            "text": "{\n        return Helper::format($name);\n    }"
+          },
+          "name": {
+            "type": "name",
+            "text": "greet"
+          },
+          "parameters": {
+            "type": "formal_parameters",
+            "text": "($name)"
+          }
+        }
+      },
+      {
+        "type": "visibility_modifier",
+        "isNamed": true,
+        "startIndex": 67,
+        "endIndex": 73,
+        "startPosition": {
+          "row": 6,
+          "column": 4
+        },
+        "endPosition": {
+          "row": 6,
+          "column": 10
+        },
+        "namedChildCount": 0,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "public",
+        "isNamed": false,
+        "startIndex": 67,
+        "endIndex": 73,
+        "startPosition": {
+          "row": 6,
+          "column": 4
+        },
+        "endPosition": {
+          "row": 6,
+          "column": 10
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "function",
+        "isNamed": false,
+        "startIndex": 74,
+        "endIndex": 82,
+        "startPosition": {
+          "row": 6,
+          "column": 11
+        },
+        "endPosition": {
+          "row": 6,
+          "column": 19
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "name",
+        "isNamed": true,
+        "startIndex": 83,
+        "endIndex": 88,
+        "startPosition": {
+          "row": 6,
+          "column": 20
+        },
+        "endPosition": {
+          "row": 6,
+          "column": 25
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "greet"
+      },
+      {
+        "type": "formal_parameters",
+        "isNamed": true,
+        "startIndex": 88,
+        "endIndex": 95,
+        "startPosition": {
+          "row": 6,
+          "column": 25
+        },
+        "endPosition": {
+          "row": 6,
+          "column": 32
+        },
+        "namedChildCount": 1,
+        "childCount": 3,
+        "text": null
+      },
+      {
+        "type": "(",
+        "isNamed": false,
+        "startIndex": 88,
+        "endIndex": 89,
+        "startPosition": {
+          "row": 6,
+          "column": 25
+        },
+        "endPosition": {
+          "row": 6,
+          "column": 26
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "simple_parameter",
+        "isNamed": true,
+        "startIndex": 89,
+        "endIndex": 94,
+        "startPosition": {
+          "row": 6,
+          "column": 26
+        },
+        "endPosition": {
+          "row": 6,
+          "column": 31
+        },
+        "namedChildCount": 1,
+        "childCount": 1,
+        "text": null,
+        "fields": {
+          "name": {
+            "type": "variable_name",
+            "text": "$name"
+          }
+        }
+      },
+      {
+        "type": "variable_name",
+        "isNamed": true,
+        "startIndex": 89,
+        "endIndex": 94,
+        "startPosition": {
+          "row": 6,
+          "column": 26
+        },
+        "endPosition": {
+          "row": 6,
+          "column": 31
+        },
+        "namedChildCount": 1,
+        "childCount": 2,
+        "text": null
+      },
+      {
+        "type": "$",
+        "isNamed": false,
+        "startIndex": 89,
+        "endIndex": 90,
+        "startPosition": {
+          "row": 6,
+          "column": 26
+        },
+        "endPosition": {
+          "row": 6,
+          "column": 27
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "name",
+        "isNamed": true,
+        "startIndex": 90,
+        "endIndex": 94,
+        "startPosition": {
+          "row": 6,
+          "column": 27
+        },
+        "endPosition": {
+          "row": 6,
+          "column": 31
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "name"
+      },
+      {
+        "type": ")",
+        "isNamed": false,
+        "startIndex": 94,
+        "endIndex": 95,
+        "startPosition": {
+          "row": 6,
+          "column": 31
+        },
+        "endPosition": {
+          "row": 6,
+          "column": 32
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "compound_statement",
+        "isNamed": true,
+        "startIndex": 96,
+        "endIndex": 141,
+        "startPosition": {
+          "row": 6,
+          "column": 33
+        },
+        "endPosition": {
+          "row": 8,
+          "column": 5
+        },
+        "namedChildCount": 1,
+        "childCount": 3,
+        "text": null
+      },
+      {
+        "type": "{",
+        "isNamed": false,
+        "startIndex": 96,
+        "endIndex": 97,
+        "startPosition": {
+          "row": 6,
+          "column": 33
+        },
+        "endPosition": {
+          "row": 6,
+          "column": 34
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "return_statement",
+        "isNamed": true,
+        "startIndex": 106,
+        "endIndex": 135,
+        "startPosition": {
+          "row": 7,
+          "column": 8
+        },
+        "endPosition": {
+          "row": 7,
+          "column": 37
+        },
+        "namedChildCount": 1,
+        "childCount": 3,
+        "text": null
+      },
+      {
+        "type": "return",
+        "isNamed": false,
+        "startIndex": 106,
+        "endIndex": 112,
+        "startPosition": {
+          "row": 7,
+          "column": 8
+        },
+        "endPosition": {
+          "row": 7,
+          "column": 14
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "scoped_call_expression",
+        "isNamed": true,
+        "startIndex": 113,
+        "endIndex": 134,
+        "startPosition": {
+          "row": 7,
+          "column": 15
+        },
+        "endPosition": {
+          "row": 7,
+          "column": 36
+        },
+        "namedChildCount": 3,
+        "childCount": 4,
+        "text": null,
+        "fields": {
+          "name": {
+            "type": "name",
+            "text": "format"
+          }
+        }
+      },
+      {
+        "type": "name",
+        "isNamed": true,
+        "startIndex": 113,
+        "endIndex": 119,
+        "startPosition": {
+          "row": 7,
+          "column": 15
+        },
+        "endPosition": {
+          "row": 7,
+          "column": 21
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "Helper"
+      },
+      {
+        "type": "::",
+        "isNamed": false,
+        "startIndex": 119,
+        "endIndex": 121,
+        "startPosition": {
+          "row": 7,
+          "column": 21
+        },
+        "endPosition": {
+          "row": 7,
+          "column": 23
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "name",
+        "isNamed": true,
+        "startIndex": 121,
+        "endIndex": 127,
+        "startPosition": {
+          "row": 7,
+          "column": 23
+        },
+        "endPosition": {
+          "row": 7,
+          "column": 29
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "format"
+      },
+      {
+        "type": "arguments",
+        "isNamed": true,
+        "startIndex": 127,
+        "endIndex": 134,
+        "startPosition": {
+          "row": 7,
+          "column": 29
+        },
+        "endPosition": {
+          "row": 7,
+          "column": 36
+        },
+        "namedChildCount": 1,
+        "childCount": 3,
+        "text": null
+      },
+      {
+        "type": "(",
+        "isNamed": false,
+        "startIndex": 127,
+        "endIndex": 128,
+        "startPosition": {
+          "row": 7,
+          "column": 29
+        },
+        "endPosition": {
+          "row": 7,
+          "column": 30
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "argument",
+        "isNamed": true,
+        "startIndex": 128,
+        "endIndex": 133,
+        "startPosition": {
+          "row": 7,
+          "column": 30
+        },
+        "endPosition": {
+          "row": 7,
+          "column": 35
+        },
+        "namedChildCount": 1,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "variable_name",
+        "isNamed": true,
+        "startIndex": 128,
+        "endIndex": 133,
+        "startPosition": {
+          "row": 7,
+          "column": 30
+        },
+        "endPosition": {
+          "row": 7,
+          "column": 35
+        },
+        "namedChildCount": 1,
+        "childCount": 2,
+        "text": null
+      },
+      {
+        "type": "$",
+        "isNamed": false,
+        "startIndex": 128,
+        "endIndex": 129,
+        "startPosition": {
+          "row": 7,
+          "column": 30
+        },
+        "endPosition": {
+          "row": 7,
+          "column": 31
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "name",
+        "isNamed": true,
+        "startIndex": 129,
+        "endIndex": 133,
+        "startPosition": {
+          "row": 7,
+          "column": 31
+        },
+        "endPosition": {
+          "row": 7,
+          "column": 35
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "name"
+      },
+      {
+        "type": ")",
+        "isNamed": false,
+        "startIndex": 133,
+        "endIndex": 134,
+        "startPosition": {
+          "row": 7,
+          "column": 35
+        },
+        "endPosition": {
+          "row": 7,
+          "column": 36
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": ";",
+        "isNamed": false,
+        "startIndex": 134,
+        "endIndex": 135,
+        "startPosition": {
+          "row": 7,
+          "column": 36
+        },
+        "endPosition": {
+          "row": 7,
+          "column": 37
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "}",
+        "isNamed": false,
+        "startIndex": 140,
+        "endIndex": 141,
+        "startPosition": {
+          "row": 8,
+          "column": 4
+        },
+        "endPosition": {
+          "row": 8,
+          "column": 5
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "}",
+        "isNamed": false,
+        "startIndex": 142,
+        "endIndex": 143,
+        "startPosition": {
+          "row": 9,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 9,
+          "column": 1
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      }
+    ]
+  },
+  "swift (protocol method + method + init + subscript, explicit return types)": {
+    "hasError": false,
+    "nodes": [
+      {
+        "type": "source_file",
+        "isNamed": true,
+        "startIndex": 1,
+        "endIndex": 372,
+        "startPosition": {
+          "row": 1,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 24,
+          "column": 0
+        },
+        "namedChildCount": 2,
+        "childCount": 2,
+        "text": null
+      },
+      {
+        "type": "protocol_declaration",
+        "isNamed": true,
+        "startIndex": 1,
+        "endIndex": 51,
+        "startPosition": {
+          "row": 1,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 3,
+          "column": 1
+        },
+        "namedChildCount": 2,
+        "childCount": 3,
+        "text": null,
+        "fields": {
+          "body": {
+            "type": "protocol_body",
+            "text": "{\n    func message() -> String\n}"
+          },
+          "name": {
+            "type": "type_identifier",
+            "text": "Greeting"
+          }
+        }
+      },
+      {
+        "type": "protocol",
+        "isNamed": false,
+        "startIndex": 1,
+        "endIndex": 9,
+        "startPosition": {
+          "row": 1,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 1,
+          "column": 8
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "type_identifier",
+        "isNamed": true,
+        "startIndex": 10,
+        "endIndex": 18,
+        "startPosition": {
+          "row": 1,
+          "column": 9
+        },
+        "endPosition": {
+          "row": 1,
+          "column": 17
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "Greeting"
+      },
+      {
+        "type": "protocol_body",
+        "isNamed": true,
+        "startIndex": 19,
+        "endIndex": 51,
+        "startPosition": {
+          "row": 1,
+          "column": 18
+        },
+        "endPosition": {
+          "row": 3,
+          "column": 1
+        },
+        "namedChildCount": 1,
+        "childCount": 3,
+        "text": null
+      },
+      {
+        "type": "{",
+        "isNamed": false,
+        "startIndex": 19,
+        "endIndex": 20,
+        "startPosition": {
+          "row": 1,
+          "column": 18
+        },
+        "endPosition": {
+          "row": 1,
+          "column": 19
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "protocol_function_declaration",
+        "isNamed": true,
+        "startIndex": 25,
+        "endIndex": 49,
+        "startPosition": {
+          "row": 2,
+          "column": 4
+        },
+        "endPosition": {
+          "row": 2,
+          "column": 28
+        },
+        "namedChildCount": 2,
+        "childCount": 6,
+        "text": null,
+        "fields": {
+          "name": {
+            "type": "simple_identifier",
+            "text": "message"
+          },
+          "return_type": {
+            "type": "user_type",
+            "text": "String"
+          }
+        }
+      },
+      {
+        "type": "func",
+        "isNamed": false,
+        "startIndex": 25,
+        "endIndex": 29,
+        "startPosition": {
+          "row": 2,
+          "column": 4
+        },
+        "endPosition": {
+          "row": 2,
+          "column": 8
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "simple_identifier",
+        "isNamed": true,
+        "startIndex": 30,
+        "endIndex": 37,
+        "startPosition": {
+          "row": 2,
+          "column": 9
+        },
+        "endPosition": {
+          "row": 2,
+          "column": 16
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "message"
+      },
+      {
+        "type": "(",
+        "isNamed": false,
+        "startIndex": 37,
+        "endIndex": 38,
+        "startPosition": {
+          "row": 2,
+          "column": 16
+        },
+        "endPosition": {
+          "row": 2,
+          "column": 17
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": ")",
+        "isNamed": false,
+        "startIndex": 38,
+        "endIndex": 39,
+        "startPosition": {
+          "row": 2,
+          "column": 17
+        },
+        "endPosition": {
+          "row": 2,
+          "column": 18
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "->",
+        "isNamed": false,
+        "startIndex": 40,
+        "endIndex": 42,
+        "startPosition": {
+          "row": 2,
+          "column": 19
+        },
+        "endPosition": {
+          "row": 2,
+          "column": 21
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "user_type",
+        "isNamed": true,
+        "startIndex": 43,
+        "endIndex": 49,
+        "startPosition": {
+          "row": 2,
+          "column": 22
+        },
+        "endPosition": {
+          "row": 2,
+          "column": 28
+        },
+        "namedChildCount": 1,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "type_identifier",
+        "isNamed": true,
+        "startIndex": 43,
+        "endIndex": 49,
+        "startPosition": {
+          "row": 2,
+          "column": 22
+        },
+        "endPosition": {
+          "row": 2,
+          "column": 28
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "String"
+      },
+      {
+        "type": "}",
+        "isNamed": false,
+        "startIndex": 50,
+        "endIndex": 51,
+        "startPosition": {
+          "row": 3,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 3,
+          "column": 1
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "class_declaration",
+        "isNamed": true,
+        "startIndex": 53,
+        "endIndex": 371,
+        "startPosition": {
+          "row": 5,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 23,
+          "column": 1
+        },
+        "namedChildCount": 3,
+        "childCount": 5,
+        "text": null,
+        "fields": {
+          "body": {
+            "type": "class_body",
+            "text": "{\n    private let name: String\n\n    init(name: String) {\n        self.name = name\n    }\n\n    func message() -> String {\n        return \"hello \" + name\n    }\n\n    func add(a: Int, b: Int) -> Int {\n        return a + b\n    }\n\n    subscript(index: Int) -> String {\n        return message()\n    }\n}"
+          },
+          "name": {
+            "type": "type_identifier",
+            "text": "Greeter"
+          }
+        }
+      },
+      {
+        "type": "class",
+        "isNamed": false,
+        "startIndex": 53,
+        "endIndex": 58,
+        "startPosition": {
+          "row": 5,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 5,
+          "column": 5
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "type_identifier",
+        "isNamed": true,
+        "startIndex": 59,
+        "endIndex": 66,
+        "startPosition": {
+          "row": 5,
+          "column": 6
+        },
+        "endPosition": {
+          "row": 5,
+          "column": 13
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "Greeter"
+      },
+      {
+        "type": ":",
+        "isNamed": false,
+        "startIndex": 66,
+        "endIndex": 67,
+        "startPosition": {
+          "row": 5,
+          "column": 13
+        },
+        "endPosition": {
+          "row": 5,
+          "column": 14
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "inheritance_specifier",
+        "isNamed": true,
+        "startIndex": 68,
+        "endIndex": 76,
+        "startPosition": {
+          "row": 5,
+          "column": 15
+        },
+        "endPosition": {
+          "row": 5,
+          "column": 23
+        },
+        "namedChildCount": 1,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "user_type",
+        "isNamed": true,
+        "startIndex": 68,
+        "endIndex": 76,
+        "startPosition": {
+          "row": 5,
+          "column": 15
+        },
+        "endPosition": {
+          "row": 5,
+          "column": 23
+        },
+        "namedChildCount": 1,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "type_identifier",
+        "isNamed": true,
+        "startIndex": 68,
+        "endIndex": 76,
+        "startPosition": {
+          "row": 5,
+          "column": 15
+        },
+        "endPosition": {
+          "row": 5,
+          "column": 23
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "Greeting"
+      },
+      {
+        "type": "class_body",
+        "isNamed": true,
+        "startIndex": 77,
+        "endIndex": 371,
+        "startPosition": {
+          "row": 5,
+          "column": 24
+        },
+        "endPosition": {
+          "row": 23,
+          "column": 1
+        },
+        "namedChildCount": 5,
+        "childCount": 7,
+        "text": null
+      },
+      {
+        "type": "{",
+        "isNamed": false,
+        "startIndex": 77,
+        "endIndex": 78,
+        "startPosition": {
+          "row": 5,
+          "column": 24
+        },
+        "endPosition": {
+          "row": 5,
+          "column": 25
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "property_declaration",
+        "isNamed": true,
+        "startIndex": 83,
+        "endIndex": 107,
+        "startPosition": {
+          "row": 6,
+          "column": 4
+        },
+        "endPosition": {
+          "row": 6,
+          "column": 28
+        },
+        "namedChildCount": 4,
+        "childCount": 4,
+        "text": null,
+        "fields": {
+          "name": {
+            "type": "pattern",
+            "text": "name"
+          }
+        }
+      },
+      {
+        "type": "modifiers",
+        "isNamed": true,
+        "startIndex": 83,
+        "endIndex": 90,
+        "startPosition": {
+          "row": 6,
+          "column": 4
+        },
+        "endPosition": {
+          "row": 6,
+          "column": 11
+        },
+        "namedChildCount": 1,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "visibility_modifier",
+        "isNamed": true,
+        "startIndex": 83,
+        "endIndex": 90,
+        "startPosition": {
+          "row": 6,
+          "column": 4
+        },
+        "endPosition": {
+          "row": 6,
+          "column": 11
+        },
+        "namedChildCount": 0,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "private",
+        "isNamed": false,
+        "startIndex": 83,
+        "endIndex": 90,
+        "startPosition": {
+          "row": 6,
+          "column": 4
+        },
+        "endPosition": {
+          "row": 6,
+          "column": 11
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "value_binding_pattern",
+        "isNamed": true,
+        "startIndex": 91,
+        "endIndex": 94,
+        "startPosition": {
+          "row": 6,
+          "column": 12
+        },
+        "endPosition": {
+          "row": 6,
+          "column": 15
+        },
+        "namedChildCount": 0,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "let",
+        "isNamed": false,
+        "startIndex": 91,
+        "endIndex": 94,
+        "startPosition": {
+          "row": 6,
+          "column": 12
+        },
+        "endPosition": {
+          "row": 6,
+          "column": 15
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "pattern",
+        "isNamed": true,
+        "startIndex": 95,
+        "endIndex": 99,
+        "startPosition": {
+          "row": 6,
+          "column": 16
+        },
+        "endPosition": {
+          "row": 6,
+          "column": 20
+        },
+        "namedChildCount": 1,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "simple_identifier",
+        "isNamed": true,
+        "startIndex": 95,
+        "endIndex": 99,
+        "startPosition": {
+          "row": 6,
+          "column": 16
+        },
+        "endPosition": {
+          "row": 6,
+          "column": 20
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "name"
+      },
+      {
+        "type": "type_annotation",
+        "isNamed": true,
+        "startIndex": 99,
+        "endIndex": 107,
+        "startPosition": {
+          "row": 6,
+          "column": 20
+        },
+        "endPosition": {
+          "row": 6,
+          "column": 28
+        },
+        "namedChildCount": 1,
+        "childCount": 2,
+        "text": null,
+        "fields": {
+          "name": {
+            "type": "user_type",
+            "text": "String"
+          }
+        }
+      },
+      {
+        "type": ":",
+        "isNamed": false,
+        "startIndex": 99,
+        "endIndex": 100,
+        "startPosition": {
+          "row": 6,
+          "column": 20
+        },
+        "endPosition": {
+          "row": 6,
+          "column": 21
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "user_type",
+        "isNamed": true,
+        "startIndex": 101,
+        "endIndex": 107,
+        "startPosition": {
+          "row": 6,
+          "column": 22
+        },
+        "endPosition": {
+          "row": 6,
+          "column": 28
+        },
+        "namedChildCount": 1,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "type_identifier",
+        "isNamed": true,
+        "startIndex": 101,
+        "endIndex": 107,
+        "startPosition": {
+          "row": 6,
+          "column": 22
+        },
+        "endPosition": {
+          "row": 6,
+          "column": 28
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "String"
+      },
+      {
+        "type": "init_declaration",
+        "isNamed": true,
+        "startIndex": 113,
+        "endIndex": 164,
+        "startPosition": {
+          "row": 8,
+          "column": 4
+        },
+        "endPosition": {
+          "row": 10,
+          "column": 5
+        },
+        "namedChildCount": 2,
+        "childCount": 5,
+        "text": null,
+        "fields": {
+          "body": {
+            "type": "function_body",
+            "text": "{\n        self.name = name\n    }"
+          },
+          "name": {
+            "type": "init",
+            "text": "init"
+          }
+        }
+      },
+      {
+        "type": "init",
+        "isNamed": false,
+        "startIndex": 113,
+        "endIndex": 117,
+        "startPosition": {
+          "row": 8,
+          "column": 4
+        },
+        "endPosition": {
+          "row": 8,
+          "column": 8
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "(",
+        "isNamed": false,
+        "startIndex": 117,
+        "endIndex": 118,
+        "startPosition": {
+          "row": 8,
+          "column": 8
+        },
+        "endPosition": {
+          "row": 8,
+          "column": 9
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "parameter",
+        "isNamed": true,
+        "startIndex": 118,
+        "endIndex": 130,
+        "startPosition": {
+          "row": 8,
+          "column": 9
+        },
+        "endPosition": {
+          "row": 8,
+          "column": 21
+        },
+        "namedChildCount": 2,
+        "childCount": 3,
+        "text": null,
+        "fields": {
+          "name": {
+            "type": "simple_identifier",
+            "text": "name"
+          }
+        }
+      },
+      {
+        "type": "simple_identifier",
+        "isNamed": true,
+        "startIndex": 118,
+        "endIndex": 122,
+        "startPosition": {
+          "row": 8,
+          "column": 9
+        },
+        "endPosition": {
+          "row": 8,
+          "column": 13
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "name"
+      },
+      {
+        "type": ":",
+        "isNamed": false,
+        "startIndex": 122,
+        "endIndex": 123,
+        "startPosition": {
+          "row": 8,
+          "column": 13
+        },
+        "endPosition": {
+          "row": 8,
+          "column": 14
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "user_type",
+        "isNamed": true,
+        "startIndex": 124,
+        "endIndex": 130,
+        "startPosition": {
+          "row": 8,
+          "column": 15
+        },
+        "endPosition": {
+          "row": 8,
+          "column": 21
+        },
+        "namedChildCount": 1,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "type_identifier",
+        "isNamed": true,
+        "startIndex": 124,
+        "endIndex": 130,
+        "startPosition": {
+          "row": 8,
+          "column": 15
+        },
+        "endPosition": {
+          "row": 8,
+          "column": 21
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "String"
+      },
+      {
+        "type": ")",
+        "isNamed": false,
+        "startIndex": 130,
+        "endIndex": 131,
+        "startPosition": {
+          "row": 8,
+          "column": 21
+        },
+        "endPosition": {
+          "row": 8,
+          "column": 22
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "function_body",
+        "isNamed": true,
+        "startIndex": 132,
+        "endIndex": 164,
+        "startPosition": {
+          "row": 8,
+          "column": 23
+        },
+        "endPosition": {
+          "row": 10,
+          "column": 5
+        },
+        "namedChildCount": 1,
+        "childCount": 3,
+        "text": null
+      },
+      {
+        "type": "{",
+        "isNamed": false,
+        "startIndex": 132,
+        "endIndex": 133,
+        "startPosition": {
+          "row": 8,
+          "column": 23
+        },
+        "endPosition": {
+          "row": 8,
+          "column": 24
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "statements",
+        "isNamed": true,
+        "startIndex": 142,
+        "endIndex": 163,
+        "startPosition": {
+          "row": 9,
+          "column": 8
+        },
+        "endPosition": {
+          "row": 10,
+          "column": 4
+        },
+        "namedChildCount": 1,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "assignment",
+        "isNamed": true,
+        "startIndex": 142,
+        "endIndex": 158,
+        "startPosition": {
+          "row": 9,
+          "column": 8
+        },
+        "endPosition": {
+          "row": 9,
+          "column": 24
+        },
+        "namedChildCount": 2,
+        "childCount": 3,
+        "text": null,
+        "fields": {
+          "operator": {
+            "type": "=",
+            "text": "="
+          }
+        }
+      },
+      {
+        "type": "directly_assignable_expression",
+        "isNamed": true,
+        "startIndex": 142,
+        "endIndex": 151,
+        "startPosition": {
+          "row": 9,
+          "column": 8
+        },
+        "endPosition": {
+          "row": 9,
+          "column": 17
+        },
+        "namedChildCount": 1,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "navigation_expression",
+        "isNamed": true,
+        "startIndex": 142,
+        "endIndex": 151,
+        "startPosition": {
+          "row": 9,
+          "column": 8
+        },
+        "endPosition": {
+          "row": 9,
+          "column": 17
+        },
+        "namedChildCount": 2,
+        "childCount": 2,
+        "text": null
+      },
+      {
+        "type": "self_expression",
+        "isNamed": true,
+        "startIndex": 142,
+        "endIndex": 146,
+        "startPosition": {
+          "row": 9,
+          "column": 8
+        },
+        "endPosition": {
+          "row": 9,
+          "column": 12
+        },
+        "namedChildCount": 0,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "self",
+        "isNamed": false,
+        "startIndex": 142,
+        "endIndex": 146,
+        "startPosition": {
+          "row": 9,
+          "column": 8
+        },
+        "endPosition": {
+          "row": 9,
+          "column": 12
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "navigation_suffix",
+        "isNamed": true,
+        "startIndex": 146,
+        "endIndex": 151,
+        "startPosition": {
+          "row": 9,
+          "column": 12
+        },
+        "endPosition": {
+          "row": 9,
+          "column": 17
+        },
+        "namedChildCount": 1,
+        "childCount": 2,
+        "text": null
+      },
+      {
+        "type": ".",
+        "isNamed": false,
+        "startIndex": 146,
+        "endIndex": 147,
+        "startPosition": {
+          "row": 9,
+          "column": 12
+        },
+        "endPosition": {
+          "row": 9,
+          "column": 13
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "simple_identifier",
+        "isNamed": true,
+        "startIndex": 147,
+        "endIndex": 151,
+        "startPosition": {
+          "row": 9,
+          "column": 13
+        },
+        "endPosition": {
+          "row": 9,
+          "column": 17
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "name"
+      },
+      {
+        "type": "=",
+        "isNamed": false,
+        "startIndex": 152,
+        "endIndex": 153,
+        "startPosition": {
+          "row": 9,
+          "column": 18
+        },
+        "endPosition": {
+          "row": 9,
+          "column": 19
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "simple_identifier",
+        "isNamed": true,
+        "startIndex": 154,
+        "endIndex": 158,
+        "startPosition": {
+          "row": 9,
+          "column": 20
+        },
+        "endPosition": {
+          "row": 9,
+          "column": 24
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "name"
+      },
+      {
+        "type": "}",
+        "isNamed": false,
+        "startIndex": 163,
+        "endIndex": 164,
+        "startPosition": {
+          "row": 10,
+          "column": 4
+        },
+        "endPosition": {
+          "row": 10,
+          "column": 5
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "function_declaration",
+        "isNamed": true,
+        "startIndex": 170,
+        "endIndex": 233,
+        "startPosition": {
+          "row": 12,
+          "column": 4
+        },
+        "endPosition": {
+          "row": 14,
+          "column": 5
+        },
+        "namedChildCount": 3,
+        "childCount": 7,
+        "text": null,
+        "fields": {
+          "body": {
+            "type": "function_body",
+            "text": "{\n        return \"hello \" + name\n    }"
+          },
+          "name": {
+            "type": "simple_identifier",
+            "text": "message"
+          },
+          "return_type": {
+            "type": "user_type",
+            "text": "String"
+          }
+        }
+      },
+      {
+        "type": "func",
+        "isNamed": false,
+        "startIndex": 170,
+        "endIndex": 174,
+        "startPosition": {
+          "row": 12,
+          "column": 4
+        },
+        "endPosition": {
+          "row": 12,
+          "column": 8
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "simple_identifier",
+        "isNamed": true,
+        "startIndex": 175,
+        "endIndex": 182,
+        "startPosition": {
+          "row": 12,
+          "column": 9
+        },
+        "endPosition": {
+          "row": 12,
+          "column": 16
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "message"
+      },
+      {
+        "type": "(",
+        "isNamed": false,
+        "startIndex": 182,
+        "endIndex": 183,
+        "startPosition": {
+          "row": 12,
+          "column": 16
+        },
+        "endPosition": {
+          "row": 12,
+          "column": 17
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": ")",
+        "isNamed": false,
+        "startIndex": 183,
+        "endIndex": 184,
+        "startPosition": {
+          "row": 12,
+          "column": 17
+        },
+        "endPosition": {
+          "row": 12,
+          "column": 18
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "->",
+        "isNamed": false,
+        "startIndex": 185,
+        "endIndex": 187,
+        "startPosition": {
+          "row": 12,
+          "column": 19
+        },
+        "endPosition": {
+          "row": 12,
+          "column": 21
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "user_type",
+        "isNamed": true,
+        "startIndex": 188,
+        "endIndex": 194,
+        "startPosition": {
+          "row": 12,
+          "column": 22
+        },
+        "endPosition": {
+          "row": 12,
+          "column": 28
+        },
+        "namedChildCount": 1,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "type_identifier",
+        "isNamed": true,
+        "startIndex": 188,
+        "endIndex": 194,
+        "startPosition": {
+          "row": 12,
+          "column": 22
+        },
+        "endPosition": {
+          "row": 12,
+          "column": 28
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "String"
+      },
+      {
+        "type": "function_body",
+        "isNamed": true,
+        "startIndex": 195,
+        "endIndex": 233,
+        "startPosition": {
+          "row": 12,
+          "column": 29
+        },
+        "endPosition": {
+          "row": 14,
+          "column": 5
+        },
+        "namedChildCount": 1,
+        "childCount": 3,
+        "text": null
+      },
+      {
+        "type": "{",
+        "isNamed": false,
+        "startIndex": 195,
+        "endIndex": 196,
+        "startPosition": {
+          "row": 12,
+          "column": 29
+        },
+        "endPosition": {
+          "row": 12,
+          "column": 30
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "statements",
+        "isNamed": true,
+        "startIndex": 205,
+        "endIndex": 232,
+        "startPosition": {
+          "row": 13,
+          "column": 8
+        },
+        "endPosition": {
+          "row": 14,
+          "column": 4
+        },
+        "namedChildCount": 1,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "control_transfer_statement",
+        "isNamed": true,
+        "startIndex": 205,
+        "endIndex": 227,
+        "startPosition": {
+          "row": 13,
+          "column": 8
+        },
+        "endPosition": {
+          "row": 13,
+          "column": 30
+        },
+        "namedChildCount": 1,
+        "childCount": 2,
+        "text": null
+      },
+      {
+        "type": "return",
+        "isNamed": false,
+        "startIndex": 205,
+        "endIndex": 211,
+        "startPosition": {
+          "row": 13,
+          "column": 8
+        },
+        "endPosition": {
+          "row": 13,
+          "column": 14
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "additive_expression",
+        "isNamed": true,
+        "startIndex": 212,
+        "endIndex": 227,
+        "startPosition": {
+          "row": 13,
+          "column": 15
+        },
+        "endPosition": {
+          "row": 13,
+          "column": 30
+        },
+        "namedChildCount": 2,
+        "childCount": 3,
+        "text": null
+      },
+      {
+        "type": "line_string_literal",
+        "isNamed": true,
+        "startIndex": 212,
+        "endIndex": 220,
+        "startPosition": {
+          "row": 13,
+          "column": 15
+        },
+        "endPosition": {
+          "row": 13,
+          "column": 23
+        },
+        "namedChildCount": 1,
+        "childCount": 3,
+        "text": null
+      },
+      {
+        "type": "\"",
+        "isNamed": false,
+        "startIndex": 212,
+        "endIndex": 213,
+        "startPosition": {
+          "row": 13,
+          "column": 15
+        },
+        "endPosition": {
+          "row": 13,
+          "column": 16
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "line_str_text",
+        "isNamed": true,
+        "startIndex": 213,
+        "endIndex": 219,
+        "startPosition": {
+          "row": 13,
+          "column": 16
+        },
+        "endPosition": {
+          "row": 13,
+          "column": 22
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "hello "
+      },
+      {
+        "type": "\"",
+        "isNamed": false,
+        "startIndex": 219,
+        "endIndex": 220,
+        "startPosition": {
+          "row": 13,
+          "column": 22
+        },
+        "endPosition": {
+          "row": 13,
+          "column": 23
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "+",
+        "isNamed": false,
+        "startIndex": 221,
+        "endIndex": 222,
+        "startPosition": {
+          "row": 13,
+          "column": 24
+        },
+        "endPosition": {
+          "row": 13,
+          "column": 25
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "simple_identifier",
+        "isNamed": true,
+        "startIndex": 223,
+        "endIndex": 227,
+        "startPosition": {
+          "row": 13,
+          "column": 26
+        },
+        "endPosition": {
+          "row": 13,
+          "column": 30
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "name"
+      },
+      {
+        "type": "}",
+        "isNamed": false,
+        "startIndex": 232,
+        "endIndex": 233,
+        "startPosition": {
+          "row": 14,
+          "column": 4
+        },
+        "endPosition": {
+          "row": 14,
+          "column": 5
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "function_declaration",
+        "isNamed": true,
+        "startIndex": 239,
+        "endIndex": 299,
+        "startPosition": {
+          "row": 16,
+          "column": 4
+        },
+        "endPosition": {
+          "row": 18,
+          "column": 5
+        },
+        "namedChildCount": 5,
+        "childCount": 10,
+        "text": null,
+        "fields": {
+          "body": {
+            "type": "function_body",
+            "text": "{\n        return a + b\n    }"
+          },
+          "name": {
+            "type": "simple_identifier",
+            "text": "add"
+          },
+          "return_type": {
+            "type": "user_type",
+            "text": "Int"
+          }
+        }
+      },
+      {
+        "type": "func",
+        "isNamed": false,
+        "startIndex": 239,
+        "endIndex": 243,
+        "startPosition": {
+          "row": 16,
+          "column": 4
+        },
+        "endPosition": {
+          "row": 16,
+          "column": 8
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "simple_identifier",
+        "isNamed": true,
+        "startIndex": 244,
+        "endIndex": 247,
+        "startPosition": {
+          "row": 16,
+          "column": 9
+        },
+        "endPosition": {
+          "row": 16,
+          "column": 12
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "add"
+      },
+      {
+        "type": "(",
+        "isNamed": false,
+        "startIndex": 247,
+        "endIndex": 248,
+        "startPosition": {
+          "row": 16,
+          "column": 12
+        },
+        "endPosition": {
+          "row": 16,
+          "column": 13
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "parameter",
+        "isNamed": true,
+        "startIndex": 248,
+        "endIndex": 254,
+        "startPosition": {
+          "row": 16,
+          "column": 13
+        },
+        "endPosition": {
+          "row": 16,
+          "column": 19
+        },
+        "namedChildCount": 2,
+        "childCount": 3,
+        "text": null,
+        "fields": {
+          "name": {
+            "type": "simple_identifier",
+            "text": "a"
+          }
+        }
+      },
+      {
+        "type": "simple_identifier",
+        "isNamed": true,
+        "startIndex": 248,
+        "endIndex": 249,
+        "startPosition": {
+          "row": 16,
+          "column": 13
+        },
+        "endPosition": {
+          "row": 16,
+          "column": 14
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "a"
+      },
+      {
+        "type": ":",
+        "isNamed": false,
+        "startIndex": 249,
+        "endIndex": 250,
+        "startPosition": {
+          "row": 16,
+          "column": 14
+        },
+        "endPosition": {
+          "row": 16,
+          "column": 15
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "user_type",
+        "isNamed": true,
+        "startIndex": 251,
+        "endIndex": 254,
+        "startPosition": {
+          "row": 16,
+          "column": 16
+        },
+        "endPosition": {
+          "row": 16,
+          "column": 19
+        },
+        "namedChildCount": 1,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "type_identifier",
+        "isNamed": true,
+        "startIndex": 251,
+        "endIndex": 254,
+        "startPosition": {
+          "row": 16,
+          "column": 16
+        },
+        "endPosition": {
+          "row": 16,
+          "column": 19
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "Int"
+      },
+      {
+        "type": ",",
+        "isNamed": false,
+        "startIndex": 254,
+        "endIndex": 255,
+        "startPosition": {
+          "row": 16,
+          "column": 19
+        },
+        "endPosition": {
+          "row": 16,
+          "column": 20
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "parameter",
+        "isNamed": true,
+        "startIndex": 256,
+        "endIndex": 262,
+        "startPosition": {
+          "row": 16,
+          "column": 21
+        },
+        "endPosition": {
+          "row": 16,
+          "column": 27
+        },
+        "namedChildCount": 2,
+        "childCount": 3,
+        "text": null,
+        "fields": {
+          "name": {
+            "type": "simple_identifier",
+            "text": "b"
+          }
+        }
+      },
+      {
+        "type": "simple_identifier",
+        "isNamed": true,
+        "startIndex": 256,
+        "endIndex": 257,
+        "startPosition": {
+          "row": 16,
+          "column": 21
+        },
+        "endPosition": {
+          "row": 16,
+          "column": 22
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "b"
+      },
+      {
+        "type": ":",
+        "isNamed": false,
+        "startIndex": 257,
+        "endIndex": 258,
+        "startPosition": {
+          "row": 16,
+          "column": 22
+        },
+        "endPosition": {
+          "row": 16,
+          "column": 23
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "user_type",
+        "isNamed": true,
+        "startIndex": 259,
+        "endIndex": 262,
+        "startPosition": {
+          "row": 16,
+          "column": 24
+        },
+        "endPosition": {
+          "row": 16,
+          "column": 27
+        },
+        "namedChildCount": 1,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "type_identifier",
+        "isNamed": true,
+        "startIndex": 259,
+        "endIndex": 262,
+        "startPosition": {
+          "row": 16,
+          "column": 24
+        },
+        "endPosition": {
+          "row": 16,
+          "column": 27
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "Int"
+      },
+      {
+        "type": ")",
+        "isNamed": false,
+        "startIndex": 262,
+        "endIndex": 263,
+        "startPosition": {
+          "row": 16,
+          "column": 27
+        },
+        "endPosition": {
+          "row": 16,
+          "column": 28
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "->",
+        "isNamed": false,
+        "startIndex": 264,
+        "endIndex": 266,
+        "startPosition": {
+          "row": 16,
+          "column": 29
+        },
+        "endPosition": {
+          "row": 16,
+          "column": 31
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "user_type",
+        "isNamed": true,
+        "startIndex": 267,
+        "endIndex": 270,
+        "startPosition": {
+          "row": 16,
+          "column": 32
+        },
+        "endPosition": {
+          "row": 16,
+          "column": 35
+        },
+        "namedChildCount": 1,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "type_identifier",
+        "isNamed": true,
+        "startIndex": 267,
+        "endIndex": 270,
+        "startPosition": {
+          "row": 16,
+          "column": 32
+        },
+        "endPosition": {
+          "row": 16,
+          "column": 35
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "Int"
+      },
+      {
+        "type": "function_body",
+        "isNamed": true,
+        "startIndex": 271,
+        "endIndex": 299,
+        "startPosition": {
+          "row": 16,
+          "column": 36
+        },
+        "endPosition": {
+          "row": 18,
+          "column": 5
+        },
+        "namedChildCount": 1,
+        "childCount": 3,
+        "text": null
+      },
+      {
+        "type": "{",
+        "isNamed": false,
+        "startIndex": 271,
+        "endIndex": 272,
+        "startPosition": {
+          "row": 16,
+          "column": 36
+        },
+        "endPosition": {
+          "row": 16,
+          "column": 37
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "statements",
+        "isNamed": true,
+        "startIndex": 281,
+        "endIndex": 298,
+        "startPosition": {
+          "row": 17,
+          "column": 8
+        },
+        "endPosition": {
+          "row": 18,
+          "column": 4
+        },
+        "namedChildCount": 1,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "control_transfer_statement",
+        "isNamed": true,
+        "startIndex": 281,
+        "endIndex": 293,
+        "startPosition": {
+          "row": 17,
+          "column": 8
+        },
+        "endPosition": {
+          "row": 17,
+          "column": 20
+        },
+        "namedChildCount": 1,
+        "childCount": 2,
+        "text": null
+      },
+      {
+        "type": "return",
+        "isNamed": false,
+        "startIndex": 281,
+        "endIndex": 287,
+        "startPosition": {
+          "row": 17,
+          "column": 8
+        },
+        "endPosition": {
+          "row": 17,
+          "column": 14
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "additive_expression",
+        "isNamed": true,
+        "startIndex": 288,
+        "endIndex": 293,
+        "startPosition": {
+          "row": 17,
+          "column": 15
+        },
+        "endPosition": {
+          "row": 17,
+          "column": 20
+        },
+        "namedChildCount": 2,
+        "childCount": 3,
+        "text": null
+      },
+      {
+        "type": "simple_identifier",
+        "isNamed": true,
+        "startIndex": 288,
+        "endIndex": 289,
+        "startPosition": {
+          "row": 17,
+          "column": 15
+        },
+        "endPosition": {
+          "row": 17,
+          "column": 16
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "a"
+      },
+      {
+        "type": "+",
+        "isNamed": false,
+        "startIndex": 290,
+        "endIndex": 291,
+        "startPosition": {
+          "row": 17,
+          "column": 17
+        },
+        "endPosition": {
+          "row": 17,
+          "column": 18
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "simple_identifier",
+        "isNamed": true,
+        "startIndex": 292,
+        "endIndex": 293,
+        "startPosition": {
+          "row": 17,
+          "column": 19
+        },
+        "endPosition": {
+          "row": 17,
+          "column": 20
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "b"
+      },
+      {
+        "type": "}",
+        "isNamed": false,
+        "startIndex": 298,
+        "endIndex": 299,
+        "startPosition": {
+          "row": 18,
+          "column": 4
+        },
+        "endPosition": {
+          "row": 18,
+          "column": 5
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "subscript_declaration",
+        "isNamed": true,
+        "startIndex": 305,
+        "endIndex": 369,
+        "startPosition": {
+          "row": 20,
+          "column": 4
+        },
+        "endPosition": {
+          "row": 22,
+          "column": 5
+        },
+        "namedChildCount": 3,
+        "childCount": 7,
+        "text": null,
+        "fields": {
+          "name": {
+            "type": "user_type",
+            "text": "String"
+          },
+          "return_type": {
+            "type": "user_type",
+            "text": "String"
+          }
+        }
+      },
+      {
+        "type": "subscript",
+        "isNamed": false,
+        "startIndex": 305,
+        "endIndex": 314,
+        "startPosition": {
+          "row": 20,
+          "column": 4
+        },
+        "endPosition": {
+          "row": 20,
+          "column": 13
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "(",
+        "isNamed": false,
+        "startIndex": 314,
+        "endIndex": 315,
+        "startPosition": {
+          "row": 20,
+          "column": 13
+        },
+        "endPosition": {
+          "row": 20,
+          "column": 14
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "parameter",
+        "isNamed": true,
+        "startIndex": 315,
+        "endIndex": 325,
+        "startPosition": {
+          "row": 20,
+          "column": 14
+        },
+        "endPosition": {
+          "row": 20,
+          "column": 24
+        },
+        "namedChildCount": 2,
+        "childCount": 3,
+        "text": null,
+        "fields": {
+          "name": {
+            "type": "simple_identifier",
+            "text": "index"
+          }
+        }
+      },
+      {
+        "type": "simple_identifier",
+        "isNamed": true,
+        "startIndex": 315,
+        "endIndex": 320,
+        "startPosition": {
+          "row": 20,
+          "column": 14
+        },
+        "endPosition": {
+          "row": 20,
+          "column": 19
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "index"
+      },
+      {
+        "type": ":",
+        "isNamed": false,
+        "startIndex": 320,
+        "endIndex": 321,
+        "startPosition": {
+          "row": 20,
+          "column": 19
+        },
+        "endPosition": {
+          "row": 20,
+          "column": 20
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "user_type",
+        "isNamed": true,
+        "startIndex": 322,
+        "endIndex": 325,
+        "startPosition": {
+          "row": 20,
+          "column": 21
+        },
+        "endPosition": {
+          "row": 20,
+          "column": 24
+        },
+        "namedChildCount": 1,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "type_identifier",
+        "isNamed": true,
+        "startIndex": 322,
+        "endIndex": 325,
+        "startPosition": {
+          "row": 20,
+          "column": 21
+        },
+        "endPosition": {
+          "row": 20,
+          "column": 24
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "Int"
+      },
+      {
+        "type": ")",
+        "isNamed": false,
+        "startIndex": 325,
+        "endIndex": 326,
+        "startPosition": {
+          "row": 20,
+          "column": 24
+        },
+        "endPosition": {
+          "row": 20,
+          "column": 25
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "->",
+        "isNamed": false,
+        "startIndex": 327,
+        "endIndex": 329,
+        "startPosition": {
+          "row": 20,
+          "column": 26
+        },
+        "endPosition": {
+          "row": 20,
+          "column": 28
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "user_type",
+        "isNamed": true,
+        "startIndex": 330,
+        "endIndex": 336,
+        "startPosition": {
+          "row": 20,
+          "column": 29
+        },
+        "endPosition": {
+          "row": 20,
+          "column": 35
+        },
+        "namedChildCount": 1,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "type_identifier",
+        "isNamed": true,
+        "startIndex": 330,
+        "endIndex": 336,
+        "startPosition": {
+          "row": 20,
+          "column": 29
+        },
+        "endPosition": {
+          "row": 20,
+          "column": 35
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "String"
+      },
+      {
+        "type": "computed_property",
+        "isNamed": true,
+        "startIndex": 337,
+        "endIndex": 369,
+        "startPosition": {
+          "row": 20,
+          "column": 36
+        },
+        "endPosition": {
+          "row": 22,
+          "column": 5
+        },
+        "namedChildCount": 1,
+        "childCount": 3,
+        "text": null
+      },
+      {
+        "type": "{",
+        "isNamed": false,
+        "startIndex": 337,
+        "endIndex": 338,
+        "startPosition": {
+          "row": 20,
+          "column": 36
+        },
+        "endPosition": {
+          "row": 20,
+          "column": 37
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "statements",
+        "isNamed": true,
+        "startIndex": 347,
+        "endIndex": 368,
+        "startPosition": {
+          "row": 21,
+          "column": 8
+        },
+        "endPosition": {
+          "row": 22,
+          "column": 4
+        },
+        "namedChildCount": 1,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "control_transfer_statement",
+        "isNamed": true,
+        "startIndex": 347,
+        "endIndex": 363,
+        "startPosition": {
+          "row": 21,
+          "column": 8
+        },
+        "endPosition": {
+          "row": 21,
+          "column": 24
+        },
+        "namedChildCount": 1,
+        "childCount": 2,
+        "text": null
+      },
+      {
+        "type": "return",
+        "isNamed": false,
+        "startIndex": 347,
+        "endIndex": 353,
+        "startPosition": {
+          "row": 21,
+          "column": 8
+        },
+        "endPosition": {
+          "row": 21,
+          "column": 14
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "call_expression",
+        "isNamed": true,
+        "startIndex": 354,
+        "endIndex": 363,
+        "startPosition": {
+          "row": 21,
+          "column": 15
+        },
+        "endPosition": {
+          "row": 21,
+          "column": 24
+        },
+        "namedChildCount": 2,
+        "childCount": 2,
+        "text": null
+      },
+      {
+        "type": "simple_identifier",
+        "isNamed": true,
+        "startIndex": 354,
+        "endIndex": 361,
+        "startPosition": {
+          "row": 21,
+          "column": 15
+        },
+        "endPosition": {
+          "row": 21,
+          "column": 22
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "message"
+      },
+      {
+        "type": "call_suffix",
+        "isNamed": true,
+        "startIndex": 361,
+        "endIndex": 363,
+        "startPosition": {
+          "row": 21,
+          "column": 22
+        },
+        "endPosition": {
+          "row": 21,
+          "column": 24
+        },
+        "namedChildCount": 1,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "value_arguments",
+        "isNamed": true,
+        "startIndex": 361,
+        "endIndex": 363,
+        "startPosition": {
+          "row": 21,
+          "column": 22
+        },
+        "endPosition": {
+          "row": 21,
+          "column": 24
+        },
+        "namedChildCount": 0,
+        "childCount": 2,
+        "text": null
+      },
+      {
+        "type": "(",
+        "isNamed": false,
+        "startIndex": 361,
+        "endIndex": 362,
+        "startPosition": {
+          "row": 21,
+          "column": 22
+        },
+        "endPosition": {
+          "row": 21,
+          "column": 23
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": ")",
+        "isNamed": false,
+        "startIndex": 362,
+        "endIndex": 363,
+        "startPosition": {
+          "row": 21,
+          "column": 23
+        },
+        "endPosition": {
+          "row": 21,
+          "column": 24
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "}",
+        "isNamed": false,
+        "startIndex": 368,
+        "endIndex": 369,
+        "startPosition": {
+          "row": 22,
+          "column": 4
+        },
+        "endPosition": {
+          "row": 22,
+          "column": 5
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "}",
+        "isNamed": false,
+        "startIndex": 370,
+        "endIndex": 371,
+        "startPosition": {
+          "row": 23,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 23,
+          "column": 1
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      }
+    ]
+  },
+  "non-ascii (accents + emoji)": {
+    "hasError": false,
+    "nodes": [
+      {
+        "type": "program",
+        "isNamed": true,
+        "startIndex": 0,
+        "endIndex": 24,
+        "startPosition": {
+          "row": 0,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 1,
+          "column": 0
+        },
+        "namedChildCount": 1,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "lexical_declaration",
+        "isNamed": true,
+        "startIndex": 0,
+        "endIndex": 23,
+        "startPosition": {
+          "row": 0,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 0,
+          "column": 23
+        },
+        "namedChildCount": 1,
+        "childCount": 3,
+        "text": null
+      },
+      {
+        "type": "const",
+        "isNamed": false,
+        "startIndex": 0,
+        "endIndex": 5,
+        "startPosition": {
+          "row": 0,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 0,
+          "column": 5
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "variable_declarator",
+        "isNamed": true,
+        "startIndex": 6,
+        "endIndex": 22,
+        "startPosition": {
+          "row": 0,
+          "column": 6
+        },
+        "endPosition": {
+          "row": 0,
+          "column": 22
+        },
+        "namedChildCount": 2,
+        "childCount": 3,
+        "text": null,
+        "fields": {
+          "name": {
+            "type": "identifier",
+            "text": "café"
+          }
+        }
+      },
+      {
+        "type": "identifier",
+        "isNamed": true,
+        "startIndex": 6,
+        "endIndex": 10,
+        "startPosition": {
+          "row": 0,
+          "column": 6
+        },
+        "endPosition": {
+          "row": 0,
+          "column": 10
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "café"
+      },
+      {
+        "type": "=",
+        "isNamed": false,
+        "startIndex": 11,
+        "endIndex": 12,
+        "startPosition": {
+          "row": 0,
+          "column": 11
+        },
+        "endPosition": {
+          "row": 0,
+          "column": 12
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "string",
+        "isNamed": true,
+        "startIndex": 13,
+        "endIndex": 22,
+        "startPosition": {
+          "row": 0,
+          "column": 13
+        },
+        "endPosition": {
+          "row": 0,
+          "column": 22
+        },
+        "namedChildCount": 1,
+        "childCount": 3,
+        "text": null
+      },
+      {
+        "type": "\"",
+        "isNamed": false,
+        "startIndex": 13,
+        "endIndex": 14,
+        "startPosition": {
+          "row": 0,
+          "column": 13
+        },
+        "endPosition": {
+          "row": 0,
+          "column": 14
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "string_fragment",
+        "isNamed": true,
+        "startIndex": 14,
+        "endIndex": 21,
+        "startPosition": {
+          "row": 0,
+          "column": 14
+        },
+        "endPosition": {
+          "row": 0,
+          "column": 21
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "🎉world"
+      },
+      {
+        "type": "\"",
+        "isNamed": false,
+        "startIndex": 21,
+        "endIndex": 22,
+        "startPosition": {
+          "row": 0,
+          "column": 21
+        },
+        "endPosition": {
+          "row": 0,
+          "column": 22
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": ";",
+        "isNamed": false,
+        "startIndex": 22,
+        "endIndex": 23,
+        "startPosition": {
+          "row": 0,
+          "column": 22
+        },
+        "endPosition": {
+          "row": 0,
+          "column": 23
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      }
+    ]
+  },
+  "CRLF line endings": {
+    "hasError": false,
+    "nodes": [
+      {
+        "type": "program",
+        "isNamed": true,
+        "startIndex": 0,
+        "endIndex": 34,
+        "startPosition": {
+          "row": 0,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 3,
+          "column": 0
+        },
+        "namedChildCount": 1,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "function_declaration",
+        "isNamed": true,
+        "startIndex": 0,
+        "endIndex": 32,
+        "startPosition": {
+          "row": 0,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 2,
+          "column": 1
+        },
+        "namedChildCount": 3,
+        "childCount": 4,
+        "text": null,
+        "fields": {
+          "body": {
+            "type": "statement_block",
+            "text": "{\r\n  return 1;\r\n}"
+          },
+          "name": {
+            "type": "identifier",
+            "text": "foo"
+          },
+          "parameters": {
+            "type": "formal_parameters",
+            "text": "()"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "isNamed": false,
+        "startIndex": 0,
+        "endIndex": 8,
+        "startPosition": {
+          "row": 0,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 0,
+          "column": 8
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "identifier",
+        "isNamed": true,
+        "startIndex": 9,
+        "endIndex": 12,
+        "startPosition": {
+          "row": 0,
+          "column": 9
+        },
+        "endPosition": {
+          "row": 0,
+          "column": 12
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "foo"
+      },
+      {
+        "type": "formal_parameters",
+        "isNamed": true,
+        "startIndex": 12,
+        "endIndex": 14,
+        "startPosition": {
+          "row": 0,
+          "column": 12
+        },
+        "endPosition": {
+          "row": 0,
+          "column": 14
+        },
+        "namedChildCount": 0,
+        "childCount": 2,
+        "text": null
+      },
+      {
+        "type": "(",
+        "isNamed": false,
+        "startIndex": 12,
+        "endIndex": 13,
+        "startPosition": {
+          "row": 0,
+          "column": 12
+        },
+        "endPosition": {
+          "row": 0,
+          "column": 13
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": ")",
+        "isNamed": false,
+        "startIndex": 13,
+        "endIndex": 14,
+        "startPosition": {
+          "row": 0,
+          "column": 13
+        },
+        "endPosition": {
+          "row": 0,
+          "column": 14
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "statement_block",
+        "isNamed": true,
+        "startIndex": 15,
+        "endIndex": 32,
+        "startPosition": {
+          "row": 0,
+          "column": 15
+        },
+        "endPosition": {
+          "row": 2,
+          "column": 1
+        },
+        "namedChildCount": 1,
+        "childCount": 3,
+        "text": null
+      },
+      {
+        "type": "{",
+        "isNamed": false,
+        "startIndex": 15,
+        "endIndex": 16,
+        "startPosition": {
+          "row": 0,
+          "column": 15
+        },
+        "endPosition": {
+          "row": 0,
+          "column": 16
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "return_statement",
+        "isNamed": true,
+        "startIndex": 20,
+        "endIndex": 29,
+        "startPosition": {
+          "row": 1,
+          "column": 2
+        },
+        "endPosition": {
+          "row": 1,
+          "column": 11
+        },
+        "namedChildCount": 1,
+        "childCount": 3,
+        "text": null
+      },
+      {
+        "type": "return",
+        "isNamed": false,
+        "startIndex": 20,
+        "endIndex": 26,
+        "startPosition": {
+          "row": 1,
+          "column": 2
+        },
+        "endPosition": {
+          "row": 1,
+          "column": 8
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "number",
+        "isNamed": true,
+        "startIndex": 27,
+        "endIndex": 28,
+        "startPosition": {
+          "row": 1,
+          "column": 9
+        },
+        "endPosition": {
+          "row": 1,
+          "column": 10
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "1"
+      },
+      {
+        "type": ";",
+        "isNamed": false,
+        "startIndex": 28,
+        "endIndex": 29,
+        "startPosition": {
+          "row": 1,
+          "column": 10
+        },
+        "endPosition": {
+          "row": 1,
+          "column": 11
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "}",
+        "isNamed": false,
+        "startIndex": 31,
+        "endIndex": 32,
+        "startPosition": {
+          "row": 2,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 2,
+          "column": 1
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      }
+    ]
+  },
+  "empty file": {
+    "hasError": false,
+    "nodes": [
+      {
+        "type": "program",
+        "isNamed": true,
+        "startIndex": 0,
+        "endIndex": 0,
+        "startPosition": {
+          "row": 0,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 0,
+          "column": 0
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": ""
+      }
+    ]
+  },
+  "syntax error": {
+    "hasError": true,
+    "nodes": [
+      {
+        "type": "program",
+        "isNamed": true,
+        "startIndex": 0,
+        "endIndex": 13,
+        "startPosition": {
+          "row": 0,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 0,
+          "column": 13
+        },
+        "namedChildCount": 1,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "ERROR",
+        "isNamed": true,
+        "startIndex": 0,
+        "endIndex": 13,
+        "startPosition": {
+          "row": 0,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 0,
+          "column": 13
+        },
+        "namedChildCount": 1,
+        "childCount": 3,
+        "text": null
+      },
+      {
+        "type": "function",
+        "isNamed": false,
+        "startIndex": 0,
+        "endIndex": 8,
+        "startPosition": {
+          "row": 0,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 0,
+          "column": 8
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "identifier",
+        "isNamed": true,
+        "startIndex": 9,
+        "endIndex": 12,
+        "startPosition": {
+          "row": 0,
+          "column": 9
+        },
+        "endPosition": {
+          "row": 0,
+          "column": 12
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "foo"
+      },
+      {
+        "type": "(",
+        "isNamed": false,
+        "startIndex": 12,
+        "endIndex": 13,
+        "startPosition": {
+          "row": 0,
+          "column": 12
+        },
+        "endPosition": {
+          "row": 0,
+          "column": 13
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      }
+    ]
+  },
+  "isMissing (unclosed Go parameter list)": {
+    "hasError": true,
+    "nodes": [
+      {
+        "type": "source_file",
+        "isNamed": true,
+        "startIndex": 0,
+        "endIndex": 9,
+        "startPosition": {
+          "row": 0,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 0,
+          "column": 9
+        },
+        "namedChildCount": 1,
+        "childCount": 1,
+        "text": null
+      },
+      {
+        "type": "function_declaration",
+        "isNamed": true,
+        "startIndex": 0,
+        "endIndex": 9,
+        "startPosition": {
+          "row": 0,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 0,
+          "column": 9
+        },
+        "namedChildCount": 2,
+        "childCount": 3,
+        "text": null,
+        "fields": {
+          "name": {
+            "type": "identifier",
+            "text": "foo"
+          },
+          "parameters": {
+            "type": "parameter_list",
+            "text": "("
+          }
+        }
+      },
+      {
+        "type": "func",
+        "isNamed": false,
+        "startIndex": 0,
+        "endIndex": 4,
+        "startPosition": {
+          "row": 0,
+          "column": 0
+        },
+        "endPosition": {
+          "row": 0,
+          "column": 4
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": "identifier",
+        "isNamed": true,
+        "startIndex": 5,
+        "endIndex": 8,
+        "startPosition": {
+          "row": 0,
+          "column": 5
+        },
+        "endPosition": {
+          "row": 0,
+          "column": 8
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": "foo"
+      },
+      {
+        "type": "parameter_list",
+        "isNamed": true,
+        "startIndex": 8,
+        "endIndex": 9,
+        "startPosition": {
+          "row": 0,
+          "column": 8
+        },
+        "endPosition": {
+          "row": 0,
+          "column": 9
+        },
+        "namedChildCount": 0,
+        "childCount": 2,
+        "text": null
+      },
+      {
+        "type": "(",
+        "isNamed": false,
+        "startIndex": 8,
+        "endIndex": 9,
+        "startPosition": {
+          "row": 0,
+          "column": 8
+        },
+        "endPosition": {
+          "row": 0,
+          "column": 9
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      },
+      {
+        "type": ")",
+        "isNamed": false,
+        "startIndex": 9,
+        "endIndex": 9,
+        "startPosition": {
+          "row": 0,
+          "column": 9
+        },
+        "endPosition": {
+          "row": 0,
+          "column": 9
+        },
+        "namedChildCount": 0,
+        "childCount": 0,
+        "text": null
+      }
+    ]
+  }
+}

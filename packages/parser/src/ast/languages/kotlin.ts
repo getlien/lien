@@ -1,6 +1,4 @@
-import Kotlin from 'tree-sitter-kotlin';
-import type Parser from 'tree-sitter';
-import type { SymbolInfo } from '../types.js';
+import type { SymbolInfo, SyntaxNode } from '../types.js';
 import type { LanguageDefinition } from './types.js';
 import type { LanguageTraverser, DeclarationFunctionInfo } from '../traversers/types.js';
 import type {
@@ -19,12 +17,12 @@ import { calculateComplexity } from '../complexity/index.js';
 // =============================================================================
 
 /** First named child of a given type. */
-function childByType(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
+function childByType(node: SyntaxNode, type: string): SyntaxNode | null {
   return node.namedChildren.find(child => child.type === type) ?? null;
 }
 
 /** Whether a node has a child token of a given type (incl. anonymous keyword tokens). */
-function hasTokenChild(node: Parser.SyntaxNode, type: string): boolean {
+function hasTokenChild(node: SyntaxNode, type: string): boolean {
   return node.children.some(child => child.type === type);
 }
 
@@ -35,7 +33,7 @@ function hasTokenChild(node: Parser.SyntaxNode, type: string): boolean {
  * passed as a call argument (`val n = xs.count { it > 0 }`) is NOT treated as a
  * function-valued property.
  */
-function propertyInitializerFunction(node: Parser.SyntaxNode): Parser.SyntaxNode | null {
+function propertyInitializerFunction(node: SyntaxNode): SyntaxNode | null {
   const initializer = node.namedChildren.at(-1);
   if (!initializer) return null;
   return initializer.type === 'lambda_literal' || initializer.type === 'anonymous_function'
@@ -44,7 +42,7 @@ function propertyInitializerFunction(node: Parser.SyntaxNode): Parser.SyntaxNode
 }
 
 /** The `function_body` child of a function_declaration ({ … } block OR `= expr`). */
-function functionBody(node: Parser.SyntaxNode): Parser.SyntaxNode | null {
+function functionBody(node: SyntaxNode): SyntaxNode | null {
   return childByType(node, 'function_body');
 }
 
@@ -53,12 +51,12 @@ function functionBody(node: Parser.SyntaxNode): Parser.SyntaxNode | null {
  * function_declaration. (Extension-function receivers are `user_type` nodes, so
  * the bare simple_identifier is the name in the common case.)
  */
-function functionName(node: Parser.SyntaxNode): string | undefined {
+function functionName(node: SyntaxNode): string | undefined {
   return childByType(node, 'simple_identifier')?.text;
 }
 
 /** The declared name of a class/object declaration (`type_identifier`). */
-function declarationName(node: Parser.SyntaxNode): string | undefined {
+function declarationName(node: SyntaxNode): string | undefined {
   return childByType(node, 'type_identifier')?.text;
 }
 
@@ -76,7 +74,7 @@ function clamp(signature: string): string {
  * the `=`), so slicing up to its start yields a clean `fun foo(a: Int): Int`
  * for both. Abstract/interface methods have no body — use the whole node.
  */
-function functionSignature(node: Parser.SyntaxNode, content: string): string {
+function functionSignature(node: SyntaxNode, content: string): string {
   const body = functionBody(node);
   const end = body ? body.startIndex : node.endIndex;
   const signature = content
@@ -88,7 +86,7 @@ function functionSignature(node: Parser.SyntaxNode, content: string): string {
 }
 
 /** Parameter texts from a function's `function_value_parameters`. */
-function functionParameters(node: Parser.SyntaxNode): string[] {
+function functionParameters(node: SyntaxNode): string[] {
   const params = childByType(node, 'function_value_parameters');
   if (!params) return [];
   return params.namedChildren.filter(p => p.text.trim()).map(p => p.text);
@@ -98,7 +96,7 @@ function functionParameters(node: Parser.SyntaxNode): string[] {
  * Return type: the type node that sits between the parameter list and the body.
  * Kotlin's grammar emits it as `user_type` / `nullable_type` / `function_type`.
  */
-function functionReturnType(node: Parser.SyntaxNode): string | undefined {
+function functionReturnType(node: SyntaxNode): string | undefined {
   const children = node.namedChildren;
   const paramsIndex = children.findIndex(c => c.type === 'function_value_parameters');
   if (paramsIndex === -1) return undefined;
@@ -113,7 +111,7 @@ function functionReturnType(node: Parser.SyntaxNode): string | undefined {
 }
 
 /** Visibility modifier text (`private` / `internal` / `protected` / `public`), if any. */
-function visibilityModifier(node: Parser.SyntaxNode): string | null {
+function visibilityModifier(node: SyntaxNode): string | null {
   const modifiers = childByType(node, 'modifiers');
   if (!modifiers) return null;
   return modifiers.namedChildren.find(c => c.type === 'visibility_modifier')?.text ?? null;
@@ -125,7 +123,7 @@ function visibilityModifier(node: Parser.SyntaxNode): string | null {
  * or `internal`. `protected` members stay visible to subclasses, so we keep
  * them. (Inverse of Java's "has a `public` modifier" check.)
  */
-function isExported(node: Parser.SyntaxNode): boolean {
+function isExported(node: SyntaxNode): boolean {
   const visibility = visibilityModifier(node);
   return visibility !== 'private' && visibility !== 'internal';
 }
@@ -152,20 +150,20 @@ export class KotlinTraverser implements LanguageTraverser {
 
   functionTypes = ['lambda_literal', 'anonymous_function'];
 
-  shouldExtractChildren(node: Parser.SyntaxNode): boolean {
+  shouldExtractChildren(node: SyntaxNode): boolean {
     return this.containerTypes.includes(node.type);
   }
 
-  isDeclarationWithFunction(node: Parser.SyntaxNode): boolean {
+  isDeclarationWithFunction(node: SyntaxNode): boolean {
     return node.type === 'property_declaration' && propertyInitializerFunction(node) !== null;
   }
 
-  getContainerBody(node: Parser.SyntaxNode): Parser.SyntaxNode | null {
+  getContainerBody(node: SyntaxNode): SyntaxNode | null {
     if (!this.containerTypes.includes(node.type)) return null;
     return childByType(node, 'class_body') ?? childByType(node, 'enum_class_body');
   }
 
-  shouldTraverseChildren(node: Parser.SyntaxNode): boolean {
+  shouldTraverseChildren(node: SyntaxNode): boolean {
     return (
       node.type === 'source_file' ||
       node.type === 'class_body' ||
@@ -174,7 +172,7 @@ export class KotlinTraverser implements LanguageTraverser {
     );
   }
 
-  findParentContainerName(node: Parser.SyntaxNode): string | undefined {
+  findParentContainerName(node: SyntaxNode): string | undefined {
     let current = node.parent;
     while (current) {
       if (current.type === 'class_declaration' || current.type === 'object_declaration') {
@@ -185,7 +183,7 @@ export class KotlinTraverser implements LanguageTraverser {
     return undefined;
   }
 
-  findFunctionInDeclaration(node: Parser.SyntaxNode): DeclarationFunctionInfo {
+  findFunctionInDeclaration(node: SyntaxNode): DeclarationFunctionInfo {
     if (node.type !== 'property_declaration') {
       return { hasFunction: false, functionNode: null };
     }
@@ -208,7 +206,7 @@ export class KotlinTraverser implements LanguageTraverser {
  * members are implicitly public.
  */
 export class KotlinExportExtractor implements LanguageExportExtractor {
-  extractExports(rootNode: Parser.SyntaxNode): string[] {
+  extractExports(rootNode: SyntaxNode): string[] {
     const exports: string[] = [];
     const seen = new Set<string>();
 
@@ -224,7 +222,7 @@ export class KotlinExportExtractor implements LanguageExportExtractor {
     return exports;
   }
 
-  private extractFromNode(node: Parser.SyntaxNode, addExport: (name?: string) => void): void {
+  private extractFromNode(node: SyntaxNode, addExport: (name?: string) => void): void {
     switch (node.type) {
       case 'function_declaration':
         if (isExported(node)) addExport(functionName(node));
@@ -243,7 +241,7 @@ export class KotlinExportExtractor implements LanguageExportExtractor {
     }
   }
 
-  private extractMembers(container: Parser.SyntaxNode, addExport: (name?: string) => void): void {
+  private extractMembers(container: SyntaxNode, addExport: (name?: string) => void): void {
     const body = childByType(container, 'class_body') ?? childByType(container, 'enum_class_body');
     if (!body) return;
 
@@ -267,7 +265,7 @@ export class KotlinExportExtractor implements LanguageExportExtractor {
     });
   }
 
-  private propertyName(node: Parser.SyntaxNode): string | undefined {
+  private propertyName(node: SyntaxNode): string | undefined {
     // property_declaration → variable_declaration → simple_identifier
     const variable = childByType(node, 'variable_declaration');
     return (variable ? childByType(variable, 'simple_identifier') : null)?.text;
@@ -303,13 +301,13 @@ function isKotlinStdLib(importPath: string): boolean {
 export class KotlinImportExtractor implements LanguageImportExtractor {
   readonly importNodeTypes = ['import_header'];
 
-  extractImportPath(node: Parser.SyntaxNode): string | null {
+  extractImportPath(node: SyntaxNode): string | null {
     const path = this.getImportPath(node);
     if (!path || isKotlinStdLib(path)) return null;
     return path;
   }
 
-  processImportSymbols(node: Parser.SyntaxNode): { importPath: string; symbols: string[] } | null {
+  processImportSymbols(node: SyntaxNode): { importPath: string; symbols: string[] } | null {
     const path = this.getImportPath(node);
     if (!path || isKotlinStdLib(path)) return null;
 
@@ -329,7 +327,7 @@ export class KotlinImportExtractor implements LanguageImportExtractor {
     return { importPath: path, symbols: [aliasName ?? lastPart] };
   }
 
-  private getImportPath(node: Parser.SyntaxNode): string | null {
+  private getImportPath(node: SyntaxNode): string | null {
     const identifier = childByType(node, 'identifier');
     if (!identifier) return null;
     const hasWildcard = hasTokenChild(node, 'wildcard_import');
@@ -355,7 +353,7 @@ export class KotlinImportExtractor implements LanguageImportExtractor {
 export class KotlinSymbolExtractor implements LanguageSymbolExtractor {
   readonly symbolNodeTypes = ['function_declaration', 'class_declaration', 'object_declaration'];
 
-  extractSymbol(node: Parser.SyntaxNode, content: string, parentClass?: string): SymbolInfo | null {
+  extractSymbol(node: SyntaxNode, content: string, parentClass?: string): SymbolInfo | null {
     switch (node.type) {
       case 'function_declaration':
         return this.extractFunctionInfo(node, content, parentClass);
@@ -368,7 +366,7 @@ export class KotlinSymbolExtractor implements LanguageSymbolExtractor {
     }
   }
 
-  extractCallSite(node: Parser.SyntaxNode): { symbol: string; line: number; key: string } | null {
+  extractCallSite(node: SyntaxNode): { symbol: string; line: number; key: string } | null {
     if (node.type !== 'call_expression') return null;
     const line = node.startPosition.row + 1;
 
@@ -389,7 +387,7 @@ export class KotlinSymbolExtractor implements LanguageSymbolExtractor {
   }
 
   private extractFunctionInfo(
-    node: Parser.SyntaxNode,
+    node: SyntaxNode,
     content: string,
     parentClass?: string,
   ): SymbolInfo | null {
@@ -409,7 +407,7 @@ export class KotlinSymbolExtractor implements LanguageSymbolExtractor {
     };
   }
 
-  private extractClassInfo(node: Parser.SyntaxNode): SymbolInfo | null {
+  private extractClassInfo(node: SyntaxNode): SymbolInfo | null {
     const name = declarationName(node);
     if (!name) return null;
 
@@ -422,14 +420,14 @@ export class KotlinSymbolExtractor implements LanguageSymbolExtractor {
     return this.makeSymbol(node, name, 'class', `class ${name}`);
   }
 
-  private extractObjectInfo(node: Parser.SyntaxNode): SymbolInfo | null {
+  private extractObjectInfo(node: SyntaxNode): SymbolInfo | null {
     const name = declarationName(node);
     if (!name) return null;
     return this.makeSymbol(node, name, 'class', `object ${name}`);
   }
 
   private makeSymbol(
-    node: Parser.SyntaxNode,
+    node: SyntaxNode,
     name: string,
     type: SymbolInfo['type'],
     signature: string,
@@ -451,7 +449,6 @@ export class KotlinSymbolExtractor implements LanguageSymbolExtractor {
 export const kotlinDefinition: LanguageDefinition = {
   id: 'kotlin',
   extensions: ['kt'],
-  grammar: Kotlin,
   traverser: new KotlinTraverser(),
   exportExtractor: new KotlinExportExtractor(),
   importExtractor: new KotlinImportExtractor(),

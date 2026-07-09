@@ -1,6 +1,4 @@
-import Python from 'tree-sitter-python';
-import type Parser from 'tree-sitter';
-import type { SymbolInfo } from '../types.js';
+import type { SymbolInfo, SyntaxNode } from '../types.js';
 import type { LanguageDefinition } from './types.js';
 import type { LanguageTraverser, DeclarationFunctionInfo } from '../traversers/types.js';
 import type {
@@ -23,7 +21,7 @@ import { calculateComplexity } from '../complexity/index.js';
  * Extract the effective symbol name from a Python aliased_import node.
  * Returns the alias if present, otherwise the original name.
  */
-function extractAliasedSymbolName(node: Parser.SyntaxNode): string | null {
+function extractAliasedSymbolName(node: SyntaxNode): string | null {
   const identifiers = node.namedChildren.filter(c => c.type === 'identifier');
 
   if (identifiers.length >= 2) {
@@ -70,15 +68,15 @@ export class PythonTraverser implements LanguageTraverser {
 
   functionTypes = ['function_definition', 'async_function_definition'];
 
-  shouldExtractChildren(node: Parser.SyntaxNode): boolean {
+  shouldExtractChildren(node: SyntaxNode): boolean {
     return this.containerTypes.includes(node.type);
   }
 
-  isDeclarationWithFunction(_node: Parser.SyntaxNode): boolean {
+  isDeclarationWithFunction(_node: SyntaxNode): boolean {
     return false;
   }
 
-  getContainerBody(node: Parser.SyntaxNode): Parser.SyntaxNode | null {
+  getContainerBody(node: SyntaxNode): SyntaxNode | null {
     if (node.type === 'class_definition') {
       return node.childForFieldName('body');
     }
@@ -91,11 +89,11 @@ export class PythonTraverser implements LanguageTraverser {
     return null;
   }
 
-  shouldTraverseChildren(node: Parser.SyntaxNode): boolean {
+  shouldTraverseChildren(node: SyntaxNode): boolean {
     return node.type === 'module' || node.type === 'block';
   }
 
-  findParentContainerName(node: Parser.SyntaxNode): string | undefined {
+  findParentContainerName(node: SyntaxNode): string | undefined {
     let current = node.parent;
     while (current) {
       if (current.type === 'class_definition') {
@@ -107,7 +105,7 @@ export class PythonTraverser implements LanguageTraverser {
     return undefined;
   }
 
-  findFunctionInDeclaration(_node: Parser.SyntaxNode): DeclarationFunctionInfo {
+  findFunctionInDeclaration(_node: SyntaxNode): DeclarationFunctionInfo {
     return {
       hasFunction: false,
       functionNode: null,
@@ -135,7 +133,7 @@ export class PythonExportExtractor implements LanguageExportExtractor {
     'async_function_definition',
   ]);
 
-  private extractExportName(node: Parser.SyntaxNode): string | null {
+  private extractExportName(node: SyntaxNode): string | null {
     if (node.type === 'decorated_definition') {
       const definition = node.childForFieldName('definition');
       if (definition && this.exportableTypes.has(definition.type)) {
@@ -151,7 +149,7 @@ export class PythonExportExtractor implements LanguageExportExtractor {
     return null;
   }
 
-  extractExports(rootNode: Parser.SyntaxNode): string[] {
+  extractExports(rootNode: SyntaxNode): string[] {
     const exports: string[] = [];
     const seen = new Set<string>();
 
@@ -181,13 +179,13 @@ export class PythonExportExtractor implements LanguageExportExtractor {
     return exports;
   }
 
-  private findModulePathIndex(node: Parser.SyntaxNode): number {
+  private findModulePathIndex(node: SyntaxNode): number {
     return node.namedChildren.findIndex(
       child => child.type === 'relative_import' || child.type === 'dotted_name',
     );
   }
 
-  private extractReExportNames(node: Parser.SyntaxNode, addExport: (name: string) => void): void {
+  private extractReExportNames(node: SyntaxNode, addExport: (name: string) => void): void {
     const startIndex = this.findModulePathIndex(node);
     if (startIndex === -1) return;
 
@@ -218,12 +216,12 @@ export class PythonExportExtractor implements LanguageExportExtractor {
 export class PythonImportExtractor implements LanguageImportExtractor {
   readonly importNodeTypes = ['import_statement', 'import_from_statement'];
 
-  extractImportPath(node: Parser.SyntaxNode): string | null {
+  extractImportPath(node: SyntaxNode): string | null {
     // Return the raw text for Python imports (used in the imports list)
     return node.text.split('\n')[0];
   }
 
-  processImportSymbols(node: Parser.SyntaxNode): { importPath: string; symbols: string[] } | null {
+  processImportSymbols(node: SyntaxNode): { importPath: string; symbols: string[] } | null {
     if (node.type === 'import_statement') {
       return this.processPythonImport(node);
     }
@@ -233,7 +231,7 @@ export class PythonImportExtractor implements LanguageImportExtractor {
     return null;
   }
 
-  private processSimpleImport(child: Parser.SyntaxNode): { importPath: string; symbols: string[] } {
+  private processSimpleImport(child: SyntaxNode): { importPath: string; symbols: string[] } {
     return {
       importPath: child.text,
       symbols: [child.text],
@@ -241,7 +239,7 @@ export class PythonImportExtractor implements LanguageImportExtractor {
   }
 
   private processAliasedImport(
-    child: Parser.SyntaxNode,
+    child: SyntaxNode,
   ): { importPath: string; symbols: string[] } | null {
     const dottedName = child.namedChildren.find(c => c.type === 'dotted_name');
     const identifiers = child.namedChildren.filter(c => c.type === 'identifier');
@@ -258,9 +256,7 @@ export class PythonImportExtractor implements LanguageImportExtractor {
    * Process Python regular import statement.
    * e.g., "import os", "import os as system"
    */
-  private processPythonImport(
-    node: Parser.SyntaxNode,
-  ): { importPath: string; symbols: string[] } | null {
+  private processPythonImport(node: SyntaxNode): { importPath: string; symbols: string[] } | null {
     for (const child of node.namedChildren) {
       if (child.type === 'dotted_name' || child.type === 'identifier') {
         return this.processSimpleImport(child);
@@ -272,13 +268,13 @@ export class PythonImportExtractor implements LanguageImportExtractor {
     return null;
   }
 
-  private findModulePath(node: Parser.SyntaxNode): { path: string; startIndex: number } | null {
+  private findModulePath(node: SyntaxNode): { path: string; startIndex: number } | null {
     const index = node.namedChildren.findIndex(child => child.type === 'dotted_name');
     if (index === -1) return null;
     return { path: node.namedChildren[index].text, startIndex: index };
   }
 
-  private collectImportedSymbols(node: Parser.SyntaxNode, startIndex: number): string[] {
+  private collectImportedSymbols(node: SyntaxNode, startIndex: number): string[] {
     const symbols: string[] = [];
     node.namedChildren.slice(startIndex + 1).forEach(child => {
       if (child.type === 'dotted_name') {
@@ -296,7 +292,7 @@ export class PythonImportExtractor implements LanguageImportExtractor {
    * e.g., "from utils.validate import validateEmail, validatePhone"
    */
   private processPythonFromImport(
-    node: Parser.SyntaxNode,
+    node: SyntaxNode,
   ): { importPath: string; symbols: string[] } | null {
     const moduleInfo = this.findModulePath(node);
     if (!moduleInfo) return null;
@@ -330,7 +326,7 @@ export class PythonSymbolExtractor implements LanguageSymbolExtractor {
     'decorated_definition',
   ];
 
-  extractSymbol(node: Parser.SyntaxNode, content: string, parentClass?: string): SymbolInfo | null {
+  extractSymbol(node: SyntaxNode, content: string, parentClass?: string): SymbolInfo | null {
     switch (node.type) {
       case 'function_definition':
       case 'async_function_definition':
@@ -353,7 +349,7 @@ export class PythonSymbolExtractor implements LanguageSymbolExtractor {
    * (there it's a sibling child of the same node, not a separate wrapper node).
    */
   private extractDecoratedInfo(
-    node: Parser.SyntaxNode,
+    node: SyntaxNode,
     content: string,
     parentClass?: string,
   ): SymbolInfo | null {
@@ -372,7 +368,7 @@ export class PythonSymbolExtractor implements LanguageSymbolExtractor {
     return { ...inner, signature: clampSignatureLength(`${decoratorPrefix} ${inner.signature}`) };
   }
 
-  extractCallSite(node: Parser.SyntaxNode): { symbol: string; line: number; key: string } | null {
+  extractCallSite(node: SyntaxNode): { symbol: string; line: number; key: string } | null {
     if (node.type !== 'call') return null;
 
     const line = node.startPosition.row + 1;
@@ -396,7 +392,7 @@ export class PythonSymbolExtractor implements LanguageSymbolExtractor {
   }
 
   private extractFunctionInfo(
-    node: Parser.SyntaxNode,
+    node: SyntaxNode,
     content: string,
     parentClass?: string,
   ): SymbolInfo | null {
@@ -415,7 +411,7 @@ export class PythonSymbolExtractor implements LanguageSymbolExtractor {
     };
   }
 
-  private extractClassInfo(node: Parser.SyntaxNode): SymbolInfo | null {
+  private extractClassInfo(node: SyntaxNode): SymbolInfo | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
@@ -436,7 +432,6 @@ export class PythonSymbolExtractor implements LanguageSymbolExtractor {
 export const pythonDefinition: LanguageDefinition = {
   id: 'python',
   extensions: ['py'],
-  grammar: Python,
   traverser: new PythonTraverser(),
   exportExtractor: new PythonExportExtractor(),
   importExtractor: new PythonImportExtractor(),

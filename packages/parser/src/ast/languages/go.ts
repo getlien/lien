@@ -1,6 +1,4 @@
-import Go from 'tree-sitter-go';
-import type Parser from 'tree-sitter';
-import type { SymbolInfo } from '../types.js';
+import type { SymbolInfo, SyntaxNode } from '../types.js';
 import type { LanguageDefinition } from './types.js';
 import type { LanguageTraverser, DeclarationFunctionInfo } from '../traversers/types.js';
 import type {
@@ -34,11 +32,11 @@ export class GoTraverser implements LanguageTraverser {
 
   functionTypes = ['func_literal'];
 
-  shouldExtractChildren(_node: Parser.SyntaxNode): boolean {
+  shouldExtractChildren(_node: SyntaxNode): boolean {
     return false;
   }
 
-  isDeclarationWithFunction(node: Parser.SyntaxNode): boolean {
+  isDeclarationWithFunction(node: SyntaxNode): boolean {
     if (node.type === 'var_declaration') {
       return this.hasFuncLiteral(node);
     }
@@ -48,19 +46,19 @@ export class GoTraverser implements LanguageTraverser {
     return false;
   }
 
-  getContainerBody(_node: Parser.SyntaxNode): Parser.SyntaxNode | null {
+  getContainerBody(_node: SyntaxNode): SyntaxNode | null {
     return null;
   }
 
-  shouldTraverseChildren(node: Parser.SyntaxNode): boolean {
+  shouldTraverseChildren(node: SyntaxNode): boolean {
     return node.type === 'source_file';
   }
 
-  findParentContainerName(_node: Parser.SyntaxNode): string | undefined {
+  findParentContainerName(_node: SyntaxNode): string | undefined {
     return undefined;
   }
 
-  findFunctionInDeclaration(node: Parser.SyntaxNode): DeclarationFunctionInfo {
+  findFunctionInDeclaration(node: SyntaxNode): DeclarationFunctionInfo {
     const noFunction: DeclarationFunctionInfo = { hasFunction: false, functionNode: null };
 
     // var handler = func(...) { ... }
@@ -78,7 +76,7 @@ export class GoTraverser implements LanguageTraverser {
     return noFunction;
   }
 
-  private hasFuncLiteral(node: Parser.SyntaxNode): boolean {
+  private hasFuncLiteral(node: SyntaxNode): boolean {
     return this.findFunctionInDeclaration(node).hasFunction;
   }
 }
@@ -107,7 +105,7 @@ export class GoTraverser implements LanguageTraverser {
  * - type ( Request struct{}; Response struct{} )
  */
 export class GoExportExtractor implements LanguageExportExtractor {
-  extractExports(rootNode: Parser.SyntaxNode): string[] {
+  extractExports(rootNode: SyntaxNode): string[] {
     const exports: string[] = [];
     const seen = new Set<string>();
 
@@ -143,7 +141,7 @@ export class GoExportExtractor implements LanguageExportExtractor {
     return exports;
   }
 
-  private extractTypeExports(node: Parser.SyntaxNode, addExport: (name: string) => void): void {
+  private extractTypeExports(node: SyntaxNode, addExport: (name: string) => void): void {
     node.namedChildren
       .filter(spec => spec.type === 'type_spec')
       .forEach(spec => {
@@ -152,7 +150,7 @@ export class GoExportExtractor implements LanguageExportExtractor {
       });
   }
 
-  private extractSpecExports(node: Parser.SyntaxNode, addExport: (name: string) => void): void {
+  private extractSpecExports(node: SyntaxNode, addExport: (name: string) => void): void {
     const specs = collectSpecs(node);
     for (const spec of specs) {
       const nameNode = spec.childForFieldName('name');
@@ -190,7 +188,7 @@ function isStdLibImport(importPath: string): boolean {
 export class GoImportExtractor implements LanguageImportExtractor {
   readonly importNodeTypes = ['import_declaration'];
 
-  extractImportPath(node: Parser.SyntaxNode): string | null {
+  extractImportPath(node: SyntaxNode): string | null {
     for (const spec of this.collectImportSpecs(node)) {
       const path = this.extractSpecPath(spec);
       if (path) return path;
@@ -198,7 +196,7 @@ export class GoImportExtractor implements LanguageImportExtractor {
     return null;
   }
 
-  processImportSymbols(node: Parser.SyntaxNode): { importPath: string; symbols: string[] } | null {
+  processImportSymbols(node: SyntaxNode): { importPath: string; symbols: string[] } | null {
     // Collect all import specs from the declaration
     const specs = this.collectImportSpecs(node);
 
@@ -219,8 +217,8 @@ export class GoImportExtractor implements LanguageImportExtractor {
     return null;
   }
 
-  private collectImportSpecs(node: Parser.SyntaxNode): Parser.SyntaxNode[] {
-    const specs: Parser.SyntaxNode[] = [];
+  private collectImportSpecs(node: SyntaxNode): SyntaxNode[] {
+    const specs: SyntaxNode[] = [];
 
     // Single import
     const spec = findChildOfType(node, 'import_spec');
@@ -238,20 +236,20 @@ export class GoImportExtractor implements LanguageImportExtractor {
     return specs;
   }
 
-  private extractSpecPath(spec: Parser.SyntaxNode): string | null {
+  private extractSpecPath(spec: SyntaxNode): string | null {
     const rawPath = this.getSpecRawPath(spec);
     if (!rawPath || isStdLibImport(rawPath)) return null;
     return rawPath;
   }
 
-  private getSpecRawPath(spec: Parser.SyntaxNode): string | null {
+  private getSpecRawPath(spec: SyntaxNode): string | null {
     const pathNode = spec.childForFieldName('path');
     if (!pathNode) return null;
     // Remove surrounding quotes from the interpreted_string_literal
     return pathNode.text.replace(/^"|"$/g, '');
   }
 
-  private getSpecAlias(spec: Parser.SyntaxNode): string | null {
+  private getSpecAlias(spec: SyntaxNode): string | null {
     const nameNode = spec.childForFieldName('name');
     if (!nameNode) return null;
     // Dot import (.) and blank import (_) are special
@@ -277,7 +275,7 @@ export class GoImportExtractor implements LanguageImportExtractor {
 export class GoSymbolExtractor implements LanguageSymbolExtractor {
   readonly symbolNodeTypes = ['function_declaration', 'method_declaration', 'type_declaration'];
 
-  extractSymbol(node: Parser.SyntaxNode, content: string, parentClass?: string): SymbolInfo | null {
+  extractSymbol(node: SyntaxNode, content: string, parentClass?: string): SymbolInfo | null {
     switch (node.type) {
       case 'function_declaration':
         return this.buildFuncSymbolInfo(node, content, parentClass);
@@ -290,7 +288,7 @@ export class GoSymbolExtractor implements LanguageSymbolExtractor {
     }
   }
 
-  extractCallSite(node: Parser.SyntaxNode): { symbol: string; line: number; key: string } | null {
+  extractCallSite(node: SyntaxNode): { symbol: string; line: number; key: string } | null {
     if (node.type !== 'call_expression') return null;
 
     const line = node.startPosition.row + 1;
@@ -314,7 +312,7 @@ export class GoSymbolExtractor implements LanguageSymbolExtractor {
   }
 
   private buildFuncSymbolInfo(
-    node: Parser.SyntaxNode,
+    node: SyntaxNode,
     content: string,
     parentClass?: string,
   ): SymbolInfo | null {
@@ -334,7 +332,7 @@ export class GoSymbolExtractor implements LanguageSymbolExtractor {
     };
   }
 
-  private extractTypeInfo(node: Parser.SyntaxNode): SymbolInfo | null {
+  private extractTypeInfo(node: SyntaxNode): SymbolInfo | null {
     // type_declaration contains type_spec children
     const typeSpec = findChildOfType(node, 'type_spec');
     if (!typeSpec) return null;
@@ -383,7 +381,7 @@ function isExported(name: string): boolean {
  * Extract the receiver type from a method_declaration.
  * Handles both value receivers (u User) and pointer receivers (u *User).
  */
-function extractReceiverType(node: Parser.SyntaxNode): string | undefined {
+function extractReceiverType(node: SyntaxNode): string | undefined {
   const receiver = node.childForFieldName('receiver');
   if (!receiver) return undefined;
 
@@ -412,7 +410,7 @@ function extractReceiverType(node: Parser.SyntaxNode): string | undefined {
  * Extract return type from a Go function/method.
  * Go uses a `result` field instead of `return_type`.
  */
-function extractGoReturnType(node: Parser.SyntaxNode): string | undefined {
+function extractGoReturnType(node: SyntaxNode): string | undefined {
   const resultNode = node.childForFieldName('result');
   if (!resultNode) return undefined;
   return resultNode.text;
@@ -421,7 +419,7 @@ function extractGoReturnType(node: Parser.SyntaxNode): string | undefined {
 /**
  * Find a func_literal inside a var_declaration's var_spec children.
  */
-function findFuncLiteralInVarDecl(node: Parser.SyntaxNode): DeclarationFunctionInfo | null {
+function findFuncLiteralInVarDecl(node: SyntaxNode): DeclarationFunctionInfo | null {
   for (const spec of node.namedChildren) {
     if (spec.type !== 'var_spec') continue;
 
@@ -437,7 +435,7 @@ function findFuncLiteralInVarDecl(node: Parser.SyntaxNode): DeclarationFunctionI
 /**
  * Collect all named children of specific types from a node.
  */
-function collectChildrenOfType(node: Parser.SyntaxNode, types: Set<string>): Parser.SyntaxNode[] {
+function collectChildrenOfType(node: SyntaxNode, types: Set<string>): SyntaxNode[] {
   return node.namedChildren.filter(child => types.has(child.type));
 }
 
@@ -447,7 +445,7 @@ const SPEC_TYPES = new Set(['const_spec', 'var_spec']);
  * Collect all const_spec or var_spec nodes from a declaration,
  * handling the var_spec_list wrapper for grouped var blocks.
  */
-function collectSpecs(node: Parser.SyntaxNode): Parser.SyntaxNode[] {
+function collectSpecs(node: SyntaxNode): SyntaxNode[] {
   // Direct spec children (single declarations and grouped const)
   const direct = collectChildrenOfType(node, SPEC_TYPES);
   if (direct.length > 0) return direct;
@@ -460,7 +458,7 @@ function collectSpecs(node: Parser.SyntaxNode): Parser.SyntaxNode[] {
 /**
  * Find the first child of a specific type.
  */
-function findChildOfType(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
+function findChildOfType(node: SyntaxNode, type: string): SyntaxNode | null {
   return node.namedChildren.find(child => child.type === type) ?? null;
 }
 
@@ -471,7 +469,6 @@ function findChildOfType(node: Parser.SyntaxNode, type: string): Parser.SyntaxNo
 export const goDefinition: LanguageDefinition = {
   id: 'go',
   extensions: ['go'],
-  grammar: Go,
   traverser: new GoTraverser(),
   exportExtractor: new GoExportExtractor(),
   importExtractor: new GoImportExtractor(),

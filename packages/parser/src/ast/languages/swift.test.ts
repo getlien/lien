@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import Parser from 'tree-sitter';
-import Swift from 'tree-sitter-swift';
+import { mustParse } from '../test/helpers/parse-fixture.js';
+import type { SyntaxNode } from '../types.js';
 import { chunkByAST } from '../chunker.js';
 import {
   SwiftTraverser,
@@ -10,14 +10,12 @@ import {
 } from './swift.js';
 
 describe('Swift Language', () => {
-  const parser = new Parser();
-  parser.setLanguage(Swift);
   const traverser = new SwiftTraverser();
   const exportExtractor = new SwiftExportExtractor();
   const importExtractor = new SwiftImportExtractor();
   const symbolExtractor = new SwiftSymbolExtractor();
 
-  const parse = (src: string) => parser.parse(src).rootNode;
+  const parse = (src: string) => mustParse(src, 'swift');
 
   // ===========================================================================
   // TRAVERSER
@@ -335,7 +333,7 @@ func topLevelHelper(_ x: Int) -> Int { return x + 1 }
 // =============================================================================
 // HELPERS
 // =============================================================================
-function findNode(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
+function findNode(node: SyntaxNode, type: string): SyntaxNode | null {
   if (node.type === type) return node;
   for (const child of node.namedChildren) {
     const found = findNode(child, type);
@@ -344,11 +342,7 @@ function findNode(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | nu
   return null;
 }
 
-function findAllNodes(
-  node: Parser.SyntaxNode,
-  type: string,
-  acc: Parser.SyntaxNode[] = [],
-): Parser.SyntaxNode[] {
+function findAllNodes(node: SyntaxNode, type: string, acc: SyntaxNode[] = []): SyntaxNode[] {
   if (node.type === type) acc.push(node);
   for (const child of node.namedChildren) findAllNodes(child, type, acc);
   return acc;
