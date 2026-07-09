@@ -11,7 +11,6 @@
 import fs from 'fs/promises';
 import pLimit from 'p-limit';
 import path from 'path';
-import type { LienConfig } from '../config/schema.js';
 import type { ProgressTracker } from './progress-tracker.js';
 import {
   DEFAULT_CHUNK_SIZE,
@@ -50,8 +49,6 @@ export interface IndexingOptions {
   verbose?: boolean;
   /** Force full reindex, skip incremental */
   force?: boolean;
-  /** Pre-loaded config (skip loading from disk) */
-  config?: LienConfig;
   /** Progress callback for external UI */
   onProgress?: (progress: IndexingProgress) => void;
 }

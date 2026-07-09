@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
-import type { LienConfig, LegacyLienConfig } from './schema.js';
-import { defaultConfig, isLegacyConfig, isModernConfig } from './schema.js';
+import type { LienConfig } from './schema.js';
+import { defaultConfig } from './schema.js';
 import { deepMergeConfig } from './merge.js';
 import { ConfigError, wrapError } from '../errors/index.js';
 
@@ -15,13 +15,14 @@ export interface ValidationResult {
 }
 
 /**
- * One entry per group of config keys retired together (validated in the
- * past but never actually read by any pipeline). Each group is stripped
- * from both the modern `core` section and the legacy `indexing` section
- * before merge/validation, warning once per group per process instead of
- * throwing — mirrors global-config.ts's stripRetiredBackends, generalized
- * so a future retirement is a new array entry rather than a copy-pasted
- * strip function.
+ * One entry per group of top-level `.lien.config.json` keys retired
+ * together. Each was validated in the past but never actually read by any
+ * pipeline (or, for `indexing`/`version`, was the legacy pre-v0.3.0 shape,
+ * which was silently discarded by the merge even before this — settings in
+ * it just vanished with no warning). Stripped before merge/validation,
+ * warning once per group per process instead of throwing — mirrors
+ * global-config.ts's stripRetiredBackends, generalized so a future
+ * retirement is a new array entry rather than a copy-pasted strip function.
  */
 interface RetiredKeyGroup {
   keys: readonly string[];
@@ -29,27 +30,93 @@ interface RetiredKeyGroup {
   warned: boolean;
 }
 
-const RETIRED_KEY_GROUPS: RetiredKeyGroup[] = [
+const RETIRED_TOP_LEVEL_GROUPS: RetiredKeyGroup[] = [
   {
-    keys: ['concurrency'],
+    keys: ['core'],
     message:
-      'Warning: the "concurrency" setting (core.concurrency / legacy indexing.concurrency) has been ' +
-      'removed — it was validated but never read by the indexing pipeline. Ignoring it; you can ' +
-      'delete it from your .lien.config.json. Parse-stage concurrency is now governed internally ' +
-      '(PARSE_STAGE_MAX_CONCURRENCY in @liendev/parser).',
+      'Warning: the top-level "core" .lien.config.json section has been removed — it never held ' +
+      'any configurable settings (chunkSize/chunkOverlap and concurrency were both retired as ' +
+      'dead config in earlier releases). Ignoring it; you can delete "core" from your ' +
+      '.lien.config.json.',
     warned: false,
   },
   {
-    keys: ['chunkSize', 'chunkOverlap'],
+    keys: ['chunking'],
     message:
-      'Warning: the "chunkSize"/"chunkOverlap" settings (core.* / legacy indexing.*) have been ' +
-      'removed — they were validated but never read by any indexing pipeline. Chunking is ' +
-      'AST-based for all supported languages; these only ever shaped the line-based fallback ' +
-      'chunker, which now always uses its built-in defaults. Ignoring them; you can delete them ' +
+      'Warning: the top-level "chunking" .lien.config.json section has been removed — ' +
+      'chunking.useAST/chunking.astFallback were validated but never read; chunking is always ' +
+      'AST-based for supported languages with an internal line-based fallback. Ignoring it; you ' +
+      'can delete "chunking" from your .lien.config.json.',
+    warned: false,
+  },
+  {
+    keys: ['mcp'],
+    message:
+      'Warning: the top-level "mcp" .lien.config.json section has been removed — mcp.port, ' +
+      'mcp.transport, and mcp.autoIndexOnFirstRun were validated but never read; the MCP server ' +
+      'does not load .lien.config.json at all. Ignoring it; you can delete "mcp" from your ' +
+      '.lien.config.json.',
+    warned: false,
+  },
+  {
+    keys: ['gitDetection'],
+    message:
+      'Warning: the top-level "gitDetection" .lien.config.json section has been removed — it was ' +
+      'validated but never read; git-change polling is governed internally. Ignoring it; you can ' +
+      'delete "gitDetection" from your .lien.config.json.',
+    warned: false,
+  },
+  {
+    keys: ['fileWatching'],
+    message:
+      'Warning: the top-level "fileWatching" .lien.config.json section has been removed — it was ' +
+      'validated but never read; file watching during `lien serve` is controlled only by the ' +
+      '--watch/--no-watch CLI flag. Ignoring it; you can delete "fileWatching" from your ' +
+      '.lien.config.json.',
+    warned: false,
+  },
+  {
+    keys: ['storage'],
+    message:
+      'Warning: the top-level "storage" .lien.config.json section has been removed — it was ' +
+      'validated but never read. The storage backend is chosen by the separate global config ' +
+      '(~/.lien/config.json, via `lien config set backend`), not per-project .lien.config.json. ' +
+      'Ignoring it; you can delete "storage" from your .lien.config.json.',
+    warned: false,
+  },
+  {
+    keys: ['frameworks'],
+    message:
+      'Warning: the top-level "frameworks" .lien.config.json section has been removed — it was ' +
+      'already deprecated in favor of ecosystem presets (see ADR-007) and unread. Ignoring it; ' +
+      'you can delete "frameworks" from your .lien.config.json.',
+    warned: false,
+  },
+  {
+    keys: ['indexing', 'version'],
+    message:
+      'Warning: the legacy .lien.config.json format is no longer read; only ' +
+      '"complexity.thresholds" is supported. Ignoring "indexing"/"version"; you can delete them ' +
       'from your .lien.config.json.',
     warned: false,
   },
 ];
+
+/** Top-level `.lien.config.json` key that is actually read. */
+const SUPPORTED_TOP_LEVEL_KEY = 'complexity';
+
+/** Nested `complexity.*` keys retired together (thresholds is the only survivor). */
+const RETIRED_COMPLEXITY_KEY_GROUP: RetiredKeyGroup = {
+  keys: ['enabled'],
+  message:
+    'Warning: "complexity.enabled" has been removed — it was validated but never read; ' +
+    'complexity.thresholds is always active. Ignoring it; you can delete "complexity.enabled" ' +
+    'from your .lien.config.json.',
+  warned: false,
+};
+
+/** Warned-once state for top-level keys with no dedicated group (typos, future removals). */
+const warnedUnknownTopLevelKeys = new Set<string>();
 
 function warnRetiredOnce(group: RetiredKeyGroup): void {
   if (group.warned) return;
@@ -57,55 +124,80 @@ function warnRetiredOnce(group: RetiredKeyGroup): void {
   console.warn(group.message);
 }
 
-/**
- * Strip one retired key group from a single config section (`core` or
- * `indexing`), warning once if any of the group's keys were present.
- */
-function stripGroupFromSection(
-  raw: Record<string, unknown>,
-  sectionName: 'core' | 'indexing',
-  group: RetiredKeyGroup,
-): Record<string, unknown> {
-  const section = raw[sectionName];
-  if (!section || typeof section !== 'object') return raw;
-
-  const sectionObj = section as Record<string, unknown>;
-  if (!group.keys.some(key => key in sectionObj)) return raw;
-
-  warnRetiredOnce(group);
-  const restSection = Object.fromEntries(
-    Object.entries(sectionObj).filter(([key]) => !group.keys.includes(key)),
+function warnUnknownTopLevelKeyOnce(key: string): void {
+  if (warnedUnknownTopLevelKeys.has(key)) return;
+  warnedUnknownTopLevelKeys.add(key);
+  console.warn(
+    `Warning: unrecognized top-level .lien.config.json key "${key}" — only ` +
+      `"${SUPPORTED_TOP_LEVEL_KEY}.thresholds" is supported. Ignoring it; you can delete "${key}" ` +
+      'from your .lien.config.json.',
   );
-  return { ...raw, [sectionName]: restSection };
 }
 
 /**
- * Strip all retired config key groups from a raw parsed config before it is
- * merged/validated, so an existing config that still carries one never
- * throws.
+ * Strip every top-level key except `complexity` from a raw parsed config,
+ * warning once for each. Named retired sections get a tailored message
+ * explaining what they used to do; anything else (typos, a future removal
+ * that hasn't earned its own message yet) gets a generic one. Tolerant by
+ * design — an unrecognized key must never fail validation, only be ignored.
+ */
+function stripUnsupportedTopLevelKeys(raw: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (key === SUPPORTED_TOP_LEVEL_KEY) {
+      result[key] = value;
+      continue;
+    }
+    const group = RETIRED_TOP_LEVEL_GROUPS.find(g => g.keys.includes(key));
+    if (group) {
+      warnRetiredOnce(group);
+    } else {
+      warnUnknownTopLevelKeyOnce(key);
+    }
+  }
+  return result;
+}
+
+/**
+ * Strip retired keys from the `complexity` section (currently just
+ * `enabled`), warning once if present.
+ */
+function stripRetiredComplexityKeys(raw: Record<string, unknown>): Record<string, unknown> {
+  const complexity = raw.complexity;
+  if (!complexity || typeof complexity !== 'object') return raw;
+
+  const complexityObj = complexity as Record<string, unknown>;
+  if (!RETIRED_COMPLEXITY_KEY_GROUP.keys.some(key => key in complexityObj)) return raw;
+
+  warnRetiredOnce(RETIRED_COMPLEXITY_KEY_GROUP);
+  const restComplexity = Object.fromEntries(
+    Object.entries(complexityObj).filter(
+      ([key]) => !RETIRED_COMPLEXITY_KEY_GROUP.keys.includes(key),
+    ),
+  );
+  return { ...raw, complexity: restComplexity };
+}
+
+/**
+ * Strip all retired/unsupported config keys from a raw parsed config before
+ * it is merged/validated, so an existing config that still carries any of
+ * them never throws.
  */
 function stripRetiredKeys(raw: Record<string, unknown>): Record<string, unknown> {
-  return RETIRED_KEY_GROUPS.reduce(
-    (result, group) =>
-      stripGroupFromSection(stripGroupFromSection(result, 'core', group), 'indexing', group),
-    raw,
-  );
+  return stripRetiredComplexityKeys(stripUnsupportedTopLevelKeys(raw));
 }
 
 /**
- * ConfigService encapsulates all configuration operations including
- * loading, saving, and validation.
- * Migration removed - no longer needed.
- *
- * This service provides a single point of truth for config management
- * with comprehensive error handling and validation.
+ * ConfigService encapsulates per-project configuration loading and
+ * validation. The only field it reads is `complexity.thresholds`; every
+ * other legacy section is tolerated (warned-and-stripped) rather than
+ * rejected — see RETIRED_TOP_LEVEL_GROUPS.
  */
 export class ConfigService {
   private static readonly CONFIG_FILENAME = '.lien.config.json';
 
   /**
    * Load configuration from the specified directory.
-   * Automatically handles migration if needed.
    *
    * @param rootDir - Root directory containing the config file
    * @returns Loaded and validated configuration
@@ -118,10 +210,8 @@ export class ConfigService {
       const configContent = await fs.readFile(configPath, 'utf-8');
       const userConfig = stripRetiredKeys(JSON.parse(configContent));
 
-      // Merge with defaults - no migration needed
       const mergedConfig = deepMergeConfig(defaultConfig, userConfig as Partial<LienConfig>);
 
-      // Then validate the merged config
       const validation = this.validate(mergedConfig);
       if (!validation.valid) {
         throw new ConfigError(`Invalid configuration:\n${validation.errors.join('\n')}`, {
@@ -130,7 +220,6 @@ export class ConfigService {
         });
       }
 
-      // Show warnings if any
       if (validation.warnings.length > 0) {
         console.warn('⚠️  Configuration warnings:');
         validation.warnings.forEach(warning => console.warn(`   ${warning}`));
@@ -159,53 +248,14 @@ export class ConfigService {
   }
 
   /**
-   * Save configuration to the specified directory.
-   * Validates the config before saving.
-   *
-   * @param rootDir - Root directory to save the config file
-   * @param config - Configuration to save
-   * @throws {ConfigError} If config is invalid or cannot be saved
-   */
-  async save(rootDir: string, config: LienConfig): Promise<void> {
-    const configPath = this.getConfigPath(rootDir);
-
-    // Validate before saving
-    const validation = this.validate(config);
-    if (!validation.valid) {
-      throw new ConfigError(`Cannot save invalid configuration:\n${validation.errors.join('\n')}`, {
-        errors: validation.errors,
-      });
-    }
-
-    try {
-      const configJson = JSON.stringify(config, null, 2) + '\n';
-      await fs.writeFile(configPath, configJson, 'utf-8');
-    } catch (error) {
-      throw wrapError(error, 'Failed to save configuration', { path: configPath });
-    }
-  }
-
-  /**
-   * Check if a configuration file exists in the specified directory.
-   *
-   * @param rootDir - Root directory to check
-   * @returns True if config file exists
-   */
-  async exists(rootDir: string = process.cwd()): Promise<boolean> {
-    const configPath = this.getConfigPath(rootDir);
-    try {
-      await fs.access(configPath);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  // Migration methods removed - no longer needed
-
-  /**
    * Validate a configuration object.
-   * Checks all constraints and returns detailed validation results.
+   *
+   * `complexity` is the only field left, and it's optional (an empty config
+   * is valid — thresholds fall back to defaults), so this only rejects a
+   * non-object `complexity`/`complexity.thresholds`. Stray top-level or
+   * `complexity.*` keys are warnings, never errors — this mirrors load()'s
+   * tolerant stripRetiredKeys() for callers (and tests) that hand validate()
+   * a raw config directly, bypassing load()'s stripping pass.
    *
    * @param config - Configuration to validate
    * @returns Validation result with errors and warnings
@@ -214,7 +264,6 @@ export class ConfigService {
     const errors: string[] = [];
     const warnings: string[] = [];
 
-    // Type check
     if (!config || typeof config !== 'object') {
       return {
         valid: false,
@@ -223,56 +272,9 @@ export class ConfigService {
       };
     }
 
-    const cfg = config as Partial<LienConfig>;
-
-    // Validate based on config type
-    if (isModernConfig(cfg as LienConfig | LegacyLienConfig)) {
-      this.validateModernConfig(cfg as LienConfig, errors, warnings);
-    } else if (isLegacyConfig(cfg as LienConfig | LegacyLienConfig)) {
-      this.validateLegacyConfig(cfg as LegacyLienConfig, errors, warnings);
-    } else {
-      errors.push(
-        'Configuration format not recognized. Must have either "core" or "indexing" field',
-      );
-    }
-
-    return {
-      valid: errors.length === 0,
-      errors,
-      warnings,
-    };
-  }
-
-  /**
-   * Validate a partial configuration object.
-   * Useful for validating user input before merging with defaults.
-   *
-   * @param config - Partial configuration to validate
-   * @returns Validation result with errors and warnings
-   */
-  validatePartial(config: Partial<LienConfig>): ValidationResult {
-    const errors: string[] = [];
-    const warnings: string[] = [];
-
-    // Validate core settings if present
-    if (config.core) {
-      this.validateCoreConfig(config.core, warnings);
-    }
-
-    // Validate MCP settings if present
-    if (config.mcp) {
-      this.validateMCPConfig(config.mcp, errors, warnings);
-    }
-
-    // Validate git detection settings if present
-    if (config.gitDetection) {
-      this.validateGitDetectionConfig(config.gitDetection, errors, warnings);
-    }
-
-    // Validate file watching settings if present
-    if (config.fileWatching) {
-      this.validateFileWatchingConfig(config.fileWatching, errors, warnings);
-    }
+    const cfg = config as Record<string, unknown>;
+    this.validateComplexityConfig(cfg.complexity, errors);
+    this.warnStrayKeys(cfg, warnings);
 
     return {
       valid: errors.length === 0,
@@ -289,177 +291,42 @@ export class ConfigService {
   }
 
   /**
-   * Validate modern (v0.3.0+) configuration
+   * Validate the shape of the `complexity` section, if present.
    */
-  private validateModernConfig(config: LienConfig, errors: string[], warnings: string[]): void {
-    // `core` currently holds no configurable settings (chunkSize/chunkOverlap
-    // and concurrency were both removed as dead config) — its presence is
-    // only the modern/legacy discriminator. It's still required to exist,
-    // and validateCoreConfig below checks it's actually empty.
-    if (!config.core) {
-      errors.push('Missing required field: core');
-      return;
-    }
-    this.validateCoreConfig(config.core, warnings);
-
-    // Validate MCP settings
-    if (!config.mcp) {
-      errors.push('Missing required field: mcp');
-      return;
-    }
-    this.validateMCPConfig(config.mcp, errors, warnings);
-
-    // Validate git detection settings
-    if (!config.gitDetection) {
-      errors.push('Missing required field: gitDetection');
-      return;
-    }
-    this.validateGitDetectionConfig(config.gitDetection, errors, warnings);
-
-    // Validate file watching settings
-    if (!config.fileWatching) {
-      errors.push('Missing required field: fileWatching');
-      return;
-    }
-    this.validateFileWatchingConfig(config.fileWatching, errors, warnings);
-  }
-
-  /**
-   * Validate legacy (v0.2.0) configuration
-   */
-  private validateLegacyConfig(
-    config: LegacyLienConfig,
-    errors: string[],
-    warnings: string[],
-  ): void {
-    warnings.push(
-      'Using legacy configuration format. Consider running "lien init" to migrate to v0.3.0',
-    );
-
-    // Validate indexing settings
-    if (!config.indexing) {
-      errors.push('Missing required field: indexing');
+  private validateComplexityConfig(complexity: unknown, errors: string[]): void {
+    if (complexity === undefined) return;
+    if (typeof complexity !== 'object' || complexity === null) {
+      errors.push('complexity must be an object');
       return;
     }
 
-    // `indexing` currently has nothing left to numerically validate
-    // (chunkSize/chunkOverlap were removed as dead config); include/exclude
-    // are plain arrays with no constraints. Existence was already checked
-    // above.
-
-    // Validate MCP settings (same for both)
-    if (config.mcp) {
-      this.validateMCPConfig(config.mcp, errors, warnings);
+    const thresholds = (complexity as Record<string, unknown>).thresholds;
+    if (thresholds === undefined) return;
+    if (typeof thresholds !== 'object' || thresholds === null) {
+      errors.push('complexity.thresholds must be an object');
     }
   }
 
   /**
-   * Validate that `core` — which currently holds no configurable settings —
-   * hasn't been given any keys. This only fires for callers that hand
-   * validate()/validatePartial()/save() a raw config directly: the load()
-   * path already runs stripRetiredKeys() before validating, so a config
-   * file that still carries a retired key never reaches here with it.
-   * Never an error, even for recognized retired keys: this file's
-   * philosophy is to warn and ignore stale config, not break on it (see
-   * RETIRED_KEY_GROUPS), and validate()/save() must extend that same
-   * guarantee to direct callers, not just the load() path.
+   * Warn (never error) about top-level keys other than `complexity`, and
+   * about `complexity.enabled`. Never fires for the load() path — that
+   * already stripped these before validate() ran — but does fire for a
+   * caller (or test) that hands validate() a raw config directly.
    */
-  private validateCoreConfig(core: Record<string, unknown>, warnings: string[]): void {
-    const keys = Object.keys(core);
-    if (keys.length === 0) return;
-
-    const retiredKeyNames = new Set(RETIRED_KEY_GROUPS.flatMap(group => group.keys));
-    const retired = keys.filter(key => retiredKeyNames.has(key));
-    const unknown = keys.filter(key => !retiredKeyNames.has(key));
-
-    if (retired.length > 0) {
+  private warnStrayKeys(cfg: Record<string, unknown>, warnings: string[]): void {
+    const strayTopLevel = Object.keys(cfg).filter(key => key !== SUPPORTED_TOP_LEVEL_KEY);
+    if (strayTopLevel.length > 0) {
       warnings.push(
-        `core has retired key(s) with no effect: ${retired.join(', ')}. These are silently ` +
-          'dropped by load() — remove them from your .lien.config.json.',
+        `Unrecognized top-level key(s): ${strayTopLevel.join(', ')}. Only ` +
+          `"${SUPPORTED_TOP_LEVEL_KEY}.thresholds" is supported; these are ignored.`,
       );
     }
-    if (unknown.length > 0) {
+
+    const complexity = cfg.complexity;
+    if (complexity && typeof complexity === 'object' && 'enabled' in complexity) {
       warnings.push(
-        `core has unexpected key(s): ${unknown.join(', ')}. core currently holds no ` +
-          'configurable settings.',
+        '"complexity.enabled" has no effect and is ignored — complexity.thresholds is always active.',
       );
-    }
-  }
-
-  /**
-   * Validate MCP configuration settings
-   */
-  private validateMCPConfig(
-    mcp: Partial<LienConfig['mcp']>,
-    errors: string[],
-    _warnings: string[],
-  ): void {
-    if (mcp.port !== undefined) {
-      if (typeof mcp.port !== 'number' || mcp.port < 1024 || mcp.port > 65535) {
-        errors.push('mcp.port must be between 1024 and 65535');
-      }
-    }
-
-    if (mcp.transport !== undefined) {
-      if (mcp.transport !== 'stdio' && mcp.transport !== 'socket') {
-        errors.push('mcp.transport must be either "stdio" or "socket"');
-      }
-    }
-
-    if (mcp.autoIndexOnFirstRun !== undefined) {
-      if (typeof mcp.autoIndexOnFirstRun !== 'boolean') {
-        errors.push('mcp.autoIndexOnFirstRun must be a boolean');
-      }
-    }
-  }
-
-  /**
-   * Validate git detection configuration settings
-   */
-  private validateGitDetectionConfig(
-    gitDetection: Partial<LienConfig['gitDetection']>,
-    errors: string[],
-    _warnings: string[],
-  ): void {
-    if (gitDetection.enabled !== undefined) {
-      if (typeof gitDetection.enabled !== 'boolean') {
-        errors.push('gitDetection.enabled must be a boolean');
-      }
-    }
-
-    if (gitDetection.pollIntervalMs !== undefined) {
-      if (typeof gitDetection.pollIntervalMs !== 'number' || gitDetection.pollIntervalMs < 100) {
-        errors.push('gitDetection.pollIntervalMs must be at least 100ms');
-      } else if (gitDetection.pollIntervalMs < 1000) {
-        _warnings.push(
-          'gitDetection.pollIntervalMs is very short (<1s). This may impact performance',
-        );
-      }
-    }
-  }
-
-  /**
-   * Validate file watching configuration settings
-   */
-  private validateFileWatchingConfig(
-    fileWatching: Partial<LienConfig['fileWatching']>,
-    errors: string[],
-    warnings: string[],
-  ): void {
-    if (fileWatching.enabled !== undefined) {
-      if (typeof fileWatching.enabled !== 'boolean') {
-        errors.push('fileWatching.enabled must be a boolean');
-      }
-    }
-
-    if (fileWatching.debounceMs !== undefined) {
-      if (typeof fileWatching.debounceMs !== 'number' || fileWatching.debounceMs < 0) {
-        errors.push('fileWatching.debounceMs must be a non-negative number');
-      } else if (fileWatching.debounceMs < 100) {
-        warnings.push(
-          'fileWatching.debounceMs is very short (<100ms). This may cause excessive reindexing',
-        );
-      }
     }
   }
 }

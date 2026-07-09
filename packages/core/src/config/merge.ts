@@ -2,81 +2,26 @@ import type { LienConfig } from './schema.js';
 
 /**
  * Deep merges user config with defaults, preserving user customizations.
- * User values always take precedence over defaults.
+ * `complexity.thresholds` is the only field LienConfig has left, so this
+ * simply merges that one nested object; user-defined thresholds win,
+ * unspecified ones fall back to the default.
  *
  * @param defaults - The default configuration
  * @param user - The user's partial configuration
  * @returns Complete merged configuration
  */
 export function deepMergeConfig(defaults: LienConfig, user: Partial<LienConfig>): LienConfig {
+  // Non-null assertion: `defaults` is a contract, not user input — callers
+  // (in practice, always `defaultConfig`) must supply complete thresholds.
+  // Without it, TS widens testPaths/mentalLoad to `| undefined` below, since
+  // it can no longer see that *some* spread source always provides them.
+  const defaultThresholds = defaults.complexity!.thresholds;
   return {
-    core: {
-      ...defaults.core,
-      ...user.core,
+    complexity: {
+      thresholds: {
+        ...defaultThresholds,
+        ...user.complexity?.thresholds,
+      },
     },
-    chunking: {
-      ...defaults.chunking,
-      ...user.chunking,
-    },
-    mcp: {
-      ...defaults.mcp,
-      ...user.mcp,
-    },
-    gitDetection: {
-      ...defaults.gitDetection,
-      ...user.gitDetection,
-    },
-    fileWatching: {
-      ...defaults.fileWatching,
-      ...user.fileWatching,
-    },
-    storage: user.storage ?? defaults.storage,
-    complexity: user.complexity
-      ? {
-          enabled: user.complexity.enabled ?? defaults.complexity?.enabled ?? true,
-          thresholds: {
-            ...defaults.complexity?.thresholds,
-            ...(user.complexity.thresholds || {}),
-          },
-        }
-      : defaults.complexity,
-    // Only include frameworks if defined (backward compat with old configs)
-    ...(user.frameworks !== undefined || defaults.frameworks !== undefined
-      ? { frameworks: user.frameworks ?? defaults.frameworks }
-      : {}),
   };
-}
-
-/**
- * Detects new fields that exist in the 'after' config but not in the 'before' config.
- * Returns a list of human-readable field paths.
- *
- * @param before - The existing config (potentially missing fields)
- * @param after - The complete config with all fields
- * @returns Array of new field paths (e.g., ["mcp.autoIndexOnFirstRun", "gitDetection"])
- */
-export function detectNewFields(before: Record<string, any>, after: Record<string, any>): string[] {
-  const newFields: string[] = [];
-
-  // Check top-level sections
-  for (const key of Object.keys(after)) {
-    if (!(key in before)) {
-      newFields.push(key);
-      continue;
-    }
-
-    // Check nested fields for object sections
-    if (typeof after[key] === 'object' && after[key] !== null && !Array.isArray(after[key])) {
-      const beforeSection = (before[key] as Record<string, any>) || {};
-      const afterSection = after[key] as Record<string, any>;
-
-      for (const nestedKey of Object.keys(afterSection)) {
-        if (!(nestedKey in beforeSection)) {
-          newFields.push(`${key}.${nestedKey}`);
-        }
-      }
-    }
-  }
-
-  return newFields;
 }

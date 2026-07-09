@@ -203,15 +203,16 @@ export async function initCommand(options: InitOptions = {}) {
     console.log(JSON.stringify(snippet, null, 2));
   }
 
-  // Check if a project config exists and note that most of it is legacy.
-  // Indexing/search run on built-in defaults; only the complexity thresholds
-  // are still read from it.
+  // Check if a project config exists and note its reduced scope. Indexing,
+  // search, MCP, git detection, and file watching all run on built-in
+  // defaults; only complexity.thresholds is still read from it (other keys
+  // are ignored with a warning — see ConfigService's retired-key handling).
   const projectConfigPath = path.join(rootDir, '.lien.config.json');
   try {
     await fs.access(projectConfigPath);
     console.log(
       chalk.dim(
-        '  Note: .lien.config.json found — most of it is legacy; only complexity thresholds are read.',
+        '  Note: .lien.config.json found — only complexity.thresholds is read; other keys are ignored.',
       ),
     );
   } catch {

@@ -365,4 +365,28 @@ describe('deltaCommand — --base <ref> integration (real git fixtures)', () => 
       expect.stringContaining('base ref "totally-not-a-ref" not found'),
     );
   });
+
+  it('loads complexity.thresholds from a real .lien.config.json on disk (no --threshold flag)', async () => {
+    await initRepo();
+    await write('a.ts', BODY.oneIf);
+    await commitAll('init');
+    // cog 3 — under the built-in default mentalLoad (15), so it would be
+    // invisible without the config-loaded threshold below.
+    await write('a.ts', BODY.twoNest);
+
+    // No .lien.config.json yet: default thresholds see no regression.
+    const exitBeforeConfig = await runDelta({ format: 'json' });
+    expect(exitBeforeConfig).toBe(0);
+
+    await write(
+      '.lien.config.json',
+      JSON.stringify({ complexity: { thresholds: { mentalLoad: 2 } } }),
+    );
+
+    // Same working tree, no --threshold flag: configService.load() must have
+    // picked up complexity.thresholds.mentalLoad from disk for this to flag.
+    const exitAfterConfig = await runDelta({ format: 'json' });
+    expect(exitAfterConfig).toBe(1);
+    expect((lastJsonLog() as { summary: { regressions: number } }).summary.regressions).toBe(1);
+  });
 });
