@@ -1,6 +1,6 @@
 {
   "name": "@liendev/parser-native",
-  "version": "0.59.0",
+  "version": "0.61.0",
   "description": "Prebuilt native tree-sitter parser bindings for Lien (napi-rs)",
   "type": "module",
   "main": "./index.js",
