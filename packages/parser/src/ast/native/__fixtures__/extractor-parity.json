@@ -1,0 +1,365 @@
+{
+  "tsExports": ["Greeter", "Greeting"],
+  "tsImports": ["./helper"],
+  "pyCallSites": [
+    {
+      "symbol": "helper",
+      "line": 8,
+      "isResultCaptured": true
+    }
+  ],
+  "tsChunks": [
+    {
+      "content": "import { helper } from './helper';",
+      "metadata": {
+        "file": "greeter.ts",
+        "startLine": 1,
+        "endLine": 3,
+        "type": "block",
+        "language": "typescript",
+        "symbols": {
+          "functions": [],
+          "classes": [],
+          "interfaces": []
+        },
+        "imports": ["helper"],
+        "exports": ["Greeter", "Greeting"],
+        "importedSymbols": {
+          "helper": ["helper"]
+        }
+      }
+    },
+    {
+      "content": "export interface Greeter {\n  greet(name: string): string;\n}",
+      "metadata": {
+        "file": "greeter.ts",
+        "startLine": 4,
+        "endLine": 6,
+        "type": "function",
+        "language": "typescript",
+        "symbols": {
+          "functions": [],
+          "classes": [],
+          "interfaces": ["Greeter"]
+        },
+        "symbolName": "Greeter",
+        "symbolType": "interface",
+        "signature": "interface Greeter",
+        "imports": ["helper"],
+        "exports": ["Greeter", "Greeting"],
+        "importedSymbols": {
+          "helper": ["helper"]
+        }
+      }
+    },
+    {
+      "content": "export class Greeting implements Greeter {\n  greet(name: string): string {\n    return helper(name);\n  }\n}",
+      "metadata": {
+        "file": "greeter.ts",
+        "startLine": 8,
+        "endLine": 12,
+        "type": "class",
+        "language": "typescript",
+        "symbols": {
+          "functions": [],
+          "classes": ["Greeting"],
+          "interfaces": []
+        },
+        "symbolName": "Greeting",
+        "symbolType": "class",
+        "signature": "class Greeting",
+        "imports": ["helper"],
+        "exports": ["Greeter", "Greeting"],
+        "importedSymbols": {
+          "helper": ["helper"]
+        }
+      }
+    },
+    {
+      "content": "  greet(name: string): string {\n    return helper(name);\n  }",
+      "metadata": {
+        "file": "greeter.ts",
+        "startLine": 9,
+        "endLine": 11,
+        "type": "function",
+        "language": "typescript",
+        "symbols": {
+          "functions": ["greet"],
+          "classes": [],
+          "interfaces": []
+        },
+        "symbolName": "greet",
+        "symbolType": "method",
+        "parentClass": "Greeting",
+        "complexity": 1,
+        "cognitiveComplexity": 0,
+        "parameters": ["name: string"],
+        "signature": "greet(name: string): string",
+        "returnType": ": string",
+        "imports": ["helper"],
+        "exports": ["Greeter", "Greeting"],
+        "importedSymbols": {
+          "helper": ["helper"]
+        },
+        "callSites": [
+          {
+            "symbol": "helper",
+            "line": 10,
+            "isResultCaptured": true
+          }
+        ],
+        "halsteadVolume": 55.35,
+        "halsteadDifficulty": 5.25,
+        "halsteadEffort": 291,
+        "halsteadBugs": 0.015
+      }
+    },
+    {
+      "content": "}",
+      "metadata": {
+        "file": "greeter.ts",
+        "startLine": 12,
+        "endLine": 13,
+        "type": "block",
+        "language": "typescript",
+        "symbols": {
+          "functions": [],
+          "classes": [],
+          "interfaces": []
+        },
+        "imports": ["helper"],
+        "exports": ["Greeter", "Greeting"],
+        "importedSymbols": {
+          "helper": ["helper"]
+        }
+      }
+    }
+  ],
+  "swiftChunks": [
+    {
+      "content": "protocol Greeting {\n    func message() -> String\n}",
+      "metadata": {
+        "file": "greeter.swift",
+        "startLine": 2,
+        "endLine": 4,
+        "type": "function",
+        "language": "swift",
+        "symbols": {
+          "functions": [],
+          "classes": [],
+          "interfaces": ["Greeting"]
+        },
+        "symbolName": "Greeting",
+        "symbolType": "interface",
+        "signature": "protocol Greeting",
+        "imports": [],
+        "exports": ["Greeting", "message", "Greeter", "init", "add", "String"]
+      }
+    },
+    {
+      "content": "    func message() -> String",
+      "metadata": {
+        "file": "greeter.swift",
+        "startLine": 3,
+        "endLine": 3,
+        "type": "function",
+        "language": "swift",
+        "symbols": {
+          "functions": ["message"],
+          "classes": [],
+          "interfaces": []
+        },
+        "symbolName": "message",
+        "symbolType": "method",
+        "parentClass": "Greeting",
+        "complexity": 1,
+        "cognitiveComplexity": 0,
+        "parameters": [],
+        "signature": "func message() -> String",
+        "returnType": "String",
+        "imports": [],
+        "exports": ["Greeting", "message", "Greeter", "init", "add", "String"],
+        "halsteadVolume": 8,
+        "halsteadDifficulty": 0,
+        "halsteadEffort": 0,
+        "halsteadBugs": 0
+      }
+    },
+    {
+      "content": "}",
+      "metadata": {
+        "file": "greeter.swift",
+        "startLine": 4,
+        "endLine": 5,
+        "type": "block",
+        "language": "swift",
+        "symbols": {
+          "functions": [],
+          "classes": [],
+          "interfaces": []
+        },
+        "imports": [],
+        "exports": ["Greeting", "message", "Greeter", "init", "add", "String"]
+      }
+    },
+    {
+      "content": "class Greeter: Greeting {\n    private let name: String\n\n    init(name: String) {\n        self.name = name\n    }\n\n    func message() -> String {\n        return \"hello \" + name\n    }\n\n    func add(a: Int, b: Int) -> Int {\n        return a + b\n    }\n\n    subscript(index: Int) -> String {\n        return message()\n    }\n}",
+      "metadata": {
+        "file": "greeter.swift",
+        "startLine": 6,
+        "endLine": 24,
+        "type": "class",
+        "language": "swift",
+        "symbols": {
+          "functions": [],
+          "classes": ["Greeter"],
+          "interfaces": []
+        },
+        "symbolName": "Greeter",
+        "symbolType": "class",
+        "signature": "class Greeter",
+        "imports": [],
+        "exports": ["Greeting", "message", "Greeter", "init", "add", "String"]
+      }
+    },
+    {
+      "content": "    init(name: String) {\n        self.name = name\n    }",
+      "metadata": {
+        "file": "greeter.swift",
+        "startLine": 9,
+        "endLine": 11,
+        "type": "function",
+        "language": "swift",
+        "symbols": {
+          "functions": ["init"],
+          "classes": [],
+          "interfaces": []
+        },
+        "symbolName": "init",
+        "symbolType": "method",
+        "parentClass": "Greeter",
+        "complexity": 1,
+        "cognitiveComplexity": 0,
+        "parameters": ["name: String"],
+        "signature": "init(name: String)",
+        "imports": [],
+        "exports": ["Greeting", "message", "Greeter", "init", "add", "String"],
+        "halsteadVolume": 31.7,
+        "halsteadDifficulty": 4,
+        "halsteadEffort": 127,
+        "halsteadBugs": 0.008
+      }
+    },
+    {
+      "content": "    func message() -> String {\n        return \"hello \" + name\n    }",
+      "metadata": {
+        "file": "greeter.swift",
+        "startLine": 13,
+        "endLine": 15,
+        "type": "function",
+        "language": "swift",
+        "symbols": {
+          "functions": ["message"],
+          "classes": [],
+          "interfaces": []
+        },
+        "symbolName": "message",
+        "symbolType": "method",
+        "parentClass": "Greeter",
+        "complexity": 1,
+        "cognitiveComplexity": 0,
+        "parameters": [],
+        "signature": "func message() -> String",
+        "returnType": "String",
+        "imports": [],
+        "exports": ["Greeting", "message", "Greeter", "init", "add", "String"],
+        "halsteadVolume": 24,
+        "halsteadDifficulty": 0,
+        "halsteadEffort": 0,
+        "halsteadBugs": 0
+      }
+    },
+    {
+      "content": "    func add(a: Int, b: Int) -> Int {\n        return a + b\n    }",
+      "metadata": {
+        "file": "greeter.swift",
+        "startLine": 17,
+        "endLine": 19,
+        "type": "function",
+        "language": "swift",
+        "symbols": {
+          "functions": ["add"],
+          "classes": [],
+          "interfaces": []
+        },
+        "symbolName": "add",
+        "symbolType": "method",
+        "parentClass": "Greeter",
+        "complexity": 1,
+        "cognitiveComplexity": 0,
+        "parameters": ["a: Int", "b: Int"],
+        "signature": "func add(a: Int, b: Int) -> Int",
+        "returnType": "Int",
+        "imports": [],
+        "exports": ["Greeting", "message", "Greeter", "init", "add", "String"],
+        "halsteadVolume": 24,
+        "halsteadDifficulty": 0,
+        "halsteadEffort": 0,
+        "halsteadBugs": 0
+      }
+    },
+    {
+      "content": "    subscript(index: Int) -> String {\n        return message()\n    }",
+      "metadata": {
+        "file": "greeter.swift",
+        "startLine": 21,
+        "endLine": 23,
+        "type": "function",
+        "language": "swift",
+        "symbols": {
+          "functions": ["String"],
+          "classes": [],
+          "interfaces": []
+        },
+        "symbolName": "String",
+        "symbolType": "method",
+        "parentClass": "Greeter",
+        "complexity": 1,
+        "cognitiveComplexity": 0,
+        "parameters": ["index: Int"],
+        "signature": "subscript(index: Int) -> String",
+        "returnType": "String",
+        "imports": [],
+        "exports": ["Greeting", "message", "Greeter", "init", "add", "String"],
+        "callSites": [
+          {
+            "symbol": "message",
+            "line": 22,
+            "isResultCaptured": true
+          }
+        ],
+        "halsteadVolume": 30,
+        "halsteadDifficulty": 0,
+        "halsteadEffort": 0,
+        "halsteadBugs": 0
+      }
+    },
+    {
+      "content": "}",
+      "metadata": {
+        "file": "greeter.swift",
+        "startLine": 24,
+        "endLine": 25,
+        "type": "block",
+        "language": "swift",
+        "symbols": {
+          "functions": [],
+          "classes": [],
+          "interfaces": []
+        },
+        "imports": [],
+        "exports": ["Greeting", "message", "Greeter", "init", "add", "String"]
+      }
+    }
+  ]
+}

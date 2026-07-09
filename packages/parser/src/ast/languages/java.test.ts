@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import Parser from 'tree-sitter';
-import Java from 'tree-sitter-java';
+import { mustParse } from '../test/helpers/parse-fixture.js';
+import type { SyntaxNode } from '../types.js';
 import { chunkByAST } from '../chunker.js';
 import {
   JavaTraverser,
@@ -10,8 +10,6 @@ import {
 } from './java.js';
 
 describe('Java Language', () => {
-  const parser = new Parser();
-  parser.setLanguage(Java);
   const traverser = new JavaTraverser();
   const exportExtractor = new JavaExportExtractor();
   const importExtractor = new JavaImportExtractor();
@@ -32,15 +30,15 @@ describe('Java Language', () => {
 
     it('should extract children from class declarations', () => {
       const code = 'public class Foo { public void bar() {} }';
-      const tree = parser.parse(code);
-      const classNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'java');
+      const classNode = root.namedChild(0)!;
       expect(traverser.shouldExtractChildren(classNode)).toBe(true);
     });
 
     it('should not extract children from method declarations', () => {
       const code = 'public class Foo { public void bar() {} }';
-      const tree = parser.parse(code);
-      const classNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'java');
+      const classNode = root.namedChild(0)!;
       const body = classNode.childForFieldName('body')!;
       const methodNode = body.namedChild(0)!;
       expect(traverser.shouldExtractChildren(methodNode)).toBe(false);
@@ -48,8 +46,8 @@ describe('Java Language', () => {
 
     it('should get class body from class declaration', () => {
       const code = 'public class Foo { public void bar() {} }';
-      const tree = parser.parse(code);
-      const classNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'java');
+      const classNode = root.namedChild(0)!;
       const body = traverser.getContainerBody(classNode);
       expect(body).not.toBeNull();
       expect(body!.type).toBe('class_body');
@@ -57,21 +55,21 @@ describe('Java Language', () => {
 
     it('should traverse program root', () => {
       const code = 'public class Foo {}';
-      const tree = parser.parse(code);
-      expect(traverser.shouldTraverseChildren(tree.rootNode)).toBe(true);
+      const root = mustParse(code, 'java');
+      expect(traverser.shouldTraverseChildren(root)).toBe(true);
     });
 
     it('should not traverse non-root nodes', () => {
       const code = 'public class Foo { public void bar() {} }';
-      const tree = parser.parse(code);
-      const classNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'java');
+      const classNode = root.namedChild(0)!;
       expect(traverser.shouldTraverseChildren(classNode)).toBe(false);
     });
 
     it('should find parent container name for methods', () => {
       const code = 'public class Calculator { public int add(int a, int b) { return a + b; } }';
-      const tree = parser.parse(code);
-      const classNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'java');
+      const classNode = root.namedChild(0)!;
       const body = classNode.childForFieldName('body')!;
       const methodNode = body.namedChild(0)!;
       expect(traverser.findParentContainerName(methodNode)).toBe('Calculator');
@@ -79,17 +77,17 @@ describe('Java Language', () => {
 
     it('should return undefined for top-level parent container name', () => {
       const code = 'public class Foo {}';
-      const tree = parser.parse(code);
-      const classNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'java');
+      const classNode = root.namedChild(0)!;
       expect(traverser.findParentContainerName(classNode)).toBeUndefined();
     });
 
     it('should detect lambda in local variable declaration', () => {
       const code =
         'public class Foo { void bar() { Runnable r = () -> System.out.println("hi"); } }';
-      const tree = parser.parse(code);
+      const root = mustParse(code, 'java');
       // Navigate to the local_variable_declaration inside the method body
-      const localVarDecl = findNode(tree.rootNode, 'local_variable_declaration');
+      const localVarDecl = findNode(root, 'local_variable_declaration');
       if (localVarDecl) {
         expect(traverser.isDeclarationWithFunction(localVarDecl)).toBe(true);
         const result = traverser.findFunctionInDeclaration(localVarDecl);
@@ -101,8 +99,8 @@ describe('Java Language', () => {
 
     it('should not detect function in non-lambda variable declaration', () => {
       const code = 'public class Foo { void bar() { int x = 42; } }';
-      const tree = parser.parse(code);
-      const localVarDecl = findNode(tree.rootNode, 'local_variable_declaration');
+      const root = mustParse(code, 'java');
+      const localVarDecl = findNode(root, 'local_variable_declaration');
       if (localVarDecl) {
         expect(traverser.isDeclarationWithFunction(localVarDecl)).toBe(false);
       }
@@ -112,15 +110,15 @@ describe('Java Language', () => {
   describe('Export Extraction', () => {
     it('should extract public class', () => {
       const code = 'public class UserService {}';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'java');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toContain('UserService');
     });
 
     it('should not export package-private class', () => {
       const code = 'class InternalHelper {}';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'java');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).not.toContain('InternalHelper');
     });
 
@@ -130,8 +128,8 @@ describe('Java Language', () => {
     private void helper() {}
     void packagePrivate() {}
 }`;
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'java');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toContain('UserService');
       expect(exports).toContain('getName');
       expect(exports).not.toContain('helper');
@@ -140,8 +138,8 @@ describe('Java Language', () => {
 
     it('should extract public interface', () => {
       const code = 'public interface Repository { void save(); }';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'java');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toContain('Repository');
     });
 
@@ -150,16 +148,16 @@ describe('Java Language', () => {
     void save();
     void delete();
 }`;
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'java');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toContain('save');
       expect(exports).toContain('delete');
     });
 
     it('should extract public enum', () => {
       const code = 'public enum Status { ACTIVE, INACTIVE }';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'java');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toContain('Status');
     });
 
@@ -167,8 +165,8 @@ describe('Java Language', () => {
       const code = `public class Utils {
     public static String format(String s) { return s; }
 }`;
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'java');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toContain('Utils');
       expect(exports).toContain('format');
     });
@@ -179,8 +177,8 @@ describe('Java Language', () => {
     private void init() {}
     public String status() { return "ok"; }
 }`;
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'java');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toContain('App');
       expect(exports).toContain('run');
       expect(exports).toContain('status');
@@ -195,56 +193,56 @@ describe('Java Language', () => {
 
     it('should return null for stdlib imports', () => {
       const code = 'import java.util.List;';
-      const tree = parser.parse(code);
-      const importNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'java');
+      const importNode = root.namedChild(0)!;
       const path = importExtractor.extractImportPath(importNode);
       expect(path).toBeNull();
     });
 
     it('should return null for javax stdlib imports', () => {
       const code = 'import javax.swing.JFrame;';
-      const tree = parser.parse(code);
-      const importNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'java');
+      const importNode = root.namedChild(0)!;
       const path = importExtractor.extractImportPath(importNode);
       expect(path).toBeNull();
     });
 
     it('should extract external import path', () => {
       const code = 'import com.google.common.collect.ImmutableList;';
-      const tree = parser.parse(code);
-      const importNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'java');
+      const importNode = root.namedChild(0)!;
       const path = importExtractor.extractImportPath(importNode);
       expect(path).toBe('com.google.common.collect.ImmutableList');
     });
 
     it('should handle wildcard imports', () => {
       const code = 'import com.google.common.collect.*;';
-      const tree = parser.parse(code);
-      const importNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'java');
+      const importNode = root.namedChild(0)!;
       const path = importExtractor.extractImportPath(importNode);
       expect(path).toBe('com.google.common.collect.*');
     });
 
     it('should handle static imports', () => {
       const code = 'import static com.google.common.base.Preconditions.checkNotNull;';
-      const tree = parser.parse(code);
-      const importNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'java');
+      const importNode = root.namedChild(0)!;
       const path = importExtractor.extractImportPath(importNode);
       expect(path).toBe('com.google.common.base.Preconditions.checkNotNull');
     });
 
     it('should filter out static stdlib imports', () => {
       const code = 'import static java.lang.Math.PI;';
-      const tree = parser.parse(code);
-      const importNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'java');
+      const importNode = root.namedChild(0)!;
       const path = importExtractor.extractImportPath(importNode);
       expect(path).toBeNull();
     });
 
     it('should process import symbols for external packages', () => {
       const code = 'import com.google.common.collect.ImmutableList;';
-      const tree = parser.parse(code);
-      const importNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'java');
+      const importNode = root.namedChild(0)!;
       const result = importExtractor.processImportSymbols(importNode);
       expect(result).not.toBeNull();
       expect(result!.importPath).toBe('com.google.common.collect.ImmutableList');
@@ -253,8 +251,8 @@ describe('Java Language', () => {
 
     it('should process wildcard import symbols', () => {
       const code = 'import com.google.common.collect.*;';
-      const tree = parser.parse(code);
-      const importNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'java');
+      const importNode = root.namedChild(0)!;
       const result = importExtractor.processImportSymbols(importNode);
       expect(result).not.toBeNull();
       expect(result!.importPath).toBe('com.google.common.collect');
@@ -263,8 +261,8 @@ describe('Java Language', () => {
 
     it('should return null for stdlib import symbols', () => {
       const code = 'import java.util.List;';
-      const tree = parser.parse(code);
-      const importNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'java');
+      const importNode = root.namedChild(0)!;
       const result = importExtractor.processImportSymbols(importNode);
       expect(result).toBeNull();
     });
@@ -275,8 +273,8 @@ describe('Java Language', () => {
       const code = `public class Foo {
     public String getName(String prefix, int id) { return prefix + id; }
 }`;
-      const tree = parser.parse(code);
-      const methodNode = findNode(tree.rootNode, 'method_declaration')!;
+      const root = mustParse(code, 'java');
+      const methodNode = findNode(root, 'method_declaration')!;
       const symbol = symbolExtractor.extractSymbol(methodNode, code, 'Foo');
       expect(symbol).not.toBeNull();
       expect(symbol!.name).toBe('getName');
@@ -289,8 +287,8 @@ describe('Java Language', () => {
       const code = `public class User {
     public User(String name) { this.name = name; }
 }`;
-      const tree = parser.parse(code);
-      const ctorNode = findNode(tree.rootNode, 'constructor_declaration')!;
+      const root = mustParse(code, 'java');
+      const ctorNode = findNode(root, 'constructor_declaration')!;
       const symbol = symbolExtractor.extractSymbol(ctorNode, code, 'User');
       expect(symbol).not.toBeNull();
       expect(symbol!.name).toBe('User');
@@ -300,8 +298,8 @@ describe('Java Language', () => {
 
     it('should extract class_declaration info', () => {
       const code = 'public class Calculator {}';
-      const tree = parser.parse(code);
-      const classNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'java');
+      const classNode = root.namedChild(0)!;
       const symbol = symbolExtractor.extractSymbol(classNode, code);
       expect(symbol).not.toBeNull();
       expect(symbol!.name).toBe('Calculator');
@@ -311,8 +309,8 @@ describe('Java Language', () => {
 
     it('should extract interface_declaration info', () => {
       const code = 'public interface Repository {}';
-      const tree = parser.parse(code);
-      const ifaceNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'java');
+      const ifaceNode = root.namedChild(0)!;
       const symbol = symbolExtractor.extractSymbol(ifaceNode, code);
       expect(symbol).not.toBeNull();
       expect(symbol!.name).toBe('Repository');
@@ -322,8 +320,8 @@ describe('Java Language', () => {
 
     it('should extract enum_declaration info', () => {
       const code = 'public enum Color { RED, GREEN, BLUE }';
-      const tree = parser.parse(code);
-      const enumNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'java');
+      const enumNode = root.namedChild(0)!;
       const symbol = symbolExtractor.extractSymbol(enumNode, code);
       expect(symbol).not.toBeNull();
       expect(symbol!.name).toBe('Color');
@@ -333,8 +331,8 @@ describe('Java Language', () => {
 
     it('should extract record_declaration info', () => {
       const code = 'public record Point(int x, int y) {}';
-      const tree = parser.parse(code);
-      const recordNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'java');
+      const recordNode = root.namedChild(0)!;
       const symbol = symbolExtractor.extractSymbol(recordNode, code);
       expect(symbol).not.toBeNull();
       expect(symbol!.name).toBe('Point');
@@ -346,8 +344,8 @@ describe('Java Language', () => {
       const code = `public class Foo {
     public String getName() { return ""; }
 }`;
-      const tree = parser.parse(code);
-      const methodNode = findNode(tree.rootNode, 'method_declaration')!;
+      const root = mustParse(code, 'java');
+      const methodNode = findNode(root, 'method_declaration')!;
       const symbol = symbolExtractor.extractSymbol(methodNode, code, 'Foo');
       expect(symbol).not.toBeNull();
       expect(symbol!.returnType).toBe('String');
@@ -357,8 +355,8 @@ describe('Java Language', () => {
       const code = `public class Foo {
     public void doWork() {}
 }`;
-      const tree = parser.parse(code);
-      const methodNode = findNode(tree.rootNode, 'method_declaration')!;
+      const root = mustParse(code, 'java');
+      const methodNode = findNode(root, 'method_declaration')!;
       const symbol = symbolExtractor.extractSymbol(methodNode, code, 'Foo');
       expect(symbol).not.toBeNull();
       expect(symbol!.returnType).toBe('void');
@@ -368,8 +366,8 @@ describe('Java Language', () => {
       const code = `public class Foo {
     void bar() { doSomething(); }
 }`;
-      const tree = parser.parse(code);
-      const callNode = findNode(tree.rootNode, 'method_invocation');
+      const root = mustParse(code, 'java');
+      const callNode = findNode(root, 'method_invocation');
       expect(callNode).not.toBeNull();
       const callSite = symbolExtractor.extractCallSite(callNode!);
       expect(callSite).not.toBeNull();
@@ -380,8 +378,8 @@ describe('Java Language', () => {
       const code = `public class Foo {
     void bar() { user.getName(); }
 }`;
-      const tree = parser.parse(code);
-      const callNode = findNode(tree.rootNode, 'method_invocation');
+      const root = mustParse(code, 'java');
+      const callNode = findNode(root, 'method_invocation');
       expect(callNode).not.toBeNull();
       const callSite = symbolExtractor.extractCallSite(callNode!);
       expect(callSite).not.toBeNull();
@@ -392,9 +390,9 @@ describe('Java Language', () => {
       const code = `public class Foo {
     void bar() { list.stream().filter(x -> true).collect(null); }
 }`;
-      const tree = parser.parse(code);
+      const root = mustParse(code, 'java');
       // Find the outermost method_invocation (collect)
-      const callNodes = findAllNodes(tree.rootNode, 'method_invocation');
+      const callNodes = findAllNodes(root, 'method_invocation');
       expect(callNodes.length).toBeGreaterThanOrEqual(3);
 
       const symbols = callNodes.map(n => symbolExtractor.extractCallSite(n)!.symbol);
@@ -407,8 +405,8 @@ describe('Java Language', () => {
       const code = `public class Foo {
     void bar() { list.stream().map(String::valueOf).collect(null); }
 }`;
-      const tree = parser.parse(code);
-      const refNodes = findAllNodes(tree.rootNode, 'method_reference');
+      const root = mustParse(code, 'java');
+      const refNodes = findAllNodes(root, 'method_reference');
       expect(refNodes.length).toBeGreaterThanOrEqual(1);
       const callSite = symbolExtractor.extractCallSite(refNodes[0]);
       expect(callSite).not.toBeNull();
@@ -600,7 +598,7 @@ public class App {
 });
 
 /** Helper to recursively find a node of a given type */
-function findNode(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
+function findNode(node: SyntaxNode, type: string): SyntaxNode | null {
   if (node.type === type) return node;
   for (const child of node.namedChildren) {
     const result = findNode(child, type);
@@ -610,8 +608,8 @@ function findNode(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | nu
 }
 
 /** Helper to recursively find all nodes of a given type */
-function findAllNodes(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode[] {
-  const results: Parser.SyntaxNode[] = [];
+function findAllNodes(node: SyntaxNode, type: string): SyntaxNode[] {
+  const results: SyntaxNode[] = [];
   if (node.type === type) results.push(node);
   for (const child of node.namedChildren) {
     results.push(...findAllNodes(child, type));

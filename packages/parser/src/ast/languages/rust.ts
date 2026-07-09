@@ -1,6 +1,4 @@
-import Rust from 'tree-sitter-rust';
-import type Parser from 'tree-sitter';
-import type { SymbolInfo } from '../types.js';
+import type { SymbolInfo, SyntaxNode } from '../types.js';
 import type { LanguageDefinition } from './types.js';
 import type { LanguageTraverser, DeclarationFunctionInfo } from '../traversers/types.js';
 import type {
@@ -37,28 +35,28 @@ export class RustTraverser implements LanguageTraverser {
 
   functionTypes = ['closure_expression'];
 
-  shouldExtractChildren(node: Parser.SyntaxNode): boolean {
+  shouldExtractChildren(node: SyntaxNode): boolean {
     return this.containerTypes.includes(node.type);
   }
 
-  isDeclarationWithFunction(_node: Parser.SyntaxNode): boolean {
+  isDeclarationWithFunction(_node: SyntaxNode): boolean {
     return false;
   }
 
-  getContainerBody(node: Parser.SyntaxNode): Parser.SyntaxNode | null {
+  getContainerBody(node: SyntaxNode): SyntaxNode | null {
     if (node.type === 'impl_item' || node.type === 'trait_item') {
       return node.childForFieldName('body');
     }
     return null;
   }
 
-  shouldTraverseChildren(node: Parser.SyntaxNode): boolean {
+  shouldTraverseChildren(node: SyntaxNode): boolean {
     return (
       node.type === 'source_file' || node.type === 'declaration_list' || node.type === 'mod_item'
     );
   }
 
-  findParentContainerName(node: Parser.SyntaxNode): string | undefined {
+  findParentContainerName(node: SyntaxNode): string | undefined {
     let current = node.parent;
     while (current) {
       if (current.type === 'impl_item') {
@@ -74,7 +72,7 @@ export class RustTraverser implements LanguageTraverser {
     return undefined;
   }
 
-  findFunctionInDeclaration(_node: Parser.SyntaxNode): DeclarationFunctionInfo {
+  findFunctionInDeclaration(_node: SyntaxNode): DeclarationFunctionInfo {
     return {
       hasFunction: false,
       functionNode: null,
@@ -115,7 +113,7 @@ export class RustExportExtractor implements LanguageExportExtractor {
     'mod_item',
   ]);
 
-  extractExports(rootNode: Parser.SyntaxNode): string[] {
+  extractExports(rootNode: SyntaxNode): string[] {
     const exports: string[] = [];
     const seen = new Set<string>();
 
@@ -133,7 +131,7 @@ export class RustExportExtractor implements LanguageExportExtractor {
     return exports;
   }
 
-  private extractExportName(node: Parser.SyntaxNode, addExport: (name: string) => void): void {
+  private extractExportName(node: SyntaxNode, addExport: (name: string) => void): void {
     if (node.type === 'use_declaration') {
       const argument = node.childForFieldName('argument');
       if (argument) {
@@ -149,7 +147,7 @@ export class RustExportExtractor implements LanguageExportExtractor {
     }
   }
 
-  private hasVisibilityModifier(node: Parser.SyntaxNode): boolean {
+  private hasVisibilityModifier(node: SyntaxNode): boolean {
     return node.children.some(child => child.type === 'visibility_modifier');
   }
 
@@ -159,7 +157,7 @@ export class RustExportExtractor implements LanguageExportExtractor {
    * - `pub use crate::auth::AuthService;` -> ["AuthService"]
    * - `pub use crate::auth::{AuthService, AuthError};` -> ["AuthService", "AuthError"]
    */
-  private extractUseExportNames(node: Parser.SyntaxNode): string[] {
+  private extractUseExportNames(node: SyntaxNode): string[] {
     if (node.type === 'scoped_identifier') {
       const nameNode = node.childForFieldName('name');
       return nameNode ? [nameNode.text] : [];
@@ -208,7 +206,7 @@ function convertRustModulePath(path: string): string | null {
  * For `crate::auth::AuthService`, returns `crate::auth`.
  * For `crate::auth::{A, B}`, returns `crate::auth`.
  */
-function extractScopePath(node: Parser.SyntaxNode): string | null {
+function extractScopePath(node: SyntaxNode): string | null {
   const pathNode = node.childForFieldName('path');
   return pathNode?.text ?? null;
 }
@@ -217,7 +215,7 @@ function extractScopePath(node: Parser.SyntaxNode): string | null {
  * Extract the symbol name from a use_as_clause node.
  * Prefers the alias if present, otherwise takes the last identifier.
  */
-function extractUseAsClauseSymbol(node: Parser.SyntaxNode): string | null {
+function extractUseAsClauseSymbol(node: SyntaxNode): string | null {
   const alias = node.childForFieldName('alias');
   if (alias) return alias.text;
 
@@ -229,7 +227,7 @@ function extractUseAsClauseSymbol(node: Parser.SyntaxNode): string | null {
 /**
  * Extract the symbol name from a single use_list item.
  */
-function extractUseListItemSymbol(item: Parser.SyntaxNode): string | null {
+function extractUseListItemSymbol(item: SyntaxNode): string | null {
   switch (item.type) {
     case 'identifier':
       return item.text;
@@ -248,7 +246,7 @@ function extractUseListItemSymbol(item: Parser.SyntaxNode): string | null {
  * Extract imported symbol names from a use_list node.
  * Handles: identifier, scoped_identifier, use_as_clause, use_wildcard
  */
-function extractUseListSymbols(useList: Parser.SyntaxNode): string[] {
+function extractUseListSymbols(useList: SyntaxNode): string[] {
   return useList.namedChildren
     .map(item => extractUseListItemSymbol(item))
     .filter((symbol): symbol is string => symbol !== null);
@@ -271,7 +269,7 @@ function extractUseListSymbols(useList: Parser.SyntaxNode): string[] {
 export class RustImportExtractor implements LanguageImportExtractor {
   readonly importNodeTypes = ['use_declaration'];
 
-  extractImportPath(node: Parser.SyntaxNode): string | null {
+  extractImportPath(node: SyntaxNode): string | null {
     const argument = node.childForFieldName('argument');
     if (!argument) return null;
 
@@ -279,16 +277,14 @@ export class RustImportExtractor implements LanguageImportExtractor {
     return fullPath ? convertRustModulePath(fullPath) : null;
   }
 
-  processImportSymbols(node: Parser.SyntaxNode): { importPath: string; symbols: string[] } | null {
+  processImportSymbols(node: SyntaxNode): { importPath: string; symbols: string[] } | null {
     const argument = node.childForFieldName('argument');
     if (!argument) return null;
 
     return this.processUseArgument(argument);
   }
 
-  private processUseArgument(
-    node: Parser.SyntaxNode,
-  ): { importPath: string; symbols: string[] } | null {
+  private processUseArgument(node: SyntaxNode): { importPath: string; symbols: string[] } | null {
     // Simple: `use crate::auth::AuthService;`
     if (node.type === 'scoped_identifier') {
       return this.processScopedIdentifier(node);
@@ -318,7 +314,7 @@ export class RustImportExtractor implements LanguageImportExtractor {
   }
 
   private processScopedIdentifier(
-    node: Parser.SyntaxNode,
+    node: SyntaxNode,
   ): { importPath: string; symbols: string[] } | null {
     const pathNode = node.childForFieldName('path');
     const nameNode = node.childForFieldName('name');
@@ -330,9 +326,7 @@ export class RustImportExtractor implements LanguageImportExtractor {
     return { importPath: modulePath, symbols: [nameNode.text] };
   }
 
-  private processScopedUseList(
-    node: Parser.SyntaxNode,
-  ): { importPath: string; symbols: string[] } | null {
+  private processScopedUseList(node: SyntaxNode): { importPath: string; symbols: string[] } | null {
     const scopePath = extractScopePath(node);
     if (!scopePath) return null;
 
@@ -347,9 +341,7 @@ export class RustImportExtractor implements LanguageImportExtractor {
     return symbols.length > 0 ? { importPath: modulePath, symbols } : null;
   }
 
-  private processUseAsClause(
-    node: Parser.SyntaxNode,
-  ): { importPath: string; symbols: string[] } | null {
+  private processUseAsClause(node: SyntaxNode): { importPath: string; symbols: string[] } | null {
     // `use crate::auth::Service as Auth;`
     // The first child is the path (scoped_identifier), alias field has the alias
     const aliasNode = node.childForFieldName('alias');
@@ -368,9 +360,7 @@ export class RustImportExtractor implements LanguageImportExtractor {
     return { importPath: modulePath, symbols: [symbol] };
   }
 
-  private processUseWildcard(
-    node: Parser.SyntaxNode,
-  ): { importPath: string; symbols: string[] } | null {
+  private processUseWildcard(node: SyntaxNode): { importPath: string; symbols: string[] } | null {
     // `use crate::models::*;` -> AST is:
     //   use_wildcard
     //     scoped_identifier (crate::models)
@@ -388,7 +378,7 @@ export class RustImportExtractor implements LanguageImportExtractor {
    * Resolve the full path of a use argument for the imports list.
    * Returns the full `crate::...` path or similar.
    */
-  private resolveFullPath(node: Parser.SyntaxNode): string | null {
+  private resolveFullPath(node: SyntaxNode): string | null {
     if (node.type === 'scoped_identifier') {
       return node.text;
     }
@@ -433,7 +423,7 @@ export class RustSymbolExtractor implements LanguageSymbolExtractor {
     'trait_item',
   ];
 
-  extractSymbol(node: Parser.SyntaxNode, content: string, parentClass?: string): SymbolInfo | null {
+  extractSymbol(node: SyntaxNode, content: string, parentClass?: string): SymbolInfo | null {
     switch (node.type) {
       case 'function_item':
       case 'function_signature_item':
@@ -447,7 +437,7 @@ export class RustSymbolExtractor implements LanguageSymbolExtractor {
     }
   }
 
-  extractCallSite(node: Parser.SyntaxNode): { symbol: string; line: number; key: string } | null {
+  extractCallSite(node: SyntaxNode): { symbol: string; line: number; key: string } | null {
     const line = node.startPosition.row + 1;
 
     // call_expression: foo(), obj.method()
@@ -491,7 +481,7 @@ export class RustSymbolExtractor implements LanguageSymbolExtractor {
   }
 
   private extractFunctionInfo(
-    node: Parser.SyntaxNode,
+    node: SyntaxNode,
     content: string,
     parentClass?: string,
   ): SymbolInfo | null {
@@ -511,7 +501,7 @@ export class RustSymbolExtractor implements LanguageSymbolExtractor {
     };
   }
 
-  private extractImplInfo(node: Parser.SyntaxNode): SymbolInfo | null {
+  private extractImplInfo(node: SyntaxNode): SymbolInfo | null {
     const typeNode = node.childForFieldName('type');
     if (!typeNode) return null;
 
@@ -524,7 +514,7 @@ export class RustSymbolExtractor implements LanguageSymbolExtractor {
     };
   }
 
-  private extractTraitInfo(node: Parser.SyntaxNode): SymbolInfo | null {
+  private extractTraitInfo(node: SyntaxNode): SymbolInfo | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
@@ -545,7 +535,6 @@ export class RustSymbolExtractor implements LanguageSymbolExtractor {
 export const rustDefinition: LanguageDefinition = {
   id: 'rust',
   extensions: ['rs'],
-  grammar: Rust,
   traverser: new RustTraverser(),
   exportExtractor: new RustExportExtractor(),
   importExtractor: new RustImportExtractor(),

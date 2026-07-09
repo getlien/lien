@@ -42,10 +42,11 @@ Rebuild (`npm run build`) and restart your MCP client to pick up changes.
 
 ### Working in a git worktree
 
-A fresh `npm install`/`npm ci` in a linked git worktree fails to compile
-(native `tree-sitter` bindings won't build there). See
+A fresh `npm install`/`npm ci` works normally in a linked git worktree as of
+ADR-013 Phase 4-B (the `node-tree-sitter` native binding that used to fail
+to compile there is gone). See
 [docs/development/worktree-development.md](docs/development/worktree-development.md)
-for the symlink-from-main workaround.
+for details and the historical workaround it replaces.
 
 ## Project Structure
 
@@ -113,25 +114,22 @@ crate via `cargo build --release`) — without it, that suite's
 explicit-native assertions fail loudly rather than skipping. CI always
 builds the native binary before running any test job.
 
-**`LIEN_PARSER=native|legacy`:** selects the AST parser backend. Unset or
-`native` uses `@liendev/parser-native`, the default since ADR-013 Phase 4-A.
-`legacy` opts out to the previous `node-tree-sitter` path — it is
-**transitional and scheduled for removal in a future release**; don't build
-new work against it. **Fallback:** on the default (unset) path only, if the
-native binding fails to *load* (e.g. an exotic platform with no prebuilt
-package and no local build), lien automatically falls back to legacy for
-the rest of the process and prints one `console.warn` naming the platform
-and the remedy — a per-file parse error from an already-loaded binding is
-unaffected and never triggers this. An **explicit** `LIEN_PARSER=native`
-does not fall back — it fails loud, which is what CI's dedicated
-native-mode coverage relies on. CI runs the whole test suite under both —
-`build-and-test` (native, the default) and a dedicated `test-legacy` job —
-and `e2e.yml` reruns the TypeScript and Kotlin e2e projects under legacy on
-every changeset-triggered PR (the full 12-project suite in both modes is
-available via that workflow's manual `workflow_dispatch`). To reproduce a
-legacy-mode failure locally, run `LIEN_PARSER=legacy npm test`. See
+**`LIEN_PARSER`:** as of ADR-013 Phase 4-B, `@liendev/parser-native` is the
+**only** AST parser backend — `node-tree-sitter` and all 11
+`tree-sitter-<lang>` npm grammar packages have been removed. The flag now
+only validates `native` or unset (both select the sole backend); any other
+value, including the retired `legacy`, throws an actionable error naming
+ADR-013. **Fail-fast on load failure:** if the native binding can't *load*
+at all (e.g. an exotic platform with no prebuilt package and no local
+build), lien now throws once with a clear, actionable error instead of
+silently falling back and degrading every file to line-based chunking, as
+the Phase 4-A transitional fallback used to. A per-file parse error from an
+already-loaded binding is a separate, unaffected code path and still
+returns a per-file error as before. CI builds the native binary before
+every test job (`build:native -w @liendev/parser-native`) — there is no
+second parser-backend job to keep in sync anymore. See
 [ADR-013](docs/architecture/decisions/0013-prebuilt-native-parser-napi-rs.md)
-for the staged rollout this flag is part of.
+for the full staged rollout this flag was part of.
 
 ### 3. Commit Guidelines
 

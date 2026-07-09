@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import Parser from 'tree-sitter';
-import CSharp from 'tree-sitter-c-sharp';
+import { mustParse } from '../test/helpers/parse-fixture.js';
+import type { SyntaxNode } from '../types.js';
 import { chunkByAST } from '../chunker.js';
 import {
   CSharpTraverser,
@@ -10,8 +10,6 @@ import {
 } from './csharp.js';
 
 describe('C# Language', () => {
-  const parser = new Parser();
-  parser.setLanguage(CSharp);
   const traverser = new CSharpTraverser();
   const exportExtractor = new CSharpExportExtractor();
   const importExtractor = new CSharpImportExtractor();
@@ -33,15 +31,15 @@ describe('C# Language', () => {
 
     it('should extract children from class declarations', () => {
       const code = 'public class Foo { public void Bar() {} }';
-      const tree = parser.parse(code);
-      const classNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'csharp');
+      const classNode = root.namedChild(0)!;
       expect(traverser.shouldExtractChildren(classNode)).toBe(true);
     });
 
     it('should get declaration_list body from class declaration', () => {
       const code = 'public class Foo { public void Bar() {} }';
-      const tree = parser.parse(code);
-      const classNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'csharp');
+      const classNode = root.namedChild(0)!;
       const body = traverser.getContainerBody(classNode);
       expect(body).not.toBeNull();
       expect(body!.type).toBe('declaration_list');
@@ -49,23 +47,23 @@ describe('C# Language', () => {
 
     it('should traverse compilation_unit root', () => {
       const code = 'public class Foo {}';
-      const tree = parser.parse(code);
-      expect(traverser.shouldTraverseChildren(tree.rootNode)).toBe(true);
-      expect(tree.rootNode.type).toBe('compilation_unit');
+      const root = mustParse(code, 'csharp');
+      expect(traverser.shouldTraverseChildren(root)).toBe(true);
+      expect(root.type).toBe('compilation_unit');
     });
 
     it('should traverse namespace_declaration', () => {
       const code = 'namespace MyApp { public class Foo {} }';
-      const tree = parser.parse(code);
-      const nsNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'csharp');
+      const nsNode = root.namedChild(0)!;
       expect(nsNode.type).toBe('namespace_declaration');
       expect(traverser.shouldTraverseChildren(nsNode)).toBe(true);
     });
 
     it('should traverse declaration_list', () => {
       const code = 'public class Foo { public void Bar() {} }';
-      const tree = parser.parse(code);
-      const classNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'csharp');
+      const classNode = root.namedChild(0)!;
       const body = classNode.childForFieldName('body')!;
       expect(body.type).toBe('declaration_list');
       expect(traverser.shouldTraverseChildren(body)).toBe(true);
@@ -73,8 +71,8 @@ describe('C# Language', () => {
 
     it('should not traverse method declarations', () => {
       const code = 'public class Foo { public void Bar() {} }';
-      const tree = parser.parse(code);
-      const classNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'csharp');
+      const classNode = root.namedChild(0)!;
       const body = classNode.childForFieldName('body')!;
       const methodNode = body.namedChild(0)!;
       expect(traverser.shouldTraverseChildren(methodNode)).toBe(false);
@@ -82,8 +80,8 @@ describe('C# Language', () => {
 
     it('should find parent container name for methods', () => {
       const code = 'public class Calculator { public int Add(int a, int b) { return a + b; } }';
-      const tree = parser.parse(code);
-      const classNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'csharp');
+      const classNode = root.namedChild(0)!;
       const body = classNode.childForFieldName('body')!;
       const methodNode = body.namedChild(0)!;
       expect(traverser.findParentContainerName(methodNode)).toBe('Calculator');
@@ -91,15 +89,15 @@ describe('C# Language', () => {
 
     it('should return undefined for top-level parent container name', () => {
       const code = 'public class Foo {}';
-      const tree = parser.parse(code);
-      const classNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'csharp');
+      const classNode = root.namedChild(0)!;
       expect(traverser.findParentContainerName(classNode)).toBeUndefined();
     });
 
     it('should find parent struct container name', () => {
       const code = 'public struct Point { public double Distance() { return 0; } }';
-      const tree = parser.parse(code);
-      const structNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'csharp');
+      const structNode = root.namedChild(0)!;
       const body = structNode.childForFieldName('body')!;
       const methodNode = body.namedChild(0)!;
       expect(traverser.findParentContainerName(methodNode)).toBe('Point');
@@ -107,8 +105,8 @@ describe('C# Language', () => {
 
     it('should detect lambda in local declaration statement', () => {
       const code = 'public class Foo { void Bar() { Action a = () => Console.WriteLine("hi"); } }';
-      const tree = parser.parse(code);
-      const localVarDecl = findNode(tree.rootNode, 'local_declaration_statement');
+      const root = mustParse(code, 'csharp');
+      const localVarDecl = findNode(root, 'local_declaration_statement');
       expect(localVarDecl).not.toBeNull();
       expect(traverser.isDeclarationWithFunction(localVarDecl!)).toBe(true);
       const result = traverser.findFunctionInDeclaration(localVarDecl!);
@@ -119,8 +117,8 @@ describe('C# Language', () => {
 
     it('should not detect function in non-lambda variable declaration', () => {
       const code = 'public class Foo { void Bar() { int x = 42; } }';
-      const tree = parser.parse(code);
-      const localVarDecl = findNode(tree.rootNode, 'local_declaration_statement');
+      const root = mustParse(code, 'csharp');
+      const localVarDecl = findNode(root, 'local_declaration_statement');
       expect(localVarDecl).not.toBeNull();
       expect(traverser.isDeclarationWithFunction(localVarDecl!)).toBe(false);
     });
@@ -129,36 +127,36 @@ describe('C# Language', () => {
   describe('Export Extraction', () => {
     it('should extract public class', () => {
       const code = 'public class UserService {}';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'csharp');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toContain('UserService');
     });
 
     it('should not export internal class', () => {
       const code = 'internal class InternalHelper {}';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'csharp');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).not.toContain('InternalHelper');
     });
 
     it('should not export class without modifier', () => {
       const code = 'class DefaultAccess {}';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'csharp');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).not.toContain('DefaultAccess');
     });
 
     it('should extract public struct', () => {
       const code = 'public struct Point {}';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'csharp');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toContain('Point');
     });
 
     it('should extract public interface', () => {
       const code = 'public interface IRepository { void Save(); }';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'csharp');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toContain('IRepository');
     });
 
@@ -167,8 +165,8 @@ describe('C# Language', () => {
     void Save();
     void Delete();
 }`;
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'csharp');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toContain('Save');
       expect(exports).toContain('Delete');
     });
@@ -179,8 +177,8 @@ describe('C# Language', () => {
     private void PrivateHelper() {}
     protected void ProtectedMethod();
 }`;
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'csharp');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toContain('PublicMethod');
       expect(exports).not.toContain('PrivateHelper');
       expect(exports).not.toContain('ProtectedMethod');
@@ -188,8 +186,8 @@ describe('C# Language', () => {
 
     it('should extract public enum', () => {
       const code = 'public enum Status { Active, Inactive }';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'csharp');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toContain('Status');
     });
 
@@ -199,8 +197,8 @@ describe('C# Language', () => {
     private void Helper() {}
     void PackagePrivate() {}
 }`;
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'csharp');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toContain('UserService');
       expect(exports).toContain('GetName');
       expect(exports).not.toContain('Helper');
@@ -212,8 +210,8 @@ describe('C# Language', () => {
     public string Name { get; set; }
     private int age { get; set; }
 }`;
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'csharp');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toContain('Name');
       expect(exports).not.toContain('age');
     });
@@ -224,8 +222,8 @@ describe('C# Language', () => {
         public void Run() {}
     }
 }`;
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'csharp');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toContain('Foo');
       expect(exports).toContain('Run');
     });
@@ -238,64 +236,64 @@ describe('C# Language', () => {
 
     it('should return null for System stdlib imports', () => {
       const code = 'using System;';
-      const tree = parser.parse(code);
-      const importNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'csharp');
+      const importNode = root.namedChild(0)!;
       const path = importExtractor.extractImportPath(importNode);
       expect(path).toBeNull();
     });
 
     it('should return null for System.* stdlib imports', () => {
       const code = 'using System.Collections.Generic;';
-      const tree = parser.parse(code);
-      const importNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'csharp');
+      const importNode = root.namedChild(0)!;
       const path = importExtractor.extractImportPath(importNode);
       expect(path).toBeNull();
     });
 
     it('should return null for Microsoft.* stdlib imports', () => {
       const code = 'using Microsoft.Extensions.Logging;';
-      const tree = parser.parse(code);
-      const importNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'csharp');
+      const importNode = root.namedChild(0)!;
       const path = importExtractor.extractImportPath(importNode);
       expect(path).toBeNull();
     });
 
     it('should extract external import path', () => {
       const code = 'using Newtonsoft.Json;';
-      const tree = parser.parse(code);
-      const importNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'csharp');
+      const importNode = root.namedChild(0)!;
       const path = importExtractor.extractImportPath(importNode);
       expect(path).toBe('Newtonsoft.Json');
     });
 
     it('should handle static using', () => {
       const code = 'using static MyLib.Utils;';
-      const tree = parser.parse(code);
-      const importNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'csharp');
+      const importNode = root.namedChild(0)!;
       const path = importExtractor.extractImportPath(importNode);
       expect(path).toBe('MyLib.Utils');
     });
 
     it('should filter static stdlib imports', () => {
       const code = 'using static System.Math;';
-      const tree = parser.parse(code);
-      const importNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'csharp');
+      const importNode = root.namedChild(0)!;
       const path = importExtractor.extractImportPath(importNode);
       expect(path).toBeNull();
     });
 
     it('should handle alias using', () => {
       const code = 'using Json = Newtonsoft.Json;';
-      const tree = parser.parse(code);
-      const importNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'csharp');
+      const importNode = root.namedChild(0)!;
       const path = importExtractor.extractImportPath(importNode);
       expect(path).toBe('Newtonsoft.Json');
     });
 
     it('should process import symbols for external packages', () => {
       const code = 'using Newtonsoft.Json;';
-      const tree = parser.parse(code);
-      const importNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'csharp');
+      const importNode = root.namedChild(0)!;
       const result = importExtractor.processImportSymbols(importNode);
       expect(result).not.toBeNull();
       expect(result!.importPath).toBe('Newtonsoft.Json');
@@ -304,8 +302,8 @@ describe('C# Language', () => {
 
     it('should use alias name as symbol for alias using', () => {
       const code = 'using Json = Newtonsoft.Json;';
-      const tree = parser.parse(code);
-      const importNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'csharp');
+      const importNode = root.namedChild(0)!;
       const result = importExtractor.processImportSymbols(importNode);
       expect(result).not.toBeNull();
       expect(result!.importPath).toBe('Newtonsoft.Json');
@@ -314,8 +312,8 @@ describe('C# Language', () => {
 
     it('should return null for stdlib import symbols', () => {
       const code = 'using System.IO;';
-      const tree = parser.parse(code);
-      const importNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'csharp');
+      const importNode = root.namedChild(0)!;
       const result = importExtractor.processImportSymbols(importNode);
       expect(result).toBeNull();
     });
@@ -326,8 +324,8 @@ describe('C# Language', () => {
       const code = `public class Foo {
     public string GetName(string prefix, int id) { return prefix + id; }
 }`;
-      const tree = parser.parse(code);
-      const methodNode = findNode(tree.rootNode, 'method_declaration')!;
+      const root = mustParse(code, 'csharp');
+      const methodNode = findNode(root, 'method_declaration')!;
       const symbol = symbolExtractor.extractSymbol(methodNode, code, 'Foo');
       expect(symbol).not.toBeNull();
       expect(symbol!.name).toBe('GetName');
@@ -340,8 +338,8 @@ describe('C# Language', () => {
       const code = `public class User {
     public User(string name) { }
 }`;
-      const tree = parser.parse(code);
-      const ctorNode = findNode(tree.rootNode, 'constructor_declaration')!;
+      const root = mustParse(code, 'csharp');
+      const ctorNode = findNode(root, 'constructor_declaration')!;
       const symbol = symbolExtractor.extractSymbol(ctorNode, code, 'User');
       expect(symbol).not.toBeNull();
       expect(symbol!.name).toBe('User');
@@ -351,8 +349,8 @@ describe('C# Language', () => {
 
     it('should extract class_declaration info', () => {
       const code = 'public class Calculator {}';
-      const tree = parser.parse(code);
-      const classNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'csharp');
+      const classNode = root.namedChild(0)!;
       const symbol = symbolExtractor.extractSymbol(classNode, code);
       expect(symbol).not.toBeNull();
       expect(symbol!.name).toBe('Calculator');
@@ -362,8 +360,8 @@ describe('C# Language', () => {
 
     it('should extract interface_declaration info', () => {
       const code = 'public interface IRepository {}';
-      const tree = parser.parse(code);
-      const ifaceNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'csharp');
+      const ifaceNode = root.namedChild(0)!;
       const symbol = symbolExtractor.extractSymbol(ifaceNode, code);
       expect(symbol).not.toBeNull();
       expect(symbol!.name).toBe('IRepository');
@@ -373,8 +371,8 @@ describe('C# Language', () => {
 
     it('should extract struct_declaration info', () => {
       const code = 'public struct Point {}';
-      const tree = parser.parse(code);
-      const structNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'csharp');
+      const structNode = root.namedChild(0)!;
       const symbol = symbolExtractor.extractSymbol(structNode, code);
       expect(symbol).not.toBeNull();
       expect(symbol!.name).toBe('Point');
@@ -384,8 +382,8 @@ describe('C# Language', () => {
 
     it('should extract record_declaration info', () => {
       const code = 'public record Person(string Name) {}';
-      const tree = parser.parse(code);
-      const recordNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'csharp');
+      const recordNode = root.namedChild(0)!;
       const symbol = symbolExtractor.extractSymbol(recordNode, code);
       expect(symbol).not.toBeNull();
       expect(symbol!.name).toBe('Person');
@@ -395,8 +393,8 @@ describe('C# Language', () => {
 
     it('should extract enum_declaration info', () => {
       const code = 'public enum Color { Red, Green, Blue }';
-      const tree = parser.parse(code);
-      const enumNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'csharp');
+      const enumNode = root.namedChild(0)!;
       const symbol = symbolExtractor.extractSymbol(enumNode, code);
       expect(symbol).not.toBeNull();
       expect(symbol!.name).toBe('Color');
@@ -408,8 +406,8 @@ describe('C# Language', () => {
       const code = `public class Foo {
     public string GetName() { return ""; }
 }`;
-      const tree = parser.parse(code);
-      const methodNode = findNode(tree.rootNode, 'method_declaration')!;
+      const root = mustParse(code, 'csharp');
+      const methodNode = findNode(root, 'method_declaration')!;
       const symbol = symbolExtractor.extractSymbol(methodNode, code, 'Foo');
       expect(symbol).not.toBeNull();
       expect(symbol!.returnType).toBe('string');
@@ -419,8 +417,8 @@ describe('C# Language', () => {
       const code = `public class Foo {
     public void DoWork() {}
 }`;
-      const tree = parser.parse(code);
-      const methodNode = findNode(tree.rootNode, 'method_declaration')!;
+      const root = mustParse(code, 'csharp');
+      const methodNode = findNode(root, 'method_declaration')!;
       const symbol = symbolExtractor.extractSymbol(methodNode, code, 'Foo');
       expect(symbol).not.toBeNull();
       expect(symbol!.returnType).toBe('void');
@@ -430,8 +428,8 @@ describe('C# Language', () => {
       const code = `public class Foo {
     void Bar() { DoSomething(); }
 }`;
-      const tree = parser.parse(code);
-      const callNode = findNode(tree.rootNode, 'invocation_expression');
+      const root = mustParse(code, 'csharp');
+      const callNode = findNode(root, 'invocation_expression');
       expect(callNode).not.toBeNull();
       const callSite = symbolExtractor.extractCallSite(callNode!);
       expect(callSite).not.toBeNull();
@@ -442,8 +440,8 @@ describe('C# Language', () => {
       const code = `public class Foo {
     void Bar() { user.GetName(); }
 }`;
-      const tree = parser.parse(code);
-      const callNode = findNode(tree.rootNode, 'invocation_expression');
+      const root = mustParse(code, 'csharp');
+      const callNode = findNode(root, 'invocation_expression');
       expect(callNode).not.toBeNull();
       const callSite = symbolExtractor.extractCallSite(callNode!);
       expect(callSite).not.toBeNull();
@@ -454,8 +452,8 @@ describe('C# Language', () => {
       const code = `public class Foo {
     void Bar() { list.Where(x => true).Select(x => x).ToList(); }
 }`;
-      const tree = parser.parse(code);
-      const callNodes = findAllNodes(tree.rootNode, 'invocation_expression');
+      const root = mustParse(code, 'csharp');
+      const callNodes = findAllNodes(root, 'invocation_expression');
       expect(callNodes.length).toBeGreaterThanOrEqual(3);
 
       const symbols = callNodes.map(n => symbolExtractor.extractCallSite(n)!.symbol);
@@ -683,7 +681,7 @@ public class App {
 });
 
 /** Helper to recursively find a node of a given type (depth-first) */
-function findNode(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
+function findNode(node: SyntaxNode, type: string): SyntaxNode | null {
   if (node.type === type) return node;
   for (const child of node.namedChildren) {
     const result = findNode(child, type);
@@ -693,8 +691,8 @@ function findNode(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | nu
 }
 
 /** Helper to recursively find all nodes of a given type */
-function findAllNodes(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode[] {
-  const results: Parser.SyntaxNode[] = [];
+function findAllNodes(node: SyntaxNode, type: string): SyntaxNode[] {
+  const results: SyntaxNode[] = [];
   if (node.type === type) results.push(node);
   for (const child of node.namedChildren) {
     results.push(...findAllNodes(child, type));

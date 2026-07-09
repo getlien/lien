@@ -1,11 +1,22 @@
-import type Parser from 'tree-sitter';
+import type { CompatSyntaxNode, CompatTree } from './native/index.js';
 import type { CodeChunk } from '../types.js';
+
+/**
+ * Canonical AST node/tree shapes for @liendev/parser (ADR-013 Phase 4-B).
+ * Structurally identical to node-tree-sitter's `Parser.SyntaxNode`/
+ * `Parser.Tree` (which the whole ast/** surface used to alias directly,
+ * pre-native), but now sourced from the native-parser compat layer -- see
+ * ./native/compat-node.ts. Keeping these names is what makes every prior
+ * `Parser.SyntaxNode`/`Parser.Tree` reference a mechanical repoint.
+ */
+export type SyntaxNode = CompatSyntaxNode;
+export type Tree = CompatTree;
 
 /**
  * AST parse result containing the tree and any errors
  */
 export interface ASTParseResult {
-  tree: Parser.Tree | null;
+  tree: Tree | null;
   error?: string;
 }
 

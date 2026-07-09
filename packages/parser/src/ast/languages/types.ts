@@ -7,18 +7,14 @@ import type {
 import type { SupportedLanguage } from './registry.js';
 
 /**
- * Tree-sitter language grammar type.
- * Using any due to type incompatibility between parser packages and tree-sitter core.
- */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type TreeSitterLanguage = any;
-
-/**
  * Complete definition for a language supported by AST parsing.
  *
  * Each supported language has a single definition file that assembles
- * all language-specific data (grammar, traverser, extractor, complexity
- * constants, symbol types) into one place.
+ * all language-specific data (traverser, extractor, complexity constants,
+ * symbol types) into one place. Prior to ADR-013 Phase 4-B this also held
+ * a `grammar` field (the node-tree-sitter grammar object); the native
+ * backend has no equivalent -- @liendev/parser-native selects its grammar
+ * internally by language id (see ast/parser.ts's parseTree call).
  */
 export interface LanguageDefinition {
   /** Language identifier (e.g., 'typescript', 'python') */
@@ -26,9 +22,6 @@ export interface LanguageDefinition {
 
   /** File extensions without dots (e.g., ['ts', 'tsx']) */
   extensions: string[];
-
-  /** Tree-sitter grammar object for parsing */
-  grammar: TreeSitterLanguage;
 
   /** Language-specific AST traverser instance */
   traverser: LanguageTraverser;

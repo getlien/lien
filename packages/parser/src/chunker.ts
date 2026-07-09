@@ -2,6 +2,7 @@ import type { CodeChunk } from './types.js';
 import { detectFileType } from './scanner.js';
 import { extractSymbols } from './symbol-extractor.js';
 import { shouldUseAST, chunkByAST } from './ast/chunker.js';
+import { NativeBindingLoadError } from './ast/parser.js';
 import { chunkLiquidFile } from './liquid-chunker.js';
 import { chunkJSONTemplate } from './json-template-chunker.js';
 
@@ -9,7 +10,10 @@ export interface ChunkOptions {
   chunkSize?: number;
   chunkOverlap?: number;
   useAST?: boolean; // Flag to enable AST-based chunking
-  astFallback?: 'line-based' | 'error'; // How to handle AST parsing errors
+  astFallback?: 'line-based' | 'error'; // How to handle per-file AST parsing errors.
+  // Does NOT govern a NativeBindingLoadError (missing/unloadable native
+  // parser binding) -- that is a systemic, process-wide failure and always
+  // propagates regardless of this setting; see ast/parser.ts.
   // Multi-tenant fields (optional for backward compatibility)
   repoId?: string; // Repository identifier for multi-tenant scenarios
   orgId?: string; // Organization identifier for multi-tenant scenarios
@@ -59,6 +63,16 @@ export function chunkFile(
         workspaceRoot,
       });
     } catch (error) {
+      // A missing/failed native parser binding is a systemic, process-wide
+      // failure (ADR-013 Phase 4-B removed the legacy fallback backend),
+      // not a per-file parse problem -- it must propagate regardless of
+      // astFallback, or a scan on an unsupported platform would silently
+      // degrade every file to a symbol-less line-based index instead of
+      // failing loudly. See NativeBindingLoadError in ast/parser.ts.
+      if (error instanceof NativeBindingLoadError) {
+        throw error;
+      }
+
       // Handle AST errors based on configuration
       if (astFallback === 'error') {
         // Throw error if user wants strict AST-only behavior

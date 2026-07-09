@@ -1,4 +1,4 @@
-import type Parser from 'tree-sitter';
+import type { SyntaxNode } from '../types.js';
 import { getLanguage } from '../languages/registry.js';
 import type { SupportedLanguage } from '../languages/registry.js';
 
@@ -98,7 +98,7 @@ function resolveOperators(language: SupportedLanguage): ResolvedOperators {
 /**
  * Check if a node represents an operator
  */
-function isOperator(node: Parser.SyntaxNode, ops: ResolvedOperators): boolean {
+function isOperator(node: SyntaxNode, ops: ResolvedOperators): boolean {
   const nodeType = node.type;
   const nodeText = node.text;
 
@@ -114,14 +114,14 @@ function isOperator(node: Parser.SyntaxNode, ops: ResolvedOperators): boolean {
 /**
  * Check if a node represents an operand
  */
-function isOperand(node: Parser.SyntaxNode): boolean {
+function isOperand(node: SyntaxNode): boolean {
   return OPERAND_NODE_TYPES.has(node.type);
 }
 
 /**
  * Get the canonical key for an operator (for counting distinct operators)
  */
-function getOperatorKey(node: Parser.SyntaxNode): string {
+function getOperatorKey(node: SyntaxNode): string {
   // For complex expressions, use the operator type
   if (OPERATOR_NODE_TYPES.has(node.type)) {
     // For binary/unary expressions, extract the actual operator
@@ -137,7 +137,7 @@ function getOperatorKey(node: Parser.SyntaxNode): string {
 /**
  * Get the canonical key for an operand (for counting distinct operands)
  */
-function getOperandKey(node: Parser.SyntaxNode): string {
+function getOperandKey(node: SyntaxNode): string {
   return node.text;
 }
 
@@ -159,15 +159,12 @@ function sumValues(map: Map<string, number>): number {
  * @param language - Programming language for language-specific handling
  * @returns HalsteadCounts with raw operator/operand counts
  */
-export function countHalstead(
-  node: Parser.SyntaxNode,
-  language: SupportedLanguage,
-): HalsteadCounts {
+export function countHalstead(node: SyntaxNode, language: SupportedLanguage): HalsteadCounts {
   const operators = new Map<string, number>();
   const operands = new Map<string, number>();
   const ops = resolveOperators(language);
 
-  function traverse(n: Parser.SyntaxNode): void {
+  function traverse(n: SyntaxNode): void {
     // Check if this is an operator
     if (isOperator(n, ops)) {
       const key = getOperatorKey(n);
@@ -246,10 +243,7 @@ export function calculateHalsteadMetrics(counts: HalsteadCounts): HalsteadMetric
  * @param language - Programming language
  * @returns Calculated HalsteadMetrics
  */
-export function calculateHalstead(
-  node: Parser.SyntaxNode,
-  language: SupportedLanguage,
-): HalsteadMetrics {
+export function calculateHalstead(node: SyntaxNode, language: SupportedLanguage): HalsteadMetrics {
   const counts = countHalstead(node, language);
   return calculateHalsteadMetrics(counts);
 }

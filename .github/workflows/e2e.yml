@@ -5,18 +5,10 @@ on:
     branches: [main]
     types: [opened, synchronize, reopened, labeled]
 
-  # Allow manual trigger
-  workflow_dispatch:
-    inputs:
-      parser-mode:
-        description: 'LIEN_PARSER backend to run the full 12-project suite under (dispatch only -- the normal trigger always runs native for all projects plus a legacy rerun for TypeScript + Kotlin)'
-        required: false
-        default: legacy
-        type: choice
-        options:
-          - legacy
-          - native
-          - both
+  # Allow manual trigger -- runs the full 12-project suite under native,
+  # same as every other trigger (see plan-e2e-matrix.mjs; ADR-013 Phase 4-B
+  # retired the legacy backend, so there's no longer a mode to select).
+  workflow_dispatch: {}
 
 # Cancel in-progress runs when a new run is triggered
 concurrency:
@@ -66,17 +58,13 @@ jobs:
         with:
           persist-credentials: false
 
-      # Computes the project/language/mode matrix from
-      # .github/scripts/plan-e2e-matrix.mjs: every normal trigger runs all 12
-      # projects under LIEN_PARSER=native plus a legacy rerun for TypeScript +
-      # Kotlin; a workflow_dispatch run instead honors `parser-mode` (legacy |
-      # native | both) across the full 12-project suite -- see that script's
-      # header for the full rationale (ADR-013 Phase 4-A).
+      # Computes the project/language matrix from
+      # .github/scripts/plan-e2e-matrix.mjs: every trigger (PR or
+      # workflow_dispatch) runs the full 12-project suite once, under
+      # LIEN_PARSER=native -- see that script's header (ADR-013 Phase 4-B
+      # retired the legacy backend, so there's no mode axis left to plan).
       - id: plan
         run: node .github/scripts/plan-e2e-matrix.mjs
-        env:
-          IS_DISPATCH: ${{ github.event_name == 'workflow_dispatch' }}
-          PARSER_MODE_INPUT: ${{ inputs.parser-mode }}
 
   e2e-tests-parallel:
     name: E2E - ${{ matrix.project }} (${{ matrix.language }}, ${{ matrix.mode }})
@@ -103,17 +91,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Only needed for the native-mode rerun -- the compiled binary is
-      # loaded via index.js's local-dev fallback path (see CONTRIBUTING.md).
+      # The compiled binary is loaded via index.js's local-dev fallback path
+      # (see CONTRIBUTING.md) -- always needed now that native is the only
+      # backend.
       - name: Cache Rust build (parser-native)
-        if: matrix.mode == 'native'
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: packages/parser-native
           shared-key: parser-native
 
       - name: Build native parser
-        if: matrix.mode == 'native'
         run: npm run build:native -w @liendev/parser-native
 
       - name: Build Lien

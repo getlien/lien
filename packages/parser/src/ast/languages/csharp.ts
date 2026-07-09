@@ -1,6 +1,4 @@
-import CSharp from 'tree-sitter-c-sharp';
-import type Parser from 'tree-sitter';
-import type { SymbolInfo } from '../types.js';
+import type { SymbolInfo, SyntaxNode } from '../types.js';
 import type { LanguageDefinition } from './types.js';
 import type { LanguageTraverser, DeclarationFunctionInfo } from '../traversers/types.js';
 import type {
@@ -41,23 +39,23 @@ export class CSharpTraverser implements LanguageTraverser {
 
   functionTypes = ['lambda_expression'];
 
-  shouldExtractChildren(node: Parser.SyntaxNode): boolean {
+  shouldExtractChildren(node: SyntaxNode): boolean {
     return this.containerTypes.includes(node.type);
   }
 
-  isDeclarationWithFunction(node: Parser.SyntaxNode): boolean {
+  isDeclarationWithFunction(node: SyntaxNode): boolean {
     if (node.type !== 'local_declaration_statement') return false;
     return findDescendant(node, 'lambda_expression') !== null;
   }
 
-  getContainerBody(node: Parser.SyntaxNode): Parser.SyntaxNode | null {
+  getContainerBody(node: SyntaxNode): SyntaxNode | null {
     if (this.containerTypes.includes(node.type)) {
       return node.childForFieldName('body');
     }
     return null;
   }
 
-  shouldTraverseChildren(node: Parser.SyntaxNode): boolean {
+  shouldTraverseChildren(node: SyntaxNode): boolean {
     return (
       node.type === 'compilation_unit' ||
       node.type === 'declaration_list' ||
@@ -66,7 +64,7 @@ export class CSharpTraverser implements LanguageTraverser {
     );
   }
 
-  findParentContainerName(node: Parser.SyntaxNode): string | undefined {
+  findParentContainerName(node: SyntaxNode): string | undefined {
     let current = node.parent;
     while (current) {
       if (
@@ -84,7 +82,7 @@ export class CSharpTraverser implements LanguageTraverser {
     return undefined;
   }
 
-  findFunctionInDeclaration(node: Parser.SyntaxNode): DeclarationFunctionInfo {
+  findFunctionInDeclaration(node: SyntaxNode): DeclarationFunctionInfo {
     if (node.type !== 'local_declaration_statement') {
       return { hasFunction: false, functionNode: null };
     }
@@ -119,7 +117,7 @@ export class CSharpTraverser implements LanguageTraverser {
  * Internal (default access) declarations are NOT exported.
  */
 export class CSharpExportExtractor implements LanguageExportExtractor {
-  extractExports(rootNode: Parser.SyntaxNode): string[] {
+  extractExports(rootNode: SyntaxNode): string[] {
     const exports: string[] = [];
     const seen = new Set<string>();
 
@@ -135,7 +133,7 @@ export class CSharpExportExtractor implements LanguageExportExtractor {
     return exports;
   }
 
-  private walkDeclarations(node: Parser.SyntaxNode, addExport: (name: string) => void): void {
+  private walkDeclarations(node: SyntaxNode, addExport: (name: string) => void): void {
     node.namedChildren.forEach(child => {
       // Recurse into namespaces to find type declarations
       if (child.type === 'namespace_declaration') {
@@ -154,7 +152,7 @@ export class CSharpExportExtractor implements LanguageExportExtractor {
     });
   }
 
-  private extractFromNode(node: Parser.SyntaxNode, addExport: (name: string) => void): void {
+  private extractFromNode(node: SyntaxNode, addExport: (name: string) => void): void {
     switch (node.type) {
       case 'class_declaration':
       case 'interface_declaration':
@@ -171,10 +169,7 @@ export class CSharpExportExtractor implements LanguageExportExtractor {
     }
   }
 
-  private extractPublicMembers(
-    container: Parser.SyntaxNode,
-    addExport: (name: string) => void,
-  ): void {
+  private extractPublicMembers(container: SyntaxNode, addExport: (name: string) => void): void {
     const body = container.childForFieldName('body');
     if (!body) return;
 
@@ -183,7 +178,7 @@ export class CSharpExportExtractor implements LanguageExportExtractor {
   }
 
   private extractMemberExport(
-    member: Parser.SyntaxNode,
+    member: SyntaxNode,
     isInterface: boolean,
     addExport: (name: string) => void,
   ): void {
@@ -208,7 +203,7 @@ export class CSharpExportExtractor implements LanguageExportExtractor {
     }
   }
 
-  private extractFieldNames(fieldDecl: Parser.SyntaxNode, addExport: (name: string) => void): void {
+  private extractFieldNames(fieldDecl: SyntaxNode, addExport: (name: string) => void): void {
     // C# field_declaration contains variable_declaration → variable_declarator(s)
     fieldDecl.namedChildren
       .filter(child => child.type === 'variable_declaration')
@@ -251,13 +246,13 @@ function isCSharpStdLib(importPath: string): boolean {
 export class CSharpImportExtractor implements LanguageImportExtractor {
   readonly importNodeTypes = ['using_directive'];
 
-  extractImportPath(node: Parser.SyntaxNode): string | null {
+  extractImportPath(node: SyntaxNode): string | null {
     const path = this.getImportPath(node);
     if (!path || isCSharpStdLib(path)) return null;
     return path;
   }
 
-  processImportSymbols(node: Parser.SyntaxNode): { importPath: string; symbols: string[] } | null {
+  processImportSymbols(node: SyntaxNode): { importPath: string; symbols: string[] } | null {
     const path = this.getImportPath(node);
     if (!path || isCSharpStdLib(path)) return null;
 
@@ -273,7 +268,7 @@ export class CSharpImportExtractor implements LanguageImportExtractor {
     return { importPath: path, symbols: [lastPart] };
   }
 
-  private getImportPath(node: Parser.SyntaxNode): string | null {
+  private getImportPath(node: SyntaxNode): string | null {
     // qualified_name is always the import path when present
     const qualifiedName = node.namedChildren.find(c => c.type === 'qualified_name');
     if (qualifiedName) return qualifiedName.text;
@@ -315,7 +310,7 @@ export class CSharpSymbolExtractor implements LanguageSymbolExtractor {
     'enum_declaration',
   ];
 
-  extractSymbol(node: Parser.SyntaxNode, content: string, parentClass?: string): SymbolInfo | null {
+  extractSymbol(node: SyntaxNode, content: string, parentClass?: string): SymbolInfo | null {
     switch (node.type) {
       case 'method_declaration':
         return this.extractMethodInfo(node, content, parentClass);
@@ -336,7 +331,7 @@ export class CSharpSymbolExtractor implements LanguageSymbolExtractor {
     }
   }
 
-  extractCallSite(node: Parser.SyntaxNode): { symbol: string; line: number; key: string } | null {
+  extractCallSite(node: SyntaxNode): { symbol: string; line: number; key: string } | null {
     if (node.type !== 'invocation_expression') return null;
 
     const funcNode = node.childForFieldName('function');
@@ -361,7 +356,7 @@ export class CSharpSymbolExtractor implements LanguageSymbolExtractor {
   }
 
   private extractMethodInfo(
-    node: Parser.SyntaxNode,
+    node: SyntaxNode,
     content: string,
     parentClass?: string,
   ): SymbolInfo | null {
@@ -382,7 +377,7 @@ export class CSharpSymbolExtractor implements LanguageSymbolExtractor {
   }
 
   private extractConstructorInfo(
-    node: Parser.SyntaxNode,
+    node: SyntaxNode,
     content: string,
     parentClass?: string,
   ): SymbolInfo | null {
@@ -401,7 +396,7 @@ export class CSharpSymbolExtractor implements LanguageSymbolExtractor {
     };
   }
 
-  private extractClassInfo(node: Parser.SyntaxNode): SymbolInfo | null {
+  private extractClassInfo(node: SyntaxNode): SymbolInfo | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
@@ -414,7 +409,7 @@ export class CSharpSymbolExtractor implements LanguageSymbolExtractor {
     };
   }
 
-  private extractInterfaceInfo(node: Parser.SyntaxNode): SymbolInfo | null {
+  private extractInterfaceInfo(node: SyntaxNode): SymbolInfo | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
@@ -427,7 +422,7 @@ export class CSharpSymbolExtractor implements LanguageSymbolExtractor {
     };
   }
 
-  private extractStructInfo(node: Parser.SyntaxNode): SymbolInfo | null {
+  private extractStructInfo(node: SyntaxNode): SymbolInfo | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
@@ -440,7 +435,7 @@ export class CSharpSymbolExtractor implements LanguageSymbolExtractor {
     };
   }
 
-  private extractRecordInfo(node: Parser.SyntaxNode): SymbolInfo | null {
+  private extractRecordInfo(node: SyntaxNode): SymbolInfo | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
@@ -453,7 +448,7 @@ export class CSharpSymbolExtractor implements LanguageSymbolExtractor {
     };
   }
 
-  private extractEnumInfo(node: Parser.SyntaxNode): SymbolInfo | null {
+  private extractEnumInfo(node: SyntaxNode): SymbolInfo | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
@@ -476,7 +471,7 @@ export class CSharpSymbolExtractor implements LanguageSymbolExtractor {
  * C# uses individual `modifier` nodes as direct children (not a `modifiers`
  * wrapper like Java). Iterates children for an exact `public` modifier.
  */
-function hasPublicModifier(node: Parser.SyntaxNode): boolean {
+function hasPublicModifier(node: SyntaxNode): boolean {
   return node.children.some(child => child.type === 'modifier' && child.text === 'public');
 }
 
@@ -486,7 +481,7 @@ const ACCESS_MODIFIERS = new Set(['public', 'private', 'protected', 'internal'])
  * Check if a node has any explicit access modifier (public, private, protected, internal).
  * Used to distinguish implicit public interface members from explicitly non-public ones (C# 8+).
  */
-function hasExplicitAccessModifier(node: Parser.SyntaxNode): boolean {
+function hasExplicitAccessModifier(node: SyntaxNode): boolean {
   return node.children.some(child => child.type === 'modifier' && ACCESS_MODIFIERS.has(child.text));
 }
 
@@ -494,7 +489,7 @@ function hasExplicitAccessModifier(node: Parser.SyntaxNode): boolean {
  * Extract return type from a C# method_declaration.
  * C# uses a 'returns' field instead of 'type'.
  */
-function extractCSharpReturnType(node: Parser.SyntaxNode): string | undefined {
+function extractCSharpReturnType(node: SyntaxNode): string | undefined {
   if (node.type !== 'method_declaration') return undefined;
   const typeNode = node.childForFieldName('returns');
   if (!typeNode) return undefined;
@@ -504,7 +499,7 @@ function extractCSharpReturnType(node: Parser.SyntaxNode): string | undefined {
 /**
  * Find the first descendant of a specific type (depth-first).
  */
-function findDescendant(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
+function findDescendant(node: SyntaxNode, type: string): SyntaxNode | null {
   for (const child of node.namedChildren) {
     if (child.type === type) return child;
     const found = findDescendant(child, type);
@@ -520,7 +515,6 @@ function findDescendant(node: Parser.SyntaxNode, type: string): Parser.SyntaxNod
 export const csharpDefinition: LanguageDefinition = {
   id: 'csharp',
   extensions: ['cs'],
-  grammar: CSharp,
   traverser: new CSharpTraverser(),
   exportExtractor: new CSharpExportExtractor(),
   importExtractor: new CSharpImportExtractor(),

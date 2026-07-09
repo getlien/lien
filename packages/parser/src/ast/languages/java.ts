@@ -1,6 +1,4 @@
-import Java from 'tree-sitter-java';
-import type Parser from 'tree-sitter';
-import type { SymbolInfo } from '../types.js';
+import type { SymbolInfo, SyntaxNode } from '../types.js';
 import type { LanguageDefinition } from './types.js';
 import type { LanguageTraverser, DeclarationFunctionInfo } from '../traversers/types.js';
 import type {
@@ -39,23 +37,23 @@ export class JavaTraverser implements LanguageTraverser {
 
   functionTypes = ['lambda_expression'];
 
-  shouldExtractChildren(node: Parser.SyntaxNode): boolean {
+  shouldExtractChildren(node: SyntaxNode): boolean {
     return this.containerTypes.includes(node.type);
   }
 
-  isDeclarationWithFunction(node: Parser.SyntaxNode): boolean {
+  isDeclarationWithFunction(node: SyntaxNode): boolean {
     if (node.type !== 'local_variable_declaration') return false;
     return findDescendant(node, 'lambda_expression') !== null;
   }
 
-  getContainerBody(node: Parser.SyntaxNode): Parser.SyntaxNode | null {
+  getContainerBody(node: SyntaxNode): SyntaxNode | null {
     if (this.containerTypes.includes(node.type)) {
       return node.childForFieldName('body');
     }
     return null;
   }
 
-  shouldTraverseChildren(node: Parser.SyntaxNode): boolean {
+  shouldTraverseChildren(node: SyntaxNode): boolean {
     return (
       node.type === 'program' ||
       node.type === 'class_body' ||
@@ -64,7 +62,7 @@ export class JavaTraverser implements LanguageTraverser {
     );
   }
 
-  findParentContainerName(node: Parser.SyntaxNode): string | undefined {
+  findParentContainerName(node: SyntaxNode): string | undefined {
     let current = node.parent;
     while (current) {
       if (
@@ -81,7 +79,7 @@ export class JavaTraverser implements LanguageTraverser {
     return undefined;
   }
 
-  findFunctionInDeclaration(node: Parser.SyntaxNode): DeclarationFunctionInfo {
+  findFunctionInDeclaration(node: SyntaxNode): DeclarationFunctionInfo {
     if (node.type !== 'local_variable_declaration') {
       return { hasFunction: false, functionNode: null };
     }
@@ -113,7 +111,7 @@ export class JavaTraverser implements LanguageTraverser {
  * Package-private (default access) declarations are NOT exported.
  */
 export class JavaExportExtractor implements LanguageExportExtractor {
-  extractExports(rootNode: Parser.SyntaxNode): string[] {
+  extractExports(rootNode: SyntaxNode): string[] {
     const exports: string[] = [];
     const seen = new Set<string>();
 
@@ -129,7 +127,7 @@ export class JavaExportExtractor implements LanguageExportExtractor {
     return exports;
   }
 
-  private extractFromNode(node: Parser.SyntaxNode, addExport: (name: string) => void): void {
+  private extractFromNode(node: SyntaxNode, addExport: (name: string) => void): void {
     switch (node.type) {
       case 'class_declaration':
       case 'interface_declaration':
@@ -145,10 +143,7 @@ export class JavaExportExtractor implements LanguageExportExtractor {
     }
   }
 
-  private extractPublicMembers(
-    container: Parser.SyntaxNode,
-    addExport: (name: string) => void,
-  ): void {
+  private extractPublicMembers(container: SyntaxNode, addExport: (name: string) => void): void {
     const body = container.childForFieldName('body');
     if (!body) return;
 
@@ -158,7 +153,7 @@ export class JavaExportExtractor implements LanguageExportExtractor {
   }
 
   private extractMemberExport(
-    member: Parser.SyntaxNode,
+    member: SyntaxNode,
     isInterface: boolean,
     addExport: (name: string) => void,
   ): void {
@@ -175,7 +170,7 @@ export class JavaExportExtractor implements LanguageExportExtractor {
     }
   }
 
-  private extractFieldNames(fieldDecl: Parser.SyntaxNode, addExport: (name: string) => void): void {
+  private extractFieldNames(fieldDecl: SyntaxNode, addExport: (name: string) => void): void {
     fieldDecl.namedChildren
       .filter(child => child.type === 'variable_declarator')
       .forEach(child => {
@@ -211,13 +206,13 @@ function isJavaStdLib(importPath: string): boolean {
 export class JavaImportExtractor implements LanguageImportExtractor {
   readonly importNodeTypes = ['import_declaration'];
 
-  extractImportPath(node: Parser.SyntaxNode): string | null {
+  extractImportPath(node: SyntaxNode): string | null {
     const path = this.getImportPath(node);
     if (!path || isJavaStdLib(path)) return null;
     return path;
   }
 
-  processImportSymbols(node: Parser.SyntaxNode): { importPath: string; symbols: string[] } | null {
+  processImportSymbols(node: SyntaxNode): { importPath: string; symbols: string[] } | null {
     const path = this.getImportPath(node);
     if (!path || isJavaStdLib(path)) return null;
 
@@ -234,7 +229,7 @@ export class JavaImportExtractor implements LanguageImportExtractor {
     return { importPath: path, symbols: [lastPart] };
   }
 
-  private getImportPath(node: Parser.SyntaxNode): string | null {
+  private getImportPath(node: SyntaxNode): string | null {
     // Find the scoped_identifier or identifier child (import path)
     const pathChild = node.namedChildren.find(
       child => child.type === 'scoped_identifier' || child.type === 'identifier',
@@ -273,7 +268,7 @@ export class JavaSymbolExtractor implements LanguageSymbolExtractor {
     'record_declaration',
   ];
 
-  extractSymbol(node: Parser.SyntaxNode, content: string, parentClass?: string): SymbolInfo | null {
+  extractSymbol(node: SyntaxNode, content: string, parentClass?: string): SymbolInfo | null {
     switch (node.type) {
       case 'method_declaration':
         return this.extractMethodInfo(node, content, parentClass);
@@ -292,7 +287,7 @@ export class JavaSymbolExtractor implements LanguageSymbolExtractor {
     }
   }
 
-  extractCallSite(node: Parser.SyntaxNode): { symbol: string; line: number; key: string } | null {
+  extractCallSite(node: SyntaxNode): { symbol: string; line: number; key: string } | null {
     const line = node.startPosition.row + 1;
 
     // method_invocation: foo() or obj.foo()
@@ -314,7 +309,7 @@ export class JavaSymbolExtractor implements LanguageSymbolExtractor {
   }
 
   private extractMethodInfo(
-    node: Parser.SyntaxNode,
+    node: SyntaxNode,
     content: string,
     parentClass?: string,
   ): SymbolInfo | null {
@@ -335,7 +330,7 @@ export class JavaSymbolExtractor implements LanguageSymbolExtractor {
   }
 
   private extractConstructorInfo(
-    node: Parser.SyntaxNode,
+    node: SyntaxNode,
     content: string,
     parentClass?: string,
   ): SymbolInfo | null {
@@ -354,7 +349,7 @@ export class JavaSymbolExtractor implements LanguageSymbolExtractor {
     };
   }
 
-  private extractClassInfo(node: Parser.SyntaxNode): SymbolInfo | null {
+  private extractClassInfo(node: SyntaxNode): SymbolInfo | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
@@ -367,7 +362,7 @@ export class JavaSymbolExtractor implements LanguageSymbolExtractor {
     };
   }
 
-  private extractInterfaceInfo(node: Parser.SyntaxNode): SymbolInfo | null {
+  private extractInterfaceInfo(node: SyntaxNode): SymbolInfo | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
@@ -380,7 +375,7 @@ export class JavaSymbolExtractor implements LanguageSymbolExtractor {
     };
   }
 
-  private extractEnumInfo(node: Parser.SyntaxNode): SymbolInfo | null {
+  private extractEnumInfo(node: SyntaxNode): SymbolInfo | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
@@ -393,7 +388,7 @@ export class JavaSymbolExtractor implements LanguageSymbolExtractor {
     };
   }
 
-  private extractRecordInfo(node: Parser.SyntaxNode): SymbolInfo | null {
+  private extractRecordInfo(node: SyntaxNode): SymbolInfo | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
@@ -416,7 +411,7 @@ export class JavaSymbolExtractor implements LanguageSymbolExtractor {
  * Iterates the modifiers node's children for an exact `public` token
  * to avoid false positives from substring matching.
  */
-function hasPublicModifier(node: Parser.SyntaxNode): boolean {
+function hasPublicModifier(node: SyntaxNode): boolean {
   const modifiers = node.children.find(child => child.type === 'modifiers');
   if (!modifiers) return false;
   return modifiers.children.some(child => child.type === 'public');
@@ -426,7 +421,7 @@ function hasPublicModifier(node: Parser.SyntaxNode): boolean {
  * Extract return type from a Java method_declaration.
  * Java uses a 'type' field instead of 'return_type'.
  */
-function extractJavaReturnType(node: Parser.SyntaxNode): string | undefined {
+function extractJavaReturnType(node: SyntaxNode): string | undefined {
   if (node.type !== 'method_declaration') return undefined;
   const typeNode = node.childForFieldName('type');
   if (!typeNode) return undefined;
@@ -436,7 +431,7 @@ function extractJavaReturnType(node: Parser.SyntaxNode): string | undefined {
 /**
  * Find the first descendant of a specific type (breadth-first among children).
  */
-function findDescendant(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
+function findDescendant(node: SyntaxNode, type: string): SyntaxNode | null {
   for (const child of node.namedChildren) {
     if (child.type === type) return child;
     const found = findDescendant(child, type);
@@ -448,7 +443,7 @@ function findDescendant(node: Parser.SyntaxNode, type: string): Parser.SyntaxNod
 /**
  * Check if a node has a child of a specific type (including unnamed children).
  */
-function hasChildOfType(node: Parser.SyntaxNode, type: string): boolean {
+function hasChildOfType(node: SyntaxNode, type: string): boolean {
   return node.children.some(child => child.type === type);
 }
 
@@ -459,7 +454,6 @@ function hasChildOfType(node: Parser.SyntaxNode, type: string): boolean {
 export const javaDefinition: LanguageDefinition = {
   id: 'java',
   extensions: ['java'],
-  grammar: Java,
   traverser: new JavaTraverser(),
   exportExtractor: new JavaExportExtractor(),
   importExtractor: new JavaImportExtractor(),

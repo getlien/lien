@@ -1,4 +1,4 @@
-import type Parser from 'tree-sitter';
+import type { SyntaxNode } from '../types.js';
 import { getAllLanguages } from '../languages/registry.js';
 
 /**
@@ -46,13 +46,13 @@ function getLambdaTypes(): Set<string> {
 
 /** Traversal context passed to handlers */
 interface TraversalContext {
-  traverse: (n: Parser.SyntaxNode, level: number, lastOp: string | null) => void;
+  traverse: (n: SyntaxNode, level: number, lastOp: string | null) => void;
 }
 
 /**
  * Check if node is a logical operator and return normalized form
  */
-function getLogicalOperator(node: Parser.SyntaxNode): string | null {
+function getLogicalOperator(node: SyntaxNode): string | null {
   if (node.type !== 'binary_expression' && node.type !== 'boolean_operator') {
     return null;
   }
@@ -68,8 +68,8 @@ function getLogicalOperator(node: Parser.SyntaxNode): string | null {
  * Determine nesting level for a child node based on SonarSource spec.
  */
 function getChildNestingLevel(
-  parent: Parser.SyntaxNode,
-  child: Parser.SyntaxNode,
+  parent: SyntaxNode,
+  child: SyntaxNode,
   currentLevel: number,
   nonNestingTypes: Set<string>,
 ): number {
@@ -91,7 +91,7 @@ function getNestedLambdaIncrement(
 
 /** Traverse logical operator children, passing the operator type */
 function traverseLogicalChildren(
-  n: Parser.SyntaxNode,
+  n: SyntaxNode,
   level: number,
   op: string,
   ctx: TraversalContext,
@@ -104,7 +104,7 @@ function traverseLogicalChildren(
 
 /** Traverse nesting type children with proper nesting level adjustment */
 function traverseNestingChildren(
-  n: Parser.SyntaxNode,
+  n: SyntaxNode,
   level: number,
   nonNestingTypes: Set<string>,
   ctx: TraversalContext,
@@ -115,7 +115,7 @@ function traverseNestingChildren(
 }
 
 /** Traverse all children at specified level */
-function traverseAllChildren(n: Parser.SyntaxNode, level: number, ctx: TraversalContext): void {
+function traverseAllChildren(n: SyntaxNode, level: number, ctx: TraversalContext): void {
   for (const child of n.namedChildren) {
     ctx.traverse(child, level, null);
   }
@@ -134,18 +134,14 @@ function traverseAllChildren(n: Parser.SyntaxNode, level: number, ctx: Traversal
  * @param node - AST node to analyze (typically a function/method)
  * @returns Cognitive complexity score (minimum 0)
  */
-export function calculateCognitiveComplexity(node: Parser.SyntaxNode): number {
+export function calculateCognitiveComplexity(node: SyntaxNode): number {
   let complexity = 0;
   const ctx: TraversalContext = { traverse };
   const nestingTypes = getNestingTypes();
   const nonNestingTypes = getNonNestingTypes();
   const lambdaTypes = getLambdaTypes();
 
-  function traverse(
-    n: Parser.SyntaxNode,
-    nestingLevel: number,
-    lastLogicalOp: string | null,
-  ): void {
+  function traverse(n: SyntaxNode, nestingLevel: number, lastLogicalOp: string | null): void {
     const logicalOp = getLogicalOperator(n);
 
     if (logicalOp) {

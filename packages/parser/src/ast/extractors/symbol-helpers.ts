@@ -1,9 +1,9 @@
-import type Parser from 'tree-sitter';
+import type { SyntaxNode } from '../types.js';
 
 /**
  * Extract function/method signature
  */
-export function extractSignature(node: Parser.SyntaxNode, content: string): string {
+export function extractSignature(node: SyntaxNode, content: string): string {
   // Preferred: bound the signature by where the function body begins. This is
   // language-agnostic — it works for brace languages (`… ) {`), colon languages
   // (Python `… ):`), and `end` languages (Ruby `def … )`). The legacy brace/arrow
@@ -55,7 +55,7 @@ export function clampSignatureLength(signature: string): string {
  * Note: The `_content` parameter is unused in this function, but is kept for API consistency
  * with other extract functions (e.g., extractSignature).
  */
-export function extractParameters(node: Parser.SyntaxNode, _content: string): string[] {
+export function extractParameters(node: SyntaxNode, _content: string): string[] {
   const parameters: string[] = [];
 
   // Find parameters node
@@ -78,7 +78,7 @@ export function extractParameters(node: Parser.SyntaxNode, _content: string): st
  * Note: The `_content` parameter is unused in this function, but is kept for API consistency
  * with other extract functions (e.g., extractSignature).
  */
-export function extractReturnType(node: Parser.SyntaxNode, _content: string): string | undefined {
+export function extractReturnType(node: SyntaxNode, _content: string): string | undefined {
   const returnTypeNode = node.childForFieldName('return_type');
   if (!returnTypeNode) return undefined;
 

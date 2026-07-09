@@ -1,120 +1,108 @@
 import { describe, it, expect } from 'vitest';
-import Parser from 'tree-sitter';
-import TypeScript from 'tree-sitter-typescript';
-import PHP from 'tree-sitter-php';
-import Python from 'tree-sitter-python';
+import { mustParse } from '../test/helpers/parse-fixture.js';
 import { getExtractor } from './index.js';
 
 describe('Export Extractors', () => {
   describe('JavaScriptExportExtractor', () => {
-    const parser = new Parser();
-    parser.setLanguage(TypeScript.typescript);
-
     it('should extract named exports', () => {
       const code = 'export { foo, bar };';
-      const tree = parser.parse(code);
+      const root = mustParse(code, 'javascript');
       const extractor = getExtractor('javascript');
-      const exports = extractor.extractExports(tree.rootNode);
+      const exports = extractor.extractExports(root);
 
       expect(exports).toEqual(['foo', 'bar']);
     });
 
     it('should extract function exports', () => {
       const code = 'export function validateEmail() {}';
-      const tree = parser.parse(code);
+      const root = mustParse(code, 'typescript');
       const extractor = getExtractor('typescript');
-      const exports = extractor.extractExports(tree.rootNode);
+      const exports = extractor.extractExports(root);
 
       expect(exports).toEqual(['validateEmail']);
     });
 
     it('should extract default exports', () => {
       const code = 'export default class App {}';
-      const tree = parser.parse(code);
+      const root = mustParse(code, 'javascript');
       const extractor = getExtractor('javascript');
-      const exports = extractor.extractExports(tree.rootNode);
+      const exports = extractor.extractExports(root);
 
       expect(exports).toEqual(['default', 'App']);
     });
   });
 
   describe('PHPExportExtractor', () => {
-    const parser = new Parser();
-    parser.setLanguage(PHP.php);
-
     it('should extract class exports', () => {
       const code = '<?php\nclass User {}';
-      const tree = parser.parse(code);
+      const root = mustParse(code, 'php');
       const extractor = getExtractor('php');
-      const exports = extractor.extractExports(tree.rootNode);
+      const exports = extractor.extractExports(root);
 
       expect(exports).toEqual(['User']);
     });
 
     it('should extract trait exports', () => {
       const code = '<?php\ntrait HasTimestamps {}';
-      const tree = parser.parse(code);
+      const root = mustParse(code, 'php');
       const extractor = getExtractor('php');
-      const exports = extractor.extractExports(tree.rootNode);
+      const exports = extractor.extractExports(root);
 
       expect(exports).toEqual(['HasTimestamps']);
     });
 
     it('should extract interface exports', () => {
       const code = '<?php\ninterface Repository {}';
-      const tree = parser.parse(code);
+      const root = mustParse(code, 'php');
       const extractor = getExtractor('php');
-      const exports = extractor.extractExports(tree.rootNode);
+      const exports = extractor.extractExports(root);
 
       expect(exports).toEqual(['Repository']);
     });
 
     it('should extract function exports', () => {
       const code = '<?php\nfunction helper() {}';
-      const tree = parser.parse(code);
+      const root = mustParse(code, 'php');
       const extractor = getExtractor('php');
-      const exports = extractor.extractExports(tree.rootNode);
+      const exports = extractor.extractExports(root);
 
       expect(exports).toEqual(['helper']);
     });
 
     it('should extract namespaced exports', () => {
       const code = '<?php\nnamespace App\\Models;\nclass User {}';
-      const tree = parser.parse(code);
+      const root = mustParse(code, 'php');
       const extractor = getExtractor('php');
-      const exports = extractor.extractExports(tree.rootNode);
+      const exports = extractor.extractExports(root);
 
       expect(exports).toEqual(['User']);
     });
   });
 
   describe('PythonExportExtractor', () => {
-    const parser = new Parser();
-    parser.setLanguage(Python);
-
     it('should extract class exports', () => {
       const code = 'class User:\n    pass';
-      const tree = parser.parse(code);
+      const root = mustParse(code, 'python');
       const extractor = getExtractor('python');
-      const exports = extractor.extractExports(tree.rootNode);
+      const exports = extractor.extractExports(root);
 
       expect(exports).toEqual(['User']);
     });
 
     it('should extract function exports', () => {
       const code = 'def helper():\n    pass';
-      const tree = parser.parse(code);
+      const root = mustParse(code, 'python');
       const extractor = getExtractor('python');
-      const exports = extractor.extractExports(tree.rootNode);
+      const exports = extractor.extractExports(root);
 
       expect(exports).toEqual(['helper']);
     });
 
     it('should extract async function exports', () => {
       const code = 'async def fetch_data():\n    pass';
-      const tree = parser.parse(code);
+      const root = mustParse(code, 'python');
       const extractor = getExtractor('python');
-      const exports = extractor.extractExports(tree.rootNode);
+      const exports = extractor.extractExports(root);
 
       expect(exports).toEqual(['fetch_data']);
     });
@@ -130,9 +118,9 @@ def helper():
 async def fetch():
     pass
 `;
-      const tree = parser.parse(code);
+      const root = mustParse(code, 'python');
       const extractor = getExtractor('python');
-      const exports = extractor.extractExports(tree.rootNode);
+      const exports = extractor.extractExports(root);
 
       expect(exports).toEqual(['User', 'helper', 'fetch']);
     });
@@ -141,9 +129,9 @@ async def fetch():
       const code = `@dataclass
 class User:
     pass`;
-      const tree = parser.parse(code);
+      const root = mustParse(code, 'python');
       const extractor = getExtractor('python');
-      const exports = extractor.extractExports(tree.rootNode);
+      const exports = extractor.extractExports(root);
 
       expect(exports).toEqual(['User']);
     });
@@ -152,9 +140,9 @@ class User:
       const code = `@property
 def get_name():
     pass`;
-      const tree = parser.parse(code);
+      const root = mustParse(code, 'python');
       const extractor = getExtractor('python');
-      const exports = extractor.extractExports(tree.rootNode);
+      const exports = extractor.extractExports(root);
 
       expect(exports).toEqual(['get_name']);
     });
@@ -164,27 +152,27 @@ def get_name():
 @cache
 def compute():
     pass`;
-      const tree = parser.parse(code);
+      const root = mustParse(code, 'python');
       const extractor = getExtractor('python');
-      const exports = extractor.extractExports(tree.rootNode);
+      const exports = extractor.extractExports(root);
 
       expect(exports).toEqual(['compute']);
     });
 
     it('should extract re-exports from import_from_statement', () => {
       const code = 'from .auth import AuthService, ValidationError';
-      const tree = parser.parse(code);
+      const root = mustParse(code, 'python');
       const extractor = getExtractor('python');
-      const exports = extractor.extractExports(tree.rootNode);
+      const exports = extractor.extractExports(root);
 
       expect(exports).toEqual(['AuthService', 'ValidationError']);
     });
 
     it('should extract aliased re-exports', () => {
       const code = 'from .auth import AuthService as Auth';
-      const tree = parser.parse(code);
+      const root = mustParse(code, 'python');
       const extractor = getExtractor('python');
-      const exports = extractor.extractExports(tree.rootNode);
+      const exports = extractor.extractExports(root);
 
       expect(exports).toEqual(['Auth']);
     });
@@ -194,18 +182,18 @@ def compute():
 
 class UserController:
     pass`;
-      const tree = parser.parse(code);
+      const root = mustParse(code, 'python');
       const extractor = getExtractor('python');
-      const exports = extractor.extractExports(tree.rootNode);
+      const exports = extractor.extractExports(root);
 
       expect(exports).toEqual(['AuthService', 'UserController']);
     });
 
     it('should NOT treat absolute imports as re-exports', () => {
       const code = 'from utils import helper';
-      const tree = parser.parse(code);
+      const root = mustParse(code, 'python');
       const extractor = getExtractor('python');
-      const exports = extractor.extractExports(tree.rootNode);
+      const exports = extractor.extractExports(root);
 
       // Absolute imports are NOT re-exports — only relative imports (from .x import y) are
       expect(exports).toEqual([]);
@@ -213,18 +201,18 @@ class UserController:
 
     it('should extract re-exports from current package import', () => {
       const code = 'from . import symbol';
-      const tree = parser.parse(code);
+      const root = mustParse(code, 'python');
       const extractor = getExtractor('python');
-      const exports = extractor.extractExports(tree.rootNode);
+      const exports = extractor.extractExports(root);
 
       expect(exports).toEqual(['symbol']);
     });
 
     it('should ignore wildcard imports', () => {
       const code = 'from .module import *';
-      const tree = parser.parse(code);
+      const root = mustParse(code, 'python');
       const extractor = getExtractor('python');
-      const exports = extractor.extractExports(tree.rootNode);
+      const exports = extractor.extractExports(root);
 
       expect(exports).toEqual([]);
     });
@@ -234,9 +222,9 @@ class UserController:
 
 class Helper:
     pass`;
-      const tree = parser.parse(code);
+      const root = mustParse(code, 'python');
       const extractor = getExtractor('python');
-      const exports = extractor.extractExports(tree.rootNode);
+      const exports = extractor.extractExports(root);
 
       expect(exports).toEqual(['Helper']);
     });

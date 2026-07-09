@@ -1,6 +1,4 @@
-import JavaScript from 'tree-sitter-javascript';
-import type Parser from 'tree-sitter';
-import type { SymbolInfo } from '../types.js';
+import type { SymbolInfo, SyntaxNode } from '../types.js';
 import type { LanguageDefinition } from './types.js';
 import type { LanguageTraverser, DeclarationFunctionInfo } from '../traversers/types.js';
 import type {
@@ -51,28 +49,28 @@ export class JavaScriptTraverser implements LanguageTraverser {
 
   functionTypes = ['arrow_function', 'function_expression', 'function'];
 
-  shouldExtractChildren(node: Parser.SyntaxNode): boolean {
+  shouldExtractChildren(node: SyntaxNode): boolean {
     return this.containerTypes.includes(node.type);
   }
 
-  isDeclarationWithFunction(node: Parser.SyntaxNode): boolean {
+  isDeclarationWithFunction(node: SyntaxNode): boolean {
     return this.declarationTypes.includes(node.type);
   }
 
-  getContainerBody(node: Parser.SyntaxNode): Parser.SyntaxNode | null {
+  getContainerBody(node: SyntaxNode): SyntaxNode | null {
     if (this.containerTypes.includes(node.type)) {
       return node.childForFieldName('body');
     }
     return null;
   }
 
-  shouldTraverseChildren(node: Parser.SyntaxNode): boolean {
+  shouldTraverseChildren(node: SyntaxNode): boolean {
     return (
       node.type === 'program' || node.type === 'export_statement' || node.type === 'class_body'
     );
   }
 
-  findParentContainerName(node: Parser.SyntaxNode): string | undefined {
+  findParentContainerName(node: SyntaxNode): string | undefined {
     let current = node.parent;
     while (current) {
       if (this.containerTypes.includes(current.type)) {
@@ -84,8 +82,8 @@ export class JavaScriptTraverser implements LanguageTraverser {
     return undefined;
   }
 
-  findFunctionInDeclaration(node: Parser.SyntaxNode): DeclarationFunctionInfo {
-    const search = (n: Parser.SyntaxNode, depth: number): Parser.SyntaxNode | null => {
+  findFunctionInDeclaration(node: SyntaxNode): DeclarationFunctionInfo {
+    const search = (n: SyntaxNode, depth: number): SyntaxNode | null => {
       if (depth > 3) return null;
 
       if (this.functionTypes.includes(n.type)) {
@@ -151,7 +149,7 @@ export class TypeScriptTraverser extends JavaScriptTraverser {
  * - exports.foo = ... / module.exports.bar = ...
  */
 export class JavaScriptExportExtractor implements LanguageExportExtractor {
-  extractExports(rootNode: Parser.SyntaxNode): string[] {
+  extractExports(rootNode: SyntaxNode): string[] {
     const exports: string[] = [];
     const seen = new Set<string>();
 
@@ -173,10 +171,7 @@ export class JavaScriptExportExtractor implements LanguageExportExtractor {
     return exports;
   }
 
-  private extractExportStatementSymbols(
-    node: Parser.SyntaxNode,
-    addExport: (name: string) => void,
-  ): void {
+  private extractExportStatementSymbols(node: SyntaxNode, addExport: (name: string) => void): void {
     const defaultKeyword = node.children.find(c => c.type === 'default');
     if (defaultKeyword) {
       addExport('default');
@@ -192,10 +187,7 @@ export class JavaScriptExportExtractor implements LanguageExportExtractor {
       .forEach(child => this.extractExportClauseSymbols(child, addExport));
   }
 
-  private extractDeclarationExports(
-    node: Parser.SyntaxNode,
-    addExport: (name: string) => void,
-  ): void {
+  private extractDeclarationExports(node: SyntaxNode, addExport: (name: string) => void): void {
     const nameNode = node.childForFieldName('name');
     if (nameNode) {
       addExport(nameNode.text);
@@ -214,10 +206,7 @@ export class JavaScriptExportExtractor implements LanguageExportExtractor {
     }
   }
 
-  private extractExportClauseSymbols(
-    node: Parser.SyntaxNode,
-    addExport: (name: string) => void,
-  ): void {
+  private extractExportClauseSymbols(node: SyntaxNode, addExport: (name: string) => void): void {
     node.namedChildren
       .filter(child => child.type === 'export_specifier')
       .forEach(child => {
@@ -234,7 +223,7 @@ export class JavaScriptExportExtractor implements LanguageExportExtractor {
   // CommonJS export extraction
   // ---------------------------------------------------------------------------
 
-  private isModuleExports(node: Parser.SyntaxNode): boolean {
+  private isModuleExports(node: SyntaxNode): boolean {
     return (
       node.type === 'member_expression' &&
       node.childForFieldName('object')?.text === 'module' &&
@@ -242,10 +231,7 @@ export class JavaScriptExportExtractor implements LanguageExportExtractor {
     );
   }
 
-  private extractCJSExportSymbols(
-    node: Parser.SyntaxNode,
-    addExport: (name: string) => void,
-  ): void {
+  private extractCJSExportSymbols(node: SyntaxNode, addExport: (name: string) => void): void {
     const expr = node.namedChild(0);
     if (expr?.type !== 'assignment_expression') return;
 
@@ -271,10 +257,7 @@ export class JavaScriptExportExtractor implements LanguageExportExtractor {
     if (isExportsProperty) addExport(prop.text);
   }
 
-  private extractModuleExportsValue(
-    node: Parser.SyntaxNode,
-    addExport: (name: string) => void,
-  ): void {
+  private extractModuleExportsValue(node: SyntaxNode, addExport: (name: string) => void): void {
     // module.exports = { foo, bar, baz: val }
     if (node.type === 'object') {
       this.extractObjectExportProperties(node, addExport);
@@ -293,10 +276,7 @@ export class JavaScriptExportExtractor implements LanguageExportExtractor {
     addExport('default');
   }
 
-  private extractObjectExportProperties(
-    node: Parser.SyntaxNode,
-    addExport: (name: string) => void,
-  ): void {
+  private extractObjectExportProperties(node: SyntaxNode, addExport: (name: string) => void): void {
     node.namedChildren.forEach(prop => {
       if (prop.type === 'shorthand_property_identifier') {
         addExport(prop.text);
@@ -341,7 +321,7 @@ export class JavaScriptImportExtractor implements LanguageImportExtractor {
     'expression_statement',
   ];
 
-  extractImportPath(node: Parser.SyntaxNode): string | null {
+  extractImportPath(node: SyntaxNode): string | null {
     const sourceNode = node.childForFieldName('source');
     if (sourceNode) return sourceNode.text.replace(/['"]/g, '');
 
@@ -354,7 +334,7 @@ export class JavaScriptImportExtractor implements LanguageImportExtractor {
     return this.extractRequirePath(node);
   }
 
-  processImportSymbols(node: Parser.SyntaxNode): { importPath: string; symbols: string[] } | null {
+  processImportSymbols(node: SyntaxNode): { importPath: string; symbols: string[] } | null {
     if (node.type === 'import_statement') {
       return this.processImportStatement(node);
     }
@@ -371,7 +351,7 @@ export class JavaScriptImportExtractor implements LanguageImportExtractor {
   }
 
   private processImportStatement(
-    node: Parser.SyntaxNode,
+    node: SyntaxNode,
   ): { importPath: string; symbols: string[] } | null {
     const sourceNode = node.childForFieldName('source');
     if (!sourceNode) return null;
@@ -382,7 +362,7 @@ export class JavaScriptImportExtractor implements LanguageImportExtractor {
   }
 
   private processReExportStatement(
-    node: Parser.SyntaxNode,
+    node: SyntaxNode,
   ): { importPath: string; symbols: string[] } | null {
     const sourceNode = node.childForFieldName('source');
     if (!sourceNode) return null;
@@ -397,7 +377,7 @@ export class JavaScriptImportExtractor implements LanguageImportExtractor {
     return symbols.length > 0 ? { importPath, symbols } : null;
   }
 
-  private extractImportStatementSymbols(node: Parser.SyntaxNode): string[] {
+  private extractImportStatementSymbols(node: SyntaxNode): string[] {
     const symbols: string[] = [];
 
     node.namedChildren.forEach(child => {
@@ -420,7 +400,7 @@ export class JavaScriptImportExtractor implements LanguageImportExtractor {
     return symbols;
   }
 
-  private extractImportClauseSymbols(node: Parser.SyntaxNode, symbols: string[]): void {
+  private extractImportClauseSymbols(node: SyntaxNode, symbols: string[]): void {
     node.namedChildren.forEach(child => {
       if (child.type === 'identifier') {
         symbols.push(child.text);
@@ -432,14 +412,14 @@ export class JavaScriptImportExtractor implements LanguageImportExtractor {
     });
   }
 
-  private extractNamespaceImportSymbol(node: Parser.SyntaxNode, symbols: string[]): void {
+  private extractNamespaceImportSymbol(node: SyntaxNode, symbols: string[]): void {
     const identifier = node.namedChildren.find(child => child.type === 'identifier');
     if (identifier) {
       symbols.push(`* as ${identifier.text}`);
     }
   }
 
-  private extractNamedImportSymbols(node: Parser.SyntaxNode, symbols: string[]): void {
+  private extractNamedImportSymbols(node: SyntaxNode, symbols: string[]): void {
     node.namedChildren.forEach(child => {
       switch (child.type) {
         case 'import_specifier': {
@@ -465,7 +445,7 @@ export class JavaScriptImportExtractor implements LanguageImportExtractor {
    * Extract original symbol names from an export_clause (for re-exports).
    * Uses original name (not alias) since it maps to the source module's exports.
    */
-  private extractExportClauseSymbols(clause: Parser.SyntaxNode): string[] {
+  private extractExportClauseSymbols(clause: SyntaxNode): string[] {
     const symbols: string[] = [];
     clause.namedChildren
       .filter(specifier => specifier.type === 'export_specifier')
@@ -483,7 +463,7 @@ export class JavaScriptImportExtractor implements LanguageImportExtractor {
   // CommonJS require() extraction
   // ---------------------------------------------------------------------------
 
-  private findRequireCall(node: Parser.SyntaxNode): Parser.SyntaxNode | null {
+  private findRequireCall(node: SyntaxNode): SyntaxNode | null {
     // Only match require() as a direct call_expression — not nested inside other expressions
     if (node.type === 'call_expression' && node.childForFieldName('function')?.text === 'require') {
       return node;
@@ -491,7 +471,7 @@ export class JavaScriptImportExtractor implements LanguageImportExtractor {
     return null;
   }
 
-  private getRequirePathFromCall(callNode: Parser.SyntaxNode): string | null {
+  private getRequirePathFromCall(callNode: SyntaxNode): string | null {
     const args = callNode.childForFieldName('arguments');
     if (!args) return null;
     const firstArg = args.namedChild(0);
@@ -499,14 +479,14 @@ export class JavaScriptImportExtractor implements LanguageImportExtractor {
     return firstArg.text.replace(/['"]/g, '');
   }
 
-  private extractRequirePath(node: Parser.SyntaxNode): string | null {
+  private extractRequirePath(node: SyntaxNode): string | null {
     // Check the node itself, then its direct named children
     const call = this.findRequireCall(node) ?? this.findRequireCallInChildren(node);
     if (!call) return null;
     return this.getRequirePathFromCall(call);
   }
 
-  private findRequireCallInChildren(node: Parser.SyntaxNode): Parser.SyntaxNode | null {
+  private findRequireCallInChildren(node: SyntaxNode): SyntaxNode | null {
     for (const child of node.namedChildren) {
       const found = this.findRequireCall(child);
       if (found) return found;
@@ -515,7 +495,7 @@ export class JavaScriptImportExtractor implements LanguageImportExtractor {
   }
 
   private processRequireDeclaration(
-    node: Parser.SyntaxNode,
+    node: SyntaxNode,
   ): { importPath: string; symbols: string[] } | null {
     // Find the variable_declarator with a require() value
     for (const declarator of node.namedChildren) {
@@ -539,7 +519,7 @@ export class JavaScriptImportExtractor implements LanguageImportExtractor {
     return null;
   }
 
-  private extractRequireBindingSymbols(nameNode: Parser.SyntaxNode): string[] {
+  private extractRequireBindingSymbols(nameNode: SyntaxNode): string[] {
     // const express = require('express')
     if (nameNode.type === 'identifier') return [nameNode.text];
     // const { Router, json } = require('express')
@@ -547,7 +527,7 @@ export class JavaScriptImportExtractor implements LanguageImportExtractor {
     return [];
   }
 
-  private extractObjectPatternSymbols(node: Parser.SyntaxNode): string[] {
+  private extractObjectPatternSymbols(node: SyntaxNode): string[] {
     const symbols: string[] = [];
     node.namedChildren.forEach(prop => {
       if (prop.type === 'shorthand_property_identifier_pattern') {
@@ -561,9 +541,7 @@ export class JavaScriptImportExtractor implements LanguageImportExtractor {
     return symbols;
   }
 
-  private processBareRequire(
-    node: Parser.SyntaxNode,
-  ): { importPath: string; symbols: string[] } | null {
+  private processBareRequire(node: SyntaxNode): { importPath: string; symbols: string[] } | null {
     // require('./polyfill') — side-effect import, no symbols
     const importPath = this.extractRequirePath(node);
     if (!importPath) return null;
@@ -601,7 +579,7 @@ export class JavaScriptSymbolExtractor implements LanguageSymbolExtractor {
     'interface_declaration',
   ];
 
-  extractSymbol(node: Parser.SyntaxNode, content: string, parentClass?: string): SymbolInfo | null {
+  extractSymbol(node: SyntaxNode, content: string, parentClass?: string): SymbolInfo | null {
     switch (node.type) {
       case 'function_declaration':
       case 'function':
@@ -620,7 +598,7 @@ export class JavaScriptSymbolExtractor implements LanguageSymbolExtractor {
     }
   }
 
-  extractCallSite(node: Parser.SyntaxNode): { symbol: string; line: number; key: string } | null {
+  extractCallSite(node: SyntaxNode): { symbol: string; line: number; key: string } | null {
     const line = node.startPosition.row + 1;
 
     if (node.type === 'call_expression') {
@@ -640,7 +618,7 @@ export class JavaScriptSymbolExtractor implements LanguageSymbolExtractor {
     return null;
   }
 
-  private resolveSymbol(node: Parser.SyntaxNode): string | null {
+  private resolveSymbol(node: SyntaxNode): string | null {
     if (node.type === 'identifier') return node.text;
     if (node.type === 'member_expression') {
       const propertyNode = node.childForFieldName('property');
@@ -650,7 +628,7 @@ export class JavaScriptSymbolExtractor implements LanguageSymbolExtractor {
   }
 
   private extractFunctionInfo(
-    node: Parser.SyntaxNode,
+    node: SyntaxNode,
     content: string,
     parentClass?: string,
   ): SymbolInfo | null {
@@ -671,7 +649,7 @@ export class JavaScriptSymbolExtractor implements LanguageSymbolExtractor {
   }
 
   private extractArrowFunctionInfo(
-    node: Parser.SyntaxNode,
+    node: SyntaxNode,
     content: string,
     parentClass?: string,
   ): SymbolInfo | null {
@@ -696,7 +674,7 @@ export class JavaScriptSymbolExtractor implements LanguageSymbolExtractor {
   }
 
   protected extractMethodInfo(
-    node: Parser.SyntaxNode,
+    node: SyntaxNode,
     content: string,
     parentClass?: string,
   ): SymbolInfo | null {
@@ -716,7 +694,7 @@ export class JavaScriptSymbolExtractor implements LanguageSymbolExtractor {
     };
   }
 
-  protected extractClassInfo(node: Parser.SyntaxNode): SymbolInfo | null {
+  protected extractClassInfo(node: SyntaxNode): SymbolInfo | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
@@ -729,7 +707,7 @@ export class JavaScriptSymbolExtractor implements LanguageSymbolExtractor {
     };
   }
 
-  private extractInterfaceInfo(node: Parser.SyntaxNode): SymbolInfo | null {
+  private extractInterfaceInfo(node: SyntaxNode): SymbolInfo | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
@@ -765,7 +743,7 @@ export class TypeScriptSymbolExtractor extends JavaScriptSymbolExtractor {
   }
 
   override extractSymbol(
-    node: Parser.SyntaxNode,
+    node: SyntaxNode,
     content: string,
     parentClass?: string,
   ): SymbolInfo | null {
@@ -914,7 +892,6 @@ export const jsTsComplexityConfig: LanguageDefinition['complexity'] = {
 export const javascriptDefinition: LanguageDefinition = {
   id: 'javascript',
   extensions: ['js', 'jsx', 'mjs', 'cjs'],
-  grammar: JavaScript,
   traverser: new JavaScriptTraverser(),
   exportExtractor: new JavaScriptExportExtractor(),
   importExtractor: new JavaScriptImportExtractor(),

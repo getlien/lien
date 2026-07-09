@@ -1,5 +1,4 @@
-import type Parser from 'tree-sitter';
-import type { ASTChunk, SupportedLanguage } from './types.js';
+import type { ASTChunk, SupportedLanguage, SyntaxNode } from './types.js';
 import { parseAST, detectLanguage, isASTSupported } from './parser.js';
 import {
   extractSymbolInfo,
@@ -95,7 +94,7 @@ const RESOLVE_RELATIVE_IMPORTS: ReadonlySet<SupportedLanguage> = new Set([
  */
 function prepareASTContext(
   content: string,
-  rootNode: Parser.SyntaxNode,
+  rootNode: SyntaxNode,
   language: SupportedLanguage,
   filepath: string,
   workspaceRoot?: string,
@@ -117,7 +116,7 @@ function prepareASTContext(
  * Process a single top-level node into a chunk.
  */
 function processTopLevelNode(
-  node: Parser.SyntaxNode,
+  node: SyntaxNode,
   filepath: string,
   content: string,
   context: ASTContext,
@@ -157,7 +156,7 @@ function processTopLevelNode(
  * Process all top-level nodes into chunks.
  */
 function processTopLevelNodes(
-  topLevelNodes: Parser.SyntaxNode[],
+  topLevelNodes: SyntaxNode[],
   filepath: string,
   content: string,
   context: ASTContext,
@@ -236,7 +235,7 @@ export function chunkByAST(
 
 /** Check if node is a function-containing declaration at top level */
 function isFunctionDeclaration(
-  node: Parser.SyntaxNode,
+  node: SyntaxNode,
   depth: number,
   traverser: ReturnType<typeof getTraverser>,
 ): boolean {
@@ -246,7 +245,7 @@ function isFunctionDeclaration(
 
 /** Check if node is a target type at valid depth */
 function isTargetNode(
-  node: Parser.SyntaxNode,
+  node: SyntaxNode,
   depth: number,
   traverser: ReturnType<typeof getTraverser>,
 ): boolean {
@@ -265,12 +264,12 @@ function isTargetNode(
  * @returns Array of nodes to extract as chunks
  */
 function findTopLevelNodes(
-  rootNode: Parser.SyntaxNode,
+  rootNode: SyntaxNode,
   traverser: ReturnType<typeof getTraverser>,
-): Parser.SyntaxNode[] {
-  const nodes: Parser.SyntaxNode[] = [];
+): SyntaxNode[] {
+  const nodes: SyntaxNode[] = [];
 
-  function traverse(node: Parser.SyntaxNode, depth: number): void {
+  function traverse(node: SyntaxNode, depth: number): void {
     // Capture function declarations and target nodes
     if (isFunctionDeclaration(node, depth, traverser) || isTargetNode(node, depth, traverser)) {
       nodes.push(node);
@@ -299,7 +298,7 @@ function findTopLevelNodes(
 /**
  * Extract content for a specific AST node
  */
-function getNodeContent(node: Parser.SyntaxNode, lines: string[]): string {
+function getNodeContent(node: SyntaxNode, lines: string[]): string {
   const startLine = node.startPosition.row;
   const endLine = node.endPosition.row;
 
@@ -354,7 +353,7 @@ function getChunkType(
  */
 function createChunk(
   filepath: string,
-  node: Parser.SyntaxNode,
+  node: SyntaxNode,
   content: string,
   symbolInfo: ReturnType<typeof extractSymbolInfo>,
   imports: string[],

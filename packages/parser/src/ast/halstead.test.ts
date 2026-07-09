@@ -1,8 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { countHalstead, calculateHalstead, calculateHalsteadMetrics } from './complexity/index.js';
 import { parseAST } from './parser.js';
-import type { SupportedLanguage } from './types.js';
-import type Parser from 'tree-sitter';
+import type { SupportedLanguage, SyntaxNode } from './types.js';
 
 /**
  * Helper to calculate Halstead metrics of a function in TypeScript code
@@ -12,7 +11,7 @@ function getHalstead(code: string, language: SupportedLanguage = 'typescript') {
   if (!result.tree) throw new Error('Failed to parse code');
 
   // Find the first function node
-  const findFunction = (node: Parser.SyntaxNode): Parser.SyntaxNode | null => {
+  const findFunction = (node: SyntaxNode): SyntaxNode | null => {
     if (
       node.type === 'function_declaration' ||
       node.type === 'arrow_function' ||
@@ -41,7 +40,7 @@ function getHalsteadCounts(code: string, language: SupportedLanguage = 'typescri
   const result = parseAST(code, language);
   if (!result.tree) throw new Error('Failed to parse code');
 
-  const findFunction = (node: Parser.SyntaxNode): Parser.SyntaxNode | null => {
+  const findFunction = (node: SyntaxNode): SyntaxNode | null => {
     if (
       node.type === 'function_declaration' ||
       node.type === 'arrow_function' ||

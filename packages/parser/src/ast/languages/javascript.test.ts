@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import Parser from 'tree-sitter';
-import JavaScript from 'tree-sitter-javascript';
+import { mustParse } from '../test/helpers/parse-fixture.js';
 import { chunkByAST } from '../chunker.js';
 import {
   JavaScriptTraverser,
@@ -10,8 +9,6 @@ import {
 } from './javascript.js';
 
 describe('JavaScript Language', () => {
-  const parser = new Parser();
-  parser.setLanguage(JavaScript);
   const traverser = new JavaScriptTraverser();
   const exportExtractor = new JavaScriptExportExtractor();
   const importExtractor = new JavaScriptImportExtractor();
@@ -26,21 +23,21 @@ describe('JavaScript Language', () => {
 
     it('should identify class declarations as containers', () => {
       const code = 'class Foo { bar() {} }';
-      const tree = parser.parse(code);
-      const classNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'javascript');
+      const classNode = root.namedChild(0)!;
       expect(traverser.shouldExtractChildren(classNode)).toBe(true);
     });
 
     it('should traverse program root', () => {
       const code = 'const x = 1;';
-      const tree = parser.parse(code);
-      expect(traverser.shouldTraverseChildren(tree.rootNode)).toBe(true);
+      const root = mustParse(code, 'javascript');
+      expect(traverser.shouldTraverseChildren(root)).toBe(true);
     });
 
     it('should detect function expressions in variable declarations', () => {
       const code = 'var handler = function() {};';
-      const tree = parser.parse(code);
-      const declNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'javascript');
+      const declNode = root.namedChild(0)!;
       expect(traverser.isDeclarationWithFunction(declNode)).toBe(true);
       const result = traverser.findFunctionInDeclaration(declNode);
       expect(result.hasFunction).toBe(true);
@@ -49,8 +46,8 @@ describe('JavaScript Language', () => {
 
     it('should find parent container name', () => {
       const code = 'class App { render() {} }';
-      const tree = parser.parse(code);
-      const classNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'javascript');
+      const classNode = root.namedChild(0)!;
       const classBody = classNode.childForFieldName('body')!;
       const methodNode = classBody.namedChild(0)!;
       expect(traverser.findParentContainerName(methodNode)).toBe('App');
@@ -58,8 +55,8 @@ describe('JavaScript Language', () => {
 
     it('should return undefined for top-level functions', () => {
       const code = 'function standalone() {}';
-      const tree = parser.parse(code);
-      const funcNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'javascript');
+      const funcNode = root.namedChild(0)!;
       expect(traverser.findParentContainerName(funcNode)).toBeUndefined();
     });
   });
@@ -67,43 +64,43 @@ describe('JavaScript Language', () => {
   describe('Export Extraction', () => {
     it('should extract named exports', () => {
       const code = 'export { foo, bar };';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'javascript');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toEqual(['foo', 'bar']);
     });
 
     it('should extract function exports', () => {
       const code = 'export function handler() {}';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'javascript');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toEqual(['handler']);
     });
 
     it('should extract default class exports', () => {
       const code = 'export default class App {}';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'javascript');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toEqual(['default', 'App']);
     });
 
     it('should extract default function exports', () => {
       const code = 'export default function main() {}';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'javascript');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toEqual(['default', 'main']);
     });
 
     it('should extract const/let exports', () => {
       const code = 'export const VERSION = "1.0";';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'javascript');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toEqual(['VERSION']);
     });
 
     it('should extract re-exports with source', () => {
       const code = "export { helper } from './utils';";
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'javascript');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toEqual(['helper']);
     });
 
@@ -111,8 +108,8 @@ describe('JavaScript Language', () => {
       const code = `export function foo() {}
 export function bar() {}
 export const baz = 42;`;
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'javascript');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toEqual(['foo', 'bar', 'baz']);
     });
   });
@@ -120,16 +117,16 @@ export const baz = 42;`;
   describe('Import Extraction', () => {
     it('should extract import path from import statement', () => {
       const code = "import { foo } from './module';";
-      const tree = parser.parse(code);
-      const importNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'javascript');
+      const importNode = root.namedChild(0)!;
       const path = importExtractor.extractImportPath(importNode);
       expect(path).toBe('./module');
     });
 
     it('should extract named import symbols', () => {
       const code = "import { foo, bar } from './module';";
-      const tree = parser.parse(code);
-      const importNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'javascript');
+      const importNode = root.namedChild(0)!;
       const result = importExtractor.processImportSymbols(importNode);
       expect(result).not.toBeNull();
       expect(result!.importPath).toBe('./module');
@@ -138,8 +135,8 @@ export const baz = 42;`;
 
     it('should extract default import', () => {
       const code = "import React from 'react';";
-      const tree = parser.parse(code);
-      const importNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'javascript');
+      const importNode = root.namedChild(0)!;
       const result = importExtractor.processImportSymbols(importNode);
       expect(result).not.toBeNull();
       expect(result!.symbols).toContain('React');
@@ -147,8 +144,8 @@ export const baz = 42;`;
 
     it('should extract mixed default and named imports', () => {
       const code = "import React, { useState } from 'react';";
-      const tree = parser.parse(code);
-      const importNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'javascript');
+      const importNode = root.namedChild(0)!;
       const result = importExtractor.processImportSymbols(importNode);
       expect(result).not.toBeNull();
       expect(result!.symbols).toContain('React');
@@ -157,8 +154,8 @@ export const baz = 42;`;
 
     it('should extract namespace imports', () => {
       const code = "import * as path from 'path';";
-      const tree = parser.parse(code);
-      const importNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'javascript');
+      const importNode = root.namedChild(0)!;
       const result = importExtractor.processImportSymbols(importNode);
       expect(result).not.toBeNull();
       expect(result!.symbols).toContain('* as path');
@@ -167,8 +164,8 @@ export const baz = 42;`;
     it('should return null for import without source', () => {
       // Side-effect-only imports don't have named symbols to extract
       const code = "import './polyfill';";
-      const tree = parser.parse(code);
-      const importNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'javascript');
+      const importNode = root.namedChild(0)!;
       const result = importExtractor.processImportSymbols(importNode);
       // No symbols to extract from side-effect imports
       expect(result).toBeNull();
@@ -178,65 +175,65 @@ export const baz = 42;`;
   describe('CJS Export Extraction', () => {
     it('should extract module.exports = { foo, bar }', () => {
       const code = 'module.exports = { foo, bar };';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'javascript');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toEqual(['foo', 'bar']);
     });
 
     it('should extract module.exports = { key: value }', () => {
       const code = 'module.exports = { handler: handleRequest, router: appRouter };';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'javascript');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toEqual(['handler', 'router']);
     });
 
     it('should extract module.exports = MyClass as default', () => {
       const code = 'module.exports = MyClass;';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'javascript');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toEqual(['default']);
     });
 
     it('should extract module.exports = function name() {}', () => {
       const code = 'module.exports = function createApp() {};';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'javascript');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toEqual(['default', 'createApp']);
     });
 
     it('should extract module.exports = function() {} (anonymous)', () => {
       const code = 'module.exports = function() {};';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'javascript');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toEqual(['default']);
     });
 
     it('should extract module.exports = class Name {}', () => {
       const code = 'module.exports = class MyClass { method() {} };';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'javascript');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toEqual(['default', 'MyClass']);
     });
 
     it('should extract module.exports = class {} (anonymous)', () => {
       const code = 'module.exports = class {};';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'javascript');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toEqual(['default']);
     });
 
     it('should extract exports.foo and exports.bar', () => {
       const code = `exports.foo = function() {};
 exports.bar = 42;`;
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'javascript');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toEqual(['foo', 'bar']);
     });
 
     it('should extract module.exports.handler', () => {
       const code = 'module.exports.handler = function() {};';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'javascript');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toEqual(['handler']);
     });
   });
@@ -244,8 +241,8 @@ exports.bar = 42;`;
   describe('CJS Import Extraction', () => {
     it('should extract path and symbols from const x = require()', () => {
       const code = "const express = require('express');";
-      const tree = parser.parse(code);
-      const node = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'javascript');
+      const node = root.namedChild(0)!;
       const result = importExtractor.processImportSymbols(node);
       expect(result).not.toBeNull();
       expect(result!.importPath).toBe('express');
@@ -254,8 +251,8 @@ exports.bar = 42;`;
 
     it('should extract destructured symbols from require()', () => {
       const code = "const { Router, json } = require('express');";
-      const tree = parser.parse(code);
-      const node = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'javascript');
+      const node = root.namedChild(0)!;
       const result = importExtractor.processImportSymbols(node);
       expect(result).not.toBeNull();
       expect(result!.importPath).toBe('express');
@@ -264,8 +261,8 @@ exports.bar = 42;`;
 
     it('should extract aliased destructured symbols', () => {
       const code = "const { Router: MyRouter } = require('express');";
-      const tree = parser.parse(code);
-      const node = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'javascript');
+      const node = root.namedChild(0)!;
       const result = importExtractor.processImportSymbols(node);
       expect(result).not.toBeNull();
       expect(result!.importPath).toBe('express');
@@ -274,8 +271,8 @@ exports.bar = 42;`;
 
     it('should handle var declarations with require()', () => {
       const code = "var fs = require('fs');";
-      const tree = parser.parse(code);
-      const node = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'javascript');
+      const node = root.namedChild(0)!;
       const result = importExtractor.processImportSymbols(node);
       expect(result).not.toBeNull();
       expect(result!.importPath).toBe('fs');
@@ -284,16 +281,16 @@ exports.bar = 42;`;
 
     it('should extract path from bare require()', () => {
       const code = "require('./polyfill');";
-      const tree = parser.parse(code);
-      const node = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'javascript');
+      const node = root.namedChild(0)!;
       const path = importExtractor.extractImportPath(node);
       expect(path).toBe('./polyfill');
     });
 
     it('should return empty symbols for bare require()', () => {
       const code = "require('./polyfill');";
-      const tree = parser.parse(code);
-      const node = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'javascript');
+      const node = root.namedChild(0)!;
       const result = importExtractor.processImportSymbols(node);
       expect(result).not.toBeNull();
       expect(result!.importPath).toBe('./polyfill');
@@ -302,40 +299,40 @@ exports.bar = 42;`;
 
     it('should extract import path from require() declaration via extractImportPath', () => {
       const code = "const express = require('express');";
-      const tree = parser.parse(code);
-      const node = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'javascript');
+      const node = root.namedChild(0)!;
       const path = importExtractor.extractImportPath(node);
       expect(path).toBe('express');
     });
 
     it('should return null for non-require declarations', () => {
       const code = 'const x = 42;';
-      const tree = parser.parse(code);
-      const node = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'javascript');
+      const node = root.namedChild(0)!;
       const result = importExtractor.processImportSymbols(node);
       expect(result).toBeNull();
     });
 
     it('should return null for dynamic require()', () => {
       const code = 'const mod = require(dynamicPath);';
-      const tree = parser.parse(code);
-      const node = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'javascript');
+      const node = root.namedChild(0)!;
       const result = importExtractor.processImportSymbols(node);
       expect(result).toBeNull();
     });
 
     it('should not treat nested require() as an import', () => {
       const code = "const x = foo(require('a'));";
-      const tree = parser.parse(code);
-      const node = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'javascript');
+      const node = root.namedChild(0)!;
       const result = importExtractor.processImportSymbols(node);
       expect(result).toBeNull();
     });
 
     it('should skip dynamic require and find static require in same declaration', () => {
       const code = "const a = require(dynamic), b = require('express');";
-      const tree = parser.parse(code);
-      const node = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'javascript');
+      const node = root.namedChild(0)!;
       const result = importExtractor.processImportSymbols(node);
       expect(result).not.toBeNull();
       expect(result!.importPath).toBe('express');
@@ -346,8 +343,8 @@ exports.bar = 42;`;
   describe('Symbol Extraction', () => {
     it('should extract function declaration info', () => {
       const code = 'function processData(items) { return items; }';
-      const tree = parser.parse(code);
-      const funcNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'javascript');
+      const funcNode = root.namedChild(0)!;
       const symbol = symbolExtractor.extractSymbol(funcNode, code);
       expect(symbol).not.toBeNull();
       expect(symbol!.name).toBe('processData');
@@ -356,8 +353,8 @@ exports.bar = 42;`;
 
     it('should extract class info', () => {
       const code = 'class EventEmitter {}';
-      const tree = parser.parse(code);
-      const classNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'javascript');
+      const classNode = root.namedChild(0)!;
       const symbol = symbolExtractor.extractSymbol(classNode, code);
       expect(symbol).not.toBeNull();
       expect(symbol!.name).toBe('EventEmitter');
@@ -368,8 +365,8 @@ exports.bar = 42;`;
       const code = `class Foo {
   bar() { return 1; }
 }`;
-      const tree = parser.parse(code);
-      const classNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'javascript');
+      const classNode = root.namedChild(0)!;
       const classBody = classNode.childForFieldName('body')!;
       const methodNode = classBody.namedChild(0)!;
       const symbol = symbolExtractor.extractSymbol(methodNode, code, 'Foo');
@@ -381,8 +378,8 @@ exports.bar = 42;`;
 
     it('should extract call site from direct function call', () => {
       const code = 'doSomething();';
-      const tree = parser.parse(code);
-      const exprStmt = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'javascript');
+      const exprStmt = root.namedChild(0)!;
       const callExpr = exprStmt.namedChild(0)!;
       const callSite = symbolExtractor.extractCallSite(callExpr);
       expect(callSite).not.toBeNull();
@@ -391,8 +388,8 @@ exports.bar = 42;`;
 
     it('should extract call site from method call', () => {
       const code = 'console.log("test");';
-      const tree = parser.parse(code);
-      const exprStmt = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'javascript');
+      const exprStmt = root.namedChild(0)!;
       const callExpr = exprStmt.namedChild(0)!;
       const callSite = symbolExtractor.extractCallSite(callExpr);
       expect(callSite).not.toBeNull();
@@ -401,8 +398,8 @@ exports.bar = 42;`;
 
     it('should return null for unsupported node types', () => {
       const code = 'const x = 42;';
-      const tree = parser.parse(code);
-      const declNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'javascript');
+      const declNode = root.namedChild(0)!;
       const symbol = symbolExtractor.extractSymbol(declNode, code);
       expect(symbol).toBeNull();
     });

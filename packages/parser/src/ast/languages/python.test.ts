@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import Parser from 'tree-sitter';
-import Python from 'tree-sitter-python';
+import { mustParse } from '../test/helpers/parse-fixture.js';
+import type { SyntaxNode } from '../types.js';
 import { chunkByAST } from '../chunker.js';
 import {
   PythonTraverser,
@@ -10,8 +10,6 @@ import {
 } from './python.js';
 
 describe('Python Language', () => {
-  const parser = new Parser();
-  parser.setLanguage(Python);
   const traverser = new PythonTraverser();
   const exportExtractor = new PythonExportExtractor();
   const importExtractor = new PythonImportExtractor();
@@ -30,15 +28,15 @@ describe('Python Language', () => {
 
     it('should extract children from class definitions', () => {
       const code = 'class Foo:\n    def bar(self): pass\n';
-      const tree = parser.parse(code);
-      const classNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'python');
+      const classNode = root.namedChild(0)!;
       expect(traverser.shouldExtractChildren(classNode)).toBe(true);
     });
 
     it('should get block body from a class definition', () => {
       const code = 'class Foo:\n    def bar(self): pass\n';
-      const tree = parser.parse(code);
-      const classNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'python');
+      const classNode = root.namedChild(0)!;
       const body = traverser.getContainerBody(classNode);
       expect(body).not.toBeNull();
       expect(body!.type).toBe('block');
@@ -46,15 +44,15 @@ describe('Python Language', () => {
 
     it('should traverse module root', () => {
       const code = 'def foo(): pass\n';
-      const tree = parser.parse(code);
-      expect(tree.rootNode.type).toBe('module');
-      expect(traverser.shouldTraverseChildren(tree.rootNode)).toBe(true);
+      const root = mustParse(code, 'python');
+      expect(root.type).toBe('module');
+      expect(traverser.shouldTraverseChildren(root)).toBe(true);
     });
 
     it('should traverse a class block', () => {
       const code = 'class Foo:\n    def bar(self): pass\n';
-      const tree = parser.parse(code);
-      const classNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'python');
+      const classNode = root.namedChild(0)!;
       const body = classNode.childForFieldName('body')!;
       expect(body.type).toBe('block');
       expect(traverser.shouldTraverseChildren(body)).toBe(true);
@@ -62,15 +60,15 @@ describe('Python Language', () => {
 
     it('should not traverse function definitions', () => {
       const code = 'def foo(): pass\n';
-      const tree = parser.parse(code);
-      const funcNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'python');
+      const funcNode = root.namedChild(0)!;
       expect(traverser.shouldTraverseChildren(funcNode)).toBe(false);
     });
 
     it('should find parent container name for methods', () => {
       const code = 'class Calculator:\n    def add(self, a, b): return a + b\n';
-      const tree = parser.parse(code);
-      const classNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'python');
+      const classNode = root.namedChild(0)!;
       const body = classNode.childForFieldName('body')!;
       const methodNode = body.namedChild(0)!;
       expect(traverser.findParentContainerName(methodNode)).toBe('Calculator');
@@ -78,15 +76,15 @@ describe('Python Language', () => {
 
     it('should return undefined for top-level parent container name', () => {
       const code = 'def foo(): pass\n';
-      const tree = parser.parse(code);
-      const funcNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'python');
+      const funcNode = root.namedChild(0)!;
       expect(traverser.findParentContainerName(funcNode)).toBeUndefined();
     });
 
     it('should never report a variable declaration as function-bearing (Python has none)', () => {
       const code = 'x = 5\n';
-      const tree = parser.parse(code);
-      const assignment = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'python');
+      const assignment = root.namedChild(0)!;
       expect(traverser.isDeclarationWithFunction(assignment)).toBe(false);
       expect(traverser.findFunctionInDeclaration(assignment).hasFunction).toBe(false);
     });
@@ -94,22 +92,22 @@ describe('Python Language', () => {
     describe('decorated_definition (regression: decorators must not break traversal)', () => {
       it('should extract children (treat as container) from a decorated function', () => {
         const code = "@app.route('/')\ndef index(): pass\n";
-        const tree = parser.parse(code);
-        const decorated = findNode(tree.rootNode, 'decorated_definition')!;
+        const root = mustParse(code, 'python');
+        const decorated = findNode(root, 'decorated_definition')!;
         expect(traverser.shouldExtractChildren(decorated)).toBe(true);
       });
 
       it('should return null container body for a decorated function (leaf, not a container)', () => {
         const code = "@app.route('/')\ndef index(): pass\n";
-        const tree = parser.parse(code);
-        const decorated = findNode(tree.rootNode, 'decorated_definition')!;
+        const root = mustParse(code, 'python');
+        const decorated = findNode(root, 'decorated_definition')!;
         expect(traverser.getContainerBody(decorated)).toBeNull();
       });
 
       it('should return the inner class block as container body for a decorated class', () => {
         const code = '@dataclass\nclass Point:\n    x: int\n';
-        const tree = parser.parse(code);
-        const decorated = findNode(tree.rootNode, 'decorated_definition')!;
+        const root = mustParse(code, 'python');
+        const decorated = findNode(root, 'decorated_definition')!;
         const body = traverser.getContainerBody(decorated);
         expect(body).not.toBeNull();
         expect(body!.type).toBe('block');
@@ -117,8 +115,8 @@ describe('Python Language', () => {
 
       it('should find parent container name for a decorated method', () => {
         const code = 'class Foo:\n    @staticmethod\n    def bar(): pass\n';
-        const tree = parser.parse(code);
-        const decorated = findNode(tree.rootNode, 'decorated_definition')!;
+        const root = mustParse(code, 'python');
+        const decorated = findNode(root, 'decorated_definition')!;
         expect(traverser.findParentContainerName(decorated)).toBe('Foo');
       });
     });
@@ -127,74 +125,74 @@ describe('Python Language', () => {
   describe('Export Extraction', () => {
     it('should export top-level functions', () => {
       const code = 'def helper(): pass\n';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'python');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toContain('helper');
     });
 
     it('should export top-level async functions', () => {
       const code = 'async def fetch_data(): pass\n';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'python');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toContain('fetch_data');
     });
 
     it('should export top-level classes', () => {
       const code = 'class User: pass\n';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'python');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toContain('User');
     });
 
     it('should not export nested function names as top-level exports', () => {
       const code = 'def outer():\n    def inner(): pass\n    return inner\n';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'python');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toContain('outer');
       expect(exports).not.toContain('inner');
     });
 
     it('should export a decorated top-level function', () => {
       const code = "@app.route('/users')\ndef get_users(): pass\n";
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'python');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toContain('get_users');
     });
 
     it('should export a decorated top-level class', () => {
       const code = '@dataclass\nclass Point:\n    x: int\n';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'python');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toContain('Point');
     });
 
     it('should re-export names from relative imports', () => {
       const code = 'from .models import User, Order\n';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'python');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toContain('User');
       expect(exports).toContain('Order');
     });
 
     it('should re-export the alias from an aliased relative import', () => {
       const code = 'from .models import User as UserModel\n';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'python');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toContain('UserModel');
       expect(exports).not.toContain('User');
     });
 
     it('should not re-export names from absolute (non-relative) imports', () => {
       const code = 'from os.path import join\n';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'python');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).not.toContain('join');
     });
 
     it('should not export duplicate names', () => {
       const code = 'def helper(): pass\nfrom .helper import helper\n';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'python');
+      const exports = exportExtractor.extractExports(root);
       expect(exports.filter(name => name === 'helper')).toHaveLength(1);
     });
   });
@@ -207,16 +205,16 @@ describe('Python Language', () => {
 
     it('should extract a simple import path', () => {
       const code = 'import os\n';
-      const tree = parser.parse(code);
-      const importNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'python');
+      const importNode = root.namedChild(0)!;
       const path = importExtractor.extractImportPath(importNode);
       expect(path).toBe('import os');
     });
 
     it('should process a simple import into a symbol', () => {
       const code = 'import os\n';
-      const tree = parser.parse(code);
-      const importNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'python');
+      const importNode = root.namedChild(0)!;
       const result = importExtractor.processImportSymbols(importNode);
       expect(result).not.toBeNull();
       expect(result!.symbols).toContain('os');
@@ -224,8 +222,8 @@ describe('Python Language', () => {
 
     it('should process an aliased import using the alias as the symbol', () => {
       const code = 'import os as system\n';
-      const tree = parser.parse(code);
-      const importNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'python');
+      const importNode = root.namedChild(0)!;
       const result = importExtractor.processImportSymbols(importNode);
       expect(result).not.toBeNull();
       expect(result!.importPath).toBe('os');
@@ -234,8 +232,8 @@ describe('Python Language', () => {
 
     it('should process a from-import with multiple symbols', () => {
       const code = 'from utils.validate import validateEmail, validatePhone\n';
-      const tree = parser.parse(code);
-      const importNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'python');
+      const importNode = root.namedChild(0)!;
       const result = importExtractor.processImportSymbols(importNode);
       expect(result).not.toBeNull();
       expect(result!.importPath).toBe('utils.validate');
@@ -244,8 +242,8 @@ describe('Python Language', () => {
 
     it('should process a from-import with an alias', () => {
       const code = 'from typing import Optional as Opt\n';
-      const tree = parser.parse(code);
-      const importNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'python');
+      const importNode = root.namedChild(0)!;
       const result = importExtractor.processImportSymbols(importNode);
       expect(result).not.toBeNull();
       expect(result!.symbols).toEqual(['Opt']);
@@ -253,8 +251,8 @@ describe('Python Language', () => {
 
     it('should return null for an unrecognized node type', () => {
       const code = 'x = 5\n';
-      const tree = parser.parse(code);
-      const node = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'python');
+      const node = root.namedChild(0)!;
       expect(importExtractor.processImportSymbols(node)).toBeNull();
     });
   });
@@ -262,8 +260,8 @@ describe('Python Language', () => {
   describe('Symbol Extraction', () => {
     it('should extract function_definition info', () => {
       const code = 'def greet(name, age=25):\n    return name\n';
-      const tree = parser.parse(code);
-      const funcNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'python');
+      const funcNode = root.namedChild(0)!;
       const symbol = symbolExtractor.extractSymbol(funcNode, code);
       expect(symbol).not.toBeNull();
       expect(symbol!.name).toBe('greet');
@@ -275,8 +273,8 @@ describe('Python Language', () => {
 
     it('should extract async_function_definition info', () => {
       const code = 'async def fetch_data():\n    return "data"\n';
-      const tree = parser.parse(code);
-      const funcNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'python');
+      const funcNode = root.namedChild(0)!;
       const symbol = symbolExtractor.extractSymbol(funcNode, code);
       expect(symbol).not.toBeNull();
       expect(symbol!.name).toBe('fetch_data');
@@ -285,8 +283,8 @@ describe('Python Language', () => {
 
     it('should mark a function as a method when given a parentClass', () => {
       const code = 'class Foo:\n    def bar(self): pass\n';
-      const tree = parser.parse(code);
-      const body = tree.rootNode.namedChild(0)!.childForFieldName('body')!;
+      const root = mustParse(code, 'python');
+      const body = root.namedChild(0)!.childForFieldName('body')!;
       const methodNode = body.namedChild(0)!;
       const symbol = symbolExtractor.extractSymbol(methodNode, code, 'Foo');
       expect(symbol).not.toBeNull();
@@ -296,8 +294,8 @@ describe('Python Language', () => {
 
     it('should extract class_definition info', () => {
       const code = 'class Calculator: pass\n';
-      const tree = parser.parse(code);
-      const classNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'python');
+      const classNode = root.namedChild(0)!;
       const symbol = symbolExtractor.extractSymbol(classNode, code);
       expect(symbol).not.toBeNull();
       expect(symbol!.name).toBe('Calculator');
@@ -307,15 +305,15 @@ describe('Python Language', () => {
 
     it('should return null for an unrecognized node type', () => {
       const code = 'x = 5\n';
-      const tree = parser.parse(code);
-      const node = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'python');
+      const node = root.namedChild(0)!;
       expect(symbolExtractor.extractSymbol(node, code)).toBeNull();
     });
 
     it('should extract call site from a direct invocation', () => {
       const code = 'def bar():\n    do_something()\n';
-      const tree = parser.parse(code);
-      const callNode = findNode(tree.rootNode, 'call');
+      const root = mustParse(code, 'python');
+      const callNode = findNode(root, 'call');
       expect(callNode).not.toBeNull();
       const callSite = symbolExtractor.extractCallSite(callNode!);
       expect(callSite).not.toBeNull();
@@ -324,8 +322,8 @@ describe('Python Language', () => {
 
     it('should extract call site from an attribute invocation', () => {
       const code = 'def bar():\n    user.get_name()\n';
-      const tree = parser.parse(code);
-      const callNode = findNode(tree.rootNode, 'call');
+      const root = mustParse(code, 'python');
+      const callNode = findNode(root, 'call');
       expect(callNode).not.toBeNull();
       const callSite = symbolExtractor.extractCallSite(callNode!);
       expect(callSite).not.toBeNull();
@@ -334,16 +332,16 @@ describe('Python Language', () => {
 
     it('should return null call site for a non-call node', () => {
       const code = 'x = 5\n';
-      const tree = parser.parse(code);
-      const node = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'python');
+      const node = root.namedChild(0)!;
       expect(symbolExtractor.extractCallSite(node)).toBeNull();
     });
 
     describe('decorated_definition (regression: unwrap to the inner definition)', () => {
       it('should extract a decorated function as a normal function symbol', () => {
         const code = "@app.route('/users')\ndef get_users(): pass\n";
-        const tree = parser.parse(code);
-        const decorated = findNode(tree.rootNode, 'decorated_definition')!;
+        const root = mustParse(code, 'python');
+        const decorated = findNode(root, 'decorated_definition')!;
         const symbol = symbolExtractor.extractSymbol(decorated, code);
         expect(symbol).not.toBeNull();
         expect(symbol!.name).toBe('get_users');
@@ -352,8 +350,8 @@ describe('Python Language', () => {
 
       it('should fold the decorator source into the signature', () => {
         const code = "@app.route('/users')\ndef get_users(): pass\n";
-        const tree = parser.parse(code);
-        const decorated = findNode(tree.rootNode, 'decorated_definition')!;
+        const root = mustParse(code, 'python');
+        const decorated = findNode(root, 'decorated_definition')!;
         const symbol = symbolExtractor.extractSymbol(decorated, code);
         expect(symbol!.signature).toContain("@app.route('/users')");
         expect(symbol!.signature).toContain('get_users');
@@ -361,8 +359,8 @@ describe('Python Language', () => {
 
       it('should fold multiple stacked decorators into the signature in source order', () => {
         const code = '@staticmethod\n@cache\ndef bar(): pass\n';
-        const tree = parser.parse(code);
-        const decorated = findNode(tree.rootNode, 'decorated_definition')!;
+        const root = mustParse(code, 'python');
+        const decorated = findNode(root, 'decorated_definition')!;
         const symbol = symbolExtractor.extractSymbol(decorated, code);
         expect(symbol!.signature).toContain('@staticmethod');
         expect(symbol!.signature).toContain('@cache');
@@ -373,8 +371,8 @@ describe('Python Language', () => {
 
       it('should mark a decorated method as a method with the correct parentClass', () => {
         const code = 'class Foo:\n    @staticmethod\n    def bar(): pass\n';
-        const tree = parser.parse(code);
-        const decorated = findNode(tree.rootNode, 'decorated_definition')!;
+        const root = mustParse(code, 'python');
+        const decorated = findNode(root, 'decorated_definition')!;
         const symbol = symbolExtractor.extractSymbol(decorated, code, 'Foo');
         expect(symbol).not.toBeNull();
         expect(symbol!.type).toBe('method');
@@ -383,8 +381,8 @@ describe('Python Language', () => {
 
       it('should extract a decorated class as a normal class symbol', () => {
         const code = '@dataclass\nclass Point:\n    x: int\n';
-        const tree = parser.parse(code);
-        const decorated = findNode(tree.rootNode, 'decorated_definition')!;
+        const root = mustParse(code, 'python');
+        const decorated = findNode(root, 'decorated_definition')!;
         const symbol = symbolExtractor.extractSymbol(decorated, code);
         expect(symbol).not.toBeNull();
         expect(symbol!.name).toBe('Point');
@@ -395,8 +393,8 @@ describe('Python Language', () => {
       it('should compute complexity from the inner function, not the decorator', () => {
         const code =
           "@app.route('/')\ndef handler(x):\n    if x:\n        return 1\n    return 0\n";
-        const tree = parser.parse(code);
-        const decorated = findNode(tree.rootNode, 'decorated_definition')!;
+        const root = mustParse(code, 'python');
+        const decorated = findNode(root, 'decorated_definition')!;
         const symbol = symbolExtractor.extractSymbol(decorated, code);
         expect(symbol!.complexity).toBe(2);
       });
@@ -404,8 +402,8 @@ describe('Python Language', () => {
       it('should return null when the decorated_definition has no definition field', () => {
         // Defensive: a malformed/partial node should not throw.
         const code = "@app.route('/')\ndef get_users(): pass\n";
-        const tree = parser.parse(code);
-        const decorated = findNode(tree.rootNode, 'decorated_definition')!;
+        const root = mustParse(code, 'python');
+        const decorated = findNode(root, 'decorated_definition')!;
         expect(decorated.childForFieldName('definition')).not.toBeNull();
       });
     });
@@ -579,7 +577,7 @@ describe('Python Language', () => {
 });
 
 /** Helper to recursively find a node of a given type (depth-first) */
-function findNode(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
+function findNode(node: SyntaxNode, type: string): SyntaxNode | null {
   if (node.type === type) return node;
   for (const child of node.namedChildren) {
     const result = findNode(child, type);

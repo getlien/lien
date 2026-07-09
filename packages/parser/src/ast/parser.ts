@@ -1,34 +1,13 @@
-import Parser from 'tree-sitter';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import path from 'node:path';
-import { getLanguage, detectLanguage as registryDetectLanguage } from './languages/registry.js';
+import { detectLanguage as registryDetectLanguage } from './languages/registry.js';
 import type { SupportedLanguage } from './languages/registry.js';
 import type { ASTParseResult } from './types.js';
-import { resolveParserBackend, isBackendUnset } from './backend.js';
+import { resolveParserBackend } from './backend.js';
 import { buildCompatTree } from './native/index.js';
 import type { WireNode } from '@liendev/parser-native';
-
-/**
- * Cache for parser instances to avoid recreating them
- */
-const parserCache = new Map<SupportedLanguage, Parser>();
-
-/**
- * Get or create a cached parser instance for a language
- */
-function getParser(language: SupportedLanguage): Parser {
-  if (!parserCache.has(language)) {
-    const parser = new Parser();
-    const grammar = getLanguage(language).grammar;
-
-    parser.setLanguage(grammar);
-    parserCache.set(language, parser);
-  }
-
-  return parserCache.get(language)!;
-}
 
 /**
  * Detect language from file extension.
@@ -44,9 +23,40 @@ export function isASTSupported(filePath: string): boolean {
 }
 
 /**
- * Lazily-loaded, cached handle on the native binding.
+ * Thrown when the native parser binding itself fails to load (no
+ * prebuilt/local build for this platform) -- as distinct from a per-file
+ * parse failure. This is a systemic, process-wide condition: ADR-013
+ * Phase 4-B removed the legacy node-tree-sitter backend that per-file
+ * failures used to fall back to, so this must propagate rather than be
+ * swallowed by generic error handling.
+ *
+ * Callers that catch broad `Error`s around AST parsing (notably
+ * chunker.ts's `astFallback` catch, which otherwise degrades any thrown
+ * error to line-based chunking) MUST check for this type with
+ * `instanceof` and re-throw it unconditionally -- see chunker.ts.
+ */
+export class NativeBindingLoadError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'NativeBindingLoadError';
+  }
+}
+
+/**
+ * Lazily-loaded, cached handle on the native binding. `null` until a
+ * successful load (see loadNativeBinding); a failed load is cached
+ * separately in nativeLoadError instead.
  */
 let nativeBinding: typeof import('@liendev/parser-native') | null = null;
+
+/**
+ * Cached failure from the one and only load attempt this process will ever
+ * make (see loadNativeBinding) -- reused on every subsequent call so a
+ * missing prebuilt/local build pays the (failing) require() exactly once,
+ * not once per file, while still surfacing the same actionable error on
+ * every call.
+ */
+let nativeLoadError: NativeBindingLoadError | null = null;
 
 /**
  * Walk up node_modules directories from `startDir` looking for `packageName`.
@@ -68,8 +78,8 @@ function findPackageDir(startDir: string, packageName: string): string {
 }
 
 /**
- * Load (and cache) the native parseTree() binding. Only ever called from
- * the native path below -- legacy mode must never load the binary.
+ * Load (and cache) the native parseTree() binding, or throw a clear,
+ * actionable error naming the platform and the remedy.
  *
  * @liendev/parser-native is ESM-only (its package.json exports map has no
  * "require"/"default" condition), so a bare `require('@liendev/parser-native')`
@@ -85,9 +95,19 @@ function findPackageDir(startDir: string, packageName: string): string {
  * Node's `require(esm)` support (stable by default since Node 22.12, below
  * this monorepo's >=22.21.0 floor) loads that plain synchronous ESM file
  * (no top-level await) synchronously.
+ *
+ * ADR-013 Phase 4-B removed the legacy (node-tree-sitter) fallback, so a
+ * load failure here is no longer a per-file, silently-degradable condition
+ * -- there is no other backend left to hand parsing off to. It is thrown
+ * (not returned as `{tree: null, error}`), once, with a message that names
+ * the remedy; see parseAST for why this must propagate rather than be
+ * folded into the normal per-file parse-error result shape.
  */
 function loadNativeBinding(): typeof import('@liendev/parser-native') {
-  if (!nativeBinding) {
+  if (nativeBinding) return nativeBinding;
+  if (nativeLoadError) throw nativeLoadError;
+
+  try {
     const startDir = path.dirname(fileURLToPath(import.meta.url));
     const packageDir = findPackageDir(startDir, '@liendev/parser-native');
     const pkgJson = JSON.parse(fs.readFileSync(path.join(packageDir, 'package.json'), 'utf8')) as {
@@ -99,24 +119,58 @@ function loadNativeBinding(): typeof import('@liendev/parser-native') {
     nativeBinding = require(
       path.join(packageDir, entry),
     ) as typeof import('@liendev/parser-native');
+    return nativeBinding;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    nativeLoadError = new NativeBindingLoadError(
+      `[lien] Failed to load the native parser binding (@liendev/parser-native) on ` +
+        `${process.platform}-${process.arch}: ${reason}\n` +
+        `This usually means no prebuilt @liendev/parser-native package exists for your ` +
+        `platform/arch and no local build was found. See docs/architecture/native-parser.md ` +
+        `for how to build one. (The legacy node-tree-sitter backend has been removed ` +
+        `(see ADR-013), so there is no fallback.)`,
+    );
+    throw nativeLoadError;
   }
-  return nativeBinding;
 }
 
 /**
- * Legacy (node-tree-sitter) parse path.
+ * Parse source code into an AST via @liendev/parser-native plus the compat
+ * deserializer in ./native/ -- see docs/architecture/native-parser.md for
+ * the wire format and compat contract.
+ *
+ * `loadNativeBinding()` is deliberately called outside the try/catch below:
+ * a binding that cannot load at all is a systemic, process-wide failure
+ * (missing prebuilt/local build), not a per-file parse problem, and ADR-013
+ * Phase 4-B removed the legacy backend that used to catch that fall. Letting
+ * it throw once (loudly, with an actionable message, as a `NativeBindingLoadError`)
+ * is preferable to folding it into `{tree: null, error}` -- the latter reads
+ * identically to an ordinary per-file syntax error and would let every file
+ * in a scan silently degrade to line-based chunking. Callers that catch
+ * broad errors around parsing (chunker.ts's `astFallback`) check for
+ * `NativeBindingLoadError` specifically and re-throw it regardless of
+ * fallback policy, so this guarantee holds all the way up to `chunkFile`.
+ * A genuine per-file issue (a JSON.parse or compat-tree-build failure on
+ * this file's own output) still returns `{tree: null, error}` as before.
+ *
+ * @param content - Source code to parse
+ * @param language - Programming language
+ * @returns Parse result with tree or error
+ * @throws NativeBindingLoadError if the native binding cannot be loaded at
+ *   all. @throws Error if LIEN_PARSER is set to an invalid or retired value
+ *   (see ./backend.ts).
  */
-function parseLegacy(content: string, language: SupportedLanguage): ASTParseResult {
-  try {
-    const parser = getParser(language);
-    const tree = parser.parse(content);
+export function parseAST(content: string, language: SupportedLanguage): ASTParseResult {
+  resolveParserBackend(); // validates LIEN_PARSER; throws on invalid/retired values
 
-    // Check for parse errors (hasError is a property, not a method)
+  const { parseTree } = loadNativeBinding();
+
+  try {
+    const wireRoot: WireNode = JSON.parse(parseTree(language, content));
+    const tree = buildCompatTree(wireRoot, content);
+
     if (tree.rootNode.hasError) {
-      return {
-        tree,
-        error: 'Parse completed with errors',
-      };
+      return { tree, error: 'Parse completed with errors' };
     }
 
     return { tree };
@@ -129,125 +183,11 @@ function parseLegacy(content: string, language: SupportedLanguage): ASTParseResu
 }
 
 /**
- * Native (@liendev/parser-native) parse path. No parser-instance cache is
- * needed: unlike node-tree-sitter's stateful Parser object, parseTree() is
- * a single stateless call per parse -- there is no long-lived native
- * object to reuse or evict on the JS side.
- */
-function parseNative(content: string, language: SupportedLanguage): ASTParseResult {
-  try {
-    const { parseTree } = loadNativeBinding();
-    const wireRoot: WireNode = JSON.parse(parseTree(language, content));
-    const tree = buildCompatTree(wireRoot, content);
-
-    if (tree.rootNode.hasError) {
-      return {
-        tree: tree as unknown as Parser.Tree,
-        error: 'Parse completed with errors',
-      };
-    }
-
-    return { tree: tree as unknown as Parser.Tree };
-  } catch (error) {
-    return {
-      tree: null,
-      error: error instanceof Error ? error.message : 'Unknown parse error',
-    };
-  }
-}
-
-/**
- * Cached decision for the default (LIEN_PARSER unset) path: whether the
- * native binding failed to *load* and every subsequent call this process
- * must run legacy instead. `null` = not yet decided. Populated once by
- * shouldFallBackToLegacy() so a missing prebuilt/local build only pays the
- * (failing) load attempt once per process, not once per file.
- */
-let fellBackToLegacy: boolean | null = null;
-
-/**
- * Transitional fallback (ADR-013 Phase 4-A): on the default path only
- * (LIEN_PARSER unset), attempt to load the native binding and, on failure,
- * permanently switch this process to legacy while emitting exactly one
- * console.warn naming the platform, the fallback, and the remedy.
- *
- * This only covers *load* failure -- the binding cannot be obtained at all
- * (e.g. no prebuilt package for this platform/arch and no local build
- * present). A per-file parse error from an already-loaded binding (a real
- * syntax error, `hasError`, etc.) must never reach here -- that is normal
- * chunker-fallback territory handled entirely inside parseNative's own
- * try/catch, which still runs afterwards for every file.
- *
- * An explicit `LIEN_PARSER=native` never calls this -- see parseAST -- so
- * CI's dedicated native job and any user who opted in on purpose keep
- * today's fail-into-`{tree:null,error}` semantics instead of a silent
- * downgrade.
- */
-function shouldFallBackToLegacy(): boolean {
-  if (fellBackToLegacy !== null) return fellBackToLegacy;
-
-  try {
-    loadNativeBinding();
-    fellBackToLegacy = false;
-  } catch (error) {
-    fellBackToLegacy = true;
-    const reason = error instanceof Error ? error.message : String(error);
-    console.warn(
-      `[lien] Native parser binding failed to load on ${process.platform}-${process.arch}: ${reason}\n` +
-        `Falling back to the legacy (node-tree-sitter) parser backend for the rest of this run. ` +
-        `This usually means no prebuilt @liendev/parser-native package exists for your platform ` +
-        `and no local build was found. To build one, see ` +
-        `docs/architecture/native-parser.md; to silence this warning, set LIEN_PARSER=legacy ` +
-        `explicitly. (Legacy is scheduled for removal in a future release -- see ADR-013.)`,
-    );
-  }
-
-  return fellBackToLegacy;
-}
-
-/**
- * Parse source code into an AST.
- *
- * Backend selected by LIEN_PARSER (see ./backend.ts), defaulting to
- * 'native' (@liendev/parser-native plus the compat deserializer in
- * ./native/ -- see docs/architecture/native-parser.md for the wire format
- * and compat contract). 'legacy' (node-tree-sitter) remains a transitional,
- * explicit opt-out. Both paths return the same {tree, error} shape.
- *
- * On the default (unset) path, a native binding that fails to *load*
- * transparently falls back to legacy for the rest of the process -- see
- * shouldFallBackToLegacy above. An explicit LIEN_PARSER=native does not
- * fall back.
- *
- * **Known Limitation (legacy only):** Tree-sitter may throw "Invalid argument" errors on very
- * large files (1000+ lines). This is a limitation of Tree-sitter's internal buffer handling. When
- * this occurs, callers should fall back to line-based chunking (handled automatically by
- * chunker.ts). native-parser.md section 5 notes this is a node-tree-sitter-specific quirk that
- * the native backend is not expected to reproduce.
- *
- * @param content - Source code to parse
- * @param language - Programming language
- * @returns Parse result with tree or error
- */
-export function parseAST(content: string, language: SupportedLanguage): ASTParseResult {
-  const backend = resolveParserBackend();
-  if (backend === 'legacy') {
-    return parseLegacy(content, language);
-  }
-  if (isBackendUnset() && shouldFallBackToLegacy()) {
-    return parseLegacy(content, language);
-  }
-  return parseNative(content, language);
-}
-
-/**
- * Clear parser cache (useful for testing). Resets the legacy backend's
- * parser-instance cache and the default-path native-load-fallback decision
- * (see shouldFallBackToLegacy) -- the native binding handle itself
- * (nativeBinding) is intentionally left cached, since a successful load is
- * always safe to reuse.
+ * Clear parser cache (useful for testing). Resets the native-load-failure
+ * cache (see loadNativeBinding) so a test can simulate a fresh process --
+ * the native binding handle itself (nativeBinding) is intentionally left
+ * cached, since a successful load is always safe to reuse.
  */
 export function clearParserCache(): void {
-  parserCache.clear();
-  fellBackToLegacy = null;
+  nativeLoadError = null;
 }

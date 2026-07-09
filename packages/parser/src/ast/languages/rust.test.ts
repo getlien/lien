@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import Parser from 'tree-sitter';
-import Rust from 'tree-sitter-rust';
+import { mustParse } from '../test/helpers/parse-fixture.js';
+import type { SyntaxNode } from '../types.js';
 import { chunkByAST } from '../chunker.js';
 import {
   RustTraverser,
@@ -10,8 +10,6 @@ import {
 } from './rust.js';
 
 describe('Rust Language', () => {
-  const parser = new Parser();
-  parser.setLanguage(Rust);
   const traverser = new RustTraverser();
   const exportExtractor = new RustExportExtractor();
   const importExtractor = new RustImportExtractor();
@@ -30,15 +28,15 @@ describe('Rust Language', () => {
 
     it('should extract children from impl blocks', () => {
       const code = 'impl Foo { fn bar(&self) {} }';
-      const tree = parser.parse(code);
-      const implNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'rust');
+      const implNode = root.namedChild(0)!;
       expect(traverser.shouldExtractChildren(implNode)).toBe(true);
     });
 
     it('should get impl body as container body', () => {
       const code = 'impl Foo { fn bar(&self) {} }';
-      const tree = parser.parse(code);
-      const implNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'rust');
+      const implNode = root.namedChild(0)!;
       const body = traverser.getContainerBody(implNode);
       expect(body).not.toBeNull();
       expect(body!.type).toBe('declaration_list');
@@ -46,30 +44,30 @@ describe('Rust Language', () => {
 
     it('should traverse source_file root', () => {
       const code = 'fn main() {}';
-      const tree = parser.parse(code);
-      expect(traverser.shouldTraverseChildren(tree.rootNode)).toBe(true);
+      const root = mustParse(code, 'rust');
+      expect(traverser.shouldTraverseChildren(root)).toBe(true);
     });
 
     it('should traverse declaration_list nodes', () => {
       const code = 'impl Foo { fn bar(&self) {} }';
-      const tree = parser.parse(code);
-      const implNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'rust');
+      const implNode = root.namedChild(0)!;
       const body = implNode.childForFieldName('body')!;
       expect(traverser.shouldTraverseChildren(body)).toBe(true);
     });
 
     it('should not treat any nodes as declarations with functions', () => {
       const code = 'let x = 42;';
-      const tree = parser.parse(code);
-      tree.rootNode.namedChildren.forEach(child => {
+      const root = mustParse(code, 'rust');
+      root.namedChildren.forEach(child => {
         expect(traverser.isDeclarationWithFunction(child)).toBe(false);
       });
     });
 
     it('should find parent impl name for methods', () => {
       const code = 'impl MyStruct { fn my_method(&self) {} }';
-      const tree = parser.parse(code);
-      const implNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'rust');
+      const implNode = root.namedChild(0)!;
       const body = implNode.childForFieldName('body')!;
       const funcNode = body.namedChild(0)!;
       expect(traverser.findParentContainerName(funcNode)).toBe('MyStruct');
@@ -77,8 +75,8 @@ describe('Rust Language', () => {
 
     it('should find parent trait name for methods', () => {
       const code = 'trait MyTrait { fn required(&self); }';
-      const tree = parser.parse(code);
-      const traitNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'rust');
+      const traitNode = root.namedChild(0)!;
       const body = traitNode.childForFieldName('body')!;
       const funcNode = body.namedChild(0)!;
       expect(traverser.findParentContainerName(funcNode)).toBe('MyTrait');
@@ -88,50 +86,50 @@ describe('Rust Language', () => {
   describe('Export Extraction', () => {
     it('should extract pub function exports', () => {
       const code = 'pub fn helper() {}';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'rust');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toEqual(['helper']);
     });
 
     it('should extract pub struct exports', () => {
       const code = 'pub struct User { name: String }';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'rust');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toEqual(['User']);
     });
 
     it('should extract pub enum exports', () => {
       const code = 'pub enum Status { Active, Inactive }';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'rust');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toEqual(['Status']);
     });
 
     it('should extract pub trait exports', () => {
       const code = 'pub trait Serialize { fn serialize(&self) -> String; }';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'rust');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toEqual(['Serialize']);
     });
 
     it('should not export private items', () => {
       const code = 'fn private_helper() {}';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'rust');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toEqual([]);
     });
 
     it('should extract pub use re-exports', () => {
       const code = 'pub use crate::auth::AuthService;';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'rust');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toEqual(['AuthService']);
     });
 
     it('should extract pub use list re-exports', () => {
       const code = 'pub use crate::auth::{AuthService, AuthError};';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'rust');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toContain('AuthService');
       expect(exports).toContain('AuthError');
     });
@@ -141,8 +139,8 @@ describe('Rust Language', () => {
 pub struct Bar {}
 fn private_fn() {}
 pub enum Baz { A, B }`;
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'rust');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toEqual(['foo', 'Bar', 'Baz']);
       expect(exports).not.toContain('private_fn');
     });
@@ -150,16 +148,16 @@ pub enum Baz { A, B }`;
     it('should extract pub const and pub static exports', () => {
       const code = `pub const MAX_SIZE: usize = 100;
 pub static COUNTER: i32 = 0;`;
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'rust');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toContain('MAX_SIZE');
       expect(exports).toContain('COUNTER');
     });
 
     it('should extract pub mod exports', () => {
       const code = 'pub mod auth;';
-      const tree = parser.parse(code);
-      const exports = exportExtractor.extractExports(tree.rootNode);
+      const root = mustParse(code, 'rust');
+      const exports = exportExtractor.extractExports(root);
       expect(exports).toEqual(['auth']);
     });
   });
@@ -171,8 +169,8 @@ pub static COUNTER: i32 = 0;`;
 
     it('should extract crate import path', () => {
       const code = 'use crate::auth::AuthService;';
-      const tree = parser.parse(code);
-      const useNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'rust');
+      const useNode = root.namedChild(0)!;
       const path = importExtractor.extractImportPath(useNode);
       // extractImportPath resolves the full path including symbol
       expect(path).toBe('auth/AuthService');
@@ -180,32 +178,32 @@ pub static COUNTER: i32 = 0;`;
 
     it('should extract self import path', () => {
       const code = 'use self::config::Settings;';
-      const tree = parser.parse(code);
-      const useNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'rust');
+      const useNode = root.namedChild(0)!;
       const path = importExtractor.extractImportPath(useNode);
       expect(path).toBe('config/Settings');
     });
 
     it('should extract super import path', () => {
       const code = 'use super::utils::helper;';
-      const tree = parser.parse(code);
-      const useNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'rust');
+      const useNode = root.namedChild(0)!;
       const path = importExtractor.extractImportPath(useNode);
       expect(path).toBe('../utils/helper');
     });
 
     it('should return null for external crate imports', () => {
       const code = 'use std::io::Read;';
-      const tree = parser.parse(code);
-      const useNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'rust');
+      const useNode = root.namedChild(0)!;
       const path = importExtractor.extractImportPath(useNode);
       expect(path).toBeNull();
     });
 
     it('should extract import symbols from scoped identifier', () => {
       const code = 'use crate::auth::AuthService;';
-      const tree = parser.parse(code);
-      const useNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'rust');
+      const useNode = root.namedChild(0)!;
       const result = importExtractor.processImportSymbols(useNode);
       expect(result).not.toBeNull();
       expect(result!.importPath).toBe('auth');
@@ -214,8 +212,8 @@ pub static COUNTER: i32 = 0;`;
 
     it('should extract import symbols from use list', () => {
       const code = 'use crate::auth::{AuthService, AuthError};';
-      const tree = parser.parse(code);
-      const useNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'rust');
+      const useNode = root.namedChild(0)!;
       const result = importExtractor.processImportSymbols(useNode);
       expect(result).not.toBeNull();
       expect(result!.importPath).toBe('auth');
@@ -225,8 +223,8 @@ pub static COUNTER: i32 = 0;`;
 
     it('should extract aliased import symbols', () => {
       const code = 'use crate::auth::Service as Auth;';
-      const tree = parser.parse(code);
-      const useNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'rust');
+      const useNode = root.namedChild(0)!;
       const result = importExtractor.processImportSymbols(useNode);
       expect(result).not.toBeNull();
       expect(result!.symbols).toContain('Auth');
@@ -234,8 +232,8 @@ pub static COUNTER: i32 = 0;`;
 
     it('should return null for external crate import symbols', () => {
       const code = 'use std::collections::HashMap;';
-      const tree = parser.parse(code);
-      const useNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'rust');
+      const useNode = root.namedChild(0)!;
       const result = importExtractor.processImportSymbols(useNode);
       expect(result).toBeNull();
     });
@@ -244,8 +242,8 @@ pub static COUNTER: i32 = 0;`;
   describe('Symbol Extraction', () => {
     it('should extract function_item info', () => {
       const code = 'fn process_data(items: Vec<i32>) -> Vec<i32> { items }';
-      const tree = parser.parse(code);
-      const funcNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'rust');
+      const funcNode = root.namedChild(0)!;
       const symbol = symbolExtractor.extractSymbol(funcNode, code);
       expect(symbol).not.toBeNull();
       expect(symbol!.name).toBe('process_data');
@@ -255,8 +253,8 @@ pub static COUNTER: i32 = 0;`;
 
     it('should extract function as method when parent class is given', () => {
       const code = 'fn get_name(&self) -> &str { &self.name }';
-      const tree = parser.parse(code);
-      const funcNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'rust');
+      const funcNode = root.namedChild(0)!;
       const symbol = symbolExtractor.extractSymbol(funcNode, code, 'MyStruct');
       expect(symbol).not.toBeNull();
       expect(symbol!.name).toBe('get_name');
@@ -266,8 +264,8 @@ pub static COUNTER: i32 = 0;`;
 
     it('should extract impl_item as class', () => {
       const code = 'impl UserService { fn new() -> Self { UserService {} } }';
-      const tree = parser.parse(code);
-      const implNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'rust');
+      const implNode = root.namedChild(0)!;
       const symbol = symbolExtractor.extractSymbol(implNode, code);
       expect(symbol).not.toBeNull();
       expect(symbol!.name).toBe('UserService');
@@ -277,8 +275,8 @@ pub static COUNTER: i32 = 0;`;
 
     it('should extract trait_item as interface', () => {
       const code = 'trait Validate { fn validate(&self) -> bool; }';
-      const tree = parser.parse(code);
-      const traitNode = tree.rootNode.namedChild(0)!;
+      const root = mustParse(code, 'rust');
+      const traitNode = root.namedChild(0)!;
       const symbol = symbolExtractor.extractSymbol(traitNode, code);
       expect(symbol).not.toBeNull();
       expect(symbol!.name).toBe('Validate');
@@ -288,9 +286,9 @@ pub static COUNTER: i32 = 0;`;
 
     it('should extract call site from direct function call', () => {
       const code = 'fn main() { do_something(); }';
-      const tree = parser.parse(code);
+      const root = mustParse(code, 'rust');
 
-      function findNode(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
+      function findNode(node: SyntaxNode, type: string): SyntaxNode | null {
         if (node.type === type) return node;
         for (const child of node.namedChildren) {
           const result = findNode(child, type);
@@ -299,7 +297,7 @@ pub static COUNTER: i32 = 0;`;
         return null;
       }
 
-      const callNode = findNode(tree.rootNode, 'call_expression');
+      const callNode = findNode(root, 'call_expression');
       if (callNode) {
         const callSite = symbolExtractor.extractCallSite(callNode);
         expect(callSite).not.toBeNull();
@@ -309,9 +307,9 @@ pub static COUNTER: i32 = 0;`;
 
     it('should extract call site from field expression (method call)', () => {
       const code = 'fn main() { user.get_name(); }';
-      const tree = parser.parse(code);
+      const root = mustParse(code, 'rust');
 
-      function findNode(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
+      function findNode(node: SyntaxNode, type: string): SyntaxNode | null {
         if (node.type === type) return node;
         for (const child of node.namedChildren) {
           const result = findNode(child, type);
@@ -320,7 +318,7 @@ pub static COUNTER: i32 = 0;`;
         return null;
       }
 
-      const callNode = findNode(tree.rootNode, 'call_expression');
+      const callNode = findNode(root, 'call_expression');
       if (callNode) {
         const callSite = symbolExtractor.extractCallSite(callNode);
         expect(callSite).not.toBeNull();
@@ -330,9 +328,9 @@ pub static COUNTER: i32 = 0;`;
 
     it('should extract call site from scoped call (module::function)', () => {
       const code = 'fn main() { parser::parse_input(&path, &config); }';
-      const tree = parser.parse(code);
+      const root = mustParse(code, 'rust');
 
-      function findNode(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
+      function findNode(node: SyntaxNode, type: string): SyntaxNode | null {
         if (node.type === type) return node;
         for (const child of node.namedChildren) {
           const result = findNode(child, type);
@@ -341,7 +339,7 @@ pub static COUNTER: i32 = 0;`;
         return null;
       }
 
-      const callNode = findNode(tree.rootNode, 'call_expression');
+      const callNode = findNode(root, 'call_expression');
       expect(callNode).not.toBeNull();
       if (callNode) {
         const callSite = symbolExtractor.extractCallSite(callNode);
@@ -353,9 +351,9 @@ pub static COUNTER: i32 = 0;`;
 
     it('should extract call site from macro invocation', () => {
       const code = 'fn main() { println!("hello"); }';
-      const tree = parser.parse(code);
+      const root = mustParse(code, 'rust');
 
-      function findNode(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
+      function findNode(node: SyntaxNode, type: string): SyntaxNode | null {
         if (node.type === type) return node;
         for (const child of node.namedChildren) {
           const result = findNode(child, type);
@@ -364,7 +362,7 @@ pub static COUNTER: i32 = 0;`;
         return null;
       }
 
-      const macroNode = findNode(tree.rootNode, 'macro_invocation');
+      const macroNode = findNode(root, 'macro_invocation');
       if (macroNode) {
         const callSite = symbolExtractor.extractCallSite(macroNode);
         expect(callSite).not.toBeNull();

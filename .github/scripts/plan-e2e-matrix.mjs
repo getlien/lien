@@ -1,25 +1,22 @@
 #!/usr/bin/env node
 // Computes the e2e-tests-parallel matrix for e2e.yml.
 //
-// ADR-013 Phase 4-A flipped the default LIEN_PARSER backend to native.
-// Every normal (changeset- or `e2e`-label-triggered) PR run now exercises
-// all 12 project/language e2e scripts once under native, PLUS a
-// LIEN_PARSER=legacy rerun for exactly two representative jobs --
-// TypeScript (the most heavily used grammar) and Kotlin (the one vendored,
-// non-npm-prebuilt grammar -- see ADR-013's Phase 0 crate audit) -- so
-// every release-bound PR proves the transitional legacy opt-out still
-// works without doubling all 12 jobs on every run.
+// ADR-013 Phase 4-B removed the legacy (node-tree-sitter) parser backend
+// entirely -- native is the only backend now, so every trigger (PR,
+// workflow_dispatch) runs the full 12-project suite exactly once, under
+// LIEN_PARSER=native. There is no longer a parser-mode axis to plan around;
+// this script now just emits the static project list with a constant `mode`.
 //
-// A workflow_dispatch run instead honors the `parser-mode` input, running
-// the full 12-project suite under 'legacy', 'native', or both ('both' = the
-// full 12x2 cross product) -- see e2e.yml's workflow_dispatch input
-// description.
+// The `mode: 'native'` field is kept on every entry (rather than dropped)
+// purely so job names (`E2E - ${{ matrix.project }} (${{ matrix.language }},
+// ${{ matrix.mode }})`) and failure-artifact names in e2e.yml stay byte-for-
+// byte identical to the native-mode entries the pre-4-B matrix already
+// produced on every trigger -- avoids churning check names that branch
+// protection / required-checks config may reference.
 //
 // Usage (from repo root, in CI): node .github/scripts/plan-e2e-matrix.mjs
-// Env: IS_DISPATCH        = 'true' | 'false' (default 'false')
-//      PARSER_MODE_INPUT  = 'legacy' (default) | 'native' | 'both' -- only
-//                           consulted when IS_DISPATCH is 'true'
-//      GITHUB_OUTPUT       = path to append "matrix=<json>" to (set by Actions)
+// Env: GITHUB_OUTPUT = path to append "matrix=<json>" to (set by Actions;
+//      falls back to stdout when unset, e.g. local dry-run)
 
 import { appendFileSync } from 'node:fs';
 
@@ -38,50 +35,9 @@ const PROJECTS = [
   { project: 'MCP Round Trip', language: 'Protocol', script: 'test:e2e:mcp' },
 ];
 
-// The two representative jobs that get a legacy rerun on every normal
-// (non-dispatch) trigger -- see header comment above.
-const REPRESENTATIVE_LEGACY_LANGUAGES = ['TypeScript', 'Kotlin'];
-
-function withMode(entry, mode) {
-  return Object.assign({}, entry, { mode: mode });
-}
-
-function planNormalRun() {
-  const native = PROJECTS.map(function (p) {
-    return withMode(p, 'native');
-  });
-  const legacy = PROJECTS.filter(function (p) {
-    return REPRESENTATIVE_LEGACY_LANGUAGES.indexOf(p.language) !== -1;
-  }).map(function (p) {
-    return withMode(p, 'legacy');
-  });
-  return native.concat(legacy);
-}
-
-function planDispatchRun(parserMode) {
-  if (parserMode === 'native') {
-    return PROJECTS.map(function (p) {
-      return withMode(p, 'native');
-    });
-  }
-  if (parserMode === 'both') {
-    return PROJECTS.map(function (p) {
-      return withMode(p, 'legacy');
-    }).concat(
-      PROJECTS.map(function (p) {
-        return withMode(p, 'native');
-      }),
-    );
-  }
-  // Default / 'legacy'.
-  return PROJECTS.map(function (p) {
-    return withMode(p, 'legacy');
-  });
-}
-
-const isDispatch = (process.env.IS_DISPATCH || 'false').trim() === 'true';
-const parserMode = (process.env.PARSER_MODE_INPUT || 'legacy').trim();
-const matrix = isDispatch ? planDispatchRun(parserMode) : planNormalRun();
+const matrix = PROJECTS.map(function (p) {
+  return Object.assign({}, p, { mode: 'native' });
+});
 
 const outputLine = 'matrix=' + JSON.stringify(matrix) + '\n';
 if (process.env.GITHUB_OUTPUT) {

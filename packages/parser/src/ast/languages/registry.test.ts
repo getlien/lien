@@ -83,7 +83,6 @@ describe('Language Registry', () => {
         const def = getLanguage(lang);
         expect(def.id).toBe(lang);
         expect(def.extensions.length).toBeGreaterThan(0);
-        expect(def.grammar).toBeDefined();
         expect(def.traverser).toBeDefined();
         expect(def.exportExtractor).toBeDefined();
         expect(def.complexity).toBeDefined();

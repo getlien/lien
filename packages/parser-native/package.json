@@ -42,7 +42,6 @@
   },
   "keywords": [
     "ast",
-    "tree-sitter",
     "napi",
     "native",
     "parser"

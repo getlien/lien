@@ -1,5 +1,4 @@
-import type Parser from 'tree-sitter';
-import type { SymbolInfo, SupportedLanguage } from './types.js';
+import type { SymbolInfo, SupportedLanguage, SyntaxNode } from './types.js';
 import type { LanguageSymbolExtractor } from './extractors/types.js';
 import { getExtractor, getImportExtractor, getSymbolExtractor } from './extractors/index.js';
 import { getLanguage } from './languages/registry.js';
@@ -16,7 +15,7 @@ import { resolveRelativeImport, resolveWorkspaceImport } from '../utils/path-mat
  * @returns Symbol information or null
  */
 export function extractSymbolInfo(
-  node: Parser.SyntaxNode,
+  node: SyntaxNode,
   content: string,
   parentClass?: string,
   language?: string,
@@ -40,11 +39,8 @@ export function extractSymbolInfo(
  * is backward compatible: languages whose import nodes are already direct
  * children match in the first branch and are never descended into.
  */
-function collectImportNodes(
-  rootNode: Parser.SyntaxNode,
-  nodeTypeSet: Set<string>,
-): Parser.SyntaxNode[] {
-  const nodes: Parser.SyntaxNode[] = [];
+function collectImportNodes(rootNode: SyntaxNode, nodeTypeSet: Set<string>): SyntaxNode[] {
+  const nodes: SyntaxNode[] = [];
   for (const child of rootNode.namedChildren) {
     if (nodeTypeSet.has(child.type)) {
       nodes.push(child);
@@ -84,7 +80,7 @@ function resolveImportSpecifier(
  * unchanged.
  */
 function extractImportPaths(
-  rootNode: Parser.SyntaxNode,
+  rootNode: SyntaxNode,
   importExtractor: ReturnType<typeof getImportExtractor>,
   filepath?: string,
   workspacePackages?: ReadonlyMap<string, string>,
@@ -116,7 +112,7 @@ function extractImportPaths(
  *   bare `@scope/pkg` specifiers that reference sibling workspace packages.
  */
 export function extractImports(
-  rootNode: Parser.SyntaxNode,
+  rootNode: SyntaxNode,
   language?: SupportedLanguage,
   filepath?: string,
   workspacePackages?: ReadonlyMap<string, string>,
@@ -150,7 +146,7 @@ function addSymbolsToMap(
  * further resolved to their source entry file (see `extractImportPaths`).
  */
 function extractSymbolsWithExtractor(
-  rootNode: Parser.SyntaxNode,
+  rootNode: SyntaxNode,
   importExtractor: ReturnType<typeof getImportExtractor>,
   filepath?: string,
   workspacePackages?: ReadonlyMap<string, string>,
@@ -184,7 +180,7 @@ function extractSymbolsWithExtractor(
  *   entry file. Enables resolution of bare `@scope/pkg` keys.
  */
 export function extractImportedSymbols(
-  rootNode: Parser.SyntaxNode,
+  rootNode: SyntaxNode,
   language?: SupportedLanguage,
   filepath?: string,
   workspacePackages?: ReadonlyMap<string, string>,
@@ -227,10 +223,7 @@ export function extractImportedSymbols(
  * @param language - Programming language (defaults to 'javascript' for backwards compatibility)
  * @returns Array of exported symbol names
  */
-export function extractExports(
-  rootNode: Parser.SyntaxNode,
-  language?: SupportedLanguage,
-): string[] {
+export function extractExports(rootNode: SyntaxNode, language?: SupportedLanguage): string[] {
   // Default to JavaScript if no language specified (for backwards compatibility)
   const lang: SupportedLanguage = language ?? 'javascript';
   const extractor = getExtractor(lang);
@@ -249,7 +242,7 @@ export function extractExports(
  * - Rust: call_expression (foo(), obj.method()), macro_invocation (println!())
  */
 export function extractCallSites(
-  node: Parser.SyntaxNode,
+  node: SyntaxNode,
   language?: SupportedLanguage,
 ): Array<{ symbol: string; line: number; isResultCaptured?: boolean }> {
   if (!language) return [];
@@ -286,7 +279,7 @@ const TRANSPARENT_WRAPPER_TYPES = new Set([
   'parenthesized_expression', // All languages
 ]);
 
-function isCallResultCaptured(callNode: Parser.SyntaxNode): boolean {
+function isCallResultCaptured(callNode: SyntaxNode): boolean {
   let current = callNode;
   while (current.parent) {
     const parentType = current.parent.type;
@@ -305,7 +298,7 @@ function isCallResultCaptured(callNode: Parser.SyntaxNode): boolean {
  * Recursively traverse AST to find call expressions.
  */
 function traverseForCallSites(
-  node: Parser.SyntaxNode,
+  node: SyntaxNode,
   callSites: Array<{ symbol: string; line: number; isResultCaptured?: boolean }>,
   seen: Set<string>,
   callExprTypes: Set<string>,
