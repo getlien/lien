@@ -3,7 +3,6 @@
   "core": {
     "chunkSize": 75,
     "chunkOverlap": 10,
-    "concurrency": 4,
     "embeddingBatchSize": 50
   },
   "chunking": {

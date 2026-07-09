@@ -21,16 +21,18 @@ export const MAX_CHUNKS_PER_FILE = 100;
 // parse holds a transient JSON-serialized tree up to ~38x source size in
 // memory until the chunking pass finishes with it. The Phase 0 measurement in
 // that ADR found concurrency=4 peaks at a safe ~630MB worst-case RSS, while
-// concurrency=16 (a validated `indexing.concurrency`/`core.concurrency`
-// range, up to 16 in config/service.ts) peaks at ~1.55GB on megabyte-scale
-// files. Parsing is synchronous on the JS thread regardless of concurrency,
-// so capping this stage costs negligible wall-clock time — it only bounds
-// how many source buffers + parsed trees are alive at once.
+// concurrency=16 peaked at ~1.55GB on megabyte-scale files. Parsing is
+// synchronous on the JS thread regardless of concurrency, so capping this
+// stage costs negligible wall-clock time — it only bounds how many source
+// buffers + parsed trees are alive at once.
 //
-// Note: as of Phase 3, `indexing.concurrency`/`core.concurrency` are wired
-// through end-to-end only for the chunk-only review path
-// (chunk-only-index.ts); the full-index and incremental pipelines still call
-// this with a hardcoded default (see ADR-013's Consequences for tracking).
+// Note: this used to be reachable above 4 via a per-project
+// `indexing.concurrency`/`core.concurrency` config knob, but that knob was
+// validated (range 1-16) and never actually read by any indexing pipeline —
+// every real call site was hardcoded to DEFAULT_CONCURRENCY (4) regardless of
+// what a user configured. Rather than wire it through, the dead keys were
+// removed entirely (see ADR-013's Consequences for the resolution); this
+// ceiling is now the only concurrency lever for the parse stage.
 export const PARSE_STAGE_MAX_CONCURRENCY = 4;
 
 /**

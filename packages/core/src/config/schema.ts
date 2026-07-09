@@ -1,7 +1,6 @@
 import {
   DEFAULT_CHUNK_SIZE,
   DEFAULT_CHUNK_OVERLAP,
-  DEFAULT_CONCURRENCY,
   DEFAULT_PORT,
   DEFAULT_GIT_POLL_INTERVAL_MS,
   DEFAULT_DEBOUNCE_MS,
@@ -32,7 +31,6 @@ export interface LienConfig {
   core: {
     chunkSize: number;
     chunkOverlap: number;
-    concurrency: number;
   };
   chunking: {
     useAST: boolean; // Enable AST-based chunking (v0.13.0)
@@ -79,7 +77,6 @@ export interface LegacyLienConfig {
     include: string[];
     chunkSize: number;
     chunkOverlap: number;
-    concurrency: number;
   };
   mcp: {
     port: number;
@@ -122,7 +119,6 @@ export const defaultConfig: LienConfig = {
   core: {
     chunkSize: DEFAULT_CHUNK_SIZE,
     chunkOverlap: DEFAULT_CHUNK_OVERLAP,
-    concurrency: DEFAULT_CONCURRENCY,
   },
   chunking: {
     useAST: true, // AST-based chunking enabled by default (v0.13.0)

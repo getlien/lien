@@ -3,9 +3,7 @@ import { PARSE_STAGE_MAX_CONCURRENCY, getParseStageConcurrency } from './constan
 
 describe('getParseStageConcurrency', () => {
   it('caps a configured concurrency above the ceiling down to the ceiling', () => {
-    // The validated indexing.concurrency/core.concurrency range tops out at 16
-    // (packages/core/src/config/service.ts) — this is the exact ADR-013
-    // scenario that measured ~1.55GB peak RSS.
+    // 16 is the exact ADR-013 scenario that measured ~1.55GB peak RSS.
     expect(getParseStageConcurrency(16)).toBe(PARSE_STAGE_MAX_CONCURRENCY);
   });
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
@@ -54,7 +54,6 @@ describe('ConfigService', () => {
         core: {
           chunkSize: 100,
           chunkOverlap: 20,
-          concurrency: 8,
         },
         frameworks: [],
       };
@@ -85,7 +84,6 @@ describe('ConfigService', () => {
           exclude: ['**/node_modules/**'],
           chunkSize: 100,
           chunkOverlap: 15,
-          concurrency: 6,
         },
         mcp: {
           port: 7133,
@@ -110,6 +108,76 @@ describe('ConfigService', () => {
       // Migration removed - just merges with defaults
       // Old indexing field is ignored, uses defaults
       expect(config.core.chunkSize).toBe(defaultConfig.core.chunkSize);
+    });
+  });
+
+  describe('retired concurrency key (graceful degradation)', () => {
+    // Import a fresh module instance so the warn-once flag is reset per test
+    async function freshConfigService() {
+      vi.resetModules();
+      const { ConfigService: FreshConfigService } = await import('./service.js');
+      return new FreshConfigService();
+    }
+
+    // console.warn spies must not leak across tests, or a later test's spy
+    // inherits an earlier test's call count (see global-config.test.ts precedent).
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('should ignore core.concurrency and warn once instead of throwing', async () => {
+      const freshService = await freshConfigService();
+      const configPath = path.join(testDir, '.lien.config.json');
+      await fs.writeFile(
+        configPath,
+        JSON.stringify({ core: { chunkSize: 100, chunkOverlap: 20, concurrency: 8 } }, null, 2),
+      );
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const config = await freshService.load(testDir);
+
+      expect(config.core.chunkSize).toBe(100);
+      expect((config.core as Record<string, unknown>).concurrency).toBeUndefined();
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('"concurrency"'));
+    });
+
+    it('should ignore legacy indexing.concurrency and warn once instead of throwing', async () => {
+      const freshService = await freshConfigService();
+      const configPath = path.join(testDir, '.lien.config.json');
+      await fs.writeFile(
+        configPath,
+        JSON.stringify(
+          {
+            indexing: { include: [], exclude: [], chunkSize: 90, chunkOverlap: 5, concurrency: 12 },
+          },
+          null,
+          2,
+        ),
+      );
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const config = await freshService.load(testDir);
+
+      // Legacy `indexing` is dropped entirely on merge (pre-existing behavior);
+      // what matters here is that the retired key didn't throw, and was warned about.
+      expect(config.core.chunkSize).toBe(defaultConfig.core.chunkSize);
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('"concurrency"'));
+    });
+
+    it('should warn only once per process for repeated loads', async () => {
+      const freshService = await freshConfigService();
+      const configPath = path.join(testDir, '.lien.config.json');
+      await fs.writeFile(
+        configPath,
+        JSON.stringify({ core: { chunkSize: 75, chunkOverlap: 10, concurrency: 16 } }, null, 2),
+      );
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      await freshService.load(testDir);
+      await freshService.load(testDir);
+      await freshService.load(testDir);
+
+      expect(warnSpy).toHaveBeenCalledOnce();
     });
   });
 
@@ -201,21 +269,6 @@ describe('ConfigService', () => {
       expect(result.errors.some(e => e.includes('chunkSize'))).toBe(true);
     });
 
-    it('should reject invalid concurrency', () => {
-      const invalidConfig: LienConfig = {
-        ...defaultConfig,
-        core: {
-          ...defaultConfig.core,
-          concurrency: 20, // Too high (max 16)
-        },
-      };
-
-      const result = service.validate(invalidConfig);
-
-      expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.includes('concurrency'))).toBe(true);
-    });
-
     it('should reject invalid MCP port', () => {
       const invalidConfig: LienConfig = {
         ...defaultConfig,
@@ -284,7 +337,6 @@ describe('ConfigService', () => {
           exclude: [],
           chunkSize: 75,
           chunkOverlap: 10,
-          concurrency: 4,
         },
         mcp: {
           port: 7133,
@@ -314,7 +366,6 @@ describe('ConfigService', () => {
         core: {
           chunkSize: 100,
           chunkOverlap: 15,
-          concurrency: 6,
         },
       };
 
@@ -329,7 +380,6 @@ describe('ConfigService', () => {
         core: {
           chunkSize: -10, // Invalid
           chunkOverlap: 10,
-          concurrency: 4,
         },
       };
 
@@ -391,7 +441,6 @@ describe('ConfigService', () => {
           exclude: ['**/node_modules/**'],
           chunkSize: 90,
           chunkOverlap: 12,
-          concurrency: 6,
         },
         mcp: {
           port: 7200,

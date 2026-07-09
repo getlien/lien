@@ -14,6 +14,50 @@ export interface ValidationResult {
   warnings: string[];
 }
 
+const CONCURRENCY_RETIRED_WARNING =
+  'Warning: the "concurrency" setting (core.concurrency / legacy indexing.concurrency) has been ' +
+  'removed — it was validated but never read by the indexing pipeline. Ignoring it; you can ' +
+  'delete it from your .lien.config.json. Parse-stage concurrency is now governed internally ' +
+  '(PARSE_STAGE_MAX_CONCURRENCY in @liendev/parser).';
+
+let concurrencyWarningShown = false;
+
+/**
+ * Warn (once per process) that a retired `concurrency` key was found in a
+ * loaded config.
+ */
+function warnConcurrencyRetired(): void {
+  if (concurrencyWarningShown) return;
+  concurrencyWarningShown = true;
+  console.warn(CONCURRENCY_RETIRED_WARNING);
+}
+
+/**
+ * Strip the retired `concurrency` key from a raw parsed config before it is
+ * merged/validated. Mirrors global-config.ts's stripRetiredBackends: warn
+ * once and drop the key so an existing config that still has it never
+ * throws.
+ */
+function stripRetiredConcurrencyKey(raw: Record<string, unknown>): Record<string, unknown> {
+  let result = raw;
+
+  const core = result.core;
+  if (core && typeof core === 'object' && 'concurrency' in core) {
+    warnConcurrencyRetired();
+    const { concurrency: _concurrency, ...restCore } = core as Record<string, unknown>;
+    result = { ...result, core: restCore };
+  }
+
+  const indexing = result.indexing;
+  if (indexing && typeof indexing === 'object' && 'concurrency' in indexing) {
+    warnConcurrencyRetired();
+    const { concurrency: _concurrency, ...restIndexing } = indexing as Record<string, unknown>;
+    result = { ...result, indexing: restIndexing };
+  }
+
+  return result;
+}
+
 /**
  * ConfigService encapsulates all configuration operations including
  * loading, saving, and validation.
@@ -38,7 +82,7 @@ export class ConfigService {
 
     try {
       const configContent = await fs.readFile(configPath, 'utf-8');
-      const userConfig = JSON.parse(configContent);
+      const userConfig = stripRetiredConcurrencyKey(JSON.parse(configContent));
 
       // Merge with defaults - no migration needed
       const mergedConfig = deepMergeConfig(defaultConfig, userConfig as Partial<LienConfig>);
@@ -271,14 +315,6 @@ export class ConfigService {
       errors.push('indexing.chunkOverlap must be a non-negative number');
     }
 
-    if (
-      typeof indexing.concurrency !== 'number' ||
-      indexing.concurrency < 1 ||
-      indexing.concurrency > 16
-    ) {
-      errors.push('indexing.concurrency must be between 1 and 16');
-    }
-
     // Validate MCP settings (same for both)
     if (config.mcp) {
       this.validateMCPConfig(config.mcp, errors, warnings);
@@ -308,12 +344,6 @@ export class ConfigService {
     if (core.chunkOverlap !== undefined) {
       if (typeof core.chunkOverlap !== 'number' || core.chunkOverlap < 0) {
         errors.push('core.chunkOverlap must be a non-negative number');
-      }
-    }
-
-    if (core.concurrency !== undefined) {
-      if (typeof core.concurrency !== 'number' || core.concurrency < 1 || core.concurrency > 16) {
-        errors.push('core.concurrency must be between 1 and 16');
       }
     }
   }
