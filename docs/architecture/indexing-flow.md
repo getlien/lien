@@ -313,7 +313,7 @@ Typical performance on a medium-sized project:
 
 ```
 Project Size: 1,000 files, 100,000 lines of code
-Configuration:
+Defaults:
   - concurrency: 4
   - chunkSize: 75
 
@@ -411,7 +411,7 @@ await Promise.all(promises);
 **Benefits:**
 - Prevents overwhelming the system
 - Balances CPU and I/O
-- Configurable via `core.concurrency`
+- The parse/chunk stage is capped at `PARSE_STAGE_MAX_CONCURRENCY` (4) regardless of caller-requested concurrency — see [ADR-013](decisions/0013-prebuilt-native-parser-napi-rs.md#negative--risks)
 
 ### 2. Batched Writes
 
@@ -504,8 +504,7 @@ lien index --verbose
   "timestamp": "2026-07-04T20:30:00.000Z",
   "config": {
     "chunkSize": 75,
-    "chunkOverlap": 10,
-    "concurrency": 4
+    "chunkOverlap": 10
   },
   "stats": {
     "filesIndexed": 1000,

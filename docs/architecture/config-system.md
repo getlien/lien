@@ -123,7 +123,6 @@ flowchart TD
     
     subgraph "Field Validation"
         CHUNK_SIZE{chunkSize > 0?}
-        CONCURRENCY{1 ≤ concurrency ≤ 16?}
         PORT{1024 ≤ port ≤ 65535?}
         TRANSPORT{stdio or socket?}
         PATH{Path relative?}
@@ -157,7 +156,6 @@ flowchart TD
     WARN_LEGACY --> COLLECT_ERRORS
     
     VAL_CORE -.-> CHUNK_SIZE
-    VAL_CORE -.-> CONCURRENCY
     VAL_MCP -.-> PORT
     VAL_MCP -.-> TRANSPORT
     VAL_FRAMEWORKS -.-> PATH
@@ -279,15 +277,14 @@ const config = await service.load('/path/to/project');
 ```typescript
 const userInput = {
   core: {
-    chunkSize: 100,
-    concurrency: 8
+    chunkSize: -10
   }
 };
 
 const result = service.validatePartial(userInput);
 if (!result.valid) {
   console.error('Invalid config:', result.errors);
-  // ["concurrency must be between 1 and 16"]
+  // ["core.chunkSize must be a positive number"]
 }
 
 if (result.warnings.length > 0) {
@@ -320,7 +317,6 @@ await service.save('/path/to/project', config);
 |-------|------|------------|---------|
 | chunkSize | number | > 0 | < 50: too small<br/>> 500: too large |
 | chunkOverlap | number | ≥ 0 | - |
-| concurrency | number | 1-16 | - |
 
 ### MCP Settings
 

@@ -50,9 +50,6 @@ Per-project settings live in `.lien.config.json` in your project root. Most user
 
 ```json
 {
-  "core": {
-    "concurrency": 4
-  },
   "complexity": {
     "enabled": true,
     "thresholds": {
@@ -164,22 +161,6 @@ Liquid (`.liquid`) files are indexed via the default scan pattern—no ecosystem
 
 Lien automatically detects multiple ecosystems in monorepos. For example, a repo with both `package.json` and `backend/composer.json` will index both Node.js and Laravel code with appropriate patterns.
 
-## Indexing Options
-
-These options go in the per-project `.lien.config.json` under the `core` key:
-
-```json
-{
-  "core": {
-    "concurrency": 4
-  }
-}
-```
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `concurrency` | 4 | Files processed in parallel. Use 6-8 for 8+ cores. |
-
 ## Complexity Analysis
 
 Configure complexity analysis for the `lien complexity` command and `get_complexity` MCP tool. Lien tracks **four metrics**:
@@ -234,17 +215,6 @@ Control how Lien splits your source files into semantic chunks:
 |--------|---------|-------------|
 | `useAST` | `true` | Use AST-based chunking for supported languages. When `false`, falls back to line-based chunking. |
 | `astFallback` | `"line-based"` | What to do when AST parsing fails. `"line-based"` falls back to line-based chunking; `"error"` throws an error. |
-
-## Performance Tuning
-
-These settings go in per-project `.lien.config.json` under the `core` key:
-
-| Use Case | `concurrency` |
-|----------|---------------|
-| Large codebases (50k+ files) | 8 |
-| Limited RAM (<8GB) | 2 |
-| Modern machine (SSD, 8+ cores) | 6 |
-| Default (works for most) | 4 |
 
 ## Migrating from Old Config Files
 

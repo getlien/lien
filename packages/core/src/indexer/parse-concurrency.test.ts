@@ -10,12 +10,12 @@ import { OverlayBackend } from '../vectordb/overlay-backend.js';
 import { SqliteBackend } from '../vectordb/sqlite/sqlite-backend.js';
 
 /**
- * Every real caller of DEFAULT_CONCURRENCY in this codebase happens to also
- * be hardcoded to it today (indexing.concurrency/core.concurrency aren't
- * currently threaded through to these call sites) — so these tests mock the
- * constant itself to exercise the "configured 16" scenario ADR-013 measured,
- * proving the parse-stage cap holds regardless of where that number
- * ultimately comes from.
+ * Every real caller of DEFAULT_CONCURRENCY in this codebase is hardcoded to
+ * it — the `indexing.concurrency`/`core.concurrency` config keys that used to
+ * front it were validated but never actually read by any pipeline, so they
+ * were removed rather than wired through. These tests mock the constant
+ * itself to exercise the "configured 16" scenario ADR-013 measured, proving
+ * the parse-stage cap holds regardless of where that number comes from.
  */
 vi.mock('../constants.js', async importOriginal => {
   const actual = await importOriginal<typeof import('../constants.js')>();

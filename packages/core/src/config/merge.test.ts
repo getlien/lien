@@ -9,14 +9,12 @@ describe('deepMergeConfig', () => {
       core: {
         chunkSize: 100,
         chunkOverlap: 20,
-        concurrency: 8,
       },
     };
 
     const result = deepMergeConfig(defaultConfig, userConfig);
 
     expect(result.core.chunkSize).toBe(100);
-    expect(result.core.concurrency).toBe(8);
     expect(result.core.chunkOverlap).toBe(20);
   });
 
@@ -93,7 +91,6 @@ describe('deepMergeConfig', () => {
       core: {
         chunkSize: 100,
         chunkOverlap: 20,
-        concurrency: 8,
       },
       frameworks: [
         {
@@ -111,7 +108,6 @@ describe('deepMergeConfig', () => {
     const result = deepMergeConfig(defaultConfig, userConfig);
 
     expect(result.core.chunkSize).toBe(100);
-    expect(result.core.concurrency).toBe(8);
     expect(result.mcp.port).toBe(defaultConfig.mcp.port); // Default preserved
     expect(result.frameworks).toHaveLength(1);
   });
@@ -173,7 +169,6 @@ describe('detectNewFields', () => {
       core: {
         chunkSize: 75,
         chunkOverlap: 10,
-        concurrency: 4,
       },
       mcp: {
         port: 7133,

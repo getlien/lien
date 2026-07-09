@@ -81,7 +81,6 @@ export interface IndexingResult {
 
 /** Extracted config values with defaults for indexing */
 interface IndexingConfig {
-  concurrency: number;
   chunkSize: number;
   chunkOverlap: number;
   useAST: boolean;
@@ -99,7 +98,6 @@ function getIndexingConfig(rootDir: string): IndexingConfig {
   // No need to extract it here anymore
 
   return {
-    concurrency: DEFAULT_CONCURRENCY,
     chunkSize: DEFAULT_CHUNK_SIZE,
     chunkOverlap: DEFAULT_CHUNK_OVERLAP,
     useAST: true, // Always use AST-based chunking
@@ -451,10 +449,9 @@ async function batchProcessFiles(
 
   const bp = new ChunkBatchProcessor(vectorDB, { batchThreshold: 100 }, progressTracker);
 
-  // CPU-bound parse stage (chunkFile below) — cap independent of the
-  // configured concurrency; see getParseStageConcurrency's doc comment /
-  // ADR-013.
-  const limit = pLimit(getParseStageConcurrency(indexConfig.concurrency));
+  // CPU-bound parse stage (chunkFile below) — capped independent of
+  // DEFAULT_CONCURRENCY; see getParseStageConcurrency's doc comment / ADR-013.
+  const limit = pLimit(getParseStageConcurrency(DEFAULT_CONCURRENCY));
   await Promise.all(
     files.map(file =>
       limit(() => processFileForIndexing(file, rootDir, bp, indexConfig, progressTracker, verbose)),
