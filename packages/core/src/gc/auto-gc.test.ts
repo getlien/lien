@@ -192,9 +192,18 @@ describe('startLockHeartbeat', () => {
     expect(refreshedMtime).toBeGreaterThan(past.getTime());
 
     clearInterval(timer);
-    const mtimeAfterStop = (await fs.stat(lockPath)).mtimeMs;
-    await new Promise(resolve => setTimeout(resolve, 80));
 
-    expect((await fs.stat(lockPath)).mtimeMs).toBe(mtimeAfterStop);
+    // clearInterval only stops FUTURE ticks — a tick that already fired just
+    // before this call fires its mtime refresh via an un-awaited fs.utimes,
+    // so that write can still land microseconds later. Comparing a pre-stop
+    // snapshot to a single post-stop stat (as this test used to) is racy
+    // against that straggler. Instead assert quiescence: let any in-flight
+    // write settle, then confirm two samples a full interval apart, both
+    // taken after stop, are identical — i.e. nothing refreshes it again.
+    await new Promise(resolve => setTimeout(resolve, 60));
+    const settled = (await fs.stat(lockPath)).mtimeMs;
+    await new Promise(resolve => setTimeout(resolve, 60));
+
+    expect((await fs.stat(lockPath)).mtimeMs).toBe(settled);
   });
 });
