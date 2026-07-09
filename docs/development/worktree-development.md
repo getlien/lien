@@ -1,64 +1,33 @@
 # Working in a Git Worktree
 
-A fresh `npm install` / `npm ci` in a linked git worktree (e.g.
-`.claude/worktrees/<name>`) **fails to compile**: the native `tree-sitter`
-binding won't build against this environment's toolchain. The main checkout
-already has working compiled natives — reuse them instead of recompiling.
-
-## Workaround: per-entry symlink farm from main
-
-Symlink main's `node_modules` entries individually, but point `@liendev/*`
-at the **worktree's own** `packages/*`. Do NOT symlink the whole
-`node_modules` directory: that routes `@liendev/core`/`@liendev/parser`
-imports to the main checkout's (possibly older) source and `dist`, which
-surfaces as missing-export `SyntaxError`s at runtime or behavioral test
-failures for anything newer than local main.
+As of ADR-013 Phase 4-B (the retirement of `node-tree-sitter` and its 11
+npm grammar packages), a plain `npm install` / `npm ci` works normally in a
+linked git worktree — no symlink farm needed. The install-time compile
+failure this doc used to work around was `node-tree-sitter`'s `node-gyp`
+build breaking against this environment's Apple-clang toolchain; that native
+binding is gone. The one other native addon in the tree, `better-sqlite3`,
+resolves a prebuilt binary via `prebuild-install` rather than compiling
+locally, so it isn't a blocker either. Verified empirically: `npm ci` in a
+scratch worktree of this branch completed in ~7s with no compile step.
 
 ```bash
-# From inside the worktree. Adjust MAIN to your main checkout's path.
-MAIN=/path/to/main/checkout
-rm -rf node_modules packages/*/node_modules
-mkdir node_modules
-for entry in "$MAIN/node_modules"/* "$MAIN/node_modules"/.bin; do
-  base=$(basename "$entry")
-  [ "$base" = "@liendev" ] && continue
-  ln -s "$entry" "node_modules/$base"
-done
-mkdir node_modules/@liendev
-ln -s "$PWD/packages/parser" node_modules/@liendev/parser
-ln -s "$PWD/packages/core"   node_modules/@liendev/core
-ln -s "$PWD/packages/cli"    node_modules/@liendev/lien   # package name != dir name
-ln -s "$PWD/packages/review" node_modules/@liendev/review
-ln -s "$PWD/packages/action" node_modules/@liendev/action
-ln -s "$PWD/packages/site"   node_modules/@liendev/site
-
-# Non-hoisted natives (tree-sitter) live under packages/parser/node_modules,
-# not the root — symlink every package's node_modules too (whole-dir is fine
-# here; they contain no @liendev entries).
-for pkg in parser core cli review action site; do
-  [ -d "$MAIN/packages/$pkg/node_modules" ] && \
-    ln -s "$MAIN/packages/$pkg/node_modules" "packages/$pkg/node_modules"
-done
+# From inside a fresh linked worktree — just works now.
+npm ci
+npm run build
 ```
 
-Then run `npm run build` in the worktree so `@liendev/*` resolve to fresh
-worktree `dist/` output.
+`@liendev/parser-native`'s Rust crate (`packages/parser-native`) is a
+separate matter: it isn't built by `npm install`/`npm ci` at all (see that
+package's own `build` script), so it's unaffected either way. If you're
+touching the Rust crate itself, see its README for the `cargo build`
+toolchain requirement — that's a `parser-native`-specific concern, not a
+worktree one.
 
-## When the lockfile needs to change
+## Historical note
 
-Never run a plain `npm install` in the worktree — it can drift the tree or
-try to recompile natives. Use:
-
-```bash
-npm install --package-lock-only
-```
-
-This updates `package-lock.json` only — no `node_modules` changes, no native
-build.
-
-## Caution
-
-Everything symlinked from main (third-party deps, natives) reflects the
-**main checkout's** install state. If main is behind `origin/main`, its
-third-party dep versions may lag the worktree's `package.json` — usually
-harmless, but rebuild/refresh main if something looks inexplicable.
+Before Phase 4-B, this doc documented a per-entry `node_modules` symlink
+farm from a main checkout, because `node-tree-sitter`'s native binding
+failed to compile in a linked worktree. That workaround, the dual-
+`tree-sitter`-core lockfile landmine, and the `tree-sitter-kotlin`
+no-prebuilds gap are all retired along with the dependency itself — see
+[ADR-013](../architecture/decisions/0013-prebuilt-native-parser-napi-rs.md).
