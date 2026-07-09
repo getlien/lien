@@ -75,7 +75,13 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        # --ignore-scripts: this job only needs the workspace symlinks so
+        # `npm run build:native -w @liendev/parser-native` resolves — that
+        # script (fetch-vendor/copy-binary) is zero-dep and cargo does the
+        # real build. Skipping install scripts avoids node-gyp compiling
+        # node-tree-sitter, which fails outright on the windows runner (and
+        # is deleted entirely by ADR-013 Phase 4-B anyway).
+        run: npm ci --ignore-scripts
 
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
@@ -102,6 +108,12 @@ jobs:
       - name: cargo build --release --target ${{ matrix.target }}
         run: cargo build --release --target ${{ matrix.target }}
         working-directory: packages/parser-native
+        env:
+          # musl targets default to +crt-static, which cannot produce a
+          # cdylib ("target does not support these crate types"). Disable
+          # static CRT linking there so the .node dynamic library builds —
+          # the standard napi-on-musl arrangement. Empty for other targets.
+          RUSTFLAGS: ${{ contains(matrix.target, 'musl') && '-C target-feature=-crt-static' || '' }}
 
       - name: Copy binary to fixed name
         run: node scripts/copy-binary.mjs

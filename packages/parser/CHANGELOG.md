@@ -1,5 +1,26 @@
 # @liendev/parser
 
+## 0.61.0
+
+### Minor Changes
+
+- e6efbb3: New package: `@liendev/parser-native`, a prebuilt napi-rs tree-sitter binding for 11 languages (see ADR-013 and docs/architecture/native-parser.md).
+
+  `@liendev/parser` gains an opt-in `LIEN_PARSER=native` backend behind a compat deserializer that reconstructs `Parser.SyntaxNode`-shaped objects from the native wire format, so every existing traverser/extractor/complexity analyzer runs unmodified. Default remains `legacy` (node-tree-sitter) -- no behavior change unless the flag is set.
+
+- a39644a: The native backend (`@liendev/parser-native`) is now the default parser -- prebuilt binaries, 1.8-2.2x faster end-to-end than the previous `node-tree-sitter` path. `LIEN_PARSER=legacy` remains available as a transitional opt-out (scheduled for removal in a future release). If no prebuilt native binary can be loaded for your platform, lien automatically falls back to the legacy backend for the session and prints a one-time warning explaining why and how to build one -- see ADR-013 (docs/architecture/decisions/0013-prebuilt-native-parser-napi-rs.md).
+
+### Patch Changes
+
+- 5789e1c: Cap parse/chunk-stage concurrency at 4, independent of the configured indexing concurrency.
+
+  ADR-013 (prebuilt native parser) flagged a pre-GA memory risk: the native backend's transient JSON-serialized trees can be up to ~38x source size, and `indexing.concurrency`/`core.concurrency` accept up to 16 with no parse-stage file-size gate — 16 concurrent megabyte-scale parses measured ~1.55GB peak RSS, versus ~630MB at the default concurrency of 4.
+
+  `@liendev/parser` now exports `getParseStageConcurrency()`, which clamps any requested concurrency down to `PARSE_STAGE_MAX_CONCURRENCY` (4) for the CPU-bound parse/chunk stage specifically. I/O-bound stages (file stat/hash walks) are unaffected and keep using the configured value directly. Applied everywhere a limiter wraps `chunkFile`: `performChunkOnlyIndex` (parser), the full-index and incremental-index pipelines, and the worktree-overlay build (which previously shared one limiter across its I/O-bound hash-diff phase and its CPU-bound chunk phase -- now split into two). Parsing is synchronous on the JS thread, so this cap costs negligible wall-clock time; it only bounds how many source buffers and parsed trees are alive at once.
+
+- Updated dependencies [e6efbb3]
+  - @liendev/parser-native@0.61.0
+
 ## 0.59.0
 
 ### Minor Changes

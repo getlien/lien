@@ -1,6 +1,6 @@
 {
   "name": "@liendev/parser",
-  "version": "0.59.0",
+  "version": "0.61.0",
   "description": "AST parsing, complexity analysis, and semantic chunking for Lien",
   "type": "module",
   "main": "./dist/index.js",
@@ -19,7 +19,7 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "@liendev/parser-native": "^0.59.0",
+    "@liendev/parser-native": "^0.61.0",
     "glob": "^10.5.0",
     "ignore": "5.3.0",
     "p-limit": "5.0.0"
