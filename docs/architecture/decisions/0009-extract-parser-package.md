@@ -5,6 +5,11 @@
 **Deciders**: Core Team
 **Related**: [Issue #207](https://github.com/getlien/lien/issues/207), PR #278
 
+> **Update (2026-07-09):** ADR-009's deploy-size / install-speed drivers are
+> now largely obsolete — the ~100MB embedding/vector-DB stack this ADR cited
+> was removed in [ADR-011](0011-sqlite-structural-store-fts5-lexical-search.md).
+> The parser/core split now stands on its clean-boundaries rationale alone.
+
 ## Context and Problem Statement
 
 `@liendev/core` bundles two distinct responsibilities: AST parsing/analysis (~5-10MB) and vector DB/embeddings integration (~100MB with native dependencies). `@liendev/review` only needs AST parsing and complexity analysis to generate PR review comments, yet it depends on `@liendev/core` and transitively pulls in LanceDB, Qdrant, and transformers.js — none of which it uses.
