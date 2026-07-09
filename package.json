@@ -27,7 +27,7 @@
     "typecheck": "npm run build -w @liendev/parser -w @liendev/core -w @liendev/review && npm run typecheck -w packages/cli -w packages/review -w packages/action",
     "clean": "rm -rf packages/*/dist",
     "changeset": "changeset",
-    "version": "changeset version",
+    "version": "changeset version && npx --yes npm@10.9.4 install --package-lock-only",
     "release": "npm run build && changeset publish --provenance",
     "docs:dev": "npm run docs:dev -w packages/site",
     "docs:build": "npm run docs:build -w packages/site",
