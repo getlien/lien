@@ -108,6 +108,12 @@ jobs:
       - name: cargo build --release --target ${{ matrix.target }}
         run: cargo build --release --target ${{ matrix.target }}
         working-directory: packages/parser-native
+        env:
+          # musl targets default to +crt-static, which cannot produce a
+          # cdylib ("target does not support these crate types"). Disable
+          # static CRT linking there so the .node dynamic library builds —
+          # the standard napi-on-musl arrangement. Empty for other targets.
+          RUSTFLAGS: ${{ contains(matrix.target, 'musl') && '-C target-feature=-crt-static' || '' }}
 
       - name: Copy binary to fixed name
         run: node scripts/copy-binary.mjs
