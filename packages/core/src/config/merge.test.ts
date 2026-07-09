@@ -4,20 +4,6 @@ import type { LienConfig } from './schema.js';
 import { defaultConfig } from './schema.js';
 
 describe('deepMergeConfig', () => {
-  it('should merge core config while preserving defaults', () => {
-    const userConfig: Partial<LienConfig> = {
-      core: {
-        chunkSize: 100,
-        chunkOverlap: 20,
-      },
-    };
-
-    const result = deepMergeConfig(defaultConfig, userConfig);
-
-    expect(result.core.chunkSize).toBe(100);
-    expect(result.core.chunkOverlap).toBe(20);
-  });
-
   it('should merge mcp config while preserving defaults', () => {
     const userConfig: Partial<LienConfig> = {
       mcp: {
@@ -36,17 +22,17 @@ describe('deepMergeConfig', () => {
 
   it('should preserve default values for unspecified fields', () => {
     const userConfig: Partial<LienConfig> = {
-      core: {
-        ...defaultConfig.core,
-        chunkSize: 100,
+      mcp: {
+        ...defaultConfig.mcp,
+        port: 8080,
       },
     };
 
     const result = deepMergeConfig(defaultConfig, userConfig);
 
-    expect(result.core.chunkSize).toBe(100);
-    expect(result.core.chunkOverlap).toBe(defaultConfig.core.chunkOverlap);
-    expect(result.mcp).toEqual(defaultConfig.mcp);
+    expect(result.mcp.port).toBe(8080);
+    expect(result.mcp.transport).toBe(defaultConfig.mcp.transport);
+    expect(result.core).toEqual(defaultConfig.core);
     expect(result.gitDetection).toEqual(defaultConfig.gitDetection);
   });
 
@@ -88,10 +74,6 @@ describe('deepMergeConfig', () => {
 
   it('should work with actual Lien config', () => {
     const userConfig: Partial<LienConfig> = {
-      core: {
-        chunkSize: 100,
-        chunkOverlap: 20,
-      },
       frameworks: [
         {
           name: 'nodejs',
@@ -107,7 +89,6 @@ describe('deepMergeConfig', () => {
 
     const result = deepMergeConfig(defaultConfig, userConfig);
 
-    expect(result.core.chunkSize).toBe(100);
     expect(result.mcp.port).toBe(defaultConfig.mcp.port); // Default preserved
     expect(result.frameworks).toHaveLength(1);
   });
@@ -153,9 +134,9 @@ describe('detectNewFields', () => {
   it('should not report fields that exist with different values', () => {
     const existing: Partial<LienConfig> = {
       ...defaultConfig,
-      core: {
-        ...defaultConfig.core,
-        chunkSize: 100, // Different value
+      mcp: {
+        ...defaultConfig.mcp,
+        port: 9999, // Different value
       },
     };
 
@@ -166,10 +147,7 @@ describe('detectNewFields', () => {
 
   it('should work with actual Lien config upgrades', () => {
     const oldConfig: Partial<LienConfig> = {
-      core: {
-        chunkSize: 75,
-        chunkOverlap: 10,
-      },
+      core: defaultConfig.core,
       mcp: {
         port: 7133,
         transport: 'stdio' as const,

@@ -1,10 +1,4 @@
-import {
-  DEFAULT_CHUNK_SIZE,
-  DEFAULT_CHUNK_OVERLAP,
-  DEFAULT_PORT,
-  DEFAULT_GIT_POLL_INTERVAL_MS,
-  DEFAULT_DEBOUNCE_MS,
-} from '../constants.js';
+import { DEFAULT_PORT, DEFAULT_GIT_POLL_INTERVAL_MS, DEFAULT_DEBOUNCE_MS } from '../constants.js';
 
 /**
  * Framework-specific configuration
@@ -28,10 +22,16 @@ export interface FrameworkInstance {
  * Main Lien configuration supporting monorepo setups
  */
 export interface LienConfig {
-  core: {
-    chunkSize: number;
-    chunkOverlap: number;
-  };
+  /**
+   * Reserved for future project-wide core settings. `chunkSize`/`chunkOverlap`
+   * and `concurrency` used to live here but were removed as dead config —
+   * they were validated but never read by any indexing pipeline (chunking is
+   * AST-based for all supported languages; the line-based fallback and
+   * parse-stage concurrency are governed internally). Presence of this key
+   * still distinguishes the modern config shape from `LegacyLienConfig`, so
+   * it stays even though it's currently empty.
+   */
+  core: Record<string, never>;
   chunking: {
     useAST: boolean; // Enable AST-based chunking (v0.13.0)
     astFallback: 'line-based' | 'error'; // Fallback strategy on AST errors
@@ -75,8 +75,6 @@ export interface LegacyLienConfig {
   indexing: {
     exclude: string[];
     include: string[];
-    chunkSize: number;
-    chunkOverlap: number;
   };
   mcp: {
     port: number;
@@ -116,10 +114,7 @@ export function isModernConfig(config: LienConfig | LegacyLienConfig): config is
  * Frameworks should be detected and added via lien init
  */
 export const defaultConfig: LienConfig = {
-  core: {
-    chunkSize: DEFAULT_CHUNK_SIZE,
-    chunkOverlap: DEFAULT_CHUNK_OVERLAP,
-  },
+  core: {},
   chunking: {
     useAST: true, // AST-based chunking enabled by default (v0.13.0)
     astFallback: 'line-based', // Fallback to line-based on errors

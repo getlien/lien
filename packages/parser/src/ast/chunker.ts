@@ -12,7 +12,6 @@ import { getTraverser } from './traversers/index.js';
 import { resolveWorkspacePackageEntries } from '../workspace-packages.js';
 
 export interface ASTChunkOptions {
-  maxChunkSize?: number; // Reserved for future use (smart splitting of large functions)
   minChunkSize?: number;
   // Multi-tenant fields (optional for backward compatibility)
   repoId?: string; // Repository identifier for multi-tenant scenarios

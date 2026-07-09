@@ -51,9 +51,9 @@ describe('ConfigService', () => {
     it('should load and merge user config with defaults', async () => {
       const userConfig: Partial<LienConfig> = {
         version: '0.3.0',
-        core: {
-          chunkSize: 100,
-          chunkOverlap: 20,
+        mcp: {
+          ...defaultConfig.mcp,
+          port: 8080,
         },
         frameworks: [],
       };
@@ -63,9 +63,8 @@ describe('ConfigService', () => {
 
       const config = await service.load(testDir);
 
-      expect(config.core.chunkSize).toBe(100);
-      expect(config.core.chunkOverlap).toBe(20);
-      expect(config.mcp).toEqual(defaultConfig.mcp); // Should merge with defaults
+      expect(config.mcp.port).toBe(8080);
+      expect(config.core).toEqual(defaultConfig.core); // Should merge with defaults
     });
 
     it('should throw ConfigError for invalid JSON', async () => {
@@ -82,8 +81,6 @@ describe('ConfigService', () => {
         indexing: {
           include: ['**/*.ts'],
           exclude: ['**/node_modules/**'],
-          chunkSize: 100,
-          chunkOverlap: 15,
         },
         mcp: {
           port: 7133,
@@ -107,12 +104,12 @@ describe('ConfigService', () => {
 
       // Migration removed - just merges with defaults
       // Old indexing field is ignored, uses defaults
-      expect(config.core.chunkSize).toBe(defaultConfig.core.chunkSize);
+      expect(config.core).toEqual(defaultConfig.core);
     });
   });
 
-  describe('retired concurrency key (graceful degradation)', () => {
-    // Import a fresh module instance so the warn-once flag is reset per test
+  describe('retired config keys (graceful degradation)', () => {
+    // Import a fresh module instance so the warn-once flags are reset per test
     async function freshConfigService() {
       vi.resetModules();
       const { ConfigService: FreshConfigService } = await import('./service.js');
@@ -125,59 +122,101 @@ describe('ConfigService', () => {
       vi.restoreAllMocks();
     });
 
-    it('should ignore core.concurrency and warn once instead of throwing', async () => {
-      const freshService = await freshConfigService();
-      const configPath = path.join(testDir, '.lien.config.json');
-      await fs.writeFile(
-        configPath,
-        JSON.stringify({ core: { chunkSize: 100, chunkOverlap: 20, concurrency: 8 } }, null, 2),
-      );
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    describe('concurrency', () => {
+      it('should ignore core.concurrency and warn once instead of throwing', async () => {
+        const freshService = await freshConfigService();
+        const configPath = path.join(testDir, '.lien.config.json');
+        await fs.writeFile(configPath, JSON.stringify({ core: { concurrency: 8 } }, null, 2));
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-      const config = await freshService.load(testDir);
+        const config = await freshService.load(testDir);
 
-      expect(config.core.chunkSize).toBe(100);
-      expect((config.core as Record<string, unknown>).concurrency).toBeUndefined();
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('"concurrency"'));
+        expect(config.core).toEqual(defaultConfig.core);
+        expect((config.core as Record<string, unknown>).concurrency).toBeUndefined();
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('"concurrency"'));
+      });
+
+      it('should ignore legacy indexing.concurrency and warn once instead of throwing', async () => {
+        const freshService = await freshConfigService();
+        const configPath = path.join(testDir, '.lien.config.json');
+        await fs.writeFile(
+          configPath,
+          JSON.stringify({ indexing: { include: [], exclude: [], concurrency: 12 } }, null, 2),
+        );
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+        const config = await freshService.load(testDir);
+
+        // Legacy `indexing` is dropped entirely on merge (pre-existing behavior);
+        // what matters here is that the retired key didn't throw, and was warned about.
+        expect(config.core).toEqual(defaultConfig.core);
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('"concurrency"'));
+      });
+
+      it('should warn only once per process for repeated loads', async () => {
+        const freshService = await freshConfigService();
+        const configPath = path.join(testDir, '.lien.config.json');
+        await fs.writeFile(configPath, JSON.stringify({ core: { concurrency: 16 } }, null, 2));
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+        await freshService.load(testDir);
+        await freshService.load(testDir);
+        await freshService.load(testDir);
+
+        expect(warnSpy).toHaveBeenCalledOnce();
+      });
     });
 
-    it('should ignore legacy indexing.concurrency and warn once instead of throwing', async () => {
-      const freshService = await freshConfigService();
-      const configPath = path.join(testDir, '.lien.config.json');
-      await fs.writeFile(
-        configPath,
-        JSON.stringify(
-          {
-            indexing: { include: [], exclude: [], chunkSize: 90, chunkOverlap: 5, concurrency: 12 },
-          },
-          null,
-          2,
-        ),
-      );
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    describe('chunkSize/chunkOverlap', () => {
+      it('should ignore core.chunkSize/core.chunkOverlap and warn once instead of throwing', async () => {
+        const freshService = await freshConfigService();
+        const configPath = path.join(testDir, '.lien.config.json');
+        await fs.writeFile(
+          configPath,
+          JSON.stringify({ core: { chunkSize: 100, chunkOverlap: 20 } }, null, 2),
+        );
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-      const config = await freshService.load(testDir);
+        const config = await freshService.load(testDir);
 
-      // Legacy `indexing` is dropped entirely on merge (pre-existing behavior);
-      // what matters here is that the retired key didn't throw, and was warned about.
-      expect(config.core.chunkSize).toBe(defaultConfig.core.chunkSize);
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('"concurrency"'));
-    });
+        expect(config.core).toEqual(defaultConfig.core);
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('"chunkSize"'));
+      });
 
-    it('should warn only once per process for repeated loads', async () => {
-      const freshService = await freshConfigService();
-      const configPath = path.join(testDir, '.lien.config.json');
-      await fs.writeFile(
-        configPath,
-        JSON.stringify({ core: { chunkSize: 75, chunkOverlap: 10, concurrency: 16 } }, null, 2),
-      );
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      it('should ignore legacy indexing.chunkSize/indexing.chunkOverlap and warn once instead of throwing', async () => {
+        const freshService = await freshConfigService();
+        const configPath = path.join(testDir, '.lien.config.json');
+        await fs.writeFile(
+          configPath,
+          JSON.stringify(
+            { indexing: { include: [], exclude: [], chunkSize: 90, chunkOverlap: 5 } },
+            null,
+            2,
+          ),
+        );
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-      await freshService.load(testDir);
-      await freshService.load(testDir);
-      await freshService.load(testDir);
+        const config = await freshService.load(testDir);
 
-      expect(warnSpy).toHaveBeenCalledOnce();
+        expect(config.core).toEqual(defaultConfig.core);
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('"chunkSize"'));
+      });
+
+      it('should warn only once per process for repeated loads', async () => {
+        const freshService = await freshConfigService();
+        const configPath = path.join(testDir, '.lien.config.json');
+        await fs.writeFile(
+          configPath,
+          JSON.stringify({ core: { chunkSize: 75, chunkOverlap: 10 } }, null, 2),
+        );
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+        await freshService.load(testDir);
+        await freshService.load(testDir);
+        await freshService.load(testDir);
+
+        expect(warnSpy).toHaveBeenCalledOnce();
+      });
     });
   });
 
@@ -185,9 +224,9 @@ describe('ConfigService', () => {
     it('should save valid config to file', async () => {
       const config: LienConfig = {
         ...defaultConfig,
-        core: {
-          ...defaultConfig.core,
-          chunkSize: 120,
+        mcp: {
+          ...defaultConfig.mcp,
+          port: 8080,
         },
       };
 
@@ -197,15 +236,15 @@ describe('ConfigService', () => {
       const savedContent = await fs.readFile(configPath, 'utf-8');
       const savedConfig = JSON.parse(savedContent);
 
-      expect(savedConfig.core.chunkSize).toBe(120);
+      expect(savedConfig.mcp.port).toBe(8080);
     });
 
     it('should throw ConfigError when trying to save invalid config', async () => {
       const invalidConfig = {
         ...defaultConfig,
-        core: {
-          ...defaultConfig.core,
-          chunkSize: -10, // Invalid: must be positive
+        mcp: {
+          ...defaultConfig.mcp,
+          port: 500, // Invalid: below 1024
         },
       };
 
@@ -224,6 +263,18 @@ describe('ConfigService', () => {
       expect(content).toContain('"core"');
       expect(content.endsWith('\n')).toBe(true);
     });
+
+    it('should not throw when saving a config with a stale core key (warn, never break)', async () => {
+      // A direct save() caller bypasses load()'s stripRetiredKeys() entirely,
+      // so this exercises the same "never hard-fail on stale config" guarantee
+      // via a different entry point.
+      const configWithRetiredKey = {
+        ...defaultConfig,
+        core: { chunkSize: 100 },
+      } as unknown as LienConfig;
+
+      await expect(service.save(testDir, configWithRetiredKey)).resolves.not.toThrow();
+    });
   });
 
   // Migration tests removed - migration no longer exists
@@ -234,6 +285,39 @@ describe('ConfigService', () => {
 
       expect(result.valid).toBe(true);
       expect(result.errors).toHaveLength(0);
+    });
+
+    it('should warn (not error) about a retired key left in core on direct validate()', () => {
+      // load() strips retired keys before validate() ever sees them; direct
+      // validate() callers skip that strip, so this is the path where a
+      // stray retired key can actually reach validation.
+      const rawConfig = {
+        ...defaultConfig,
+        core: { chunkSize: 100 },
+      };
+
+      const result = service.validate(rawConfig);
+
+      expect(result.valid).toBe(true);
+      expect(result.errors).toHaveLength(0);
+      expect(result.warnings.some(w => w.includes('chunkSize'))).toBe(true);
+    });
+
+    it('should warn (not error) about a truly unexpected key in core, distinct from a retired one', () => {
+      const rawConfig = {
+        ...defaultConfig,
+        core: { notARealSetting: 'x' },
+      };
+
+      const result = service.validate(rawConfig);
+
+      expect(result.valid).toBe(true);
+      expect(result.errors).toHaveLength(0);
+      expect(
+        result.warnings.some(w => w.includes('unexpected') && w.includes('notARealSetting')),
+      ).toBe(true);
+      // Distinct wording from the retired-key warning — not conflated
+      expect(result.warnings.some(w => w.includes('retired'))).toBe(false);
     });
 
     it('should reject non-object config', () => {
@@ -252,21 +336,6 @@ describe('ConfigService', () => {
 
       expect(result.valid).toBe(false);
       expect(result.errors.length).toBeGreaterThan(0);
-    });
-
-    it('should reject invalid chunk size', () => {
-      const invalidConfig: LienConfig = {
-        ...defaultConfig,
-        core: {
-          ...defaultConfig.core,
-          chunkSize: -5,
-        },
-      };
-
-      const result = service.validate(invalidConfig);
-
-      expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.includes('chunkSize'))).toBe(true);
     });
 
     it('should reject invalid MCP port', () => {
@@ -299,44 +368,12 @@ describe('ConfigService', () => {
       expect(result.errors.some(e => e.includes('transport'))).toBe(true);
     });
 
-    it('should warn about very small chunk size', () => {
-      const config: LienConfig = {
-        ...defaultConfig,
-        core: {
-          ...defaultConfig.core,
-          chunkSize: 30, // Valid but small
-        },
-      };
-
-      const result = service.validate(config);
-
-      expect(result.valid).toBe(true);
-      expect(result.warnings.some(w => w.includes('very small'))).toBe(true);
-    });
-
-    it('should warn about very large chunk size', () => {
-      const config: LienConfig = {
-        ...defaultConfig,
-        core: {
-          ...defaultConfig.core,
-          chunkSize: 600, // Valid but large
-        },
-      };
-
-      const result = service.validate(config);
-
-      expect(result.valid).toBe(true);
-      expect(result.warnings.some(w => w.includes('very large'))).toBe(true);
-    });
-
     it('should warn about legacy config format', () => {
       const legacyConfig: LegacyLienConfig = {
         version: '0.2.0',
         indexing: {
           include: ['**/*.ts'],
           exclude: [],
-          chunkSize: 75,
-          chunkOverlap: 10,
         },
         mcp: {
           port: 7133,
@@ -361,32 +398,32 @@ describe('ConfigService', () => {
   });
 
   describe('validatePartial', () => {
-    it('should validate partial config with only core settings', () => {
-      const partialConfig: Partial<LienConfig> = {
-        core: {
-          chunkSize: 100,
-          chunkOverlap: 15,
-        },
-      };
+    it('should warn (not error) about a retired key left in a partial core object', () => {
+      // core is typed Record<string, never>, so a stray key can only reach
+      // this path via raw/untyped input (e.g. JSON.parse output cast at the
+      // boundary) rather than a type-checked literal — hence the cast here.
+      const partialConfig = {
+        core: { chunkSize: 100 },
+      } as unknown as Partial<LienConfig>;
 
       const result = service.validatePartial(partialConfig);
 
       expect(result.valid).toBe(true);
-      expect(result.errors).toHaveLength(0);
+      expect(result.warnings.some(w => w.includes('chunkSize'))).toBe(true);
     });
 
     it('should reject invalid values in partial config', () => {
       const partialConfig: Partial<LienConfig> = {
-        core: {
-          chunkSize: -10, // Invalid
-          chunkOverlap: 10,
+        gitDetection: {
+          enabled: true,
+          pollIntervalMs: 50, // Invalid: must be at least 100ms
         },
       };
 
       const result = service.validatePartial(partialConfig);
 
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.includes('chunkSize'))).toBe(true);
+      expect(result.errors.some(e => e.includes('pollIntervalMs'))).toBe(true);
     });
 
     it('should allow missing fields in partial config', () => {
@@ -408,10 +445,6 @@ describe('ConfigService', () => {
     it('should handle full lifecycle: save, load, validate', async () => {
       const customConfig: LienConfig = {
         ...defaultConfig,
-        core: {
-          ...defaultConfig.core,
-          chunkSize: 100,
-        },
         mcp: {
           ...defaultConfig.mcp,
           port: 8000,
@@ -428,7 +461,6 @@ describe('ConfigService', () => {
       const validation = service.validate(loadedConfig);
 
       expect(validation.valid).toBe(true);
-      expect(loadedConfig.core.chunkSize).toBe(100);
       expect(loadedConfig.mcp.port).toBe(8000);
     });
 
@@ -439,8 +471,6 @@ describe('ConfigService', () => {
         indexing: {
           include: ['**/*.ts', '**/*.js'],
           exclude: ['**/node_modules/**'],
-          chunkSize: 90,
-          chunkOverlap: 12,
         },
         mcp: {
           port: 7200,
@@ -464,7 +494,7 @@ describe('ConfigService', () => {
       const config = await service.load(testDir);
 
       // Migration removed - old indexing field ignored, uses defaults for core settings
-      expect(config.core.chunkSize).toBe(defaultConfig.core.chunkSize);
+      expect(config.core).toEqual(defaultConfig.core);
       expect(config.mcp.port).toBe(7200);
       expect(config.gitDetection.enabled).toBe(false);
       expect(config.fileWatching.enabled).toBe(true);

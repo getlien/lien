@@ -14,48 +14,82 @@ export interface ValidationResult {
   warnings: string[];
 }
 
-const CONCURRENCY_RETIRED_WARNING =
-  'Warning: the "concurrency" setting (core.concurrency / legacy indexing.concurrency) has been ' +
-  'removed — it was validated but never read by the indexing pipeline. Ignoring it; you can ' +
-  'delete it from your .lien.config.json. Parse-stage concurrency is now governed internally ' +
-  '(PARSE_STAGE_MAX_CONCURRENCY in @liendev/parser).';
-
-let concurrencyWarningShown = false;
-
 /**
- * Warn (once per process) that a retired `concurrency` key was found in a
- * loaded config.
+ * One entry per group of config keys retired together (validated in the
+ * past but never actually read by any pipeline). Each group is stripped
+ * from both the modern `core` section and the legacy `indexing` section
+ * before merge/validation, warning once per group per process instead of
+ * throwing — mirrors global-config.ts's stripRetiredBackends, generalized
+ * so a future retirement is a new array entry rather than a copy-pasted
+ * strip function.
  */
-function warnConcurrencyRetired(): void {
-  if (concurrencyWarningShown) return;
-  concurrencyWarningShown = true;
-  console.warn(CONCURRENCY_RETIRED_WARNING);
+interface RetiredKeyGroup {
+  keys: readonly string[];
+  message: string;
+  warned: boolean;
+}
+
+const RETIRED_KEY_GROUPS: RetiredKeyGroup[] = [
+  {
+    keys: ['concurrency'],
+    message:
+      'Warning: the "concurrency" setting (core.concurrency / legacy indexing.concurrency) has been ' +
+      'removed — it was validated but never read by the indexing pipeline. Ignoring it; you can ' +
+      'delete it from your .lien.config.json. Parse-stage concurrency is now governed internally ' +
+      '(PARSE_STAGE_MAX_CONCURRENCY in @liendev/parser).',
+    warned: false,
+  },
+  {
+    keys: ['chunkSize', 'chunkOverlap'],
+    message:
+      'Warning: the "chunkSize"/"chunkOverlap" settings (core.* / legacy indexing.*) have been ' +
+      'removed — they were validated but never read by any indexing pipeline. Chunking is ' +
+      'AST-based for all supported languages; these only ever shaped the line-based fallback ' +
+      'chunker, which now always uses its built-in defaults. Ignoring them; you can delete them ' +
+      'from your .lien.config.json.',
+    warned: false,
+  },
+];
+
+function warnRetiredOnce(group: RetiredKeyGroup): void {
+  if (group.warned) return;
+  group.warned = true;
+  console.warn(group.message);
 }
 
 /**
- * Strip the retired `concurrency` key from a raw parsed config before it is
- * merged/validated. Mirrors global-config.ts's stripRetiredBackends: warn
- * once and drop the key so an existing config that still has it never
+ * Strip one retired key group from a single config section (`core` or
+ * `indexing`), warning once if any of the group's keys were present.
+ */
+function stripGroupFromSection(
+  raw: Record<string, unknown>,
+  sectionName: 'core' | 'indexing',
+  group: RetiredKeyGroup,
+): Record<string, unknown> {
+  const section = raw[sectionName];
+  if (!section || typeof section !== 'object') return raw;
+
+  const sectionObj = section as Record<string, unknown>;
+  if (!group.keys.some(key => key in sectionObj)) return raw;
+
+  warnRetiredOnce(group);
+  const restSection = Object.fromEntries(
+    Object.entries(sectionObj).filter(([key]) => !group.keys.includes(key)),
+  );
+  return { ...raw, [sectionName]: restSection };
+}
+
+/**
+ * Strip all retired config key groups from a raw parsed config before it is
+ * merged/validated, so an existing config that still carries one never
  * throws.
  */
-function stripRetiredConcurrencyKey(raw: Record<string, unknown>): Record<string, unknown> {
-  let result = raw;
-
-  const core = result.core;
-  if (core && typeof core === 'object' && 'concurrency' in core) {
-    warnConcurrencyRetired();
-    const { concurrency: _concurrency, ...restCore } = core as Record<string, unknown>;
-    result = { ...result, core: restCore };
-  }
-
-  const indexing = result.indexing;
-  if (indexing && typeof indexing === 'object' && 'concurrency' in indexing) {
-    warnConcurrencyRetired();
-    const { concurrency: _concurrency, ...restIndexing } = indexing as Record<string, unknown>;
-    result = { ...result, indexing: restIndexing };
-  }
-
-  return result;
+function stripRetiredKeys(raw: Record<string, unknown>): Record<string, unknown> {
+  return RETIRED_KEY_GROUPS.reduce(
+    (result, group) =>
+      stripGroupFromSection(stripGroupFromSection(result, 'core', group), 'indexing', group),
+    raw,
+  );
 }
 
 /**
@@ -82,7 +116,7 @@ export class ConfigService {
 
     try {
       const configContent = await fs.readFile(configPath, 'utf-8');
-      const userConfig = stripRetiredConcurrencyKey(JSON.parse(configContent));
+      const userConfig = stripRetiredKeys(JSON.parse(configContent));
 
       // Merge with defaults - no migration needed
       const mergedConfig = deepMergeConfig(defaultConfig, userConfig as Partial<LienConfig>);
@@ -222,7 +256,7 @@ export class ConfigService {
 
     // Validate core settings if present
     if (config.core) {
-      this.validateCoreConfig(config.core, errors, warnings);
+      this.validateCoreConfig(config.core, warnings);
     }
 
     // Validate MCP settings if present
@@ -258,12 +292,15 @@ export class ConfigService {
    * Validate modern (v0.3.0+) configuration
    */
   private validateModernConfig(config: LienConfig, errors: string[], warnings: string[]): void {
-    // Validate core settings
+    // `core` currently holds no configurable settings (chunkSize/chunkOverlap
+    // and concurrency were both removed as dead config) — its presence is
+    // only the modern/legacy discriminator. It's still required to exist,
+    // and validateCoreConfig below checks it's actually empty.
     if (!config.core) {
       errors.push('Missing required field: core');
       return;
     }
-    this.validateCoreConfig(config.core, errors, warnings);
+    this.validateCoreConfig(config.core, warnings);
 
     // Validate MCP settings
     if (!config.mcp) {
@@ -305,15 +342,10 @@ export class ConfigService {
       return;
     }
 
-    const { indexing } = config;
-
-    if (typeof indexing.chunkSize !== 'number' || indexing.chunkSize <= 0) {
-      errors.push('indexing.chunkSize must be a positive number');
-    }
-
-    if (typeof indexing.chunkOverlap !== 'number' || indexing.chunkOverlap < 0) {
-      errors.push('indexing.chunkOverlap must be a non-negative number');
-    }
+    // `indexing` currently has nothing left to numerically validate
+    // (chunkSize/chunkOverlap were removed as dead config); include/exclude
+    // are plain arrays with no constraints. Existence was already checked
+    // above.
 
     // Validate MCP settings (same for both)
     if (config.mcp) {
@@ -322,29 +354,35 @@ export class ConfigService {
   }
 
   /**
-   * Validate core configuration settings
+   * Validate that `core` — which currently holds no configurable settings —
+   * hasn't been given any keys. This only fires for callers that hand
+   * validate()/validatePartial()/save() a raw config directly: the load()
+   * path already runs stripRetiredKeys() before validating, so a config
+   * file that still carries a retired key never reaches here with it.
+   * Never an error, even for recognized retired keys: this file's
+   * philosophy is to warn and ignore stale config, not break on it (see
+   * RETIRED_KEY_GROUPS), and validate()/save() must extend that same
+   * guarantee to direct callers, not just the load() path.
    */
-  private validateCoreConfig(
-    core: Partial<LienConfig['core']>,
-    errors: string[],
-    warnings: string[],
-  ): void {
-    if (core.chunkSize !== undefined) {
-      if (typeof core.chunkSize !== 'number' || core.chunkSize <= 0) {
-        errors.push('core.chunkSize must be a positive number');
-      } else if (core.chunkSize < 50) {
-        warnings.push(
-          'core.chunkSize is very small (<50 lines). This may result in poor search quality',
-        );
-      } else if (core.chunkSize > 500) {
-        warnings.push('core.chunkSize is very large (>500 lines). This may impact performance');
-      }
-    }
+  private validateCoreConfig(core: Record<string, unknown>, warnings: string[]): void {
+    const keys = Object.keys(core);
+    if (keys.length === 0) return;
 
-    if (core.chunkOverlap !== undefined) {
-      if (typeof core.chunkOverlap !== 'number' || core.chunkOverlap < 0) {
-        errors.push('core.chunkOverlap must be a non-negative number');
-      }
+    const retiredKeyNames = new Set(RETIRED_KEY_GROUPS.flatMap(group => group.keys));
+    const retired = keys.filter(key => retiredKeyNames.has(key));
+    const unknown = keys.filter(key => !retiredKeyNames.has(key));
+
+    if (retired.length > 0) {
+      warnings.push(
+        `core has retired key(s) with no effect: ${retired.join(', ')}. These are silently ` +
+          'dropped by load() — remove them from your .lien.config.json.',
+      );
+    }
+    if (unknown.length > 0) {
+      warnings.push(
+        `core has unexpected key(s): ${unknown.join(', ')}. core currently holds no ` +
+          'configurable settings.',
+      );
     }
   }
 
