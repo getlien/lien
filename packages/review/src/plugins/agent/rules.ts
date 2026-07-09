@@ -518,7 +518,7 @@ from the diff — AND can confirm no semantically related copies survive
 elsewhere in the post-image.`,
   example: `### Good finding — partial model bump leaves stale hardcoded copy:
 {
-  "filepath": "packages/runner/src/handlers/pr-review.ts",
+  "filepath": "packages/review/src/review-pr.ts",
   "line": 300,
   "symbolName": "handlePRReview",
   "severity": "warning",
