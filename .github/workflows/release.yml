@@ -151,7 +151,13 @@ jobs:
   registry-smoke:
     name: Post-publish registry smoke test
     needs: release
-    if: needs.release.outputs.published == 'true'
+    # !cancelled() is load-bearing: build-native (a transitive dependency
+    # via `release`) is skipped on releases with no pending parser-native
+    # publish, and GitHub skips downstream jobs with any skipped transitive
+    # need unless the job's `if` opts out — without this, the smoke test
+    # silently skipped on exactly the releases it exists to validate
+    # (observed on 0.61.0 and 0.62.0).
+    if: ${{ !cancelled() && needs.release.result == 'success' && needs.release.outputs.published == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
