@@ -182,7 +182,6 @@ export {
   LienErrorCode,
   ConfigError,
   IndexingError,
-  EmbeddingError,
   DatabaseError,
   wrapError,
   isLienError,
