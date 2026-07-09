@@ -254,6 +254,11 @@ export class ConfigService {
     const errors: string[] = [];
     const warnings: string[] = [];
 
+    // Validate core settings if present
+    if (config.core) {
+      this.validateCoreConfig(config.core, warnings);
+    }
+
     // Validate MCP settings if present
     if (config.mcp) {
       this.validateMCPConfig(config.mcp, errors, warnings);
@@ -289,12 +294,13 @@ export class ConfigService {
   private validateModernConfig(config: LienConfig, errors: string[], warnings: string[]): void {
     // `core` currently holds no configurable settings (chunkSize/chunkOverlap
     // and concurrency were both removed as dead config) — its presence is
-    // only the modern/legacy discriminator, so there's nothing to validate
-    // beyond requiring the key to exist.
+    // only the modern/legacy discriminator. It's still required to exist,
+    // and validateCoreConfig below checks it's actually empty.
     if (!config.core) {
       errors.push('Missing required field: core');
       return;
     }
+    this.validateCoreConfig(config.core, warnings);
 
     // Validate MCP settings
     if (!config.mcp) {
@@ -344,6 +350,39 @@ export class ConfigService {
     // Validate MCP settings (same for both)
     if (config.mcp) {
       this.validateMCPConfig(config.mcp, errors, warnings);
+    }
+  }
+
+  /**
+   * Validate that `core` — which currently holds no configurable settings —
+   * hasn't been given any keys. This only fires for callers that hand
+   * validate()/validatePartial()/save() a raw config directly: the load()
+   * path already runs stripRetiredKeys() before validating, so a config
+   * file that still carries a retired key never reaches here with it.
+   * Never an error, even for recognized retired keys: this file's
+   * philosophy is to warn and ignore stale config, not break on it (see
+   * RETIRED_KEY_GROUPS), and validate()/save() must extend that same
+   * guarantee to direct callers, not just the load() path.
+   */
+  private validateCoreConfig(core: Record<string, unknown>, warnings: string[]): void {
+    const keys = Object.keys(core);
+    if (keys.length === 0) return;
+
+    const retiredKeyNames = new Set(RETIRED_KEY_GROUPS.flatMap(group => group.keys));
+    const retired = keys.filter(key => retiredKeyNames.has(key));
+    const unknown = keys.filter(key => !retiredKeyNames.has(key));
+
+    if (retired.length > 0) {
+      warnings.push(
+        `core has retired key(s) with no effect: ${retired.join(', ')}. These are silently ` +
+          'dropped by load() — remove them from your .lien.config.json.',
+      );
+    }
+    if (unknown.length > 0) {
+      warnings.push(
+        `core has unexpected key(s): ${unknown.join(', ')}. core currently holds no ` +
+          'configurable settings.',
+      );
     }
   }
 

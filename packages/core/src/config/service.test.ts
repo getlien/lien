@@ -263,6 +263,18 @@ describe('ConfigService', () => {
       expect(content).toContain('"core"');
       expect(content.endsWith('\n')).toBe(true);
     });
+
+    it('should not throw when saving a config with a stale core key (warn, never break)', async () => {
+      // A direct save() caller bypasses load()'s stripRetiredKeys() entirely,
+      // so this exercises the same "never hard-fail on stale config" guarantee
+      // via a different entry point.
+      const configWithRetiredKey = {
+        ...defaultConfig,
+        core: { chunkSize: 100 },
+      } as unknown as LienConfig;
+
+      await expect(service.save(testDir, configWithRetiredKey)).resolves.not.toThrow();
+    });
   });
 
   // Migration tests removed - migration no longer exists
@@ -273,6 +285,39 @@ describe('ConfigService', () => {
 
       expect(result.valid).toBe(true);
       expect(result.errors).toHaveLength(0);
+    });
+
+    it('should warn (not error) about a retired key left in core on direct validate()', () => {
+      // load() strips retired keys before validate() ever sees them; direct
+      // validate() callers skip that strip, so this is the path where a
+      // stray retired key can actually reach validation.
+      const rawConfig = {
+        ...defaultConfig,
+        core: { chunkSize: 100 },
+      };
+
+      const result = service.validate(rawConfig);
+
+      expect(result.valid).toBe(true);
+      expect(result.errors).toHaveLength(0);
+      expect(result.warnings.some(w => w.includes('chunkSize'))).toBe(true);
+    });
+
+    it('should warn (not error) about a truly unexpected key in core, distinct from a retired one', () => {
+      const rawConfig = {
+        ...defaultConfig,
+        core: { notARealSetting: 'x' },
+      };
+
+      const result = service.validate(rawConfig);
+
+      expect(result.valid).toBe(true);
+      expect(result.errors).toHaveLength(0);
+      expect(
+        result.warnings.some(w => w.includes('unexpected') && w.includes('notARealSetting')),
+      ).toBe(true);
+      // Distinct wording from the retired-key warning — not conflated
+      expect(result.warnings.some(w => w.includes('retired'))).toBe(false);
     });
 
     it('should reject non-object config', () => {
@@ -353,6 +398,20 @@ describe('ConfigService', () => {
   });
 
   describe('validatePartial', () => {
+    it('should warn (not error) about a retired key left in a partial core object', () => {
+      // core is typed Record<string, never>, so a stray key can only reach
+      // this path via raw/untyped input (e.g. JSON.parse output cast at the
+      // boundary) rather than a type-checked literal — hence the cast here.
+      const partialConfig = {
+        core: { chunkSize: 100 },
+      } as unknown as Partial<LienConfig>;
+
+      const result = service.validatePartial(partialConfig);
+
+      expect(result.valid).toBe(true);
+      expect(result.warnings.some(w => w.includes('chunkSize'))).toBe(true);
+    });
+
     it('should reject invalid values in partial config', () => {
       const partialConfig: Partial<LienConfig> = {
         gitDetection: {
