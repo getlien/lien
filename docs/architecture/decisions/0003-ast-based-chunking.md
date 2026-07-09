@@ -199,8 +199,8 @@ accepting the increased implementation complexity and dependency overhead.
 * ⚠️ **Dependency overhead** - `tree-sitter` + language grammars (~2MB total)
 * ⚠️ **Slower chunking** - 5ms vs 1ms per file (acceptable for better quality)
 * ⚠️ **Large file limitation** - Tree-sitter fails on very large files (>1000 lines)
-  - Mitigated: Automatic fallback to line-based chunking
-  - Configurable: `chunking.astFallback` setting
+  - Mitigated: Automatic fallback to line-based chunking (hardcoded, not configurable — see the
+    "Update" note under Configuration below)
 
 ### Neutral
 
@@ -223,7 +223,13 @@ Language definitions are managed via the per-language definition pattern. See [A
 
 ### Configuration
 
-Users can control AST behavior via `.lien.config.json`:
+> **Update:** The `chunking.useAST`/`chunking.astFallback` knobs described below were removed —
+> they were validated but never actually read by any indexing pipeline. AST-based chunking with a
+> line-based fallback is always on and not configurable. This section is kept for historical
+> context on the original design; see [docs/architecture/config-system.md](../config-system.md)
+> for what `.lien.config.json` actually supports today.
+
+At the time of this decision, the plan was for users to control AST behavior via `.lien.config.json`:
 
 ```json
 {

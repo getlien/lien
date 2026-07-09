@@ -167,11 +167,13 @@ export { detectLinkedWorktree } from './git/worktree.js';
 export type { WorktreeInfo } from './git/worktree.js';
 
 // =============================================================================
-// FRAMEWORK DETECTION (DEPRECATED - replaced by ecosystem presets)
+// FRAMEWORK DETECTION (REMOVED - replaced by ecosystem presets)
 // =============================================================================
-// These types are kept for backward compatibility with old configs.
-// The framework detection system has been removed.
-// Use detectEcosystems() and getEcosystemExcludePatterns() instead.
+// The framework detection system and its config types (FrameworkConfig,
+// FrameworkInstance) have been removed, including from .lien.config.json —
+// see ConfigService's retired-section handling for existing configs that
+// still carry a `frameworks` array. Use detectEcosystems() and
+// getEcosystemExcludePatterns() instead.
 
 // =============================================================================
 // ERRORS
@@ -221,7 +223,6 @@ export {
   DEFAULT_PORT,
   VERSION_CHECK_INTERVAL_MS,
   DEFAULT_GIT_POLL_INTERVAL_MS,
-  DEFAULT_DEBOUNCE_MS,
   INDEX_FORMAT_VERSION,
   MAX_CHUNKS_PER_FILE,
 } from './constants.js';

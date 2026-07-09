@@ -23,9 +23,6 @@ export const VERSION_CHECK_INTERVAL_MS = 2000;
 // Git detection
 export const DEFAULT_GIT_POLL_INTERVAL_MS = 10000; // Check every 10 seconds
 
-// File watching
-export const DEFAULT_DEBOUNCE_MS = 1000;
-
 // Index format version - bump on ANY breaking change to indexing
 // Examples that require version bump:
 // - Chunking algorithm changes

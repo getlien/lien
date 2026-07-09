@@ -7,12 +7,7 @@
 // Re-export from modules
 export type { ChunkMetadata, CodeChunk, ScanOptions } from '@liendev/parser';
 export type { SearchResult, VectorDBInterface } from '../vectordb/types.js';
-export type {
-  LienConfig,
-  LegacyLienConfig,
-  FrameworkConfig,
-  FrameworkInstance,
-} from '../config/schema.js';
+export type { LienConfig } from '../config/schema.js';
 export type { GitState } from '../git/tracker.js';
 export type { RelevanceCategory } from '../vectordb/relevance.js';
 

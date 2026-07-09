@@ -300,7 +300,7 @@ describe('initCommand', () => {
 
   // --- Project config note ---
 
-  it('should note that .lien.config.json is found but mostly legacy', async () => {
+  it('should note that .lien.config.json is found and only complexity.thresholds is read', async () => {
     const projectConfigPath = path.join(testDir, '.lien.config.json');
     await fs.writeFile(projectConfigPath, JSON.stringify({ version: '0.2.0' }));
 
@@ -310,7 +310,7 @@ describe('initCommand', () => {
 
     expect(logSpy).toHaveBeenCalledWith(
       expect.stringContaining(
-        '.lien.config.json found — most of it is legacy; only complexity thresholds are read.',
+        '.lien.config.json found — only complexity.thresholds is read; other keys are ignored.',
       ),
     );
   });

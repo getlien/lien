@@ -105,7 +105,11 @@ program
 
 const configCmd = program
   .command('config')
-  .description('Manage configuration (global: ~/.lien/config.json, project: ./.lien.config.json)');
+  .description(
+    'Manage global configuration (~/.lien/config.json — currently just the storage backend). ' +
+      'Per-project config (./.lien.config.json) only supports complexity.thresholds and is not ' +
+      'managed by this command — edit the file directly.',
+  );
 
 configCmd
   .command('set <key> <value>')
