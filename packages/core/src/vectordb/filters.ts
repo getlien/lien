@@ -10,6 +10,8 @@ export interface FilterableRecord {
   content?: string;
   file?: string;
   language?: string;
+  /** Chunk kind ('function' | 'class' | 'block' | 'template' | 'doc'). */
+  type?: string;
   symbolName?: string;
   symbolType?: string;
   functionNames?: unknown;
@@ -134,6 +136,14 @@ export function matchesSymbolFilter(
   r: FilterableRecord,
   { language, pattern, symbolType }: SymbolQueryOptions,
 ): boolean {
+  // Markdown 'doc' chunks carry a heading-breadcrumb symbolName but are prose,
+  // not code symbols -- never surface them via the symbol-lookup path
+  // (list_functions / querySymbols). They remain fully searchable via
+  // search_code / scanAll / scanWithFilter, which don't route through here.
+  if (r.type === 'doc') {
+    return false;
+  }
+
   // Language filter
   if (language && (!r.language || r.language.toLowerCase() !== language.toLowerCase())) {
     return false;

@@ -5,6 +5,7 @@ import { shouldUseAST, chunkByAST } from './ast/chunker.js';
 import { NativeBindingLoadError } from './ast/parser.js';
 import { chunkLiquidFile } from './liquid-chunker.js';
 import { chunkJSONTemplate } from './json-template-chunker.js';
+import { chunkMarkdownFile } from './markdown-chunker.js';
 
 export interface ChunkOptions {
   chunkSize?: number;
@@ -25,6 +26,41 @@ export interface ChunkOptions {
   workspaceRoot?: string;
 }
 
+/**
+ * Route to a format-specific chunker for special-cased file types (Liquid,
+ * Shopify JSON templates, Markdown/MDX). Returns undefined when none apply,
+ * so the caller falls through to AST/line-based chunking.
+ */
+function chunkSpecialCase(
+  filepath: string,
+  content: string,
+  chunkSize: number,
+  chunkOverlap: number,
+  tenantContext: { repoId?: string; orgId?: string },
+): CodeChunk[] | undefined {
+  // Liquid files
+  if (filepath.endsWith('.liquid')) {
+    return chunkLiquidFile(filepath, content, chunkSize, chunkOverlap, tenantContext);
+  }
+
+  // Shopify JSON template files (templates/**/*.json). Regex ensures
+  // 'templates/' is a path segment, not part of another name.
+  // Matches: templates/product.json OR some-path/templates/customers/account.json
+  // Rejects: my-templates/config.json OR node_modules/pkg/templates/file.json (filtered by scanner)
+  if (filepath.endsWith('.json') && /(?:^|\/)templates\//.test(filepath)) {
+    return chunkJSONTemplate(filepath, content, tenantContext);
+  }
+
+  // Markdown/MDX — chunk by heading section instead of a fixed-size line
+  // window, so search_code retrieves a coherent section (e.g. README
+  // "Install") rather than an arbitrary slice.
+  if (/\.(md|mdx|markdown)$/i.test(filepath)) {
+    return chunkMarkdownFile(filepath, content, chunkSize, chunkOverlap, tenantContext);
+  }
+
+  return undefined;
+}
+
 export function chunkFile(
   filepath: string,
   content: string,
@@ -40,18 +76,11 @@ export function chunkFile(
     workspaceRoot,
   } = options;
 
-  // Special handling for Liquid files
-  if (filepath.endsWith('.liquid')) {
-    return chunkLiquidFile(filepath, content, chunkSize, chunkOverlap, { repoId, orgId });
-  }
-
-  // Special handling for Shopify JSON template files (templates/**/*.json)
-  // Use regex to ensure 'templates/' is a path segment, not part of another name
-  // Matches: templates/product.json OR some-path/templates/customers/account.json
-  // Rejects: my-templates/config.json OR node_modules/pkg/templates/file.json (filtered by scanner)
-  if (filepath.endsWith('.json') && /(?:^|\/)templates\//.test(filepath)) {
-    return chunkJSONTemplate(filepath, content, { repoId, orgId });
-  }
+  const specialCaseChunks = chunkSpecialCase(filepath, content, chunkSize, chunkOverlap, {
+    repoId,
+    orgId,
+  });
+  if (specialCaseChunks) return specialCaseChunks;
 
   // Try AST-based chunking for supported languages
   if (useAST && shouldUseAST(filepath)) {
