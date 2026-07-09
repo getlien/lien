@@ -217,7 +217,7 @@ lien status [options]
 
 | Option | Description |
 |--------|-------------|
-| `-v, --verbose` | Also show indexing settings (concurrency, batch size, chunk size/overlap defaults) |
+| `-v, --verbose` | Also show indexing settings (concurrency, chunk size/overlap defaults) |
 | `--format <type>` | Output format: `text` (default) or `json` |
 
 ### Output
@@ -242,7 +242,7 @@ File watching: ✓ Enabled (default)
   Disable with: lien serve --no-watch
 ```
 
-With `--verbose`, an additional "Indexing Settings (defaults)" block prints the concurrency, batch size, and chunk size/overlap defaults. With `--format json`, the same data is emitted as a single JSON object (`version`, `indexPath`, `indexStatus`, `indexFiles`, `git`, `features`, `settings`) for scripting.
+With `--verbose`, an additional "Indexing Settings (defaults)" block prints the concurrency and chunk size/overlap defaults. With `--format json`, the same data is emitted as a single JSON object (`version`, `indexPath`, `indexStatus`, `indexFiles`, `git`, `features`, `settings`) for scripting.
 
 ## lien config
 

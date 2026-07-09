@@ -7,7 +7,7 @@ export default withMermaid(
     // Use /lien/ for GitHub Pages subdomain, / for custom domain
     base: process.env.VITE_BASE_PATH || '/',
     title: 'Lien',
-    description: 'Local-first semantic code search for AI assistants',
+    description: 'Local-first structural code search and dependency analysis for AI coding assistants',
     
     head: [
       ['link', { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' }],

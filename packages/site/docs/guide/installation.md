@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - **Node.js 22.21.0 or higher** (check with `node --version`)
-- At least 200MB free disk space (for ML model)
+- No compiler or build toolchain required on supported platforms — Lien's parser ships as prebuilt native binaries for macOS (arm64/x64), Linux (x64/arm64, glibc or musl, including Alpine), and Windows (x64), so there's no `node-gyp`, no Python/make/g++, no Xcode Command Line Tools step. Any other platform needs a one-time local build of the parser crate with the Rust toolchain
 - 8GB+ RAM recommended for large codebases
 
 ## Claude Code Plugin (Recommended)
