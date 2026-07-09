@@ -122,7 +122,6 @@ flowchart TD
     end
     
     subgraph "Field Validation"
-        CHUNK_SIZE{chunkSize > 0?}
         PORT{1024 ≤ port ≤ 65535?}
         TRANSPORT{stdio or socket?}
         PATH{Path relative?}
@@ -155,7 +154,6 @@ flowchart TD
     VAL_MCP_LEG --> WARN_LEGACY
     WARN_LEGACY --> COLLECT_ERRORS
     
-    VAL_CORE -.-> CHUNK_SIZE
     VAL_MCP -.-> PORT
     VAL_MCP -.-> TRANSPORT
     VAL_FRAMEWORKS -.-> PATH
@@ -276,15 +274,15 @@ const config = await service.load('/path/to/project');
 
 ```typescript
 const userInput = {
-  core: {
-    chunkSize: -10
+  mcp: {
+    port: 500
   }
 };
 
 const result = service.validatePartial(userInput);
 if (!result.valid) {
   console.error('Invalid config:', result.errors);
-  // ["core.chunkSize must be a positive number"]
+  // ["mcp.port must be between 1024 and 65535"]
 }
 
 if (result.warnings.length > 0) {
@@ -297,9 +295,9 @@ if (result.warnings.length > 0) {
 ```typescript
 const config: LienConfig = {
   ...defaultConfig,
-  core: {
-    ...defaultConfig.core,
-    chunkSize: 100
+  mcp: {
+    ...defaultConfig.mcp,
+    port: 8080
   }
 };
 
@@ -310,13 +308,6 @@ await service.save('/path/to/project', config);
 ```
 
 ## Validation Rules
-
-### Core Settings
-
-| Field | Type | Constraint | Warning |
-|-------|------|------------|---------|
-| chunkSize | number | > 0 | < 50: too small<br/>> 500: too large |
-| chunkOverlap | number | ≥ 0 | - |
 
 ### MCP Settings
 
