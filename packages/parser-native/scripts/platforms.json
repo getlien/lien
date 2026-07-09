@@ -17,7 +17,7 @@
       "nodePlatform": "darwin",
       "nodeArch": "x64",
       "libc": null,
-      "githubRunner": "macos-13"
+      "githubRunner": "macos-15-intel"
     },
     {
       "platform": "linux-x64-gnu",
