@@ -127,8 +127,8 @@ function loadNativeBinding(): typeof import('@liendev/parser-native') {
         `${process.platform}-${process.arch}: ${reason}\n` +
         `This usually means no prebuilt @liendev/parser-native package exists for your ` +
         `platform/arch and no local build was found. See docs/architecture/native-parser.md ` +
-        `for how to build one. (The legacy node-tree-sitter backend was removed in ` +
-        `@liendev/parser 0.60.0 -- see ADR-013 -- so there is no fallback.)`,
+        `for how to build one. (The legacy node-tree-sitter backend has been removed ` +
+        `(see ADR-013), so there is no fallback.)`,
     );
     throw nativeLoadError;
   }

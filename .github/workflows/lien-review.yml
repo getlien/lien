@@ -50,6 +50,20 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # reviewPullRequest() (packages/action -> @liendev/review) parses the
+      # PR's changed files via performChunkOnlyIndex/chunkFile, which now
+      # requires the native binding -- see ci.yml's build-and-test job for
+      # the same steps. Without this, ADR-013 Phase 4-B's fail-fast
+      # NativeBindingLoadError crashes every review run.
+      - name: Cache Rust build (parser-native)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/parser-native
+          shared-key: parser-native
+
+      - name: Build native parser
+        run: npm run build:native -w @liendev/parser-native
+
       - name: Build review engine + action
         run: npm run build -w @liendev/parser -w @liendev/core -w @liendev/review -w @liendev/action
 

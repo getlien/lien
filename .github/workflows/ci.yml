@@ -124,6 +124,20 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # `lien delta` parses every changed file via @liendev/parser's chunker,
+      # which now requires the native binding (see build-and-test's "Build
+      # native parser" step above) -- without this, ADR-013 Phase 4-B's
+      # fail-fast NativeBindingLoadError crashes the job instead of running
+      # the gate.
+      - name: Cache Rust build (parser-native)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/parser-native
+          shared-key: parser-native
+
+      - name: Build native parser
+        run: npm run build:native -w @liendev/parser-native
+
       - name: Build Parser, Core & CLI (required by lien delta)
         run: npm run build:core && npm run build -w packages/cli
 

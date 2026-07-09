@@ -56,8 +56,14 @@ RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 
 # Copy pre-built node_modules (with native addons already compiled)
+#
+# @liendev/parser has no packages/parser/node_modules/ to copy: ADR-013
+# Phase 4-B deleted node-tree-sitter and its 11 grammar packages, which were
+# parser's only non-hoisted deps -- the rest (@liendev/parser-native, glob,
+# ignore, p-limit) resolve cleanly into the root node_modules/ above. core
+# still gets its own line because better-sqlite3's native build can nest
+# there depending on the lockfile's resolution.
 COPY --from=pruner /app/node_modules/ node_modules/
-COPY --from=pruner /app/packages/parser/node_modules/ packages/parser/node_modules/
 COPY --from=pruner /app/packages/core/node_modules/ packages/core/node_modules/
 
 # Copy built dist and package manifests
