@@ -26,6 +26,10 @@
  * different `error-swallowing` FP shape (early null-guard before try/catch
  * read as unguarded deref). Both rules-iteration targets should be checked
  * before any `error-swallowing` prompt change ships.
+ *
+ * Calibration status: 9/10 empty on `moonshotai/kimi-k2.7-code`
+ * (2026-07-10, --calibrate 10, healthy capture; the single miss was a stray
+ * `incomplete-handling`-labeled finding, not the captured FP shape).
  */
 
 import type { FixtureAssertions } from '../../assertions.js';

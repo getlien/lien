@@ -273,6 +273,68 @@ function selectDiffSource(
   };
 }
 
+/**
+ * Extensions whose chunking goes through the native AST parser
+ * (@liendev/parser-native). Markdown (heading-chunked) and Vue (line-based)
+ * do NOT — they survive even when the native binding fails, which is exactly
+ * why a broken index looks like a markdown/Vue-only corpus. `.liquid` is
+ * omitted deliberately: it's uncertain whether it needs the binding, and a
+ * false positive here would abort a legitimate capture.
+ */
+const NATIVE_SOURCE_EXT =
+  /\.(ts|tsx|js|jsx|mjs|cjs|py|php|go|rs|java|kt|swift|rb|cs|scala|c|cpp|cc|cxx|h|hpp)$/;
+
+const NATIVE_BUILD_HINT =
+  '@liendev/parser-native is almost certainly not built in this worktree, so ' +
+  'every AST-language file was silently dropped (performChunkOnlyIndex still ' +
+  'reports success). Build it with `npm run build:native -w @liendev/parser-native` ' +
+  'and re-run.';
+
+/**
+ * Guard against a silent partial index. When the native parser can't load, the
+ * scan still finds every file but `chunkFile` throws per-file; those errors are
+ * swallowed and only markdown/Vue chunks survive, yet the overall result is
+ * `success: true`. Persisting that produces a fixture whose corpus is missing
+ * all source code — the agent then "reviews" a diff it has no context for.
+ * Fail loudly instead, on two independent signatures:
+ *   1. A changed source file that exists on disk and is non-empty but produced
+ *      zero chunks (the PR's own files are absent from the corpus).
+ *   2. Zero source-code chunks anywhere in the corpus, even when the PR only
+ *      touched docs — the repoChunks corpus is the agent's whole search space.
+ */
+async function assertIndexComplete(
+  repoChunks: Array<{ metadata: { file: string } }>,
+  changedFiles: string[],
+  worktree: string,
+): Promise<void> {
+  const indexed = new Set(repoChunks.map(c => toRepoRelative(c.metadata.file, worktree)));
+  const missing: string[] = [];
+  for (const f of changedFiles) {
+    const rel = toRepoRelative(f, worktree);
+    if (!NATIVE_SOURCE_EXT.test(rel) || indexed.has(rel)) continue;
+    let size = 0;
+    try {
+      size = (await fs.stat(join(worktree, rel))).size;
+    } catch {
+      continue; // deleted at this SHA: legitimately absent, skip
+    }
+    if (size > 0) missing.push(rel);
+  }
+  if (missing.length > 0) {
+    throw new Error(
+      `partial index: ${missing.length} changed source file(s) produced zero chunks ` +
+        `(e.g. ${missing.slice(0, 3).join(', ')}). ${NATIVE_BUILD_HINT}`,
+    );
+  }
+  const sourceChunks = repoChunks.filter(c => NATIVE_SOURCE_EXT.test(c.metadata.file)).length;
+  if (sourceChunks === 0) {
+    throw new Error(
+      `partial index: ${repoChunks.length} chunks captured but zero from AST source ` +
+        `files. ${NATIVE_BUILD_HINT}`,
+    );
+  }
+}
+
 /** Index the worktree and return both repo-wide chunks and the
  * subset belonging to the PR's changed files. */
 async function indexCapturedWorktree(worktree: string, changedFiles: string[]) {
@@ -283,6 +345,7 @@ async function indexCapturedWorktree(worktree: string, changedFiles: string[]) {
   }
   const repoChunks = indexResult.chunks;
   console.error(`[capture] indexed ${repoChunks.length} chunks`);
+  await assertIndexComplete(repoChunks, changedFiles, worktree);
 
   // Path-shape between the parser's chunk metadata and `gh pr view`'s file
   // list isn't guaranteed to match byte-for-byte (Windows backslashes,

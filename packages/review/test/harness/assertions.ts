@@ -101,6 +101,22 @@ export function expectToolCalled(tool: string, result: HarnessResult): void {
   }
 }
 
+/**
+ * Pass if ANY of the named tools was called. Use when the rule prompt offers
+ * the model a choice of tools for the same step (e.g. "get_files_context or
+ * read_file") — asserting on a single one fails correct runs on tool choice.
+ */
+export function expectAnyToolCalled(tools: string[], result: HarnessResult): void {
+  const called = result.toolCalls.some(entry => tools.some(tool => isToolCall(entry, tool)));
+  if (!called) {
+    throw new HarnessAssertionError(
+      `Tier 1: expected any of [${tools.join(', ')}] to be called. Calls observed: ` +
+        (result.toolCalls.length === 0 ? '(none)' : result.toolCalls.slice(0, 8).join('; ')),
+      1,
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Tier 2
 // ---------------------------------------------------------------------------
@@ -144,6 +160,7 @@ export const harness = {
   expectEmpty,
   expectFindingsCount,
   expectToolCalled,
+  expectAnyToolCalled,
   expectFindingMentions,
 };
 

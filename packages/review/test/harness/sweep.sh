@@ -8,9 +8,10 @@
 # Default models: moonshotai/kimi-k2.7-code google/gemini-3-flash-preview
 #   (Kimi is the prod default; Gemini 3 Flash is kept as the original
 #   calibration baseline some canaries were tuned against, for regression
-#   comparison. A couple of canaries are known-red on Kimi — see the
-#   README's "Known-red reconciliation" note — so this sweep's bar is "no
-#   regression vs main," not literal 9/10 on every fixture/model pair.)
+#   comparison. The former "known-red on Kimi" canaries were reconciled
+#   2026-07-10 — see the README's "Known-red reconciliation" note. The
+#   sweep's bar remains "no regression vs main," not literal 9/10 on every
+#   fixture/model pair.)
 #
 # A calibration that misses the 9/10 bar exits non-zero — that's expected
 # data, not a script error. So we deliberately do NOT use `set -e` here.

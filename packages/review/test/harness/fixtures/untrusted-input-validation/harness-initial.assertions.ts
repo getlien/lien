@@ -13,9 +13,11 @@
  *     packages/review/test/harness/fixtures/untrusted-input-validation/harness-initial.fixture.json \
  *     --sha 7cb0149
  *
- * Tier 1: rule fires + get_files_context is called (the rule still mandates
- * inspecting consumers of the parsed value — get_files_context reads in-memory
- * repoChunks, so unlike grep/read it is NOT blind in replay). The *discovery*
+ * Tier 1: rule fires + a consumer-inspection tool is called. The rule prompt
+ * mandates tracing the parsed value's consumers via "get_files_context (or
+ * read_file)", so the gate accepts either — asserting get_files_context alone
+ * failed correct Kimi runs purely on tool choice (7/10 on 2026-07-10; all 3
+ * misses called read_file 8x with Tier-2-passing findings). The *discovery*
  * half is now deterministic: a pre-computed <untrusted_input_sites> worklist is
  * injected (see packages/review/src/untrusted-input-signals.ts), which hands the
  * agent the parse sites and counters the silence-bias 0-findings failure mode.
@@ -33,7 +35,7 @@ const assertions: FixtureAssertions = {
   rule: 'untrusted-input-validation',
   expect: (result, h) => {
     h.expectRuleFired('untrusted-input-validation', result);
-    h.expectToolCalled('get_files_context', result);
+    h.expectAnyToolCalled(['get_files_context', 'read_file'], result);
     h.expectFindingMentions(
       [
         // Function/symbol names from the buggy code

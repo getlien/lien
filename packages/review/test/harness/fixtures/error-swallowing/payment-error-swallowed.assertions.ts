@@ -3,6 +3,9 @@
  * false; }. Throws are silently converted to a `false` result. Textbook
  * error-swallowing: the caller cannot distinguish "charge declined" from
  * "charge crashed".
+ *
+ * Calibration status: 10/10 on `moonshotai/kimi-k2.7-code` (2026-07-10,
+ * --calibrate 10, healthy capture).
  */
 
 import type { FixtureAssertions } from '../../assertions.js';

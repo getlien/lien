@@ -117,10 +117,10 @@ exists specifically to make that cycle ~30 minutes instead of hours.
   the repo root.
 - Workflow + failure modes: see `packages/review/test/harness/README.md`.
   Includes the end-to-end recipe for capturing a real-PR fixture, authoring
-  Tier 1/2 assertions, iterating, and calibrating. A couple of existing
-  canaries were calibrated on Gemini and are currently known-red on Kimi —
-  see the README's "Known-red reconciliation" note; that's tracked
-  separately, not a blocker for new rule work.
+  Tier 1/2 assertions, iterating, and calibrating. The formerly known-red
+  Kimi canaries were reconciled 2026-07-10 (see the README's "Known-red
+  reconciliation" note); before trusting any red fixture, confirm it's a
+  healthy capture — the native parser must be built or capture fails loudly.
 
 A rule is not shippable until its calibration meets the bar. CC mode is
 necessary but not sufficient.

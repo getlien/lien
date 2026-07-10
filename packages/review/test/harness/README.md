@@ -135,6 +135,13 @@ so the fixture is reproducible. A leftover git worktree at
 `/tmp/lien-capture-<sha>` is reused on re-runs (clean up with
 `git worktree remove --force <path>` when done).
 
+**Prerequisite: the native parser must be built** in the checkout you capture
+from (`npm run build:native -w @liendev/parser-native` — the binding is
+gitignored and per-worktree). Without it, every AST-language file silently
+chunks to zero and the fixture's corpus ends up markdown/Vue-only (~800
+chunks instead of ~5300). `capture-pr.ts` now fails loudly on that signature
+(`assertIndexComplete`) instead of writing a partial fixture.
+
 Hand-authored placeholder fixtures (small, committed) live alongside.
 
 ## Layout
@@ -269,31 +276,41 @@ This bar is what gates the harness from "shipped" to "trusted for the
 parked prompt-tweak issues" (#284, #286, #287, #288, #289, #302, #339, and
 the §4.3 "test pair" tweak in `.wip/retro-blast-radius.md`).
 
-### Known-red reconciliation: Gemini-calibrated canaries vs the Kimi default
+### Known-red reconciliation: resolved 2026-07-10
 
-The canary corpus predates the Kimi cutover (#592/#591) and some fixtures
-were calibrated (and last hit ≥ 9/10) against `google/gemini-3-flash-preview`,
-not the current prod default. Running `--calibrate 10` with no `--model`
-now exercises Kimi, and two canaries are **known-red** there:
-`stale-duplicate/model-partial-update` and
-`untrusted-input-validation/harness-initial` (2/9 rules — the corpus grew to
-9 with the `doc-truth` canary added 2026-07-04, itself calibrated fresh
-against Kimi at 10/10, so it isn't part of this known-red set). This is
-expected, already-understood drift from the Kimi cutover (#592) — not a
-regression introduced by this doc change, and not something this change
-attempts to fix. See `packages/review/src/defaults.ts` for the current
-default model.
+The corpus previously carried two canaries flagged "known-red on Kimi"
+(`stale-duplicate/model-partial-update` and
+`untrusted-input-validation/harness-initial`), attributed to drift from the
+Kimi cutover (#592). A dedicated reconciliation found neither was a model
+capability gap:
 
-Because of this, the bar for **touching an existing rule's prompt** is not
-"single-rule calibrate ≥ 9/10 on every canary in the repo" — it's ≥ 9/10 on
-the rule(s) you actually changed. The bar for **the full corpus** (e.g.
-before a model swap, or a change that touches shared prompt scaffolding used
-by multiple rules) is **no regression vs main's pass/fail pattern**, checked
-by re-running the full canary sweep (`sweep.sh`, or `--calibrate 10` with no
-`--rule` filter) on both branches and diffing which fixtures flip — not
-"every fixture is green." Do not spend calibration budget trying to push the
-two known-red fixtures above 9/10 as a side effect of unrelated work; that's
-tracked as its own fix separately.
+- **untrusted-input-validation** — the assertion demanded
+  `get_files_context` while the rule prompt offers "get_files_context (or
+  read_file)"; correct Kimi runs failed Tier 1 purely on tool choice
+  (7/10, all misses `read_file`-only with Tier-2-passing findings). Fixed by
+  `expectAnyToolCalled(['get_files_context', 'read_file'])`. **10/10 on Kimi**
+  (2026-07-10, healthy fixture).
+- **stale-duplicate** — red only when replayed against a *broken capture*: a
+  fixture whose corpus was markdown/Vue-only because the native parser wasn't
+  built at capture time, so `<stale_literal_candidates>` rendered "None" and
+  suppressed the finding. With a healthy capture the deterministic scan finds
+  the candidate and the rule is **10/10 on Kimi** (2026-07-10). `capture-pr.ts`
+  now fails loudly on partial-index captures (`assertIndexComplete`).
+
+Also reconciled the same day: `error-swallowing/scanall-null-guard-fp`'s
+header claimed it "will fail on the current prompt" — that was true on
+Gemini (2026-05-16) but the gap is closed on Kimi: **10/10 empty**, no prompt
+change needed. `payment-error-swallowed` **10/10**,
+`harness-gitignore-convention-fp` **9/10** (single miss was a stray
+`incomplete-handling`-labeled finding).
+
+The calibration bars are unchanged: **touching an existing rule's prompt**
+requires ≥ 9/10 on the rule(s) you actually changed. **Full-corpus changes**
+(model swap, shared prompt scaffolding) require **no regression vs main's
+pass/fail pattern**, checked by running the sweep (`sweep.sh`, or
+`--calibrate 10` with no `--rule` filter) on both branches and diffing which
+fixtures flip. Before trusting any red, verify the fixture is a healthy
+capture (the capture guard now enforces this at capture time).
 
 ## Runbook: §4.3 boundary-change "test pair" tweak
 
