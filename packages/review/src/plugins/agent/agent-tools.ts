@@ -163,7 +163,10 @@ export function listFunctions(input: Record<string, unknown>, ctx: AgentToolCont
       MAX_FUNCTIONS_LIMIT,
     );
 
-    let results = ctx.repoChunks.filter(c => !!c.metadata.symbolName);
+    // Exclude markdown 'doc' chunks: they carry a heading-breadcrumb symbolName
+    // but are prose sections, not real code symbols (mirrors core's
+    // matchesSymbolFilter, which review can't import across the package boundary).
+    let results = ctx.repoChunks.filter(c => !!c.metadata.symbolName && c.metadata.type !== 'doc');
 
     if (symbolType) {
       results = results.filter(c => c.metadata.symbolType === symbolType);
