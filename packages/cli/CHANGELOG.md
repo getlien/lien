@@ -1,5 +1,13 @@
 # @liendev/lien
 
+## 0.64.0
+
+### Patch Changes
+
+- Updated dependencies [c6abb00]
+  - @liendev/parser@0.64.0
+  - @liendev/core@0.64.0
+
 ## 0.63.0
 
 ### Patch Changes
