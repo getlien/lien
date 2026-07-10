@@ -125,6 +125,17 @@ export { computeContentHash, isHashAlgorithmCompatible } from './content-hash.js
 export { findTestAssociationsFromChunks } from './test-associations.js';
 
 // =============================================================================
+// GRAPH TRAVERSAL (generic bounded BFS — domain graphs build on this)
+// =============================================================================
+
+export { walkBounded } from './graph/bounded-bfs.js';
+export type {
+  BoundedBfsOptions,
+  BoundedBfsEdgeResult,
+  BoundedBfsResult,
+} from './graph/bounded-bfs.js';
+
+// =============================================================================
 // DEPENDENCY ANALYSIS
 // =============================================================================
 

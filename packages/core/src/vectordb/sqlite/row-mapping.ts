@@ -191,7 +191,7 @@ function buildMetadata(r: SqliteChunkRecord): SearchResult['metadata'] {
     file: r.file,
     startLine: r.startLine,
     endLine: r.endLine,
-    type: r.type as 'function' | 'class' | 'block',
+    type: r.type as ChunkMetadata['type'],
     language: r.language,
     symbolName: r.symbolName || undefined,
     symbolType: r.symbolType as 'function' | 'method' | 'class' | 'interface' | undefined,

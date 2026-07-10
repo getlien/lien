@@ -7,7 +7,7 @@ export interface ChunkMetadata {
   file: string;
   startLine: number;
   endLine: number;
-  type: 'function' | 'class' | 'block' | 'template';
+  type: 'function' | 'class' | 'block' | 'template' | 'doc';
   language: string;
   // Extracted symbols for direct querying
   symbols?: {
