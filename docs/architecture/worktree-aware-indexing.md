@@ -27,6 +27,7 @@ as a **read-only base** and store only a small per-worktree **overlay**:
 
 ```
 ~/.lien/indices/<main-repoId>/structural.db      ← BASE  (read-only, owned by main)
+~/.lien/indices/<main-repoId>/manifest.json      ← BASE manifest (also required for overlay eligibility)
 ~/.lien/indices/<worktree-repoId>/structural.db  ← OVERLAY (rows for diverged files)
 ~/.lien/indices/<worktree-repoId>/overlay.db     ← (see "One overlay DB" below)
 ```
@@ -50,8 +51,9 @@ The **main checkout root** is taken from the first `worktree <path>` line of
 `git worktree list --porcelain` — this is authoritative and also correct for
 bare-repo topologies (where deriving `dirname(commonDir)` would be wrong). We
 additionally require that the resolved main root is **not** the current root and
-that it **has an index** (`structural.db` exists). If either fails we fall back
-to standalone.
+that it **has a complete index** (both `structural.db` and `manifest.json`
+exist — see `resolveIndexStrategy` in `overlay-resolution.ts`). If either fails
+we fall back to standalone.
 
 ### Escape hatch
 
