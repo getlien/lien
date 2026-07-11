@@ -373,6 +373,21 @@ describe('findClaimEvidence — ranking', () => {
     expect(ev?.file).toBe('docs/notes.md');
   });
 
+  it('ranks a test file last even on an exact symbolName match (deliberate)', () => {
+    // A same-named helper defined in a test fixture is a collision, not the
+    // described behavior — the test-file demotion wins over SymbolMatch.
+    const claim = claimOf('`resolveIndexStrategy` gates overlay mode');
+    const chunks = [
+      chunk('packages/core/test/strategy.test.ts', 5, 'function resolveIndexStrategy() {}', {
+        symbolName: 'resolveIndexStrategy',
+        type: 'function',
+      }),
+      chunk('packages/core/src/strategy.ts', 84, 'calls resolveIndexStrategy() at startup'),
+    ];
+    const ev = findClaimEvidence(claim, chunks, new Set());
+    expect(ev?.file).toBe('packages/core/src/strategy.ts');
+  });
+
   it('never cites the claim’s own file as its evidence', () => {
     const claim = claimOf('`structural.db` exists', DOC);
     const chunks = [chunk(DOC, 2, 'the doc itself mentions structural.db here')];

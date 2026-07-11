@@ -380,9 +380,10 @@ const TEST_FILE_RE = /(\.test\.|\.spec\.|\/tests?\/|__tests__|\/spec\/)/;
  * Evidence-source ranking. A claim describes code the PR touched, so a changed
  * code file is the strongest locate; a changed sibling DOC is next (the
  * omission-claim case, e.g. an ADR's fuller enumeration); then any code, then
- * any doc; tests are last (a fixture rarely IS the described behavior). An
- * exact symbolName match beats every content match — that chunk is literally
- * the named symbol.
+ * any doc. Among NON-TEST files, an exact symbolName match beats every content
+ * match — that chunk is literally the named symbol. Test files always rank
+ * last, even on a symbolName match: a same-named helper in a test fixture is a
+ * collision, not the described behavior (see tierOf's early return).
  */
 const enum EvidenceTier {
   Test = 0,
