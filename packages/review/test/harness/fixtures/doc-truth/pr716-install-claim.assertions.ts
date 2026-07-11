@@ -59,9 +59,10 @@
  *      packages had shipped (the PR summary calls prebuilt binaries "now the
  *      selling point"), so a rigorous reviewer could correctly conclude the doc
  *      is accurate for published installs and NOT fire — a legitimate no-fire.
- * Calibration status: 2/10 on `moonshotai/kimi-k2.7-code` (2026-07-11,
- * --calibrate 10) — as predicted below. Acceptance fixture for the phase-2
- * <doc_claims> deterministic signal.
+ * Calibration status (2026-07-11, kimi-k2.7-code, --calibrate 10): 2/10
+ * pre-signal, 0/10 with the <doc_claims> worklist (within noise of each
+ * other) — as predicted below: the contradiction is partial and possibly
+ * correctly-declined at this SHA. Characterization fixture.
  *
  * Net: expect this to calibrate LOW on Kimi, possibly correctly-low. It is the
  * second-shakiest fixture (after pr687's truncation block) and is deliberately
