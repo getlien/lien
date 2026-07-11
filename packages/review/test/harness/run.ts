@@ -13,8 +13,13 @@
  *   --fixture <path>     run only this fixture
  *   --votes <k>          K-of-M voting per fixture (default 3)
  *   --calibrate <n>      run each fixture N times, report pass rate (the 9/10 bar)
+ *   --bail <n>           abort a fixture's calibration once N votes have failed
  *   --json               emit machine-readable JSON instead of text
  *   --trace <dir>        write per-vote trace JSON to <dir>/<rule>/<scenario>/vote-<N>.json
+ *
+ * Traces are ALWAYS written: with no `--trace`, every run dumps per-vote traces
+ * to `.wip/traces/<UTC-timestamp>-<rule-or-fixture>/` (repo-root-relative,
+ * gitignored) so "diagnose from an existing trace first" is always possible.
  *
  * Env: OPENROUTER_API_KEY required.
  */
@@ -47,6 +52,7 @@ interface CliFlags {
   fixture?: string;
   votes: number;
   calibrate?: number;
+  bail?: number;
   json: boolean;
   model?: string;
   traceDir?: string;
@@ -90,6 +96,9 @@ const VALUE_FLAG_SETTERS: Record<string, (f: CliFlags, value: string | undefined
   '--calibrate': (f, v) => {
     f.calibrate = requirePositiveInt('--calibrate', v);
   },
+  '--bail': (f, v) => {
+    f.bail = requirePositiveInt('--bail', v);
+  },
   '--model': (f, v) => {
     f.model = requireString('--model', v);
   },
@@ -124,14 +133,34 @@ function parseFlags(argv: string[]): CliFlags {
 function printUsage(): void {
   console.error(
     [
-      'Usage: tsx run.ts [--rule <id>] [--fixture <path>] [--votes K] [--calibrate N] [--json] [--trace <dir>]',
+      'Usage: tsx run.ts [--rule <id>] [--fixture <path>] [--votes K] [--calibrate N] [--bail N] [--json] [--trace <dir>]',
       '',
       '  Default: K=3 voting on every fixture under test/harness/fixtures/',
       '  --calibrate 10: runs N times and checks the 9/10 reliability bar',
+      '  --bail N:       abort a fixture calibration once N votes have failed',
       '  --trace <dir>:  write per-vote trace JSON to <dir>/<rule>/<scenario>/vote-<N>.json',
+      '                  (defaults to .wip/traces/<timestamp>-<rule-or-fixture>/)',
       '  Env: OPENROUTER_API_KEY required',
     ].join('\n'),
   );
+}
+
+/**
+ * The trace directory for this run. An explicit `--trace` wins; otherwise
+ * traces persist under `.wip/traces/<UTC-timestamp>-<rule-or-fixture>/`
+ * (repo-root-relative, gitignored) so the next "diagnose from a trace" is a
+ * copy-paste away instead of requiring a fresh paid run. Computed once per run
+ * so every fixture in the run shares one timestamped directory.
+ */
+function resolveTraceDir(flags: CliFlags): string {
+  if (flags.traceDir) return flags.traceDir;
+  const repoRoot = resolve(HERE, '../../../../');
+  const stamp = new Date()
+    .toISOString()
+    .replace(/\.\d{3}Z$/, 'Z')
+    .replace(/:/g, '-');
+  const slug = flags.rule ?? (flags.fixture ? basename(flags.fixture, '.fixture.json') : 'all');
+  return join(repoRoot, '.wip', 'traces', `${stamp}-${slug}`);
 }
 
 interface FixturePair {
@@ -219,32 +248,40 @@ async function runOneFixture(
   f: FixturePair,
   opts: RunnerOptions,
   flags: CliFlags,
+  traceDir: string,
 ): Promise<FixtureOutcome> {
   const assertions = await loadAssertions(f.assertionsPath);
   const label = `${f.rule}/${f.name}`;
+  // A characterization fixture measures a known frontier — render it neutrally
+  // and never let its miss gate the run's exit code.
+  const characterization = assertions.tags?.includes('characterization') ?? false;
+  const reportOpts = { characterization };
 
   if (flags.calibrate !== undefined) {
-    const result = await calibrate(f.fixturePath, assertions, opts, flags.calibrate);
-    if (flags.traceDir) {
-      await writeTraces(flags.traceDir, label, f.rule, f.name, result.runs);
-    }
+    const result = await calibrate(
+      f.fixturePath,
+      assertions,
+      opts,
+      flags.calibrate,
+      undefined,
+      flags.bail,
+    );
+    await writeTraces(traceDir, label, f.rule, f.name, result.runs);
     return {
-      passed: result.meetsReliabilityBar,
+      passed: characterization || result.meetsReliabilityBar,
       cost: result.totalCost,
-      jsonEntry: { label, mode: 'calibrate', result },
-      text: reportCalibrate(label, result),
+      jsonEntry: { label, mode: 'calibrate', characterization, result },
+      text: reportCalibrate(label, result, reportOpts),
     };
   }
   const k = assertions.votes ?? flags.votes;
   const result = await vote(f.fixturePath, assertions, opts, k);
-  if (flags.traceDir) {
-    await writeTraces(flags.traceDir, label, f.rule, f.name, result.votes);
-  }
+  await writeTraces(traceDir, label, f.rule, f.name, result.votes);
   return {
-    passed: result.agree && result.passes === result.votes.length,
+    passed: characterization || (result.agree && result.passes === result.votes.length),
     cost: result.totalCost,
-    jsonEntry: { label, mode: 'vote', result },
-    text: reportVote(label, result),
+    jsonEntry: { label, mode: 'vote', characterization, result },
+    text: reportVote(label, result, reportOpts),
   };
 }
 
@@ -290,15 +327,17 @@ function printSummary(
   totalCost: number,
   jsonReport: unknown[],
   flags: CliFlags,
+  traceDir: string,
 ): void {
   if (flags.json) {
     process.stdout.write(
-      JSON.stringify({ allPassed, totalCost, fixtures: jsonReport }, null, 2) + '\n',
+      JSON.stringify({ allPassed, totalCost, traceDir, fixtures: jsonReport }, null, 2) + '\n',
     );
     return;
   }
   console.log('');
   console.log(`Total cost: $${totalCost.toFixed(4)}`);
+  console.log(`Traces: ${traceDir}`);
   if (!allPassed) {
     console.log(
       '\n⚠️  One or more fixtures failed. Iterate prompts via /test-harness (CC mode), then re-calibrate here.',
@@ -318,19 +357,26 @@ async function main(): Promise<void> {
   const opts: RunnerOptions = { apiKey, model: flags.model };
   if (flags.model) console.error(`[harness] model: ${flags.model}`);
 
+  // Resolve (and pre-create) the trace directory once so every fixture in this
+  // run shares one timestamped folder, and print it up front so a follow-up
+  // diagnose-from-trace is a copy-paste away.
+  const traceDir = resolveTraceDir(flags);
+  await fs.mkdir(traceDir, { recursive: true });
+  console.error(`[harness] traces: ${traceDir}`);
+
   let allPassed = true;
   let totalCost = 0;
   const jsonReport: unknown[] = [];
 
   for (const f of fixtures) {
-    const outcome = await runOneFixture(f, opts, flags);
+    const outcome = await runOneFixture(f, opts, flags, traceDir);
     if (!outcome.passed) allPassed = false;
     totalCost += outcome.cost;
     if (flags.json) jsonReport.push(outcome.jsonEntry);
     else console.log(outcome.text);
   }
 
-  printSummary(allPassed, totalCost, jsonReport, flags);
+  printSummary(allPassed, totalCost, jsonReport, flags, traceDir);
   process.exit(allPassed ? 0 : 1);
 }
 

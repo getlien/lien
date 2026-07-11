@@ -569,6 +569,110 @@ describe('AgentReviewPlugin.present — incomplete review', () => {
   });
 });
 
+describe('AgentReviewPlugin.present — multiple summary findings', () => {
+  function primarySummary(overview: string): ReviewFinding {
+    return {
+      pluginId: 'agent-review',
+      filepath: '',
+      line: 0,
+      severity: 'info',
+      category: 'summary',
+      message: overview,
+      metadata: { riskLevel: 'low', overview, keyChanges: [] },
+    };
+  }
+
+  function appendedIncompleteSummary(overview: string): ReviewFinding {
+    return {
+      pluginId: 'agent-review',
+      filepath: '',
+      line: 0,
+      severity: 'warning',
+      category: 'summary',
+      message: overview,
+      metadata: { incomplete: true, stopReason: 'budget', overview },
+    };
+  }
+
+  it('renders a single summary byte-identically (no appended sections)', async () => {
+    const plugin = new AgentReviewPlugin();
+    const appendDescription = vi.fn();
+    const appendSummary = vi.fn();
+    const ctx = {
+      addAnnotations: vi.fn(),
+      appendDescription,
+      appendSummary,
+    } as unknown as PresentContext;
+
+    await plugin.present([primarySummary('All good')], ctx);
+
+    expect(appendDescription.mock.calls[0][0]).toBe(
+      '> [!NOTE]\n> **Low Risk**\n>\n> All good\n\n' +
+        '<sup>Reviewed by [Lien Review](https://lien.dev). Updates automatically on new commits.</sup>',
+    );
+    expect(appendSummary.mock.calls[0][0]).toBe('### Agent Review\n\n**Low Risk** — All good');
+  });
+
+  it('renders a second (appended) summary that the old first-only logic dropped', async () => {
+    const plugin = new AgentReviewPlugin();
+    const appendDescription = vi.fn();
+    const appendSummary = vi.fn();
+    const ctx = {
+      addAnnotations: vi.fn(),
+      appendDescription,
+      appendSummary,
+    } as unknown as PresentContext;
+
+    const docNotice = 'The documentation-truthfulness pass did not finish — it hit the budget.';
+    await plugin.present(
+      [primarySummary('Main overview'), appendedIncompleteSummary(docNotice)],
+      ctx,
+    );
+
+    // Primary block still drives the callout (low risk → NOTE), and the second
+    // summary surfaces as its own ⚠️ warning section — the #733 trap fixed.
+    const description = appendDescription.mock.calls[0][0] as string;
+    expect(description).toContain('> [!NOTE]');
+    expect(description).toContain('> **Low Risk**');
+    expect(description).toContain('> Main overview');
+    expect(description).toContain(`⚠️ ${docNotice}`);
+
+    const summary = appendSummary.mock.calls[0][0] as string;
+    expect(summary).toContain('**Low Risk** — Main overview');
+    expect(summary).toContain(`⚠️ **Review incomplete** — ${docNotice}`);
+  });
+
+  it('renders a second non-incomplete summary as a plain appended paragraph', async () => {
+    const plugin = new AgentReviewPlugin();
+    const appendDescription = vi.fn();
+    const appendSummary = vi.fn();
+    const ctx = {
+      addAnnotations: vi.fn(),
+      appendDescription,
+      appendSummary,
+    } as unknown as PresentContext;
+
+    const second: ReviewFinding = {
+      pluginId: 'agent-review',
+      filepath: '',
+      line: 0,
+      severity: 'info',
+      category: 'summary',
+      message: 'A secondary note.',
+      metadata: { overview: 'A secondary note.' },
+    };
+    await plugin.present([primarySummary('Main overview'), second], ctx);
+
+    const description = appendDescription.mock.calls[0][0] as string;
+    expect(description).toContain('A secondary note.');
+    expect(description).not.toContain('⚠️ A secondary note.');
+    const summary = appendSummary.mock.calls[0][0] as string;
+    // Plain paragraph, not a "Review incomplete" line, not a duplicated Risk line.
+    expect(summary).toContain('\n\nA secondary note.');
+    expect(summary).not.toContain('Review incomplete');
+  });
+});
+
 describe('clampText (finding free-text cap)', () => {
   it('leaves short text unchanged', () => {
     expect(clampText('short message')).toBe('short message');

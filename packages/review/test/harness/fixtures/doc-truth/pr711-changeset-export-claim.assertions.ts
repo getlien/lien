@@ -55,7 +55,9 @@
  * so a lenient reviewer may read "otherwise unchanged" as "other than the
  * disclosed removals" and stay quiet; the sharper, more defensible finding is
  * that a removed public export is breaking and the patch/"unchanged" framing
- * understates it. NOT tagged canary until a calibration baseline exists.
+ * understates it. Tagged `characterization` (not canary): the model declines it
+ * consistently and defensibly, so the harness renders it as a non-gating `~`
+ * line and excludes it from the exit code.
  */
 
 import type { FixtureAssertions } from '../../assertions.js';
@@ -100,7 +102,7 @@ const assertions: FixtureAssertions = {
   },
   votes: 3,
   passThreshold: 9,
-  tags: [],
+  tags: ['characterization'],
 };
 
 export default assertions;

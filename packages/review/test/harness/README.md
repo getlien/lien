@@ -256,9 +256,24 @@ const assertions: FixtureAssertions = {
 export default assertions;
 ```
 
-`tags: ['canary']` marks a fixture as a drift signal — when multiple
-canaries flip simultaneously after a model update, the harness should be
-re-baselined under human review, not silently re-pinned.
+### Fixture tags — canary vs characterization
+
+`tags` classify what a fixture's pass/fail *means*:
+
+- **`['canary']`** — a drift signal, certified ≥9/10 on the prod model. When
+  multiple canaries flip simultaneously after a model update, the harness
+  should be re-baselined under human review, not silently re-pinned. Canaries
+  gate: a red canary fails the run.
+- **`['characterization']`** — measures a known frontier (a shape the prod
+  model handles unreliably or declines defensibly) and does **not** gate. The
+  harness renders it as a neutral `~ <label> — measured N/M (non-gating, see
+  fixture header)` line instead of a red `✗`, and its result never contributes
+  to the process exit code. The fixture's header records the measured rate and
+  why iteration stopped; don't spend calibration budget pushing it green. The
+  four doc-truth frontier fixtures (`pr667-*`, `pr687-*`, `pr711-*`, `pr716-*`)
+  carry this tag.
+- **untagged** — an ordinary fixture; it gates like a canary but isn't a
+  drift-signal alarm.
 
 ## The 9/10 reliability bar (#538)
 
@@ -420,15 +435,21 @@ If you can't tell what's happening, `--json` is your friend — pipe through
 
 When the `failureMessage` alone doesn't tell you why a vote bailed —
 typically `Tier 1: ... (no findings)` where the model investigated but
-decided silence — capture per-vote traces and compare a passing vote to
+decided silence — read the per-vote traces and compare a passing vote to
 a failing one.
+
+**Traces persist by default.** Every run writes them, even without `--trace`,
+to `.wip/traces/<UTC-timestamp>-<rule-or-fixture>/` (repo-root-relative;
+`.wip/` is gitignored). The run prints the directory (`Traces: …`) on exit, so
+diagnosing the last run never needs a fresh paid call. Pass `--trace <dir>` to
+write somewhere explicit instead:
 
 ```bash
 npm run test:harness -w @liendev/review -- \
   --rule concurrency-race --calibrate 10 --trace /tmp/cal-trace
 ```
 
-Each vote produces `/tmp/cal-trace/<rule>/<scenario>/vote-<N>.json`
+Each vote produces `<trace-dir>/<rule>/<scenario>/vote-<N>.json`
 containing the rendered system prompt, the rendered initial message, the
 full per-turn assistant response (including reasoning prose outside the
 JSON fence — normally stripped), and tool-call inputs + outputs.
@@ -484,9 +505,11 @@ fixture writes ~100-500 KB to disk.
 real money, not a free inner loop (~$0.05-0.50/fixture, ~$5-8 for a full
 corpus sweep). Before spending another round:
 
-- **Diagnose from existing `--trace` dumps first** (free) — most "why did
-  this fail" questions are answerable from a trace already on disk without
-  another network call.
+- **Diagnose from existing traces first** (free) — every run now persists
+  per-vote traces (see "Debugging a failing vote" below), so a trace of the
+  last run is *always* on disk. Most "why did this fail" questions are
+  answerable from it without another network call; the run prints the exact
+  trace directory (`Traces: …`) so it's a copy-paste away.
 - **Stop after one non-converging iteration.** If a prompt/tool-fallback
   change doesn't move the pass rate, don't chain another calibration sweep on
   the same hypothesis — reassess and report the cost spent so far before the

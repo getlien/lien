@@ -103,22 +103,64 @@ async function runOnce(
   }
 }
 
+/** Wave size for `--bail` chunked dispatch. Kept small so an early abort saves
+ * most of the batch while still overlapping a few calls per round-trip. */
+export const BAIL_WAVE_SIZE = 3;
+
 /**
- * Run K calls in parallel. Transient LLM errors are caught inside runOnce
- * and become passed=false results, so flaky network/5xx doesn't poison the
- * batch. Setup errors (fixture schema, programmer bugs) DO propagate and
- * reject the whole calibration — that's intentional, those should surface
- * loudly rather than masquerade as model flakiness across N votes.
- * OpenRouter handles 10 concurrent OpenAI-compat requests without rate-limit
- * issues at our volume.
+ * Dispatch `count` votes, optionally aborting early once `bail` failures land.
+ *
+ * `voteFn` is a thunk producing one AssertedRun — injected so the abort logic
+ * is unit-testable with fake fast/slow/failing vote fns and zero LLM spend.
+ *
+ * With no `bail`, all votes dispatch at once via `Promise.all` — byte-identical
+ * to the historical behavior (OpenRouter handles our concurrency fine). With
+ * `bail`, votes run in waves of `waveSize`; after each wave, if the cumulative
+ * failure count has reached `bail`, dispatch stops and `aborted` is true when
+ * votes were left unrun. A wave in flight always finishes (we don't cancel
+ * in-flight requests), so up to `waveSize - 1` extra votes may land past the
+ * bail threshold — an accepted tradeoff for a simple chunked implementation.
+ */
+export async function runVotesWithBail(
+  voteFn: () => Promise<AssertedRun>,
+  count: number,
+  bail?: number,
+  waveSize: number = BAIL_WAVE_SIZE,
+): Promise<{ runs: AssertedRun[]; aborted: boolean }> {
+  if (bail === undefined) {
+    const runs = await Promise.all(Array.from({ length: count }, () => voteFn()));
+    return { runs, aborted: false };
+  }
+  const runs: AssertedRun[] = [];
+  let failures = 0;
+  while (runs.length < count) {
+    const size = Math.min(waveSize, count - runs.length);
+    const wave = await Promise.all(Array.from({ length: size }, () => voteFn()));
+    runs.push(...wave);
+    failures += wave.filter(r => !r.passed).length;
+    if (failures >= bail) {
+      return { runs, aborted: runs.length < count };
+    }
+  }
+  return { runs, aborted: false };
+}
+
+/**
+ * Run K calls. Transient LLM errors are caught inside runOnce and become
+ * passed=false results, so flaky network/5xx doesn't poison the batch. Setup
+ * errors (fixture schema, programmer bugs) DO propagate and reject the whole
+ * calibration — that's intentional, those should surface loudly rather than
+ * masquerade as model flakiness across N votes. OpenRouter handles 10
+ * concurrent OpenAI-compat requests without rate-limit issues at our volume.
  */
 async function runMany(
   fixturePath: string,
   assertions: FixtureAssertions,
   opts: RunnerOptions,
   count: number,
-): Promise<AssertedRun[]> {
-  return Promise.all(Array.from({ length: count }, () => runOnce(fixturePath, assertions, opts)));
+  bail?: number,
+): Promise<{ runs: AssertedRun[]; aborted: boolean }> {
+  return runVotesWithBail(() => runOnce(fixturePath, assertions, opts), count, bail);
 }
 
 export async function vote(
@@ -127,7 +169,7 @@ export async function vote(
   opts: RunnerOptions,
   k: number = 3,
 ): Promise<VoteResult> {
-  const votes = await runMany(fixturePath, assertions, opts, k);
+  const { runs: votes } = await runMany(fixturePath, assertions, opts, k);
   const passes = votes.filter(v => v.passed).length;
   const agree = passes === 0 || passes === k;
   const totalCost = votes.reduce((sum, v) => sum + v.cost, 0);
@@ -141,6 +183,12 @@ export interface CalibrateResult {
   totalCost: number;
   /** Whether the 9/10 bar from #538 was met. Bar threshold scales with N. */
   meetsReliabilityBar: boolean;
+  /** The N runs requested (may exceed runs.length when `--bail` aborted early). */
+  requested: number;
+  /** True when `--bail` stopped dispatch before all N runs completed. */
+  aborted: boolean;
+  /** The `--bail` failure threshold that was in effect, if any. */
+  bail?: number;
 }
 
 export async function calibrate(
@@ -149,16 +197,22 @@ export async function calibrate(
   opts: RunnerOptions,
   n: number = 10,
   passThreshold?: number,
+  bail?: number,
 ): Promise<CalibrateResult> {
   const threshold = passThreshold ?? assertions.passThreshold ?? Math.max(1, Math.ceil(n * 0.9));
-  const runs = await runMany(fixturePath, assertions, opts, n);
+  const { runs, aborted } = await runMany(fixturePath, assertions, opts, n, bail);
   const passes = runs.filter(r => r.passed).length;
   const totalCost = runs.reduce((sum, r) => sum + r.cost, 0);
   return {
     runs,
     passes,
-    passRate: passes / n,
+    // Rate over the runs that actually happened; equals passes/n unless aborted.
+    passRate: passes / (runs.length || n),
     totalCost,
-    meetsReliabilityBar: passes >= threshold,
+    // An aborted run can never certify the bar — it stopped on failures.
+    meetsReliabilityBar: !aborted && passes >= threshold,
+    requested: n,
+    aborted,
+    bail,
   };
 }

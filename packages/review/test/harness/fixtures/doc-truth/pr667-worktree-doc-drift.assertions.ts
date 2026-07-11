@@ -76,9 +76,10 @@
  *   occasional evidence-ignoring read_file flood exhausting the pass budget.
  *   Model-judgment frontier on Kimi; further prompt iteration showed
  *   diminishing returns and was stopped per cost discipline.
- * No canary tag: this fixture measures the frontier (~6-7/10), it does not
- * gate. The feature itself is certified on the canary corpus (pr658 10/10,
- * accurate-doc 10/10 precision with the strict language).
+ * Tagged `characterization` (not canary): this fixture measures the frontier
+ * (~6-7/10), so the harness renders it as a non-gating `~` line and excludes it
+ * from the exit code. The feature itself is certified on the canary corpus
+ * (pr658 10/10, accurate-doc 10/10 precision with the strict language).
  */
 
 import type { FixtureAssertions } from '../../assertions.js';
@@ -121,7 +122,7 @@ const assertions: FixtureAssertions = {
   },
   votes: 3,
   passThreshold: 9,
-  tags: [],
+  tags: ['characterization'],
 };
 
 export default assertions;

@@ -68,12 +68,15 @@ gitignored, regenerated per-machine via `capture-pr.ts <pr> <out> [--sha]`.
   is a drift signal. The bar for touching a rule's prompt is ≥9/10 on that
   rule's canaries; shared scaffolding (output format, injected sections all
   rules see) needs a full-corpus no-regression sweep.
-- **Characterization fixtures** (no tag): measure a known frontier and don't
-  gate. Their headers record the measured rate, the trace-verified failure
-  mode, and why iteration stopped. Never spend calibration budget pushing a
-  characterization fixture "green as a side effect" — read its header first;
-  some (e.g. disclosed-removal changeset claims) are *correctly* declined by
-  the model.
+- **Characterization fixtures** (`tags: ['characterization']`): measure a known
+  frontier and don't gate. The harness renders them as a neutral `~ … measured
+  N/M (non-gating, see fixture header)` line rather than a red `✗`, and their
+  result is excluded from the process exit code — so a run where only
+  characterization fixtures miss their historical rate still exits 0. Their
+  headers record the measured rate, the trace-verified failure mode, and why
+  iteration stopped. Never spend calibration budget pushing a characterization
+  fixture "green as a side effect" — read its header first; some (e.g.
+  disclosed-removal changeset claims) are *correctly* declined by the model.
 
 ## The deterministic-signal pattern — and its limit
 
@@ -128,6 +131,7 @@ competition is the bottleneck.
 - Deterministic signals: `packages/review/src/*-signals.ts`
 - The doc-truth second pass: `packages/review/src/plugins/agent/doc-truth-pass.ts`
 - Calibration driver: `packages/review/test/harness/run.ts` (`--calibrate`,
-  `--trace`, `--fixture`, `--rule`, `--model`)
+  `--trace`, `--fixture`, `--rule`, `--model`, `--bail`; traces persist to
+  `.wip/traces/` by default)
 - Offline re-scoring: `packages/review/test/harness/assert-cli.ts`
 - Prompt rendering without an LLM: `packages/review/test/harness/build-prompts.ts`
