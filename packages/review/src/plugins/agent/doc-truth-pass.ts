@@ -72,7 +72,16 @@ const DOC_PASS_INTRO =
   'excerpt (or locate the described code via get_files_context when no excerpt ' +
   'is attached), and emit a doc-truth finding only when the code CONTRADICTS the ' +
   'claim — or when the diff changed the behavior and left the prose describing ' +
-  'the OLD behavior. A claim the code confirms needs no finding.';
+  'the OLD behavior. A claim the code confirms needs no finding.\n\n' +
+  'Compare claims STRICTLY, not charitably. When a claim enumerates conditions, ' +
+  'requirements, gates, or a key/file list, the enumeration must match the code ' +
+  'EXACTLY: a condition the code checks but the claim omits IS a contradiction ' +
+  '(the doc tells readers a weaker rule than the code enforces), and so is a ' +
+  'condition the claim states but the code does not check. "Close enough", ' +
+  '"covers the main case", or "the extra condition is an implementation detail" ' +
+  'are NOT confirmations — if the enumerations differ, report it and cite both ' +
+  'sides. Descriptive prose without a checkable enumeration or behavior stays ' +
+  'held to the ordinary contradicts-or-confirms standard.';
 
 // ---------------------------------------------------------------------------
 // Gate
