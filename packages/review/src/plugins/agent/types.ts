@@ -45,6 +45,12 @@ export interface AgentConfig {
   requestTimeoutMs?: number;
   /** Inject transitive blast radius into the agent's initial message. */
   blastRadius?: BlastRadiusConfig;
+  /**
+   * Run the dedicated claims-only doc-truth second pass on doc-touching PRs
+   * (issue #732). Default true; set false (or env LIEN_REVIEW_DOC_PASS=0) to
+   * skip it and run the single main pass only.
+   */
+  docTruthPass?: boolean;
 }
 
 /** A single finding produced by the agent during review. */
@@ -152,6 +158,13 @@ export interface ToolInvocation {
  */
 export interface TurnTrace {
   turnNumber: number;
+  /**
+   * Which review pass produced this turn. Absent means the main pass; the
+   * dedicated doc-truth second pass (issue #732) stamps its appended turns
+   * `'doc-truth'` so a merged trace stays interpretable. Optional/additive —
+   * existing consumers ignore it.
+   */
+  phase?: 'main' | 'doc-truth';
   /** Full assistant message content, captured before extractResponse. */
   responseText: string;
   /**

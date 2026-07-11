@@ -68,7 +68,17 @@
  *   bug-rich PR the model samples a few claims and rarely reaches this one.
  *   Remaining gap is per-claim verification COST, not discovery: fixing it
  *   needs claim->code evidence pre-fetch (#729 stays open for that design).
- * No canary tag until this fixture clears the bar.
+ * - 5/10 with the DEDICATED doc-truth pass (#732/#733): the pass runs every
+ *   vote, competition eliminated; residual = lenient equivalence ("has an
+ *   index" judged consistent with the two-file gate ~50%).
+ * - 7/10 after the strict-enumeration intro; 6/10 after adding budget
+ *   discipline (statistically flat — plateau). Residuals: ~1 lenient vote +
+ *   occasional evidence-ignoring read_file flood exhausting the pass budget.
+ *   Model-judgment frontier on Kimi; further prompt iteration showed
+ *   diminishing returns and was stopped per cost discipline.
+ * No canary tag: this fixture measures the frontier (~6-7/10), it does not
+ * gate. The feature itself is certified on the canary corpus (pr658 10/10,
+ * accurate-doc 10/10 precision with the strict language).
  */
 
 import type { FixtureAssertions } from '../../assertions.js';
