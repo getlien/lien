@@ -118,3 +118,34 @@ describe('performChunkOnlyIndex parse-stage concurrency cap', () => {
     }
   });
 });
+
+describe('performChunkOnlyIndex per-file error handling', () => {
+  let testDir: string;
+
+  beforeEach(async () => {
+    testDir = await createTestDir();
+  });
+
+  afterEach(async () => {
+    await cleanupTestDir(testDir);
+  });
+
+  it('skips an unreadable file (ENOENT) without failing the whole run', async () => {
+    // Only a native-binding LOAD failure is fatal (see
+    // chunk-only-index-native-load.test.ts). An ordinary per-file error --
+    // here a missing file whose read throws ENOENT -- is swallowed per-file
+    // so one bad file never aborts the index.
+    const [validFile] = await writeTestFiles(testDir, 1);
+    const missingFile = path.join(testDir, 'does-not-exist.ts');
+
+    const result = await performChunkOnlyIndex(testDir, {
+      filesToIndex: [validFile, missingFile],
+    });
+
+    expect(result.success).toBe(true);
+    // Both files were attempted; the missing one contributed no chunks but
+    // did not abort the run.
+    expect(result.filesIndexed).toBe(2);
+    expect(result.chunksCreated).toBeGreaterThan(0);
+  });
+});
