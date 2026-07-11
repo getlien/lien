@@ -5,6 +5,13 @@
  * and the code it describes are in the same diff, so the claim is verifiable
  * from in-prompt material alone.
  *
+ * Calibration status: 0/10 on `moonshotai/kimi-k2.7-code` (2026-07-11,
+ * --calibrate 10). Traces show the model DOES investigate (greps remaining
+ * EmbeddingError references, checks dependents in every vote) and then
+ * declines to report — a defensible read, since the changeset's first
+ * sentence discloses the removal and "otherwise" can honestly scope it out.
+ * Ambiguous-on-merits; kept as a characterization fixture, not a canary.
+ *
  * THE PLANTED CLAIM (touched prose, .changeset/remove-embedding-error.md):
  *   "Removed the unused embeddings-era `EmbeddingError` class and its
  *    `EMBEDDING_MODEL_FAILED`/`EMBEDDING_GENERATION_FAILED` error codes. …

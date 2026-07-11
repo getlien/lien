@@ -6,6 +6,13 @@
  * Note in docs/architecture/config-system.md — introducing a doc-vs-doc
  * inconsistency between the two, both in the same diff.
  *
+ * Calibration status: 1/10 on `moonshotai/kimi-k2.7-code` (2026-07-11,
+ * --calibrate 10, after the smallest-first budget fix put the claim in the
+ * prompt). Omission-shaped claims (the Note doesn't say embeddings keys
+ * crash, it just doesn't mention them) are the weakest doc-truth shape for
+ * an initiative-driven check. Acceptance fixture for the phase-2
+ * <doc_claims> deterministic signal, not a canary.
+ *
  * THE PLANTED CLAIM (touched prose, docs/architecture/config-system.md — the
  * "> **Note:**" that config-system.md links to ADR-011 from):
  *   "Existing configs that name a retired backend (`backend: "lancedb"` /
