@@ -432,6 +432,12 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('<output_format>');
     expect(prompt).toContain('"ruleId"');
 
+    // ruleId is required and enumerates exactly the active rule ids (#724)
+    expect(prompt).toContain('"ruleId": "REQUIRED — exactly one of: ');
+    for (const rule of BUILTIN_RULES) {
+      expect(prompt).toContain(rule.id);
+    }
+
     // Structural analysis rule
     expect(prompt).toContain('Structural');
     expect(prompt).toContain('get_files_context');
@@ -502,6 +508,18 @@ describe('buildSystemPrompt', () => {
     const prompt = buildSystemPrompt(rules);
     expect(prompt).toContain('<output_format>');
     expect(prompt).toContain('"ruleId"');
+    // No active rules to enumerate — falls back to unenumerated-but-required
+    expect(prompt).toContain('"ruleId": "REQUIRED — the id of the rule');
+  });
+
+  it('enumerates only the active rule ids in the ruleId line', () => {
+    const subset = BUILTIN_RULES.filter(
+      r => r.id === 'structural-analysis' || r.id === 'edge-case-sweep',
+    );
+    const prompt = buildSystemPrompt({ active: subset, skipped: [] });
+    expect(prompt).toContain(
+      '"ruleId": "REQUIRED — exactly one of: structural-analysis, edge-case-sweep"',
+    );
   });
 
   it('always includes self-review and bad examples', () => {

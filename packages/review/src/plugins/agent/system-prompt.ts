@@ -72,7 +72,20 @@ Do NOT report:
 - Suggestions to update PR descriptions, comments, or documentation
 </rules>`;
 
-const OUTPUT_FORMAT = `<output_format>
+/**
+ * The output-format section, assembled per prompt so the \`ruleId\` field can
+ * enumerate the rules actually active for this review. \`ruleId\` used to be
+ * "optional", and Kimi intermittently omitted it — the finding was correct but
+ * lost its rule attribution (issue #724; a 12-sample replay A/B showed the
+ * required+enumerated wording reaches 100% presence with zero invalid ids and
+ * no change in finding quality).
+ */
+function buildOutputFormat(activeRuleIds: string[]): string {
+  const ruleIdLine =
+    activeRuleIds.length > 0
+      ? `REQUIRED — exactly one of: ${activeRuleIds.join(', ')}`
+      : `REQUIRED — the id of the rule this finding belongs to`;
+  return `<output_format>
 After investigation, output a JSON block in a \`\`\`json code fence:
 
 {
@@ -87,7 +100,7 @@ After investigation, output a JSON block in a \`\`\`json code fence:
       "message": "1–2 sentences with the concrete trigger and wrong behavior: input X → returns Y → should return Z. Keep exact values/conditions; cut the investigation story.",
       "suggestion": "The fix, ideally a short code snippet. No prose walkthrough.",
       "evidence": "One line: the specific check that found this",
-      "ruleId": "optional — which rule triggered this (e.g., 'edge-case-sweep', 'concurrency-race')"
+      "ruleId": "${ruleIdLine}"
     }
   ],
   "summary": {
@@ -101,6 +114,7 @@ If you find no issues, return empty findings with a low-risk summary. Do not fab
 
 Keep \`message\`, \`suggestion\`, and \`evidence\` tight — a few sentences at most each. Cut the investigation narrative and your reasoning, but ALWAYS keep the concrete specifics (exact inputs, values, boundary conditions, before→after states) that make the finding actionable.
 </output_format>`;
+}
 
 // ---------------------------------------------------------------------------
 // Dynamic Prompt Assembly
@@ -148,7 +162,7 @@ ${examplesSection}
 
 ${RULES_SECTION}
 
-${OUTPUT_FORMAT}`;
+${buildOutputFormat(rules.active.map(r => r.id))}`;
 }
 
 /** Max characters for the diff section before truncation. */
