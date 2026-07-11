@@ -238,6 +238,14 @@ function processDiffLine(state: ScanState, raw: string, file: string): void {
 
   const hunk = raw.match(HUNK_HEADER_RE);
   if (hunk) {
+    // List state is deliberately RESET at every hunk header and re-derived
+    // from the header's section text only. Hunks are non-contiguous: the
+    // unseen gap between them can contain the list's closing `}`, so carrying
+    // `inList` across a boundary would misparse unrelated `-  Foo,` lines in
+    // later hunks as removed list members (precision loss). The cost is a
+    // rare recall miss — a single export list spanning multiple hunks whose
+    // later header carries no section text — which the rendered block's
+    // "the scan can miss exotic shapes" caveat already covers.
     state.inListOld = state.inListNew = updateListState(false, hunk[1]);
     return;
   }
