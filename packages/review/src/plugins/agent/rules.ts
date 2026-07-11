@@ -750,8 +750,20 @@ MANDATORY protocol when this rule is active:
 }`,
   triggers: {
     // Guidance surfaces (matched against allChangedFiles, so the invisible
-    // .sh/.mdc/CLAUDE.md cases still activate the rule)...
-    filePatterns: ['**/CLAUDE.md', 'plugins/**', '.cursor/**', '**/*.mdc'],
+    // .sh/.mdc/CLAUDE.md cases still activate the rule), plus the project
+    // documentation surfaces the <guidance_surface_changes> section passes
+    // through: architecture/design docs and ADRs, the user-guide site, and
+    // changeset entries whose public-API claims must match the diff. Kept in
+    // lockstep with GUIDANCE_SURFACE_MATCHERS in guidance-surface-signals.ts.
+    filePatterns: [
+      '**/CLAUDE.md',
+      'plugins/**',
+      '.cursor/**',
+      '**/*.mdc',
+      'docs/**',
+      'packages/site/docs/**',
+      '.changeset/**',
+    ],
     // ...OR claim-shaped prose anywhere in the diff (doc comments/docstrings in
     // otherwise-analyzable code, e.g. the schema.ts miss on PR #658).
     keywords: [
