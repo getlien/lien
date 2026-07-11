@@ -3,6 +3,7 @@ import path from 'path';
 import pLimit from 'p-limit';
 import type { CodeChunk } from './types.js';
 import { chunkFile } from './chunker.js';
+import { NativeBindingLoadError } from './ast/parser.js';
 import { scanCodebase } from './scanner.js';
 import { detectEcosystems, getEcosystemExcludePatterns } from './ecosystem-presets.js';
 import { extractRepoId } from './utils/repo-id.js';
@@ -88,6 +89,17 @@ async function chunkFileForCollection(
     }
     return false;
   } catch (error) {
+    // A native-binding load failure is systemic, not per-file: the binding
+    // can't load for ANY file, so every AST-language file throws the same
+    // error here. Swallowing it per-file would let performChunkOnlyIndex
+    // report success on a corpus containing only the format-specific chunkers'
+    // output (markdown/Liquid/Vue) -- a silently partial index. Re-throw so
+    // the run fails loudly; performChunkOnlyIndex's outer handler catches it
+    // once and surfaces the actionable message. Mirrors the same re-throw in
+    // chunker.ts; see NativeBindingLoadError in ast/parser.ts.
+    if (error instanceof NativeBindingLoadError) {
+      throw error;
+    }
     console.error(
       `[parser] Failed to process ${file}: ${error instanceof Error ? error.message : String(error)}`,
     );
