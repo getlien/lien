@@ -57,7 +57,8 @@
  * passes assert-cli exit 0). Also the weakest contradiction on the merits: the
  * Note doesn't claim embeddings keys crash, it just omits them, so even fully
  * in-prompt a strict reviewer might read it as "accurate as far as it goes".
- * Deliberately NOT tagged canary.
+ * Tagged `characterization` (not canary): the harness renders it as a
+ * non-gating `~` line and excludes it from the exit code.
  */
 
 import type { FixtureAssertions } from '../../assertions.js';
@@ -101,7 +102,7 @@ const assertions: FixtureAssertions = {
   },
   votes: 3,
   passThreshold: 9,
-  tags: [],
+  tags: ['characterization'],
 };
 
 export default assertions;

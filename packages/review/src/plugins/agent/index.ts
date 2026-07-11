@@ -184,10 +184,13 @@ export class AgentReviewPlugin implements ReviewPlugin {
 
     const pluginId = this.id;
     const agentFindings = mergeDocTruthFindings(result.findings, docResult?.findings ?? []);
-    // The render path consumes ONE summary finding, so doc-pass state (an
-    // unfinished pass, error-severity doc findings) must be folded into the
-    // main result BEFORE the notices are appended — a second summary finding
-    // would never render.
+    // Fold doc-pass result state (an unfinished pass, error-severity doc
+    // findings) into the main result before the notices are appended: it lifts
+    // the PRIMARY summary's risk level for doc-truth errors, and marks the run
+    // incomplete so `appendIncompleteNotice` emits the doc-pass notice. The
+    // render path (`present`/`formatCheckSummary`) now renders every summary
+    // finding, so that appended notice is visible as its own section — this
+    // fold shapes the primary block, it no longer has to be the only summary.
     mergeDocPassIntoResult(result, docResult, agentFindings);
     const findings = agentFindings.map(f => mapToReviewFinding(f, pluginId));
     appendSummaryFinding(findings, pluginId, result.summary);
@@ -234,7 +237,10 @@ export class AgentReviewPlugin implements ReviewPlugin {
       f => f.line > 0 && f.category !== 'architectural' && f.category !== 'summary',
     );
     const archFindings = findings.filter(f => f.category === 'architectural');
-    const summaryFinding = findings.find(f => f.category === 'summary');
+    // Render EVERY summary finding, not just the first: the agent can append a
+    // second summary (e.g. the doc-truth-pass incomplete notice) that would
+    // otherwise silently never render (the trap behind #733).
+    const summaryFindings = findings.filter(f => f.category === 'summary');
 
     // 1. Post bug findings. GitHub only anchors inline review comments to lines
     //    inside the PR's diff hunks, so split findings by whether their line is
@@ -271,7 +277,7 @@ export class AgentReviewPlugin implements ReviewPlugin {
     }
 
     // 2. Contribute to PR description — GitHub callout box style
-    const description = buildDescription(bugFindings, summaryFinding, archFindings, commitSha);
+    const description = buildDescription(bugFindings, summaryFindings, archFindings, commitSha);
     context.appendDescription(description, this.id);
 
     // 4. Append to check run summary
@@ -535,22 +541,27 @@ function formatCheckSummary(findings: ReviewFinding[], name: string): string {
     f => f.category !== 'architectural' && f.category !== 'summary' && f.line > 0,
   );
   const arch = findings.filter(f => f.category === 'architectural');
-  const summary = findings.find(f => f.category === 'summary');
+  const summaries = findings.filter(f => f.category === 'summary');
 
   const sections: string[] = [`### ${name}`];
 
-  if (summary) {
+  // First summary → the primary risk/overview (or incomplete) line, byte-for-byte
+  // as before. Any further summary → its own appended line so an appended notice
+  // (e.g. an incomplete doc-truth pass) is never silently dropped.
+  summaries.forEach((summary, i) => {
     const meta = summary.metadata as
       | { riskLevel?: string; overview?: string; incomplete?: boolean }
       | undefined;
     if (meta?.incomplete) {
       sections.push(`⚠️ **Review incomplete** — ${meta.overview ?? summary.message}`);
-    } else {
+    } else if (i === 0) {
       sections.push(
         `**${capitalize(meta?.riskLevel ?? 'unknown')} Risk** — ${meta?.overview ?? summary.message}`,
       );
+    } else {
+      sections.push(meta?.overview ?? summary.message);
     }
-  }
+  });
 
   if (bugs.length > 0) {
     const bugLines = bugs.map(f => {
@@ -565,28 +576,51 @@ function formatCheckSummary(findings: ReviewFinding[], name: string): string {
     sections.push(`**Architectural (${arch.length})**\n${archLines.join('\n')}`);
   }
 
-  if (bugs.length === 0 && arch.length === 0 && !summary) {
+  if (bugs.length === 0 && arch.length === 0 && summaries.length === 0) {
     sections.push('No issues found.');
   }
 
   return sections.join('\n\n');
 }
 
+interface SummaryMeta {
+  riskLevel?: string;
+  overview?: string;
+  keyChanges?: string[];
+  incomplete?: boolean;
+}
+
+function summaryMetaOf(finding: ReviewFinding | undefined): SummaryMeta | undefined {
+  return finding?.metadata as SummaryMeta | undefined;
+}
+
+/**
+ * Render a NON-primary summary finding (any beyond the first) as its own
+ * section: incomplete-flagged notices get a ⚠️ warning line; anything else a
+ * plain paragraph. Shared by the PR description and the check-run summary so a
+ * second summary the primary block can't absorb still surfaces.
+ */
+function formatExtraSummary(finding: ReviewFinding): string {
+  const meta = summaryMetaOf(finding);
+  const text = meta?.overview ?? finding.message;
+  return meta?.incomplete ? `⚠️ ${text}` : text;
+}
+
 /**
  * Build the PR description section using GitHub's callout blockquote syntax.
- * Uses > [!NOTE] for clean PRs, > [!WARNING] when issues are found.
+ * Uses > [!NOTE] for clean PRs, > [!WARNING] when issues are found. The first
+ * summary drives the callout; any further summaries render as appended
+ * sections so an appended notice (e.g. an incomplete doc-truth pass) is visible.
  */
 function buildDescription(
   bugFindings: ReviewFinding[],
-  summaryFinding: ReviewFinding | undefined,
+  summaryFindings: ReviewFinding[],
   archFindings: ReviewFinding[],
   commitSha?: string,
 ): string {
-  const meta = summaryFinding?.metadata as
-    | { riskLevel?: string; overview?: string; keyChanges?: string[]; incomplete?: boolean }
-    | undefined;
+  const meta = summaryMetaOf(summaryFindings[0]);
   const risk = meta?.riskLevel ?? 'low';
-  const overview = meta?.overview ?? summaryFinding?.message ?? '';
+  const overview = meta?.overview ?? summaryFindings[0]?.message ?? '';
   const incomplete = meta?.incomplete === true;
 
   // An incomplete review must never read as a clean/approving NOTE.
@@ -614,6 +648,10 @@ function buildDescription(
   }
 
   const parts: string[] = [lines.join('\n')];
+
+  for (const extra of summaryFindings.slice(1)) {
+    parts.push(formatExtraSummary(extra));
+  }
 
   if (archFindings.length > 0) {
     parts.push(formatArchDescription(archFindings));

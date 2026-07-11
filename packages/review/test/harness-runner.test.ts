@@ -26,6 +26,8 @@ import {
   expectToolCalled,
   HarnessAssertionError,
 } from './harness/assertions.js';
+import { reportCalibrate, reportVote } from './harness/reporter.js';
+import type { AssertedRun, CalibrateResult, VoteResult } from './harness/voting.js';
 import type { AgentTrace, TurnTrace } from '../src/plugins/agent/types.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -202,5 +204,98 @@ describe('runFixture — HarnessResult.toolCalls/turns come from the trace', () 
     expect(result.trace?.turns).toHaveLength(2);
 
     expectRuleFired('boundary-change', result);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Reporter — characterization rendering, --bail aborted lines, byte-identical
+// default output. These are pure string formatters (no LLM).
+// ---------------------------------------------------------------------------
+
+function fakeRun(passed: boolean): AssertedRun {
+  return { result: { findings: [], toolCalls: [], turns: 0 }, cost: 0, passed };
+}
+
+function calResult(overrides: Partial<CalibrateResult> = {}): CalibrateResult {
+  const runs = Array.from({ length: 10 }, () => fakeRun(true));
+  return {
+    runs,
+    passes: 10,
+    passRate: 1,
+    totalCost: 0.5,
+    meetsReliabilityBar: true,
+    requested: 10,
+    aborted: false,
+    ...overrides,
+  };
+}
+
+describe('reportCalibrate', () => {
+  it('renders a passing bar exactly as before (byte-identical default)', () => {
+    const line = reportCalibrate('doc-truth/pr658', calResult());
+    expect(line).toBe('✓ doc-truth/pr658 — 10/10 passed (100%) · $0.5000');
+  });
+
+  it('renders a characterization fixture as a neutral non-gating ~ line', () => {
+    const runs = [
+      ...Array.from({ length: 6 }, () => fakeRun(true)),
+      ...Array.from({ length: 4 }, () => fakeRun(false)),
+    ];
+    const line = reportCalibrate(
+      'doc-truth/pr667-worktree-doc-drift',
+      calResult({ runs, passes: 6, passRate: 0.6, meetsReliabilityBar: false }),
+      { characterization: true },
+    );
+    expect(line).toBe(
+      '~ doc-truth/pr667-worktree-doc-drift — measured 6/10 (non-gating, see fixture header) · $0.5000',
+    );
+    // No red ✗, no "BAR NOT MET" scare line.
+    expect(line).not.toContain('✗');
+    expect(line).not.toContain('BAR NOT MET');
+  });
+
+  it('renders an aborted --bail run with the aborted headline', () => {
+    const runs = [fakeRun(true), fakeRun(false), fakeRun(false)];
+    const line = reportCalibrate(
+      'concurrency-race/toctou',
+      calResult({
+        runs,
+        passes: 1,
+        passRate: 1 / 3,
+        meetsReliabilityBar: false,
+        aborted: true,
+        bail: 2,
+      }),
+    );
+    expect(line).toContain('✗ concurrency-race/toctou — aborted after 3/10 votes (--bail 2)');
+    // The aborted headline replaces the "BAR NOT MET" advisory (it's redundant).
+    expect(line).not.toContain('BAR NOT MET');
+    expect(line).toContain('failures: 0 tier-1');
+  });
+});
+
+describe('reportVote', () => {
+  function voteResult(overrides: Partial<VoteResult> = {}): VoteResult {
+    const votes = Array.from({ length: 3 }, () => fakeRun(true));
+    return { votes, agree: true, passes: 3, totalCost: 0.18, ...overrides };
+  }
+
+  it('renders a passing vote exactly as before (byte-identical default)', () => {
+    expect(reportVote('boundary-change/ge5', voteResult())).toBe(
+      '✓ boundary-change/ge5 — 3/3 passed · $0.1800',
+    );
+  });
+
+  it('renders a characterization fixture as a neutral non-gating ~ line', () => {
+    const votes = [fakeRun(true), fakeRun(false), fakeRun(false)];
+    const line = reportVote(
+      'doc-truth/pr716-install-claim',
+      voteResult({ votes, agree: false, passes: 1 }),
+      { characterization: true },
+    );
+    expect(line).toBe(
+      '~ doc-truth/pr716-install-claim — measured 1/3 (non-gating, see fixture header) · $0.1800',
+    );
+    expect(line).not.toContain('FLAKY');
   });
 });

@@ -8,7 +8,20 @@ function previewMessage(msg: string, max = 220): string {
   return msg.length <= max ? msg : `${msg.slice(0, max)}…`;
 }
 
-export function reportVote(label: string, result: VoteResult): string {
+/**
+ * Render options common to both reporters. A `characterization` fixture
+ * measures a known frontier and does not gate: it renders as a neutral `~`
+ * line reporting the measured rate rather than a red `✗`, and its result never
+ * contributes to the process exit code (that gating is enforced in run.ts).
+ */
+export interface ReportOptions {
+  characterization?: boolean;
+}
+
+export function reportVote(label: string, result: VoteResult, opts?: ReportOptions): string {
+  if (opts?.characterization) {
+    return `~ ${label} — measured ${result.passes}/${result.votes.length} (non-gating, see fixture header) · $${result.totalCost.toFixed(4)}`;
+  }
   const lines: string[] = [];
   const status = result.agree ? (result.passes === result.votes.length ? '✓' : '✗') : '?';
   lines.push(
@@ -27,13 +40,27 @@ export function reportVote(label: string, result: VoteResult): string {
   return lines.join('\n');
 }
 
-export function reportCalibrate(label: string, result: CalibrateResult): string {
+/** The headline outcome line for a calibration run (aborted vs completed). */
+function calibrateStatusLine(label: string, result: CalibrateResult): string {
   const status = result.meetsReliabilityBar ? '✓' : '✗';
-  const lines: string[] = [];
-  lines.push(
-    `${status} ${label} — ${result.passes}/${result.runs.length} passed (${(result.passRate * 100).toFixed(0)}%) · $${result.totalCost.toFixed(4)}`,
-  );
-  if (!result.meetsReliabilityBar) {
+  const cost = `$${result.totalCost.toFixed(4)}`;
+  if (result.aborted) {
+    return `${status} ${label} — aborted after ${result.runs.length}/${result.requested} votes (--bail ${result.bail}) · ${cost}`;
+  }
+  const pct = (result.passRate * 100).toFixed(0);
+  return `${status} ${label} — ${result.passes}/${result.runs.length} passed (${pct}%) · ${cost}`;
+}
+
+export function reportCalibrate(
+  label: string,
+  result: CalibrateResult,
+  opts?: ReportOptions,
+): string {
+  if (opts?.characterization) {
+    return `~ ${label} — measured ${result.passes}/${result.runs.length} (non-gating, see fixture header) · $${result.totalCost.toFixed(4)}`;
+  }
+  const lines: string[] = [calibrateStatusLine(label, result)];
+  if (!result.meetsReliabilityBar && !result.aborted) {
     lines.push('    BAR NOT MET — assertions too tight or fixture too ambiguous (per #538)');
   }
   const failures = result.runs.filter(r => !r.passed);

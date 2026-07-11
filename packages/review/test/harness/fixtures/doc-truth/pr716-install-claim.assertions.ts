@@ -65,8 +65,9 @@
  * correctly-declined at this SHA. Characterization fixture.
  *
  * Net: expect this to calibrate LOW on Kimi, possibly correctly-low. It is the
- * second-shakiest fixture (after pr687's truncation block) and is deliberately
- * NOT tagged canary until a calibration baseline exists.
+ * second-shakiest fixture (after pr687's truncation block). Tagged
+ * `characterization` (not canary): the harness renders it as a non-gating `~`
+ * line and excludes it from the exit code.
  */
 
 import type { FixtureAssertions } from '../../assertions.js';
@@ -110,7 +111,7 @@ const assertions: FixtureAssertions = {
   },
   votes: 3,
   passThreshold: 9,
-  tags: [],
+  tags: ['characterization'],
 };
 
 export default assertions;
