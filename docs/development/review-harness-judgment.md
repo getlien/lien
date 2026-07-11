@@ -29,13 +29,19 @@ passing CC run certifies nothing.
    Calibration votes run in parallel; if the OpenRouter account dies
    mid-batch, votes fail non-uniformly as 1–2-turn runs with empty responses
    and near-zero cost. A `0/10 @ $0.00` result is starvation, not behavior.
+   (The PROD side of this trap is closed: since #738 a CI review whose main
+   pass never ran fails the check loudly with the cause named — but harness
+   batches still need the per-vote autopsy.)
 3. **Real billing ≈ 1.5–2× harness-reported cost**, and the repo's CI runs a
    paid Lien review on *every PR push with the same key*. Track spend via
    the credits API delta, and count ~1 CI review per push in any budget.
-4. **Stop after one non-converging paid iteration.** Diagnose from saved
-   `--trace` output (free) before every paid run. The traces almost always
-   contain the answer: what the model actually said, which tools it called,
-   what it declined.
+4. **Stop after one non-converging paid iteration.** Diagnose from traces
+   (free) before every paid run — since #739 calibration ALWAYS persists
+   per-vote traces (`.wip/traces/<stamp>-<scope>/`, printed in the run
+   output), so there is never a reason to pay for a re-run just to see what
+   happened. The traces almost always contain the answer: what the model
+   actually said, which tools it called, what it declined. Use `--bail N`
+   on fixtures you expect to be red — no need to burn all 10 votes.
 5. **Prefer zero-LLM fixes.** Assertion changes can be validated for free by
    re-scoring saved trace votes through `assert-cli.ts`. Output-shape prompt
    changes can be A/B'd cheaply by single-turn replay of a captured trace
@@ -82,8 +88,12 @@ gitignored, regenerated per-machine via `capture-pr.ts <pr> <out> [--sha]`.
 
 The house pattern for making a rule reliable: pre-compute the deterministic
 part and inject it (`<stale_literal_candidates>`, `<untrusted_input_sites>`,
-`<doc_claims>`). Zero-LLM, unit-testable, no calibration spend for the
-extraction logic itself.
+`<doc_claims>`, `<removed_exports>`). Zero-LLM, unit-testable, no
+calibration spend for the extraction logic itself. `<removed_exports>` is
+the pattern at its best — one signal serving two rules (structural-analysis
+gets the removed symbols AND their surviving cross-file references
+pre-swept; boundary-change gets the changeset cross-check), replacing a
+"MUST grep every removed symbol" instruction outright.
 
 The doc-truth arc mapped the pattern's limits precisely:
 
