@@ -47,3 +47,11 @@ Durable, git-tracked record of corrections. Read this at the start of every sess
   targeting it sit "queued" forever with no error while sibling matrix
   jobs run. If one matrix job never starts, suspect the label before the
   workload. Current Intel macOS label: `macos-15-intel`.
+
+## Documentation destinations (2026-07-11, from Alf)
+
+- **"Update the onboarding guide / write docs" means REPO docs by default**
+  (`docs/` or the relevant README), not Claude Code's claude.ai share-link
+  onboarding feature. Alf was surprised a hosted guide existed; the repo is
+  the source of truth for team knowledge. If a hosted/shareable artifact
+  seems genuinely better, ask first.
