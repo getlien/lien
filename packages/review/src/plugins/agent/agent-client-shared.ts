@@ -157,10 +157,33 @@ export function extractFindingsWithReasoningFallback(
 /** Pull validated findings + summary out of one parsed JSON verdict (array or object). */
 export function readVerdict(parsed: unknown): { findings: AgentFinding[]; summary?: AgentSummary } {
   const obj = (parsed ?? {}) as { findings?: unknown; summary?: unknown };
-  const rawFindings = Array.isArray(parsed) ? parsed : obj.findings;
+  let rawFindings = Array.isArray(parsed) ? parsed : obj.findings;
+  if (!Array.isArray(rawFindings) && typeof parsed === 'object' && parsed !== null) {
+    rawFindings = findingsUnderCorruptedKey(parsed as Record<string, unknown>);
+  }
   const findings = (Array.isArray(rawFindings) ? rawFindings : []).filter(isValidFinding);
   const summary = isValidSummary(obj.summary) ? obj.summary : undefined;
   return { findings, summary };
+}
+
+/**
+ * Recover a findings array whose key got mangled. Kimi has been observed
+ * emitting an otherwise-valid verdict as `{":  ": [...], "summary": {...}}` —
+ * the findings intact but the key corrupted — which previously read as a
+ * clean zero-finding review: the valid summary satisfied the summary-retry
+ * and incomplete checks, so real findings were silently discarded. When no
+ * `findings` array is present, accept another property only if it holds a
+ * non-empty array in which EVERY element is a valid finding; anything less
+ * stays unrecovered rather than guessed at.
+ */
+function findingsUnderCorruptedKey(obj: Record<string, unknown>): AgentFinding[] | undefined {
+  for (const [key, value] of Object.entries(obj)) {
+    if (key === 'findings' || key === 'summary') continue;
+    if (Array.isArray(value) && value.length > 0 && value.every(isValidFinding)) {
+      return value as AgentFinding[];
+    }
+  }
+  return undefined;
 }
 
 /** First `{`…last `}` slice — recovers a JSON object wrapped in prose. */

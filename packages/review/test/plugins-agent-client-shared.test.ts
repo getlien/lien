@@ -188,6 +188,30 @@ describe('readVerdict', () => {
     expect(findings).toHaveLength(1);
     expect(s).toBeUndefined();
   });
+
+  // Kimi emitted `{":  ": [...], "summary": {...}}` on a real calibration run
+  // (untrusted-input-validation vote-5, 2026-07-10): findings intact, key
+  // mangled. The valid summary made the run look complete, so the findings
+  // were silently discarded.
+  it('recovers findings under a corrupted key when no findings array exists', () => {
+    const { findings, summary: s } = readVerdict({ ':  ': [finding, finding], summary });
+    expect(findings).toHaveLength(2);
+    expect(s).toEqual(summary);
+  });
+
+  it('does not recover from a corrupted key holding anything but pure findings', () => {
+    const { findings } = readVerdict({ ':  ': [finding, { bogus: true }], summary });
+    expect(findings).toHaveLength(0);
+  });
+
+  it('does not second-guess a present findings array (empty means clean review)', () => {
+    const { findings } = readVerdict({ findings: [], ':  ': [finding], summary });
+    expect(findings).toHaveLength(0);
+  });
+
+  it('ignores non-array and empty-array corrupted candidates', () => {
+    expect(readVerdict({ oops: 'text', other: [], summary }).findings).toHaveLength(0);
+  });
 });
 
 describe('extractFindingsFromText (fence-priority verdict recovery)', () => {
