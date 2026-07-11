@@ -12,9 +12,11 @@
  * `table: LanceDBTable | null` does this guard), so silencing this FP
  * shape is a high-leverage prompt fix.
  *
- * Calibration status (recorded 2026-05-16, against the unmodified prompt):
- *   pending — fixture authored, calibration run not yet executed. Will
- *   fail on the current prompt; that's the documented gap.
+ * Calibration status: 10/10 empty on `moonshotai/kimi-k2.7-code`
+ * (2026-07-10, --calibrate 10, healthy capture). The 2026-05-16 note that
+ * this fixture "will fail on the current prompt" described Gemini-era
+ * behavior; the FP shape does not reproduce on the Kimi prod default, so
+ * no prompt change was needed.
  */
 
 import type { FixtureAssertions } from '../../assertions.js';

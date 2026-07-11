@@ -20,7 +20,12 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
 import { runFixture, toolCallsFromTrace, turnCountFromTrace } from './harness/runner.js';
-import { expectRuleFired, expectToolCalled } from './harness/assertions.js';
+import {
+  expectAnyToolCalled,
+  expectRuleFired,
+  expectToolCalled,
+  HarnessAssertionError,
+} from './harness/assertions.js';
 import type { AgentTrace, TurnTrace } from '../src/plugins/agent/types.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -40,6 +45,25 @@ function turn(turnNumber: number, toolNames: string[], responseText = ''): TurnT
 function traceOf(turns: TurnTrace[]): AgentTrace {
   return { systemPrompt: 'sys', initialMessage: 'init', model: 'test-model', turns };
 }
+
+describe('expectAnyToolCalled', () => {
+  const result = { findings: [], toolCalls: ['tool=read_file'], turns: 1 };
+
+  it('passes when any of the accepted tools was called', () => {
+    expect(() => expectAnyToolCalled(['get_files_context', 'read_file'], result)).not.toThrow();
+  });
+
+  it('throws Tier 1 when none of the accepted tools was called', () => {
+    expect(() => expectAnyToolCalled(['get_files_context', 'grep_codebase'], result)).toThrow(
+      HarnessAssertionError,
+    );
+  });
+
+  it('does not false-match a tool name substring', () => {
+    const subst = { findings: [], toolCalls: ['tool=file_reader_x'], turns: 1 };
+    expect(() => expectAnyToolCalled(['read_file'], subst)).toThrow(HarnessAssertionError);
+  });
+});
 
 describe('toolCallsFromTrace / turnCountFromTrace (pure trace helpers)', () => {
   it('flattens tool calls across turns, in order', () => {

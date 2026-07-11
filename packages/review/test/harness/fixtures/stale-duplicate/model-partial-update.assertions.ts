@@ -19,6 +19,12 @@
  * Tier 2: the finding cites adapterContext / line 300 / claude-sonnet-4-6
  * or proposes a hoist to a shared const. Keyword set is deliberately wide
  * to cover the phrasings any correct rendering will use.
+ *
+ * Calibration status: 10/10 on `moonshotai/kimi-k2.7-code` (2026-07-10,
+ * --calibrate 10). The earlier "known-red on Kimi" label was stale: red
+ * runs traced to a broken capture (native parser unbuilt → markdown-only
+ * corpus → <stale_literal_candidates> rendered "None" and suppressed the
+ * finding). capture-pr.ts now rejects such partial captures loudly.
  */
 
 import type { FixtureAssertions } from '../../assertions.js';
