@@ -5,6 +5,7 @@ import {
   buildDocTruthPassPrompts,
   buildDocTruthPassInitialMessage,
   mergeDocTruthFindings,
+  mergeDocPassIntoResult,
   appendDocTruthTurns,
   docTruthPassBudget,
   runDocTruthPass,
@@ -250,6 +251,89 @@ describe('mergeDocTruthFindings', () => {
     mergeDocTruthFindings(main, doc);
     expect(doc[0].ruleId).toBe('x'); // original untouched
     expect(main).toHaveLength(1);
+  });
+
+  it('keeps a doc-pass ERROR that overlaps a main-pass WARNING (severity-aware dedupe)', () => {
+    const main = [finding({ filepath: 'a.md', line: 10, severity: 'warning', message: 'main' })];
+    const doc = [finding({ filepath: 'a.md', line: 10, severity: 'error', message: 'doc-error' })];
+
+    const merged = mergeDocTruthFindings(main, doc);
+
+    expect(merged.map(f => f.message)).toEqual(['main', 'doc-error']);
+  });
+
+  it('still drops a doc-pass warning that overlaps a main-pass error', () => {
+    const main = [finding({ filepath: 'a.md', line: 10, severity: 'error', message: 'main' })];
+    const doc = [finding({ filepath: 'a.md', line: 11, severity: 'warning', message: 'doc' })];
+
+    expect(mergeDocTruthFindings(main, doc)).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// mergeDocPassIntoResult
+// ---------------------------------------------------------------------------
+
+describe('mergeDocPassIntoResult', () => {
+  it('marks the merged result incomplete when only the doc pass died', () => {
+    const main = fakeResult();
+    main.incomplete = false;
+    main.stopReason = 'completed';
+    const doc = fakeResult();
+    doc.incomplete = true;
+    doc.stopReason = 'budget';
+
+    mergeDocPassIntoResult(main, doc, []);
+
+    expect(main.incomplete).toBe(true);
+    expect(main.stopReason).toBe('budget');
+    expect(main.incompleteFromDocPass).toBe(true);
+  });
+
+  it('leaves a main-pass incomplete untouched (no doc-pass attribution)', () => {
+    const main = fakeResult();
+    main.incomplete = true;
+    main.stopReason = 'max_turns';
+    const doc = fakeResult();
+    doc.incomplete = true;
+    doc.stopReason = 'budget';
+
+    mergeDocPassIntoResult(main, doc, []);
+
+    expect(main.stopReason).toBe('max_turns');
+    expect(main.incompleteFromDocPass).toBeUndefined();
+  });
+
+  it('lifts a low risk level to medium and notes contradictions when the doc pass found errors', () => {
+    const main = fakeResult();
+    main.summary = { riskLevel: 'low', overview: 'Fine.', keyChanges: [] };
+    const merged = [finding({ ruleId: 'doc-truth', severity: 'error' })];
+
+    mergeDocPassIntoResult(main, fakeResult(), merged);
+
+    expect(main.summary.riskLevel).toBe('medium');
+    expect(main.summary.overview).toContain('documentation-truthfulness pass found 1');
+  });
+
+  it('does not lower an already-elevated risk level', () => {
+    const main = fakeResult();
+    main.summary = { riskLevel: 'critical', overview: 'Bad.', keyChanges: [] };
+    const merged = [finding({ ruleId: 'doc-truth', severity: 'error' })];
+
+    mergeDocPassIntoResult(main, fakeResult(), merged);
+
+    expect(main.summary.riskLevel).toBe('critical');
+  });
+
+  it('is a no-op for doc-truth warnings only or a null doc result', () => {
+    const main = fakeResult();
+    main.summary = { riskLevel: 'low', overview: 'Fine.', keyChanges: [] };
+
+    mergeDocPassIntoResult(main, fakeResult(), [finding({ ruleId: 'doc-truth' })]);
+    expect(main.summary.riskLevel).toBe('low');
+
+    mergeDocPassIntoResult(main, null, [finding({ ruleId: 'doc-truth', severity: 'error' })]);
+    expect(main.summary.riskLevel).toBe('low');
   });
 });
 

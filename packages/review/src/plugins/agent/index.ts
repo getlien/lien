@@ -24,7 +24,12 @@ import { OpenAIAgentClient, toOpenAITools } from './openai-client.js';
 import { buildSystemPrompt, buildInitialMessage } from './system-prompt.js';
 import { BUILTIN_RULES, buildTriggerContext, selectRules } from './rules.js';
 import { AGENT_TOOLS, dispatchTool } from './tools.js';
-import { runDocTruthPass, mergeDocTruthFindings, appendDocTruthTurns } from './doc-truth-pass.js';
+import {
+  runDocTruthPass,
+  mergeDocTruthFindings,
+  mergeDocPassIntoResult,
+  appendDocTruthTurns,
+} from './doc-truth-pass.js';
 import {
   DEFAULT_REVIEW_MODEL,
   DEFAULT_OPENROUTER_BASE_URL,
@@ -182,13 +187,14 @@ export class AgentReviewPlugin implements ReviewPlugin {
 
     const pluginId = this.id;
     const agentFindings = mergeDocTruthFindings(result.findings, docResult?.findings ?? []);
+    // The render path consumes ONE summary finding, so doc-pass state (an
+    // unfinished pass, error-severity doc findings) must be folded into the
+    // main result BEFORE the notices are appended — a second summary finding
+    // would never render.
+    mergeDocPassIntoResult(result, docResult, agentFindings);
     const findings = agentFindings.map(f => mapToReviewFinding(f, pluginId));
     appendSummaryFinding(findings, pluginId, result.summary);
     appendIncompleteNotice(findings, pluginId, result);
-    // The doc pass's summary is deliberately discarded (claims-only overview;
-    // the main pass owns the PR's risk profile) — but an INCOMPLETE doc pass
-    // must not read as "no doc issues": surface its own notice.
-    if (docResult?.incomplete) appendDocPassIncompleteNotice(findings, pluginId, docResult);
 
     return findings;
   }
@@ -403,9 +409,13 @@ function appendIncompleteNotice(
         : result.stopReason === 'completed'
           ? 'ended without emitting a parseable JSON verdict'
           : 'stopped unexpectedly';
-  const message =
-    `Lien Review did not finish — it ${reason} while investigating. ` +
-    `Any findings shown are partial; re-run the review to retry.`;
+  // An incomplete that came only from the doc-truth SECOND pass must not
+  // imply the whole review is partial — the main pass finished normally.
+  const message = result.incompleteFromDocPass
+    ? `The documentation-truthfulness pass did not finish — it ${reason}. ` +
+      `Doc-claim verification is partial; code findings are unaffected.`
+    : `Lien Review did not finish — it ${reason} while investigating. ` +
+      `Any findings shown are partial; re-run the review to retry.`;
   findings.push({
     pluginId,
     filepath: '',
@@ -414,32 +424,6 @@ function appendIncompleteNotice(
     category: 'summary',
     message,
     metadata: { incomplete: true, stopReason: result.stopReason, overview: message },
-  });
-}
-
-/**
- * Surface an incomplete doc-truth SECOND pass. Kept separate from
- * `appendIncompleteNotice` so the wording says which pass died: the main
- * review completed normally, only the documentation check is partial —
- * "re-run the review" guidance would be misleadingly broad here.
- */
-function appendDocPassIncompleteNotice(
-  findings: ReviewFinding[],
-  pluginId: string,
-  docResult: AgentResult,
-): void {
-  const message =
-    'The dedicated documentation-truthfulness pass did not finish ' +
-    `(${docResult.stopReason ?? 'stopped unexpectedly'}) — doc-claim ` +
-    'verification is partial. Code findings above are unaffected.';
-  findings.push({
-    pluginId,
-    filepath: '',
-    line: 0,
-    severity: 'warning' as const,
-    category: 'summary',
-    message,
-    metadata: { incomplete: true, stopReason: docResult.stopReason, overview: message },
   });
 }
 

@@ -216,6 +216,12 @@ export interface AgentResult {
    * result must NOT be presented as a clean/approving review.
    */
   incomplete: boolean;
+  /**
+   * True when `incomplete` was set by an unfinished doc-truth SECOND pass
+   * while the main pass finished cleanly — the incomplete notice then names
+   * the doc pass instead of implying the whole review is partial.
+   */
+  incompleteFromDocPass?: boolean;
   /** Per-turn trace data — only populated when the caller wires up trace capture. */
   trace?: AgentTrace;
 }
