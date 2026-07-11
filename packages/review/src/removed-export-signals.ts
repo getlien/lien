@@ -74,6 +74,8 @@ const HUNK_HEADER_RE = /^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@(.*)$/;
 /** An `export {` / `export type {` list opener (the brace right after export). */
 const EXPORT_LIST_OPEN_RE = /\bexport\s+(?:type\s+)?\{/;
 const DEFAULT_PREFIX = 'default (';
+/** Bulk re-export removals (`export * from '…'`) — listed, never swept. */
+const BULK_PREFIX = "* (all re-exports of '";
 
 // ---------------------------------------------------------------------------
 // Declaration / member parsing
@@ -94,7 +96,12 @@ function parseMemberList(body: string): string[] {
     if (!cleaned) continue;
     const parts = cleaned.split(/\s+as\s+/);
     const name = parts[parts.length - 1].trim();
-    if (IDENT_RE.test(name)) out.push(name);
+    if (!IDENT_RE.test(name)) continue;
+    // `export { default }` / `A as default`: the public name is the module's
+    // default export. Record it in the default form so the reference sweep
+    // skips it — a bare `default` would word-boundary-match every `default`
+    // keyword in the repo.
+    out.push(name === 'default' ? `${DEFAULT_PREFIX}default)` : name);
   }
   return out;
 }
@@ -111,6 +118,12 @@ function extractExportSymbolsFromDeclLine(code: string): string[] {
 
   const inlineList = t.match(/^export\s+(?:type\s+)?\{([^}]*)\}/);
   if (inlineList) return parseMemberList(inlineList[1]);
+
+  // A removed bulk re-export (`export * from './m'`) removes EVERY symbol the
+  // source module re-published — no individual names to sweep, but the agent
+  // must know the surface shrank. Recorded as a bulk entry (no ref sweep).
+  const bulk = t.match(/^export\s+(?:type\s+)?\*\s+from\s+['"]([^'"]+)['"]/);
+  if (bulk) return [`${BULK_PREFIX}${bulk[1]}')`];
 
   const patterns: Array<[RegExp, (name: string) => string]> = [
     [/^export\s+default\s+(?:async\s+)?(?:function\*?|class)\s+([A-Za-z_$][\w$]*)/, defaultName],
@@ -140,18 +153,27 @@ function defaultName(name: string): string {
   return `${DEFAULT_PREFIX}${name})`;
 }
 
+/** The line with `//` comments stripped — a `}` in a comment must not end a list. */
+function withoutLineComment(code: string): string {
+  const idx = code.indexOf('//');
+  return idx === -1 ? code : code.slice(0, idx);
+}
+
 /**
  * Update `inList` (are we inside a multi-line `export { … }` block?) for one
  * code line. Only an `export {`-shaped opener starts a block (a function body's
- * bare `{` must not), and any `}` closes it. Deliberately brace-count-free —
- * export member bodies don't nest braces.
+ * bare `{` must not), and a STRUCTURAL `}` closes it — a `}` inside a trailing
+ * `//` comment doesn't count (a commented member line must not silently drop
+ * the rest of the list). Deliberately brace-count-free — export member bodies
+ * don't nest braces.
  */
 function updateListState(inList: boolean, code: string): boolean {
-  if (inList) return !code.includes('}');
-  if (!EXPORT_LIST_OPEN_RE.test(code)) return false;
+  const structural = withoutLineComment(code);
+  if (inList) return !structural.includes('}');
+  if (!EXPORT_LIST_OPEN_RE.test(structural)) return false;
   // Opener only counts if the list isn't also closed on the same line.
-  const braceIdx = code.indexOf('{', code.search(EXPORT_LIST_OPEN_RE));
-  return !code.includes('}', braceIdx);
+  const braceIdx = structural.indexOf('{', structural.search(EXPORT_LIST_OPEN_RE));
+  return !structural.includes('}', braceIdx);
 }
 
 // ---------------------------------------------------------------------------
@@ -264,7 +286,7 @@ export function extractRemovedExports(patches: Map<string, string>): RemovedExpo
 
 /** The bare name to search for, or null for a default export (no stable name). */
 function searchableName(symbol: string): string | null {
-  return symbol.startsWith(DEFAULT_PREFIX) ? null : symbol;
+  return symbol.startsWith(DEFAULT_PREFIX) || symbol.startsWith(BULK_PREFIX) ? null : symbol;
 }
 
 function wordBoundaryRe(name: string): RegExp {
@@ -309,7 +331,14 @@ function collectRefsFromChunk(
   const file = chunk.metadata.file;
   let content: string | undefined;
   for (const spec of specs) {
-    if (spec.file === file) continue; // its own removal site is not a survivor
+    // Deliberate precision tradeoff: the whole removal FILE is excluded, not
+    // just the removal site. An export removal is not always a definition
+    // removal (`export { foo }` dropped while `function foo` stays for
+    // internal use) — same-file references are then legitimate, and flagging
+    // them would manufacture breakage. Same-file dangling refs from a true
+    // definition removal are the compiler/CI's job; the review's signal is
+    // the CROSS-FILE importers that silently break.
+    if (spec.file === file) continue;
     const refs = refsBySymbol.get(spec.symbol);
     if (refs && refs.length >= MAX_REFS_PER_SYMBOL) continue;
     content ??= chunk.content;

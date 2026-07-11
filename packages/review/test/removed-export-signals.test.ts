@@ -177,6 +177,49 @@ describe('extractRemovedExports', () => {
     expect(embedding).toHaveLength(1);
     expect(embedding[0].file).toBe('src/errors/index.ts'); // first occurrence
   });
+  it('a } inside a trailing comment does not end a multi-line export list', () => {
+    const patches = new Map([
+      [
+        'src/a.ts',
+        patch(
+          '@@ -1,5 +1,2 @@',
+          ' export {',
+          '-  Foo, // note: old }',
+          '-  Bar,',
+          ' } from "./m";',
+        ),
+      ],
+    ]);
+    const symbols = extractRemovedExports(patches).map(r => r.symbol);
+    expect(symbols).toEqual(expect.arrayContaining(['Foo', 'Bar']));
+  });
+
+  it('records a removed bulk re-export as a bulk entry (never swept)', () => {
+    const patches = new Map([
+      ['src/index.ts', patch('@@ -1,1 +1,0 @@', "-export * from './internal';")],
+    ]);
+    const removed = extractRemovedExports(patches);
+    expect(removed).toHaveLength(1);
+    expect(removed[0].symbol).toBe("* (all re-exports of './internal')");
+    // The bulk entry must not produce a reference sweep.
+    const refs = findSurvivingReferences(removed, [
+      makeChunk('src/other.ts', 1, "export * from './elsewhere';"),
+    ]);
+    expect(refs.get(removed[0].symbol)).toBeUndefined();
+  });
+
+  it('treats a bare default list member as a default export, not a sweepable name', () => {
+    const patches = new Map([
+      ['src/index.ts', patch('@@ -1,1 +1,0 @@', "-export { default } from './widget';")],
+    ]);
+    const removed = extractRemovedExports(patches);
+    expect(removed[0].symbol).toBe('default (default)');
+    const refs = findSurvivingReferences(removed, [
+      makeChunk('src/other.ts', 1, 'export default function x() {}'),
+    ]);
+    // No `\bdefault\b` sweep — every default keyword in the repo must NOT match.
+    expect(refs.get(removed[0].symbol)).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -184,6 +227,16 @@ describe('extractRemovedExports', () => {
 // ---------------------------------------------------------------------------
 
 describe('findSurvivingReferences', () => {
+  it('excludes same-file references by design (export removal ≠ definition removal)', () => {
+    // `export { helper }` dropped while `function helper` stays for internal
+    // use: same-file refs are legitimate; cross-file importers are the signal.
+    const removed = [{ symbol: 'helper', file: 'src/a.ts' }];
+    const refs = findSurvivingReferences(removed, [
+      makeChunk('src/a.ts', 10, 'function helper() {}\nconst x = helper();'),
+      makeChunk('src/b.ts', 3, "import { helper } from './a';"),
+    ]);
+    expect(refs.get('helper')?.map(r => r.file)).toEqual(['src/b.ts']);
+  });
   const removed: RemovedExport[] = [{ symbol: 'parse_input', file: 'src/parser.rs' }];
 
   it('finds references in the head corpus outside the symbol’s own file', () => {
