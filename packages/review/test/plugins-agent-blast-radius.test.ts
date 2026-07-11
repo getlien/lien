@@ -76,7 +76,7 @@ describe('buildInitialMessage with blast-radius injection', () => {
     expect(message).not.toContain('<blast_radius>');
   });
 
-  it('places <blast_radius> after <changed_files> and before <deleted_exports>', () => {
+  it('places <blast_radius> after <changed_files> and before <removed_exports>', () => {
     const context = createTestContext({
       changedFiles: ['src/auth/validate.ts'],
       pr: {
@@ -92,14 +92,14 @@ describe('buildInitialMessage with blast-radius injection', () => {
 
     const changedFilesIdx = message.indexOf('<changed_files>');
     const blastIdx = message.indexOf('<blast_radius>');
-    const deletedIdx = message.indexOf('<deleted_exports>');
+    const removedIdx = message.indexOf('<removed_exports>');
 
     // All three blocks must be present — otherwise the ordering assertion
     // silently no-ops and this test loses its point.
     expect(changedFilesIdx).toBeGreaterThan(-1);
     expect(blastIdx).toBeGreaterThan(-1);
-    expect(deletedIdx).toBeGreaterThan(-1);
+    expect(removedIdx).toBeGreaterThan(-1);
     expect(blastIdx).toBeGreaterThan(changedFilesIdx);
-    expect(blastIdx).toBeLessThan(deletedIdx);
+    expect(blastIdx).toBeLessThan(removedIdx);
   });
 });

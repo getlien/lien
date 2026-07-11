@@ -16,6 +16,7 @@ import type { ReviewContext } from '../../plugin-types.js';
 import type { BlastRadiusReport } from '../../blast-radius.js';
 import { renderBlastRadiusMarkdown } from '../../blast-radius-render.js';
 import { renderStaleLiteralSection } from '../../stale-literal-signals.js';
+import { renderRemovedExportsSection } from '../../removed-export-signals.js';
 import { renderUntrustedInputSection } from '../../untrusted-input-signals.js';
 import { renderRenameSweepSection } from '../../rename-sweep-signals.js';
 import { renderGuidanceSurfaceSection } from '../../guidance-surface-signals.js';
@@ -192,7 +193,7 @@ export function buildInitialMessage(
   appendIfPresent(sections, renderComplexityRegressions(context));
   appendIfPresent(sections, renderChangedFunctions(context));
   appendIfPresent(sections, renderBlastRadius(opts));
-  appendIfPresent(sections, renderDeletedExports(context));
+  appendIfPresent(sections, renderRemovedExportsSection(context));
   appendIfPresent(sections, renderStaleLiteralSection(context));
   appendIfPresent(sections, renderUntrustedInputSection(context));
   appendIfPresent(sections, renderRenameSweepSection(context));
@@ -263,46 +264,4 @@ function renderBlastRadius(opts: BuildInitialMessageOptions): string | null {
   if (!opts.blastRadius) return null;
   const rendered = renderBlastRadiusMarkdown(opts.blastRadius);
   return rendered.length > 0 ? rendered : null;
-}
-
-function renderDeletedExports(context: ReviewContext): string | null {
-  const patches = context.pr?.patches;
-  if (!patches) return null;
-  const deletedExports = extractDeletedExports(patches);
-  if (deletedExports.length === 0) return null;
-  const list = deletedExports.map(e => `- ${e}`).join('\n');
-  return `<deleted_exports>\nThese exports were REMOVED in this PR. Use grep_codebase to check if any file still imports them. After checking deleted exports, continue with the rest of your investigation (edge case sweep on new/changed functions, self-review).\n${list}\n</deleted_exports>`;
-}
-
-/**
- * Extract symbol names of deleted exports from diff patches.
- * Looks for lines like `-export { Foo } from ...` or `-export { Foo, Bar }`.
- */
-function extractDeletedExports(patches: Map<string, string>): string[] {
-  const symbols: string[] = [];
-
-  for (const [, patch] of patches) {
-    const lines = patch.split('\n');
-    for (const line of lines) {
-      // Match removed export lines: -export { X, Y } from ...
-      if (!line.startsWith('-')) continue;
-      const exportMatch = line.match(/^-\s*export\s*\{([^}]+)\}/);
-      if (exportMatch) {
-        const names = exportMatch[1].split(',').map(s =>
-          s
-            .trim()
-            .split(/\s+as\s+/)[0]
-            .trim(),
-        );
-        symbols.push(...names.filter(n => n && !n.startsWith('type ')));
-      }
-      // Match removed re-export: -export { default as X } from ...
-      const reexportMatch = line.match(/^-\s*export\s*\{\s*(\w+)\s*\}/);
-      if (reexportMatch && !exportMatch) {
-        symbols.push(reexportMatch[1]);
-      }
-    }
-  }
-
-  return [...new Set(symbols)];
 }

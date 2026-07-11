@@ -2,9 +2,14 @@
  * PR #399 — `parse_input` (Rust exported function) entirely removed.
  * Classic structural breakage: any caller of `parse_input` is now broken.
  *
- * Per structural-analysis prompt, the agent MUST call grep_codebase for
- * each removed symbol name to check if any file still imports it. The
- * Tier 1 assertion enforces both: rule fires + investigation happened.
+ * The Tier 1 assertion enforces that the structural-analysis rule fires.
+ * It no longer requires a `grep_codebase` call: since the `<removed_exports>`
+ * signal (removed-export-signals.ts) pre-computes the removed symbol AND the
+ * surviving-reference sweep and hands it to the agent, the prompt now tells
+ * the model NOT to re-grep covered symbols. Requiring the grep would test the
+ * retired grep-and-reason path, not finding quality. The Tier 2 checks below
+ * pin the substance — that the agent names the removed symbol and the compile
+ * breakage of its remaining callers — which is what actually matters.
  *
  * Tier 2 (added 2026-07-11, authored from 3 observed Kimi votes —
  * moonshotai/kimi-k2.7-code, the prod default): pins the substance of the
@@ -36,7 +41,6 @@ const assertions: FixtureAssertions = {
   rule: 'structural-analysis',
   expect: (result, h) => {
     h.expectRuleFired('structural-analysis', result);
-    h.expectToolCalled('grep_codebase', result);
     // (A) names the removed exported symbol.
     h.expectFindingMentions(['parse_input', 'parser::parse_input', 'parser.rs'], result);
     // (B) states the compile breakage of its remaining callers.
