@@ -185,6 +185,10 @@ export class AgentReviewPlugin implements ReviewPlugin {
     const findings = agentFindings.map(f => mapToReviewFinding(f, pluginId));
     appendSummaryFinding(findings, pluginId, result.summary);
     appendIncompleteNotice(findings, pluginId, result);
+    // The doc pass's summary is deliberately discarded (claims-only overview;
+    // the main pass owns the PR's risk profile) — but an INCOMPLETE doc pass
+    // must not read as "no doc issues": surface its own notice.
+    if (docResult?.incomplete) appendDocPassIncompleteNotice(findings, pluginId, docResult);
 
     return findings;
   }
@@ -410,6 +414,32 @@ function appendIncompleteNotice(
     category: 'summary',
     message,
     metadata: { incomplete: true, stopReason: result.stopReason, overview: message },
+  });
+}
+
+/**
+ * Surface an incomplete doc-truth SECOND pass. Kept separate from
+ * `appendIncompleteNotice` so the wording says which pass died: the main
+ * review completed normally, only the documentation check is partial —
+ * "re-run the review" guidance would be misleadingly broad here.
+ */
+function appendDocPassIncompleteNotice(
+  findings: ReviewFinding[],
+  pluginId: string,
+  docResult: AgentResult,
+): void {
+  const message =
+    'The dedicated documentation-truthfulness pass did not finish ' +
+    `(${docResult.stopReason ?? 'stopped unexpectedly'}) — doc-claim ` +
+    'verification is partial. Code findings above are unaffected.';
+  findings.push({
+    pluginId,
+    filepath: '',
+    line: 0,
+    severity: 'warning' as const,
+    category: 'summary',
+    message,
+    metadata: { incomplete: true, stopReason: docResult.stopReason, overview: message },
   });
 }
 
