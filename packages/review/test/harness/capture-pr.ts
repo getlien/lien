@@ -296,17 +296,26 @@ const NATIVE_BUILD_HINT =
  * swallowed and only markdown/Vue chunks survive, yet the overall result is
  * `success: true`. Persisting that produces a fixture whose corpus is missing
  * all source code — the agent then "reviews" a diff it has no context for.
- * Fail loudly instead, on two independent signatures:
- *   1. A changed source file that exists on disk and is non-empty but produced
- *      zero chunks (the PR's own files are absent from the corpus).
- *   2. Zero source-code chunks anywhere in the corpus, even when the PR only
- *      touched docs — the repoChunks corpus is the agent's whole search space.
+ * The fatal signature is a corpus with ZERO source-code chunks anywhere —
+ * that never happens with a working binding, even on docs-only PRs, because
+ * repoChunks spans the whole repo. A changed source file that individually
+ * produced zero chunks is only a WARNING: files with no chunkable top-level
+ * declarations (e.g. a VitePress config that is a single `export default`
+ * expression) legitimately chunk to zero and must not abort a healthy
+ * capture (false positive observed on PR #716's .vitepress/config.ts).
  */
 async function assertIndexComplete(
   repoChunks: Array<{ metadata: { file: string } }>,
   changedFiles: string[],
   worktree: string,
 ): Promise<void> {
+  const sourceChunks = repoChunks.filter(c => NATIVE_SOURCE_EXT.test(c.metadata.file)).length;
+  if (sourceChunks === 0) {
+    throw new Error(
+      `partial index: ${repoChunks.length} chunks captured but zero from AST source ` +
+        `files. ${NATIVE_BUILD_HINT}`,
+    );
+  }
   const indexed = new Set(repoChunks.map(c => toRepoRelative(c.metadata.file, worktree)));
   const missing: string[] = [];
   for (const f of changedFiles) {
@@ -321,16 +330,10 @@ async function assertIndexComplete(
     if (size > 0) missing.push(rel);
   }
   if (missing.length > 0) {
-    throw new Error(
-      `partial index: ${missing.length} changed source file(s) produced zero chunks ` +
-        `(e.g. ${missing.slice(0, 3).join(', ')}). ${NATIVE_BUILD_HINT}`,
-    );
-  }
-  const sourceChunks = repoChunks.filter(c => NATIVE_SOURCE_EXT.test(c.metadata.file)).length;
-  if (sourceChunks === 0) {
-    throw new Error(
-      `partial index: ${repoChunks.length} chunks captured but zero from AST source ` +
-        `files. ${NATIVE_BUILD_HINT}`,
+    console.error(
+      `[capture] warning: ${missing.length} changed source file(s) produced zero chunks ` +
+        `(${missing.slice(0, 3).join(', ')}). The corpus has ${sourceChunks} source chunks, ` +
+        `so the binding works — likely declaration-free files. Verify they matter to the fixture.`,
     );
   }
 }

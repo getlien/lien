@@ -270,6 +270,27 @@ describe('selectRules', () => {
     expect(selectRules(BUILTIN_RULES, claudeMd).active.map(r => r.id)).toContain('doc-truth');
   });
 
+  it('activates doc-truth on documentation surfaces (docs, site guides, changesets)', () => {
+    for (const file of [
+      'docs/architecture/worktree-aware-indexing.md',
+      'docs/architecture/decisions/0011-retire-embeddings.md',
+      'packages/site/docs/guide/installation.md',
+      '.changeset/remove-embedding-error.md',
+    ]) {
+      // diffText set so the keyword trigger's fail-open path can't mask a
+      // filePatterns miss — this must pass on the file pattern alone.
+      const ctx = makeTriggerContext({ changedFiles: [file], diffText: '+plain prose line' });
+      expect(selectRules(BUILTIN_RULES, ctx).active.map(r => r.id)).toContain('doc-truth');
+    }
+  });
+
+  it('does not activate doc-truth for markdown outside the documented surfaces', () => {
+    for (const file of ['packages/parser/docs/notes.md', 'README.md', 'src/some/readme.md']) {
+      const ctx = makeTriggerContext({ changedFiles: [file], diffText: '+plain prose line' });
+      expect(selectRules(BUILTIN_RULES, ctx).skipped).toContain('doc-truth');
+    }
+  });
+
   it('activates doc-truth on claim-shaped prose in an otherwise-analyzable diff', () => {
     // The schema.ts miss: a doc comment making a falsifiable "reports as
     // disabled" claim, in a code file (no guidance-surface path match).
