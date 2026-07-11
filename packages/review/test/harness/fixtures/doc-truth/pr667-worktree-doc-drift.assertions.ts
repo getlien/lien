@@ -57,15 +57,18 @@
  * reviewer following step 2 rather than pattern-matching the prose. That is by
  * design for the canary — it tests protocol-following, not prose-matching.
  *
- * Calibration status: 0/10 on `moonshotai/kimi-k2.7-code` (2026-07-11,
- * --calibrate 10, surface-widening branch). NOT a prompt-assembly failure —
- * traces show doc-truth active and the claim rendered; the model spends its
- * budget on the PR's real code bugs (buildOverlay mask-clear race,
- * chunksCreated:0, manifest JSON.parse) and never engages the doc claim.
- * Attention competition on a bug-rich PR. Canary tag REMOVED until the
- * planned deterministic <doc_claims> worklist signal (the stale-literal /
- * untrusted-input pattern, #614/#616) makes claim-checking non-optional;
- * this fixture is the acceptance test for that phase-2 work.
+ * Calibration status (2026-07-11, kimi-k2.7-code, --calibrate 10):
+ * - 0/10 pre-signal (surface-widening branch). Not prompt assembly — traces
+ *   showed doc-truth active and the claim rendered; the model spent its
+ *   budget on the PR's real code bugs (buildOverlay mask-clear race,
+ *   chunksCreated:0, manifest JSON.parse) and never engaged the doc claim.
+ * - 2/10 with the <doc_claims> worklist. The signal verifiably engages:
+ *   passing votes emit doc-truth findings verifying OTHER worklist entries
+ *   (a JSDoc logger claim, a version-stamp claim) — but with 11 entries on a
+ *   bug-rich PR the model samples a few claims and rarely reaches this one.
+ *   Remaining gap is per-claim verification COST, not discovery: fixing it
+ *   needs claim->code evidence pre-fetch (#729 stays open for that design).
+ * No canary tag until this fixture clears the bar.
  */
 
 import type { FixtureAssertions } from '../../assertions.js';

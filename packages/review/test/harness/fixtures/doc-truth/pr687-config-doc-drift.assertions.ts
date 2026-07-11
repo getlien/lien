@@ -6,12 +6,13 @@
  * Note in docs/architecture/config-system.md — introducing a doc-vs-doc
  * inconsistency between the two, both in the same diff.
  *
- * Calibration status: 1/10 on `moonshotai/kimi-k2.7-code` (2026-07-11,
- * --calibrate 10, after the smallest-first budget fix put the claim in the
- * prompt). Omission-shaped claims (the Note doesn't say embeddings keys
- * crash, it just doesn't mention them) are the weakest doc-truth shape for
- * an initiative-driven check. Acceptance fixture for the phase-2
- * <doc_claims> deterministic signal, not a canary.
+ * Calibration status (2026-07-11, kimi-k2.7-code, --calibrate 10): 1/10
+ * pre-signal, 1/10 with the <doc_claims> worklist. Omission-shaped claims
+ * (the Note doesn't FALSELY state anything — it omits keys ADR-011 covers)
+ * are the weakest doc-truth shape: verifying an omission means comparing
+ * the claim against a DIFFERENT doc's enumeration, which the worklist
+ * doesn't link. Needs claim->code/claim->doc evidence pre-fetch (#729).
+ * Characterization fixture, not a canary.
  *
  * THE PLANTED CLAIM (touched prose, docs/architecture/config-system.md — the
  * "> **Note:**" that config-system.md links to ADR-011 from):
@@ -44,32 +45,19 @@
  *     packages/review/test/harness/fixtures/doc-truth/pr687-config-doc-drift.fixture.json \
  *     --sha a26e480bd06f6503d0d1e0f0341c37c7173e8815
  *
- * STRUCTURAL BLOCKER for real-Kimi calibration — VERIFIED via build-prompts.ts
- * on this fixture (2026-07-11), do NOT paper over: BOTH sides of the
- * contradiction are truncated out of the rendered prompt. This PR touches 22
- * files; the `.claude/skills/*` and `.cursor/rules/project.mdc` hunks sort
- * first and exhaust the char budgets of BOTH blocks — the <diff> block
- * truncates after `.cursor/rules/project.mdc` ("[Diff truncated — use read_file
- * …]") and <guidance_surface_changes> stops after
- * docs/architecture/claude-code-hook-channels.md. config-system.md's retired-key
- * Note never appears (grep for "Existing configs that name a retired backend"
- * in the prompt: 0 hits), and ADR-011's "embeddings.* / core.embeddingBatchSize
- * keys still load" line never appears (grep "embeddingBatchSize" / "still load":
- * 0 hits). An honest reviewer therefore has NO in-prompt signal that a
- * retired-key list even exists to cross-check, so the protocol-following verdict
- * is EMPTY and this fixture is effectively unfireable in replay as captured —
- * confirmed by assert-cli: an empty verdict fails Tier 1 here.
- *
- * The assertion below is nonetheless correct and well-formed (a hand-authored
- * "correct finding" verdict passes assert-cli exit 0), so the block is the
- * PROMPT-ASSEMBLY / capture, not the keywords. To make this fixture reachable,
- * fix upstream — e.g. have the guidance-surface passthrough prioritize
- * claim-bearing doc hunks (config-system.md, ADRs) over voluminous
- * `.claude/skills/*` prose, or re-capture a smaller/more-focused PR — rather
- * than loosening these assertions. Independent of that, this is also the
- * weakest contradiction on the merits: the Note doesn't claim embeddings keys
- * crash, it just omits them, so even fully in-prompt a strict reviewer might
- * read it as "accurate as far as it goes". Deliberately NOT tagged canary.
+ * Structural history: as first captured, BOTH sides of the contradiction were
+ * truncated out of the rendered prompt (22-file PR; `.claude/skills/*` prose
+ * exhausted the block budgets first). The smallest-hunk-first budget reorder
+ * (#727) fixed that — the retired-key Note now renders in
+ * <guidance_surface_changes> and its claim line appears in <doc_claims>
+ * (verified via build-prompts.ts post-fix). What remains unreachable is
+ * ADR-011's fuller enumeration (large hunk, still truncated), which is one
+ * half of the omission comparison — hence the evidence-pre-fetch need above.
+ * The assertion itself is well-formed (a hand-authored correct-finding verdict
+ * passes assert-cli exit 0). Also the weakest contradiction on the merits: the
+ * Note doesn't claim embeddings keys crash, it just omits them, so even fully
+ * in-prompt a strict reviewer might read it as "accurate as far as it goes".
+ * Deliberately NOT tagged canary.
  */
 
 import type { FixtureAssertions } from '../../assertions.js';

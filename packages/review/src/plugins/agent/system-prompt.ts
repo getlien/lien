@@ -19,6 +19,7 @@ import { renderStaleLiteralSection } from '../../stale-literal-signals.js';
 import { renderUntrustedInputSection } from '../../untrusted-input-signals.js';
 import { renderRenameSweepSection } from '../../rename-sweep-signals.js';
 import { renderGuidanceSurfaceSection } from '../../guidance-surface-signals.js';
+import { renderDocClaimsSection } from '../../doc-claims-signals.js';
 import type { ResolvedRules } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -196,6 +197,7 @@ export function buildInitialMessage(
   appendIfPresent(sections, renderUntrustedInputSection(context));
   appendIfPresent(sections, renderRenameSweepSection(context));
   appendIfPresent(sections, renderGuidanceSurfaceSection(context));
+  appendIfPresent(sections, renderDocClaimsSection(context));
   sections.push(
     'Investigate this PR. Use the investigation strategy described in your instructions, then output findings as JSON.',
   );

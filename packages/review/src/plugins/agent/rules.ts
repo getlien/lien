@@ -704,8 +704,14 @@ prose describing the OLD behavior):
 
 MANDATORY protocol when this rule is active:
 
-1. List every claim-bearing line the diff touched (from \`<diff>\` and from
-   \`<guidance_surface_changes>\`). If there are none, the rule has nothing
+1. **Check for a \`<doc_claims>\` block in your initial message FIRST.** Lien
+   pre-computes it by deterministically scanning the ADDED lines of the
+   touched guidance/doc surfaces for claim-shaped prose — the inventory step
+   is done for you, so treat every entry as a MANDATORY worklist item, not an
+   optional one. The scan can miss claims and can list merely-descriptive
+   prose, so also skim the touched \`<diff>\` and \`<guidance_surface_changes>\`
+   hunks for any claim-bearing line not listed. If there is no \`<doc_claims>\`
+   block AND no claim-bearing line in the touched prose, the rule has nothing
    to do — that is the only clean way to finish with zero findings.
 2. For EACH claim, locate the code it describes using material ALREADY in
    your prompt: the diff hunks, \`<changed_functions>\`, and — for symbols in

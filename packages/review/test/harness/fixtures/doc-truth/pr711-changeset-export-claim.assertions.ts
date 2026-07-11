@@ -5,12 +5,14 @@
  * and the code it describes are in the same diff, so the claim is verifiable
  * from in-prompt material alone.
  *
- * Calibration status: 0/10 on `moonshotai/kimi-k2.7-code` (2026-07-11,
- * --calibrate 10). Traces show the model DOES investigate (greps remaining
- * EmbeddingError references, checks dependents in every vote) and then
- * declines to report — a defensible read, since the changeset's first
- * sentence discloses the removal and "otherwise" can honestly scope it out.
- * Ambiguous-on-merits; kept as a characterization fixture, not a canary.
+ * Calibration status (2026-07-11, kimi-k2.7-code, --calibrate 10): 0/10
+ * pre-signal AND 0/10 with the <doc_claims> worklist. In both runs traces
+ * show the model engages the claim in EVERY vote (investigates remaining
+ * EmbeddingError references, checks dependents, discusses "otherwise
+ * unchanged") and then deliberately declines — the changeset's first
+ * sentence discloses the removal, so "otherwise" has an honest lenient
+ * reading. A consistent judgment call, not a discovery failure; no signal
+ * fixes judgment. Characterization fixture, not a canary.
  *
  * THE PLANTED CLAIM (touched prose, .changeset/remove-embedding-error.md):
  *   "Removed the unused embeddings-era `EmbeddingError` class and its
