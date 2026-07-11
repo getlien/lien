@@ -665,7 +665,12 @@ matches.`,
   source: 'builtin',
 };
 
-const DOC_TRUTH: ReviewRule = {
+/**
+ * The documentation-truthfulness rule. Exported so the dedicated doc-truth
+ * second pass (issue #732) can build a single-rule ResolvedRules set without
+ * re-deriving it from BUILTIN_RULES.
+ */
+export const DOC_TRUTH: ReviewRule = {
   id: 'doc-truth',
   name: 'Documentation / Guidance Truthfulness',
   description:

@@ -24,6 +24,7 @@ import { OpenAIAgentClient, toOpenAITools } from './openai-client.js';
 import { buildSystemPrompt, buildInitialMessage } from './system-prompt.js';
 import { BUILTIN_RULES, buildTriggerContext, selectRules } from './rules.js';
 import { AGENT_TOOLS, dispatchTool } from './tools.js';
+import { runDocTruthPass, mergeDocTruthFindings, appendDocTruthTurns } from './doc-truth-pass.js';
 import {
   DEFAULT_REVIEW_MODEL,
   DEFAULT_OPENROUTER_BASE_URL,
@@ -58,6 +59,11 @@ const configSchema = z.object({
       maxSeeds: z.number().int().min(1).max(20).default(8),
     })
     .optional(),
+  /**
+   * Run the dedicated claims-only doc-truth second pass on doc-touching PRs
+   * (issue #732). Default true; env LIEN_REVIEW_DOC_PASS=0 also disables it.
+   */
+  docTruthPass: z.boolean().default(true),
 });
 
 export interface AgentReviewPluginOptions {
@@ -154,14 +160,61 @@ export class AgentReviewPlugin implements ReviewPlugin {
       maxTokenBudget,
     );
 
+    // Second, claims-only doc-truth pass for doc-touching PRs (issue #732).
+    // A dedicated pass with no competing rules keeps documentation drift from
+    // being out-competed by the PR's real code bugs in a single findings list.
+    // Its trace/usage fold into the main run; a failure returns null and leaves
+    // the main-pass output untouched.
+    const docResult = await this.runSecondDocPass(
+      context,
+      config,
+      apiKey,
+      provider,
+      logger,
+      toolExecutor,
+    );
+    if (docResult) {
+      appendDocTruthTurns(result.trace, docResult.trace);
+      context.reportUsage?.(docResult.usage);
+    }
+
     reportAgentRun(this.id, context, logger, result);
 
     const pluginId = this.id;
-    const findings = result.findings.map(f => mapToReviewFinding(f, pluginId));
+    const agentFindings = mergeDocTruthFindings(result.findings, docResult?.findings ?? []);
+    const findings = agentFindings.map(f => mapToReviewFinding(f, pluginId));
     appendSummaryFinding(findings, pluginId, result.summary);
     appendIncompleteNotice(findings, pluginId, result);
 
     return findings;
+  }
+
+  /**
+   * Run the doc-truth second pass, wiring the shared tool executor into a client
+   * runner the pass can invoke with its own (smaller) turn/token budget. Returns
+   * null when the pass is gated off or fails — kept as a thin method so
+   * `analyze()` stays under its complexity budget.
+   */
+  private runSecondDocPass(
+    context: ReviewContext,
+    config: AgentConfig,
+    apiKey: string,
+    provider: string,
+    logger: Logger,
+    toolExecutor: ToolExecutor,
+  ): Promise<AgentResult | null> {
+    return runDocTruthPass(context, config, logger, (sys, init, budget, maxTurns) =>
+      runAgentClient(
+        provider,
+        { ...config, maxTurns },
+        apiKey,
+        logger,
+        sys,
+        init,
+        toolExecutor,
+        budget,
+      ),
+    );
   }
 
   async present(findings: ReviewFinding[], context: PresentContext): Promise<void> {
