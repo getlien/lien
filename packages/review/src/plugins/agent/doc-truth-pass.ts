@@ -226,21 +226,68 @@ function sameLocation(a: AgentFinding, b: AgentFinding): boolean {
   return a.filepath === b.filepath && Math.abs(a.line - b.line) <= DEDUPE_LINE_PROXIMITY;
 }
 
+/** error outranks warning — used so dedupe never drops the sharper finding. */
+function severityRank(f: AgentFinding): number {
+  return f.severity === 'error' ? 1 : 0;
+}
+
 /**
  * Fold the doc pass's findings into the main pass's. Every doc-pass finding gets
  * `ruleId: 'doc-truth'` (the pass has a single rule, so attribution is
  * unambiguous regardless of what the model emitted). A doc-pass finding is
- * dropped when the main pass already reported one at the same file within
- * DEDUPE_LINE_PROXIMITY lines — the main-pass version is kept. Returns a new
- * array; inputs are not mutated.
+ * dropped only when the main pass already reported one at the same location
+ * (same file, within DEDUPE_LINE_PROXIMITY lines) AT LEAST AS SEVERE — a
+ * doc-truth `error` must not be silenced by a nearby main-pass `warning`.
+ * Returns a new array; inputs are not mutated.
  */
 export function mergeDocTruthFindings(
   mainFindings: AgentFinding[],
   docFindings: AgentFinding[],
 ): AgentFinding[] {
   const forced = docFindings.map(f => ({ ...f, ruleId: 'doc-truth' }));
-  const kept = forced.filter(df => !mainFindings.some(mf => sameLocation(mf, df)));
+  const kept = forced.filter(
+    df => !mainFindings.some(mf => sameLocation(mf, df) && severityRank(mf) >= severityRank(df)),
+  );
   return [...mainFindings, ...kept];
+}
+
+/**
+ * Merge the doc pass's RESULT-LEVEL state into the main pass's before the
+ * summary/incomplete notices are appended. The render path (`present()` /
+ * `formatCheckSummary()`) consumes a SINGLE summary-category finding — a
+ * second appended notice is never rendered — so doc-pass state must be folded
+ * into the one summary the main pass owns:
+ *  - incomplete: an unfinished doc pass marks the merged result incomplete
+ *    (with the doc pass's stopReason when the main pass finished cleanly);
+ *  - risk: doc-truth `error` findings lift a low/absent risk level to medium
+ *    and note the documentation contradictions in the overview, so the
+ *    headline can't read "Low Risk / no issues" above doc-truth errors.
+ * Mutates and returns `main` (the caller owns it).
+ */
+export function mergeDocPassIntoResult(
+  main: AgentResult,
+  docResult: AgentResult | null,
+  mergedFindings: AgentFinding[],
+): AgentResult {
+  if (!docResult) return main;
+
+  if (docResult.incomplete && !main.incomplete) {
+    main.incomplete = true;
+    main.stopReason = docResult.stopReason;
+    main.incompleteFromDocPass = true;
+  }
+
+  const docErrors = mergedFindings.filter(
+    f => f.ruleId === 'doc-truth' && f.severity === 'error',
+  ).length;
+  if (docErrors > 0 && main.summary) {
+    const level = main.summary.riskLevel?.toLowerCase();
+    if (level === undefined || level === 'low') main.summary.riskLevel = 'medium';
+    main.summary.overview =
+      `${main.summary.overview} The documentation-truthfulness pass found ` +
+      `${docErrors} contradiction(s) between touched docs and the code — see the doc-truth findings.`;
+  }
+  return main;
 }
 
 /**
