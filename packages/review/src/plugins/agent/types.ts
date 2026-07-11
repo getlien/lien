@@ -217,6 +217,21 @@ export interface AgentResult {
    */
   incomplete: boolean;
   /**
+   * True when the agent pass NEVER completed a single model turn — every
+   * provider request failed terminally (e.g. a 402 on an overdrawn account, or a
+   * network outage that outlasted the retries). Distinct from a PARTIAL
+   * incomplete run (some turns completed, then it bailed): a never-ran review
+   * investigated nothing, so it must drive a FAILING check conclusion rather
+   * than the neutral one a partial run gets. Always implies `incomplete`. Set on
+   * the MAIN pass only — a failure-isolated doc-truth second pass never sets it.
+   */
+  neverRan?: boolean;
+  /**
+   * The terminal error message that ended the run (present when `stopReason` is
+   * 'error'), so the never-ran/incomplete notice can name the provider failure.
+   */
+  errorMessage?: string;
+  /**
    * True when `incomplete` was set by an unfinished doc-truth SECOND pass
    * while the main pass finished cleanly — the incomplete notice then names
    * the doc pass instead of implying the whole review is partial.

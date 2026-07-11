@@ -291,6 +291,15 @@ export class OpenAIAgentClient {
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
     let turn = 0;
+    // Turns the model actually completed (a usable response came back). `turn`
+    // increments at the top of the loop, BEFORE the API call — so a request that
+    // throws on its first attempt leaves turn=1 with nothing accomplished. This
+    // counts only real responses, so a fully starved run (every request 402s)
+    // reports 0 turns instead of a misleading 1, and marks the run `neverRan`.
+    let completedTurns = 0;
+    // The terminal error that ended the run, surfaced on the result so the
+    // never-ran notice can name the provider failure (e.g. a 402).
+    let terminalError: string | undefined;
     let lastContent: string | null = null;
     const turnTraces: TurnTrace[] = [];
     // Defaults to 'max_turns': if the loop exits via its `while` condition
@@ -311,12 +320,15 @@ export class OpenAIAgentClient {
         // Transient failures are already retried inside chatCompletion; a throw
         // here means it gave up. End the run gracefully (stopReason 'error' → no
         // summary → incomplete notice) rather than crashing the whole plugin.
+        terminalError = err instanceof Error ? err.message : String(err);
         this.logger.warning(
-          `[agent] chat request failed after retries (${err instanceof Error ? err.message : String(err)}); ending run`,
+          `[agent] chat request failed after retries (${terminalError}); ending run`,
         );
         stopReason = 'error';
         break;
       }
+      // A usable response came back — this turn genuinely completed.
+      completedTurns++;
 
       const turnInputTokens = response.usage?.prompt_tokens ?? 0;
       const turnOutputTokens = response.usage?.completion_tokens ?? 0;
@@ -401,7 +413,9 @@ export class OpenAIAgentClient {
     // field, not `content`). Result: silent-bail failures on rules
     // whose runs the model was actively investigating. Trace evidence
     // gathered after #553 — see PR description.
-    if (!parsed.summary && turn > 0) {
+    // Gated on a completed turn: a never-ran run (every request failed) has no
+    // conversation to summarize, so skip the doomed retry (and its 3s sleep).
+    if (!parsed.summary && completedTurns > 0) {
       const retry = await this.runSummaryRetry(messages, turn);
       if (retry) {
         totalInputTokens += retry.inputTokens;
@@ -423,9 +437,14 @@ export class OpenAIAgentClient {
     // prose instead of the findings JSON (the model "completed" but delivered no
     // verdict): that must NOT be reported as a clean 0-findings review.
     const incomplete = !parsed.summary;
+    // Never-ran = a terminal error with zero completed turns: every provider
+    // request failed (e.g. an overdrawn account 402ing on every call), so the
+    // agent investigated nothing. This is an infrastructure failure, not a
+    // partial review, and must not read as a clean/neutral result downstream.
+    const neverRan = stopReason === 'error' && completedTurns === 0;
     if (incomplete) {
       this.logger.warning(
-        `[agent] Review incomplete (stopReason=${stopReason}, no verdict/summary after ${turn} turns)`,
+        `[agent] Review ${neverRan ? 'never ran' : 'incomplete'} (stopReason=${stopReason}, no verdict/summary after ${completedTurns} completed turn(s))`,
       );
       // Always surface what the agent was doing when it bailed — the single
       // most useful datum for diagnosing an incomplete run in CI logs.
@@ -441,9 +460,11 @@ export class OpenAIAgentClient {
         totalTokens: totalInputTokens + totalOutputTokens,
         cost,
       },
-      turns: turn,
+      turns: completedTurns,
       stopReason,
       incomplete,
+      neverRan,
+      errorMessage: terminalError,
       trace: {
         systemPrompt,
         initialMessage,

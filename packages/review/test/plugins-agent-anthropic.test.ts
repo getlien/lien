@@ -168,3 +168,31 @@ describe('AnthropicAgentClient extended thinking + retry forcing', () => {
     expect(retryArgs.tools).toBeDefined();
   }, 15000);
 });
+
+describe('AnthropicAgentClient never-ran (terminal API failure)', () => {
+  it('returns a never-ran result instead of propagating the throw', async () => {
+    // An overdrawn account: the SDK exhausts its own retries and throws. A
+    // propagated throw would be silently dropped by the engine's
+    // Promise.allSettled — letting a starved review read as clean — so the
+    // client must catch it and return a neverRan result with zero completed
+    // turns and no summary.
+    createMock.mockRejectedValue(new Error('402 Insufficient credits'));
+    const { logger } = capturingLogger();
+
+    const result = await makeClient(1_000_000, logger).run(
+      'sys',
+      'init',
+      TOOLS as never,
+      async () => 'ok',
+    );
+
+    expect(result.neverRan).toBe(true);
+    expect(result.incomplete).toBe(true);
+    expect(result.turns).toBe(0);
+    expect(result.summary).toBeUndefined();
+    expect(result.stopReason).toBe('error');
+    expect(result.errorMessage).toContain('402');
+    // No summary-retry: with no lastResponse there is nothing to summarize.
+    expect(createMock).toHaveBeenCalledTimes(1);
+  });
+});
