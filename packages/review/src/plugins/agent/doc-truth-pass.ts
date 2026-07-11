@@ -81,7 +81,13 @@ const DOC_PASS_INTRO =
   '"covers the main case", or "the extra condition is an implementation detail" ' +
   'are NOT confirmations — if the enumerations differ, report it and cite both ' +
   'sides. Descriptive prose without a checkable enumeration or behavior stays ' +
-  'held to the ordinary contradicts-or-confirms standard.';
+  'held to the ordinary contradicts-or-confirms standard.\n\n' +
+  'Budget discipline: an evidence excerpt attached to a claim IS the described ' +
+  'code — compare against it directly and do NOT re-read that file with tools; ' +
+  'spend tool calls ONLY on claims with no attached evidence. Your budget is ' +
+  'sized for comparisons, not re-investigation: emit your verdict JSON as soon ' +
+  'as the worklist is judged, and if you approach the budget, output the ' +
+  'verdict for the claims you have judged rather than reading more files.';
 
 // ---------------------------------------------------------------------------
 // Gate
