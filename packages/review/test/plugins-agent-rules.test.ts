@@ -655,6 +655,68 @@ describe('boundary-change rule', () => {
     expect(selectRules(BUILTIN_RULES, ctx).skipped).toContain('boundary-change');
   });
 
+  // #741 (cross-repo pilot): validation-boundary shifts with no numeric
+  // comparison in the diff. Each activation case below is an evidenced
+  // miss shape; the no-fire cases pin the false-positive guards.
+
+  it('activates on a type allow-list change (isinstance) — httpx#2523 shape', () => {
+    const ctx = makeTriggerContext({
+      diffText:
+        '-    return str(value)\n+    if isinstance(value, (str, float, int)):\n+        return str(value)',
+    });
+    expect(selectRules(BUILTIN_RULES, ctx).active.map(r => r.id)).toContain('boundary-change');
+  });
+
+  it('activates on a raised/thrown TypeError — httpx#2400 shape', () => {
+    const ctx = makeTriggerContext({
+      diffText: '+        raise TypeError(f"Unexpected type for file content: {value!r}")',
+    });
+    expect(selectRules(BUILTIN_RULES, ctx).active.map(r => r.id)).toContain('boundary-change');
+  });
+
+  it('activates on instanceof and language-specific type checks', () => {
+    const js = makeTriggerContext({ diffText: '+  if (err instanceof HttpError) rethrow(err);' });
+    const php = makeTriggerContext({ diffText: '+  if (!is_string($body)) { return; }' });
+    const rb = makeTriggerContext({ diffText: '+    return value if value.is_a?(String)' });
+    expect(selectRules(BUILTIN_RULES, js).active.map(r => r.id)).toContain('boundary-change');
+    expect(selectRules(BUILTIN_RULES, php).active.map(r => r.id)).toContain('boundary-change');
+    expect(selectRules(BUILTIN_RULES, rb).active.map(r => r.id)).toContain('boundary-change');
+  });
+
+  it('activates on integer-truncation idioms (`| 0`, `~~`, narrowing casts) — hono#3605 shape', () => {
+    const bitwiseOr = makeTriggerContext({
+      diffText:
+        '-  const now = Math.floor(Date.now() / 1000);\n+  const now = (Date.now() / 1000) | 0;',
+    });
+    const doubleNot = makeTriggerContext({ diffText: '+  const idx = ~~(offset / size);' });
+    const rustCast = makeTriggerContext({
+      diffText: '+        let secs = duration.as_secs() as i32;',
+    });
+    const goCast = makeTriggerContext({ diffText: '+\tsize := int32(len(payload))' });
+    expect(selectRules(BUILTIN_RULES, bitwiseOr).active.map(r => r.id)).toContain(
+      'boundary-change',
+    );
+    expect(selectRules(BUILTIN_RULES, doubleNot).active.map(r => r.id)).toContain(
+      'boundary-change',
+    );
+    expect(selectRules(BUILTIN_RULES, rustCast).active.map(r => r.id)).toContain('boundary-change');
+    expect(selectRules(BUILTIN_RULES, goCast).active.map(r => r.id)).toContain('boundary-change');
+  });
+
+  it('does not activate on the multipart MIME delimiter literal `boundary=`', () => {
+    const ctx = makeTriggerContext({
+      diffText: '+        content_type = "multipart/form-data; boundary=abc123"',
+    });
+    expect(selectRules(BUILTIN_RULES, ctx).skipped).toContain('boundary-change');
+  });
+
+  it('does not activate on `|| 0` fallbacks or wider numeric literals after `| 0x`', () => {
+    const orFallback = makeTriggerContext({ diffText: '+  const count = input.length || 0;' });
+    const hexMask = makeTriggerContext({ diffText: '+  const flags = base | 0x40;' });
+    expect(selectRules(BUILTIN_RULES, orFallback).skipped).toContain('boundary-change');
+    expect(selectRules(BUILTIN_RULES, hexMask).skipped).toContain('boundary-change');
+  });
+
   it('carries requiresBlastRadius=true so the agent gate can detect it', () => {
     const ctx = makeTriggerContext({
       diffText: '+  if (dependentCount >= 5) return "medium";',
