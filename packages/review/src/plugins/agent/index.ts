@@ -169,15 +169,12 @@ export class AgentReviewPlugin implements ReviewPlugin {
     // A dedicated pass with no competing rules keeps documentation drift from
     // being out-competed by the PR's real code bugs in a single findings list.
     // Its trace/usage fold into the main run; a failure returns null and leaves
-    // the main-pass output untouched.
-    const docResult = await this.runSecondDocPass(
-      context,
-      config,
-      apiKey,
-      provider,
-      logger,
-      toolExecutor,
-    );
+    // the main-pass output untouched. Skipped entirely when the main pass never
+    // ran (provider down) — a second pass would only fire more doomed requests,
+    // and its own incomplete state must not overwrite the never-ran marker.
+    const docResult = result.neverRan
+      ? null
+      : await this.runSecondDocPass(context, config, apiKey, provider, logger, toolExecutor);
     if (docResult) {
       appendDocTruthTurns(result.trace, docResult.trace);
       context.reportUsage?.(docResult.usage);
@@ -391,24 +388,27 @@ export function scaleBudgetForBlastRadius(baseBudget: number, riskLevel?: string
 }
 
 /**
- * When the agent bailed on a budget/turn limit before producing a verdict,
- * append a `summary` finding flagged `incomplete` so `present()` surfaces a
- * clear warning instead of a misleading "no issues found" / clean review.
+ * When the agent bailed before producing a verdict, append a `summary` finding
+ * so `present()` surfaces a clear notice instead of a misleading "no issues
+ * found" / clean review.
+ *
+ * A NEVER-RAN main pass (every provider request failed — infrastructure, not a
+ * partial review) escalates to an `error` finding so the check concludes
+ * `failure` rather than the passing `neutral` a `warning` maps to. A partial
+ * run, or an incomplete that came only from the failure-isolated doc-truth
+ * pass, stays a `warning` (fail-open) — but still never reads as clean.
  */
-function appendIncompleteNotice(
+export function appendIncompleteNotice(
   findings: ReviewFinding[],
   pluginId: string,
   result: AgentResult,
 ): void {
   if (!result.incomplete) return;
-  const reason =
-    result.stopReason === 'budget'
-      ? 'hit the token budget limit'
-      : result.stopReason === 'max_turns'
-        ? 'hit the turn limit'
-        : result.stopReason === 'completed'
-          ? 'ended without emitting a parseable JSON verdict'
-          : 'stopped unexpectedly';
+  if (result.neverRan && !result.incompleteFromDocPass) {
+    appendNeverRanNotice(findings, pluginId, result);
+    return;
+  }
+  const reason = describeIncompleteStop(result.stopReason);
   // An incomplete that came only from the doc-truth SECOND pass must not
   // imply the whole review is partial — the main pass finished normally.
   const message = result.incompleteFromDocPass
@@ -425,6 +425,62 @@ function appendIncompleteNotice(
     message,
     metadata: { incomplete: true, stopReason: result.stopReason, overview: message },
   });
+}
+
+/** Human-readable phrase for why an incomplete (but partial) run stopped. */
+function describeIncompleteStop(stopReason: AgentResult['stopReason']): string {
+  switch (stopReason) {
+    case 'budget':
+      return 'hit the token budget limit';
+    case 'max_turns':
+      return 'hit the turn limit';
+    case 'completed':
+      return 'ended without emitting a parseable JSON verdict';
+    default:
+      return 'stopped unexpectedly';
+  }
+}
+
+/**
+ * Append the never-ran notice: an `error`-severity summary finding naming the
+ * provider failure. The error severity is load-bearing — `determineConclusion`
+ * maps it to a `failure` check conclusion, so a fully starved review can't pass
+ * as clean. `metadata.neverRan` lets a conclusion-mapper key on it explicitly.
+ */
+function appendNeverRanNotice(
+  findings: ReviewFinding[],
+  pluginId: string,
+  result: AgentResult,
+): void {
+  const cause = summarizeProviderError(result.errorMessage);
+  const message =
+    `Lien Review did not run — every provider request failed${cause ? ` (${cause})` : ''}. ` +
+    `This is NOT a clean review; no code was analyzed. Re-run once the provider ` +
+    `issue is resolved.`;
+  findings.push({
+    pluginId,
+    filepath: '',
+    line: 0,
+    severity: 'error' as const,
+    category: 'summary',
+    message,
+    metadata: {
+      incomplete: true,
+      neverRan: true,
+      stopReason: result.stopReason,
+      overview: message,
+    },
+  });
+}
+
+/** Cap the provider error to a short, single-line cause for the notice. */
+const MAX_PROVIDER_ERROR_CHARS = 160;
+function summarizeProviderError(msg?: string): string {
+  if (!msg) return '';
+  const oneLine = msg.replace(/\s+/g, ' ').trim();
+  return oneLine.length <= MAX_PROVIDER_ERROR_CHARS
+    ? oneLine
+    : `${oneLine.slice(0, MAX_PROVIDER_ERROR_CHARS - 1).trimEnd()}…`;
 }
 
 // ---------------------------------------------------------------------------

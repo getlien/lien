@@ -304,6 +304,38 @@ describe('ReviewEngine.present()', () => {
     );
   });
 
+  it('concludes failure on a never-ran summary error finding (not neutral)', async () => {
+    // Guards the #737 contract at the conclusion layer: the never-ran notice is
+    // a category:'summary', line:0 ERROR finding. determineConclusion must map it
+    // to 'failure' — a starved review that investigated nothing cannot conclude
+    // with the passing 'neutral' a warning-severity incomplete notice gets.
+    const engine = new ReviewEngine();
+    const octokit = {
+      checks: {
+        create: vi.fn().mockResolvedValue({ data: { id: 1 } }),
+        update: vi.fn().mockResolvedValue({}),
+      },
+    };
+
+    const findings: ReviewFinding[] = [
+      {
+        pluginId: 'agent-review',
+        filepath: '',
+        line: 0,
+        severity: 'error',
+        category: 'summary',
+        message: 'Lien Review did not run — every provider request failed (402).',
+        metadata: { incomplete: true, neverRan: true, stopReason: 'error' },
+      },
+    ];
+
+    await engine.present(findings, createAdapterContext({ octokit, pr: mockPR }));
+
+    expect(octokit.checks.update).toHaveBeenCalledWith(
+      expect.objectContaining({ conclusion: 'failure' }),
+    );
+  });
+
   it('captures debug log in check run text field', async () => {
     const engine = new ReviewEngine();
     const octokit = {

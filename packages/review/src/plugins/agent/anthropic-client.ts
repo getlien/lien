@@ -141,6 +141,13 @@ export class AnthropicAgentClient {
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
     let turn = 0;
+    // Turns the model actually completed (a usable response came back), as
+    // opposed to `turn`, which counts attempts including one that throws. A run
+    // where the first request fails terminally reports 0 completed turns and is
+    // marked `neverRan`. See the OpenAI client for the same accounting.
+    let completedTurns = 0;
+    // The terminal error that ended the run, surfaced on the result.
+    let terminalError: string | undefined;
     let lastResponse: Anthropic.Messages.Message | null = null;
     const turnTraces: TurnTrace[] = [];
     // Defaults to 'max_turns': if the loop exits via its `while` condition
@@ -154,23 +161,37 @@ export class AnthropicAgentClient {
       turn++;
 
       const used = totalInputTokens + totalOutputTokens;
-      const response = await this.client.messages.create({
-        model: this.model,
-        max_tokens: requestMaxTokens(this.maxTokenBudget - used),
-        thinking: { type: 'enabled', budget_tokens: THINKING_BUDGET_TOKENS },
-        system: [
-          {
-            type: 'text',
-            text: systemPrompt,
-            cache_control: { type: 'ephemeral' },
-          },
-        ],
-        messages,
-        tools,
-        // tool_choice:'none' forbids tool calls, forcing a findings response.
-        // Compatible with extended thinking (unlike 'any'/'tool').
-        ...(forceFinish ? { tool_choice: { type: 'none' as const } } : {}),
-      });
+      let response: Anthropic.Messages.Message;
+      try {
+        response = await this.client.messages.create({
+          model: this.model,
+          max_tokens: requestMaxTokens(this.maxTokenBudget - used),
+          thinking: { type: 'enabled', budget_tokens: THINKING_BUDGET_TOKENS },
+          system: [
+            {
+              type: 'text',
+              text: systemPrompt,
+              cache_control: { type: 'ephemeral' },
+            },
+          ],
+          messages,
+          tools,
+          // tool_choice:'none' forbids tool calls, forcing a findings response.
+          // Compatible with extended thinking (unlike 'any'/'tool').
+          ...(forceFinish ? { tool_choice: { type: 'none' as const } } : {}),
+        });
+      } catch (err) {
+        // The SDK already retries transient failures; a throw here means it gave
+        // up (e.g. credits exhausted). End gracefully as an error stop — a
+        // propagated throw would be silently dropped by the engine's
+        // Promise.allSettled, letting a starved review read as clean.
+        terminalError = err instanceof Error ? err.message : String(err);
+        this.logger.warning(`[agent] message request failed (${terminalError}); ending run`);
+        stopReason = 'error';
+        break;
+      }
+      // A usable response came back — this turn genuinely completed.
+      completedTurns++;
 
       lastResponse = response;
 
@@ -287,9 +308,12 @@ export class AnthropicAgentClient {
     // This also catches an `end_turn` that emitted prose instead of the findings
     // JSON: that must NOT be reported as a clean 0-findings review.
     const incomplete = !parsed.summary;
+    // Never-ran = a terminal error with zero completed turns (parity with the
+    // OpenAI client): every request failed, so nothing was investigated.
+    const neverRan = stopReason === 'error' && completedTurns === 0;
     if (incomplete) {
       this.logger.warning(
-        `[agent] Review incomplete (stopReason=${stopReason}, no verdict/summary after ${turn} turns)`,
+        `[agent] Review ${neverRan ? 'never ran' : 'incomplete'} (stopReason=${stopReason}, no verdict/summary after ${completedTurns} completed turn(s))`,
       );
       // Always surface what the agent was doing when it bailed.
       logTurn(this.logger, lastLoopTurn, 'last turn before bail');
@@ -304,9 +328,11 @@ export class AnthropicAgentClient {
         totalTokens: totalInputTokens + totalOutputTokens,
         cost,
       },
-      turns: turn,
+      turns: completedTurns,
       stopReason,
       incomplete,
+      neverRan,
+      errorMessage: terminalError,
       trace: {
         systemPrompt,
         initialMessage,

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { OpenAIAgentClient, envDisabled } from '../src/plugins/agent/openai-client.js';
 import {
   AgentReviewPlugin,
+  appendIncompleteNotice,
   scaleBudgetForBlastRadius,
   clampText,
 } from '../src/plugins/agent/index.js';
@@ -10,6 +11,7 @@ import { DEFAULT_REVIEW_MODEL, MAX_REVIEW_TOKEN_BUDGET } from '../src/defaults.j
 import { silentLogger } from '../src/test-helpers.js';
 import type { Logger } from '../src/logger.js';
 import type { PresentContext, ReviewFinding } from '../src/plugin-types.js';
+import type { AgentResult } from '../src/plugins/agent/types.js';
 
 // ---------------------------------------------------------------------------
 // fetch mock helpers (OpenAI-compatible chat/completions)
@@ -327,6 +329,126 @@ describe('OpenAIAgentClient budget handling', () => {
     expect(result.incomplete).toBe(true);
     expect(result.summary).toBeUndefined();
   }, 20000); // retries + the summary-retry's own attempts/sleep
+
+  it('marks a credit-starved run never-ran (402 on every request), not a clean review', async () => {
+    // The exact #737 signature: an overdrawn account 402s on every request. A
+    // non-429/non-5xx 4xx is a fatal throw (no retry), so no turn ever completes.
+    // The run must report neverRan with ZERO completed turns and no summary — an
+    // infrastructure failure, not a misleading "0 findings in 1 turns".
+    let calls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        calls++;
+        return {
+          ok: false,
+          status: 402,
+          text: async () => '{"error":{"message":"Insufficient credits"}}',
+        };
+      }),
+    );
+    const client = makeClient(1_000_000);
+
+    const result = await client.run('sys', 'init', [], noopTool);
+
+    expect(result.neverRan).toBe(true);
+    expect(result.incomplete).toBe(true);
+    expect(result.turns).toBe(0);
+    expect(result.summary).toBeUndefined();
+    expect(result.findings).toHaveLength(0);
+    expect(result.errorMessage).toContain('402');
+    // Zero completed turns ⇒ the doomed summary-retry is skipped (one call only).
+    expect(calls).toBe(1);
+  });
+
+  it('does NOT mark a partial run (a turn completed, then failures) never-ran', async () => {
+    // Turn 1 completes with tool_calls; the next request (and its retries) fail.
+    // A turn ran, so this is a PARTIAL incomplete — fail-open — not never-ran.
+    let calls = 0;
+    const ok = toolCallTurn(100);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        calls++;
+        if (calls === 1) return { ok: true, status: 200, text: async () => JSON.stringify(ok) };
+        throw new TypeError('fetch failed');
+      }),
+    );
+    const client = makeClient(1_000_000);
+
+    const result = await client.run('sys', 'init', [], noopTool);
+
+    expect(result.incomplete).toBe(true);
+    expect(result.neverRan).toBe(false);
+    expect(result.turns).toBeGreaterThanOrEqual(1);
+  }, 20000);
+});
+
+describe('appendIncompleteNotice — severity by run outcome', () => {
+  function baseResult(overrides: Partial<AgentResult>): AgentResult {
+    return {
+      findings: [],
+      usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0 },
+      turns: 0,
+      stopReason: 'error',
+      incomplete: true,
+      ...overrides,
+    };
+  }
+
+  it('escalates a never-ran main pass to an ERROR notice naming the cause', () => {
+    const findings: ReviewFinding[] = [];
+    appendIncompleteNotice(
+      findings,
+      'agent-review',
+      baseResult({ neverRan: true, errorMessage: 'API error (402): Insufficient credits' }),
+    );
+
+    expect(findings).toHaveLength(1);
+    const notice = findings[0];
+    expect(notice.severity).toBe('error');
+    expect(notice.category).toBe('summary');
+    expect(notice.message).toContain('did not run');
+    expect(notice.message).toContain('402');
+    expect(notice.message).toContain('NOT a clean review');
+    expect(notice.metadata).toMatchObject({ neverRan: true, incomplete: true });
+  });
+
+  it('keeps a partial (budget) incomplete a WARNING, not clean', () => {
+    const findings: ReviewFinding[] = [];
+    appendIncompleteNotice(
+      findings,
+      'agent-review',
+      baseResult({ neverRan: false, stopReason: 'budget' }),
+    );
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].message).toContain('did not finish');
+    expect(findings[0].message).not.toContain('did not run');
+  });
+
+  it('keeps a doc-pass-only incomplete a WARNING even if that pass never ran', () => {
+    // A never-ran flag arriving alongside incompleteFromDocPass must NOT escalate
+    // — the doc-truth second pass is failure-isolated; the main pass ran fine.
+    const findings: ReviewFinding[] = [];
+    appendIncompleteNotice(
+      findings,
+      'agent-review',
+      baseResult({ neverRan: true, incompleteFromDocPass: true, stopReason: 'error' }),
+    );
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].message).toContain('documentation-truthfulness pass');
+    expect(findings[0].message).toContain('code findings are unaffected');
+  });
+
+  it('is a no-op for a complete run', () => {
+    const findings: ReviewFinding[] = [];
+    appendIncompleteNotice(findings, 'agent-review', baseResult({ incomplete: false }));
+    expect(findings).toHaveLength(0);
+  });
 });
 
 describe('envDisabled (LIEN_REVIEW_LOG_AGENT parsing — logging on by default)', () => {
