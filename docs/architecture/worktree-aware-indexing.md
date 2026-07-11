@@ -27,6 +27,7 @@ as a **read-only base** and store only a small per-worktree **overlay**:
 
 ```
 ~/.lien/indices/<main-repoId>/structural.db      ← BASE  (read-only, owned by main)
+~/.lien/indices/<main-repoId>/manifest.json      ← BASE manifest (also required for overlay eligibility)
 ~/.lien/indices/<worktree-repoId>/structural.db  ← OVERLAY (rows for diverged files)
 ~/.lien/indices/<worktree-repoId>/overlay.db     ← (see "One overlay DB" below)
 ```
