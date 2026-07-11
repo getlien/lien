@@ -425,7 +425,7 @@ const REPLAY_UNAVAILABLE_REASON =
   'The repository working tree is not available in this run (e.g. offline fixture ' +
   'replay), so disk-backed search is blind here — a zero/empty result does NOT mean ' +
   '"no match exists". Rely on the pre-computed signals in your initial message ' +
-  '(<stale_literal_candidates>, <blast_radius>, <deleted_exports>) and the ' +
+  '(<stale_literal_candidates>, <blast_radius>, <removed_exports>) and the ' +
   'chunk-backed tools (get_files_context, get_dependents, list_functions) instead.';
 
 /**

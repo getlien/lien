@@ -145,7 +145,7 @@ const STRUCTURAL_ANALYSIS: ReviewRule = {
 Use tools to understand impact:
 1. Use get_files_context on changed files to understand imports/exports
 2. Use get_dependents on every changed/exported symbol to find callers
-3. **CRITICAL**: If the diff removes exports from a barrel/index file, you MUST use grep_codebase for EACH removed symbol name to check if any file still imports it. This is the #1 source of breaking changes in deletion PRs. Do not skip this step.
+3. **CRITICAL — removed exports**: A \`<removed_exports>\` section may be in your initial message. When present it pre-computes the removed public symbols AND the surviving-reference sweep, so treat EVERY entry that lists surviving references as a mandatory breaking-change check — verify and report it — and do NOT re-grep those symbols. Only \`grep_codebase\` for removed symbols NOT covered there (the scan can miss exotic export shapes). Removed exports are the #1 source of breaking changes in deletion PRs; do not skip this.
 4. Check if callers handle new behavior correctly
 5. Use read_file to get the FULL body of every changed function (not just the diff)`,
   example: `### Good finding — structural, caller broken:
@@ -399,6 +399,13 @@ MANDATORY protocol when this rule is active:
    new boundary semantics cascade into that caller. This is
    additional evidence for the finding, not a replacement for the
    test-coverage check.
+5. If a \`<removed_exports>\` section is present, cross-check each
+   entry against the PR's changeset entries and description. An
+   export removal the changeset omits, or describes as unchanged /
+   patch-level / non-breaking, is a reportable contradiction: the
+   public surface shrank but the release notes claim it did not.
+   Quote the changeset's claim and name the removed symbol in the
+   finding.
 
 Do not finalize a response for this rule with zero findings unless
 step 2 found a qualifying test. "I could not find an obvious bug"

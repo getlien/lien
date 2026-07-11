@@ -10,7 +10,7 @@
  *
  * This module pre-computes the parse sites the diff introduces/modifies and
  * injects them as an `<untrusted_input_sites>` worklist, mirroring the
- * `<deleted_exports>` / `<stale_literal_candidates>` precedents. It hands the
+ * `<removed_exports>` / `<stale_literal_candidates>` precedents. It hands the
  * agent a concrete list to trace, which counters the silence-bias failure mode
  * (the agent investigates but emits nothing). It injects only locations — never
  * a verdict; the agent still traces each site to its consumers and judges.

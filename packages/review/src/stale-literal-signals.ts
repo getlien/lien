@@ -8,7 +8,7 @@
  * exists), so the rule can never find the surviving copy.
  *
  * This module pre-computes the structural fact instead, mirroring the
- * `<blast_radius>` / `<deleted_exports>` precedents: collect every distinctive
+ * `<blast_radius>` / `<removed_exports>` precedents: collect every distinctive
  * literal the diff TOUCHES (on a `+` or `-` line — this covers both a literal
  * the PR removed and one it conditionalized in place), then scan the indexed
  * repo's post-image chunk content for the SAME literal surviving unchanged

@@ -462,7 +462,7 @@ describe('buildSystemPrompt', () => {
     // Structural analysis rule
     expect(prompt).toContain('Structural');
     expect(prompt).toContain('get_files_context');
-    expect(prompt).toContain('barrel/index file');
+    expect(prompt).toContain('<removed_exports>');
 
     // Edge case sweep rule
     expect(prompt).toContain('Edge Case Sweep');
