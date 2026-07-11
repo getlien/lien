@@ -55,3 +55,9 @@ Durable, git-tracked record of corrections. Read this at the start of every sess
   onboarding feature. Alf was surprised a hosted guide existed; the repo is
   the source of truth for team knowledge. If a hosted/shareable artifact
   seems genuinely better, ask first.
+- **Review-body findings are a separate channel from inline comments.**
+  Out-of-diff findings get PROMOTED to the review body (#630), so triaging
+  `gh api .../pulls/N/comments` alone misses them — the #733 merge shipped
+  over three unread findings that way. Before any merge: also read
+  `gh pr view N --json reviews` (the github-actions review body) and treat
+  a fresh push's review as unread until fetched.
