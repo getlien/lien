@@ -76,6 +76,38 @@ npx tsx packages/review/test/harness/capture-pr.ts 541 "$ROOT/untrusted-input-va
 npx tsx packages/review/test/harness/capture-pr.ts 658 "$ROOT/doc-truth/pr658-search-code-rename.fixture.json"
 ```
 
+## Cross-repo corpus (`fixtures/crossrepo/`)
+
+Fixtures mined from real regression history of EXTERNAL open-source repos
+during the 2026-07 cross-repo validation study — real bugs that shipped
+past those projects' own maintainers, with a later fix commit as ground
+truth. They exercise the whole pipeline on codebases and languages the
+rules were never tuned on, so they're the drift signal for "still works
+beyond our own repo". Fixture JSONs are gitignored like the rest of the
+corpus, but regeneration needs the external clone first — each
+`.assertions.ts` header carries its exact recipe, e.g.:
+
+```bash
+git clone https://github.com/encode/starlette /tmp/starlette && cd /tmp/starlette
+git fetch origin pull/2334/head:pr-2334-head   # squash-merged heads aren't in default refs
+npx tsx <lien>/packages/review/test/harness/capture-pr.ts 2334 \
+  <lien>/packages/review/test/harness/fixtures/crossrepo/pr2334-etag-weak-indicator-strip.fixture.json
+```
+
+(`capture-pr.ts` retargets to whatever repo the cwd is in — no flags needed.)
+
+| Source | PR | Fixture | Bug shape | Status |
+| --- | :---: | --- | --- | --- |
+| encode/starlette | #2334 | `crossrepo/pr2334-etag-weak-indicator-strip` | `.strip(" W/")` char-set gotcha | characterization (measured 5/10 — borderline-judgment, see header) |
+| encode/starlette | #2191 | `crossrepo/pr2191-templateresponse-offbyone` | positional-args index collision | **canary** (certified 10/10, 2026-07-12) |
+| pallets/werkzeug | #2678 | `crossrepo/pr2678-multipart-index-offset` | slice-relative index used as absolute | characterization (cert deferred) |
+| pallets/werkzeug | #2017 | `crossrepo/pr2017-multipart-boundary-regex` | unescaped client boundary in regex | characterization (cert deferred) |
+
+The two `characterization`-tagged entries have 3/3 Kimi vote evidence but
+not yet a `--calibrate 10` certification — promote by running the
+calibration, recording the result in the header, and flipping the tag to
+`canary` (the bar is the same ≥9/10 as everywhere else).
+
 ## Negative-regression fixtures
 
 These capture real-world false positives the rule produced on a non-bug
