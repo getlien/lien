@@ -80,6 +80,7 @@ const FIELD_ALLOWLISTS: Record<ToolName, ReadonlySet<AllowlistKey>> = {
     'parentClass',
     'parameters',
     'exports',
+    'repoId',
   ]),
   get_files_context: new Set<AllowlistKey>([
     'language',
@@ -94,6 +95,7 @@ const FIELD_ALLOWLISTS: Record<ToolName, ReadonlySet<AllowlistKey>> = {
     'importedSymbols',
     'callSites',
     'symbols',
+    'repoId',
   ]),
   list_functions: new Set<AllowlistKey>([
     'language',
@@ -105,6 +107,7 @@ const FIELD_ALLOWLISTS: Record<ToolName, ReadonlySet<AllowlistKey>> = {
     'parameters',
     'exports',
     'symbols',
+    'repoId',
   ]),
 };
 

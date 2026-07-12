@@ -22,6 +22,7 @@ function createFullResult(): SearchResult {
       importedSymbols: { './utils': ['helper'] },
       callSites: [{ symbol: 'helper', line: 5 }],
       symbols: { functions: ['example'], classes: [], interfaces: [] },
+      repoId: 'repo-a',
       complexity: 3,
       cognitiveComplexity: 2,
       halsteadVolume: 100,
@@ -51,6 +52,7 @@ describe('shapeResultMetadata', () => {
     expect(m.parentClass).toBe('ExampleClass');
     expect(m.parameters).toEqual(['a', 'b']);
     expect(m.exports).toEqual(['example']);
+    expect(m.repoId).toBe('repo-a');
 
     // Stripped — only allowed keys should be present
     const keys = Object.keys(m);
@@ -67,6 +69,7 @@ describe('shapeResultMetadata', () => {
     const m = result.metadata;
 
     expect(m.exports).toEqual(['example']);
+    expect(m.repoId).toBe('repo-a');
     const keys = Object.keys(m);
     expect(keys).not.toContain('imports');
     expect(keys).not.toContain('callSites');
@@ -84,6 +87,7 @@ describe('shapeResultMetadata', () => {
     expect(m.callSites).toEqual([{ symbol: 'helper', line: 5 }]);
     expect(m.exports).toEqual(['example']);
     expect(m.symbols).toEqual({ functions: ['example'], classes: [], interfaces: [] });
+    expect(m.repoId).toBe('repo-a');
 
     // Stripped
     const keys = Object.keys(m);
@@ -98,6 +102,7 @@ describe('shapeResultMetadata', () => {
     // Kept
     expect(m.symbols).toEqual({ functions: ['example'], classes: [], interfaces: [] });
     expect(m.exports).toEqual(['example']);
+    expect(m.repoId).toBe('repo-a');
 
     // Stripped
     const keys = Object.keys(m);
@@ -105,6 +110,20 @@ describe('shapeResultMetadata', () => {
     expect(keys).not.toContain('callSites');
     expect(keys).not.toContain('complexity');
     expect(keys).not.toContain('halsteadEffort');
+  });
+
+  it.each<[import('./metadata-shaper.js').ToolName]>([
+    ['search_code'],
+    ['find_similar'],
+    ['get_files_context'],
+    ['list_functions'],
+  ])('%s: omits repoId key entirely in single-repo mode (not present at all)', tool => {
+    const result = createFullResult();
+    delete (result.metadata as { repoId?: string }).repoId;
+
+    const shaped = shapeResultMetadata(result, tool);
+    expect(Object.keys(shaped.metadata)).not.toContain('repoId');
+    expect(shaped.metadata.repoId).toBeUndefined();
   });
 
   it('preserves content, score, and relevance', () => {
