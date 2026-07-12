@@ -62,8 +62,19 @@ export class ComplexityPlugin implements ReviewPlugin {
   async present(findings: ReviewFinding[], context: PresentContext): Promise<void> {
     context.appendSummary(buildComplexitySummary(findings, context));
 
+    // `findings` is this plugin's own analyze() output, already scoped to the
+    // PR's changed files (see analyze() above). If the underlying report has
+    // more violations than made it into findings, analyze() must have filtered
+    // out-of-scope ones — i.e. this is the full-repo fallback report (#572),
+    // and the badge shouldn't claim those counts are "in touched files".
+    const isRepoWide = findings.length < (context.complexityReport?.summary.totalViolations ?? 0);
     context.appendDescription(
-      buildComplexityStatus(context.complexityReport, context.deltaSummary, context.deltas),
+      buildComplexityStatus(
+        context.complexityReport,
+        context.deltaSummary,
+        context.deltas,
+        isRepoWide,
+      ),
       'complexity',
     );
 

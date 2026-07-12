@@ -59,6 +59,40 @@ describe('ComplexityPlugin', () => {
     expect(findings).toHaveLength(0);
   });
 
+  it('present() reports the stats badge as repo-wide, not "in touched files", on the full-repo fallback path (#572)', async () => {
+    // Same fallback scenario as above, but this time asserting the PR-description
+    // badge itself doesn't claim the pre-existing violations are "in touched files"
+    // when the PR touched none of them.
+    const report = createTestReport([
+      { filepath: 'unrelated/a.ts', symbolName: 'fnA', complexity: 20, threshold: 15 },
+      { filepath: 'unrelated/b.ts', symbolName: 'fnB', complexity: 25, threshold: 15 },
+    ]);
+
+    const findings = await plugin.analyze(
+      createTestContext({
+        complexityReport: report,
+        changedFiles: [],
+        allChangedFiles: ['README.md'],
+      }),
+    );
+
+    const appendDescription = vi.fn();
+    const ctx = {
+      complexityReport: report,
+      deltaSummary: null,
+      deltas: null,
+      addAnnotations: vi.fn(),
+      appendSummary: vi.fn(),
+      appendDescription,
+    } as unknown as PresentContext;
+    await plugin.present(findings, ctx);
+
+    expect(appendDescription).toHaveBeenCalledTimes(1);
+    const badge: string = appendDescription.mock.calls[0][0];
+    expect(badge).toContain('repo-wide');
+    expect(badge).not.toContain('in touched files');
+  });
+
   it('normal-path equivalence: report scoped to changedFiles produces identical findings', async () => {
     const report = createTestReport([
       { filepath: 'a.ts', symbolName: 'fnA', complexity: 20, threshold: 15 },
