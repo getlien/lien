@@ -3,12 +3,14 @@ import type { CodeChunk } from '@liendev/parser';
 import type { ReviewContext } from '../src/plugin-types.js';
 import {
   extractAnchors,
+  extractCitedPath,
   extractDocClaims,
   findClaimEvidence,
   attachEvidence,
   renderDocClaims,
   renderDocClaimsSection,
   type DocClaim,
+  type DocClaimCitedPath,
   type DocClaimEvidence,
 } from '../src/doc-claims-signals.js';
 import { buildInitialMessage } from '../src/plugins/agent/system-prompt.js';
@@ -44,6 +46,11 @@ function chunk(
 /** A DocClaim with the given text (shape is irrelevant to evidence lookup). */
 function claimOf(claimText: string, file = DOC): DocClaim {
   return { file, claimText, shape: 'mechanism' };
+}
+
+/** A DocClaim carrying an explicit citedPath (see extractCitedPath), for evidence tests. */
+function claimWithCitedPath(claimText: string, citedPath: DocClaimCitedPath, file = DOC): DocClaim {
+  return { file, claimText, shape: 'mechanism', citedPath };
 }
 
 /** Build a one-hunk patch adding the given lines to a file. */
@@ -320,6 +327,69 @@ describe('extractAnchors', () => {
 });
 
 // ---------------------------------------------------------------------------
+// extractCitedPath (#749)
+// ---------------------------------------------------------------------------
+
+describe('extractCitedPath', () => {
+  it('extracts a backtick-quoted path plus an adjacent backtick symbol', () => {
+    const cp = extractCitedPath(
+      'currently `moonshotai/kimi-k2.7-code`; see `packages/review/src/defaults.ts` for `DEFAULT_REVIEW_MODEL`, the source of truth.',
+    );
+    expect(cp?.path).toBe('packages/review/src/defaults.ts');
+    expect(cp?.symbol).toBe('DEFAULT_REVIEW_MODEL');
+  });
+
+  it('parses a markdown-link citation whose display text is the path', () => {
+    const cp = extractCitedPath(
+      'see [packages/review/src/defaults.ts](../../packages/review/src/defaults.ts) for the source of truth',
+    );
+    expect(cp?.path).toBe('packages/review/src/defaults.ts');
+  });
+
+  it('does not treat a bare word without an extension/path shape as a citedPath', () => {
+    expect(extractCitedPath('see defaults for the source of truth')).toBeUndefined();
+  });
+
+  it('returns the path with no symbol when no adjacent backticked identifier is present', () => {
+    const cp = extractCitedPath('the default lives in packages/review/src/defaults.ts today');
+    expect(cp).toEqual({ path: 'packages/review/src/defaults.ts' });
+  });
+
+  it('does not mistake the backtick-quoted path token itself for the adjacent symbol', () => {
+    const cp = extractCitedPath('see `packages/review/src/defaults.ts` for details');
+    expect(cp?.symbol).toBeUndefined();
+  });
+
+  it('skips a non-identifier-shaped backtick span (e.g. a model name) when looking for the adjacent symbol', () => {
+    const cp = extractCitedPath(
+      'model is `moonshotai/kimi-k2.7-code`; source: `packages/review/src/defaults.ts`',
+    );
+    expect(cp?.symbol).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractDocClaims — citedPath wiring (#749)
+// ---------------------------------------------------------------------------
+
+describe('extractDocClaims — citedPath wiring', () => {
+  it('records the citedPath (and adjacent symbol) extracted from a real claim line', () => {
+    const line =
+      'The review model defaults to `moonshotai/kimi-k2.7-code`; see `packages/review/src/defaults.ts` for `DEFAULT_REVIEW_MODEL`, the source of truth.';
+    const c = extractDocClaims(new Map([[DOC, added(line)]]))[0];
+    expect(c.citedPath).toEqual({
+      path: 'packages/review/src/defaults.ts',
+      symbol: 'DEFAULT_REVIEW_MODEL',
+    });
+  });
+
+  it('leaves citedPath unset for a claim with no file citation', () => {
+    const c = extractDocClaims(new Map([[DOC, added('The batch size defaults to 32.')]]))[0];
+    expect(c.citedPath).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // findClaimEvidence — ranking
 // ---------------------------------------------------------------------------
 
@@ -460,6 +530,84 @@ describe('findClaimEvidence — excerpt', () => {
     )!;
     expect(ev.excerpt).not.toContain('```');
     expect(ev.excerpt).toContain("'''");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// findClaimEvidence — citedPath (#749)
+// ---------------------------------------------------------------------------
+
+describe('findClaimEvidence — citedPath', () => {
+  const CODE = 'packages/review/src/defaults.ts';
+
+  it("ranks the cited file's symbol chunk first, bypassing decoys in other files entirely", () => {
+    const claim = claimWithCitedPath(
+      'currently `moonshotai/kimi-k2.7-code`; see `packages/review/src/defaults.ts` for `DEFAULT_REVIEW_MODEL`, the source of truth.',
+      { path: CODE, symbol: 'DEFAULT_REVIEW_MODEL' },
+    );
+    const chunks = [
+      // A decoy in a different file mentioning the same symbol/keywords.
+      chunk(
+        'packages/review/src/other.ts',
+        1,
+        'DEFAULT_REVIEW_MODEL mentioned here too, moonshotai/kimi-k2.7-code',
+      ),
+      chunk(CODE, 1, 'export const OTHER_CONST = 1;'),
+      chunk(CODE, 12, 'export const DEFAULT_REVIEW_MODEL = "moonshotai/kimi-k2.7-code";', {
+        symbolName: 'DEFAULT_REVIEW_MODEL',
+        type: 'const',
+      }),
+    ];
+    const ev = findClaimEvidence(claim, chunks, new Set())!;
+    expect(ev.file).toBe(CODE);
+    expect(ev.startLine).toBe(12);
+    expect(ev.excerpt).toContain('DEFAULT_REVIEW_MODEL');
+  });
+
+  it("falls back to the cited file's best keyword-overlap chunk when no symbol was captured", () => {
+    const claim = claimWithCitedPath(
+      'the `packages/review/src/defaults.ts` module exports `modelList` among other config',
+      { path: CODE },
+    );
+    const chunks = [
+      chunk(CODE, 1, 'export const UNRELATED = 1;'),
+      chunk(CODE, 20, 'export const modelList = ["a", "b"];'),
+    ];
+    const ev = findClaimEvidence(claim, chunks, new Set())!;
+    expect(ev.file).toBe(CODE);
+    expect(ev.startLine).toBe(20);
+  });
+
+  it('attaches a one-line "not found" note — not a fenced excerpt — when the cited path does not resolve', () => {
+    const claim = claimWithCitedPath('see `packages/review/src/ghost.ts` for details', {
+      path: 'packages/review/src/ghost.ts',
+    });
+    const chunks = [chunk(CODE, 1, 'export const DEFAULT_REVIEW_MODEL = 1;')];
+    const ev = findClaimEvidence(claim, chunks, new Set())!;
+    expect(ev.citedPathMissing).toBe(true);
+    expect(ev.file).toBe('packages/review/src/ghost.ts');
+
+    const md = renderDocClaims([{ ...claim, evidence: ev }]);
+    expect(md).toContain('was not found in the index');
+    expect(md).not.toContain('```'); // a one-line note, not a fenced block
+  });
+
+  it('takes priority over the generic anchor/tier scan even when a changed file would otherwise win', () => {
+    const claim = claimWithCitedPath(
+      'the `structuralStore` lives in `packages/core/src/store.ts`',
+      {
+        path: 'packages/core/src/store.ts',
+      },
+    );
+    const chunks = [
+      chunk('packages/core/src/changed.ts', 1, 'export const structuralStore = 1;'),
+      chunk('packages/core/src/store.ts', 5, 'export const structuralStore = makeStore();'),
+    ];
+    // changed.ts is CHANGED and would win the generic tier scan — the citation
+    // must still resolve to the cited file, not the changed decoy.
+    const changed = new Set(['packages/core/src/changed.ts']);
+    const ev = findClaimEvidence(claim, chunks, changed)!;
+    expect(ev.file).toBe('packages/core/src/store.ts');
   });
 });
 
