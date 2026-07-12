@@ -43,6 +43,26 @@ npm run test:harness -w @liendev/review -- \
 An inline `OPENROUTER_API_KEY=…` still wins over the `.env` value if you want
 to override per-invocation (e.g., to test against a different account's quota).
 
+## Rule-coverage preflight (#742)
+
+Since #724, the agent's output format enumerates `ruleId` to the fixture's
+ACTIVE rule set only (see `buildOutputFormat` in `system-prompt.ts`) — a
+fixture whose assertion targets a trigger-skipped rule is unpassable by
+construction, and every paid vote against it is wasted money. Before `run.ts`
+casts any vote, it preflights the WHOLE discovered batch: for each fixture it
+computes the active rule set (the same `selectRules`/`buildTriggerContext`
+call `build-prompts.ts` uses) and checks it against the `.assertions.ts`'s
+`rule`. Any violation aborts the run with `exit 2` and prints every offending
+fixture — before fixture 1 has spent a cent.
+
+If a fixture's bug could plausibly be surfaced by more than one rule (e.g. an
+off-by-one caught by either `edge-case-sweep` or `boundary-change`, depending
+on trigger context), declare the extra rule ids in `ruleCandidates` alongside
+`rule` — the preflight passes if `rule` OR any `ruleCandidates` entry is
+active. See the `crossrepo/` fixtures for the pattern; pair with
+`expectAnyRuleFired` in a new `expect` closure rather than hand-rolling the
+OR check.
+
 ## Canary corpus
 
 One captured fixture per `BUILTIN_RULES` rule, all from closed planted-regression
