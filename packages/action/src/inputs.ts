@@ -119,8 +119,8 @@ function parseReviewTypes(raw: string): ReviewTypes {
 
 /**
  * Resolve the LLM provider from the supplied keys. OpenRouter takes precedence
- * (cheaper Gemini path); Anthropic is the fallback; absent both, `null` means
- * complexity-only review with no agent.
+ * (runs DEFAULT_REVIEW_MODEL, the calibrated default); Anthropic is the
+ * fallback; absent both, `null` means complexity-only review with no agent.
  */
 function resolveLLM(openrouterKey: string, anthropicKey: string): ReviewLLMConfig {
   if (openrouterKey) {

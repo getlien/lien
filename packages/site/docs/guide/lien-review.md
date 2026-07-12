@@ -43,11 +43,13 @@ permissions:
 
 The agent (bug) review needs an LLM key, provided as a workflow **secret**:
 
-1. Get an [OpenRouter](https://openrouter.ai/) API key (preferred — cheaper Gemini path) or an Anthropic API key.
+1. Get an [OpenRouter](https://openrouter.ai/) API key (preferred — runs OpenRouter's calibrated default model, currently `moonshotai/kimi-k2.7-code`; see [`packages/review/src/defaults.ts`](https://github.com/getlien/lien/blob/main/packages/review/src/defaults.ts) for the source of truth) or an Anthropic API key.
 2. Add it under **Settings → Secrets and variables → Actions → New repository secret** as `OPENROUTER_API_KEY` (or `ANTHROPIC_API_KEY`).
 3. Pass it through the action's `with:` block, as shown above.
 
 If both keys are omitted, the review still runs but **complexity-only** — the agent bug/summary/architectural passes are skipped.
+
+**Cost:** a typical PR review costs roughly $0.02–$0.15 in OpenRouter tokens on the default model (measured across the 2026-07 cross-repo study; ~$0.03/vote median, with complex multi-pass reviews at the high end — OpenRouter's own billing can run ~1.5–2× the harness-reported figure). The exact cost of every run is printed in the job's step summary.
 
 ## What it checks
 
@@ -58,9 +60,15 @@ If both keys are omitted, the review still runs but **complexity-only** — the 
 | PR summary | A concise summary of the change, posted as a step summary |
 | Advisory by default | `fail-on: never` — the check never blocks a PR unless you opt in |
 
+## Advanced configuration
+
+One behavior is tunable only via an environment variable on the action step, not a formal input: set `LIEN_REVIEW_DOC_PASS=0` to disable the dedicated doc-truth second pass that checks documentation/guidance prose against the code it describes (on by default, and only runs on PRs touching doc surfaces). There is currently no `model` input — the OpenRouter path pins the calibrated default deliberately, since the calibration evidence backing this review only covers that one model. See [`packages/action/README.md`](https://github.com/getlien/lien/blob/main/packages/action/README.md#advanced-configuration) for details.
+
 ## Blocking a PR on the review
 
 By default the review is **advisory** — it never fails CI. To gate merges on it, set `fail-on: error` (or `any`) and mark the workflow's job as a **Required status check** in your branch protection rules. See the [inputs table](https://github.com/getlien/lien/blob/main/packages/action/README.md#inputs) for the full set of options (`threshold`, `review-types`, `block-on-new-errors`, `fail-on`).
+
+If the agent review's main pass never runs at all (every LLM provider request failed), Lien marks the result with an error-severity finding and a `failure` conclusion instead of a clean-looking review, so a starved run is never mistaken for "no issues found." See [`packages/action/README.md`](https://github.com/getlien/lien/blob/main/packages/action/README.md#fail-loudly-guarantee) for the full behavior, including how it interacts with `fail-on`.
 
 ## Fork PRs
 

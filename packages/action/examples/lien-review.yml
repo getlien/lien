@@ -21,8 +21,9 @@ jobs:
     steps:
       - uses: getlien/lien-review@v1
         with:
-          # Preferred LLM provider — cheaper Gemini path. Add OPENROUTER_API_KEY
-          # under Settings → Secrets and variables → Actions.
+          # Preferred LLM provider — runs OpenRouter's calibrated default
+          # model. Add OPENROUTER_API_KEY under Settings → Secrets and
+          # variables → Actions.
           openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
           # Or use Anthropic instead (omit openrouter-api-key above):
           # anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}

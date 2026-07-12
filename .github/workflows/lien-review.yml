@@ -7,9 +7,11 @@ name: Lien Review
 # diff), inline PR comments, and a step summary.
 #
 # The public, external-consumer path is `uses: getlien/lien-review@v1` (a Docker
-# action backed by a prebuilt GHCR image — see packages/action/README.md). That
-# image + the public dist repo aren't published yet, so here we build the action
-# from source and run its entrypoint directly. Same code path, no publish needed.
+# action backed by a prebuilt GHCR image — see packages/action/README.md). Both
+# the image and the public dist repo are published; this monorepo still builds
+# the action from source and runs its entrypoint directly on purpose, so CI
+# dogfoods the current commit instead of the last released tag. Same code
+# path either way, so this isn't a stand-in for the real thing.
 #
 # The review is advisory by default (fail-on defaults to 'never'), so the check
 # stays green whenever the action *runs*; findings show as annotations + comments.

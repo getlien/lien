@@ -183,10 +183,24 @@ worktree.
 ## Performance
 
 - **File context lookup:** sub-millisecond (indexed lookup by file)
-- **Small projects** (1k files): minutes to index
-- **Medium projects** (10k files): ~15-20 minutes to index
+- **Indexing:** measured full reindexes (`lien index -f`, not incremental) on
+  an Apple Silicon laptop (M3 Pro), 2026-07:
+
+  | Corpus | Files indexed | Wall time |
+  |---|---|---|
+  | reqwest (Rust) | 79 | 0.7s |
+  | gin (Go) | 107 | 1.1s |
+  | hono (TypeScript) | 370 | 1.7s |
+  | Lien monorepo itself (6 languages) | 517 | 1.8s |
+
+  The largest corpus measured here is 517 files, so anything past that is a
+  linear extrapolation, not a direct measurement — but scaling these numbers
+  out lands a 1k-file project around 3s and a 10k-file project around
+  25-30s. There's no embedding step to slow this down: indexing is
+  Tree-sitter AST parsing plus a SQLite write, so it's CPU-bound and roughly
+  linear in file count.
 - **Parsing:** 1.82–2.21x faster end-to-end than Lien's previous `node-tree-sitter`-based parser, measured across benchmarked languages (see [ADR-013](https://github.com/getlien/lien/blob/main/docs/architecture/decisions/0013-prebuilt-native-parser-napi-rs.md))
-- **Native install:** ~1.8MB (SQLite binding) plus a small prebuilt parser binary — no model download, no compiler toolchain
+- **Native install:** ~22MB of native binaries for your platform (~1.8MB SQLite binding + ~20MB prebuilt parser binary; only the one matching platform variant is downloaded) — no model download, no compiler toolchain
 - **Disk usage:** roughly comparable to the source it indexes for a standalone
   index; a linked git worktree instead pays only for its overlay (see
   [Git Worktree Support](#git-worktree-support) above)

@@ -18,8 +18,9 @@ inputs:
     default: ${{ github.token }}
   openrouter-api-key:
     description: >-
-      OpenRouter API key for agent review (preferred provider — runs Gemini).
-      If omitted, falls back to anthropic-api-key, then to complexity-only.
+      OpenRouter API key for agent review (preferred provider — runs
+      OpenRouter's calibrated default model). If omitted, falls back to
+      anthropic-api-key, then to complexity-only.
     required: false
     default: ''
   anthropic-api-key:
