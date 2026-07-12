@@ -1,6 +1,7 @@
 import type { SearchResult, VectorDBInterface } from '@liendev/core';
 import {
   findTransitiveDependents,
+  findReExportedSymbolsForFile,
   normalizePath,
   matchesFile,
   getCanonicalPath,
@@ -114,87 +115,15 @@ interface ReExporter {
 }
 
 /**
- * Collect named symbols from a chunk's importedSymbols that match the target path.
- */
-function collectNamedSymbolsFromChunk(
-  chunk: SearchResult,
-  normalizedTarget: string,
-  normalizePathCached: (path: string) => string,
-  symbols: Set<string>,
-): void {
-  const importedSymbols = chunk.metadata.importedSymbols;
-  if (!importedSymbols || typeof importedSymbols !== 'object') return;
-  for (const [importPath, syms] of Object.entries(importedSymbols)) {
-    if (matchesFile(normalizePathCached(importPath), normalizedTarget)) {
-      for (const sym of syms) symbols.add(sym);
-    }
-  }
-}
-
-/**
- * Collect symbols imported from a target path across all chunks of a file,
- * sourced exclusively from `importedSymbols`.
- *
- * We deliberately do NOT fall back to the raw `imports` array to synthesize a
- * `'*'` sentinel. Doing so flagged any file that raw-imports the target AND
- * exports anything as a re-exporter of *all* the target's exports — even when
- * the file had precise named imports (e.g. `import { x } from './a'`
- * populates both `imports` and `importedSymbols['./a'] = ['x']`, so the
- * sentinel would always fire). See #526.
- *
- * Legitimate wildcard cases (`import * as x` in JS, `use foo::*` in Rust)
- * are already represented in `importedSymbols` as `'* as x'` or `'*'`, so
- * `findReExportedSymbols` still handles them correctly.
- */
-function collectImportedSymbolsFromTarget(
-  chunks: SearchResult[],
-  normalizedTarget: string,
-  normalizePathCached: (path: string) => string,
-): Set<string> {
-  const symbols = new Set<string>();
-  for (const chunk of chunks) {
-    collectNamedSymbolsFromChunk(chunk, normalizedTarget, normalizePathCached, symbols);
-  }
-  return symbols;
-}
-
-/**
- * Collect all exported symbols across all chunks of a file.
- */
-function collectExportsFromChunks(chunks: SearchResult[]): Set<string> {
-  const allExports = new Set<string>();
-  for (const chunk of chunks) {
-    for (const exp of chunk.metadata.exports || []) allExports.add(exp);
-  }
-  return allExports;
-}
-
-/**
- * Find which symbols are re-exported (imported from target AND exported).
- * Handles wildcard/namespace imports by treating all exports as re-exported.
- */
-function findReExportedSymbols(importsFromTarget: Set<string>, allExports: Set<string>): string[] {
-  if (importsFromTarget.has('*')) return [...allExports];
-
-  for (const sym of importsFromTarget) {
-    if (sym.startsWith('* as ')) return [...allExports];
-  }
-
-  const reExported: string[] = [];
-  for (const sym of importsFromTarget) {
-    if (allExports.has(sym)) reExported.push(sym);
-  }
-  return reExported;
-}
-
-/**
  * Build a graph of re-exporter files for a given target.
  *
  * A re-exporter is a file where a symbol appears in both
  * `importedSymbols[targetPath]` AND `exports`. This identifies barrel files
  * that re-export from the target.
  *
- * No new DB queries needed; uses the already-scanned chunks.
+ * No new DB queries needed; uses the already-scanned chunks. The intersection
+ * algorithm itself lives in `@liendev/parser` (`findReExportedSymbolsForFile`)
+ * — shared with the parser's own `fileIsReExporter` (#532).
  */
 function buildReExportGraph(
   allChunksByFile: Map<string, SearchResult[]>,
@@ -206,15 +135,11 @@ function buildReExportGraph(
   for (const [filepath, chunks] of allChunksByFile.entries()) {
     if (matchesFile(filepath, normalizedTarget)) continue;
 
-    const importsFromTarget = collectImportedSymbolsFromTarget(
+    const reExportedSymbols = findReExportedSymbolsForFile(
       chunks,
       normalizedTarget,
       normalizePathCached,
     );
-    const allExports = collectExportsFromChunks(chunks);
-    if (importsFromTarget.size === 0 || allExports.size === 0) continue;
-
-    const reExportedSymbols = findReExportedSymbols(importsFromTarget, allExports);
     if (reExportedSymbols.length > 0) {
       reExporters.push({ filepath, reExportedSymbols });
     }
