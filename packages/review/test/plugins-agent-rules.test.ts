@@ -716,6 +716,14 @@ describe('boundary-change rule', () => {
     expect(selectRules(BUILTIN_RULES, ctx).skipped).toContain('boundary-change');
   });
 
+  it('does activate on a spaced assignment to a variable named boundary', () => {
+    // Lien Review + CodeRabbit on #743: the MIME guard must not swallow
+    // real threshold definitions — only the unspaced RFC 2045 `boundary=`
+    // parameter form is excluded.
+    const ctx = makeTriggerContext({ diffText: '+  const boundary = maxSize;' });
+    expect(selectRules(BUILTIN_RULES, ctx).active.map(r => r.id)).toContain('boundary-change');
+  });
+
   it('does not activate on `|| 0` fallbacks or wider numeric literals after `| 0x`', () => {
     const orFallback = makeTriggerContext({ diffText: '+  const count = input.length || 0;' });
     const hexMask = makeTriggerContext({ diffText: '+  const flags = base | 0x40;' });

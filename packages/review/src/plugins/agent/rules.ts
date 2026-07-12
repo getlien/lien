@@ -441,11 +441,16 @@ is not a qualifying test; an actual test file + line is.`,
       // bare 'severity' matches every ReviewFinding and logger call in this
       // codebase.
       '\\bthreshold\\b',
-      // `boundary=` is the multipart MIME delimiter (Content-Type:
-      // multipart/form-data; boundary=...) — an HTTP literal unrelated to
-      // threshold logic. It coincidentally activated this rule on
-      // httpx#2400 during the 2026-07 cross-repo pilot (#741).
-      '\\bboundary\\b(?!\\s*=)',
+      // `boundary=` (no space — RFC 2045 parameter syntax) is the
+      // multipart MIME delimiter (Content-Type: multipart/form-data;
+      // boundary=...), an HTTP literal unrelated to threshold logic that
+      // coincidentally activated this rule on httpx#2400 during the
+      // 2026-07 cross-repo pilot (#741). The lookahead deliberately
+      // rejects only the immediate `=` so spaced assignments to a
+      // threshold variable (`const boundary = maxSize`) still fire —
+      // per Lien Review + CodeRabbit on #743, `(?!\s*=)` also swallowed
+      // those real boundary definitions.
+      '\\bboundary\\b(?!=)',
       '\\bcutoff\\b',
       'severity\\s*[:=]',
       // Type-acceptance gates (#741): a diff that touches a type
