@@ -676,6 +676,12 @@ describe('boundary-change rule', () => {
 
   it('activates on instanceof and language-specific type checks', () => {
     const js = makeTriggerContext({ diffText: '+  if (err instanceof HttpError) rethrow(err);' });
+    // Parenthesized RHS form (`instanceof(Foo)`) — no whitespace after the
+    // keyword; per Lien Review on #743 the pattern must not require `\s`.
+    const jsParen = makeTriggerContext({
+      diffText: '+  if (err instanceof(HttpError)) rethrow(err);',
+    });
+    expect(selectRules(BUILTIN_RULES, jsParen).active.map(r => r.id)).toContain('boundary-change');
     const php = makeTriggerContext({ diffText: '+  if (!is_string($body)) { return; }' });
     const rb = makeTriggerContext({ diffText: '+    return value if value.is_a?(String)' });
     expect(selectRules(BUILTIN_RULES, js).active.map(r => r.id)).toContain('boundary-change');

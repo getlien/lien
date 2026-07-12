@@ -457,7 +457,7 @@ is not a qualifying test; an actual test file + line is.`,
       // Ruby is_a?/kind_of?, JS/Java/PHP instanceof).
       'isinstance\\s*\\(',
       '\\bTypeError\\b',
-      '\\binstanceof\\s',
+      '\\binstanceof\\b',
       '\\bis_(?:int|string|float|numeric|bool|array)\\s*\\(',
       '\\bis_a\\?',
       '\\bkind_of\\?',
