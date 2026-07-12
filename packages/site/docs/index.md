@@ -48,7 +48,7 @@ features:
 /plugin install lien
 ```
 
-That's it. Lien's MCP tools and the Explore agent are available in every Claude Code session, in every repo — no per-project setup. First use in a new git repo triggers a one-time index automatically.
+That's it. Lien's MCP tools and the Explore agent are available in every Claude Code session, in every repo — no per-project setup. First use in a new git repo triggers a one-time index automatically. See the [Claude Code plugin guide](/guide/claude-code-plugin) for what its hooks do beyond the MCP config.
 
 ### Other editors (Cursor, Windsurf, OpenCode, Kilo Code, Antigravity)
 

@@ -34,6 +34,7 @@ Decouple Lien Review from the hosted platform entirely: ship it as a self-contai
 
 - No cross-repo aggregation or dashboard — each repo runs review independently inside its own Actions minutes, with no shared queue, retry infrastructure, or cross-repo view.
 - Publishing still requires one-time human setup (the `getlien/lien-review` dist repo plus a `GH_DIST_TOKEN` secret) that hasn't happened yet — until it does, the documented `uses: getlien/lien-review@v1` quick start doesn't resolve to a real release, and this repo's own CI builds the action from source instead.
+  **Update (2026-07-12):** that setup is done — `getlien/lien-review` is a real, published dist repo (tags `v1`, `0.62.0`–`0.64.0`, resolving to `docker://ghcr.io/getlien/lien-review:v1`), so the quick start now resolves for consumers. This monorepo's own CI still builds from source rather than pulling the image, unchanged and deliberate: it dogfoods the current commit, not the last released tag.
 - `platform/` and `packages/runner` are retired in git but not guaranteed gone from every working checkout — a checkout that predates PR #593, or a local restore of `platform/`, leaves an untracked, undocumented pile of dead Laravel code. Both are remnants scheduled for deletion, not live parts of the monorepo.
 
 ### Neutral

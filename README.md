@@ -20,7 +20,7 @@ Lien connects AI coding assistants like Cursor and Claude Code to your codebase 
 - 📦 **No Model Download** - No embeddings, no ~100MB model — tiny install, instant offline indexing
 - 🎯 **MCP Integration** - Works seamlessly with Cursor, Claude Code, and other MCP-compatible tools
 - ⚡ **Fast** - Sub-millisecond file context; minutes to index large codebases
-- 🆓 **Free Forever** - No API costs, no subscriptions, no usage limits
+- 🆓 **Free Forever** - No API costs, no subscriptions, no usage limits (applies to the local MCP/search tooling — [Lien Review](#lien-review)'s agent pass uses your own LLM key and has its own token cost)
 - 🏗️ **Framework-Aware & Monorepo** - Auto-detects 12+ ecosystems; supports 15+ languages
 
 ## Quick Start

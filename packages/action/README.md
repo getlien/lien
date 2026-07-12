@@ -57,8 +57,9 @@ explicit block is what re-grants the write scopes this action needs.
 
 The agent (bug) review needs an LLM key, provided as a workflow **secret**:
 
-1. Get an [OpenRouter](https://openrouter.ai/) API key (preferred — cheaper
-   Gemini path) or an Anthropic API key.
+1. Get an [OpenRouter](https://openrouter.ai/) API key (preferred — runs
+   OpenRouter's calibrated default model, cheaper than Anthropic) or an
+   Anthropic API key.
 2. Add it to your repo under **Settings → Secrets and variables → Actions →
    New repository secret** as `OPENROUTER_API_KEY` (or `ANTHROPIC_API_KEY`).
 3. Pass it through the action's `with:` block:
@@ -74,6 +75,13 @@ If **both** keys are omitted the review still runs, but **complexity-only** —
 the agent bug/summary/architectural passes are skipped. When both are present
 OpenRouter wins.
 
+**Cost:** a typical PR review costs roughly **$0.02–$0.15** in OpenRouter
+tokens on the default model (measured across the 2026-07 cross-repo study;
+~$0.03/vote median, with complex multi-pass reviews at the high end —
+OpenRouter's own billing can run ~1.5–2× the harness-reported figure). The
+exact cost of every run is printed in the job's step summary (the
+`**Tokens:** ... · **Cost:** $...` line).
+
 > Never hard-code an API key in the workflow YAML. Always reference it from
 > `secrets`.
 
@@ -82,7 +90,7 @@ OpenRouter wins.
 | Input                 | Required | Default                         | Description                                                                                                                                |
 | --------------------- | -------- | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | `github-token`        | no       | `${{ github.token }}`           | Token used to clone the PR and post inline comments. Needs `contents:read` and `pull-requests:write`.                                    |
-| `openrouter-api-key`  | no       | `''`                            | OpenRouter API key for agent review (preferred provider — runs Gemini). If omitted, falls back to `anthropic-api-key`, then complexity-only. |
+| `openrouter-api-key`  | no       | `''`                            | OpenRouter API key for agent review (preferred provider — runs OpenRouter's calibrated default model, currently `moonshotai/kimi-k2.7-code`; see `packages/review/src/defaults.ts` for the source of truth). If omitted, falls back to `anthropic-api-key`, then complexity-only. |
 | `anthropic-api-key`   | no       | `''`                            | Anthropic API key for agent review (fallback when `openrouter-api-key` is not set). If both are omitted, review is complexity-only.       |
 | `threshold`           | no       | `15`                            | Complexity threshold above which violations are reported.                                                                                 |
 | `review-types`        | no       | `complexity,bugs,summary`       | Comma-separated review types to enable. `complexity` toggles the complexity check. `bugs`, `architectural`, and `summary` all come from the single agent reviewer, so they switch it on/off as a group (and only when an API key is set) — they can't be toggled independently. |
@@ -112,6 +120,29 @@ Reference them from a later step via the step `id`:
 - run: echo "Lien found ${{ steps.lien.outputs.error-count }} errors"
 ```
 
+## Advanced configuration
+
+Beyond the inputs above, one behavior is tunable only via an environment
+variable on the action step, not a formal input:
+
+```yaml
+- uses: getlien/lien-review@v1
+  env:
+    LIEN_REVIEW_DOC_PASS: '0' # disable the doc-truth second pass
+  with:
+    openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
+```
+
+- **`LIEN_REVIEW_DOC_PASS=0`** (or `false`) — disables the dedicated
+  doc-truth second pass, a claims-only re-review that runs only on PRs
+  touching documentation/guidance surfaces and checks their prose against the
+  code. On by default.
+
+There is currently no `model` input — the OpenRouter path pins the calibrated
+default deliberately, since the calibration evidence backing this review
+(see the [test harness](https://github.com/getlien/lien/tree/main/packages/review/test/harness))
+only covers that one model.
+
 ## Blocking a PR on the review
 
 By default the review is **advisory** (`fail-on: never`) — it never fails CI, so
@@ -121,6 +152,18 @@ in your branch protection rules. With `fail-on: error` the action exits non-zero
 only when the review's overall conclusion is a failure (driven by
 `block-on-new-errors`); `fail-on: any` is stricter (any error- or warning-level
 finding fails the check).
+
+## Fail-loudly guarantee
+
+If the agent review's main pass never runs at all — every request to the LLM
+provider failed (exhausted key, a terminal provider error, etc.) — Lien marks
+the result with an **error-severity finding** and a **`failure`** conclusion
+naming the cause, instead of a clean-looking review. That finding is what
+`fail-on: error`/`any` act on, so a starved review fails the check under
+either gating mode. Under the default `fail-on: never` the job itself still
+exits `0` (advisory stays advisory), but the step summary, PR description, and
+`conclusion` output make the failure impossible to mistake for "no issues
+found."
 
 ## Fork PRs
 
@@ -194,15 +237,30 @@ The action ships as a Docker container action pulling a prebuilt image from
 JavaScript/composite action), so each run pulls the image rather than building
 it.
 
+## License note (AGPL-3.0)
+
+Lien Review is licensed AGPL-3.0. Running the unmodified, published
+`getlien/lien-review` action/image in your own CI against your own repos
+(including private ones) does not trigger AGPL §13's network-copyleft
+obligations toward *your* codebase — the license governs Lien's own source,
+not the code Lien reviews. §13 obligations attach to modifications of Lien
+itself that you convey or offer as a network service to others. This is a
+factual summary, not legal advice — consult counsel for your specific
+situation.
+
 ## Publishing the Action (maintainer runbook)
 
 This section is for Lien maintainers cutting a release, not action consumers.
 
-Until the one-time human setup below is done, `.github/workflows/publish-action.yml`
-publishes the GHCR image but **cannot** yet update the public
-`getlien/lien-review` dist repo that `uses: getlien/lien-review@v1` resolves
-to — the sync step detects the missing secret and no-ops with a
-`::notice::` log line instead of failing the build.
+**Update (2026-07-12):** the one-time human setup below is done — the
+`getlien/lien-review` dist repo exists and syncs automatically on release, so
+`uses: getlien/lien-review@v1` resolves to a real, published release (tags
+`v1`, `0.62.0`–`0.64.0`, backed by `docker://ghcr.io/getlien/lien-review:v1`).
+The steps below are kept for reference (re-provisioning after a token
+rotation, or setting up a fork of this repo). If `GH_DIST_TOKEN` is ever
+unset or revoked, `.github/workflows/publish-action.yml` still publishes the
+GHCR image but the dist-repo sync step no-ops with a `::notice::` log line
+instead of failing the build.
 
 ### One-time human setup
 
