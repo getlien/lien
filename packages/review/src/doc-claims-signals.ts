@@ -22,6 +22,18 @@
  * the render layer reminds the agent that a worklist entry may be descriptive
  * prose rather than a falsifiable behavioral claim — those need no finding, so
  * the block never manufactures a contradiction the code doesn't support.
+ *
+ * `citedPath` (issue #749) handles the doc-that-cites-its-own-source shape: on
+ * PR #748, 3 of 4 doc-truth findings were the model flagging "the code proving
+ * this could not be located" against prose that named its own evidence file
+ * (e.g. "see `packages/review/src/defaults.ts` for the source of truth") — the
+ * evidence pre-fetch never treated the citation as an anchor, so the model
+ * never saw the file and flagged absence-of-verification as if it were
+ * falsehood. When a claim's own excerpt names a repo file, that citation
+ * outranks every other evidence tier (a claim that ships its own pointer
+ * should arrive pre-verified), and a citation that does NOT resolve gets a
+ * one-line "not found" note instead — a stale citation is itself doc-truth
+ * signal, not something to search around.
  */
 
 import type { CodeChunk } from '@liendev/parser';
@@ -68,6 +80,27 @@ export interface DocClaimEvidence {
    * weighs it as prose-vs-prose, not prose-vs-code.
    */
   fromDoc: boolean;
+  /**
+   * True when this entry is a one-line "cited file not found in the index"
+   * note rather than a located excerpt — the claim named its own evidence
+   * file (see `DocClaim.citedPath`) but that file doesn't resolve against
+   * `repoChunks`. `file` carries the cited (unresolved) path; `excerpt` is
+   * unused. A stale citation is itself doc-truth signal (issue #749).
+   */
+  citedPathMissing?: boolean;
+}
+
+/**
+ * An explicit repo-file citation found in a claim's own excerpt — "see
+ * `packages/review/src/defaults.ts`" — plus, when present, an adjacent
+ * backticked identifier in the same excerpt that narrows which chunk of that
+ * file is the described one (issue #749). See `extractCitedPath`.
+ */
+export interface DocClaimCitedPath {
+  /** The path token as it appeared in the claim excerpt (repo-relative). */
+  path: string;
+  /** An adjacent backticked identifier in the same excerpt, if any. */
+  symbol?: string;
 }
 
 /** A claim-shaped line the diff added to a guidance/doc surface. */
@@ -78,6 +111,12 @@ export interface DocClaim {
   claimText: string;
   /** Which claim shape matched — most-specific-first (see CLAIM_SHAPES). */
   shape: DocClaimShape;
+  /**
+   * An explicit file citation the claim's own excerpt names, if any. When
+   * present it takes priority over every other evidence tier — see
+   * `findClaimEvidence`.
+   */
+  citedPath?: DocClaimCitedPath;
   /**
    * The code/sibling-doc the claim describes, located deterministically over
    * the indexed repo. Absent when no anchor in the claim resolves to a chunk
@@ -257,8 +296,14 @@ function extractClaimsFromPatch(file: string, patch: string): DocClaim[] {
   for (const raw of addedProseLines(patch)) {
     const text = stripLinkTargets(raw);
     const match = classifyClaim(text);
-    if (match)
-      claims.push({ file, claimText: toClaimText(text, match.matchIndex), shape: match.shape });
+    if (!match) continue;
+    const claimText = toClaimText(text, match.matchIndex);
+    // Extract the citation from the FULL line, not the windowed claimText:
+    // match-centered capping routinely cuts a trailing "see path/to/file.ts"
+    // out of the excerpt, which is exactly where citations live (found by
+    // replaying the fix against PR #748, the issue's motivating case).
+    const citedPath = extractCitedPath(text);
+    claims.push({ file, claimText, shape: match.shape, ...(citedPath && { citedPath }) });
   }
   return claims;
 }
@@ -367,6 +412,45 @@ export function extractAnchors(text: string): string[] {
   }
 
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Cited-path extraction (issue #749)
+// ---------------------------------------------------------------------------
+
+/**
+ * A repo-file-shaped token: a path/filename ending in a recognized source or
+ * doc extension. Not anchored to `/` on purpose — a bare cited filename
+ * (`defaults.ts`) is still a citation, just a less specific one; resolution
+ * against the corpus (see `findCitedPathEvidence`) is the real precision gate,
+ * not the shape regex.
+ */
+const CITED_PATH_RE = /[\w./-]+\.(?:ts|tsx|js|jsx|py|go|rs|rb|php|md|yml|yaml|json)\b/;
+/** A backtick span that reads as a plain identifier, not a path — used to tell
+ *  an adjacent symbol citation apart from the cited path itself. */
+const SYMBOL_SPAN_RE = /^[A-Za-z_$][\w$]*$/;
+
+/**
+ * Extract an explicit repo-file citation from a claim's own excerpt, plus an
+ * adjacent backticked identifier in the same excerpt (if any) to narrow which
+ * chunk of that file is the described one. Both the backtick form
+ * ("see `packages/review/src/defaults.ts`") and the markdown-link form whose
+ * display text is the path itself ("[packages/review/src/defaults.ts](../..)")
+ * parse identically here, since both leave a bare path token in `text` once
+ * `stripLinkTargets` and backtick delimiters are out of the way. A bare word
+ * with no extension/path shape (e.g. "defaults") never matches. Exposed for
+ * testing.
+ */
+export function extractCitedPath(text: string): DocClaimCitedPath | undefined {
+  const m = CITED_PATH_RE.exec(text);
+  if (!m) return undefined;
+  const path = m[0].replace(/^\/+/, '');
+
+  for (const span of text.matchAll(BACKTICK_SPAN_RE)) {
+    const candidate = span[1].trim();
+    if (candidate !== path && SYMBOL_SPAN_RE.test(candidate)) return { path, symbol: candidate };
+  }
+  return { path };
 }
 
 // ---------------------------------------------------------------------------
@@ -540,10 +624,88 @@ function buildExcerpt(
 }
 
 /**
- * Locate the code (or sibling doc) a single claim describes. Tries a
- * case-sensitive pass first (identifiers/keys are case-bearing), then a
- * case-insensitive fallback. Returns undefined when no anchor resolves or
- * there is no repo index to search.
+ * Which chunk of a cited file is the described one: the chunk containing the
+ * adjacent symbol (by exact symbolName or content match) when one was
+ * captured, else the file's best keyword-overlap chunk against the claim's
+ * own anchors (ties keep the first chunk in traversal order). `centerOn` is
+ * always non-empty so `buildExcerpt` always has something to center on.
+ */
+function pickCitedChunk(
+  fileChunks: CodeChunk[],
+  symbol: string | undefined,
+  keywordAnchors: string[],
+): { chunk: CodeChunk; centerOn: string[] } {
+  if (symbol) {
+    const bySymbol = fileChunks.find(
+      c => c.metadata.symbolName === symbol || c.content.includes(symbol),
+    );
+    if (bySymbol) return { chunk: bySymbol, centerOn: [symbol] };
+  }
+
+  let best = fileChunks[0];
+  let bestCount = -1;
+  for (const c of fileChunks) {
+    const count = keywordAnchors.filter(a => c.content.includes(a)).length;
+    if (count > bestCount) {
+      bestCount = count;
+      best = c;
+    }
+  }
+  return {
+    chunk: best,
+    centerOn: keywordAnchors.length > 0 ? keywordAnchors : [best.metadata.file],
+  };
+}
+
+/**
+ * Resolve a claim's own file citation (see `DocClaim.citedPath`) against the
+ * repo index. A citation is authoritative — a claim that ships its own
+ * pointer should arrive pre-verified — so a resolved hit is returned directly,
+ * bypassing the generic anchor/tier scan entirely (it outranks every tier).
+ * When the cited path does NOT resolve to any indexed chunk, returns a
+ * one-line `citedPathMissing` note instead: a stale citation is itself
+ * doc-truth signal, not something to search around (issue #749).
+ */
+function findCitedPathEvidence(
+  cited: DocClaimCitedPath,
+  claimText: string,
+  repoChunks: CodeChunk[],
+): DocClaimEvidence {
+  const resolvedFile = repoChunks.find(
+    c => c.metadata.file === cited.path || c.metadata.file.endsWith(`/${cited.path}`),
+  )?.metadata.file;
+
+  if (!resolvedFile) {
+    return {
+      file: cited.path,
+      startLine: 0,
+      excerpt: '',
+      anchor: cited.path,
+      fromDoc: DOC_FILE_RE.test(cited.path),
+      citedPathMissing: true,
+    };
+  }
+
+  const fileChunks = repoChunks.filter(c => c.metadata.file === resolvedFile);
+  const keywordAnchors = extractAnchors(claimText).filter(a => a !== cited.symbol);
+  const { chunk, centerOn } = pickCitedChunk(fileChunks, cited.symbol, keywordAnchors);
+  const built = buildExcerpt(chunk, centerOn, IDENTITY);
+  return {
+    file: resolvedFile,
+    startLine: built.startLine,
+    excerpt: built.excerpt,
+    anchor: built.anchor,
+    fromDoc: DOC_FILE_RE.test(resolvedFile),
+  };
+}
+
+/**
+ * Locate the code (or sibling doc) a single claim describes. An explicit
+ * self-citation (`claim.citedPath`) is resolved first and, when present,
+ * short-circuits the rest of this function — see `findCitedPathEvidence`.
+ * Otherwise tries a case-sensitive anchor pass (identifiers/keys are
+ * case-bearing), then a case-insensitive fallback. Returns undefined when no
+ * anchor resolves or there is no repo index to search.
  */
 export function findClaimEvidence(
   claim: DocClaim,
@@ -551,6 +713,7 @@ export function findClaimEvidence(
   changed: Set<string>,
 ): DocClaimEvidence | undefined {
   if (!repoChunks || repoChunks.length === 0) return undefined;
+  if (claim.citedPath) return findCitedPathEvidence(claim.citedPath, claim.claimText, repoChunks);
   const anchors = extractAnchors(claim.claimText);
   if (anchors.length === 0) return undefined;
 
@@ -621,13 +784,21 @@ const NO_EVIDENCE_HINT =
 
 /**
  * Render one claim entry's lines: the `file: "claim"` header, then either its
- * located evidence excerpt (as a fenced block) or the no-evidence hint. Evidence
- * is suppressed with an inline note once `remaining` budget can't hold it, so
- * the claim inventory itself never gets dropped for an excerpt.
+ * located evidence excerpt (as a fenced block), the one-line "cited file not
+ * found" note (see `DocClaimEvidence.citedPathMissing`), or the no-evidence
+ * hint. Evidence is suppressed with an inline note once `remaining` budget
+ * can't hold it, so the claim inventory itself never gets dropped for an
+ * excerpt.
  */
 function renderClaimEntry(claim: DocClaim, remaining: number): string[] {
   const header = `- ${claim.file}: "${claim.claimText}"`;
   if (!claim.evidence) return [header, NO_EVIDENCE_HINT];
+  if (claim.evidence.citedPathMissing) {
+    return [
+      header,
+      `  (evidence: the cited file "${claim.evidence.file}" was not found in the index — the citation itself may be stale)`,
+    ];
+  }
 
   const { file, startLine, excerpt, fromDoc } = claim.evidence;
   const label = fromDoc ? 'evidence (sibling doc)' : 'evidence';
