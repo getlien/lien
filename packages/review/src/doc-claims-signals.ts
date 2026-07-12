@@ -298,7 +298,11 @@ function extractClaimsFromPatch(file: string, patch: string): DocClaim[] {
     const match = classifyClaim(text);
     if (!match) continue;
     const claimText = toClaimText(text, match.matchIndex);
-    const citedPath = extractCitedPath(claimText);
+    // Extract the citation from the FULL line, not the windowed claimText:
+    // match-centered capping routinely cuts a trailing "see path/to/file.ts"
+    // out of the excerpt, which is exactly where citations live (found by
+    // replaying the fix against PR #748, the issue's motivating case).
+    const citedPath = extractCitedPath(text);
     claims.push({ file, claimText, shape: match.shape, ...(citedPath && { citedPath }) });
   }
   return claims;

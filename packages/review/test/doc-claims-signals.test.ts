@@ -387,6 +387,21 @@ describe('extractDocClaims — citedPath wiring', () => {
     const c = extractDocClaims(new Map([[DOC, added('The batch size defaults to 32.')]]))[0];
     expect(c.citedPath).toBeUndefined();
   });
+
+  it('extracts a citation that the claim-excerpt window truncates away', () => {
+    // Regression pin from replaying against PR #748: the claim phrase sits
+    // early in a long line, the citation sits past MAX_CLAIM_CHARS, so the
+    // match-centered excerpt excludes it — extraction must run on the FULL
+    // line, not the windowed claimText.
+    const filler = 'and the surrounding prose keeps going with more descriptive detail '.repeat(4);
+    const line = `The pass defaults to on ${filler}— see \`packages/review/src/defaults.ts\` for \`DEFAULT_REVIEW_MODEL\`, the source of truth.`;
+    const c = extractDocClaims(new Map([[DOC, added(line)]]))[0];
+    expect(c.claimText).not.toContain('defaults.ts'); // window really cut it
+    expect(c.citedPath).toEqual({
+      path: 'packages/review/src/defaults.ts',
+      symbol: 'DEFAULT_REVIEW_MODEL',
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
