@@ -44,7 +44,14 @@ export class ComplexityPlugin implements ReviewPlugin {
   async analyze(context: ReviewContext): Promise<ReviewFinding[]> {
     const { complexityReport, deltas, logger } = context;
 
-    const allViolations = Object.values(complexityReport.files).flatMap(f => f.violations);
+    // On the normal path, complexityReport.files is already scoped to the PR's
+    // analyzable files. On the full-repo fallback path (PR touches zero
+    // analyzable files), complexityReport covers the whole repo — scope here
+    // so pre-existing violations elsewhere don't surface as PR findings.
+    const scopedFiles = new Set(context.allChangedFiles ?? context.changedFiles);
+    const allViolations = Object.values(complexityReport.files)
+      .flatMap(f => f.violations)
+      .filter(v => scopedFiles.has(v.filepath));
     const violations = prioritizeViolations(allViolations, complexityReport);
     logger.info(`Complexity plugin: ${violations.length} violations to review`);
 

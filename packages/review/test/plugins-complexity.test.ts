@@ -31,11 +31,47 @@ describe('ComplexityPlugin', () => {
       { filepath: 'b.ts', symbolName: 'fnB', complexity: 25, threshold: 15, severity: 'error' },
     ]);
 
-    const findings = await plugin.analyze(createTestContext({ complexityReport: report }));
+    const findings = await plugin.analyze(
+      createTestContext({ complexityReport: report, changedFiles: ['a.ts', 'b.ts'] }),
+    );
     expect(findings).toHaveLength(2);
     expect(findings[0].pluginId).toBe('complexity');
     const severities = findings.map(f => f.severity).sort();
     expect(severities).toEqual(['error', 'warning']);
+  });
+
+  it('scopes findings to PR files on the full-repo fallback path (#572)', async () => {
+    // Simulates the fallback: a PR that touched zero analyzable files (e.g. docs-only)
+    // still gets a full-repo complexity report for the stats badge, but none of those
+    // pre-existing violations belong to this PR.
+    const report = createTestReport([
+      { filepath: 'unrelated/a.ts', symbolName: 'fnA', complexity: 20, threshold: 15 },
+      { filepath: 'unrelated/b.ts', symbolName: 'fnB', complexity: 25, threshold: 15 },
+    ]);
+
+    const findings = await plugin.analyze(
+      createTestContext({
+        complexityReport: report,
+        changedFiles: [],
+        allChangedFiles: ['README.md'],
+      }),
+    );
+    expect(findings).toHaveLength(0);
+  });
+
+  it('normal-path equivalence: report scoped to changedFiles produces identical findings', async () => {
+    const report = createTestReport([
+      { filepath: 'a.ts', symbolName: 'fnA', complexity: 20, threshold: 15 },
+      { filepath: 'b.ts', symbolName: 'fnB', complexity: 25, threshold: 15, severity: 'error' },
+    ]);
+
+    const scoped = await plugin.analyze(
+      createTestContext({ complexityReport: report, changedFiles: ['a.ts', 'b.ts'] }),
+    );
+    const unscoped = await plugin.analyze(
+      createTestContext({ complexityReport: report, changedFiles: ['a.ts', 'b.ts', 'c.ts'] }),
+    );
+    expect(scoped).toEqual(unscoped);
   });
 
   it('uses per-metric messages for cyclomatic violations', async () => {
@@ -49,7 +85,9 @@ describe('ComplexityPlugin', () => {
       },
     ]);
 
-    const findings = await plugin.analyze(createTestContext({ complexityReport: report }));
+    const findings = await plugin.analyze(
+      createTestContext({ complexityReport: report, changedFiles: ['a.ts'] }),
+    );
     expect(findings[0].message).toContain('branches');
     expect(findings[0].message).toContain('20 tests');
   });
@@ -65,7 +103,9 @@ describe('ComplexityPlugin', () => {
       },
     ]);
 
-    const findings = await plugin.analyze(createTestContext({ complexityReport: report }));
+    const findings = await plugin.analyze(
+      createTestContext({ complexityReport: report, changedFiles: ['a.ts'] }),
+    );
     expect(findings[0].message).toContain('cognitive complexity 20');
     expect(findings[0].message).toContain('early returns');
   });
@@ -81,7 +121,9 @@ describe('ComplexityPlugin', () => {
       },
     ]);
 
-    const findings = await plugin.analyze(createTestContext({ complexityReport: report }));
+    const findings = await plugin.analyze(
+      createTestContext({ complexityReport: report, changedFiles: ['a.ts'] }),
+    );
     expect(findings[0].message).toContain('to understand');
     expect(findings[0].message).toContain('readability');
   });
@@ -97,7 +139,9 @@ describe('ComplexityPlugin', () => {
       },
     ]);
 
-    const findings = await plugin.analyze(createTestContext({ complexityReport: report }));
+    const findings = await plugin.analyze(
+      createTestContext({ complexityReport: report, changedFiles: ['a.ts'] }),
+    );
     expect(findings[0].message).toContain('bug density');
     expect(findings[0].message).toContain('error likelihood');
   });
@@ -113,7 +157,9 @@ describe('ComplexityPlugin', () => {
       },
     ]);
 
-    const findings = await plugin.analyze(createTestContext({ complexityReport: report }));
+    const findings = await plugin.analyze(
+      createTestContext({ complexityReport: report, changedFiles: ['a.ts'] }),
+    );
     expect(findings[0].metadata).toEqual({
       pluginType: 'complexity',
       metricType: 'cognitive',
@@ -130,7 +176,9 @@ describe('ComplexityPlugin', () => {
       { filepath: 'b.ts', symbolName: 'fnB', complexity: 30, threshold: 15, severity: 'error' },
     ]);
 
-    const findings = await plugin.analyze(createTestContext({ complexityReport: report }));
+    const findings = await plugin.analyze(
+      createTestContext({ complexityReport: report, changedFiles: ['a.ts', 'b.ts'] }),
+    );
 
     const addAnnotations = vi.fn();
     const ctx = {
@@ -179,7 +227,9 @@ describe('ComplexityPlugin', () => {
       },
     ]);
 
-    const findings = await plugin.analyze(createTestContext({ complexityReport: report }));
+    const findings = await plugin.analyze(
+      createTestContext({ complexityReport: report, changedFiles: ['a.ts'] }),
+    );
     expect(findings).toHaveLength(2);
 
     const addAnnotations = vi.fn();
@@ -217,7 +267,9 @@ describe('ComplexityPlugin', () => {
       },
     ]);
 
-    const findings = await plugin.analyze(createTestContext({ complexityReport: report }));
+    const findings = await plugin.analyze(
+      createTestContext({ complexityReport: report, changedFiles: ['a.ts'] }),
+    );
     const addAnnotations = vi.fn();
     const ctx = {
       addAnnotations,
@@ -242,7 +294,9 @@ describe('ComplexityPlugin', () => {
         severity: 'warning',
       },
     ]);
-    const findings = await plugin.analyze(createTestContext({ complexityReport: report }));
+    const findings = await plugin.analyze(
+      createTestContext({ complexityReport: report, changedFiles: ['a.ts'] }),
+    );
     const appendSummary = vi.fn();
     await plugin.present(findings, {
       addAnnotations: vi.fn(),
