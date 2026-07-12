@@ -256,6 +256,40 @@ const assertions: FixtureAssertions = {
 export default assertions;
 ```
 
+### Smoke-test new assertions with THREE verdicts — including a distractor
+
+Before a new `.assertions.ts` is trusted, run it through `assert-cli.ts`
+against three hand-written verdict JSONs (zero LLM spend):
+
+1. **Perfect** — a finding stating the ground truth (right rule, right
+   file, the bug's mechanism in its message) → must **exit 0**.
+2. **Empty** — `{"findings":[],"toolCalls":[],"turns":1}` → must exit
+   non-zero.
+3. **Distractor** — a *plausible but wrong* finding about the same
+   file/function: a different real-looking issue, a test-quality nit, or
+   an adjacent hazard that is NOT the fixture's bug → must **exit
+   non-zero**.
+
+The distractor is the step that earns its keep. Keyword lists built from
+bare domain nouns (`'etag'`, `'netloc'`, the changed function's name)
+false-pass any finding that merely *talks about* the changed code — in
+the 2026-07 cross-repo Python round, **all three first-draft keyword
+lists false-passed their distractors** and had to be rewritten around
+compound phrases naming the bug's specific shape (`'weak etag'` +
+`'w/ prefix'`, `'empty netloc'` + `'no authority'`) before shipping. The
+same failure class previously let a test-bug finding score as a "catch"
+on a fixture whose real bug went unmentioned, silently corrupting a
+calibration result. A distractor that passes means your assertions
+measure "mentioned the neighborhood", not "found the bug".
+
+Keep the discrimination without going brittle: the keyword list should
+still accept sibling manifestations of the same root cause (a correct
+finding about the same defect in a second file must pass — use synonyms
+and the sibling's name), while the distractor pins that *different*
+defects in the same neighborhood fail. Delete the three scratch verdict
+JSONs afterwards; they must never live where blind-review verdicts are
+collected.
+
 ### Fixture tags — canary vs characterization
 
 `tags` classify what a fixture's pass/fail *means*:
@@ -382,7 +416,10 @@ harness lets you do it autonomously once `OPENROUTER_API_KEY` is in `.env`.
    `expectToolCalled` for whatever tool the rule's prompt mandates.
    Don't add Tier 2 keyword checks until after baseline calibration is
    green — they're what proves the prompt produces the *right* finding,
-   and you need a reliable Tier 1 first.
+   and you need a reliable Tier 1 first. When you do add Tier 2, run the
+   three-verdict smoke test (perfect / empty / **distractor** — see
+   "Smoke-test new assertions" above) before spending any calibration
+   money against them.
 
 4. **Add the rule to `BUILTIN_RULES`** in
    `packages/review/src/plugins/agent/rules.ts`. Mirror the existing
