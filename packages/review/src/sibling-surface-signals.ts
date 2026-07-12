@@ -37,6 +37,27 @@
  *    `validate(` call appears in 9 of 13 untouched siblings, not all 13 (a few
  *    unrelated files like `any.go` never call it). Requiring unanimity would
  *    silently kill the positive.
+ *
+ * A second, independent family axis covers a gap the same-directory definition
+ * cannot see: MIRROR DIRECTORIES. reqwest's `blocking/request.rs` and
+ * `async_impl/request.rs` are the real sibling axis for "applied to one variant,
+ * forgot the other" bugs (reqwest #916/#1550), but they live in different
+ * directories, so the same-dir family never pairs them. A mirror sibling for a
+ * changed `<dirA>/<base>.<ext>` is `<dirB>/<base>.<ext>` where dirA and dirB
+ * share at least two same-basename+extension source files (the mirror-evidence
+ * gate — one coincidental shared name like `utils.rs` must not create a family)
+ * and dirB actually contains the counterpart file itself. Qualifying mirror
+ * directories are capped at 3 per changed file: a basename like `index.ts`
+ * shared across dozens of directories is noise, not a mirror relationship, so
+ * exceeding the cap discards the mirror family for that file entirely rather
+ * than truncating to the first 3. Mirror siblings feed both directions exactly
+ * like same-dir siblings, except Direction B with a SINGLE mirror sibling (the
+ * common case — most mirror relationships are 1:1 pairs, not larger clusters)
+ * swaps the cross-file majority-share rule for a within-file repetition rule:
+ * the identifier must occur at least twice in that one sibling, compensating
+ * for a family too small for "majority" to mean anything. Rendered entries
+ * that come from this axis are labeled "mirror sibling" so the reviewer can
+ * tell the relationship apart from a same-directory one.
  */
 
 import type { CodeChunk } from '@liendev/parser';
@@ -58,6 +79,8 @@ export interface SiblingSurfaceEntry {
   line?: number;
   /** Direction A: untouched siblings LACKING it. Direction B: untouched siblings SHARING it. */
   siblings: string[];
+  /** True when `siblings` are mirror-directory siblings (cross-dir, same basename+ext), not same-directory family members. */
+  isMirror: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -85,6 +108,37 @@ const TEST_PATH_RE =
 const MIN_FAMILY_SIZE = 2;
 /** A group larger than this is a bulk directory, not a family (see module doc). */
 const MAX_FAMILY_SIZE = 20;
+
+/** Minimum same-basename+ext file pairs two directories must share to count as "mirror directories" — the mirror-evidence gate. */
+const MIN_MIRROR_SHARED_BASENAMES = 2;
+/** More mirror directories than this qualifying for one file is noise (see module doc); discard the mirror family entirely rather than truncate. */
+const MAX_MIRROR_DIRS_PER_FILE = 3;
+
+/**
+ * Directory "entry point" basenames — barrel/module-init files present in
+ * nearly any directory regardless of its role, in the languages this module
+ * scans. Sharing one of these between two directories is not evidence of a
+ * deliberate mirror relationship, so it must not count toward the
+ * mirror-evidence gate above — the same failure mode the module doc's
+ * `utils.rs` example warns about, just for an even more common name. Found
+ * empirically: `packages/cli/src/mcp/handlers/` and `packages/parser/src/`
+ * (this very repo) share `dependency-analyzer.ts` (a real caller/callee pair,
+ * not a mirror) plus `index.ts` — and `index.ts` alone was enough to clear a
+ * naive 2-shared-basename gate.
+ */
+const GENERIC_ENTRYPOINT_BASENAMES = new Set([
+  'index.ts',
+  'index.tsx',
+  'index.js',
+  'index.jsx',
+  'index.mjs',
+  'index.cjs',
+  '__init__.py',
+  'mod.rs',
+  'main.rs',
+  'main.go',
+  'main.py',
+]);
 
 const MAX_ENTRIES_PER_FILE_PER_DIRECTION = 5;
 /** Bound on raw diff-added candidates considered per file before the corpus-rarity scan. */
@@ -252,6 +306,15 @@ function dirnameOf(file: string): string {
   return idx === -1 ? '' : file.slice(0, idx);
 }
 
+function basenameOf(file: string): string {
+  const idx = file.lastIndexOf('/');
+  return idx === -1 ? file : file.slice(idx + 1);
+}
+
+function joinDirBase(dir: string, base: string): string {
+  return dir === '' ? base : `${dir}/${base}`;
+}
+
 function isTestFile(file: string): boolean {
   return TEST_PATH_RE.test(file);
 }
@@ -341,6 +404,86 @@ function familyFor(file: string, index: Map<string, string[]>): string[] | null 
   const members = index.get(`${dirnameOf(file)}::${ext}`);
   if (!members || members.length < MIN_FAMILY_SIZE || members.length > MAX_FAMILY_SIZE) return null;
   return members;
+}
+
+// ---------------------------------------------------------------------------
+// Mirror-directory computation
+// ---------------------------------------------------------------------------
+
+/** dirname -> set of source (non-test) basenames present in that directory, built once from the indexed repo's file set. */
+function buildDirBasenameIndex(files: Iterable<string>): Map<string, Set<string>> {
+  const index = new Map<string, Set<string>>();
+  for (const file of files) {
+    if (!isSourceFile(file)) continue;
+    const dir = dirnameOf(file);
+    const base = basenameOf(file);
+    const set = index.get(dir);
+    if (set) set.add(base);
+    else index.set(dir, new Set([base]));
+  }
+  return index;
+}
+
+/**
+ * Count of basenames two directories share, short-circuiting once the
+ * mirror-evidence gate is met. Generic entry-point basenames (index.ts and
+ * equivalents) don't count as evidence — see GENERIC_ENTRYPOINT_BASENAMES.
+ */
+function sharedBasenameCount(a: Set<string>, b: Set<string>): number {
+  let count = 0;
+  for (const base of a) {
+    if (GENERIC_ENTRYPOINT_BASENAMES.has(base)) continue;
+    if (!b.has(base)) continue;
+    count++;
+    if (count >= MIN_MIRROR_SHARED_BASENAMES) return count;
+  }
+  return count;
+}
+
+/**
+ * Directories that qualify as mirror directories of `dir`: each contains a
+ * same-basename+ext file (the mirror counterpart must exist) AND shares at
+ * least MIN_MIRROR_SHARED_BASENAMES such files with `dir` overall (the
+ * mirror-evidence gate — see module doc).
+ */
+function mirrorDirsFor(
+  dir: string,
+  base: string,
+  dirBasenames: Map<string, Set<string>>,
+): string[] {
+  const ownBasenames = dirBasenames.get(dir);
+  if (!ownBasenames) return [];
+
+  const qualified: string[] = [];
+  for (const [otherDir, basenames] of dirBasenames) {
+    if (otherDir === dir || !basenames.has(base)) continue;
+    if (sharedBasenameCount(ownBasenames, basenames) >= MIN_MIRROR_SHARED_BASENAMES) {
+      qualified.push(otherDir);
+    }
+  }
+  return qualified;
+}
+
+/**
+ * Untouched mirror-sibling file paths for `file`, one per qualifying mirror
+ * directory — or [] when there's no mirror relationship, or more than
+ * MAX_MIRROR_DIRS_PER_FILE directories qualify (noise, not a mirror family).
+ */
+function mirrorSiblingsFor(
+  file: string,
+  dirBasenames: Map<string, Set<string>>,
+  changedFileSet: Set<string>,
+): string[] {
+  if (!isSourceFile(file)) return [];
+
+  const base = basenameOf(file);
+  const qualifiedDirs = mirrorDirsFor(dirnameOf(file), base, dirBasenames);
+  if (qualifiedDirs.length === 0 || qualifiedDirs.length > MAX_MIRROR_DIRS_PER_FILE) return [];
+
+  return qualifiedDirs
+    .map(d => joinDirBase(d, base))
+    .filter(s => s !== file && !changedFileSet.has(s))
+    .sort();
 }
 
 // ---------------------------------------------------------------------------
@@ -467,6 +610,7 @@ function extractUnmirroredAdditions(
   chunksByFile: Map<string, CodeChunk[]>,
   changedFileSet: Set<string>,
   untouchedSiblings: string[],
+  isMirror = false,
 ): SiblingSurfaceEntry[] {
   const entries: SiblingSurfaceEntry[] = [];
 
@@ -478,7 +622,14 @@ function extractUnmirroredAdditions(
     const lacking = untouchedSiblings.filter(s => !fileContains(chunksByFile, s, value)).sort();
     if (lacking.length === 0) continue;
 
-    entries.push({ direction: 'unmirrored-addition', display, file, line, siblings: lacking });
+    entries.push({
+      direction: 'unmirrored-addition',
+      display,
+      file,
+      line,
+      siblings: lacking,
+      isMirror,
+    });
   }
 
   return entries;
@@ -488,17 +639,25 @@ function extractUnmirroredAdditions(
 // Direction B: family-pattern divergence
 // ---------------------------------------------------------------------------
 
-function extractCallIdentifiers(chunksByFile: Map<string, CodeChunk[]>, file: string): Set<string> {
-  const out = new Set<string>();
+/** Call-shaped identifier -> occurrence count within one file's chunks (dedup'd by the same rules as Direction A's stoplist). */
+function countCallIdentifiers(
+  chunksByFile: Map<string, CodeChunk[]>,
+  file: string,
+): Map<string, number> {
+  const counts = new Map<string, number>();
   for (const chunk of chunksByFile.get(file) ?? []) {
     for (const m of chunk.content.matchAll(CALL_RE)) {
       const id = m[1];
       if (id.length < MIN_IDENTIFIER_CHARS) continue;
       if (CALL_KEYWORD_STOPLIST.has(id.toLowerCase())) continue;
-      out.add(id);
+      counts.set(id, (counts.get(id) ?? 0) + 1);
     }
   }
-  return out;
+  return counts;
+}
+
+function extractCallIdentifiers(chunksByFile: Map<string, CodeChunk[]>, file: string): Set<string> {
+  return new Set(countCallIdentifiers(chunksByFile, file).keys());
 }
 
 /** How many members must share a call for it to count as a "family pattern" (a majority). */
@@ -534,6 +693,7 @@ function extractFamilyPatternDivergence(
   file: string,
   chunksByFile: Map<string, CodeChunk[]>,
   untouchedSiblings: string[],
+  isMirror = false,
 ): SiblingSurfaceEntry[] {
   if (untouchedSiblings.length < 2) return [];
 
@@ -563,12 +723,118 @@ function extractFamilyPatternDivergence(
     display: id,
     file,
     siblings,
+    isMirror,
   }));
+}
+
+/**
+ * Direction B for a mirror family with exactly one mirror sibling — the
+ * common case, since most mirror relationships are 1:1 pairs. The majority
+ * rule (`requiredShareCount`) can never fire with a single candidate, so
+ * instead require the identifier to occur at least twice within that one
+ * sibling: a within-file repetition signal standing in for "the family
+ * pattern", to compensate for a family too small for a majority to mean
+ * anything.
+ */
+function extractSingleMirrorDivergence(
+  file: string,
+  chunksByFile: Map<string, CodeChunk[]>,
+  mirrorSibling: string,
+): SiblingSurfaceEntry[] {
+  const counts = countCallIdentifiers(chunksByFile, mirrorSibling);
+  const candidates = [...counts.entries()]
+    .filter(([id, count]) => count >= 2 && !fileContains(chunksByFile, file, id))
+    .map(([id]) => id)
+    .sort();
+
+  return candidates.slice(0, MAX_ENTRIES_PER_FILE_PER_DIRECTION).map(id => ({
+    direction: 'family-pattern-divergence' as const,
+    display: id,
+    file,
+    siblings: [mirrorSibling],
+    isMirror: true,
+  }));
+}
+
+/** Direction B dispatcher for the mirror axis: single-sibling families use the repetition rule above; larger ones reuse the same majority rule as same-dir families. */
+function extractMirrorFamilyPatternDivergence(
+  file: string,
+  chunksByFile: Map<string, CodeChunk[]>,
+  mirrorSiblings: string[],
+): SiblingSurfaceEntry[] {
+  if (mirrorSiblings.length === 1) {
+    return extractSingleMirrorDivergence(file, chunksByFile, mirrorSiblings[0]);
+  }
+  return extractFamilyPatternDivergence(file, chunksByFile, mirrorSiblings, true);
 }
 
 // ---------------------------------------------------------------------------
 // Extraction entry point
 // ---------------------------------------------------------------------------
+
+/** Same-directory family axis (v1) for one changed file: both directions, or [] when no cohesive family exists. */
+function extractSameDirFamilyEntries(
+  file: string,
+  familyIndex: Map<string, string[]>,
+  chunksByFile: Map<string, CodeChunk[]>,
+  repoChunks: CodeChunk[],
+  changedFileSet: Set<string>,
+  patches: Map<string, string> | undefined,
+): SiblingSurfaceEntry[] {
+  const family = familyFor(file, familyIndex);
+  if (!family || !hasCohesivePattern(family, chunksByFile)) return [];
+
+  const untouchedSiblings = family.filter(s => s !== file && !changedFileSet.has(s));
+  if (untouchedSiblings.length === 0) return [];
+
+  const entries: SiblingSurfaceEntry[] = [];
+  const patch = patches?.get(file);
+  if (patch) {
+    entries.push(
+      ...extractUnmirroredAdditions(
+        file,
+        patch,
+        repoChunks,
+        chunksByFile,
+        changedFileSet,
+        untouchedSiblings,
+      ),
+    );
+  }
+  entries.push(...extractFamilyPatternDivergence(file, chunksByFile, untouchedSiblings));
+  return entries;
+}
+
+/** Mirror-directory family axis for one changed file: both directions, or [] when no mirror family qualifies. */
+function extractMirrorFamilyEntries(
+  file: string,
+  dirBasenameIndex: Map<string, Set<string>>,
+  chunksByFile: Map<string, CodeChunk[]>,
+  repoChunks: CodeChunk[],
+  changedFileSet: Set<string>,
+  patches: Map<string, string> | undefined,
+): SiblingSurfaceEntry[] {
+  const mirrorSiblings = mirrorSiblingsFor(file, dirBasenameIndex, changedFileSet);
+  if (mirrorSiblings.length === 0) return [];
+
+  const entries: SiblingSurfaceEntry[] = [];
+  const patch = patches?.get(file);
+  if (patch) {
+    entries.push(
+      ...extractUnmirroredAdditions(
+        file,
+        patch,
+        repoChunks,
+        chunksByFile,
+        changedFileSet,
+        mirrorSiblings,
+        true,
+      ),
+    );
+  }
+  entries.push(...extractMirrorFamilyPatternDivergence(file, chunksByFile, mirrorSiblings));
+  return entries;
+}
 
 /**
  * Precompute sibling-surface entries for the review context. Returns [] when
@@ -580,6 +846,7 @@ export function extractSiblingSurfaces(context: ReviewContext): SiblingSurfaceEn
 
   const chunksByFile = groupChunksByFile(repoChunks);
   const familyIndex = buildFamilyIndex(chunksByFile.keys());
+  const dirBasenameIndex = buildDirBasenameIndex(chunksByFile.keys());
   const changedFileSet = collectChangedFileSet(context);
   const patches = context.pr?.patches;
 
@@ -587,26 +854,26 @@ export function extractSiblingSurfaces(context: ReviewContext): SiblingSurfaceEn
   const candidateFiles = [...changedFileSet].filter(isSourceFile).sort();
 
   for (const file of candidateFiles) {
-    const family = familyFor(file, familyIndex);
-    if (!family || !hasCohesivePattern(family, chunksByFile)) continue;
-
-    const untouchedSiblings = family.filter(s => s !== file && !changedFileSet.has(s));
-    if (untouchedSiblings.length === 0) continue;
-
-    const patch = patches?.get(file);
-    if (patch) {
-      entries.push(
-        ...extractUnmirroredAdditions(
-          file,
-          patch,
-          repoChunks,
-          chunksByFile,
-          changedFileSet,
-          untouchedSiblings,
-        ),
-      );
-    }
-    entries.push(...extractFamilyPatternDivergence(file, chunksByFile, untouchedSiblings));
+    entries.push(
+      ...extractSameDirFamilyEntries(
+        file,
+        familyIndex,
+        chunksByFile,
+        repoChunks,
+        changedFileSet,
+        patches,
+      ),
+    );
+    entries.push(
+      ...extractMirrorFamilyEntries(
+        file,
+        dirBasenameIndex,
+        chunksByFile,
+        repoChunks,
+        changedFileSet,
+        patches,
+      ),
+    );
   }
 
   return entries.slice(0, MAX_TOTAL_ENTRIES);
@@ -617,32 +884,36 @@ export function extractSiblingSurfaces(context: ReviewContext): SiblingSurfaceEn
 // ---------------------------------------------------------------------------
 
 const SIBLING_SURFACES_HEADER =
-  'Pre-computed by a deterministic scan of file "families" (other source files in the same ' +
-  'directory sharing an extension, tests excluded — no grep needed). Each entry is either a ' +
-  'feature-shaped literal/identifier this PR ADDED to one family member but which is absent ' +
-  'from an untouched sibling that handles the same kind of surface, or a call every OTHER ' +
-  'family member makes that this file never does. For each, verify whether the omission is ' +
-  'intentional: an option or code path implemented in one family member but silently absent ' +
-  'from a sibling that handles the same surface is a finding; if the sibling structurally ' +
-  'cannot support it (documented, or a genuinely different responsibility), stay silent.';
+  'Pre-computed by a deterministic scan of file "families" — other source files in the same ' +
+  'directory sharing an extension, or "mirror siblings": the same file basename in a different ' +
+  'directory that this codebase maintains as a parallel implementation (e.g. an async vs a ' +
+  'blocking variant), tests excluded — no grep needed. Each entry is either a feature-shaped ' +
+  'literal/identifier this PR ADDED to one family member but which is absent from an untouched ' +
+  'sibling that handles the same kind of surface, or a call every OTHER family member makes ' +
+  'that this file never does. For each, verify whether the omission is intentional: an option ' +
+  'or code path implemented in one family member but silently absent from a sibling that ' +
+  'handles the same surface is a finding; if the sibling structurally cannot support it ' +
+  '(documented, or a genuinely different responsibility), stay silent.';
 
 /**
- * Entries for the same file, direction, and sibling set share one rendered
- * line — otherwise a family with many members (or a file with several
- * qualifying identifiers) repeats the same long sibling list per identifier,
- * which burns the block's char budget on redundant text instead of signal.
+ * Entries for the same file, direction, sibling set, and mirror-ness share one
+ * rendered line — otherwise a family with many members (or a file with
+ * several qualifying identifiers) repeats the same long sibling list per
+ * identifier, which burns the block's char budget on redundant text instead
+ * of signal.
  */
 interface EntryGroup {
   direction: SiblingSurfaceDirection;
   file: string;
   siblings: string[];
+  isMirror: boolean;
   items: { display: string; line?: number }[];
 }
 
 function groupEntries(entries: SiblingSurfaceEntry[]): EntryGroup[] {
   const groups = new Map<string, EntryGroup>();
   for (const e of entries) {
-    const key = `${e.direction}::${e.file}::${e.siblings.join(',')}`;
+    const key = `${e.direction}::${e.file}::${e.siblings.join(',')}::${e.isMirror}`;
     const group = groups.get(key);
     if (group) group.items.push({ display: e.display, line: e.line });
     else
@@ -650,6 +921,7 @@ function groupEntries(entries: SiblingSurfaceEntry[]): EntryGroup[] {
         direction: e.direction,
         file: e.file,
         siblings: e.siblings,
+        isMirror: e.isMirror,
         items: [{ display: e.display, line: e.line }],
       });
   }
@@ -658,14 +930,15 @@ function groupEntries(entries: SiblingSurfaceEntry[]): EntryGroup[] {
 
 function renderGroup(g: EntryGroup): string {
   const siblingsList = g.siblings.join(', ');
+  const siblingWord = g.isMirror ? 'mirror sibling' : 'sibling';
   if (g.direction === 'unmirrored-addition') {
     const items = g.items
       .map(i => (i.line ? `${i.display} (line ${i.line})` : i.display))
       .join(', ');
-    return `- ${items} — added in ${g.file}, absent from untouched sibling(s): ${siblingsList}`;
+    return `- ${items} — added in ${g.file}, absent from untouched ${siblingWord}(s): ${siblingsList}`;
   }
   const items = g.items.map(i => `${i.display}(...)`).join(', ');
-  return `- ${items} — shared by sibling(s) ${siblingsList}, absent from ${g.file}`;
+  return `- ${items} — shared by ${siblingWord}(s) ${siblingsList}, absent from ${g.file}`;
 }
 
 /**

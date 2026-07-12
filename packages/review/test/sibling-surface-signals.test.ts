@@ -308,6 +308,210 @@ describe('extractSiblingSurfaces — noise avoidance', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Mirror directories
+// ---------------------------------------------------------------------------
+
+// Mimics reqwest #916: `async_impl/request.rs` and `blocking/request.rs` are
+// the real sibling axis, but they live in different directories. `client.rs`
+// is present in both dirs purely to give the pair its mirror-evidence (>= 2
+// shared basenames) — its content is otherwise irrelevant.
+const ASYNC_REQUEST_PATCH = `@@ -1,7 +1,8 @@
+ pub struct Request {
+     headers: HeaderMap,
+ }
+
+ impl Request {
+     pub fn build(&self) -> HeaderMap {
++        redact_sensitive_headers(&self.headers);
+         self.headers.clone()
+     }
+ }`;
+
+const ASYNC_REQUEST_CONTENT = [
+  'pub struct Request {',
+  '    headers: HeaderMap,',
+  '}',
+  '',
+  'impl Request {',
+  '    pub fn build(&self) -> HeaderMap {',
+  '        redact_sensitive_headers(&self.headers);',
+  '        self.headers.clone()',
+  '    }',
+  '}',
+].join('\n');
+
+const BLOCKING_REQUEST_CONTENT = [
+  'pub struct Request {',
+  '    headers: HeaderMap,',
+  '}',
+  '',
+  'impl Request {',
+  '    pub fn build(&self) -> HeaderMap {',
+  '        self.headers.clone()',
+  '    }',
+  '}',
+].join('\n');
+
+const ASYNC_CLIENT_CONTENT = [
+  'pub struct Client;',
+  '',
+  'impl Client {',
+  '    fn execute(&self) {} ',
+  '}',
+].join('\n');
+const BLOCKING_CLIENT_CONTENT = ASYNC_CLIENT_CONTENT;
+
+function reqwestLikeContext(): ReviewContext {
+  const patches = new Map([['async_impl/request.rs', ASYNC_REQUEST_PATCH]]);
+  const repoChunks = [
+    makeChunk('async_impl/request.rs', 1, ASYNC_REQUEST_CONTENT),
+    makeChunk('async_impl/client.rs', 1, ASYNC_CLIENT_CONTENT),
+    makeChunk('blocking/request.rs', 1, BLOCKING_REQUEST_CONTENT),
+    makeChunk('blocking/client.rs', 1, BLOCKING_CLIENT_CONTENT),
+  ];
+  return makeContext({ patches, repoChunks, changedFiles: ['async_impl/request.rs'] });
+}
+
+describe('extractSiblingSurfaces — mirror directories (direction A)', () => {
+  it('reports an identifier added to one variant as absent from its cross-directory mirror sibling', () => {
+    const entries = extractSiblingSurfaces(reqwestLikeContext());
+    const entry = entries.find(
+      e => e.direction === 'unmirrored-addition' && e.display.includes('redact_sensitive_headers'),
+    );
+    expect(entry).toBeDefined();
+    expect(entry?.file).toBe('async_impl/request.rs');
+    expect(entry?.siblings).toEqual(['blocking/request.rs']);
+    expect(entry?.isMirror).toBe(true);
+  });
+
+  it('renders the mirror entry with "mirror sibling" wording, not plain "sibling"', () => {
+    const entries = extractSiblingSurfaces(reqwestLikeContext());
+    const block = renderSiblingSurfaces(entries);
+    expect(block).toContain('mirror sibling');
+    expect(block).toContain('blocking/request.rs');
+  });
+
+  it('requires a second shared basename (the mirror-evidence gate) — a single shared name is not a mirror', () => {
+    // Only `request.rs` is shared between the two directories; there is no
+    // `client.rs` (or any other) pairing, so the directories share just one
+    // basename — below the >= 2 mirror-evidence threshold.
+    const patches = new Map([['async_impl/request.rs', ASYNC_REQUEST_PATCH]]);
+    const repoChunks = [
+      makeChunk('async_impl/request.rs', 1, ASYNC_REQUEST_CONTENT),
+      makeChunk('blocking/request.rs', 1, BLOCKING_REQUEST_CONTENT),
+    ];
+    const context = makeContext({
+      patches,
+      repoChunks,
+      changedFiles: ['async_impl/request.rs'],
+    });
+    expect(extractSiblingSurfaces(context)).toEqual([]);
+  });
+
+  it('discards the mirror family entirely when more than 3 directories qualify', () => {
+    // src/dirA is the changed file's directory; dirB..dirE each mirror it
+    // fully (model.ts + common.ts — both non-generic basenames), so 4
+    // directories qualify — over the cap of 3 — which must produce nothing,
+    // not the first 3.
+    const patch =
+      '@@ -1,1 +1,2 @@\n export const modelValue = 1;\n+export const mirrorNoiseToken = 1;';
+    const patches = new Map([['src/dirA/model.ts', patch]]);
+    const repoChunks = [
+      makeChunk(
+        'src/dirA/model.ts',
+        1,
+        'export const modelValue = 1;\nexport const mirrorNoiseToken = 1;',
+      ),
+      makeChunk('src/dirA/common.ts', 1, 'export const commonValue = 1;'),
+    ];
+    for (const dir of ['dirB', 'dirC', 'dirD', 'dirE']) {
+      repoChunks.push(makeChunk(`src/${dir}/model.ts`, 1, 'export const value = 1;'));
+      repoChunks.push(makeChunk(`src/${dir}/common.ts`, 1, 'export const value = 1;'));
+    }
+    const context = makeContext({
+      patches,
+      repoChunks,
+      changedFiles: ['src/dirA/model.ts'],
+    });
+    expect(extractSiblingSurfaces(context)).toEqual([]);
+  });
+
+  it('does not count a shared generic entry-point basename (index.ts) as mirror-evidence', () => {
+    // src/moduleA and src/moduleB share exactly two basenames — index.ts and
+    // shared.ts — but index.ts is a barrel-file convention present in nearly
+    // any directory, so it must not count. That leaves only ONE real shared
+    // basename (shared.ts), below the mirror-evidence gate, so no mirror
+    // family should form at all.
+    const patch =
+      '@@ -1,1 +1,2 @@\n export const sharedValue = 1;\n+export const distinctiveGenericGateToken = 1;';
+    const patches = new Map([['src/moduleA/shared.ts', patch]]);
+    const repoChunks = [
+      makeChunk(
+        'src/moduleA/shared.ts',
+        1,
+        'export const sharedValue = 1;\nexport const distinctiveGenericGateToken = 1;',
+      ),
+      makeChunk('src/moduleA/index.ts', 1, "export * from './shared.js';"),
+      makeChunk('src/moduleB/shared.ts', 1, 'export const sharedValue = 2;'),
+      makeChunk('src/moduleB/index.ts', 1, "export * from './shared.js';"),
+    ];
+    const context = makeContext({
+      patches,
+      repoChunks,
+      changedFiles: ['src/moduleA/shared.ts'],
+    });
+    expect(extractSiblingSurfaces(context)).toEqual([]);
+  });
+});
+
+describe('extractSiblingSurfaces — mirror directories (direction B)', () => {
+  it('with a single mirror sibling, requires the identifier to occur >= 2 times in it', () => {
+    // blocking/request.rs (the lone mirror sibling) calls `validate_headers`
+    // twice; async_impl/request.rs (the changed file) never calls it at all.
+    const asyncRequestContent = [
+      'pub struct Request;',
+      '',
+      'impl Request {',
+      '    pub fn build(&self) -> HeaderMap {',
+      '        self.headers.clone()',
+      '    }',
+      '}',
+    ].join('\n');
+    const blockingRequestContent = [
+      'pub struct Request;',
+      '',
+      'impl Request {',
+      '    pub fn build(&self) -> HeaderMap {',
+      '        validate_headers(&self.headers);',
+      '        self.headers.clone()',
+      '    }',
+      '',
+      '    pub fn retry(&self) -> HeaderMap {',
+      '        validate_headers(&self.headers);',
+      '        self.headers.clone()',
+      '    }',
+      '}',
+    ].join('\n');
+    const repoChunks = [
+      makeChunk('async_impl/request.rs', 1, asyncRequestContent),
+      makeChunk('async_impl/client.rs', 1, 'pub struct Client;'),
+      makeChunk('blocking/request.rs', 1, blockingRequestContent),
+      makeChunk('blocking/client.rs', 1, 'pub struct Client;'),
+    ];
+    const context = makeContext({ repoChunks, changedFiles: ['async_impl/request.rs'] });
+
+    const entries = extractSiblingSurfaces(context);
+    const entry = entries.find(
+      e => e.direction === 'family-pattern-divergence' && e.display === 'validate_headers',
+    );
+    expect(entry).toBeDefined();
+    expect(entry?.file).toBe('async_impl/request.rs');
+    expect(entry?.siblings).toEqual(['blocking/request.rs']);
+    expect(entry?.isMirror).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Caps
 // ---------------------------------------------------------------------------
 
