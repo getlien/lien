@@ -213,7 +213,36 @@ export async function getFileContent(
 }
 
 /**
- * Post a review with line-specific comments
+ * Result of {@link postPRReview}: how many line comments actually landed, and
+ * which ones were dropped (with why) so callers can surface the degradation
+ * instead of losing it silently.
+ */
+export interface PostReviewResult {
+  posted: number;
+  dropped: Array<{ path: string; line: number; error: string }>;
+}
+
+/** Shape a LineComment into the params octokit expects for a review comment. */
+function toReviewCommentParams(c: LineComment) {
+  return {
+    path: c.path,
+    line: c.line,
+    ...(c.start_line ? { start_line: c.start_line, start_side: 'RIGHT' as const } : {}),
+    side: 'RIGHT' as const,
+    body: c.body,
+  };
+}
+
+/**
+ * Post a review with line-specific comments.
+ *
+ * `octokit.pulls.createReview` is all-or-nothing: if ANY comment anchors to a
+ * line outside the diff, GitHub rejects the entire batch — including every
+ * valid comment in it. On that failure we post the summary body on its own
+ * first (it must survive), then retry each comment individually via
+ * `createReviewComment` so one bad anchor can't take the rest down with it.
+ * Comments that still fail are logged and returned in `dropped`, never
+ * silently discarded.
  */
 export async function postPRReview(
   octokit: Octokit,
@@ -222,7 +251,7 @@ export async function postPRReview(
   summaryBody: string,
   logger: Logger,
   event: 'COMMENT' | 'REQUEST_CHANGES' = 'COMMENT',
-): Promise<void> {
+): Promise<PostReviewResult> {
   logger.info(`Creating review with ${comments.length} line comments (event: ${event})`);
 
   const reviewParams = {
@@ -232,39 +261,81 @@ export async function postPRReview(
     commit_id: prContext.headSha,
     event,
     body: summaryBody,
-    ...(comments.length > 0
-      ? {
-          comments: comments.map(c => ({
-            path: c.path,
-            line: c.line,
-            ...(c.start_line ? { start_line: c.start_line, start_side: 'RIGHT' } : {}),
-            side: 'RIGHT' as const,
-            body: c.body,
-          })),
-        }
-      : {}),
+    ...(comments.length > 0 ? { comments: comments.map(toReviewCommentParams) } : {}),
   };
 
   try {
     await octokit.pulls.createReview(reviewParams);
     logger.info('Review posted successfully');
+    return { posted: comments.length, dropped: [] };
   } catch (error) {
-    if (comments.length > 0) {
-      // Line comments failed (e.g., lines not in diff) — retry as body-only review
-      logger.warning(`Failed to post line comments: ${error}`);
-      logger.info('Retrying as body-only review');
-      await octokit.pulls.createReview({
+    if (comments.length === 0) {
+      // Nothing to salvage individually — surface the failure as before.
+      throw error;
+    }
+
+    logger.warning(`Failed to post line comments as a batch: ${error}`);
+    return postBodyThenRetryCommentsIndividually(
+      octokit,
+      prContext,
+      comments,
+      summaryBody,
+      logger,
+      event,
+    );
+  }
+}
+
+/**
+ * Batch fallback: post the summary alone first (it must survive the batch
+ * failure), then retry each comment individually via `createReviewComment` so
+ * one bad anchor can't take the rest of the batch down with it.
+ */
+async function postBodyThenRetryCommentsIndividually(
+  octokit: Octokit,
+  prContext: PRContext,
+  comments: LineComment[],
+  summaryBody: string,
+  logger: Logger,
+  event: 'COMMENT' | 'REQUEST_CHANGES',
+): Promise<PostReviewResult> {
+  logger.info('Posting body-only review, then retrying comments individually');
+
+  await octokit.pulls.createReview({
+    owner: prContext.owner,
+    repo: prContext.repo,
+    pull_number: prContext.pullNumber,
+    commit_id: prContext.headSha,
+    event,
+    body: summaryBody,
+  });
+
+  const dropped: PostReviewResult['dropped'] = [];
+  let posted = 0;
+
+  for (const comment of comments) {
+    try {
+      await octokit.pulls.createReviewComment({
         owner: prContext.owner,
         repo: prContext.repo,
         pull_number: prContext.pullNumber,
         commit_id: prContext.headSha,
-        event,
-        body: summaryBody,
+        ...toReviewCommentParams(comment),
       });
-    } else {
-      throw error;
+      posted++;
+    } catch (commentError) {
+      const message = commentError instanceof Error ? commentError.message : String(commentError);
+      logger.warning(`Dropped inline comment at ${comment.path}:${comment.line}: ${message}`);
+      dropped.push({ path: comment.path, line: comment.line, error: message });
     }
   }
+
+  logger.info(
+    `Posted ${posted} of ${comments.length} line comments individually after batch failure; ` +
+      `${dropped.length} dropped`,
+  );
+
+  return { posted, dropped };
 }
 
 /**
