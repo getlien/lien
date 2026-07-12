@@ -441,9 +441,42 @@ is not a qualifying test; an actual test file + line is.`,
       // bare 'severity' matches every ReviewFinding and logger call in this
       // codebase.
       '\\bthreshold\\b',
-      '\\bboundary\\b',
+      // `boundary=` (no space — RFC 2045 parameter syntax) is the
+      // multipart MIME delimiter (Content-Type: multipart/form-data;
+      // boundary=...), an HTTP literal unrelated to threshold logic that
+      // coincidentally activated this rule on httpx#2400 during the
+      // 2026-07 cross-repo pilot (#741). The lookahead deliberately
+      // rejects only the immediate `=` so spaced assignments to a
+      // threshold variable (`const boundary = maxSize`) still fire —
+      // per Lien Review + CodeRabbit on #743, `(?!\s*=)` also swallowed
+      // those real boundary definitions.
+      '\\bboundary\\b(?!=)',
       '\\bcutoff\\b',
       'severity\\s*[:=]',
+      // Type-acceptance gates (#741): a diff that touches a type
+      // allow-list or raises a type error is a validation-boundary shift
+      // even with no numeric comparison. Shape missed on httpx#2523
+      // (universal str(value) fallback → isinstance allow-list) and
+      // httpx#2400 (text-mode rejection via raised TypeError) in the
+      // cross-repo pilot. Cross-language analogues included (PHP is_*,
+      // Ruby is_a?/kind_of?, JS/Java/PHP instanceof).
+      'isinstance\\s*\\(',
+      '\\bTypeError\\b',
+      '\\binstanceof\\b',
+      '\\bis_(?:int|string|float|numeric|bool|array)\\s*\\(',
+      '\\bis_a\\?',
+      '\\bkind_of\\?',
+      // Integer-truncation idioms (#741): `| 0` / `~~` (JS) and
+      // fixed-width narrowing casts (Rust `as i32`, Go `int32(...)`)
+      // change a value's numeric range. Shape missed on hono#3605
+      // (Math.floor → `| 0`, Y2038 overflow in JWT verification).
+      // `| 0` is LHS-anchored like the bare comparison operators above so
+      // `||` alternation never fires it, and the lookahead excludes
+      // `0x`/`0b`/`0o`/decimal literals where `0` starts a wider number.
+      '[\\w)\\]]\\s*\\|\\s*0(?![\\dxXbBoO.])',
+      '~~[\\w(]',
+      '\\bas\\s+[iu](?:8|16|32)\\b',
+      '\\bu?int(?:8|16|32)\\s*\\(',
     ],
   },
   requiresBlastRadius: true,
