@@ -76,6 +76,20 @@ describe('postPRReview', () => {
     expect(result).toEqual({ posted: 2, dropped: [] });
   });
 
+  it('drops an invalid (negative) start_line instead of passing it through', async () => {
+    const createReview = vi.fn().mockResolvedValue({});
+    const octokit = createMockOctokit({ createReview });
+    const logger = createMockLogger();
+
+    const comments: LineComment[] = [{ path: 'a.ts', line: 10, start_line: -1, body: 'nit a' }];
+
+    await postPRReview(octokit, pr, comments, 'summary body', logger, 'COMMENT');
+
+    const postedComment = createReview.mock.calls[0][0].comments[0];
+    expect(postedComment).not.toHaveProperty('start_line');
+    expect(postedComment).not.toHaveProperty('start_side');
+  });
+
   it('posts the body alone, then every comment individually, when the batch is rejected', async () => {
     const createReview = vi
       .fn()
@@ -130,6 +144,32 @@ describe('postPRReview', () => {
     ]);
     expect(logger.warning).toHaveBeenCalledWith(
       expect.stringContaining('Dropped inline comment at b.ts:20'),
+    );
+  });
+
+  it('still retries comments individually when the body-only post also fails', async () => {
+    const createReview = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('batch rejected'))
+      .mockRejectedValueOnce(new Error('body-only post also failed'));
+    const createReviewComment = vi.fn().mockResolvedValue({});
+    const octokit = createMockOctokit({ createReview, createReviewComment });
+    const logger = createMockLogger();
+
+    const comments: LineComment[] = [
+      { path: 'a.ts', line: 10, body: 'nit a' },
+      { path: 'b.ts', line: 20, body: 'nit b' },
+    ];
+
+    const result = await postPRReview(octokit, pr, comments, 'summary body', logger, 'COMMENT');
+
+    // Both createReview attempts happened, but neither throws out of the function.
+    expect(createReview).toHaveBeenCalledTimes(2);
+    // The salvage path still ran for every comment.
+    expect(createReviewComment).toHaveBeenCalledTimes(2);
+    expect(result).toEqual({ posted: 2, dropped: [] });
+    expect(logger.warning).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to post body-only review after batch failure'),
     );
   });
 

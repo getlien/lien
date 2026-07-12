@@ -224,10 +224,11 @@ export interface PostReviewResult {
 
 /** Shape a LineComment into the params octokit expects for a review comment. */
 function toReviewCommentParams(c: LineComment) {
+  const hasValidStartLine = typeof c.start_line === 'number' && c.start_line > 0;
   return {
     path: c.path,
     line: c.line,
-    ...(c.start_line ? { start_line: c.start_line, start_side: 'RIGHT' as const } : {}),
+    ...(hasValidStartLine ? { start_line: c.start_line, start_side: 'RIGHT' as const } : {}),
     side: 'RIGHT' as const,
     body: c.body,
   };
@@ -290,6 +291,11 @@ export async function postPRReview(
  * Batch fallback: post the summary alone first (it must survive the batch
  * failure), then retry each comment individually via `createReviewComment` so
  * one bad anchor can't take the rest of the batch down with it.
+ *
+ * The body-only post can itself fail (e.g. a transient network error right
+ * after the batch failure) — that's caught and logged rather than thrown, so
+ * the per-comment salvage loop below still runs. Individual comments are the
+ * real salvage path; the body is a bonus, not a precondition for it.
  */
 async function postBodyThenRetryCommentsIndividually(
   octokit: Octokit,
@@ -301,14 +307,18 @@ async function postBodyThenRetryCommentsIndividually(
 ): Promise<PostReviewResult> {
   logger.info('Posting body-only review, then retrying comments individually');
 
-  await octokit.pulls.createReview({
-    owner: prContext.owner,
-    repo: prContext.repo,
-    pull_number: prContext.pullNumber,
-    commit_id: prContext.headSha,
-    event,
-    body: summaryBody,
-  });
+  try {
+    await octokit.pulls.createReview({
+      owner: prContext.owner,
+      repo: prContext.repo,
+      pull_number: prContext.pullNumber,
+      commit_id: prContext.headSha,
+      event,
+      body: summaryBody,
+    });
+  } catch (error) {
+    logger.warning(`Failed to post body-only review after batch failure: ${error}`);
+  }
 
   const dropped: PostReviewResult['dropped'] = [];
   let posted = 0;
