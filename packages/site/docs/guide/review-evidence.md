@@ -75,10 +75,17 @@ catching the bug requires knowledge the PR body actively contradicts. Example:
 zlib-wrapped), which the reviewer would need to know independently of what
 the PR says it's doing.
 
+All four miss examples cite public PRs from the study record, so each is
+independently checkable against the linked project's history — but note that
+only a subset of the study's 24 fixtures is committed in the repo's corpus
+(the miss examples above are documented in the study log, not all carried as
+replayable fixtures).
+
 ## Reproducing This
 
-- The corpus lives in the repo: `packages/review/test/harness/fixtures/crossrepo/`
-  plus per-rule canaries promoted from it.
+- The committed corpus lives in the repo:
+  `packages/review/test/harness/fixtures/crossrepo/` plus the per-rule
+  canaries.
 - Fixture JSONs are gitignored and regenerate from the public PRs — each
   fixture's `.assertions.ts` header carries the exact `capture-pr.ts` recipe
   (clone the public repo, fetch the PR ref, run the capture script).

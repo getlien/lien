@@ -50,6 +50,7 @@ export default withMermaid(
             text: 'Usage',
             items: [
               { text: 'MCP Tools', link: '/guide/mcp-tools' },
+              { text: 'Claude Code Plugin', link: '/guide/claude-code-plugin' },
               { text: 'CLI Commands', link: '/guide/cli-commands' },
               { text: 'Lien Review', link: '/guide/lien-review' },
               { text: 'Review Evidence', link: '/guide/review-evidence' },
