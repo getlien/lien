@@ -61,3 +61,36 @@ Durable, git-tracked record of corrections. Read this at the start of every sess
   over three unread findings that way. Before any merge: also read
   `gh pr view N --json reviews` (the github-actions review body) and treat
   a fresh push's review as unread until fetched.
+
+## Harness evidence discipline (learned in the 2026-07 cross-repo study)
+
+- **Screens are screens — never tag canary from a 3-vote result.** A
+  fixture that screened 3/3 on the prod model measured 5/10 at
+  `--calibrate 10` (crossrepo/pr2334) and had to be demoted before it
+  entered the corpus as a false drift-signal. Certification is the
+  calibrate-10 run, full stop; vote screens only decide where to SPEND
+  calibration.
+- **Verify an omission/disclosure claim against the offending PR's own
+  full diff AND body before building on it.** A fixture's "shipped with
+  no doc caveat" ground truth turned out to be documented THREE times in
+  the PR's own diff (guzzle#3740) — the fixture was judgment-bounded,
+  not omission-shaped, and an entire experiment ran against a mislabeled
+  target. Record the non-disclosure greps in the fixture header so the
+  verification is auditable.
+- **Deterministic no-regression proof beats paid sweeps for
+  trigger/signal changes.** Trigger keywords and injected-signal presence
+  are not part of rendered prompts unless they fire — so render the
+  corpus before/after (`build-prompts.ts`) and diff: byte-identical
+  fixtures are PROVABLY unaffected and need zero paid re-validation; pay
+  only for changed-prompt fixtures. Used to merge #743 with a 19/19
+  identical corpus and to scope #744's validation to 8 fixtures.
+- **New prompt surface ships on measured lift, not plausibility.** The
+  sibling-surface signal (#744) was well-built, non-regressive, and
+  discovery-correct — and stayed a draft because two rigorous A/B
+  experiments produced zero outcome flips. The bar for injected sections
+  is an A/B where the treatment arm catches something the control
+  doesn't.
+- **The free CC screen is a filter, not an oracle.** CC-miss→Kimi-miss
+  held 5/6 across the study; the counter-example (a Sonnet reviewer
+  rationalized a hazard Kimi flagged 3/3) means cheap prod spot-checks
+  on CC-misses are still worth ~$0.10 each.
