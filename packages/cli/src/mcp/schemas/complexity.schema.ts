@@ -52,24 +52,6 @@ export const GetComplexitySchema = z.object({
     .enum(['cyclomatic', 'cognitive', 'halstead_effort', 'halstead_bugs'])
     .optional()
     .describe('Filter violations to a specific metric type. If omitted, returns all types.'),
-
-  crossRepo: z
-    .boolean()
-    .default(false)
-    .describe(
-      'If true, analyze complexity across all repos in the organization (requires a cross-repo-capable backend; the bundled SQLite backend is single-repo).\n\n' +
-        'Default: false (single-repo analysis)\n' +
-        'When enabled, results are aggregated by repository.',
-    ),
-
-  repoIds: z
-    .array(z.string().max(255))
-    .optional()
-    .describe(
-      'Optional: Filter to specific repos when crossRepo=true.\n\n' +
-        'If provided, only analyzes the specified repositories.\n' +
-        'If omitted and crossRepo=true, analyzes all repos in the organization.',
-    ),
 });
 
 /**

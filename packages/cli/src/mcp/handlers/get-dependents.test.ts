@@ -24,8 +24,6 @@ describe('handleGetDependents', () => {
 
   let mockVectorDB: {
     scanWithFilter: ReturnType<typeof vi.fn>;
-    scanCrossRepo: ReturnType<typeof vi.fn>;
-    supportsCrossRepo: boolean;
   };
 
   let mockCtx: ToolContext;
@@ -86,8 +84,6 @@ describe('handleGetDependents', () => {
 
     mockVectorDB = {
       scanWithFilter: vi.fn(),
-      scanCrossRepo: vi.fn(),
-      supportsCrossRepo: false,
     };
 
     mockCtx = {
@@ -136,7 +132,6 @@ describe('handleGetDependents', () => {
       expect(findDependents).toHaveBeenCalledWith(
         mockVectorDB,
         'src/utils/helpers.ts',
-        false, // crossRepo default
         mockLog,
         undefined, // symbol default
         1234567890, // indexVersion from mock
@@ -273,165 +268,6 @@ describe('handleGetDependents', () => {
     });
   });
 
-  describe('hitLimit behavior', () => {
-    it('should include warning note when scan limit is reached', async () => {
-      vi.mocked(findDependents).mockResolvedValue(
-        createMockAnalysis({
-          hitLimit: true,
-          dependents: Array(50)
-            .fill(null)
-            .map((_, i) => ({
-              filepath: `src/file${i}.ts`,
-              isTestFile: false,
-            })),
-        }),
-      );
-
-      const result = await handleGetDependents({ filepath: 'src/widely-used.ts' }, mockCtx);
-
-      const parsed = JSON.parse(result.content![0].text);
-      expect(parsed.note).toContain('100,000');
-      expect(parsed.note).toContain('Cross-repo');
-      expect(parsed.note).toContain('incomplete');
-    });
-
-    it('should not include note when scan limit is not reached', async () => {
-      vi.mocked(findDependents).mockResolvedValue(
-        createMockAnalysis({
-          hitLimit: false,
-        }),
-      );
-
-      const result = await handleGetDependents({ filepath: 'src/normal.ts' }, mockCtx);
-
-      const parsed = JSON.parse(result.content![0].text);
-      expect(parsed.note).toBeUndefined();
-    });
-  });
-
-  describe('cross-repo search with a cross-repo-capable backend', () => {
-    let mockCrossRepoDB: any;
-
-    beforeEach(() => {
-      mockCrossRepoDB = {
-        scanWithFilter: vi.fn(),
-        scanCrossRepo: vi.fn(),
-        supportsCrossRepo: true,
-      };
-
-      mockCtx = {
-        vectorDB: mockCrossRepoDB,
-        log: mockLog,
-        checkAndReconnect: mockCheckAndReconnect,
-        getIndexMetadata: mockGetIndexMetadata,
-        getReindexState: vi.fn(() => ({
-          inProgress: false,
-          pendingFiles: [],
-          lastReindexTimestamp: null,
-          lastReindexDurationMs: null,
-        })),
-        rootDir: '/fake/workspace',
-      };
-    });
-
-    it('should pass crossRepo=true to findDependents when enabled', async () => {
-      vi.mocked(findDependents).mockResolvedValue(createMockAnalysis());
-
-      await handleGetDependents({ filepath: 'src/shared/utils.ts', crossRepo: true }, mockCtx);
-
-      expect(findDependents).toHaveBeenCalledWith(
-        mockCrossRepoDB,
-        'src/shared/utils.ts',
-        true,
-        mockLog,
-        undefined,
-        1234567890,
-        1,
-        500,
-      );
-    });
-
-    it('should include groupedByRepo when crossRepo=true with a cross-repo-capable backend', async () => {
-      const mockChunks: SearchResult[] = [
-        {
-          content: 'import { util } from "./utils"',
-          metadata: {
-            file: 'repo-a/src/consumer.ts',
-            repoId: 'repo-a',
-            startLine: 1,
-            endLine: 5,
-            type: 'block',
-            language: 'typescript',
-          },
-          score: 0,
-          relevance: 'highly_relevant',
-        },
-        {
-          content: 'import { util } from "./utils"',
-          metadata: {
-            file: 'repo-b/src/other.ts',
-            repoId: 'repo-b',
-            startLine: 1,
-            endLine: 5,
-            type: 'block',
-            language: 'typescript',
-          },
-          score: 0,
-          relevance: 'highly_relevant',
-        },
-      ];
-
-      vi.mocked(findDependents).mockResolvedValue({
-        ...createMockAnalysis({
-          dependents: [
-            { filepath: 'repo-a/src/consumer.ts', isTestFile: false },
-            { filepath: 'repo-b/src/other.ts', isTestFile: false },
-          ],
-        }),
-        allChunks: mockChunks,
-      });
-
-      const result = await handleGetDependents(
-        { filepath: 'shared/utils.ts', crossRepo: true },
-        mockCtx,
-      );
-
-      const parsed = JSON.parse(result.content![0].text);
-      expect(parsed.groupedByRepo).toBeDefined();
-    });
-  });
-
-  describe('cross-repo fallback (unsupported backend)', () => {
-    it('should not include groupedByRepo when the backend lacks cross-repo support', async () => {
-      vi.mocked(findDependents).mockResolvedValue(createMockAnalysis());
-
-      const result = await handleGetDependents(
-        { filepath: 'src/utils.ts', crossRepo: true },
-        mockCtx,
-      );
-
-      const parsed = JSON.parse(result.content![0].text);
-      expect(parsed.groupedByRepo).toBeUndefined();
-    });
-
-    it('should still pass crossRepo to findDependents (which handles warning)', async () => {
-      vi.mocked(findDependents).mockResolvedValue(createMockAnalysis());
-
-      await handleGetDependents({ filepath: 'src/utils.ts', crossRepo: true }, mockCtx);
-
-      expect(findDependents).toHaveBeenCalledWith(
-        mockVectorDB,
-        'src/utils.ts',
-        true,
-        mockLog,
-        undefined,
-        1234567890,
-        1,
-        500,
-      );
-    });
-  });
-
   describe('validation', () => {
     it('should reject empty filepath', async () => {
       const result = await handleGetDependents({ filepath: '' }, mockCtx);
@@ -472,14 +308,6 @@ describe('handleGetDependents', () => {
       await handleGetDependents({ filepath: 'src/important.ts' }, mockCtx);
 
       expect(mockLog).toHaveBeenCalledWith('Finding dependents of: src/important.ts');
-    });
-
-    it('should indicate cross-repo in log when enabled', async () => {
-      vi.mocked(findDependents).mockResolvedValue(createMockAnalysis());
-
-      await handleGetDependents({ filepath: 'src/shared.ts', crossRepo: true }, mockCtx);
-
-      expect(mockLog).toHaveBeenCalledWith('Finding dependents of: src/shared.ts (cross-repo)');
     });
 
     it('should log dependent count with prod/test breakdown', async () => {
@@ -629,7 +457,6 @@ describe('handleGetDependents', () => {
       expect(findDependents).toHaveBeenCalledWith(
         mockVectorDB,
         'src/utils/validate.ts',
-        false,
         mockLog,
         'validateEmail',
         1234567890,
@@ -764,7 +591,6 @@ describe('handleGetDependents', () => {
       expect(findDependents).toHaveBeenCalledWith(
         mockVectorDB,
         'src/target.ts',
-        false,
         mockLog,
         undefined,
         1234567890,

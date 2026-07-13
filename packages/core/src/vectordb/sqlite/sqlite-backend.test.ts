@@ -316,13 +316,6 @@ describe('SqliteBackend', () => {
     });
   });
 
-  describe('cross-repo stubs', () => {
-    it('reports no cross-repo support and returns [] from cross-repo methods', async () => {
-      expect(db.supportsCrossRepo).toBe(false);
-      expect(await db.scanCrossRepo({})).toEqual([]);
-    });
-  });
-
   describe('version accessors', () => {
     it('returns Unknown before any version and a date after', async () => {
       expect(db.getVersionDate()).toBe('Unknown');

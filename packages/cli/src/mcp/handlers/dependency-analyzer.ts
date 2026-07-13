@@ -48,7 +48,6 @@ type RiskLevel = 'low' | 'medium' | 'high' | 'critical';
  */
 let scanCache: {
   indexVersion: number;
-  crossRepo: boolean;
   importIndex: Map<string, SearchResult[]>;
   allChunksByFile: Map<string, SearchResult[]>;
   totalChunks: number;
@@ -235,8 +234,6 @@ function addChunkToFileMap(
  */
 async function scanAllChunks(
   vectorDB: VectorDBInterface,
-  crossRepo: boolean,
-  log: (message: string, level?: 'warning') => void,
   normalizePathCached: (path: string) => string,
 ): Promise<{
   importIndex: Map<string, SearchResult[]>;
@@ -247,32 +244,6 @@ async function scanAllChunks(
   const importIndex = new Map<string, SearchResult[]>();
   const allChunksByFile = new Map<string, SearchResult[]>();
   const seenRanges = new Map<string, Set<string>>();
-
-  if (crossRepo && vectorDB.supportsCrossRepo) {
-    const CROSS_REPO_LIMIT = 100000;
-    const allChunks = await vectorDB.scanCrossRepo({
-      limit: CROSS_REPO_LIMIT,
-    });
-    const hitLimit = allChunks.length >= CROSS_REPO_LIMIT;
-    if (hitLimit) {
-      log(
-        `Warning: cross-repo scan hit ${CROSS_REPO_LIMIT} chunk limit. Results may be incomplete.`,
-        'warning',
-      );
-    }
-    for (const chunk of allChunks) {
-      addChunkToImportIndex(chunk, normalizePathCached, importIndex);
-      addChunkToFileMap(chunk, normalizePathCached, allChunksByFile, seenRanges);
-    }
-    return { importIndex, allChunksByFile, totalChunks: allChunks.length, hitLimit };
-  }
-
-  if (crossRepo) {
-    log(
-      'Warning: crossRepo=true requires a cross-repo-capable backend. Falling back to single-repo scan.',
-      'warning',
-    );
-  }
 
   const allChunks = await vectorDB.scanAll();
   for (const chunk of allChunks) {
@@ -428,7 +399,6 @@ function mergeTransitiveDependents(
  */
 async function getOrScanChunks(
   vectorDB: VectorDBInterface,
-  crossRepo: boolean,
   log: (message: string, level?: 'warning') => void,
   normalizePathCached: (path: string) => string,
   indexVersion?: number,
@@ -438,20 +408,15 @@ async function getOrScanChunks(
   totalChunks: number;
   hitLimit: boolean;
 }> {
-  if (
-    indexVersion !== undefined &&
-    scanCache !== null &&
-    scanCache.indexVersion === indexVersion &&
-    scanCache.crossRepo === crossRepo
-  ) {
+  if (indexVersion !== undefined && scanCache !== null && scanCache.indexVersion === indexVersion) {
     log(`Using cached import index (${scanCache.totalChunks} chunks, version ${indexVersion})`);
     return scanCache;
   }
 
-  const scanResult = await scanAllChunks(vectorDB, crossRepo, log, normalizePathCached);
+  const scanResult = await scanAllChunks(vectorDB, normalizePathCached);
 
   if (indexVersion !== undefined) {
-    scanCache = { indexVersion, crossRepo, ...scanResult };
+    scanCache = { indexVersion, ...scanResult };
   }
   log(`Scanned ${scanResult.totalChunks} chunks for imports...`);
   return scanResult;
@@ -509,7 +474,6 @@ interface ScanContext {
 export async function findDependents(
   vectorDB: VectorDBInterface,
   filepath: string,
-  crossRepo: boolean,
   log: (message: string, level?: 'warning') => void,
   symbol?: string,
   indexVersion?: number,
@@ -517,8 +481,7 @@ export async function findDependents(
   maxNodes: number = 500,
   /**
    * Surface the full normalized chunk set on the result.
-   * Cross-repo callers always get it (used by groupDependentsByRepo);
-   * other callers opt in by passing `true` only if they need the chunks
+   * Callers opt in by passing `true` only if they need the chunks
    * (e.g., the annotator for test-association + complexity lookups).
    * Default `false` keeps memory cost down for the common MCP path.
    */
@@ -529,7 +492,6 @@ export async function findDependents(
 
   const { importIndex, allChunksByFile, hitLimit } = await getOrScanChunks(
     vectorDB,
-    crossRepo,
     log,
     normalizePathCached,
     indexVersion,
@@ -580,13 +542,11 @@ export async function findDependents(
   const productionDependentCount = dependents.length - testDependentCount;
   const uncoveredProductionDependents = countUncoveredProductionDependents(dependents, ctx);
 
-  // Surface the full normalized chunk set only when the caller asks for it.
-  // Cross-repo paths always need it (groupDependentsByRepo); single-repo
-  // callers opt in via the `includeAllChunks` flag. Leaving it `[]` for
-  // the common case avoids allocating a flat array of every indexed chunk
-  // on each MCP get_dependents call.
-  const allChunks =
-    crossRepo || includeAllChunks ? Array.from(allChunksByFile.values()).flat() : [];
+  // Surface the full normalized chunk set only when the caller asks for it via
+  // the `includeAllChunks` flag. Leaving it `[]` for the common case avoids
+  // allocating a flat array of every indexed chunk on each MCP get_dependents
+  // call.
+  const allChunks = includeAllChunks ? Array.from(allChunksByFile.values()).flat() : [];
 
   return {
     dependents,
@@ -978,46 +938,6 @@ function calculateComplexityRiskBoost(avgComplexity: number, maxComplexity: numb
     return 'medium';
   }
   return 'low';
-}
-
-/**
- * Group dependents by repository ID.
- */
-export function groupDependentsByRepo(
-  dependents: DependentInfo[],
-  chunks: SearchResult[],
-): Record<string, DependentInfo[]> {
-  const repoMap = new Map<string, Set<string>>();
-
-  // Build map of filepath -> repoId
-  for (const chunk of chunks) {
-    const repoId = chunk.metadata.repoId || 'unknown';
-    const filepath = chunk.metadata.file;
-    if (!repoMap.has(repoId)) {
-      repoMap.set(repoId, new Set());
-    }
-    repoMap.get(repoId)!.add(filepath);
-  }
-
-  // Group dependents by repo
-  const grouped: Record<string, DependentInfo[]> = {};
-  for (const dependent of dependents) {
-    // Find which repo this file belongs to
-    let foundRepo = 'unknown';
-    for (const [repoId, files] of repoMap.entries()) {
-      if (files.has(dependent.filepath)) {
-        foundRepo = repoId;
-        break;
-      }
-    }
-
-    if (!grouped[foundRepo]) {
-      grouped[foundRepo] = [];
-    }
-    grouped[foundRepo].push(dependent);
-  }
-
-  return grouped;
 }
 
 /**

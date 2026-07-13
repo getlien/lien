@@ -11,9 +11,7 @@ import path from 'path';
  * for that exported symbol instead of just file-level dependencies.
  *
  * Limitations:
- * - Single-repo scans iterate every indexed chunk with no chunk-count cap.
- * - Cross-repo scans (`crossRepo: true`) cap at 100,000 chunks; if that cap is
- *   reached, a warning is returned in the response `note`.
+ * - Scans iterate every indexed chunk with no chunk-count cap.
  */
 export const GetDependentsSchema = z.object({
   filepath: z
@@ -27,10 +25,7 @@ export const GetDependentsSchema = z.object({
     .describe(
       'Path to file to find dependents for (relative to workspace root).\n\n' +
         "Example: 'src/utils/validate.ts'\n\n" +
-        'Returns all files that import or depend on this file.\n\n' +
-        'Single-repo scans are unbounded. Cross-repo scans cap at 100,000\n' +
-        'chunks — a warning is included in the response `note` if the cap\n' +
-        'is reached.',
+        'Returns all files that import or depend on this file. The scan is unbounded.',
     ),
 
   symbol: z
@@ -75,15 +70,6 @@ export const GetDependentsSchema = z.object({
         'is the scan-level `hitLimit`). A `depth=1` response can therefore\n' +
         'exceed `maxNodes` with `truncated: false`. When the BFS walk itself\n' +
         'hits the cap mid-expansion, `truncated: true` is set.',
-    ),
-
-  crossRepo: z
-    .boolean()
-    .default(false)
-    .describe(
-      'If true, find dependents across all repos in the organization (requires a cross-repo-capable backend; the bundled SQLite backend is single-repo).\n\n' +
-        'Default: false (single-repo search)\n' +
-        'When enabled, results are grouped by repository.',
     ),
 });
 

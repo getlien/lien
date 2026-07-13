@@ -2,11 +2,9 @@ import type { z } from 'zod';
 import { wrapToolHandler } from '../utils/tool-wrapper.js';
 import { GetDependentsSchema } from '../schemas/index.js';
 import type { ToolContext, MCPToolResult } from '../types.js';
-import type { VectorDBInterface } from '@liendev/core';
 import { computeBlastRadiusRisk, type BlastRadiusRisk } from '@liendev/parser';
 import {
   findDependents,
-  groupDependentsByRepo,
   type DependencyAnalysisResult,
   type DependentInfo,
   type ComplexityMetrics,
@@ -46,35 +44,6 @@ interface DependentsResponse {
   riskReasoning: string[];
   dependents: DependentInfo[];
   complexityMetrics: ComplexityMetrics;
-  note?: string;
-  groupedByRepo?: Record<string, DependentInfo[]>;
-}
-
-/**
- * Check if cross-repo search is requested but not supported.
- */
-function checkCrossRepoFallback(
-  crossRepo: boolean | undefined,
-  vectorDB: VectorDBInterface,
-): boolean {
-  return Boolean(crossRepo && !vectorDB.supportsCrossRepo);
-}
-
-/**
- * Build warning notes for the response.
- */
-function buildNotes(crossRepoFallback: boolean, hitLimit: boolean): string[] {
-  const notes: string[] = [];
-  if (crossRepoFallback) {
-    notes.push(
-      'Cross-repo search requires a cross-repo-capable backend. Fell back to single-repo search.',
-    );
-  }
-  if (hitLimit) {
-    // Only set by the cross-repo scan path (single-repo pagination is unbounded).
-    notes.push('Cross-repo scan reached its 100,000-chunk limit. Results may be incomplete.');
-  }
-  return notes;
 }
 
 /**
@@ -139,9 +108,6 @@ function buildDependentsResponse(
   args: ValidatedArgs,
   risk: BlastRadiusRisk,
   indexInfo: IndexInfo,
-  notes: string[],
-  crossRepo: boolean | undefined,
-  vectorDB: VectorDBInterface,
 ): DependentsResponse {
   const { symbol, filepath, depth } = args;
 
@@ -167,14 +133,6 @@ function buildDependentsResponse(
   if (analysis.totalUsageCount !== undefined) {
     response.totalUsageCount = analysis.totalUsageCount;
   }
-  if (notes.length > 0) {
-    response.note = notes.join(' ');
-  }
-
-  // Group by repo if cross-repo search on a cross-repo-capable backend
-  if (crossRepo && vectorDB.supportsCrossRepo) {
-    response.groupedByRepo = groupDependentsByRepo(analysis.dependents, analysis.allChunks);
-  }
 
   return response;
 }
@@ -197,13 +155,12 @@ export async function handleGetDependents(args: unknown, ctx: ToolContext): Prom
     // defaults aren't reflected in `raw`'s type. At runtime Zod has already
     // applied them, so the cast is sound.
     const validatedArgs = raw as ValidatedArgs;
-    const { crossRepo, filepath, symbol, depth, maxNodes } = validatedArgs;
+    const { filepath, symbol, depth, maxNodes } = validatedArgs;
 
     // Log initial request
     const symbolSuffix = symbol ? ` (symbol: ${symbol})` : '';
-    const crossRepoSuffix = crossRepo ? ' (cross-repo)' : '';
     const depthSuffix = depth > 1 ? ` (depth: ${depth})` : '';
-    log(`Finding dependents of: ${filepath}${symbolSuffix}${crossRepoSuffix}${depthSuffix}`);
+    log(`Finding dependents of: ${filepath}${symbolSuffix}${depthSuffix}`);
 
     await checkAndReconnect();
 
@@ -214,7 +171,6 @@ export async function handleGetDependents(args: unknown, ctx: ToolContext): Prom
     const analysis = await findDependents(
       vectorDB,
       filepath,
-      crossRepo ?? false,
       log,
       symbol,
       indexInfo.indexVersion,
@@ -229,17 +185,6 @@ export async function handleGetDependents(args: unknown, ctx: ToolContext): Prom
     logRiskAssessment(analysis, risk.level, symbol, log);
 
     // Build and return response
-    const crossRepoFallback = checkCrossRepoFallback(crossRepo, vectorDB);
-    const notes = buildNotes(crossRepoFallback, analysis.hitLimit);
-
-    return buildDependentsResponse(
-      analysis,
-      validatedArgs,
-      risk,
-      indexInfo,
-      notes,
-      crossRepo,
-      vectorDB,
-    );
+    return buildDependentsResponse(analysis, validatedArgs, risk, indexInfo);
   })(args);
 }
