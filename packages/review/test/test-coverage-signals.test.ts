@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import type { ComplexityReport } from '@liendev/parser';
-import type { ReviewContext } from '../src/plugin-types.js';
 import { createTestContext } from '../src/test-helpers.js';
 import {
   computeTestCoverageGaps,
@@ -151,13 +150,10 @@ describe('renderTestCoverageSection', () => {
 
 describe('buildInitialMessage injection', () => {
   it('includes the <test_coverage> block when a changed file has no tests', () => {
-    const context = {
-      ...createTestContext({
-        changedFiles: ['src/new-module.ts'],
-        complexityReport: makeReport({ 'src/new-module.ts': [] }),
-      }),
-      chunks: [],
-    } as unknown as ReviewContext;
+    const context = createTestContext({
+      changedFiles: ['src/new-module.ts'],
+      complexityReport: makeReport({ 'src/new-module.ts': [] }),
+    });
 
     const message = buildInitialMessage(context, { blastRadius: null });
     expect(message).toContain('<test_coverage>');
@@ -165,26 +161,20 @@ describe('buildInitialMessage injection', () => {
   });
 
   it('omits the block when every changed file has test associations', () => {
-    const context = {
-      ...createTestContext({
-        changedFiles: ['src/auth.ts'],
-        complexityReport: makeReport({ 'src/auth.ts': ['test/auth.test.ts'] }),
-      }),
-      chunks: [],
-    } as unknown as ReviewContext;
+    const context = createTestContext({
+      changedFiles: ['src/auth.ts'],
+      complexityReport: makeReport({ 'src/auth.ts': ['test/auth.test.ts'] }),
+    });
 
     const message = buildInitialMessage(context, { blastRadius: null });
     expect(message).not.toContain('<test_coverage>');
   });
 
   it('omits the block when there is no test-association data at all', () => {
-    const context = {
-      ...createTestContext({
-        changedFiles: ['src/a.ts'],
-        complexityReport: makeReport({}),
-      }),
-      chunks: [],
-    } as unknown as ReviewContext;
+    const context = createTestContext({
+      changedFiles: ['src/a.ts'],
+      complexityReport: makeReport({}),
+    });
 
     const message = buildInitialMessage(context, { blastRadius: null });
     expect(message).not.toContain('<test_coverage>');
