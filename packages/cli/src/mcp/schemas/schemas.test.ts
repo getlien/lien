@@ -68,11 +68,6 @@ describe('SearchCodeSchema', () => {
     const result = SearchCodeSchema.parse({ query: 'test', limit: 50 });
     expect(result.limit).toBe(50);
   });
-
-  it('should reject too-long repoIds element', () => {
-    const longRepoId = 'a'.repeat(256);
-    expect(() => SearchCodeSchema.parse({ query: 'test', repoIds: [longRepoId] })).toThrow();
-  });
 });
 
 describe('FindSimilarSchema', () => {
@@ -499,10 +494,5 @@ describe('GetComplexitySchema', () => {
   it('should reject too-long files element', () => {
     const longPath = 'a'.repeat(1001);
     expect(() => GetComplexitySchema.parse({ files: [longPath] })).toThrow();
-  });
-
-  it('should reject too-long repoIds element', () => {
-    const longRepoId = 'a'.repeat(256);
-    expect(() => GetComplexitySchema.parse({ repoIds: [longRepoId] })).toThrow();
   });
 });

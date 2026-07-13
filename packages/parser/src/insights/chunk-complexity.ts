@@ -247,7 +247,7 @@ export function getUniqueFunctionChunks(
   for (const { metadata } of chunks) {
     if (metadata.symbolType !== 'function' && metadata.symbolType !== 'method') continue;
 
-    const key = `${metadata.repoId ?? ''}:${normalizeFilePath(metadata.file)}:${metadata.startLine}-${metadata.endLine}`;
+    const key = `${normalizeFilePath(metadata.file)}:${metadata.startLine}-${metadata.endLine}`;
     if (seen.has(key)) continue;
 
     seen.add(key);

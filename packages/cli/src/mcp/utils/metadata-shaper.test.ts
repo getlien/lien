@@ -257,33 +257,4 @@ describe('deduplicateResults', () => {
   it('handles empty array', () => {
     expect(deduplicateResults([])).toEqual([]);
   });
-
-  it('keeps results from different repos with same file path and line range', () => {
-    const r1 = {
-      ...createFullResult(),
-      metadata: { ...createFullResult().metadata, repoId: 'repo-a' },
-    };
-    const r2 = {
-      ...createFullResult(),
-      metadata: { ...createFullResult().metadata, repoId: 'repo-b' },
-    };
-
-    const results = deduplicateResults([r1, r2]);
-    expect(results).toHaveLength(2);
-  });
-
-  it('deduplicates results within the same repo', () => {
-    const r1 = {
-      ...createFullResult(),
-      metadata: { ...createFullResult().metadata, repoId: 'repo-a' },
-    };
-    const r2 = {
-      ...createFullResult(),
-      metadata: { ...createFullResult().metadata, repoId: 'repo-a' },
-      content: 'duplicate',
-    };
-
-    const results = deduplicateResults([r1, r2]);
-    expect(results).toHaveLength(1);
-  });
 });

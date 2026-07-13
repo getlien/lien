@@ -16,7 +16,6 @@ export interface ChunkOptions {
   // parser binding) -- that is a systemic, process-wide failure and always
   // propagates regardless of this setting; see ast/parser.ts.
   // Multi-tenant fields (optional for backward compatibility)
-  repoId?: string; // Repository identifier for multi-tenant scenarios
   orgId?: string; // Organization identifier for multi-tenant scenarios
   /**
    * Absolute path to the workspace/monorepo root. Enables cross-package
@@ -36,7 +35,7 @@ function chunkSpecialCase(
   content: string,
   chunkSize: number,
   chunkOverlap: number,
-  tenantContext: { repoId?: string; orgId?: string },
+  tenantContext: { orgId?: string },
 ): CodeChunk[] | undefined {
   // Liquid files
   if (filepath.endsWith('.liquid')) {
@@ -71,13 +70,11 @@ export function chunkFile(
     chunkOverlap = 10,
     useAST = true,
     astFallback = 'line-based',
-    repoId,
     orgId,
     workspaceRoot,
   } = options;
 
   const specialCaseChunks = chunkSpecialCase(filepath, content, chunkSize, chunkOverlap, {
-    repoId,
     orgId,
   });
   if (specialCaseChunks) return specialCaseChunks;
@@ -87,7 +84,6 @@ export function chunkFile(
     try {
       return chunkByAST(filepath, content, {
         minChunkSize: Math.floor(chunkSize / 10),
-        repoId,
         orgId,
         workspaceRoot,
       });
@@ -115,7 +111,7 @@ export function chunkFile(
   }
 
   // Line-based chunking (original implementation)
-  return chunkByLines(filepath, content, chunkSize, chunkOverlap, { repoId, orgId });
+  return chunkByLines(filepath, content, chunkSize, chunkOverlap, { orgId });
 }
 
 /**
@@ -127,7 +123,7 @@ function buildLineChunk(
   startLine: number,
   endLine: number,
   fileType: string,
-  tenantContext?: { repoId?: string; orgId?: string },
+  tenantContext?: { orgId?: string },
 ): CodeChunk {
   return {
     content: chunkContent,
@@ -138,7 +134,6 @@ function buildLineChunk(
       type: 'block',
       language: fileType,
       symbols: extractSymbols(chunkContent, fileType),
-      ...(tenantContext?.repoId && { repoId: tenantContext.repoId }),
       ...(tenantContext?.orgId && { orgId: tenantContext.orgId }),
     },
   };
@@ -152,7 +147,7 @@ function chunkByLines(
   content: string,
   chunkSize: number,
   chunkOverlap: number,
-  tenantContext?: { repoId?: string; orgId?: string },
+  tenantContext?: { orgId?: string },
 ): CodeChunk[] {
   const lines = content.split('\n');
   if (lines.length === 0 || (lines.length === 1 && lines[0].trim() === '')) {

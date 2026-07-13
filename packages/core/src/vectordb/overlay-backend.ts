@@ -66,7 +66,6 @@ function isSqliteBusy(error: unknown): boolean {
  */
 export class OverlayBackend implements VectorDBInterface {
   public readonly dbPath: string;
-  public readonly supportsCrossRepo = false;
   public readonly isOverlay = true;
   public readonly worktreeRoot: string;
   public readonly baseIndexDir: string;
@@ -520,15 +519,5 @@ export class OverlayBackend implements VectorDBInterface {
   getVersionDate(): string {
     if (this.currentVersion === 0) return 'Unknown';
     return new Date(this.currentVersion).toLocaleString();
-  }
-
-  async scanCrossRepo(_options: {
-    language?: string;
-    pattern?: string;
-    limit?: number;
-    repoIds?: string[];
-    branch?: string;
-  }): Promise<SearchResult[]> {
-    return [];
   }
 }

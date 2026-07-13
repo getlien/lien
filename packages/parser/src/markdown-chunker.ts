@@ -176,7 +176,7 @@ function createDocChunk(
   endLine: number,
   filepath: string,
   symbolName: string | undefined,
-  tenantContext?: { repoId?: string; orgId?: string },
+  tenantContext?: { orgId?: string },
 ): CodeChunk {
   return {
     content,
@@ -187,7 +187,6 @@ function createDocChunk(
       language: 'markdown',
       type: 'doc',
       symbolName,
-      ...(tenantContext?.repoId && { repoId: tenantContext.repoId }),
       ...(tenantContext?.orgId && { orgId: tenantContext.orgId }),
     },
   };
@@ -204,7 +203,7 @@ function splitLargeSection(
   filepath: string,
   chunkSize: number,
   chunkOverlap: number,
-  tenantContext?: { repoId?: string; orgId?: string },
+  tenantContext?: { orgId?: string },
 ): CodeChunk[] {
   const chunks: CodeChunk[] = [];
   const sectionLines = lines.slice(section.startLine, section.endLine);
@@ -242,14 +241,14 @@ function splitLargeSection(
  *   into windows; also the window size used when splitting (default 75).
  * @param chunkOverlap - Line overlap between windows when splitting an
  *   oversized section (default 10).
- * @param tenantContext - Optional repoId/orgId passthrough for multi-tenant indexes.
+ * @param tenantContext - Optional orgId passthrough for multi-tenant indexes.
  */
 export function chunkMarkdownFile(
   filepath: string,
   content: string,
   chunkSize: number = 75,
   chunkOverlap: number = 10,
-  tenantContext?: { repoId?: string; orgId?: string },
+  tenantContext?: { orgId?: string },
 ): CodeChunk[] {
   const lines = content.split('\n');
   if (lines.length === 0 || (lines.length === 1 && lines[0].trim() === '')) {

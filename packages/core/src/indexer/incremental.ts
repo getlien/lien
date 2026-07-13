@@ -11,7 +11,7 @@ import {
 import { ManifestManager } from './manifest.js';
 import type { Result } from '../utils/result.js';
 import { Ok, Err, isOk } from '../utils/result.js';
-import { chunkFile, computeContentHash, extractRepoId } from '@liendev/parser';
+import { chunkFile, computeContentHash } from '@liendev/parser';
 import type { CodeChunk } from '@liendev/parser';
 
 /**
@@ -46,7 +46,7 @@ export function normalizeToRelativePath(filepath: string, rootDir?: string): str
 
 export interface IncrementalIndexOptions {
   verbose?: boolean;
-  rootDir?: string; // Root directory for extracting repoId
+  rootDir?: string; // Workspace root, enables cross-package import resolution
 }
 
 /**
@@ -91,9 +91,7 @@ async function processFileContent(
   const useAST = true; // Always use AST-based chunking
   const astFallback = 'line-based' as const;
 
-  // Extract tenant context for multi-tenant scenarios
   // orgId is now handled in createVectorDB() via global config and git remote detection
-  const repoId = rootDir ? extractRepoId(rootDir) : undefined;
   const orgId = undefined; // Not needed here - handled in VectorDB factory
 
   // Chunk the file
@@ -102,7 +100,6 @@ async function processFileContent(
     chunkOverlap,
     useAST,
     astFallback,
-    repoId,
     orgId,
     workspaceRoot: rootDir,
   });

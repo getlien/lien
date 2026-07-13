@@ -198,7 +198,6 @@ function createCodeChunk(
     symbolName?: string;
     symbolType?: LiquidBlock['type'];
     imports?: string[];
-    repoId?: string;
     orgId?: string;
   } = {},
 ): CodeChunk {
@@ -213,7 +212,6 @@ function createCodeChunk(
       symbolName: options.symbolName,
       symbolType: options.symbolType,
       imports: options.imports?.length ? options.imports : undefined,
-      ...(options.repoId && { repoId: options.repoId }),
       ...(options.orgId && { orgId: options.orgId }),
     },
   };
@@ -227,7 +225,7 @@ function splitLargeBlock(
   ctx: ChunkContext,
   symbolName: string | undefined,
   imports: string[],
-  tenantContext?: { repoId?: string; orgId?: string },
+  tenantContext?: { orgId?: string },
 ): CodeChunk[] {
   const chunks: CodeChunk[] = [];
   const blockLines = block.content.split('\n');
@@ -264,7 +262,7 @@ function processSpecialBlock(
   block: LiquidBlock,
   ctx: ChunkContext,
   coveredLines: Set<number>,
-  tenantContext?: { repoId?: string; orgId?: string },
+  tenantContext?: { orgId?: string },
 ): CodeChunk[] {
   // Mark lines as covered
   for (let i = block.startLine; i <= block.endLine; i++) {
@@ -308,7 +306,7 @@ function flushTemplateChunk(
   chunkStartLine: number,
   endLine: number,
   ctx: ChunkContext,
-  tenantContext?: { repoId?: string; orgId?: string },
+  tenantContext?: { orgId?: string },
 ): CodeChunk | null {
   if (currentChunk.length === 0) return null;
 
@@ -334,7 +332,7 @@ function flushTemplateChunk(
 function processTemplateContent(
   ctx: ChunkContext,
   coveredLines: Set<number>,
-  tenantContext?: { repoId?: string; orgId?: string },
+  tenantContext?: { orgId?: string },
 ): CodeChunk[] {
   const chunks: CodeChunk[] = [];
   const { lines, params } = ctx;
@@ -387,7 +385,7 @@ export function chunkLiquidFile(
   content: string,
   chunkSize: number = 75,
   chunkOverlap: number = 10,
-  tenantContext?: { repoId?: string; orgId?: string },
+  tenantContext?: { orgId?: string },
 ): CodeChunk[] {
   // Build context once for reuse across helpers
   const contentWithoutComments = removeComments(content);

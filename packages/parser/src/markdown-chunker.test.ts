@@ -132,13 +132,11 @@ describe('chunkMarkdownFile', () => {
     expect(chunkMarkdownFile('empty.md', '')).toEqual([]);
   });
 
-  it('passes through repoId/orgId tenant context', () => {
+  it('passes through orgId tenant context', () => {
     const chunks = chunkMarkdownFile('README.md', '# Title\ncontent', 75, 10, {
-      repoId: 'repo-1',
       orgId: 'org-1',
     });
 
-    expect(chunks[0].metadata.repoId).toBe('repo-1');
     expect(chunks[0].metadata.orgId).toBe('org-1');
   });
 });
