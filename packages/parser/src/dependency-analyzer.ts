@@ -343,8 +343,7 @@ export function groupChunksByNormalizedPath(
 
 /**
  * Collect the symbols a file imports from a given source path, sourced
- * exclusively from `importedSymbols`. Mirrors the CLI-side approach in
- * `packages/cli/src/mcp/handlers/dependency-analyzer.ts`.
+ * exclusively from `importedSymbols`.
  *
  * Deliberately ignores the raw `imports` array — a raw-only match means the
  * file imports for side effect or does `export * from`, neither of which
@@ -380,7 +379,7 @@ function collectExportsFromChunks(chunks: CodeChunk[]): Set<string> {
 }
 
 /**
- * Check if a file (given its chunks) genuinely re-exports symbols from a
+ * Find which symbols a file (given its chunks) genuinely re-exports from a
  * source path.
  *
  * Requires a non-empty intersection between (a) symbols the file imports from
@@ -390,31 +389,49 @@ function collectExportsFromChunks(chunks: CodeChunk[]): Set<string> {
  *
  * Wildcard markers (`'*'` from Rust `use foo::*`, `'* as x'` from JS
  * namespace imports) still trigger re-export detection: both mean "we pulled
- * in everything the source exports," so intersection against the file's own
- * export list is the right signal.
+ * in everything the source exports," so every own export counts as
+ * re-exported.
+ *
+ * Single source of truth for this algorithm: both `fileIsReExporter` below
+ * and the CLI's `get_dependents` handler
+ * (`packages/cli/src/mcp/handlers/dependency-analyzer.ts`) consume this (#532).
+ *
+ * @returns The re-exported symbols; empty means the file is not a re-exporter.
+ */
+export function findReExportedSymbolsForFile(
+  chunks: CodeChunk[],
+  sourcePath: string,
+  normalizePathCached: (path: string) => string,
+): string[] {
+  const importsFromSource = collectImportedSymbolsFromSource(
+    chunks,
+    sourcePath,
+    normalizePathCached,
+  );
+  if (importsFromSource.size === 0) return [];
+
+  const allExports = collectExportsFromChunks(chunks);
+  if (allExports.size === 0) return [];
+
+  // Wildcards mean "imported everything"; every own export counts as re-exported.
+  if (importsFromSource.has('*')) return [...allExports];
+  for (const sym of importsFromSource) {
+    if (sym.startsWith('* as ')) return [...allExports];
+  }
+
+  return [...importsFromSource].filter(sym => allExports.has(sym));
+}
+
+/**
+ * Check if a file (given its chunks) genuinely re-exports anything from a
+ * source path. Thin boolean wrapper over `findReExportedSymbolsForFile`.
  */
 export function fileIsReExporter(
   chunks: CodeChunk[],
   sourcePath: string,
   normalizePathCached: (path: string) => string,
 ): boolean {
-  const importsFromSource = collectImportedSymbolsFromSource(
-    chunks,
-    sourcePath,
-    normalizePathCached,
-  );
-  if (importsFromSource.size === 0) return false;
-
-  const allExports = collectExportsFromChunks(chunks);
-  if (allExports.size === 0) return false;
-
-  // Wildcards mean "imported everything"; any own export then counts.
-  if (importsFromSource.has('*')) return true;
-  for (const sym of importsFromSource) {
-    if (sym.startsWith('* as ')) return true;
-    if (allExports.has(sym)) return true;
-  }
-  return false;
+  return findReExportedSymbolsForFile(chunks, sourcePath, normalizePathCached).length > 0;
 }
 
 /**
