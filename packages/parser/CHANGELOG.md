@@ -1,5 +1,11 @@
 # @liendev/parser
 
+## 0.64.1
+
+### Patch Changes
+
+- 12c70ad: refactor: single source of truth for re-export intersection logic
+
 ## 0.64.0
 
 ### Minor Changes
