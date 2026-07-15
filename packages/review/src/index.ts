@@ -27,7 +27,34 @@ export type {
 } from './plugin-types.js';
 
 // Engine
-export { ReviewEngine, createDefaultEngine, type EngineOptions } from './engine.js';
+export {
+  ReviewEngine,
+  createDefaultEngine,
+  type EngineOptions,
+  type PresentDelivery,
+  EMPTY_DELIVERY,
+} from './engine.js';
+
+// Delivery attestation
+export {
+  assembleAttestation,
+  emptyAttestation,
+  computeVerdict,
+  deriveMainPassAttestation,
+  formatAttestationBadgeLine,
+  ATTESTATION_VERSION,
+  type Attestation,
+  type AttestationVerdict,
+  type AttestationInput,
+  type ProviderPassAttestation,
+  type ProviderStopReason,
+  type SkippedPass,
+  type BudgetAttestation,
+  type InlineCommentsAttestation,
+  type DeliveryAttestation,
+  type ScopeAttestation,
+  type EligibilityPath,
+} from './attestation.js';
 
 // Built-in plugins
 export { ComplexityPlugin } from './plugins/complexity.js';
@@ -87,6 +114,7 @@ export {
   getFileContent,
   postPRReview,
   updatePRDescription,
+  removePRDescriptionSection,
   parsePatchLines,
   getPRDiffLines,
   getPRPatchData,

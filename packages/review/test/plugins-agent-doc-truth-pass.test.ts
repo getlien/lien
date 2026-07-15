@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 
 import {
   shouldRunDocTruthPass,
@@ -45,7 +45,10 @@ const CODE_PATCH = `@@ -1,3 +1,4 @@
 +  return UNIQUE_CODE_MARKER_XYZ; // disabled when true
  }`;
 
-function contextWithPatches(entries: Array<[string, string]>): ReviewContext {
+function contextWithPatches(
+  entries: Array<[string, string]>,
+  extra?: Partial<ReviewContext>,
+): ReviewContext {
   return createTestContext({
     changedFiles: entries.map(([f]) => f),
     allChangedFiles: entries.map(([f]) => f),
@@ -54,6 +57,7 @@ function contextWithPatches(entries: Array<[string, string]>): ReviewContext {
       body: 'Clarify the overlay gate.',
       patches: new Map(entries),
     } as unknown as ReviewContext['pr'],
+    ...extra,
   });
 }
 
@@ -412,5 +416,65 @@ describe('runDocTruthPass', () => {
     });
     expect(res).toBeNull();
     expect(lines.some(l => l.includes('doc-truth pass failed') && l.includes('boom'))).toBe(true);
+  });
+
+  // Regression coverage for the CodeRabbit #768 finding: reportDocTruthPassSkip
+  // used to report a generic "no doc claims" reason for every gated-off case,
+  // and a thrown pass-2 error vanished from the attestation entirely (neither
+  // "ran" nor "skipped"). `runDocTruthPass` now reports its own precise reason
+  // for both the gate and the failure, straight from the one place that knows it.
+  it('reports the CONFIG-disabled reason, not the generic "no doc claims" one', async () => {
+    const ctx = contextWithPatches([['docs/architecture/worktree.md', DOC_CLAIM_PATCH]]);
+    const reportSkip = vi.fn();
+    await runDocTruthPass(
+      { ...ctx, reportSkip },
+      cfg({ docTruthPass: false }),
+      silentLogger,
+      async () => fakeResult(),
+    );
+    expect(reportSkip).toHaveBeenCalledWith({
+      plugin: 'agent-review:doc-truth',
+      reason: expect.stringContaining('config'),
+    });
+  });
+
+  it('reports the ENV-disabled reason', async () => {
+    const ctx = contextWithPatches([['docs/architecture/worktree.md', DOC_CLAIM_PATCH]]);
+    process.env.LIEN_REVIEW_DOC_PASS = '0';
+    const reportSkip = vi.fn();
+    await runDocTruthPass({ ...ctx, reportSkip }, cfg(), silentLogger, async () => fakeResult());
+    expect(reportSkip).toHaveBeenCalledWith({
+      plugin: 'agent-review:doc-truth',
+      reason: expect.stringContaining('LIEN_REVIEW_DOC_PASS'),
+    });
+  });
+
+  it('reports "no doc claims" only when that is the actual reason', async () => {
+    const ctx = contextWithPatches([['packages/core/src/overlay.ts', CODE_PATCH]]); // no claims
+    const reportSkip = vi.fn();
+    await runDocTruthPass({ ...ctx, reportSkip }, cfg(), silentLogger, async () => fakeResult());
+    expect(reportSkip).toHaveBeenCalledWith({
+      plugin: 'agent-review:doc-truth',
+      reason: expect.stringContaining('no doc claims'),
+    });
+  });
+
+  it('reports a FAILED outcome (not silence) when the client throws', async () => {
+    const ctx = contextWithPatches([['docs/architecture/worktree.md', DOC_CLAIM_PATCH]]);
+    const reportSkip = vi.fn();
+    await runDocTruthPass({ ...ctx, reportSkip }, cfg(), silentLogger, async () => {
+      throw new Error('boom');
+    });
+    expect(reportSkip).toHaveBeenCalledWith({
+      plugin: 'agent-review:doc-truth',
+      reason: expect.stringContaining('failed: boom'),
+    });
+  });
+
+  it('does not report anything when the pass runs to completion', async () => {
+    const ctx = contextWithPatches([['docs/architecture/worktree.md', DOC_CLAIM_PATCH]]);
+    const reportSkip = vi.fn();
+    await runDocTruthPass({ ...ctx, reportSkip }, cfg(), silentLogger, async () => fakeResult());
+    expect(reportSkip).not.toHaveBeenCalled();
   });
 });

@@ -151,6 +151,11 @@ export class AgentReviewPlugin implements ReviewPlugin {
         `[${this.id}] Token budget scaled ${config.maxTokenBudget} → ${maxTokenBudget} for ${blastRadius?.globalRisk.level} blast radius`,
       );
     }
+    // Report the FINAL allocated ceiling (post blast-radius scaling) for the
+    // delivery attestation's budget.allocatedTokens — the pre-scaling value
+    // computed upstream in review-pr.ts's scaleAgentBudget() isn't the real
+    // ceiling this run was held to.
+    context.reportBudget?.(maxTokenBudget);
 
     const systemPrompt = buildSystemPrompt(rules);
     const initialMessage = buildInitialMessage(context, { blastRadius, rules });
@@ -172,6 +177,15 @@ export class AgentReviewPlugin implements ReviewPlugin {
     // the main-pass output untouched. Skipped entirely when the main pass never
     // ran (provider down) — a second pass would only fire more doomed requests,
     // and its own incomplete state must not overwrite the never-ran marker.
+    // `runDocTruthPass` reports its own gated-off/failed outcome to the
+    // attestation; this is the one case it never even gets called for, so it's
+    // reported here instead.
+    if (result.neverRan) {
+      context.reportSkip?.({
+        plugin: 'agent-review:doc-truth',
+        reason: 'main pass never ran (provider failure)',
+      });
+    }
     const docResult = result.neverRan
       ? null
       : await this.runSecondDocPass(context, config, apiKey, provider, logger, toolExecutor);

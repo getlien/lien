@@ -109,6 +109,23 @@ export interface ReviewContext {
    * runners leave this unset and the client skips trace accumulation.
    */
   reportTrace?: (trace: import('./plugins/agent/types.js').AgentTrace) => void;
+  /**
+   * Callback invoked by the engine whenever a registered plugin is skipped
+   * during activation (see `getSkipReason` in engine.ts), and by a plugin
+   * itself for an internal sub-pass it decides not to run (e.g. the
+   * agent-review plugin's doc-truth second pass). Feeds the delivery
+   * attestation's `passesSkipped` list so a silent skip (misconfigured API
+   * key, a gate that didn't fire) stays inspectable instead of vanishing
+   * outside verbose logs.
+   */
+  reportSkip?: (skip: { plugin: string; reason: string }) => void;
+  /**
+   * Callback for an agent-style plugin to report the final token budget it
+   * allocated for a pass (after any scaling, e.g. blast-radius-based
+   * upscaling), independent of `reportUsage`'s spent-tokens report. Feeds
+   * the delivery attestation's `budget.allocatedTokens`.
+   */
+  reportBudget?: (allocatedTokens: number) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -267,9 +284,12 @@ export interface PresentContext {
   /**
    * Post a PR review with a summary body only (no inline comments — use
    * postInlineComments for those, which surfaces per-comment drops).
-   * Only available when pr + octokit are present.
+   * Only available when pr + octokit are present. Returns whether the post
+   * actually succeeded — previously `Promise<void>`, which made the
+   * out-of-diff review-comment path structurally unable to observe its own
+   * delivery outcome (see the delivery attestation's `outOfDiffReviewPosted`).
    */
-  postReviewComment?(body: string): Promise<void>;
+  postReviewComment?(body: string): Promise<{ posted: boolean; error?: string }>;
 
   /**
    * Minimize (hide as "outdated") existing PR comments matching a marker string.

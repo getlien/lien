@@ -18,6 +18,7 @@ export interface ActionOutputs {
   conclusion: ReviewCoreResult['conclusion'];
   findingsCount: number;
   errorCount: number;
+  attestation: ReviewCoreResult['attestation'];
 }
 
 /** Count findings whose severity marks them as errors. */
@@ -43,9 +44,29 @@ export async function writeStepSummary(result: ReviewCoreResult): Promise<void> 
     `**Findings:** ${result.findings.length} (${errorCount} error${errorCount === 1 ? '' : 's'})`,
     `**Tokens:** ${tokens} · **Cost:** $${cost}`,
     '',
+    formatAttestationDetails(result.attestation),
+    '',
   ].join('\n');
 
   await appendFile(summaryPath, body, 'utf8');
+}
+
+/**
+ * A collapsed `<details>` block with the full attestation JSON. Collapsed by
+ * default so it costs nothing in the visible summary; the JSON inside is the
+ * complete record — see `@liendev/review`'s `attestation.ts` for the schema.
+ */
+function formatAttestationDetails(attestation: ReviewCoreResult['attestation']): string {
+  return [
+    '<details>',
+    '<summary>Delivery attestation</summary>',
+    '',
+    '```json',
+    JSON.stringify(attestation, null, 2),
+    '```',
+    '',
+    '</details>',
+  ].join('\n');
 }
 
 /** Format one `$GITHUB_OUTPUT` entry using the heredoc form (safe for any value). */
@@ -65,6 +86,7 @@ export async function writeOutputs(outputs: ActionOutputs): Promise<void> {
     formatOutput('conclusion', outputs.conclusion),
     formatOutput('findings-count', String(outputs.findingsCount)),
     formatOutput('error-count', String(outputs.errorCount)),
+    formatOutput('attestation', JSON.stringify(outputs.attestation)),
   ].join('');
 
   await appendFile(outputPath, body, 'utf8');
