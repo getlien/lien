@@ -337,12 +337,27 @@ export function getViolationKey(violation: ComplexityViolation): string {
 }
 
 /**
+ * Where the pre-existing-violation count in the status message applies:
+ * scoped to the files this PR touched, or the whole repo (the full-repo
+ * fallback report used when a PR has zero analyzable files — see #572).
+ */
+function scopeLabel(isRepoWide: boolean): string {
+  return isRepoWide ? 'repo-wide' : 'in touched files';
+}
+
+/**
  * Determine human-friendly status message based on violations and delta.
  * Prioritizes positive messaging when PR improves complexity.
+ *
+ * @param isRepoWide - True when `report` is the full-repo fallback scan (PR
+ *   touched zero analyzable files) rather than one scoped to the PR's changed
+ *   files. Changes the wording from "in touched files" to "repo-wide" so the
+ *   badge doesn't misattribute repo-wide violations to this PR.
  */
 function determineStatus(
   report: ComplexityReport | null,
   deltaSummary: DeltaSummary | null,
+  isRepoWide = false,
 ): { emoji: string; message: string } {
   const violations = report?.summary.totalViolations ?? 0;
   const errors = report?.summary.bySeverity.error ?? 0;
@@ -355,7 +370,7 @@ function determineStatus(
     if (preExisting > 0) {
       return {
         emoji: '✅',
-        message: `**Improved!** Complexity reduced by ${Math.abs(delta)}. ${preExisting} pre-existing issue${preExisting === 1 ? '' : 's'} remain${preExisting === 1 ? 's' : ''} in touched files.`,
+        message: `**Improved!** Complexity reduced by ${Math.abs(delta)}. ${preExisting} pre-existing issue${preExisting === 1 ? '' : 's'} remain${preExisting === 1 ? 's' : ''} ${scopeLabel(isRepoWide)}.`,
       };
     }
     return {
@@ -383,7 +398,7 @@ function determineStatus(
   if (violations > 0) {
     return {
       emoji: '➡️',
-      message: `**Stable** - ${preExisting} pre-existing issue${preExisting === 1 ? '' : 's'} in touched files (none introduced).`,
+      message: `**Stable** - ${preExisting} pre-existing issue${preExisting === 1 ? '' : 's'} ${scopeLabel(isRepoWide)} (none introduced).`,
     };
   }
 
@@ -485,13 +500,17 @@ function buildImpactSummary(report: ComplexityReport | null): string {
 /**
  * Build complexity status content (no heading, no footer).
  * Used as a content fragment for the unified PR description section.
+ *
+ * @param isRepoWide - See `determineStatus`. Defaults to false (the normal,
+ *   PR-scoped path) so existing callers are unaffected.
  */
 export function buildComplexityStatus(
   report: ComplexityReport | null,
   deltaSummary: DeltaSummary | null,
   deltas: ComplexityDelta[] | null,
+  isRepoWide = false,
 ): string {
-  const status = determineStatus(report, deltaSummary);
+  const status = determineStatus(report, deltaSummary, isRepoWide);
   const metricTable = buildMetricTable(report, deltas);
   const impactSummary = buildImpactSummary(report);
 

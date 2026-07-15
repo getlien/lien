@@ -26,7 +26,7 @@ describe('handleSearchCode', () => {
   function createMockResult(
     overrides: {
       content?: string;
-      metadata?: Partial<typeof defaultMetadata & { repoId?: string }>;
+      metadata?: Partial<typeof defaultMetadata>;
       score?: number;
       relevance?: 'highly_relevant' | 'relevant' | 'loosely_related' | 'not_relevant';
     } = {},
@@ -44,7 +44,6 @@ describe('handleSearchCode', () => {
 
   let mockVectorDB: {
     search: ReturnType<typeof vi.fn>;
-    supportsCrossRepo: boolean;
   };
 
   let mockCtx: ToolContext;
@@ -54,7 +53,6 @@ describe('handleSearchCode', () => {
 
     mockVectorDB = {
       search: vi.fn(),
-      supportsCrossRepo: false,
     };
 
     mockCtx = {
@@ -159,48 +157,6 @@ describe('handleSearchCode', () => {
     });
   });
 
-  describe('cross-repo fallback (unsupported by the bundled backend)', () => {
-    it('should fall back to single-repo search when crossRepo=true', async () => {
-      const mockResults = [createMockResult()];
-      mockVectorDB.search.mockResolvedValue(mockResults);
-
-      const result = await handleSearchCode(
-        { query: 'test fallback query', crossRepo: true },
-        mockCtx,
-      );
-
-      // Should log a warning
-      expect(mockLog).toHaveBeenCalledWith(
-        'Warning: crossRepo=true requires a cross-repo-capable backend. Falling back to single-repo search.',
-        'warning',
-      );
-
-      // Should use regular lexical search
-      expect(mockVectorDB.search).toHaveBeenCalled();
-
-      // Should not include groupedByRepo in response (single-repo backend)
-      const parsed = JSON.parse(result.content![0].text);
-      expect(parsed.groupedByRepo).toBeUndefined();
-    });
-
-    it('should still return results when falling back', async () => {
-      const mockResults = [
-        createMockResult({ content: 'fallback result 1', metadata: { file: 'src/fb1.ts' } }),
-        createMockResult({ content: 'fallback result 2', metadata: { file: 'src/fb2.ts' } }),
-      ];
-      mockVectorDB.search.mockResolvedValue(mockResults);
-
-      const result = await handleSearchCode(
-        { query: 'test fallback results', crossRepo: true },
-        mockCtx,
-      );
-
-      const parsed = JSON.parse(result.content![0].text);
-      expect(parsed.results).toHaveLength(2);
-      expect(parsed.indexInfo).toBeDefined();
-    });
-  });
-
   describe('validation', () => {
     it('should reject queries shorter than 3 characters', async () => {
       const result = await handleSearchCode({ query: 'ab' }, mockCtx);
@@ -280,23 +236,6 @@ describe('handleSearchCode', () => {
       expect(parsed.indexInfo).toBeDefined();
     });
 
-    it('should merge crossRepo fallback note with not_relevant note', async () => {
-      const mockResults = [
-        createMockResult({ relevance: 'not_relevant', metadata: { file: 'src/a.ts' } }),
-      ];
-      mockVectorDB.search.mockResolvedValue(mockResults);
-
-      const result = await handleSearchCode(
-        { query: 'something irrelevant', crossRepo: true },
-        mockCtx,
-      );
-
-      const parsed = JSON.parse(result.content![0].text);
-      expect(parsed.results).toHaveLength(0);
-      expect(parsed.note).toContain('Cross-repo search requires a cross-repo-capable backend');
-      expect(parsed.note).toContain('No relevant matches found.');
-    });
-
     it('should keep results when at least one is relevant', async () => {
       const mockResults = [
         createMockResult({ relevance: 'not_relevant', metadata: { file: 'src/a.ts' } }),
@@ -318,14 +257,6 @@ describe('handleSearchCode', () => {
       await handleSearchCode({ query: 'authentication handler' }, mockCtx);
 
       expect(mockLog).toHaveBeenCalledWith('Searching for: "authentication handler"');
-    });
-
-    it('should indicate cross-repo in log when enabled', async () => {
-      mockVectorDB.search.mockResolvedValue([]);
-
-      await handleSearchCode({ query: 'cross repo test', crossRepo: true }, mockCtx);
-
-      expect(mockLog).toHaveBeenCalledWith('Searching for: "cross repo test" (cross-repo)');
     });
 
     it('should log result count', async () => {

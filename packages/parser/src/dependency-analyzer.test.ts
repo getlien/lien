@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { analyzeDependencies, COMPLEXITY_THRESHOLDS } from './dependency-analyzer.js';
+import {
+  analyzeDependencies,
+  findReExportedSymbolsForFile,
+  COMPLEXITY_THRESHOLDS,
+} from './dependency-analyzer.js';
 import type { CodeChunk, ChunkMetadata } from './types.js';
 
 describe('analyzeDependencies', () => {
@@ -488,5 +492,80 @@ describe('analyzeDependencies', () => {
       expect(result.dependentCount).toBe(1);
       expect(result.dependents[0].filepath).toBe('src/app.ts');
     });
+  });
+});
+
+// Direct unit coverage for the shared re-export intersection algorithm,
+// consumed by both `fileIsReExporter` here and the CLI's `get_dependents`
+// handler (#532).
+describe('findReExportedSymbolsForFile', () => {
+  const identity = (path: string): string => path;
+
+  function chunk(
+    file: string,
+    options?: { exports?: string[]; importedSymbols?: Record<string, string[]> },
+  ): CodeChunk {
+    return {
+      content: 'test content',
+      metadata: {
+        file,
+        startLine: 1,
+        endLine: 10,
+        type: 'function',
+        language: 'typescript',
+        ...(options?.exports && { exports: options.exports }),
+        ...(options?.importedSymbols && { importedSymbols: options.importedSymbols }),
+      } as ChunkMetadata,
+    };
+  }
+
+  it('returns empty when the file imports nothing from the source', () => {
+    const chunks = [chunk('src/b.ts', { exports: ['fnB'] })];
+    expect(findReExportedSymbolsForFile(chunks, 'src/a.ts', identity)).toEqual([]);
+  });
+
+  it('returns empty when the file exports nothing of its own', () => {
+    const chunks = [chunk('src/b.ts', { importedSymbols: { 'src/a.ts': ['fnA'] } })];
+    expect(findReExportedSymbolsForFile(chunks, 'src/a.ts', identity)).toEqual([]);
+  });
+
+  it('returns empty when imported symbols and exports do not intersect (#526)', () => {
+    const chunks = [
+      chunk('src/b.ts', {
+        importedSymbols: { 'src/a.ts': ['fnA'] },
+        exports: ['fnB'],
+      }),
+    ];
+    expect(findReExportedSymbolsForFile(chunks, 'src/a.ts', identity)).toEqual([]);
+  });
+
+  it('returns the intersecting symbols for a genuine re-export', () => {
+    const chunks = [
+      chunk('src/b.ts', {
+        importedSymbols: { 'src/a.ts': ['fnA', 'fnB'] },
+        exports: ['fnA', 'fnC'],
+      }),
+    ];
+    expect(findReExportedSymbolsForFile(chunks, 'src/a.ts', identity)).toEqual(['fnA']);
+  });
+
+  it('treats a "*" wildcard import as re-exporting all of the file\'s exports', () => {
+    const chunks = [
+      chunk('src/b.ts', {
+        importedSymbols: { 'src/a.ts': ['*'] },
+        exports: ['fnA', 'fnB'],
+      }),
+    ];
+    expect(findReExportedSymbolsForFile(chunks, 'src/a.ts', identity)).toEqual(['fnA', 'fnB']);
+  });
+
+  it('treats a "* as ns" namespace import as re-exporting all of the file\'s exports', () => {
+    const chunks = [
+      chunk('src/b.ts', {
+        importedSymbols: { 'src/a.ts': ['* as ns'] },
+        exports: ['ns'],
+      }),
+    ];
+    expect(findReExportedSymbolsForFile(chunks, 'src/a.ts', identity)).toEqual(['ns']);
   });
 });

@@ -30,8 +30,6 @@ vi.mock('@liendev/core', async () => {
 describe('handleGetComplexity', () => {
   const mockVectorDB = {
     scanWithFilter: vi.fn(),
-    scanCrossRepo: vi.fn(),
-    supportsCrossRepo: false,
     getCurrentVersion: vi.fn(() => 1234567890),
     getVersionDate: vi.fn(() => '2025-12-19'),
   };

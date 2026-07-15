@@ -3,21 +3,14 @@ import { wrapToolHandler } from '../utils/tool-wrapper.js';
 import { GetComplexitySchema } from '../schemas/index.js';
 import type { GetComplexityInput } from '../schemas/index.js';
 import { ComplexityAnalyzer } from '@liendev/core';
-import type { VectorDBInterface } from '@liendev/core';
 import type { ComplexityViolation, FileComplexityData, ComplexityReport } from '@liendev/parser';
-import type { ToolContext, MCPToolResult, LogFn } from '../types.js';
+import type { ToolContext, MCPToolResult } from '../types.js';
 
 // ============================================================================
 // Types
 // ============================================================================
 
-type ChunkWithRepo = { metadata: { file: string; repoId?: string } };
 type TransformedViolation = ReturnType<typeof transformViolation>;
-
-interface CrossRepoResult {
-  chunks: ChunkWithRepo[];
-  fallback: boolean;
-}
 
 interface ProcessedViolations {
   violations: TransformedViolation[];
@@ -49,62 +42,6 @@ function transformViolation(v: ComplexityViolation, fileData: FileComplexityData
     riskLevel: fileData.riskLevel,
     ...(v.halsteadDetails && { halsteadDetails: v.halsteadDetails }),
   };
-}
-
-/**
- * Group complexity violations by repository ID.
- */
-function groupViolationsByRepo(
-  violations: TransformedViolation[],
-  allChunks: ChunkWithRepo[],
-): Record<string, TransformedViolation[]> {
-  const fileToRepo = new Map<string, string>();
-
-  for (const chunk of allChunks) {
-    const repoId = chunk.metadata.repoId || 'unknown';
-    fileToRepo.set(chunk.metadata.file, repoId);
-  }
-
-  const grouped: Record<string, TransformedViolation[]> = {};
-  for (const violation of violations) {
-    const repoId = fileToRepo.get(violation.filepath) || 'unknown';
-    if (!grouped[repoId]) {
-      grouped[repoId] = [];
-    }
-    grouped[repoId].push(violation);
-  }
-
-  return grouped;
-}
-
-/**
- * Fetch chunks for cross-repo analysis.
- * Returns fallback=true if cross-repo was requested but the backend does not support it.
- */
-async function fetchCrossRepoChunks(
-  vectorDB: VectorDBInterface,
-  crossRepo: boolean | undefined,
-  repoIds: string[] | undefined,
-  log: LogFn,
-): Promise<CrossRepoResult> {
-  if (!crossRepo) {
-    return { chunks: [], fallback: false };
-  }
-
-  if (vectorDB.supportsCrossRepo) {
-    // Chunks here feed only `groupViolationsByRepo` (file → repoId mapping).
-    // The actual analyzer scan that reads complexity/halstead/imports
-    // happens inside ComplexityAnalyzer.analyze. `repoId` is required for
-    // grouping on cross-repo backends — not applicable to the single-repo backend.
-    const chunks = await vectorDB.scanCrossRepo({
-      limit: 100000,
-      repoIds,
-    });
-    log(`Scanned ${chunks.length} chunks across repos`);
-    return { chunks, fallback: false };
-  }
-
-  return { chunks: [], fallback: true };
 }
 
 /**
@@ -144,15 +81,6 @@ function processViolations(
   };
 }
 
-/**
- * Build warning note for cross-repo fallback.
- */
-function buildCrossRepoFallbackNote(fallback: boolean): string | undefined {
-  return fallback
-    ? 'Cross-repo analysis requires a cross-repo-capable backend. Fell back to single-repo analysis.'
-    : undefined;
-}
-
 // ============================================================================
 // Main Handler
 // ============================================================================
@@ -165,39 +93,22 @@ export async function handleGetComplexity(args: unknown, ctx: ToolContext): Prom
   const { vectorDB, log, checkAndReconnect, getIndexMetadata } = ctx;
 
   return await wrapToolHandler(GetComplexitySchema, async validatedArgs => {
-    const { crossRepo, repoIds, files, top, threshold, metricType } = validatedArgs;
-    log(`Analyzing complexity${crossRepo ? ' (cross-repo)' : ''}...`);
+    const { files, top, threshold, metricType } = validatedArgs;
+    log('Analyzing complexity...');
     await checkAndReconnect();
 
-    // Step 1: Fetch cross-repo chunks if needed
-    const { chunks: allChunks, fallback } = await fetchCrossRepoChunks(
-      vectorDB,
-      crossRepo,
-      repoIds,
-      log,
-    );
-
-    // Step 2: Run complexity analysis
+    // Step 1: Run complexity analysis
     const analyzer = new ComplexityAnalyzer(vectorDB);
-    const report = await analyzer.analyze(files, crossRepo && !fallback, repoIds);
+    const report = await analyzer.analyze(files);
     log(`Analyzed ${report.summary.filesAnalyzed} files`);
 
-    // Step 3: Process violations
+    // Step 2: Process violations
     const { violations, topViolations, bySeverity } = processViolations(
       report,
       threshold,
       top ?? 10,
       metricType,
     );
-
-    // Step 4: Build response
-    const note = buildCrossRepoFallbackNote(fallback);
-    if (note) {
-      log(
-        'Warning: crossRepo=true requires a cross-repo-capable backend. Falling back to single-repo analysis.',
-        'warning',
-      );
-    }
 
     return {
       indexInfo: getIndexMetadata(),
@@ -209,12 +120,6 @@ export async function handleGetComplexity(args: unknown, ctx: ToolContext): Prom
         bySeverity,
       },
       violations: topViolations,
-      ...(crossRepo &&
-        !fallback &&
-        allChunks.length > 0 && {
-          groupedByRepo: groupViolationsByRepo(topViolations, allChunks),
-        }),
-      ...(note && { note }),
     };
   })(args);
 }

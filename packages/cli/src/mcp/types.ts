@@ -68,9 +68,7 @@ export interface IndexMetadata {
 export interface SearchResultResponse {
   indexInfo: IndexMetadata;
   results: ToolResult[];
-  /** Results grouped by repository when cross-repo search is used */
-  groupedByRepo?: Record<string, ToolResult[]>;
-  /** Warning note when cross-repo fallback occurs or other issues */
+  /** Diagnostic note, e.g. when no relevant results are found */
   note?: string;
 }
 

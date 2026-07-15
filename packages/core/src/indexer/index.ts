@@ -31,7 +31,6 @@ import { buildOverlay } from './overlay-index.js';
 import type { VectorDBInterface } from '../vectordb/types.js';
 import type { OverlayBackend } from '../vectordb/overlay-backend.js';
 import {
-  extractRepoId,
   scanCodebase,
   detectEcosystems,
   getEcosystemExcludePatterns,
@@ -82,15 +81,12 @@ interface IndexingConfig {
   chunkOverlap: number;
   useAST: boolean;
   astFallback: 'line-based' | 'error';
-  repoId?: string;
   orgId?: string;
 }
 
 /** Extract indexing config values using defaults */
-function getIndexingConfig(rootDir: string): IndexingConfig {
+function getIndexingConfig(_rootDir: string): IndexingConfig {
   // Use defaults for all settings - no config needed!
-  const repoId = extractRepoId(rootDir);
-
   // orgId is now handled in createVectorDB() via global config and git remote detection
   // No need to extract it here anymore
 
@@ -99,7 +95,6 @@ function getIndexingConfig(rootDir: string): IndexingConfig {
     chunkOverlap: DEFAULT_CHUNK_OVERLAP,
     useAST: true, // Always use AST-based chunking
     astFallback: 'line-based' as const,
-    repoId,
     orgId: undefined, // Not needed here - handled in VectorDB factory
   };
 }
@@ -352,7 +347,6 @@ async function processFileForIndexing(
       chunkOverlap: indexConfig.chunkOverlap,
       useAST: indexConfig.useAST,
       astFallback: indexConfig.astFallback,
-      repoId: indexConfig.repoId,
       orgId: indexConfig.orgId,
       workspaceRoot: rootDir,
     });
