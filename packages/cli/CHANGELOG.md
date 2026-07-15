@@ -1,5 +1,29 @@
 # @liendev/lien
 
+## 0.64.2
+
+### Patch Changes
+
+- 93191c4: refactor: remove never-functional cross-repo scaffolding
+
+  Cross-repo MCP mode was never implemented in the SQLite era: `repoId` was
+  computed in-memory but never persisted to the structural store, both
+  backends hardcoded `supportsCrossRepo = false` with `scanCrossRepo()`
+  stubbed to `[]`, and `lien serve` is one-repo-per-process — making every
+  `crossRepo`/`repoIds` code path unreachable. Removes the always-false
+  `supportsCrossRepo` flag and `scanCrossRepo()` stub from both backends and
+  `VectorDBInterface`, the `crossRepo`/`repoIds` MCP tool parameters and their
+  `groupedByRepo` response fields, the `repoId` field on `ChunkMetadata` and
+  its plumbing through the chunkers, and the corresponding doc claims. No
+  behavior change for the single-repo path.
+
+- 8d1056c: refactor: remove dead orgId multi-tenant plumbing
+- Updated dependencies [e2b0e24]
+- Updated dependencies [93191c4]
+- Updated dependencies [8d1056c]
+  - @liendev/parser@0.64.2
+  - @liendev/core@0.64.2
+
 ## 0.64.1
 
 ### Patch Changes
