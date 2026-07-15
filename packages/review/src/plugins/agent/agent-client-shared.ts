@@ -95,7 +95,10 @@ export function logTurn(logger: Logger, turn: TurnTrace | undefined, label?: str
  * `{"findings": [...]}`-only example can't beat the real verdict; fall back to
  * the first findings-only candidate if nothing carries a summary.
  */
-export function extractFindingsFromText(text: string): {
+export function extractFindingsFromText(
+  text: string,
+  logger?: Logger,
+): {
   findings: AgentFinding[];
   summary?: AgentSummary;
 } {
@@ -111,7 +114,7 @@ export function extractFindingsFromText(text: string): {
     } catch {
       continue; // not parseable — try the next candidate
     }
-    const { findings, summary } = readVerdict(parsed);
+    const { findings, summary } = readVerdict(parsed, logger);
     if (summary) return { findings, summary };
     if (findings.length > 0 && !fallback) fallback = { findings };
   }
@@ -139,12 +142,12 @@ export function extractFindingsWithReasoningFallback(
   logger?: Logger,
 ): { findings: AgentFinding[]; summary?: AgentSummary } {
   const fromContent = content
-    ? extractFindingsFromText(content)
+    ? extractFindingsFromText(content, logger)
     : { findings: [] as AgentFinding[], summary: undefined };
   if (fromContent.summary || fromContent.findings.length > 0) return fromContent;
 
   const fromReasoning = reasoning
-    ? extractFindingsFromText(reasoning)
+    ? extractFindingsFromText(reasoning, logger)
     : { findings: [] as AgentFinding[], summary: undefined };
   if (fromReasoning.summary || fromReasoning.findings.length > 0) {
     logger?.info('[agent] Verdict recovered from the reasoning channel (content had none)');
@@ -155,14 +158,20 @@ export function extractFindingsWithReasoningFallback(
 }
 
 /** Pull validated findings + summary out of one parsed JSON verdict (array or object). */
-export function readVerdict(parsed: unknown): { findings: AgentFinding[]; summary?: AgentSummary } {
+export function readVerdict(
+  parsed: unknown,
+  logger?: Logger,
+): { findings: AgentFinding[]; summary?: AgentSummary } {
   const obj = (parsed ?? {}) as { findings?: unknown; summary?: unknown };
   let rawFindings = Array.isArray(parsed) ? parsed : obj.findings;
   if (!Array.isArray(rawFindings) && typeof parsed === 'object' && parsed !== null) {
     rawFindings = findingsUnderCorruptedKey(parsed as Record<string, unknown>);
   }
   const findings = (Array.isArray(rawFindings) ? rawFindings : []).filter(isValidFinding);
-  const summary = isValidSummary(obj.summary) ? obj.summary : undefined;
+  let summary = isValidSummary(obj.summary) ? obj.summary : undefined;
+  if (!summary && typeof parsed === 'object' && parsed !== null) {
+    summary = summaryUnderCorruptedKey(parsed as Record<string, unknown>, logger);
+  }
   return { findings, summary };
 }
 
@@ -184,6 +193,36 @@ function findingsUnderCorruptedKey(obj: Record<string, unknown>): AgentFinding[]
     }
   }
   return undefined;
+}
+
+/**
+ * Recover a summary object whose key got mangled — the mirror image of
+ * `findingsUnderCorruptedKey` above. Observed on the PR #772 Lien Review run
+ * (2026-07-15, prod Kimi model): a leaked chat-template fragment landed as a
+ * key —
+ *   {"findings":[],":<parameter name=":{"riskLevel":"low","overview":"...","keyChanges":[...]}}
+ * — findings were a VALID empty array (a genuine clean review), but the
+ * summary lived under the corrupted key. `obj.summary` read as missing, so
+ * the run was reported as incomplete ("did not finish, re-run") even though
+ * it had actually completed clean.
+ *
+ * When no `summary` value validates, accept another property only if its
+ * value is itself summary-shaped (`isValidSummary` — object carrying
+ * riskLevel/overview/keyChanges). If more than one other key qualifies,
+ * recover NONE: ambiguity between candidates must never be guessed at, so
+ * the run stays "incomplete" rather than risk attaching the wrong summary.
+ */
+function summaryUnderCorruptedKey(
+  obj: Record<string, unknown>,
+  logger?: Logger,
+): AgentSummary | undefined {
+  const candidates = Object.entries(obj).filter(
+    ([key, value]) => key !== 'findings' && key !== 'summary' && isValidSummary(value),
+  );
+  if (candidates.length !== 1) return undefined;
+  const [key, value] = candidates[0];
+  logger?.warning(`[agent] Recovered summary from corrupted key ${JSON.stringify(key)}`);
+  return value as AgentSummary;
 }
 
 /** First `{`…last `}` slice — recovers a JSON object wrapped in prose. */
