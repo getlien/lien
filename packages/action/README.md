@@ -95,7 +95,7 @@ exact cost of every run is printed in the job's step summary (the
 | `threshold`           | no       | `15`                            | Complexity threshold above which violations are reported.                                                                                 |
 | `review-types`        | no       | `complexity,bugs,summary`       | Comma-separated review types to enable. `complexity` toggles the complexity check. `bugs`, `architectural`, and `summary` all come from the single agent reviewer, so they switch it on/off as a group (and only when an API key is set) — they can't be toggled independently. |
 | `block-on-new-errors` | no       | `false`                         | Post `REQUEST_CHANGES` (instead of `COMMENT`) when the PR introduces new error-level complexity violations.                               |
-| `fail-on`             | no       | `never`                         | Whether the review fails the check (so a Required check can block the PR). Default `never` — **advisory**, never fails CI. Opt into gating with `error` (a failure conclusion / new error-level findings) or `any` (any error or warning finding). |
+| `fail-on`             | no       | `never`                         | Whether the review fails the check (so a Required check can block the PR). Default `never` — **advisory** for review findings. Opt into gating with `error` (a failure conclusion / new error-level findings) or `any` (any error or warning finding). Exception: a total LLM-provider failure always fails the check regardless of this setting — see [Fail-loudly guarantee](#fail-loudly-guarantee). |
 
 > The action posts **no check run of its own** — the workflow job is the single
 > status check. Findings surface as workflow annotations (inline on the diff),
@@ -145,25 +145,32 @@ only covers that one model.
 
 ## Blocking a PR on the review
 
-By default the review is **advisory** (`fail-on: never`) — it never fails CI, so
-adding the action can't break anyone's pipeline. To gate merges on it, opt in by
-setting `fail-on` and marking the workflow's job as a **Required status check**
-in your branch protection rules. With `fail-on: error` the action exits non-zero
-only when the review's overall conclusion is a failure (driven by
-`block-on-new-errors`); `fail-on: any` is stricter (any error- or warning-level
-finding fails the check).
+By default the review is **advisory** (`fail-on: never`) for its own findings —
+it never fails CI on those, so adding the action can't break anyone's
+pipeline. To gate merges on findings, opt in by setting `fail-on` and marking
+the workflow's job as a **Required status check** in your branch protection
+rules. With `fail-on: error` the action exits non-zero only when the review's
+overall conclusion is a failure (driven by `block-on-new-errors`); `fail-on:
+any` is stricter (any error- or warning-level finding fails the check). A
+total LLM-provider failure is a separate case that always fails the check,
+even under `fail-on: never` — see below.
 
 ## Fail-loudly guarantee
 
 If the agent review's main pass never runs at all — every request to the LLM
-provider failed (exhausted key, a terminal provider error, etc.) — Lien marks
-the result with an **error-severity finding** and a **`failure`** conclusion
-naming the cause, instead of a clean-looking review. That finding is what
-`fail-on: error`/`any` act on, so a starved review fails the check under
-either gating mode. Under the default `fail-on: never` the job itself still
-exits `0` (advisory stays advisory), but the step summary, PR description, and
-`conclusion` output make the failure impossible to mistake for "no issues
-found."
+provider failed terminally (insufficient credits, an invalid/expired key, a
+provider outage, etc.) — Lien marks the result with an **error-severity
+finding** and a **`failure`** conclusion naming the cause, instead of a
+clean-looking review.
+
+This is treated as an **operational failure, not an advisory finding**: a
+review that never ran isn't something `fail-on` gates on, because there's
+nothing to be advisory *about* — no code was analyzed. **The check fails
+regardless of `fail-on`, including the advisory default `never`.** A partial
+run (some turns completed before it bailed on a budget/turn limit) is
+different — that's a genuine advisory finding and still obeys `fail-on` as
+before. Either way, the step summary, PR description, and `conclusion` output
+make the failure impossible to mistake for "no issues found."
 
 ## Fork PRs
 

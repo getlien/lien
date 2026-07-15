@@ -57,13 +57,40 @@ function exitCodeFor(
   conclusion: 'success' | 'failure' | 'neutral',
   errorCount: number,
   warningCount: number,
+  providerFailure: boolean,
 ): number {
+  // A total provider failure means the agent review never ran at all — an
+  // operational failure, not an advisory finding. A user who enabled (and is
+  // paying for) the review deserves a red check when it didn't happen, so
+  // this fails regardless of `fail-on`, including the advisory default
+  // `never`. See the "Fail-loudly guarantee" section of the action README.
+  if (providerFailure) return 1;
   if (failOn === 'never') return 0;
   // 'any' is strictly stricter than 'error': fail on a failure conclusion (e.g.
   // analysis failed with no findings) OR on any error/warning finding.
   if (failOn === 'any') return conclusion === 'failure' || errorCount + warningCount > 0 ? 1 : 0;
   // failOn === 'error'
   return conclusion === 'failure' ? 1 : 0;
+}
+
+/**
+ * Log a clear, actionable message naming why the review couldn't run at all.
+ * Only called once `result.providerFailure` (the authoritative signal from
+ * `@liendev/review`) is already known true — this just locates the specific
+ * never-ran notice among `findings` to quote its message (which already
+ * carries the raw provider error, e.g. "API error (402): ..."), then adds the
+ * common-cause remediation so a maintainer doesn't have to guess.
+ */
+function logProviderFailure(findings: ReviewFinding[]): void {
+  const notice = findings.find(f => (f.metadata as { neverRan?: boolean } | undefined)?.neverRan);
+  const cause = notice?.message ?? 'every LLM provider request failed.';
+  actionLogger.error(
+    `Lien Review could not run: ${cause} This fails the check even with fail-on: never — a ` +
+      'review that never ran is an operational failure, not an advisory finding. Common causes: ' +
+      'insufficient provider credits (402, add credits), an invalid/expired API key (401/403, ' +
+      'check the openrouter-api-key/anthropic-api-key secret), or a provider outage (5xx, re-run ' +
+      'once it recovers).',
+  );
 }
 
 /**
@@ -78,6 +105,7 @@ export async function finishRun(
   failOn: FailOn,
 ): Promise<number> {
   const errorCount = countErrors(result.findings);
+  const providerFailure = result.providerFailure;
 
   await writeStepSummary(result);
   await writeOutputs({
@@ -90,13 +118,14 @@ export async function finishRun(
   // post (annotations + the step summary still do). Note it once. Skipped under
   // pull_request_target, which grants forks a writable token.
   if (forkReadOnly) emitForkWarning();
+  if (providerFailure) logProviderFailure(result.findings);
 
   const warningCount = result.findings.filter(f => f.severity === 'warning').length;
   actionLogger.info(
     `Review complete: ${result.findings.length} findings (${errorCount} errors), ` +
       `conclusion=${result.conclusion}, files=${result.filesAnalyzed}`,
   );
-  return exitCodeFor(failOn, result.conclusion, errorCount, warningCount);
+  return exitCodeFor(failOn, result.conclusion, errorCount, warningCount, providerFailure);
 }
 
 async function main(): Promise<void> {

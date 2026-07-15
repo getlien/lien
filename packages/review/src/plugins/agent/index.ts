@@ -479,6 +479,20 @@ function appendNeverRanNotice(
   });
 }
 
+/**
+ * True when `findings` contains the never-ran notice from `appendNeverRanNotice`
+ * — the agent-review MAIN pass never completed a single turn because every LLM
+ * provider request failed terminally (a 402 on an overdrawn account, an
+ * invalid key, a provider outage). This is the single source of truth for that
+ * signal: callers outside this module (the transport-agnostic review core, the
+ * GitHub Action) key off this instead of re-deriving it from `metadata` shape
+ * or from `conclusion`/summary text, so the contract only needs to change here
+ * if the notice's shape ever does.
+ */
+export function hasProviderFailure(findings: ReviewFinding[]): boolean {
+  return findings.some(f => (f.metadata as { neverRan?: boolean } | undefined)?.neverRan === true);
+}
+
 /** Cap the provider error to a short, single-line cause for the notice. */
 const MAX_PROVIDER_ERROR_CHARS = 160;
 function summarizeProviderError(msg?: string): string {

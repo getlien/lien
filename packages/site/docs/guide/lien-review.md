@@ -58,7 +58,7 @@ If both keys are omitted, the review still runs but **complexity-only** — the 
 | Complexity analysis | Flags new/worsened cyclomatic, cognitive, and Halstead complexity violations |
 | Agent bug review | LLM-driven review for correctness bugs (OpenRouter or Anthropic) |
 | PR summary | A concise summary of the change, posted as a step summary |
-| Advisory by default | `fail-on: never` — the check never blocks a PR unless you opt in |
+| Advisory by default | `fail-on: never` — review findings never block a PR unless you opt in (a total LLM-provider failure still fails the check regardless) |
 
 ## Advanced configuration
 
@@ -66,9 +66,9 @@ One behavior is tunable only via an environment variable on the action step, not
 
 ## Blocking a PR on the review
 
-By default the review is **advisory** — it never fails CI. To gate merges on it, set `fail-on: error` (or `any`) and mark the workflow's job as a **Required status check** in your branch protection rules. See the [inputs table](https://github.com/getlien/lien/blob/main/packages/action/README.md#inputs) for the full set of options (`threshold`, `review-types`, `block-on-new-errors`, `fail-on`).
+By default the review is **advisory** for its own findings — it never fails CI on those. To gate merges on findings, set `fail-on: error` (or `any`) and mark the workflow's job as a **Required status check** in your branch protection rules. See the [inputs table](https://github.com/getlien/lien/blob/main/packages/action/README.md#inputs) for the full set of options (`threshold`, `review-types`, `block-on-new-errors`, `fail-on`). A total LLM-provider failure is a separate case that always fails the check, even under `fail-on: never` — see the paragraph below.
 
-If the agent review's main pass never runs at all (every LLM provider request failed), Lien marks the result with an error-severity finding and a `failure` conclusion instead of a clean-looking review, so a starved run is never mistaken for "no issues found." See [`packages/action/README.md`](https://github.com/getlien/lien/blob/main/packages/action/README.md#fail-loudly-guarantee) for the full behavior, including how it interacts with `fail-on`.
+If the agent review's main pass never runs at all (every LLM provider request failed — insufficient credits, an invalid key, a provider outage), Lien marks the result with an error-severity finding and a `failure` conclusion instead of a clean-looking review — and **fails the check regardless of `fail-on`**, including the advisory default `never`. A review that never ran isn't an advisory finding to gate on; a partial run (some turns completed before it bailed) still obeys `fail-on` as before. See [`packages/action/README.md`](https://github.com/getlien/lien/blob/main/packages/action/README.md#fail-loudly-guarantee) for the full behavior.
 
 ## Fork PRs
 
