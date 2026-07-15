@@ -18,6 +18,7 @@ import { renderBlastRadiusMarkdown } from '../../blast-radius-render.js';
 import { renderStaleLiteralSection } from '../../stale-literal-signals.js';
 import { renderUndiscriminatedCatchSection } from '../../catch-discrimination-signals.js';
 import { renderRemovedExportsSection } from '../../removed-export-signals.js';
+import { renderVariantSweepSection } from '../../variant-sweep-signals.js';
 import { renderUntrustedInputSection } from '../../untrusted-input-signals.js';
 import { renderRenameSweepSection } from '../../rename-sweep-signals.js';
 import { renderGuidanceSurfaceSection } from '../../guidance-surface-signals.js';
@@ -206,6 +207,9 @@ export function buildInitialMessage(
   appendIfPresent(sections, renderStaleLiteralSection(context));
   if (isRuleActive(opts.rules, 'error-swallowing')) {
     appendIfPresent(sections, renderUndiscriminatedCatchSection(context));
+  }
+  if (isRuleActive(opts.rules, 'incomplete-handling')) {
+    appendIfPresent(sections, renderVariantSweepSection(context));
   }
   appendIfPresent(sections, renderUntrustedInputSection(context));
   appendIfPresent(sections, renderRenameSweepSection(context));
