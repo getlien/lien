@@ -138,6 +138,29 @@ describe('recordDeltaEvent + readDeltaEvents', () => {
     expect(events.every(e => Array.isArray(e.flagged))).toBe(true);
   });
 
+  it('skips a line whose flagged array contains a malformed element (e.g. null)', async () => {
+    const good = sampleEvent();
+    await recordDeltaEvent(rootDir, good);
+
+    const filePath = deltaEventsFilePath(rootDir);
+    // Array.isArray(flagged) passes, but an element is null / missing fields —
+    // must not reach functionKey's `f.filepath` destructure downstream.
+    const malformed = {
+      timestamp: new Date().toISOString(),
+      mode: 'normal',
+      exitCode: 0,
+      counts: { crossings: 0, newOverThreshold: 0, improved: 0 },
+      flagged: [null],
+    };
+    await fs.appendFile(filePath, `${JSON.stringify(malformed)}\n`, 'utf-8');
+    await recordDeltaEvent(rootDir, sampleEvent({ exitCode: 1 }));
+
+    const events = await readDeltaEvents(rootDir);
+    expect(events).toHaveLength(2);
+    expect(events[0]).toEqual(good);
+    expect(events[1].exitCode).toBe(1);
+  });
+
   it('LIEN_DELTA_EVENTS=off disables recording entirely (kill switch)', async () => {
     process.env.LIEN_DELTA_EVENTS = 'off';
     await recordDeltaEvent(rootDir, sampleEvent());

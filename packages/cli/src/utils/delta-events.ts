@@ -107,12 +107,23 @@ async function trimIfOversized(filePath: string): Promise<void> {
   await fs.writeFile(filePath, `${kept.join('\n')}\n`, 'utf-8');
 }
 
+/** Validates one element of `flagged` — every field `functionKey` (delta-stats.ts) destructures. */
+function isValidFlaggedFunction(value: unknown): value is DeltaFlaggedFunction {
+  if (typeof value !== 'object' || value === null) return false;
+  const f = value as Record<string, unknown>;
+  return (
+    typeof f.filepath === 'string' && typeof f.symbol === 'string' && typeof f.metric === 'string'
+  );
+}
+
 /**
  * Shape-validate a parsed JSONL line before trusting it as a `DeltaEvent`.
  * Valid JSON with the wrong shape (e.g. a torn write that dropped `flagged`,
- * or a hand-edited line) must not crash a downstream consumer like
- * `computeDeltaWindowStats`'s `e.flagged.map(...)` — it's treated the same as
- * a JSON.parse failure: skipped, not thrown.
+ * a `flagged` element that is `null`, or a hand-edited line) must not crash a
+ * downstream consumer like `computeDeltaWindowStats`'s
+ * `e.flagged.map(functionKey)` (which destructures `filepath`/`symbol` off
+ * each element) — it's treated the same as a JSON.parse failure: the whole
+ * line is skipped, not thrown.
  */
 function isValidDeltaEvent(value: unknown): value is DeltaEvent {
   if (typeof value !== 'object' || value === null) return false;
@@ -129,7 +140,7 @@ function isValidDeltaEvent(value: unknown): value is DeltaEvent {
   ) {
     return false;
   }
-  return Array.isArray(v.flagged);
+  return Array.isArray(v.flagged) && v.flagged.every(isValidFlaggedFunction);
 }
 
 /**
