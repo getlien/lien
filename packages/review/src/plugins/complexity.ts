@@ -44,7 +44,14 @@ export class ComplexityPlugin implements ReviewPlugin {
   async analyze(context: ReviewContext): Promise<ReviewFinding[]> {
     const { complexityReport, deltas, logger } = context;
 
-    const allViolations = Object.values(complexityReport.files).flatMap(f => f.violations);
+    // On the normal path, complexityReport.files is already scoped to the PR's
+    // analyzable files. On the full-repo fallback path (PR touches zero
+    // analyzable files), complexityReport covers the whole repo — scope here
+    // so pre-existing violations elsewhere don't surface as PR findings.
+    const scopedFiles = new Set(context.allChangedFiles ?? context.changedFiles);
+    const allViolations = Object.values(complexityReport.files)
+      .flatMap(f => f.violations)
+      .filter(v => scopedFiles.has(v.filepath));
     const violations = prioritizeViolations(allViolations, complexityReport);
     logger.info(`Complexity plugin: ${violations.length} violations to review`);
 
@@ -55,8 +62,19 @@ export class ComplexityPlugin implements ReviewPlugin {
   async present(findings: ReviewFinding[], context: PresentContext): Promise<void> {
     context.appendSummary(buildComplexitySummary(findings, context));
 
+    // `findings` is this plugin's own analyze() output, already scoped to the
+    // PR's changed files (see analyze() above). If the underlying report has
+    // more violations than made it into findings, analyze() must have filtered
+    // out-of-scope ones — i.e. this is the full-repo fallback report (#572),
+    // and the badge shouldn't claim those counts are "in touched files".
+    const isRepoWide = findings.length < (context.complexityReport?.summary.totalViolations ?? 0);
     context.appendDescription(
-      buildComplexityStatus(context.complexityReport, context.deltaSummary, context.deltas),
+      buildComplexityStatus(
+        context.complexityReport,
+        context.deltaSummary,
+        context.deltas,
+        isRepoWide,
+      ),
       'complexity',
     );
 

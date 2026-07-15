@@ -6,7 +6,6 @@ import { chunkFile } from './chunker.js';
 import { NativeBindingLoadError } from './ast/parser.js';
 import { scanCodebase } from './scanner.js';
 import { detectEcosystems, getEcosystemExcludePatterns } from './ecosystem-presets.js';
-import { extractRepoId } from './utils/repo-id.js';
 import {
   DEFAULT_CHUNK_SIZE,
   DEFAULT_CHUNK_OVERLAP,
@@ -66,7 +65,7 @@ function normalizeToRelativePath(file: string, rootDir: string): string {
 async function chunkFileForCollection(
   file: string,
   rootDir: string,
-  config: { chunkSize: number; chunkOverlap: number; repoId?: string },
+  config: { chunkSize: number; chunkOverlap: number },
   output: CodeChunk[],
 ): Promise<boolean> {
   try {
@@ -79,7 +78,6 @@ async function chunkFileForCollection(
       chunkOverlap: config.chunkOverlap,
       useAST: true,
       astFallback: 'line-based',
-      repoId: config.repoId,
       workspaceRoot: rootDir,
     });
 
@@ -134,7 +132,6 @@ export async function performChunkOnlyIndex(
     const config = {
       chunkSize: options.chunkSize ?? DEFAULT_CHUNK_SIZE,
       chunkOverlap: options.chunkOverlap ?? DEFAULT_CHUNK_OVERLAP,
-      repoId: extractRepoId(rootDir),
     };
 
     const allChunks: CodeChunk[] = [];

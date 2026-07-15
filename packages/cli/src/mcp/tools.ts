@@ -29,8 +29,7 @@ IMPORTANT: Query with concrete KEYWORDS, identifiers, and domain terms that actu
 Returns:
 - results[]: { content, score, relevance, metadata: { file, startLine, endLine, language?, symbolName?, symbolType?, signature?, enclosingSymbol? } }
 - enclosingSymbol: "Class.method" for methods, "functionName" for standalone functions, absent for block chunks
-- relevance: "highly_relevant" | "relevant" | "loosely_related" (not_relevant auto-filtered)
-- groupedByRepo?: Record<repoId, results[]> (when crossRepo=true)`,
+- relevance: "highly_relevant" | "relevant" | "loosely_related" (not_relevant auto-filtered)`,
   ),
   toMCPToolSchema(
     FindSimilarSchema,
@@ -139,8 +138,7 @@ Returns:
 - riskLevel: "low" | "medium" | "high" | "critical"
 - dependents[]: { filepath, isTestFile, usages[]? }
 - complexityMetrics: { averageComplexity, maxComplexity, highComplexityDependents[] }
-- totalUsageCount?: number (when symbol parameter provided)
-- groupedByRepo?: Record<repoId, dependents[]> (when crossRepo=true)`,
+- totalUsageCount?: number (when symbol parameter provided)`,
   ),
   toMCPToolSchema(
     GetComplexitySchema,
@@ -167,7 +165,6 @@ Returns:
 - summary: { filesAnalyzed, avgComplexity, maxComplexity, violationCount, bySeverity: { error, warning } }
 - violations[]: { filepath, symbolName, symbolType, complexity, metricType, threshold, severity, riskLevel, dependentCount }
 - metricType: "cyclomatic" | "cognitive" | "halstead_effort" | "halstead_bugs"
-- severity: "error" | "warning"
-- groupedByRepo?: Record<repoId, violations[]> (when crossRepo=true)`,
+- severity: "error" | "warning"`,
   ),
 ];

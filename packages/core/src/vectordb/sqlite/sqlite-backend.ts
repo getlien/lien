@@ -41,7 +41,6 @@ export class SqliteBackend implements VectorDBInterface {
   private db: DatabaseType.Database | null = null;
   public readonly dbPath: string;
   private readonly dbFilePath: string;
-  public readonly supportsCrossRepo = false;
   public readonly isOverlay = false;
   private lastVersionCheck = 0;
   private currentVersion = 0;
@@ -257,16 +256,6 @@ export class SqliteBackend implements VectorDBInterface {
       return 'Unknown';
     }
     return new Date(this.currentVersion).toLocaleString();
-  }
-
-  async scanCrossRepo(_options: {
-    language?: string;
-    pattern?: string;
-    limit?: number;
-    repoIds?: string[];
-    branch?: string;
-  }): Promise<SearchResult[]> {
-    return [];
   }
 
   static async load(projectRoot: string): Promise<SqliteBackend> {

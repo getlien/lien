@@ -30,7 +30,6 @@ export interface ToolResultMetadata {
   importedSymbols?: Record<string, string[]>;
   callSites?: Array<{ symbol: string; line: number }>;
   symbols?: { functions: string[]; classes: string[]; interfaces: string[] };
-  repoId?: string;
   enclosingSymbol?: string;
 }
 
@@ -69,7 +68,6 @@ const FIELD_ALLOWLISTS: Record<ToolName, ReadonlySet<AllowlistKey>> = {
     'parentClass',
     'parameters',
     'exports',
-    'repoId',
   ]),
   find_similar: new Set<AllowlistKey>([
     'language',
@@ -109,16 +107,13 @@ const FIELD_ALLOWLISTS: Record<ToolName, ReadonlySet<AllowlistKey>> = {
 };
 
 /**
- * Deduplicate results by repoId + file + startLine + endLine.
+ * Deduplicate results by file + startLine + endLine.
  * Keeps the first occurrence (highest ranked) of each unique chunk.
- * Includes repoId so cross-repo searches don't collapse results from
- * different repos that share the same relative path and line range.
  */
 export function deduplicateResults(results: SearchResult[]): SearchResult[] {
   const seen = new Set<string>();
   return results.filter(r => {
     const key = JSON.stringify([
-      r.metadata.repoId ?? '',
       r.metadata.file ? normalizeToRelativePath(r.metadata.file) : '',
       r.metadata.startLine,
       r.metadata.endLine,

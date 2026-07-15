@@ -135,7 +135,6 @@ async function run(file: string): Promise<void> {
     const result = await findDependents(
       vectorDB,
       filepath,
-      false,
       log,
       undefined,
       undefined,

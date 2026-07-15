@@ -145,6 +145,7 @@ export {
   groupChunksByNormalizedPath,
   chunkImportsFrom,
   fileIsReExporter,
+  findReExportedSymbolsForFile,
   DEPENDENT_COUNT_THRESHOLDS,
   COMPLEXITY_THRESHOLDS,
 } from './dependency-analyzer.js';
