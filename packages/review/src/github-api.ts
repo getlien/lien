@@ -264,12 +264,13 @@ function isBatchValidationError(error: unknown): boolean {
  * `octokit.pulls.createReview` is all-or-nothing: if ANY comment anchors to a
  * line outside the diff, GitHub rejects the whole batch with a 422 —
  * including every valid comment in it. Only that validation failure triggers
- * the per-comment salvage path below: we post the summary body on its own,
- * then retry each comment individually via `createReviewComment` so one bad
- * anchor can't take the rest down with it. Comments that still fail are
- * logged and returned in `dropped`, never silently discarded. Any other
- * failure (auth, rate-limit, 5xx, network) is rethrown as-is — those aren't
- * anchor problems and salvaging would just mask the real error.
+ * the per-comment salvage path below: we attempt the summary body on its own
+ * (best-effort — see `bodyPosted` on the result), then retry each comment
+ * individually via `createReviewComment` so one bad anchor can't take the
+ * rest down with it. Comments that still fail are logged and returned in
+ * `dropped`, never silently discarded. Any other failure (auth, rate-limit,
+ * 5xx, network) is rethrown as-is — those aren't anchor problems and
+ * salvaging would just mask the real error.
  */
 export async function postPRReview(
   octokit: Octokit,

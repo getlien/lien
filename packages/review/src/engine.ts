@@ -540,8 +540,8 @@ function buildPresentContext(
         : undefined,
     postReviewComment:
       octokit && pr
-        ? async (body, comments) => {
-            await postPRReview(octokit, pr, comments ?? [], body, logger, 'COMMENT');
+        ? async body => {
+            await postPRReview(octokit, pr, [], body, logger, 'COMMENT');
           }
         : undefined,
     minimizeOutdatedComments:

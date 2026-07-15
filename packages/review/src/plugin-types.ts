@@ -11,7 +11,7 @@
 
 import type { z } from 'zod';
 import type { CodeChunk, ComplexityReport } from '@liendev/parser';
-import type { PRContext, LineComment, ReviewConfig } from './types.js';
+import type { PRContext, ReviewConfig } from './types.js';
 import type { Logger } from './logger.js';
 import type { ComplexityDelta, DeltaSummary } from './delta.js';
 
@@ -265,10 +265,11 @@ export interface PresentContext {
   ): Promise<{ posted: number; skipped: number }>;
 
   /**
-   * Post a PR review with optional inline comments.
+   * Post a PR review with a summary body only (no inline comments — use
+   * postInlineComments for those, which surfaces per-comment drops).
    * Only available when pr + octokit are present.
    */
-  postReviewComment?(body: string, lineComments?: LineComment[]): Promise<void>;
+  postReviewComment?(body: string): Promise<void>;
 
   /**
    * Minimize (hide as "outdated") existing PR comments matching a marker string.
