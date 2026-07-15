@@ -14,7 +14,6 @@ Local-first structural code search tool (lexical FTS5 search + dependency analys
 - Dependency chain: `parser` ← `core` ← `cli`; `review` depends on `parser` only (not `core`); `action` wraps `review` as a self-hostable GitHub Action ([ADR-012](docs/architecture/decisions/0012-self-hostable-review-action.md)).
 - `plugins/claude/` — the dogfooded Claude Code plugin (MCP server config + hooks). Hooks auto-annotate reads and run the `lien delta` gate on writes, i.e. they automate two of this file's own MANDATORY policies — see `plugins/claude/README.md`.
 - `lien-review-testbed/` — tracked, multi-language fixture app used by the review-agent test harness. Not a demo to clean up.
-- `platform/` and `packages/runner` — retired hosted-platform remnants (see [ADR-012](docs/architecture/decisions/0012-self-hostable-review-action.md)); safe to ignore.
 
 **Package Structure:**
 ```
