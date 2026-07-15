@@ -16,7 +16,9 @@ the project's own maintainers later had to patch, or it doesn't exist. Each
 fixture is replayed through the production review pipeline against the
 production default model (`moonshotai/kimi-k2.7-code`) and scored by the same
 committed Tier-1/2 assertions used to gate every in-repo rule change (see
-`packages/review/test/harness/`).
+`packages/review/test/harness/`). For the full methodology — the distractor
+smoke test, the canary/characterization split, and the deterministic
+no-regression proofs — see [How We Know Lien Review Works](/guide/review-harness).
 
 To keep this affordable, a free blind screen (Claude Code on a Claude
 subscription, no OpenRouter spend) triages fixtures before paying for
