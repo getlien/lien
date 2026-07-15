@@ -638,3 +638,132 @@ an agent's honor system, and this PR gives it a CI backstop, which is context
 worth adding there. A parallel in-flight change already owns edits to that
 section's `lien delta` wording; folding this update into it there avoids two
 PRs racing on the same lines.
+
+---
+
+# Measuring the nudge loop — `delta-events.jsonl` + `lien stats`
+
+Everything above makes `lien delta` available (Phase 1), proactive at edit
+time (Phase 2), and CI-backstopped (`--base`). None of it produces a single
+number proving the gate actually changes what agents commit. This is the first
+move of the broader "agent-nudging wedge" direction: turn "we nudge agents"
+into local counters.
+
+## Design constraints (non-negotiable)
+
+- **Strictly local.** No network call, no telemetry, nothing phones home.
+  Every event lives in a file on the user's own disk, next to the structural
+  index it already trusts Lien to manage.
+- **Instrument the source of truth, not the shell hook.** The recording call
+  lives inside `deltaCommand` itself (`packages/cli/src/cli/delta-cmd.ts`), not
+  in `delta-write.sh`. That means a manual `lien delta`, the plugin hook's
+  `lien delta --file <path>` fast path, and a CI `--base` run are all the same
+  code path and therefore all counted — none of them can be run "around" the
+  measurement.
+- **No causal claims.** v1 has no way to know *why* a function stopped being
+  flagged — the field is named `resolvedAfterFlag`, not "warnings heeded" or
+  "fixed". See the honest-limitations note below.
+
+## The event log (`packages/cli/src/utils/delta-events.ts`)
+
+One JSONL line is appended to `<indexDir>/delta-events.jsonl` per `lien delta`
+invocation — `indexDir` is `getIndexDir(rootDir)` from `@liendev/parser`, the
+same per-repo directory (`~/.lien/indices/<repoId>/`) the structural index and
+manifest already live in, so there's no new top-level location to reason
+about, garbage-collect, or explain.
+
+```ts
+interface DeltaEvent {
+  timestamp: string; // ISO-8601, when the run completed
+  mode: 'normal' | 'soft'; // '--soft' or not
+  exitCode: number;
+  counts: {
+    crossings: number; // crossed + newOverThreshold — the gate-failing count
+    newOverThreshold: number;
+    improved: number;
+  };
+  // One row per (function, metric) with a failing verdict this run. Empty when clean.
+  flagged: Array<{ filepath: string; symbol: string; metric: ComplexityMetricType }>;
+}
+```
+
+`symbol` matches the CLI report's display name (`MyClass.doThing` when the
+function has a parent class). Recording happens right after
+`computeComplexityDelta` returns, using the exact `ComplexityDeltaResult` the
+report/exit-code logic already computed — no second pass, no re-parse.
+
+**Growth cap.** After each append, if the file exceeds 2 MB
+(`MAX_BYTES_BEFORE_TRIM`) it is trimmed from the front (oldest lines dropped)
+down to the newest 2000 lines (`KEEP_LINES_AFTER_TRIM`) — simple, bounded, no
+silent unbounded growth. The common case (well under the cap) pays only the
+append; the trim's read-modify-write only runs once the file has actually
+grown large.
+
+**Kill switch:** `LIEN_DELTA_EVENTS=off` disables recording (the gate itself
+is unaffected — `lien delta`'s report and exit code never depend on this).
+Recording is best-effort throughout: any failure (unwritable disk, a race with
+a concurrent writer) is swallowed silently so it can never break the gate it
+instruments. A malformed line on read (e.g. a torn write from a crash) is
+skipped rather than failing the whole read.
+
+## Aggregation (`packages/cli/src/utils/delta-stats.ts`)
+
+Pure functions over an in-memory `DeltaEvent[]` — no I/O, so trivially
+unit-testable with synthetic event sequences. `computeDeltaWindowStats(events,
+windowDays, now?)` reports, per window:
+
+- **`runs`** — total `lien delta` invocations in the window.
+- **`runsWithCrossings`** — runs where `counts.crossings > 0`.
+- **`distinctFunctionsFlagged`** — unique `(filepath, symbol)` pairs appearing
+  in any run's `flagged` list (metric is ignored for this identity — the same
+  function flagged on two metrics in one run, or across runs, counts once).
+- **`resolvedAfterFlag`** — a function flagged in one event and absent from
+  the flagged set of a **strictly later** event in the window. Once a function
+  is seen clean after being flagged, it counts even if a still-later run flags
+  it again (the metric answers "was it ever seen resolved", not "is it
+  currently clean").
+- **`softShareOfFlaggedRuns`** — the fraction of crossing-having runs that were
+  `--soft` (advisory only); `null` when there were no crossing-having runs.
+
+### Honest limitation: `resolvedAfterFlag` is not "warnings heeded"
+
+This is presence/absence over time, nothing more. A function can leave the
+flagged list because an agent simplified it in response to the warning — or
+because the file was rewritten for an unrelated reason, the function was
+deleted, or a later unrelated edit happened to move a Halstead-effort number
+back under threshold. v1 has no causal signal to distinguish these. The field
+is named for exactly what it measures, deliberately avoiding language that
+implies causation. A future version could narrow this (e.g. correlating with
+git blame on the specific lines), but that is out of scope here.
+
+## `lien stats` (`packages/cli/src/cli/stats-cmd.ts`)
+
+A new top-level command, not a section bolted onto `lien status`. They answer
+different questions with different data shapes: `status` is a point-in-time
+snapshot (does an index exist, is it stale, what mode is worktree indexing
+in — all cheap `fs.stat`/`git rev-parse` calls with no growth profile of their
+own), while `stats` aggregates a growing historical log and reports
+time-windowed counts. Folding the second concern into `status`'s already
+branchy `--verbose` output would couple two unrelated read paths and make
+`status` slower as the log grows for no reason `status`'s own users asked for.
+This also matches the codebase's existing convention: `lien gc` is a separate
+command for a different index-directory concern rather than a `status`
+sub-mode.
+
+`lien stats --format text|json` resolves the same repo root `lien delta`
+itself uses (`getRepoRoot`, i.e. `git rev-parse --show-toplevel` — so it reads
+from the exact directory `lien delta` just wrote to), reads all events via
+`readDeltaEvents`, and reports the 7-day and 30-day windows. Text output ends
+with a one-line reminder of the local-only guarantee, the kill switch, and the
+non-causal nature of `resolvedAfterFlag` — the same disclaimer belongs in the
+tool's own output, not only in this doc.
+
+## YAGNI cuts (deliberately not built in v1)
+
+- No dashboards, no charts — the command prints numbers.
+- No config surface beyond the one env kill switch — no `.lien.config.json`
+  knobs for window sizes, cap thresholds, or output shape.
+- No cross-repo aggregation — one event log per repo, matching how the
+  structural index itself is already scoped per `repoId`. A user with several
+  worktrees of the same repo gets one independent log per worktree (same
+  isolation the index already has), not a merged view.

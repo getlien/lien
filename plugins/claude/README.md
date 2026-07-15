@@ -29,6 +29,12 @@ entry in `hooks.json`: it resolves a global `lien` binary, falling back to
 `npx -y @liendev/lien@latest` when none is installed (the default case for a
 plugin-only install).
 
+Every `delta-write.sh` run (and every other `lien delta` invocation — manual
+or CI) is recorded locally as one JSONL line in `delta-events.jsonl` next to
+the project's index; nothing leaves the machine. Run `lien stats` for 7/30-day
+counts. Kill switch: `LIEN_DELTA_EVENTS=off`. See
+[docs/architecture/lien-delta.md](../../docs/architecture/lien-delta.md#measuring-the-nudge-loop--delta-eventsjsonl--lien-stats).
+
 ### The Explore agent
 
 This plugin does **not** ship an Explore agent — there's no `agents/`

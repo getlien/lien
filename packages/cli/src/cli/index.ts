@@ -9,6 +9,7 @@ import { indexCommand } from './index-cmd.js';
 import { serveCommand } from './serve.js';
 import { complexityCommand } from './complexity.js';
 import { deltaCommand } from './delta-cmd.js';
+import { statsCommand } from './stats-cmd.js';
 import { configSetCommand, configGetCommand, configListCommand } from './config.js';
 import { pathCommand } from './path-cmd.js';
 import { annotateCommand } from './annotate-cmd.js';
@@ -102,6 +103,14 @@ program
     'Compare the working tree against this ref instead of HEAD (e.g. origin/main in CI)',
   )
   .action(deltaCommand);
+
+program
+  .command('stats')
+  .description(
+    'Local nudge-loop metrics: lien delta runs, crossings, and functions resolved after being flagged',
+  )
+  .option('--format <type>', 'Output format: text, json', 'text')
+  .action(statsCommand);
 
 const configCmd = program
   .command('config')

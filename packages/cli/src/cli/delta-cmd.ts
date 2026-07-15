@@ -17,6 +17,11 @@ import {
   type ComplexityDeltaVerdict,
 } from '@liendev/parser';
 import { getRepoRoot, collectFileChanges, collectFileChange } from './delta-git.js';
+import {
+  recordDeltaEvent,
+  type DeltaEvent,
+  type DeltaFlaggedFunction,
+} from '../utils/delta-events.js';
 
 export interface DeltaOptions {
   soft?: boolean;
@@ -97,6 +102,43 @@ export function resolveDeltaThresholds(
 export function deltaExitCode(result: ComplexityDeltaResult, soft: boolean | undefined): number {
   if (soft) return 0;
   return hasRegressions(result) ? 1 : 0;
+}
+
+/** One (function, metric) row per failing verdict — the local event log's "flagged" list. */
+function flaggedFunctions(result: ComplexityDeltaResult): DeltaFlaggedFunction[] {
+  return result.regressions.flatMap(fn =>
+    fn.metrics
+      .filter(m => m.verdict === 'crossed' || m.verdict === 'new-over-threshold')
+      .map(m => ({
+        filepath: fn.filepath,
+        symbol: fn.parentClass ? `${fn.parentClass}.${fn.symbolName}` : fn.symbolName,
+        metric: m.metricType,
+      })),
+  );
+}
+
+/**
+ * Build the local JSONL event this run will record (see
+ * `../utils/delta-events.ts`). Pure — no I/O, no process state — so it's
+ * unit-testable independent of the filesystem.
+ */
+export function buildDeltaEvent(
+  result: ComplexityDeltaResult,
+  soft: boolean | undefined,
+  exitCode: number,
+  now: Date = new Date(),
+): DeltaEvent {
+  return {
+    timestamp: now.toISOString(),
+    mode: soft ? 'soft' : 'normal',
+    exitCode,
+    counts: {
+      crossings: result.summary.crossed + result.summary.newOverThreshold,
+      newOverThreshold: result.summary.newOverThreshold,
+      improved: result.summary.improved,
+    },
+    flagged: flaggedFunctions(result),
+  };
 }
 
 const VERDICT_DISPLAY: Record<
@@ -296,6 +338,12 @@ export async function deltaCommand(options: DeltaOptions): Promise<void> {
 
   const result = computeComplexityDelta(changes, thresholds);
   const elapsedMs = Date.now() - start;
+  const exitCode = deltaExitCode(result, options.soft);
+
+  // Instrument the command itself (not the shell hook) so manual runs,
+  // hook-driven runs, and CI `--base` runs all count the same way. Local-only
+  // (see ../utils/delta-events.ts); best-effort and never throws.
+  await recordDeltaEvent(rootDir, buildDeltaEvent(result, options.soft, exitCode));
 
   if (options.format === 'json') {
     console.log(JSON.stringify({ ...result, elapsedMs }, null, 2));
@@ -303,5 +351,5 @@ export async function deltaCommand(options: DeltaOptions): Promise<void> {
     console.log(formatDeltaText(result, elapsedMs, options.base ?? 'HEAD'));
   }
 
-  process.exit(deltaExitCode(result, options.soft));
+  process.exit(exitCode);
 }
