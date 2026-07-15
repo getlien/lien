@@ -172,4 +172,40 @@ describe('truncation-from-front capping', () => {
     const events = await readDeltaEvents(rootDir);
     expect(events).toHaveLength(10);
   });
+
+  it('enforces the byte cap even when a few large lines stay well under the line-count cap', async () => {
+    // A handful of oversized events (large flagged[] payloads) can blow the
+    // byte budget while the file has far fewer than KEEP_LINES_AFTER_TRIM
+    // lines — the line-count guard alone must not let this slip through.
+    const filePath = deltaEventsFilePath(rootDir);
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+
+    const bigFlagged = Array.from({ length: 10000 }, (_, i) => ({
+      filepath: `src/file-${i}.ts`,
+      symbol: `fn${i}`,
+      metric: 'cognitive' as const,
+    }));
+    const bigLine = (timestamp: string) =>
+      JSON.stringify(sampleEvent({ timestamp, flagged: bigFlagged }));
+
+    // 5 large lines, comfortably under KEEP_LINES_AFTER_TRIM (2000), but each
+    // one is big enough that a handful together exceed MAX_BYTES_BEFORE_TRIM.
+    const seedTimestamps = [0, 1, 2, 3, 4].map(i => new Date(i).toISOString());
+    const seed = seedTimestamps.map(bigLine).join('\n') + '\n';
+    expect(Buffer.byteLength(seed, 'utf-8')).toBeGreaterThan(MAX_BYTES_BEFORE_TRIM);
+    await fs.writeFile(filePath, seed, 'utf-8');
+
+    const marker = sampleEvent({ timestamp: new Date(100).toISOString(), exitCode: 1 });
+    await recordDeltaEvent(rootDir, marker);
+
+    const stats = await fs.stat(filePath);
+    expect(stats.size).toBeLessThanOrEqual(MAX_BYTES_BEFORE_TRIM);
+
+    const events = await readDeltaEvents(rootDir);
+    expect(events.length).toBeLessThan(seedTimestamps.length + 1);
+    // The newest event (just appended) must survive.
+    expect(events.at(-1)).toEqual(marker);
+    // The oldest seeded event must have been dropped.
+    expect(events.some(e => e.timestamp === seedTimestamps[0])).toBe(false);
+  });
 });

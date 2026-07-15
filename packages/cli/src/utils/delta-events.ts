@@ -77,16 +77,33 @@ export async function recordDeltaEvent(rootDir: string, event: DeltaEvent): Prom
   }
 }
 
-/** Truncate-from-front: keep only the newest KEEP_LINES_AFTER_TRIM lines once oversized. */
+function byteSizeOf(lines: string[]): number {
+  return Buffer.byteLength(`${lines.join('\n')}\n`, 'utf-8');
+}
+
+/**
+ * Truncate-from-front once the log exceeds the byte cap: first drop down to
+ * the newest KEEP_LINES_AFTER_TRIM lines (the cheap, common case), then — since
+ * a handful of unusually large events can themselves exceed the byte cap while
+ * staying well under the line-count cap — keep dropping the oldest surviving
+ * line until back under budget. Never drops below a single line, so one
+ * oversized event stays visible rather than silently vanishing (that residual
+ * line can still exceed the cap only in the pathological case of one event
+ * whose own JSON is larger than the cap).
+ */
 async function trimIfOversized(filePath: string): Promise<void> {
   const stats = await fs.stat(filePath).catch(() => null);
   if (!stats || stats.size <= MAX_BYTES_BEFORE_TRIM) return;
 
   const content = await fs.readFile(filePath, 'utf-8');
   const lines = content.split('\n').filter(line => line.length > 0);
-  if (lines.length <= KEEP_LINES_AFTER_TRIM) return;
 
-  const kept = lines.slice(-KEEP_LINES_AFTER_TRIM);
+  let kept = lines.length > KEEP_LINES_AFTER_TRIM ? lines.slice(-KEEP_LINES_AFTER_TRIM) : lines;
+  while (kept.length > 1 && byteSizeOf(kept) > MAX_BYTES_BEFORE_TRIM) {
+    kept = kept.slice(1);
+  }
+
+  if (kept.length === lines.length) return; // nothing to trim
   await fs.writeFile(filePath, `${kept.join('\n')}\n`, 'utf-8');
 }
 
