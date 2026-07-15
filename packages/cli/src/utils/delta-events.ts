@@ -108,10 +108,36 @@ async function trimIfOversized(filePath: string): Promise<void> {
 }
 
 /**
+ * Shape-validate a parsed JSONL line before trusting it as a `DeltaEvent`.
+ * Valid JSON with the wrong shape (e.g. a torn write that dropped `flagged`,
+ * or a hand-edited line) must not crash a downstream consumer like
+ * `computeDeltaWindowStats`'s `e.flagged.map(...)` — it's treated the same as
+ * a JSON.parse failure: skipped, not thrown.
+ */
+function isValidDeltaEvent(value: unknown): value is DeltaEvent {
+  if (typeof value !== 'object' || value === null) return false;
+  const v = value as Record<string, unknown>;
+  if (typeof v.timestamp !== 'string') return false;
+  if (v.mode !== 'normal' && v.mode !== 'soft') return false;
+  if (typeof v.exitCode !== 'number') return false;
+  if (typeof v.counts !== 'object' || v.counts === null) return false;
+  const counts = v.counts as Record<string, unknown>;
+  if (
+    typeof counts.crossings !== 'number' ||
+    typeof counts.newOverThreshold !== 'number' ||
+    typeof counts.improved !== 'number'
+  ) {
+    return false;
+  }
+  return Array.isArray(v.flagged);
+}
+
+/**
  * Read every recorded event for `rootDir`, oldest first. A missing log (never
  * ran `lien delta` here, or the kill switch has always been on) yields an
- * empty array. A malformed line (e.g. a torn write from a crash mid-append) is
- * skipped rather than failing the whole read.
+ * empty array. A malformed line — invalid JSON, or valid JSON with the wrong
+ * shape (e.g. a torn write from a crash mid-append) — is skipped rather than
+ * failing the whole read or crashing a downstream consumer.
  */
 export async function readDeltaEvents(rootDir: string): Promise<DeltaEvent[]> {
   let content: string;
@@ -125,7 +151,8 @@ export async function readDeltaEvents(rootDir: string): Promise<DeltaEvent[]> {
   for (const line of content.split('\n')) {
     if (line.trim().length === 0) continue;
     try {
-      events.push(JSON.parse(line) as DeltaEvent);
+      const parsed: unknown = JSON.parse(line);
+      if (isValidDeltaEvent(parsed)) events.push(parsed);
     } catch {
       // Skip a torn/corrupted line rather than failing the whole read.
     }

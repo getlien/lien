@@ -119,6 +119,25 @@ describe('recordDeltaEvent + readDeltaEvents', () => {
     expect(events[1].exitCode).toBe(1);
   });
 
+  it('skips a line that is valid JSON but the wrong shape, instead of crashing', async () => {
+    const good = sampleEvent();
+    await recordDeltaEvent(rootDir, good);
+
+    const filePath = deltaEventsFilePath(rootDir);
+    // Valid JSON, but missing `flagged` (and `counts` is empty) — a plausible
+    // torn-write shape that must not reach a downstream `.flagged.map(...)`.
+    await fs.appendFile(
+      filePath,
+      `${JSON.stringify({ timestamp: new Date().toISOString(), counts: {} })}\n`,
+      'utf-8',
+    );
+    await recordDeltaEvent(rootDir, sampleEvent({ exitCode: 1 }));
+
+    const events = await readDeltaEvents(rootDir);
+    expect(events).toHaveLength(2);
+    expect(events.every(e => Array.isArray(e.flagged))).toBe(true);
+  });
+
   it('LIEN_DELTA_EVENTS=off disables recording entirely (kill switch)', async () => {
     process.env.LIEN_DELTA_EVENTS = 'off';
     await recordDeltaEvent(rootDir, sampleEvent());
