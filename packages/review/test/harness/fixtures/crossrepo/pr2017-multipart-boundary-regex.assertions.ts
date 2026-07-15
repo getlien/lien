@@ -86,6 +86,7 @@ const assertions: FixtureAssertions = {
     '%-formatting without re.escape(), so a boundary containing a regex metacharacter (e.g. trailing ' +
     '$, or ., +, (, )) is misinterpreted as regex syntax and breaks parsing of that request',
   rule: 'edge-case-sweep',
+  ruleCandidates: ['edge-case-sweep', 'structural-analysis'],
   expect: (result, h) => {
     const ruleCandidates = ['edge-case-sweep', 'structural-analysis'];
     if (!result.findings.some(f => f.ruleId && ruleCandidates.includes(f.ruleId))) {

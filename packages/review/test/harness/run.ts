@@ -28,11 +28,15 @@ import { promises as fs } from 'node:fs';
 import { dirname, basename, resolve, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { BUILTIN_RULES, buildTriggerContext, selectRules } from '../../src/plugins/agent/rules.js';
+
 import type { FixtureAssertions } from './assertions.js';
 import { vote, calibrate } from './voting.js';
 import type { AssertedRun } from './voting.js';
 import type { RunnerOptions } from './runner.js';
 import { reportVote, reportCalibrate } from './reporter.js';
+import { loadFixture } from './fixture-loader.js';
+import { checkRuleCoverage } from './rule-coverage.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURES_ROOT = resolve(HERE, 'fixtures');
@@ -227,6 +231,38 @@ async function loadAssertions(path: string): Promise<FixtureAssertions> {
   return mod.default;
 }
 
+/**
+ * Preflight the WHOLE discovered batch before any fixture runs, so a bad
+ * assertion in fixture N is caught before fixtures 1..N-1 have already spent
+ * OpenRouter money. Returns one human-readable violation per offending
+ * fixture (a load failure counts as a violation of its own); an empty array
+ * means every fixture's assertion targets a rule that's actually active for
+ * its trigger context. See `rule-coverage.ts` for the #724 background.
+ */
+async function validateFixtureRuleCoverage(fixtures: FixturePair[]): Promise<string[]> {
+  const violations: string[] = [];
+  for (const f of fixtures) {
+    const label = `${f.rule}/${f.name}`;
+    try {
+      const [assertions, ctx] = await Promise.all([
+        loadAssertions(f.assertionsPath),
+        loadFixture(f.fixturePath),
+      ]);
+      const activeRuleIds = selectRules(BUILTIN_RULES, buildTriggerContext(ctx)).active.map(
+        r => r.id,
+      );
+      const violation = checkRuleCoverage(assertions, activeRuleIds);
+      if (violation) violations.push(`${label}: ${violation}`);
+    } catch (err) {
+      violations.push(
+        `${label}: failed to load for rule-coverage preflight — ` +
+          (err instanceof Error ? err.message : String(err)),
+      );
+    }
+  }
+  return violations;
+}
+
 function requireApiKey(): string {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
@@ -345,6 +381,17 @@ function printSummary(
   }
 }
 
+/** Exits the process (code 2) if any discovered fixture fails the rule-coverage preflight. */
+async function abortOnRuleCoverageViolations(fixtures: FixturePair[]): Promise<void> {
+  const violations = await validateFixtureRuleCoverage(fixtures);
+  if (violations.length === 0) return;
+  console.error(
+    `Rule-coverage preflight failed for ${violations.length} fixture(s) — aborting before any paid votes:`,
+  );
+  for (const v of violations) console.error(`  - ${v}`);
+  process.exit(2);
+}
+
 async function main(): Promise<void> {
   const flags = parseFlags(process.argv.slice(2));
   const apiKey = requireApiKey();
@@ -353,6 +400,7 @@ async function main(): Promise<void> {
     console.error('No fixtures found.');
     process.exit(2);
   }
+  await abortOnRuleCoverageViolations(fixtures);
 
   const opts: RunnerOptions = { apiKey, model: flags.model };
   if (flags.model) console.error(`[harness] model: ${flags.model}`);

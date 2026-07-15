@@ -71,6 +71,26 @@ export function expectRuleFired(ruleId: string, result: HarnessResult): void {
   }
 }
 
+/**
+ * Pass if ANY of the named rules fired. Use when a bug could plausibly be
+ * surfaced by more than one rule (e.g. an off-by-one index caught by either
+ * `edge-case-sweep` or `boundary-change` depending on which one is active
+ * for a given fixture's trigger context) — asserting on a single rule id
+ * fails correct runs where a sibling rule reasonably fires instead. Pair
+ * with `FixtureAssertions.ruleCandidates` so the harness's rule-coverage
+ * preflight (`rule-coverage.ts`) recognizes the OR-across-rules intent.
+ */
+export function expectAnyRuleFired(ruleIds: string[], result: HarnessResult): void {
+  const fired = result.findings.some(f => f.ruleId && ruleIds.includes(f.ruleId));
+  if (!fired) {
+    const observed = result.findings.map(f => f.ruleId ?? '(none)').join(', ') || '(no findings)';
+    throw new HarnessAssertionError(
+      `Tier 1: expected any of [${ruleIds.join(', ')}] to fire. Got: ${observed}`,
+      1,
+    );
+  }
+}
+
 export function expectEmpty(result: HarnessResult): void {
   if (result.findings.length > 0) {
     throw new HarnessAssertionError(
@@ -157,6 +177,7 @@ export function expectFindingMentions(keywords: string[], result: HarnessResult)
 
 export const harness = {
   expectRuleFired,
+  expectAnyRuleFired,
   expectEmpty,
   expectFindingsCount,
   expectToolCalled,
@@ -173,4 +194,14 @@ export interface FixtureAssertions {
   votes?: number;
   passThreshold?: number;
   tags?: string[];
+  /**
+   * Additional rule ids under which a correct finding is also accepted —
+   * for fixtures whose `expect` closure checks `rule` OR one of these
+   * (e.g. a bug that several rules could plausibly surface). Declaring the
+   * candidates here lets the harness's rule-coverage preflight
+   * (`rule-coverage.ts`) recognize the closure's OR-across-rules logic
+   * instead of false-flagging `rule` as unpassable whenever it isn't the
+   * active rule that happens to fire.
+   */
+  ruleCandidates?: string[];
 }

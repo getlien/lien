@@ -95,6 +95,7 @@ const assertions: FixtureAssertions = {
     "(each one index too low, colliding with the preceding parameter's slot) instead of " +
     'args[3]/args[4]/args[5], silently scrambling which value lands in which parameter',
   rule: 'boundary-change',
+  ruleCandidates: ['boundary-change', 'edge-case-sweep', 'structural-analysis'],
   expect: (result, h) => {
     const ruleCandidates = ['boundary-change', 'edge-case-sweep', 'structural-analysis'];
     if (!result.findings.some(f => f.ruleId && ruleCandidates.includes(f.ruleId))) {

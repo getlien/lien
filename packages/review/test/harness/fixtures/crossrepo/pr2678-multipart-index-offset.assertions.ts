@@ -83,6 +83,7 @@ const assertions: FixtureAssertions = {
     'absolute index (data_end/del_index) into the unsliced data buffer, truncating parsed data short ' +
     'whenever data_start > 0 and leaking a spurious newline into the next chunk',
   rule: 'edge-case-sweep',
+  ruleCandidates: ['edge-case-sweep', 'structural-analysis', 'boundary-change'],
   expect: (result, h) => {
     const ruleCandidates = ['edge-case-sweep', 'structural-analysis', 'boundary-change'];
     if (!result.findings.some(f => f.ruleId && ruleCandidates.includes(f.ruleId))) {

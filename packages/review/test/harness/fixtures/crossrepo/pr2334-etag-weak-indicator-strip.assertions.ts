@@ -95,6 +95,7 @@ const assertions: FixtureAssertions = {
     'as a character set, not a literal prefix, so tags ending in W, /, or space get ' +
     'over-trimmed instead of just having the W/ prefix removed',
   rule: 'edge-case-sweep',
+  ruleCandidates: ['edge-case-sweep', 'boundary-change', 'structural-analysis'],
   expect: (result, h) => {
     const ruleCandidates = ['edge-case-sweep', 'boundary-change', 'structural-analysis'];
     if (!result.findings.some(f => f.ruleId && ruleCandidates.includes(f.ruleId))) {
