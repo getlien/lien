@@ -74,6 +74,11 @@ If the agent review's main pass never runs at all (every LLM provider request fa
 
 On a `pull_request` event from a fork, GitHub forces the built-in `GITHUB_TOKEN` to read-only, so Lien can still review the code but can't post inline comments (findings still show up as workflow annotations and in the step summary). To get inline comments on fork PRs, opt into the `pull_request_target` variant documented in [`packages/action/README.md`](https://github.com/getlien/lien/blob/main/packages/action/README.md#fork-prs) — read the security note there first.
 
+Every rule above ships only after clearing a real-PR fixture harness — see
+[How We Know Lien Review Works](/guide/review-harness) for the methodology
+and [Review Evidence](/guide/review-evidence) for results on codebases Lien
+wasn't tuned on.
+
 ## Relationship to the MCP tools
 
 Lien Review is a separate product surface from the [MCP tools](/guide/mcp-tools): the MCP tools run locally inside your AI assistant, while Lien Review runs in CI against a pull request. Both share the same underlying AST parsing and complexity analysis (`@liendev/parser`), but Lien Review needs no local index and no `lien init` — it's a drop-in GitHub Action.

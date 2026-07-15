@@ -54,6 +54,7 @@ export default withMermaid(
               { text: 'CLI Commands', link: '/guide/cli-commands' },
               { text: 'Lien Review', link: '/guide/lien-review' },
               { text: 'Review Evidence', link: '/guide/review-evidence' },
+              { text: 'Review Harness', link: '/guide/review-harness' },
             ]
           },
         ]
