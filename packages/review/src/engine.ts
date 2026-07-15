@@ -57,12 +57,19 @@ export interface PresentDelivery {
   outOfDiffReviewPosted: boolean | null;
 }
 
-/** Zero-value delivery, for paths where `present()` never ran (e.g. it threw). */
+/**
+ * Delivery for the sole path that uses this: `presentFindings` in
+ * review-pr.ts, when `engine.present()` itself throws. This is a delivery
+ * ATTEMPT that crashed, not one that never happened — `descriptionBadgeUpdated`
+ * and `outOfDiffReviewPosted` are `false` (attempted-and-failed), not `null`
+ * (never attempted): `computeVerdict` treats `null` as nothing-to-report, so
+ * `null` here would let a catastrophic present() failure attest 'delivered'.
+ */
 export const EMPTY_DELIVERY: PresentDelivery = {
   annotationsEmitted: 0,
   inlineComments: { attempted: 0, posted: 0, dropped: 0, deduped: 0 },
-  descriptionBadgeUpdated: null,
-  outOfDiffReviewPosted: null,
+  descriptionBadgeUpdated: false,
+  outOfDiffReviewPosted: false,
 };
 
 /** Mutable accumulator threaded through a single `present()` call. */

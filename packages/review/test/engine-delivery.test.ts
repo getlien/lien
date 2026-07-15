@@ -6,7 +6,8 @@
  * attestation design identified (see `.wip/attestation-design.md` §1).
  */
 import { describe, it, expect, vi } from 'vitest';
-import { ReviewEngine } from '../src/engine.js';
+import { ReviewEngine, EMPTY_DELIVERY } from '../src/engine.js';
+import { computeVerdict } from '../src/attestation.js';
 import { createTestReport, silentLogger } from '../src/test-helpers.js';
 import type {
   ReviewPlugin,
@@ -259,5 +260,32 @@ describe('ReviewEngine.present() delivery truth', () => {
 
       expect(result.delivery.descriptionBadgeUpdated).toBe(false);
     });
+  });
+});
+
+// Regression coverage for a finding Lien Review's own dogfooded check caught
+// on this PR: `presentFindings` (review-pr.ts) falls back to EMPTY_DELIVERY
+// when `engine.present()` itself throws — a delivery ATTEMPT that crashed,
+// not one that never happened. Its two nullable fields must be `false`
+// (attempted-and-failed), not `null` (never attempted), or a catastrophic
+// present() failure would attest 'delivered' via computeVerdict's null
+// carve-out.
+describe('EMPTY_DELIVERY', () => {
+  it('reports description/out-of-diff delivery as failed, not "not attempted"', () => {
+    expect(EMPTY_DELIVERY.descriptionBadgeUpdated).toBe(false);
+    expect(EMPTY_DELIVERY.outOfDiffReviewPosted).toBe(false);
+  });
+
+  it('computes a degraded verdict, not "delivered", from its own shape', () => {
+    const verdict = computeVerdict({
+      pipelineFailed: false,
+      providerFailure: false,
+      mainPass: { name: 'main', ran: false, stopReason: 'not_run', neverRan: false },
+      budget: { allocatedTokens: 0, spentTokens: 0, starved: false },
+      inlineComments: EMPTY_DELIVERY.inlineComments,
+      descriptionBadgeUpdated: EMPTY_DELIVERY.descriptionBadgeUpdated,
+      outOfDiffReviewPosted: EMPTY_DELIVERY.outOfDiffReviewPosted,
+    });
+    expect(verdict).toBe('degraded:delivery_incomplete');
   });
 });
