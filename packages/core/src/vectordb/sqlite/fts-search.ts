@@ -124,7 +124,20 @@ export function applyStructuralBoost(
 /** A scored FTS row plus the internal ratio the boost re-sort needs — never returned as-is. */
 type RankedResult = SearchResult & { ratio: number };
 
-/** Score one FTS row into a `RankedResult` (bm25 ratio/relevance/score + dependentCount metadata). */
+/**
+ * Score one FTS row into a `RankedResult` (bm25 ratio/relevance/score + dependentCount metadata).
+ *
+ * `score` and `relevance` are deliberately computed from the PURE bm25 `ratio`,
+ * never from the boosted value used for ordering — they answer "how good is
+ * this lexical match", a meaning that would collapse if a highly-connected
+ * but weakly-matching file could inflate its own `relevance` band. `dependentCount`
+ * is in the metadata precisely so a caller who wants the actual sort key can
+ * derive it themselves (the formula is documented on `applyStructuralBoost`
+ * and in the search_code tool description): the list order can therefore
+ * legitimately show a `relevant` result above a `highly_relevant` one when
+ * structural ranking is enabled — that's not a bug, see the caveat on
+ * `STRUCTURAL_BOOST_ALPHA`.
+ */
 function scoreRow(
   row: FtsRow,
   rankBest: number,
@@ -158,6 +171,11 @@ function scoreRow(
  * `structuralRankingEnabled()` is false, in which case the SQL's pure bm25
  * order is preserved untouched. `Array.prototype.sort` is stable (ES2019+),
  * so equal-boost rows keep their original bm25 order either way.
+ *
+ * Each result's own `score`/`relevance` fields are NOT recomputed from the
+ * boost (see `scoreRow`'s doc comment) — they stay pure bm25, so the list
+ * order and each item's own relevance label can legitimately disagree when
+ * structural ranking promotes a well-connected file.
  */
 export function keywordSearch(
   db: Database.Database,

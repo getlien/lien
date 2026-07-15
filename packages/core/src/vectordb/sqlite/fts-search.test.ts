@@ -264,4 +264,41 @@ describe('SqliteBackend.search (FTS5)', () => {
       }
     },
   );
+
+  it(
+    "a result's own score/relevance always describe pure bm25 quality, even when a " +
+      'lower-quality-but-popular result outranks it in the returned order',
+    async () => {
+      const TERM = 'zzzscorepin';
+      // Strongest possible bm25 match: the term repeated, nothing else competing.
+      await insert(db, chunk('strong.ts', `${TERM} ${TERM} ${TERM} ${TERM} ${TERM}`));
+      // A couple of mentions diluted among unrelated filler — a real but genuinely
+      // weaker ('relevant', not 'highly_relevant') match.
+      await insert(db, chunk('weak.ts', `${TERM} ${TERM} alpha bravo charlie delta echo`));
+      // Give weak.ts enough dependents (near MAX_STRUCTURAL_BOOST_MULTIPLIER's
+      // ~1.8x at 200) that its boosted rank can overtake strong.ts's — which has
+      // none, so its own boost multiplier stays 1x (unchanged from pure bm25).
+      for (let i = 0; i < 200; i++) {
+        await insert(
+          db,
+          chunk(`importer${i}.ts`, `unrelated filler ${i}`, { imports: ['./weak'] }),
+        );
+      }
+      await db.reconnect();
+
+      const results = await db.search(TERM, 5);
+      const strong = results.find(r => r.metadata.file === 'strong.ts')!;
+      const weak = results.find(r => r.metadata.file === 'weak.ts')!;
+
+      // Precondition for this test to be meaningful: weak really is a weaker
+      // lexical match than strong, on its own terms.
+      expect(strong.relevance).toBe('highly_relevant');
+      expect(weak.relevance).not.toBe('highly_relevant');
+      expect(weak.score).toBeGreaterThan(strong.score);
+
+      // Yet the popularity boost puts weak.ts AHEAD of strong.ts in the returned order —
+      // list order and each result's own relevance label legitimately disagree here.
+      expect(results.indexOf(weak)).toBeLessThan(results.indexOf(strong));
+    },
+  );
 });
