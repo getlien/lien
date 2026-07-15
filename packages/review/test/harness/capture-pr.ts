@@ -205,8 +205,11 @@ function parseArgs(argv: string[]): ParsedArgs {
  * miss/characterization fixture pinned to the earlier, buggy commit.
  */
 function stripLienStatsBadge(body: string): string {
-  const idx = body.indexOf('<!-- lien-stats -->');
-  return idx === -1 ? body : body.slice(0, idx).trimEnd();
+  // Matches both the legacy `<!-- lien-stats -->` marker and the
+  // parameterized `<!-- lien:{sectionId} -->` form emitted by
+  // `sectionMarkers()` in `github-api.ts`.
+  const match = body.match(/<!-- lien(?:-stats|:\S+) -->/);
+  return match ? body.slice(0, match.index).trimEnd() : body;
 }
 
 /** Short or full git commit SHA — 7–40 hex chars, nothing else. */
@@ -461,8 +464,9 @@ async function main(): Promise<void> {
   if (shaOverride) {
     assertShaInPrRange(meta, prNumber, headSha);
     console.error(`[capture] overriding head: ${meta.headRefOid} -> ${headSha}`);
-    const sanitized = stripLienStatsBadge(meta.body ?? '');
-    if (sanitized !== (meta.body ?? '')) {
+    const originalBody = meta.body ?? '';
+    const sanitized = stripLienStatsBadge(originalBody);
+    if (sanitized !== originalBody) {
       console.error('[capture] stripped lien-stats badge (reflects a later commit than --sha)');
     }
     meta.body = sanitized;
