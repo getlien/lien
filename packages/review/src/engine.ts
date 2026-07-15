@@ -42,6 +42,41 @@ export interface EngineOptions {
   verbose?: boolean;
 }
 
+/**
+ * What `present()` actually delivered, as ground truth rather than "attempted"
+ * counts — feeds the delivery attestation. Populated from the SAME
+ * `PostReviewResult` the GitHub API call returns, not from the size of the
+ * batch a plugin asked to post.
+ */
+export interface PresentDelivery {
+  annotationsEmitted: number;
+  inlineComments: { attempted: number; posted: number; dropped: number; deduped: number };
+  descriptionBadgeUpdated: boolean;
+  /** null when no plugin attempted an out-of-diff review comment this run. */
+  outOfDiffReviewPosted: boolean | null;
+}
+
+/** Zero-value delivery, for paths where `present()` never ran (e.g. it threw). */
+export const EMPTY_DELIVERY: PresentDelivery = {
+  annotationsEmitted: 0,
+  inlineComments: { attempted: 0, posted: 0, dropped: 0, deduped: 0 },
+  descriptionBadgeUpdated: false,
+  outOfDiffReviewPosted: null,
+};
+
+/** Mutable accumulator threaded through a single `present()` call. */
+interface DeliveryTracker {
+  inlineComments: { attempted: number; posted: number; dropped: number; deduped: number };
+  outOfDiffReviewPosted: boolean | null;
+}
+
+function createDeliveryTracker(): DeliveryTracker {
+  return {
+    inlineComments: { attempted: 0, posted: 0, dropped: 0, deduped: 0 },
+    outOfDiffReviewPosted: null,
+  };
+}
+
 export class ReviewEngine {
   private plugins: ReviewPlugin[] = [];
   private readonly verbose: boolean;
@@ -142,6 +177,7 @@ export class ReviewEngine {
 
       if (skipReason) {
         if (this.verbose) context.logger.debug(`[engine] Skipping "${plugin.id}" — ${skipReason}`);
+        context.reportSkip?.({ plugin: plugin.id, reason: skipReason });
         continue;
       }
 
@@ -166,13 +202,18 @@ export class ReviewEngine {
     findings: ReviewFinding[],
     adapterContext: AdapterContext,
     opts?: { pluginFilter?: string; checkRunId?: number; skipCheckRun?: boolean },
-  ): Promise<{ conclusion: 'success' | 'failure' | 'neutral'; summary: string }> {
+  ): Promise<{
+    conclusion: 'success' | 'failure' | 'neutral';
+    summary: string;
+    delivery: PresentDelivery;
+  }> {
     const octokit = adapterContext.octokit as Octokit | undefined;
     const pr = adapterContext.pr;
     const pendingAnnotations: CheckAnnotation[] = [];
     const debugLog: string[] = [];
     const summarySections: TaggedSection[] = [];
     const descriptionParts = new Map<string, string>();
+    const deliveryTracker = createDeliveryTracker();
 
     const checkRunId = opts?.skipCheckRun
       ? undefined
@@ -185,6 +226,7 @@ export class ReviewEngine {
       summarySections,
       descriptionParts,
       debugLog,
+      deliveryTracker,
     );
     await dispatchPresent(
       this.plugins,
@@ -196,10 +238,21 @@ export class ReviewEngine {
     );
 
     // Compose unified PR description from all plugin fragments
-    await finalizeDescription(descriptionParts, octokit, pr, adapterContext.logger);
+    const descriptionBadgeUpdated = await finalizeDescription(
+      descriptionParts,
+      octokit,
+      pr,
+      adapterContext.logger,
+    );
+    const delivery: PresentDelivery = {
+      annotationsEmitted: pendingAnnotations.length,
+      inlineComments: deliveryTracker.inlineComments,
+      descriptionBadgeUpdated,
+      outOfDiffReviewPosted: deliveryTracker.outOfDiffReviewPosted,
+    };
 
     if (octokit && pr && checkRunId != null) {
-      return await finalizePresentation(
+      const presented = await finalizePresentation(
         octokit,
         pr,
         checkRunId,
@@ -209,6 +262,7 @@ export class ReviewEngine {
         debugLog,
         adapterContext.logger,
       );
+      return { ...presented, delivery };
     }
 
     // No check run was finalized (no octokit/pr/checkRunId), but callers still
@@ -217,6 +271,7 @@ export class ReviewEngine {
     return {
       conclusion: determineConclusion(findings),
       summary: ordered.length > 0 ? ordered.join('\n\n') : buildCheckSummary(findings),
+      delivery,
     };
   }
 }
@@ -396,8 +451,8 @@ async function finalizeDescription(
   octokit: Octokit | undefined,
   pr: PRContext | undefined,
   logger: Logger,
-): Promise<void> {
-  if (!octokit || !pr || descriptionParts.size === 0) return;
+): Promise<boolean> {
+  if (!octokit || !pr || descriptionParts.size === 0) return false;
 
   const ordered: string[] = [];
   for (const id of PLUGIN_ORDER) {
@@ -411,9 +466,13 @@ async function finalizeDescription(
   const body = ordered.join('\n\n');
   const markdown = `### Lien Review\n\n${body}`;
 
-  await updatePRDescription(octokit, pr, markdown, logger).catch(err =>
-    logger.warning(`Failed to update PR description: ${err instanceof Error ? err.message : err}`),
-  );
+  try {
+    await updatePRDescription(octokit, pr, markdown, logger);
+    return true;
+  } catch (err) {
+    logger.warning(`Failed to update PR description: ${err instanceof Error ? err.message : err}`);
+    return false;
+  }
 }
 
 async function ensureCheckRun(
@@ -504,6 +563,44 @@ async function finalizePresentation(
 // PresentContext Builder
 // ---------------------------------------------------------------------------
 
+/** Wrap `postPluginInlineComments` to also accumulate its outcome into the delivery tracker. */
+function createPostInlineComments(
+  octokit: Octokit,
+  pr: PRContext,
+  logger: Logger,
+  deliveryTracker: DeliveryTracker,
+): NonNullable<PresentContext['postInlineComments']> {
+  return async (findings, summaryBody) => {
+    const result = await postPluginInlineComments(octokit, pr, findings, summaryBody, logger);
+    deliveryTracker.inlineComments.attempted += result.attempted;
+    deliveryTracker.inlineComments.posted += result.posted;
+    deliveryTracker.inlineComments.dropped += result.dropped;
+    deliveryTracker.inlineComments.deduped += result.deduped;
+    return result;
+  };
+}
+
+/** Wrap the out-of-diff review-comment post so its success/failure reaches the delivery tracker. */
+function createPostReviewComment(
+  octokit: Octokit,
+  pr: PRContext,
+  logger: Logger,
+  deliveryTracker: DeliveryTracker,
+): NonNullable<PresentContext['postReviewComment']> {
+  return async body => {
+    try {
+      await postPRReview(octokit, pr, [], body, logger, 'COMMENT');
+      deliveryTracker.outOfDiffReviewPosted = true;
+      return { posted: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warning(`Failed to post out-of-diff review comment: ${message}`);
+      deliveryTracker.outOfDiffReviewPosted = false;
+      return { posted: false, error: message };
+    }
+  };
+}
+
 function buildPresentContext(
   adapterContext: AdapterContext,
   octokit: Octokit | undefined,
@@ -512,6 +609,7 @@ function buildPresentContext(
   summarySections: TaggedSection[],
   descriptionParts: Map<string, string>,
   debugLog: string[],
+  deliveryTracker: DeliveryTracker,
 ): PresentContext {
   const logger = adapterContext.logger;
   const debugLogger = createDebugCapturingLogger(logger, debugLog);
@@ -534,16 +632,9 @@ function buildPresentContext(
             updatePRDescription(octokit, pr, markdown, logger, sectionId)
         : undefined,
     postInlineComments:
-      octokit && pr
-        ? (findings, summaryBody) =>
-            postPluginInlineComments(octokit, pr, findings, summaryBody, logger)
-        : undefined,
+      octokit && pr ? createPostInlineComments(octokit, pr, logger, deliveryTracker) : undefined,
     postReviewComment:
-      octokit && pr
-        ? async body => {
-            await postPRReview(octokit, pr, [], body, logger, 'COMMENT');
-          }
-        : undefined,
+      octokit && pr ? createPostReviewComment(octokit, pr, logger, deliveryTracker) : undefined,
     minimizeOutdatedComments:
       octokit && pr ? marker => minimizeOutdatedComments(octokit, pr, marker, logger) : undefined,
   };
@@ -553,21 +644,35 @@ function buildPresentContext(
 // Inline Comment Posting
 // ---------------------------------------------------------------------------
 
+/**
+ * Ground truth for one `postInlineComments` call, feeding both the
+ * plugin-facing `{posted, skipped}` contract and the delivery attestation.
+ * Invariant: `attempted === posted + dropped + deduped`.
+ */
+interface InlinePostOutcome {
+  posted: number;
+  skipped: number;
+  attempted: number;
+  dropped: number;
+  deduped: number;
+}
+
 async function postPluginInlineComments(
   octokit: Octokit,
   pr: PRContext,
   findings: ReviewFinding[],
   summaryBody: string,
   logger: Logger,
-): Promise<{ posted: number; skipped: number }> {
-  if (findings.length === 0) return { posted: 0, skipped: 0 };
+): Promise<InlinePostOutcome> {
+  const attempted = findings.length;
+  if (attempted === 0) return { posted: 0, skipped: 0, attempted: 0, dropped: 0, deduped: 0 };
 
   const pluginId = findings[0].pluginId;
   if (findings.some(f => f.pluginId !== pluginId)) {
     logger.warning(
       `postInlineComments: mixed pluginIds in findings, skipping to avoid mis-attribution`,
     );
-    return { posted: 0, skipped: findings.length };
+    return { posted: 0, skipped: attempted, attempted, dropped: attempted, deduped: 0 };
   }
 
   const markerPrefix = `${PLUGIN_MARKER_PREFIX}${pluginId}:`;
@@ -575,10 +680,10 @@ async function postPluginInlineComments(
   const diffResult = await filterToDiffLines(octokit, pr, findings, logger);
   if (!diffResult) {
     logger.info(
-      `postInlineComments(${pluginId}): posting 0 of ${findings.length} finding(s) ` +
+      `postInlineComments(${pluginId}): posting 0 of ${attempted} finding(s) ` +
         `(diff fetch failed — see warning above)`,
     );
-    return { posted: 0, skipped: findings.length };
+    return { posted: 0, skipped: attempted, attempted, dropped: attempted, deduped: 0 };
   }
 
   const { inDiff, outOfDiffCount } = diffResult;
@@ -604,10 +709,12 @@ async function postPluginInlineComments(
 
   const skipped = outOfDiffCount + dedupSkipped;
   logger.info(
-    `postInlineComments(${pluginId}): posting ${toPost.length} of ${findings.length} finding(s) ` +
+    `postInlineComments(${pluginId}): posting ${toPost.length} of ${attempted} finding(s) ` +
       `(${outOfDiffCount} outside diff, ${dedupSkipped} already commented)`,
   );
-  if (toPost.length === 0) return { posted: 0, skipped };
+  if (toPost.length === 0) {
+    return { posted: 0, skipped, attempted, dropped: outOfDiffCount, deduped: dedupSkipped };
+  }
 
   const { posted, dropped } = await postPRReview(
     octokit,
@@ -617,7 +724,13 @@ async function postPluginInlineComments(
     logger,
     'COMMENT',
   );
-  return { posted, skipped: skipped + dropped.length };
+  return {
+    posted,
+    skipped: skipped + dropped.length,
+    attempted,
+    dropped: outOfDiffCount + dropped.length,
+    deduped: dedupSkipped,
+  };
 }
 
 /** Fetch diff lines and filter findings to those within the diff. Returns null on API failure. */

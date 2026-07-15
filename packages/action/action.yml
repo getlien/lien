@@ -65,6 +65,14 @@ outputs:
     description: 'Total number of findings produced.'
   error-count:
     description: 'Number of error-severity findings.'
+  attestation:
+    description: >-
+      JSON-encoded delivery attestation (v1): provider health, token budget,
+      what was actually delivered (inline comments posted/dropped,
+      annotations, PR description badge), review scope, and an overall
+      verdict (delivered / degraded:<reason> / failed:<reason>). Observational
+      only in v1 — it does not change the exit code beyond the existing
+      provider-never-ran behavior.
 
 runs:
   using: 'docker'

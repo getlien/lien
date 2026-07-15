@@ -112,6 +112,7 @@ export async function finishRun(
     conclusion: result.conclusion,
     findingsCount: result.findings.length,
     errorCount,
+    attestation: result.attestation,
   });
 
   // Read-only fork token (a `pull_request` from a fork): inline comments can't
@@ -158,6 +159,9 @@ async function main(): Promise<void> {
   let result;
   try {
     result = await reviewPullRequest(ctx);
+    // Full attestation JSON for scripted consumption (e.g. `gh run view --log`
+    // grep); the step summary/PR-description renderings stay short by design.
+    actionLogger.info(`Attestation: ${JSON.stringify(result.attestation)}`);
   } finally {
     endGroup();
   }

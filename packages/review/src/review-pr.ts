@@ -23,6 +23,7 @@ import type {
   ComplexityReport,
   ComplexityDelta,
   AdapterContext,
+  PresentDelivery,
 } from './index.js';
 import {
   runComplexityAnalysis,
@@ -36,10 +37,20 @@ import {
   ComplexityPlugin,
   AgentReviewPlugin,
   hasProviderFailure,
+  updatePRDescription,
+  EMPTY_DELIVERY,
 } from './index.js';
 import type { CodeChunk } from '@liendev/parser';
 import { performChunkOnlyIndex, analyzeComplexityFromChunks } from '@liendev/parser';
 import { reviewTokenBudgetMultiplier, MAX_REVIEW_TOKEN_BUDGET } from './defaults.js';
+import {
+  assembleAttestation,
+  emptyAttestation,
+  formatAttestationBadgeLine,
+  type Attestation,
+  type EligibilityPath,
+  type SkippedPass,
+} from './attestation.js';
 
 import { cloneBySha, type CloneResult } from './clone.js';
 
@@ -105,6 +116,8 @@ export interface ReviewCoreResult {
    * enabled, or the pipeline failed before reaching the engine).
    */
   providerFailure: boolean;
+  /** Machine-readable receipt of this run — provider health, budget, delivery, verdict (v1). */
+  attestation: Attestation;
 }
 
 export async function reviewPullRequest(ctx: ReviewCoreContext): Promise<ReviewCoreResult> {
@@ -130,7 +143,12 @@ export async function reviewPullRequest(ctx: ReviewCoreContext): Promise<ReviewC
 
     if (filesToAnalyze.length === 0 && !summaryEnabled) {
       logger.info('No analyzable files changed — skipping complexity/agent review');
-      return emptyResult('success', 'No files eligible for complexity analysis.', filesAnalyzed);
+      return emptyResult(
+        'success',
+        'No files eligible for complexity analysis.',
+        filesAnalyzed,
+        'zero_files_early_exit',
+      );
     }
 
     const analysis = await runAnalysisPhase(
@@ -147,6 +165,8 @@ export async function reviewPullRequest(ctx: ReviewCoreContext): Promise<ReviewC
         'failure',
         'Review failed — could not produce a complexity report.',
         filesAnalyzed,
+        'normal',
+        true,
       );
     }
     baseClone = analysis.baseClone;
@@ -178,6 +198,8 @@ function emptyResult(
   conclusion: 'success' | 'failure',
   summaryMarkdown: string,
   filesAnalyzed: number,
+  eligibilityPath: EligibilityPath,
+  pipelineFailed = false,
 ): ReviewCoreResult {
   return {
     findings: [],
@@ -186,6 +208,7 @@ function emptyResult(
     filesAnalyzed,
     usage: { totalTokens: 0, cost: 0 },
     providerFailure: false,
+    attestation: emptyAttestation(conclusion, filesAnalyzed, eligibilityPath, pipelineFailed),
   };
 }
 
@@ -230,27 +253,45 @@ interface PresentedReview {
   summaryMarkdown: string;
   usage: { totalTokens: number; cost: number };
   providerFailure: boolean;
+  attestation: Attestation;
 }
 
-/** Run the review engine over an analyzed PR and present the findings to GitHub. */
-async function analyzeAndPresent(
+/** Telemetry the engine reports out-of-band during `run()`, via callbacks. */
+interface RunTelemetry {
+  findings: ReviewFinding[];
+  agentUsage: { promptTokens: number; completionTokens: number; totalTokens: number; cost: number };
+  allocatedTokens: number;
+  passesSkipped: SkippedPass[];
+}
+
+/**
+ * Register plugins and run the engine, collecting findings plus the
+ * out-of-band telemetry (usage/budget/skips) it reports via callback —
+ * agent-review bypasses the LLMClient meter and `run()`'s return value only
+ * carries findings, so this is the one place that wiring lives.
+ */
+async function runEngineForReview(
   ctx: ReviewCoreContext,
   analysis: AnalysisPhaseResult,
   filesToAnalyze: string[],
   allChangedFiles: string[],
   headCloneDir: string,
-): Promise<PresentedReview> {
-  const { octokit, pr, logger } = ctx;
+  engine: ReviewEngine,
+  agentAttempted: boolean,
+): Promise<RunTelemetry> {
+  const { pr, logger } = ctx;
   const { currentReport, chunks, baselineReport, deltas } = analysis;
-
-  const engine = new ReviewEngine();
   if (ctx.config.reviewTypes.complexity) engine.register(new ComplexityPlugin());
-  if (isAgentEnabled(ctx)) engine.register(new AgentReviewPlugin());
+  if (agentAttempted) engine.register(new AgentReviewPlugin());
 
-  // Agent usage is reported via callback since it bypasses the LLMClient meter.
-  let agentUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0 };
+  const telemetry: RunTelemetry = {
+    findings: [],
+    agentUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0 },
+    allocatedTokens: 0,
+    passesSkipped: [],
+  };
 
-  const findings = await engine.run({
+  telemetry.findings = await engine.run({
     chunks,
     changedFiles: filesToAnalyze,
     allChangedFiles,
@@ -263,16 +304,71 @@ async function analyzeAndPresent(
     logger,
     repoRootDir: headCloneDir,
     reportUsage: usage => {
-      agentUsage = usage;
+      telemetry.agentUsage = usage;
     },
+    reportBudget: tokens => {
+      telemetry.allocatedTokens = tokens;
+    },
+    reportSkip: skip => telemetry.passesSkipped.push(skip),
   });
-  logger.info(`Engine produced ${findings.length} total findings`);
+  logger.info(`Engine produced ${telemetry.findings.length} total findings`);
+  return telemetry;
+}
+
+/** Assemble the attestation from the run's telemetry + the present() delivery outcome. */
+function buildRunAttestation(
+  analysis: AnalysisPhaseResult,
+  filesToAnalyze: string[],
+  telemetry: RunTelemetry,
+  agentAttempted: boolean,
+  providerFailure: boolean,
+  presentation: { conclusion: 'success' | 'failure' | 'neutral'; delivery: PresentDelivery },
+): Attestation {
+  return assembleAttestation({
+    conclusion: presentation.conclusion,
+    filesAnalyzed: filesToAnalyze.length,
+    eligibilityPath: analysis.eligibilityPath,
+    findings: telemetry.findings,
+    agentAttempted,
+    providerFailure,
+    allocatedTokens: telemetry.allocatedTokens,
+    spentTokens: telemetry.agentUsage.totalTokens,
+    passesSkipped: telemetry.passesSkipped,
+    annotationsEmitted: presentation.delivery.annotationsEmitted,
+    inlineComments: presentation.delivery.inlineComments,
+    descriptionBadgeUpdated: presentation.delivery.descriptionBadgeUpdated,
+    outOfDiffReviewPosted: presentation.delivery.outOfDiffReviewPosted,
+  });
+}
+
+/** Run the review engine over an analyzed PR and present the findings to GitHub. */
+async function analyzeAndPresent(
+  ctx: ReviewCoreContext,
+  analysis: AnalysisPhaseResult,
+  filesToAnalyze: string[],
+  allChangedFiles: string[],
+  headCloneDir: string,
+): Promise<PresentedReview> {
+  const { octokit, pr, logger } = ctx;
+  const agentAttempted = isAgentEnabled(ctx);
+  const engine = new ReviewEngine();
+
+  const telemetry = await runEngineForReview(
+    ctx,
+    analysis,
+    filesToAnalyze,
+    allChangedFiles,
+    headCloneDir,
+    engine,
+    agentAttempted,
+  );
+  const { findings, agentUsage } = telemetry;
 
   const adapterContext: AdapterContext = {
-    complexityReport: currentReport,
-    baselineReport,
-    deltas,
-    deltaSummary: deltas ? calculateDeltaSummary(deltas) : null,
+    complexityReport: analysis.currentReport,
+    baselineReport: analysis.baselineReport,
+    deltas: analysis.deltas,
+    deltaSummary: analysis.deltas ? calculateDeltaSummary(analysis.deltas) : null,
     pr,
     octokit,
     logger,
@@ -282,14 +378,53 @@ async function analyzeAndPresent(
   };
 
   const presentation = await presentFindings(engine, findings, adapterContext, logger);
+  const providerFailure = hasProviderFailure(findings);
+  const attestation = buildRunAttestation(
+    analysis,
+    filesToAnalyze,
+    telemetry,
+    agentAttempted,
+    providerFailure,
+    presentation,
+  );
+
+  await postAttestationBadgeIfDegraded(octokit, pr, attestation, logger);
 
   return {
     findings,
     conclusion: presentation.conclusion,
     summaryMarkdown: presentation.summary,
     usage: { totalTokens: agentUsage.totalTokens, cost: agentUsage.cost },
-    providerFailure: hasProviderFailure(findings),
+    providerFailure,
+    attestation,
   };
+}
+
+/**
+ * Post the attestation's compact status line as its own PR-description
+ * section — only when the run is NOT a clean `delivered` (a healthy run
+ * doesn't need the extra line; see `formatAttestationBadgeLine`). Runs after
+ * `engine.present()` has already posted the main "Lien Review" section, so
+ * this is a separate `<!-- attestation -->`-marked section rather than a
+ * fragment folded into that one (the attestation isn't known until delivery
+ * — inline comments posted/dropped — has already happened).
+ */
+async function postAttestationBadgeIfDegraded(
+  octokit: Octokit,
+  pr: PRContext,
+  attestation: Attestation,
+  logger: Logger,
+): Promise<void> {
+  if (attestation.verdict === 'delivered') return;
+  await updatePRDescription(
+    octokit,
+    pr,
+    formatAttestationBadgeLine(attestation),
+    logger,
+    'attestation',
+  ).catch(err =>
+    logger.warning(`Failed to post attestation badge: ${err instanceof Error ? err.message : err}`),
+  );
 }
 
 /**
@@ -302,13 +437,21 @@ async function presentFindings(
   findings: ReviewFinding[],
   adapterContext: AdapterContext,
   logger: Logger,
-): Promise<{ conclusion: 'success' | 'failure' | 'neutral'; summary: string }> {
+): Promise<{
+  conclusion: 'success' | 'failure' | 'neutral';
+  summary: string;
+  delivery: PresentDelivery;
+}> {
   try {
     return await engine.present(findings, adapterContext, { skipCheckRun: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     logger.error(`engine.present() failed: ${message}`);
-    return { conclusion: 'neutral', summary: `An error occurred: ${message}` };
+    return {
+      conclusion: 'neutral',
+      summary: `An error occurred: ${message}`,
+      delivery: EMPTY_DELIVERY,
+    };
   }
 }
 
@@ -391,6 +534,8 @@ interface AnalysisPhaseResult {
   baselineReport: ComplexityReport | null;
   deltas: ComplexityDelta[] | null;
   baseClone: CloneResult | null;
+  /** 'normal' when the PR had analyzable files; 'full_repo_fallback' otherwise (#572/#754). */
+  eligibilityPath: EligibilityPath;
 }
 
 async function runAnalysisPhase(
@@ -444,6 +589,7 @@ async function runAnalysisPhase(
       baselineReport,
       deltas,
       baseClone,
+      eligibilityPath: 'normal',
     };
   }
 
@@ -459,6 +605,7 @@ async function runAnalysisPhase(
       baselineReport: null,
       deltas: null,
       baseClone: null,
+      eligibilityPath: 'full_repo_fallback',
     };
   }
   return {
@@ -478,6 +625,7 @@ async function runAnalysisPhase(
     baselineReport: null,
     deltas: null,
     baseClone: null,
+    eligibilityPath: 'full_repo_fallback',
   };
 }
 

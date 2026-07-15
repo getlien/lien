@@ -26,6 +26,7 @@ import { BUILTIN_RULES, buildTriggerContext, selectRules } from './rules.js';
 import { AGENT_TOOLS, dispatchTool } from './tools.js';
 import {
   runDocTruthPass,
+  shouldRunDocTruthPass,
   mergeDocTruthFindings,
   mergeDocPassIntoResult,
   appendDocTruthTurns,
@@ -151,6 +152,11 @@ export class AgentReviewPlugin implements ReviewPlugin {
         `[${this.id}] Token budget scaled ${config.maxTokenBudget} → ${maxTokenBudget} for ${blastRadius?.globalRisk.level} blast radius`,
       );
     }
+    // Report the FINAL allocated ceiling (post blast-radius scaling) for the
+    // delivery attestation's budget.allocatedTokens — the pre-scaling value
+    // computed upstream in review-pr.ts's scaleAgentBudget() isn't the real
+    // ceiling this run was held to.
+    context.reportBudget?.(maxTokenBudget);
 
     const systemPrompt = buildSystemPrompt(rules);
     const initialMessage = buildInitialMessage(context, { blastRadius });
@@ -172,6 +178,7 @@ export class AgentReviewPlugin implements ReviewPlugin {
     // the main-pass output untouched. Skipped entirely when the main pass never
     // ran (provider down) — a second pass would only fire more doomed requests,
     // and its own incomplete state must not overwrite the never-ran marker.
+    this.reportDocTruthPassSkip(context, config, result);
     const docResult = result.neverRan
       ? null
       : await this.runSecondDocPass(context, config, apiKey, provider, logger, toolExecutor);
@@ -197,6 +204,31 @@ export class AgentReviewPlugin implements ReviewPlugin {
     appendIncompleteNotice(findings, pluginId, result);
 
     return findings;
+  }
+
+  /**
+   * Report why the doc-truth second pass won't run this turn, if applicable —
+   * feeds the delivery attestation's `passesSkipped`. A no-op when the pass
+   * will actually run. Duplicates `shouldRunDocTruthPass`'s gate check (already
+   * evaluated inside `runDocTruthPass`) purely to distinguish "gated off" from
+   * "ran" for reporting; the check itself is a cheap, pure function.
+   */
+  private reportDocTruthPassSkip(
+    context: ReviewContext,
+    config: AgentConfig,
+    result: AgentResult,
+  ): void {
+    if (result.neverRan) {
+      context.reportSkip?.({
+        plugin: 'agent-review:doc-truth',
+        reason: 'main pass never ran (provider failure)',
+      });
+    } else if (!shouldRunDocTruthPass(context, config)) {
+      context.reportSkip?.({
+        plugin: 'agent-review:doc-truth',
+        reason: 'not a doc-touching PR (no doc claims)',
+      });
+    }
   }
 
   /**
