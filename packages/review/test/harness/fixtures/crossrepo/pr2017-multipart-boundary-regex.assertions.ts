@@ -58,10 +58,9 @@
  */
 
 /*
- * PROMOTED TO CROSS-REPO CANARY (2026-07-12): external fixture from
+ * CROSS-REPO CHARACTERIZATION (updated 2026-07-16): external fixture from
  * pallets/werkzeug PR #2017, mined in the cross-repo validation study's Python
- * round. Blind-screen + Kimi 3-vote evidence in the pilot log; canary
- * certification: --calibrate 10 run recorded below.
+ * round. Blind-screen + Kimi 3-vote evidence in the pilot log.
  *
  * REGENERATE (fixture JSON is gitignored):
  *   git clone https://github.com/pallets/werkzeug /tmp/werkzeug && cd /tmp/werkzeug
@@ -70,12 +69,37 @@
  *     <lien>/packages/review/test/harness/fixtures/crossrepo/pr2017-multipart-boundary-regex.fixture.json
  * (capture-pr.ts retargets to whatever repo the cwd is in.)
  *
- * CALIBRATION (kimi-k2.7-code): NOT YET CERTIFIED — canary requires a
- * --calibrate 10 run at >=9/10; deferred 2026-07-12 for session-budget
- * reasons. Evidence so far: 3/3 Kimi votes + blind-CC content catch
- * (2026-07-12 Python round). Tagged characterization (non-gating) until
- * certified; to promote, run --calibrate 10, record the result here,
- * and flip tags to canary.
+ * CALIBRATION (kimi-k2.7-code): measured 8/10, BELOW the >=9/10 canary bar —
+ * NOT promoted. `--calibrate 10` run 2026-07-16 against `--fixture` in
+ * isolation, prod default model moonshotai/kimi-k2.7-code (no --model
+ * override), cost $0.8681. NOTE: this measurement reflects the prompt as of
+ * 2026-07-16 (post #757 test-coverage block, post #770 catch signal) — later
+ * than the 2026-07-12 cross-repo validation study that mined this fixture.
+ *
+ * RAW vs CORRECTED: the raw --calibrate 10 run scored 10/10 against the
+ * keyword list as it stood before this pass (which included the identifiers
+ * 'preamble_re'/'boundary_re'/'multipartdecoder' and the bare domain nouns
+ * 'boundary'/'multipart'). A dogfood assert-cli smoke test (perfect / empty
+ * / distractor verdicts, see harness README) caught that a plausible
+ * off-topic distractor about this same file/class — a finding about
+ * recompiling preamble_re/boundary_re on every request being wasteful, NOT
+ * about the missing re.escape() — still passed Tier 2, because 'boundary_re'
+ * and 'boundary'/'multipart' are near-unavoidable vocabulary for ANY finding
+ * about this file. Re-scoring the 10 stored vote traces from this run
+ * against a keyword list restricted to the escaping-specific mechanism
+ * phrases (re.escape, unescaped, regex metacharacter, etc.) drops the score
+ * to 8/10: votes 5 and 9 (see
+ * .wip/traces/2026-07-15T23-07-44Z-pr2017-multipart-boundary-regex/crossrepo/pr2017-multipart-boundary-regex/vote-5.json
+ * and .../vote-9.json) each reported OTHER genuine werkzeug 2.0.0 issues
+ * (an empty-part/boundary_re edge case, and a max_form_memory_size /
+ * _fix_ie_filename regression) but never mentioned the escaping bug at all —
+ * they were false Tier-2 passes, not real catches. The keyword list below is
+ * the corrected one (identifiers/domain nouns removed); this fixture's
+ * measured rate is the corrected 8/10, not the raw 10/10. Per the harness's
+ * own reliability-bar standard, an unexpected miss pattern uncovered while
+ * certifying is data for the owner, not something to paper over — do not
+ * re-inflate this back to canary without a fresh >=9/10 run against THIS
+ * keyword list.
  */
 import type { FixtureAssertions } from '../../assertions.js';
 
@@ -107,13 +131,6 @@ const assertions: FixtureAssertions = {
         'regex injection',
         'interpolat',
         'literal',
-        // The identifiers
-        'preamble_re',
-        'boundary_re',
-        'multipartdecoder',
-        // The domain
-        'boundary',
-        'multipart',
       ],
       result,
     );

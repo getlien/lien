@@ -55,10 +55,10 @@
  */
 
 /*
- * PROMOTED TO CROSS-REPO CANARY (2026-07-12): external fixture from
+ * PROMOTED TO CROSS-REPO CANARY (2026-07-16): external fixture from
  * pallets/werkzeug PR #2678, mined in the cross-repo validation study's Python
- * round. Blind-screen + Kimi 3-vote evidence in the pilot log; canary
- * certification: --calibrate 10 run recorded below.
+ * round (2026-07-12). Blind-screen + Kimi 3-vote evidence in the pilot log;
+ * canary certification: --calibrate 10 run recorded below.
  *
  * REGENERATE (fixture JSON is gitignored):
  *   git clone https://github.com/pallets/werkzeug /tmp/werkzeug && cd /tmp/werkzeug
@@ -67,12 +67,27 @@
  *     <lien>/packages/review/test/harness/fixtures/crossrepo/pr2678-multipart-index-offset.fixture.json
  * (capture-pr.ts retargets to whatever repo the cwd is in.)
  *
- * CALIBRATION (kimi-k2.7-code): NOT YET CERTIFIED — canary requires a
- * --calibrate 10 run at >=9/10; deferred 2026-07-12 for session-budget
- * reasons. Evidence so far: 3/3 Kimi votes + blind-CC content catch
- * (2026-07-12 Python round). Tagged characterization (non-gating) until
- * certified; to promote, run --calibrate 10, record the result here,
- * and flip tags to canary.
+ * CALIBRATION (kimi-k2.7-code): CERTIFIED 10/10 (2026-07-16, prod default
+ * model moonshotai/kimi-k2.7-code, no --model override, cost $0.6662) —
+ * `--calibrate 10` run against `--fixture` in isolation. Prior evidence: 3/3
+ * Kimi votes + blind-CC content catch (2026-07-12 Python round). NOTE: this
+ * cert reflects the prompt as of 2026-07-16 (post #757 test-coverage block,
+ * post #770 catch signal) — later than the 2026-07-12 cross-repo validation
+ * study that mined this fixture.
+ *
+ * DOGFOOD (2026-07-16): a post-cert assert-cli smoke test (perfect / empty /
+ * distractor verdicts, see harness README) found the original keyword list's
+ * '// The domain' entries ('multipart', 'boundary') were bare nouns that a
+ * plausible off-topic distractor about this same file (a max_form_memory_size
+ * accounting gap, not the data_start slice-offset bug) also satisfied —
+ * false Tier-2 pass. Sibling fixture pr2017 (same file) had the same class
+ * of bug and its raw calibration score DID move (10/10 -> 8/10 corrected).
+ * For pr2678, re-scoring all 10 stored vote traces from the run above
+ * against a keyword list with the domain nouns removed (mechanism + symptom
+ * phrases only, below) still holds 10/10 — every real vote independently
+ * named data_start/last_newline/data_end/del_index, so the cert stands, but
+ * the keyword list below is the corrected/tightened one, not the raw one the
+ * --calibrate 10 run above technically scored against.
  */
 import type { FixtureAssertions } from '../../assertions.js';
 
@@ -109,16 +124,13 @@ const assertions: FixtureAssertions = {
         'spurious newline',
         'truncat',
         'newline',
-        // The domain
-        'multipart',
-        'boundary',
       ],
       result,
     );
   },
   votes: 3,
   passThreshold: 9,
-  tags: ['characterization', 'crossrepo', 'python'],
+  tags: ['canary', 'crossrepo', 'python'],
 };
 
 export default assertions;
