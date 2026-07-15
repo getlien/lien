@@ -23,6 +23,7 @@ import { renderRenameSweepSection } from '../../rename-sweep-signals.js';
 import { renderGuidanceSurfaceSection } from '../../guidance-surface-signals.js';
 import { renderDocClaimsSection } from '../../doc-claims-signals.js';
 import { renderTestCoverageSection } from '../../test-coverage-signals.js';
+import { renderSiblingSurfacesSection } from '../../sibling-surface-signals.js';
 import type { ResolvedRules } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -179,8 +180,12 @@ export interface BuildInitialMessageOptions {
   /**
    * Rules active for this run. Used to gate rule-scoped signal injection —
    * e.g. `<undiscriminated_catch_candidates>` only makes sense to compute
-   * and render when `error-swallowing` is actually active for this PR.
-   * Omit (CLI callers that don't resolve rules) to skip that gating.
+   * and render when `error-swallowing` is actually active for this PR, and
+   * likewise `<sibling_surfaces>` only when `incomplete-handling` is active
+   * (a sibling family member that didn't receive a mirrored change is a
+   * partial-implementation gap, the same failure shape that rule already
+   * targets for interface fields/union variants). Omit (CLI callers that
+   * don't resolve rules) to skip that gating.
    */
   rules?: ResolvedRules;
 }
@@ -212,6 +217,9 @@ export function buildInitialMessage(
   appendIfPresent(sections, renderGuidanceSurfaceSection(context));
   appendIfPresent(sections, renderDocClaimsSection(context));
   appendIfPresent(sections, renderTestCoverageSection(context));
+  if (isRuleActive(opts.rules, 'incomplete-handling')) {
+    appendIfPresent(sections, renderSiblingSurfacesSection(context));
+  }
   sections.push(
     'Investigate this PR. Use the investigation strategy described in your instructions, then output findings as JSON.',
   );
