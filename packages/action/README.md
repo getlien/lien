@@ -156,14 +156,19 @@ finding fails the check).
 ## Fail-loudly guarantee
 
 If the agent review's main pass never runs at all — every request to the LLM
-provider failed (exhausted key, a terminal provider error, etc.) — Lien marks
-the result with an **error-severity finding** and a **`failure`** conclusion
-naming the cause, instead of a clean-looking review. That finding is what
-`fail-on: error`/`any` act on, so a starved review fails the check under
-either gating mode. Under the default `fail-on: never` the job itself still
-exits `0` (advisory stays advisory), but the step summary, PR description, and
-`conclusion` output make the failure impossible to mistake for "no issues
-found."
+provider failed terminally (insufficient credits, an invalid/expired key, a
+provider outage, etc.) — Lien marks the result with an **error-severity
+finding** and a **`failure`** conclusion naming the cause, instead of a
+clean-looking review.
+
+This is treated as an **operational failure, not an advisory finding**: a
+review that never ran isn't something `fail-on` gates on, because there's
+nothing to be advisory *about* — no code was analyzed. **The check fails
+regardless of `fail-on`, including the advisory default `never`.** A partial
+run (some turns completed before it bailed on a budget/turn limit) is
+different — that's a genuine advisory finding and still obeys `fail-on` as
+before. Either way, the step summary, PR description, and `conclusion` output
+make the failure impossible to mistake for "no issues found."
 
 ## Fork PRs
 

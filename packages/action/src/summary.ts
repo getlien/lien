@@ -26,6 +26,22 @@ export function countErrors(findings: ReviewFinding[]): number {
 }
 
 /**
+ * True when a finding signals that the agent-review MAIN pass never ran at
+ * all — every LLM provider request failed terminally (a 402 on an overdrawn
+ * account, an invalid key, a provider outage). Set via `AgentResult.neverRan`
+ * and surfaced as `metadata.neverRan` by `appendNeverRanNotice` in
+ * `packages/review/src/plugins/agent/index.ts`.
+ *
+ * This is an operational failure, not an advisory finding: a user who
+ * configured and paid for a review deserves to know it didn't run, so the
+ * action fails the check for this even under `fail-on: never` (see
+ * `finishRun`) — unlike ordinary error/warning findings, which stay advisory.
+ */
+export function hasProviderFailure(findings: ReviewFinding[]): boolean {
+  return findings.some(f => (f.metadata as { neverRan?: boolean } | undefined)?.neverRan === true);
+}
+
+/**
  * Append the review summary to `$GITHUB_STEP_SUMMARY`. No-op when the env var is
  * unset (e.g. running outside Actions) so local invocations don't crash.
  */

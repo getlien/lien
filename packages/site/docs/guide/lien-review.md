@@ -68,7 +68,7 @@ One behavior is tunable only via an environment variable on the action step, not
 
 By default the review is **advisory** — it never fails CI. To gate merges on it, set `fail-on: error` (or `any`) and mark the workflow's job as a **Required status check** in your branch protection rules. See the [inputs table](https://github.com/getlien/lien/blob/main/packages/action/README.md#inputs) for the full set of options (`threshold`, `review-types`, `block-on-new-errors`, `fail-on`).
 
-If the agent review's main pass never runs at all (every LLM provider request failed), Lien marks the result with an error-severity finding and a `failure` conclusion instead of a clean-looking review, so a starved run is never mistaken for "no issues found." See [`packages/action/README.md`](https://github.com/getlien/lien/blob/main/packages/action/README.md#fail-loudly-guarantee) for the full behavior, including how it interacts with `fail-on`.
+If the agent review's main pass never runs at all (every LLM provider request failed — insufficient credits, an invalid key, a provider outage), Lien marks the result with an error-severity finding and a `failure` conclusion instead of a clean-looking review — and **fails the check regardless of `fail-on`**, including the advisory default `never`. A review that never ran isn't an advisory finding to gate on; a partial run (some turns completed before it bailed) still obeys `fail-on` as before. See [`packages/action/README.md`](https://github.com/getlien/lien/blob/main/packages/action/README.md#fail-loudly-guarantee) for the full behavior.
 
 ## Fork PRs
 
