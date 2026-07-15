@@ -153,7 +153,7 @@ export class AgentReviewPlugin implements ReviewPlugin {
     }
 
     const systemPrompt = buildSystemPrompt(rules);
-    const initialMessage = buildInitialMessage(context, { blastRadius });
+    const initialMessage = buildInitialMessage(context, { blastRadius, rules });
     const result = await runAgentClient(
       provider,
       config,

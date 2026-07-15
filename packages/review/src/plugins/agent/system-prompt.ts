@@ -16,6 +16,7 @@ import type { ReviewContext } from '../../plugin-types.js';
 import type { BlastRadiusReport } from '../../blast-radius.js';
 import { renderBlastRadiusMarkdown } from '../../blast-radius-render.js';
 import { renderStaleLiteralSection } from '../../stale-literal-signals.js';
+import { renderUndiscriminatedCatchSection } from '../../catch-discrimination-signals.js';
 import { renderRemovedExportsSection } from '../../removed-export-signals.js';
 import { renderUntrustedInputSection } from '../../untrusted-input-signals.js';
 import { renderRenameSweepSection } from '../../rename-sweep-signals.js';
@@ -175,6 +176,13 @@ const MAX_DIFF_CHARS = 50_000;
 export interface BuildInitialMessageOptions {
   /** Pre-computed blast-radius report to inject as a `<blast_radius>` block. */
   blastRadius?: BlastRadiusReport | null;
+  /**
+   * Rules active for this run. Used to gate rule-scoped signal injection —
+   * e.g. `<undiscriminated_catch_candidates>` only makes sense to compute
+   * and render when `error-swallowing` is actually active for this PR.
+   * Omit (CLI callers that don't resolve rules) to skip that gating.
+   */
+  rules?: ResolvedRules;
 }
 
 /**
@@ -196,6 +204,9 @@ export function buildInitialMessage(
   appendIfPresent(sections, renderBlastRadius(opts));
   appendIfPresent(sections, renderRemovedExportsSection(context));
   appendIfPresent(sections, renderStaleLiteralSection(context));
+  if (isRuleActive(opts.rules, 'error-swallowing')) {
+    appendIfPresent(sections, renderUndiscriminatedCatchSection(context));
+  }
   appendIfPresent(sections, renderUntrustedInputSection(context));
   appendIfPresent(sections, renderRenameSweepSection(context));
   appendIfPresent(sections, renderGuidanceSurfaceSection(context));
@@ -209,6 +220,17 @@ export function buildInitialMessage(
 
 function appendIfPresent(sections: string[], value: string | null): void {
   if (value) sections.push(value);
+}
+
+/**
+ * Whether `ruleId` is among this run's active rules. Used to gate a
+ * rule-scoped signal (computing and rendering it is only worth the cost
+ * when the rule it feeds is actually going to see the result). `rules`
+ * is optional — callers that don't resolve rules (none currently) would
+ * skip the gated signal entirely rather than risk rendering it unchecked.
+ */
+function isRuleActive(rules: ResolvedRules | undefined, ruleId: string): boolean {
+  return rules?.active.some(r => r.id === ruleId) ?? false;
 }
 
 function renderPrMetadata(context: ReviewContext): string | null {

@@ -30,7 +30,7 @@ async function main(): Promise<void> {
   const rules = selectRules(BUILTIN_RULES, triggerCtx);
 
   const systemPrompt = buildSystemPrompt(rules);
-  const initialMessage = buildInitialMessage(ctx, { blastRadius: null });
+  const initialMessage = buildInitialMessage(ctx, { blastRadius: null, rules });
 
   const output = {
     fixturePath,
