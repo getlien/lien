@@ -94,6 +94,23 @@ const DOC_PASS_INTRO =
 // ---------------------------------------------------------------------------
 
 /**
+ * Precisely why the doc-truth pass would not run right now, or null if it
+ * should run. Kept separate from `shouldRunDocTruthPass`'s boolean so a
+ * caller reporting the skip to the delivery attestation (see `runDocTruthPass`
+ * below) can name the REAL reason — config-disabled, env-disabled, or no
+ * doc claims are three different operational states that a bare boolean
+ * collapses into one.
+ */
+function docTruthSkipReason(context: ReviewContext, config?: AgentConfig): string | null {
+  if (config?.docTruthPass === false) return 'disabled via config (docTruthPass: false)';
+  if (envDisabled(process.env[DOC_PASS_ENV])) return `disabled via ${DOC_PASS_ENV} env var`;
+  const patches = context.pr?.patches;
+  if (!patches || patches.size === 0) return 'no PR patch data available';
+  if (extractDocClaims(patches).length === 0) return 'not a doc-touching PR (no doc claims)';
+  return null;
+}
+
+/**
  * Whether to run the doc-truth second pass. True iff the PR added at least one
  * claim-shaped line to a touched guidance/doc surface (which also implies a doc
  * surface was touched), and neither the config nor the env kill-switch disables
@@ -101,11 +118,7 @@ const DOC_PASS_INTRO =
  * so a non-empty worklist here means the pass has something to verify.
  */
 export function shouldRunDocTruthPass(context: ReviewContext, config?: AgentConfig): boolean {
-  if (config?.docTruthPass === false) return false;
-  if (envDisabled(process.env[DOC_PASS_ENV])) return false;
-  const patches = context.pr?.patches;
-  if (!patches || patches.size === 0) return false;
-  return extractDocClaims(patches).length > 0;
+  return docTruthSkipReason(context, config) === null;
 }
 
 // ---------------------------------------------------------------------------
@@ -188,11 +201,21 @@ export type DocTruthClientRunner = (
   maxTurns: number,
 ) => Promise<AgentResult>;
 
+/** Plugin name the doc-truth pass reports itself under in the delivery attestation. */
+const DOC_TRUTH_SKIP_PLUGIN = 'agent-review:doc-truth';
+
 /**
  * Run the second, claims-only doc-truth pass when the PR warrants it. Returns
  * the pass's AgentResult, or null when the pass is gated off OR when it fails —
  * a pass-2 error must never fail the whole review, so it is caught, logged, and
  * swallowed here (the caller keeps the main-pass findings).
+ *
+ * Reports its own outcome to `context.reportSkip` in both the gated-off and
+ * failed cases — this is the one place that knows the REAL reason (the exact
+ * gate that fired, or the caught error), so a caller doesn't need to duplicate
+ * `shouldRunDocTruthPass`'s check just to guess why nothing came back. A run
+ * that never reaches this function at all (the main pass never ran) is
+ * reported by the caller instead — this pass is never invoked in that case.
  */
 export async function runDocTruthPass(
   context: ReviewContext,
@@ -200,7 +223,11 @@ export async function runDocTruthPass(
   logger: Logger,
   runClient: DocTruthClientRunner,
 ): Promise<AgentResult | null> {
-  if (!shouldRunDocTruthPass(context, config)) return null;
+  const skipReason = docTruthSkipReason(context, config);
+  if (skipReason) {
+    context.reportSkip?.({ plugin: DOC_TRUTH_SKIP_PLUGIN, reason: skipReason });
+    return null;
+  }
   try {
     const { systemPrompt, initialMessage } = buildDocTruthPassPrompts(context);
     const budget = docTruthPassBudget(config.maxTokenBudget);
@@ -210,9 +237,9 @@ export async function runDocTruthPass(
     );
     return result;
   } catch (err) {
-    logger.warning(
-      `[agent] doc-truth pass failed: ${err instanceof Error ? err.message : String(err)}`,
-    );
+    const message = err instanceof Error ? err.message : String(err);
+    logger.warning(`[agent] doc-truth pass failed: ${message}`);
+    context.reportSkip?.({ plugin: DOC_TRUTH_SKIP_PLUGIN, reason: `failed: ${message}` });
     return null;
   }
 }
