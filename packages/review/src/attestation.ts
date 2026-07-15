@@ -70,7 +70,17 @@ export interface DeliveryAttestation {
   outOfDiffReviewPosted: boolean | null;
 }
 
-export type EligibilityPath = 'normal' | 'zero_files_early_exit' | 'full_repo_fallback';
+/**
+ * `summary_only_diff` (#572): zero analyzable files, but the diff-only
+ * summary-only agent mode ran (summary review type on, non-empty PR diff) —
+ * distinct from `full_repo_fallback`, where the agent didn't run at all
+ * (summary off, or no diff data available).
+ */
+export type EligibilityPath =
+  | 'normal'
+  | 'zero_files_early_exit'
+  | 'full_repo_fallback'
+  | 'summary_only_diff';
 
 export interface ScopeAttestation {
   eligibilityPath: EligibilityPath;

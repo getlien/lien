@@ -51,6 +51,13 @@ export interface AgentConfig {
    * skip it and run the single main pass only.
    */
   docTruthPass?: boolean;
+  /**
+   * Whether the `summary` review type is enabled for this run (issue #572).
+   * Gates the diff-only summary-only mode: with zero analyzable chunks, the
+   * plugin only activates when this is true AND the PR's patches are
+   * available — see `summary-only-pass.ts`'s `isSummaryOnlyMode`.
+   */
+  summaryEnabled?: boolean;
 }
 
 /** A single finding produced by the agent during review. */
