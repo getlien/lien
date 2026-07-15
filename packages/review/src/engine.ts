@@ -540,7 +540,9 @@ function buildPresentContext(
         : undefined,
     postReviewComment:
       octokit && pr
-        ? (body, comments) => postPRReview(octokit, pr, comments ?? [], body, logger, 'COMMENT')
+        ? async body => {
+            await postPRReview(octokit, pr, [], body, logger, 'COMMENT');
+          }
         : undefined,
     minimizeOutdatedComments:
       octokit && pr ? marker => minimizeOutdatedComments(octokit, pr, marker, logger) : undefined,
@@ -607,8 +609,15 @@ async function postPluginInlineComments(
   );
   if (toPost.length === 0) return { posted: 0, skipped };
 
-  await postPRReview(octokit, pr, toPost, summaryBody, logger, 'COMMENT');
-  return { posted: toPost.length, skipped };
+  const { posted, dropped } = await postPRReview(
+    octokit,
+    pr,
+    toPost,
+    summaryBody,
+    logger,
+    'COMMENT',
+  );
+  return { posted, skipped: skipped + dropped.length };
 }
 
 /** Fetch diff lines and filter findings to those within the diff. Returns null on API failure. */

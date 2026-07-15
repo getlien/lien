@@ -213,7 +213,64 @@ export async function getFileContent(
 }
 
 /**
- * Post a review with line-specific comments
+ * Result of {@link postPRReview}: how many line comments actually landed,
+ * which ones were dropped (with why), and whether the summary body itself
+ * made it through — so callers can surface the degradation instead of
+ * losing it silently.
+ */
+export interface PostReviewResult {
+  posted: number;
+  dropped: Array<{ path: string; line: number; error: string }>;
+  /**
+   * Whether the summary body was posted — either as part of the successful
+   * batch, or via the body-only fallback after a batch validation failure.
+   * `false` means the body-only post itself failed (best-effort; salvaging
+   * the inline comments still proceeds regardless).
+   */
+  bodyPosted: boolean;
+}
+
+/** Shape a LineComment into the params octokit expects for a review comment. */
+function toReviewCommentParams(c: LineComment, logger: Logger) {
+  const hasValidStartLine = typeof c.start_line === 'number' && c.start_line > 0;
+  if (c.start_line !== undefined && !hasValidStartLine) {
+    logger.warning(
+      `Stripping invalid start_line (${c.start_line}) for comment at ${c.path}:${c.line}; ` +
+        'posting as a single-line comment instead',
+    );
+  }
+  return {
+    path: c.path,
+    line: c.line,
+    ...(hasValidStartLine ? { start_line: c.start_line, start_side: 'RIGHT' as const } : {}),
+    side: 'RIGHT' as const,
+    body: c.body,
+  };
+}
+
+/** Does this error look like a GitHub API rejection we can retry per-comment (a 422 on the batch)? */
+function isBatchValidationError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'status' in error &&
+    (error as { status: unknown }).status === 422
+  );
+}
+
+/**
+ * Post a review with line-specific comments.
+ *
+ * `octokit.pulls.createReview` is all-or-nothing: if ANY comment anchors to a
+ * line outside the diff, GitHub rejects the whole batch with a 422 —
+ * including every valid comment in it. Only that validation failure triggers
+ * the per-comment salvage path below: we attempt the summary body on its own
+ * (best-effort — see `bodyPosted` on the result), then retry each comment
+ * individually via `createReviewComment` so one bad anchor can't take the
+ * rest down with it. Comments that still fail are logged and returned in
+ * `dropped`, never silently discarded. Any other failure (auth, rate-limit,
+ * 5xx, network) is rethrown as-is — those aren't anchor problems and
+ * salvaging would just mask the real error.
  */
 export async function postPRReview(
   octokit: Octokit,
@@ -222,7 +279,7 @@ export async function postPRReview(
   summaryBody: string,
   logger: Logger,
   event: 'COMMENT' | 'REQUEST_CHANGES' = 'COMMENT',
-): Promise<void> {
+): Promise<PostReviewResult> {
   logger.info(`Creating review with ${comments.length} line comments (event: ${event})`);
 
   const reviewParams = {
@@ -233,38 +290,94 @@ export async function postPRReview(
     event,
     body: summaryBody,
     ...(comments.length > 0
-      ? {
-          comments: comments.map(c => ({
-            path: c.path,
-            line: c.line,
-            ...(c.start_line ? { start_line: c.start_line, start_side: 'RIGHT' } : {}),
-            side: 'RIGHT' as const,
-            body: c.body,
-          })),
-        }
+      ? { comments: comments.map(c => toReviewCommentParams(c, logger)) }
       : {}),
   };
 
   try {
     await octokit.pulls.createReview(reviewParams);
     logger.info('Review posted successfully');
+    return { posted: comments.length, dropped: [], bodyPosted: true };
   } catch (error) {
-    if (comments.length > 0) {
-      // Line comments failed (e.g., lines not in diff) — retry as body-only review
-      logger.warning(`Failed to post line comments: ${error}`);
-      logger.info('Retrying as body-only review');
-      await octokit.pulls.createReview({
+    if (comments.length === 0 || !isBatchValidationError(error)) {
+      // Nothing to salvage individually, or this isn't a bad-anchor
+      // rejection we know how to retry around — surface it as before.
+      throw error;
+    }
+
+    logger.warning(`Failed to post line comments as a batch: ${error}`);
+    return postBodyThenRetryCommentsIndividually(
+      octokit,
+      prContext,
+      comments,
+      summaryBody,
+      logger,
+      event,
+    );
+  }
+}
+
+/**
+ * Batch-validation fallback: attempt the summary body alone first, then
+ * retry each comment individually via `createReviewComment` so one bad
+ * anchor can't take the rest of the batch down with it.
+ *
+ * The body-only post is best-effort — if it fails (e.g. a transient network
+ * error right after the batch failure), that's caught, logged, and reported
+ * back via `bodyPosted: false` rather than thrown, so the per-comment
+ * salvage loop below still runs regardless.
+ */
+async function postBodyThenRetryCommentsIndividually(
+  octokit: Octokit,
+  prContext: PRContext,
+  comments: LineComment[],
+  summaryBody: string,
+  logger: Logger,
+  event: 'COMMENT' | 'REQUEST_CHANGES',
+): Promise<PostReviewResult> {
+  logger.info('Posting body-only review, then retrying comments individually');
+
+  let bodyPosted = true;
+  try {
+    await octokit.pulls.createReview({
+      owner: prContext.owner,
+      repo: prContext.repo,
+      pull_number: prContext.pullNumber,
+      commit_id: prContext.headSha,
+      event,
+      body: summaryBody,
+    });
+  } catch (error) {
+    logger.warning(`Failed to post body-only review after batch failure: ${error}`);
+    bodyPosted = false;
+  }
+
+  const dropped: PostReviewResult['dropped'] = [];
+  let posted = 0;
+
+  for (const comment of comments) {
+    try {
+      await octokit.pulls.createReviewComment({
         owner: prContext.owner,
         repo: prContext.repo,
         pull_number: prContext.pullNumber,
         commit_id: prContext.headSha,
-        event,
-        body: summaryBody,
+        ...toReviewCommentParams(comment, logger),
       });
-    } else {
-      throw error;
+      posted++;
+    } catch (commentError) {
+      const message = commentError instanceof Error ? commentError.message : String(commentError);
+      logger.warning(`Dropped inline comment at ${comment.path}:${comment.line}: ${message}`);
+      dropped.push({ path: comment.path, line: comment.line, error: message });
     }
   }
+
+  logger.info(
+    `Posted ${posted} of ${comments.length} line comments individually after batch failure; ` +
+      `${dropped.length} dropped`,
+  );
+
+  return { posted, dropped, bodyPosted };
 }
 
 /**
