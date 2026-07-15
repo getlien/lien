@@ -213,18 +213,32 @@ export async function getFileContent(
 }
 
 /**
- * Result of {@link postPRReview}: how many line comments actually landed, and
- * which ones were dropped (with why) so callers can surface the degradation
- * instead of losing it silently.
+ * Result of {@link postPRReview}: how many line comments actually landed,
+ * which ones were dropped (with why), and whether the summary body itself
+ * made it through — so callers can surface the degradation instead of
+ * losing it silently.
  */
 export interface PostReviewResult {
   posted: number;
   dropped: Array<{ path: string; line: number; error: string }>;
+  /**
+   * Whether the summary body was posted — either as part of the successful
+   * batch, or via the body-only fallback after a batch validation failure.
+   * `false` means the body-only post itself failed (best-effort; salvaging
+   * the inline comments still proceeds regardless).
+   */
+  bodyPosted: boolean;
 }
 
 /** Shape a LineComment into the params octokit expects for a review comment. */
-function toReviewCommentParams(c: LineComment) {
+function toReviewCommentParams(c: LineComment, logger: Logger) {
   const hasValidStartLine = typeof c.start_line === 'number' && c.start_line > 0;
+  if (c.start_line !== undefined && !hasValidStartLine) {
+    logger.warning(
+      `Stripping invalid start_line (${c.start_line}) for comment at ${c.path}:${c.line}; ` +
+        'posting as a single-line comment instead',
+    );
+  }
   return {
     path: c.path,
     line: c.line,
@@ -234,16 +248,28 @@ function toReviewCommentParams(c: LineComment) {
   };
 }
 
+/** Does this error look like a GitHub API rejection we can retry per-comment (a 422 on the batch)? */
+function isBatchValidationError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'status' in error &&
+    (error as { status: unknown }).status === 422
+  );
+}
+
 /**
  * Post a review with line-specific comments.
  *
  * `octokit.pulls.createReview` is all-or-nothing: if ANY comment anchors to a
- * line outside the diff, GitHub rejects the entire batch — including every
- * valid comment in it. On that failure we post the summary body on its own
- * first (it must survive), then retry each comment individually via
- * `createReviewComment` so one bad anchor can't take the rest down with it.
- * Comments that still fail are logged and returned in `dropped`, never
- * silently discarded.
+ * line outside the diff, GitHub rejects the whole batch with a 422 —
+ * including every valid comment in it. Only that validation failure triggers
+ * the per-comment salvage path below: we post the summary body on its own,
+ * then retry each comment individually via `createReviewComment` so one bad
+ * anchor can't take the rest down with it. Comments that still fail are
+ * logged and returned in `dropped`, never silently discarded. Any other
+ * failure (auth, rate-limit, 5xx, network) is rethrown as-is — those aren't
+ * anchor problems and salvaging would just mask the real error.
  */
 export async function postPRReview(
   octokit: Octokit,
@@ -262,16 +288,19 @@ export async function postPRReview(
     commit_id: prContext.headSha,
     event,
     body: summaryBody,
-    ...(comments.length > 0 ? { comments: comments.map(toReviewCommentParams) } : {}),
+    ...(comments.length > 0
+      ? { comments: comments.map(c => toReviewCommentParams(c, logger)) }
+      : {}),
   };
 
   try {
     await octokit.pulls.createReview(reviewParams);
     logger.info('Review posted successfully');
-    return { posted: comments.length, dropped: [] };
+    return { posted: comments.length, dropped: [], bodyPosted: true };
   } catch (error) {
-    if (comments.length === 0) {
-      // Nothing to salvage individually — surface the failure as before.
+    if (comments.length === 0 || !isBatchValidationError(error)) {
+      // Nothing to salvage individually, or this isn't a bad-anchor
+      // rejection we know how to retry around — surface it as before.
       throw error;
     }
 
@@ -288,14 +317,14 @@ export async function postPRReview(
 }
 
 /**
- * Batch fallback: post the summary alone first (it must survive the batch
- * failure), then retry each comment individually via `createReviewComment` so
- * one bad anchor can't take the rest of the batch down with it.
+ * Batch-validation fallback: attempt the summary body alone first, then
+ * retry each comment individually via `createReviewComment` so one bad
+ * anchor can't take the rest of the batch down with it.
  *
- * The body-only post can itself fail (e.g. a transient network error right
- * after the batch failure) — that's caught and logged rather than thrown, so
- * the per-comment salvage loop below still runs. Individual comments are the
- * real salvage path; the body is a bonus, not a precondition for it.
+ * The body-only post is best-effort — if it fails (e.g. a transient network
+ * error right after the batch failure), that's caught, logged, and reported
+ * back via `bodyPosted: false` rather than thrown, so the per-comment
+ * salvage loop below still runs regardless.
  */
 async function postBodyThenRetryCommentsIndividually(
   octokit: Octokit,
@@ -307,6 +336,7 @@ async function postBodyThenRetryCommentsIndividually(
 ): Promise<PostReviewResult> {
   logger.info('Posting body-only review, then retrying comments individually');
 
+  let bodyPosted = true;
   try {
     await octokit.pulls.createReview({
       owner: prContext.owner,
@@ -318,6 +348,7 @@ async function postBodyThenRetryCommentsIndividually(
     });
   } catch (error) {
     logger.warning(`Failed to post body-only review after batch failure: ${error}`);
+    bodyPosted = false;
   }
 
   const dropped: PostReviewResult['dropped'] = [];
@@ -330,7 +361,7 @@ async function postBodyThenRetryCommentsIndividually(
         repo: prContext.repo,
         pull_number: prContext.pullNumber,
         commit_id: prContext.headSha,
-        ...toReviewCommentParams(comment),
+        ...toReviewCommentParams(comment, logger),
       });
       posted++;
     } catch (commentError) {
@@ -345,7 +376,7 @@ async function postBodyThenRetryCommentsIndividually(
       `${dropped.length} dropped`,
   );
 
-  return { posted, dropped };
+  return { posted, dropped, bodyPosted };
 }
 
 /**

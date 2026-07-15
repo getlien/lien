@@ -26,6 +26,11 @@ function createMockLogger(): Logger {
   };
 }
 
+/** Octokit RequestError-shaped rejection: a batch validation failure (invalid comment anchor). */
+function validationError(message: string): Error & { status: number } {
+  return Object.assign(new Error(message), { status: 422 });
+}
+
 /** Minimal Octokit stand-in — only the two REST methods postPRReview touches. */
 function createMockOctokit(overrides?: {
   createReview?: ReturnType<typeof vi.fn>;
@@ -73,10 +78,10 @@ describe('postPRReview', () => {
     );
     // Batch succeeded — no per-comment fallback calls.
     expect(createReviewComment).not.toHaveBeenCalled();
-    expect(result).toEqual({ posted: 2, dropped: [] });
+    expect(result).toEqual({ posted: 2, dropped: [], bodyPosted: true });
   });
 
-  it('drops an invalid (negative) start_line instead of passing it through', async () => {
+  it('drops an invalid (negative) start_line instead of passing it through, and warns', async () => {
     const createReview = vi.fn().mockResolvedValue({});
     const octokit = createMockOctokit({ createReview });
     const logger = createMockLogger();
@@ -88,12 +93,31 @@ describe('postPRReview', () => {
     const postedComment = createReview.mock.calls[0][0].comments[0];
     expect(postedComment).not.toHaveProperty('start_line');
     expect(postedComment).not.toHaveProperty('start_side');
+    expect(logger.warning).toHaveBeenCalledWith(
+      expect.stringContaining('Stripping invalid start_line (-1) for comment at a.ts:10'),
+    );
   });
 
-  it('posts the body alone, then every comment individually, when the batch is rejected', async () => {
+  it('drops a zero start_line instead of passing it through, and warns', async () => {
+    const createReview = vi.fn().mockResolvedValue({});
+    const octokit = createMockOctokit({ createReview });
+    const logger = createMockLogger();
+
+    const comments: LineComment[] = [{ path: 'a.ts', line: 10, start_line: 0, body: 'nit a' }];
+
+    await postPRReview(octokit, pr, comments, 'summary body', logger, 'COMMENT');
+
+    const postedComment = createReview.mock.calls[0][0].comments[0];
+    expect(postedComment).not.toHaveProperty('start_line');
+    expect(logger.warning).toHaveBeenCalledWith(
+      expect.stringContaining('Stripping invalid start_line (0) for comment at a.ts:10'),
+    );
+  });
+
+  it('posts the body alone, then every comment individually, when the batch is rejected as invalid (422)', async () => {
     const createReview = vi
       .fn()
-      .mockRejectedValueOnce(new Error('Line 999 is not part of the diff'))
+      .mockRejectedValueOnce(validationError('Line 999 is not part of the diff'))
       .mockResolvedValueOnce({});
     const createReviewComment = vi.fn().mockResolvedValue({});
     const octokit = createMockOctokit({ createReview, createReviewComment });
@@ -113,7 +137,7 @@ describe('postPRReview', () => {
 
     // Every comment retried individually — none silently dropped.
     expect(createReviewComment).toHaveBeenCalledTimes(2);
-    expect(result).toEqual({ posted: 2, dropped: [] });
+    expect(result).toEqual({ posted: 2, dropped: [], bodyPosted: true });
     expect(logger.warning).toHaveBeenCalledWith(
       expect.stringContaining('Failed to post line comments as a batch'),
     );
@@ -122,7 +146,7 @@ describe('postPRReview', () => {
   it('drops only the comment that still fails individually, and never throws', async () => {
     const createReview = vi
       .fn()
-      .mockRejectedValueOnce(new Error('batch rejected'))
+      .mockRejectedValueOnce(validationError('batch rejected'))
       .mockResolvedValueOnce({});
     const createReviewComment = vi
       .fn()
@@ -139,6 +163,7 @@ describe('postPRReview', () => {
     const result = await postPRReview(octokit, pr, comments, 'summary body', logger, 'COMMENT');
 
     expect(result.posted).toBe(1);
+    expect(result.bodyPosted).toBe(true);
     expect(result.dropped).toEqual([
       { path: 'b.ts', line: 20, error: 'Line 20 is not part of the diff' },
     ]);
@@ -147,10 +172,10 @@ describe('postPRReview', () => {
     );
   });
 
-  it('still retries comments individually when the body-only post also fails', async () => {
+  it('still retries comments individually, and reports bodyPosted: false, when the body-only post also fails', async () => {
     const createReview = vi
       .fn()
-      .mockRejectedValueOnce(new Error('batch rejected'))
+      .mockRejectedValueOnce(validationError('batch rejected'))
       .mockRejectedValueOnce(new Error('body-only post also failed'));
     const createReviewComment = vi.fn().mockResolvedValue({});
     const octokit = createMockOctokit({ createReview, createReviewComment });
@@ -167,7 +192,7 @@ describe('postPRReview', () => {
     expect(createReview).toHaveBeenCalledTimes(2);
     // The salvage path still ran for every comment.
     expect(createReviewComment).toHaveBeenCalledTimes(2);
-    expect(result).toEqual({ posted: 2, dropped: [] });
+    expect(result).toEqual({ posted: 2, dropped: [], bodyPosted: false });
     expect(logger.warning).toHaveBeenCalledWith(
       expect.stringContaining('Failed to post body-only review after batch failure'),
     );
@@ -182,6 +207,40 @@ describe('postPRReview', () => {
     await expect(postPRReview(octokit, pr, [], 'summary body', logger, 'COMMENT')).rejects.toThrow(
       'network error',
     );
+    expect(createReviewComment).not.toHaveBeenCalled();
+  });
+
+  it('rethrows a non-validation batch failure (e.g. 500) instead of salvaging, even with comments present', async () => {
+    const serverError = Object.assign(new Error('Internal Server Error'), { status: 500 });
+    const createReview = vi.fn().mockRejectedValue(serverError);
+    const createReviewComment = vi.fn();
+    const octokit = createMockOctokit({ createReview, createReviewComment });
+    const logger = createMockLogger();
+
+    const comments: LineComment[] = [{ path: 'a.ts', line: 10, body: 'nit a' }];
+
+    await expect(
+      postPRReview(octokit, pr, comments, 'summary body', logger, 'COMMENT'),
+    ).rejects.toThrow('Internal Server Error');
+
+    // Only the initial batch attempt — no body-only fallback, no per-comment salvage.
+    expect(createReview).toHaveBeenCalledTimes(1);
+    expect(createReviewComment).not.toHaveBeenCalled();
+  });
+
+  it('rethrows a batch failure with no status (e.g. a plain network error) instead of salvaging', async () => {
+    const createReview = vi.fn().mockRejectedValue(new Error('socket hang up'));
+    const createReviewComment = vi.fn();
+    const octokit = createMockOctokit({ createReview, createReviewComment });
+    const logger = createMockLogger();
+
+    const comments: LineComment[] = [{ path: 'a.ts', line: 10, body: 'nit a' }];
+
+    await expect(
+      postPRReview(octokit, pr, comments, 'summary body', logger, 'COMMENT'),
+    ).rejects.toThrow('socket hang up');
+
+    expect(createReview).toHaveBeenCalledTimes(1);
     expect(createReviewComment).not.toHaveBeenCalled();
   });
 });
