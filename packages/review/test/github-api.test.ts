@@ -1,5 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
-import { postPRReview, parsePatchLines } from '../src/github-api.js';
+import {
+  postPRReview,
+  parsePatchLines,
+  updatePRDescription,
+  removePRDescriptionSection,
+} from '../src/github-api.js';
 import type { Octokit } from '../src/github-api.js';
 import type { LineComment, PRContext } from '../src/types.js';
 import type { Logger } from '../src/logger.js';
@@ -242,6 +247,91 @@ describe('postPRReview', () => {
 
     expect(createReview).toHaveBeenCalledTimes(1);
     expect(createReviewComment).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// updatePRDescription / removePRDescriptionSection
+// ---------------------------------------------------------------------------
+
+/** Minimal Octokit stand-in for the PR-description read/write pair. */
+function createDescriptionOctokit(overrides?: {
+  body?: string;
+  get?: ReturnType<typeof vi.fn>;
+  update?: ReturnType<typeof vi.fn>;
+}) {
+  return {
+    pulls: {
+      get: overrides?.get ?? vi.fn().mockResolvedValue({ data: { body: overrides?.body ?? '' } }),
+      update: overrides?.update ?? vi.fn().mockResolvedValue({}),
+    },
+  } as unknown as Octokit;
+}
+
+describe('updatePRDescription', () => {
+  // Regression coverage for the CodeRabbit #768 finding: this used to swallow
+  // every error and always resolve void, so a caller tracking delivery (the
+  // attestation's descriptionBadgeUpdated) could never see a real failure.
+  it('returns true on a successful update', async () => {
+    const octokit = createDescriptionOctokit();
+    const logger = createMockLogger();
+
+    await expect(updatePRDescription(octokit, pr, 'badge', logger, 'attestation')).resolves.toBe(
+      true,
+    );
+  });
+
+  it('returns false (does not throw) when octokit.pulls.update rejects', async () => {
+    const octokit = createDescriptionOctokit({
+      update: vi.fn().mockRejectedValue(new Error('403 Forbidden')),
+    });
+    const logger = createMockLogger();
+
+    await expect(updatePRDescription(octokit, pr, 'badge', logger, 'attestation')).resolves.toBe(
+      false,
+    );
+    expect(logger.warning).toHaveBeenCalled();
+  });
+});
+
+describe('removePRDescriptionSection', () => {
+  it('strips an existing marker-delimited section and updates the PR', async () => {
+    const body =
+      'Intro.\n\n<!-- lien:attestation -->\nAttested: degraded\n<!-- /lien:attestation -->';
+    const update = vi.fn().mockResolvedValue({});
+    const octokit = createDescriptionOctokit({ body, update });
+    const logger = createMockLogger();
+
+    const ok = await removePRDescriptionSection(octokit, pr, 'attestation', logger);
+
+    expect(ok).toBe(true);
+    expect(update).toHaveBeenCalledTimes(1);
+    const newBody = update.mock.calls[0][0].body as string;
+    expect(newBody).not.toContain('lien:attestation');
+    expect(newBody).toContain('Intro.');
+  });
+
+  it('is a no-op (no update call) when the section is not present', async () => {
+    const update = vi.fn().mockResolvedValue({});
+    const octokit = createDescriptionOctokit({ body: 'Just a plain PR description.', update });
+    const logger = createMockLogger();
+
+    const ok = await removePRDescriptionSection(octokit, pr, 'attestation', logger);
+
+    expect(ok).toBe(true);
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('returns false (does not throw) when the API call fails', async () => {
+    const octokit = createDescriptionOctokit({
+      get: vi.fn().mockRejectedValue(new Error('network error')),
+    });
+    const logger = createMockLogger();
+
+    const ok = await removePRDescriptionSection(octokit, pr, 'attestation', logger);
+
+    expect(ok).toBe(false);
+    expect(logger.warning).toHaveBeenCalled();
   });
 });
 

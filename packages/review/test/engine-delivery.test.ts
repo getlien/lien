@@ -162,4 +162,102 @@ describe('ReviewEngine.present() delivery truth', () => {
     const result = await engine.present([], createAdapterContext());
     expect(result.delivery.outOfDiffReviewPosted).toBeNull();
   });
+
+  // Regression coverage for the CodeRabbit #768 finding: annotationsEmitted
+  // used to report the QUEUED count on every path, even the one where no
+  // check run exists to send them to — the real Action flow, since
+  // `presentFindings` always calls `present()` with `skipCheckRun: true`.
+  describe('annotationsEmitted', () => {
+    it('stays 0 when no check run is finalized (skipCheckRun), even if a plugin queued annotations', async () => {
+      const engine = new ReviewEngine();
+      engine.register(
+        createTestPlugin({
+          present: async (_findings, ctx: PresentContext) => {
+            ctx.addAnnotations([{ path: 'a.ts', line: 1, level: 'warning', message: 'nit' }]);
+          },
+        }),
+      );
+
+      const result = await engine.present([], createAdapterContext(), { skipCheckRun: true });
+
+      expect(result.delivery.annotationsEmitted).toBe(0);
+    });
+
+    it('reflects the actual sent count when a check run is created and finalized', async () => {
+      const octokit = {
+        checks: {
+          create: vi.fn().mockResolvedValue({ data: { id: 99 } }),
+          update: vi.fn().mockResolvedValue({}),
+        },
+      };
+      const engine = new ReviewEngine();
+      engine.register(
+        createTestPlugin({
+          present: async (_findings, ctx: PresentContext) => {
+            ctx.addAnnotations([{ path: 'a.ts', line: 1, level: 'warning', message: 'nit' }]);
+          },
+        }),
+      );
+
+      const result = await engine.present([], createAdapterContext({ octokit, pr: mockPR }));
+
+      expect(result.delivery.annotationsEmitted).toBe(1);
+      expect(octokit.checks.update).toHaveBeenCalled();
+    });
+  });
+
+  // Regression coverage for the CodeRabbit #768 finding: updatePRDescription
+  // used to swallow every error internally and never reject, so
+  // descriptionBadgeUpdated was always true whenever an update was attempted
+  // — it could never reflect a real failure.
+  describe('descriptionBadgeUpdated', () => {
+    it('is null when no plugin contributes a description section', async () => {
+      const engine = new ReviewEngine();
+      engine.register(createTestPlugin());
+      const result = await engine.present([], createAdapterContext({ octokit: {}, pr: mockPR }));
+      expect(result.delivery.descriptionBadgeUpdated).toBeNull();
+    });
+
+    it('is true when a plugin contributes a description and the update succeeds', async () => {
+      const octokit = {
+        pulls: {
+          get: vi.fn().mockResolvedValue({ data: { body: '' } }),
+          update: vi.fn().mockResolvedValue({}),
+        },
+      };
+      const engine = new ReviewEngine();
+      engine.register(
+        createTestPlugin({
+          present: async (_findings, ctx: PresentContext) => {
+            ctx.appendDescription('Some findings.', 'test');
+          },
+        }),
+      );
+
+      const result = await engine.present([], createAdapterContext({ octokit, pr: mockPR }));
+
+      expect(result.delivery.descriptionBadgeUpdated).toBe(true);
+    });
+
+    it('is false (not thrown) when the underlying PR update actually fails', async () => {
+      const octokit = {
+        pulls: {
+          get: vi.fn().mockResolvedValue({ data: { body: '' } }),
+          update: vi.fn().mockRejectedValue(new Error('403 Forbidden')),
+        },
+      };
+      const engine = new ReviewEngine();
+      engine.register(
+        createTestPlugin({
+          present: async (_findings, ctx: PresentContext) => {
+            ctx.appendDescription('Some findings.', 'test');
+          },
+        }),
+      );
+
+      const result = await engine.present([], createAdapterContext({ octokit, pr: mockPR }));
+
+      expect(result.delivery.descriptionBadgeUpdated).toBe(false);
+    });
+  });
 });

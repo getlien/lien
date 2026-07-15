@@ -5,10 +5,11 @@
  * boundary are mocked; complexity analysis runs for real against a temp
  * checkout so the eligibility-path branching is exercised, not re-described.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 import { silentLogger } from '../src/test-helpers.js';
 import type { ReviewCoreContext } from '../src/review-pr.js';
@@ -19,7 +20,8 @@ vi.mock('../src/clone.js', () => ({ cloneBySha }));
 const githubApi = vi.hoisted(() => ({
   getPRChangedFiles: vi.fn(),
   getPRPatchData: vi.fn(async () => ({ patches: new Map(), diffLines: new Map() })),
-  updatePRDescription: vi.fn(async () => {}),
+  updatePRDescription: vi.fn(async () => true),
+  removePRDescriptionSection: vi.fn(async () => true),
 }));
 vi.mock('../src/github-api.js', async importOriginal => {
   const actual = await importOriginal<typeof import('../src/github-api.js')>();
@@ -67,7 +69,8 @@ describe('reviewPullRequest — scope.eligibilityPath', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     githubApi.getPRPatchData.mockResolvedValue({ patches: new Map(), diffLines: new Map() });
-    githubApi.updatePRDescription.mockResolvedValue(undefined);
+    githubApi.updatePRDescription.mockResolvedValue(true);
+    githubApi.removePRDescriptionSection.mockResolvedValue(true);
   });
 
   it('is "zero_files_early_exit" when the PR touches no analyzable files and summary is off', async () => {

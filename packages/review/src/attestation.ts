@@ -64,7 +64,8 @@ export interface InlineCommentsAttestation {
 export interface DeliveryAttestation {
   annotationsEmitted: number;
   inlineComments: InlineCommentsAttestation;
-  descriptionBadge: { updated: boolean };
+  /** null when no plugin contributed a description section this run (nothing to update). */
+  descriptionBadge: { updated: boolean | null };
   /** null when no plugin attempted an out-of-diff review comment this run. */
   outOfDiffReviewPosted: boolean | null;
 }
@@ -80,6 +81,9 @@ export interface ScopeAttestation {
  * `degraded:provider_partial` covers any non-`neverRan` incomplete stop
  * (`max_turns`, or `completed` without a parseable verdict) that budget
  * exhaustion doesn't already explain more specifically.
+ * `degraded:delivery_incomplete` covers a description-badge update or an
+ * out-of-diff review comment that was attempted and failed to land — distinct
+ * from `comments_dropped` (which is about the per-finding inline comments).
  * `failed:analysis_error` covers a pre-engine pipeline failure (the
  * complexity report itself couldn't be built) — distinct from a provider
  * failure, but still not a "delivered" run.
@@ -89,6 +93,7 @@ export type AttestationVerdict =
   | 'degraded:provider_partial'
   | 'degraded:budget_starved'
   | 'degraded:comments_dropped'
+  | 'degraded:delivery_incomplete'
   | 'failed:provider_never_ran'
   | 'failed:analysis_error';
 
@@ -147,7 +152,10 @@ export function deriveMainPassAttestation(
  * outranks everything — nothing was analyzed. Budget starvation is a more
  * specific, more actionable diagnosis than the generic "partial" bucket, so
  * it's checked first among incomplete-stop reasons. Dropped inline comments
- * only matter once the review itself came back clean.
+ * and other delivery failures only matter once the review itself came back
+ * clean. `descriptionBadgeUpdated`/`outOfDiffReviewPosted` are checked against
+ * `=== false` specifically (not falsy) — `null`/`undefined` means "nothing was
+ * attempted this run", which is not a failure.
  */
 export function computeVerdict(input: {
   pipelineFailed: boolean;
@@ -155,6 +163,8 @@ export function computeVerdict(input: {
   mainPass: ProviderPassAttestation;
   budget: BudgetAttestation;
   inlineComments: InlineCommentsAttestation;
+  descriptionBadgeUpdated?: boolean | null;
+  outOfDiffReviewPosted?: boolean | null;
 }): AttestationVerdict {
   if (input.pipelineFailed) return 'failed:analysis_error';
   if (input.providerFailure) return 'failed:provider_never_ran';
@@ -162,6 +172,9 @@ export function computeVerdict(input: {
     return input.budget.starved ? 'degraded:budget_starved' : 'degraded:provider_partial';
   }
   if (input.inlineComments.dropped > 0) return 'degraded:comments_dropped';
+  if (input.descriptionBadgeUpdated === false || input.outOfDiffReviewPosted === false) {
+    return 'degraded:delivery_incomplete';
+  }
   return 'delivered';
 }
 
@@ -179,7 +192,8 @@ export interface AttestationInput {
   passesSkipped: SkippedPass[];
   annotationsEmitted: number;
   inlineComments: InlineCommentsAttestation;
-  descriptionBadgeUpdated: boolean;
+  /** null when no plugin contributed a description section this run (nothing to update). */
+  descriptionBadgeUpdated: boolean | null;
   outOfDiffReviewPosted: boolean | null;
   /** True for the pre-engine "couldn't build a complexity report" failure path. */
   pipelineFailed?: boolean;
@@ -202,6 +216,8 @@ export function assembleAttestation(input: AttestationInput): Attestation {
     mainPass,
     budget,
     inlineComments: input.inlineComments,
+    descriptionBadgeUpdated: input.descriptionBadgeUpdated,
+    outOfDiffReviewPosted: input.outOfDiffReviewPosted,
   });
 
   return {
@@ -240,7 +256,7 @@ export function emptyAttestation(
     passesSkipped: [],
     annotationsEmitted: 0,
     inlineComments: { attempted: 0, posted: 0, dropped: 0, deduped: 0 },
-    descriptionBadgeUpdated: false,
+    descriptionBadgeUpdated: null,
     outOfDiffReviewPosted: null,
     pipelineFailed,
   });

@@ -15,6 +15,9 @@
  * Flow: clone head → analyze → clone base → deltas → engine.run → engine.present.
  */
 
+import type { CodeChunk } from '@liendev/parser';
+import { performChunkOnlyIndex, analyzeComplexityFromChunks } from '@liendev/parser';
+
 import type {
   Octokit,
   PRContext,
@@ -38,10 +41,9 @@ import {
   AgentReviewPlugin,
   hasProviderFailure,
   updatePRDescription,
+  removePRDescriptionSection,
   EMPTY_DELIVERY,
 } from './index.js';
-import type { CodeChunk } from '@liendev/parser';
-import { performChunkOnlyIndex, analyzeComplexityFromChunks } from '@liendev/parser';
 import { reviewTokenBudgetMultiplier, MAX_REVIEW_TOKEN_BUDGET } from './defaults.js';
 import {
   assembleAttestation,
@@ -51,7 +53,6 @@ import {
   type EligibilityPath,
   type SkippedPass,
 } from './attestation.js';
-
 import { cloneBySha, type CloneResult } from './clone.js';
 
 /**
@@ -256,12 +257,35 @@ interface PresentedReview {
   attestation: Attestation;
 }
 
+/** Prompt/completion token + cost usage, as reported by a single agent-client run. */
+export interface AgentUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  cost: number;
+}
+
 /** Telemetry the engine reports out-of-band during `run()`, via callbacks. */
 interface RunTelemetry {
   findings: ReviewFinding[];
-  agentUsage: { promptTokens: number; completionTokens: number; totalTokens: number; cost: number };
+  agentUsage: AgentUsage;
   allocatedTokens: number;
   passesSkipped: SkippedPass[];
+}
+
+/**
+ * Sum two usage snapshots. `reportUsage` fires once per agent-client pass —
+ * the main review and (on doc-touching PRs) the doc-truth second pass — and
+ * both must contribute to the run's total spend. Assigning the latest call's
+ * value instead of accumulating silently drops whichever pass reported first.
+ */
+export function accumulateUsage(a: AgentUsage, b: AgentUsage): AgentUsage {
+  return {
+    promptTokens: a.promptTokens + b.promptTokens,
+    completionTokens: a.completionTokens + b.completionTokens,
+    totalTokens: a.totalTokens + b.totalTokens,
+    cost: a.cost + b.cost,
+  };
 }
 
 /**
@@ -304,7 +328,7 @@ async function runEngineForReview(
     logger,
     repoRootDir: headCloneDir,
     reportUsage: usage => {
-      telemetry.agentUsage = usage;
+      telemetry.agentUsage = accumulateUsage(telemetry.agentUsage, usage);
     },
     reportBudget: tokens => {
       telemetry.allocatedTokens = tokens;
@@ -388,7 +412,7 @@ async function analyzeAndPresent(
     presentation,
   );
 
-  await postAttestationBadgeIfDegraded(octokit, pr, attestation, logger);
+  await syncAttestationBadge(octokit, pr, attestation, logger);
 
   return {
     findings,
@@ -401,30 +425,34 @@ async function analyzeAndPresent(
 }
 
 /**
- * Post the attestation's compact status line as its own PR-description
- * section — only when the run is NOT a clean `delivered` (a healthy run
- * doesn't need the extra line; see `formatAttestationBadgeLine`). Runs after
+ * Sync the attestation's compact status line as its own PR-description
+ * section — posted only when the run is NOT a clean `delivered` (a healthy
+ * run doesn't need the extra line; see `formatAttestationBadgeLine`), and
+ * REMOVED when it is (a PR that recovers from degraded to delivered must not
+ * keep showing the old degraded badge from a prior run). Runs after
  * `engine.present()` has already posted the main "Lien Review" section, so
  * this is a separate `<!-- attestation -->`-marked section rather than a
  * fragment folded into that one (the attestation isn't known until delivery
  * — inline comments posted/dropped — has already happened).
  */
-async function postAttestationBadgeIfDegraded(
+async function syncAttestationBadge(
   octokit: Octokit,
   pr: PRContext,
   attestation: Attestation,
   logger: Logger,
 ): Promise<void> {
-  if (attestation.verdict === 'delivered') return;
-  await updatePRDescription(
+  if (attestation.verdict === 'delivered') {
+    await removePRDescriptionSection(octokit, pr, 'attestation', logger);
+    return;
+  }
+  const posted = await updatePRDescription(
     octokit,
     pr,
     formatAttestationBadgeLine(attestation),
     logger,
     'attestation',
-  ).catch(err =>
-    logger.warning(`Failed to post attestation badge: ${err instanceof Error ? err.message : err}`),
   );
+  if (!posted) logger.warning('Failed to post attestation badge');
 }
 
 /**

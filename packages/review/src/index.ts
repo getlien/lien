@@ -114,6 +114,7 @@ export {
   getFileContent,
   postPRReview,
   updatePRDescription,
+  removePRDescriptionSection,
   parsePatchLines,
   getPRDiffLines,
   getPRPatchData,

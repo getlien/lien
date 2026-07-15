@@ -51,7 +51,8 @@ export interface EngineOptions {
 export interface PresentDelivery {
   annotationsEmitted: number;
   inlineComments: { attempted: number; posted: number; dropped: number; deduped: number };
-  descriptionBadgeUpdated: boolean;
+  /** null when no plugin contributed a description section this run (nothing to update). */
+  descriptionBadgeUpdated: boolean | null;
   /** null when no plugin attempted an out-of-diff review comment this run. */
   outOfDiffReviewPosted: boolean | null;
 }
@@ -60,7 +61,7 @@ export interface PresentDelivery {
 export const EMPTY_DELIVERY: PresentDelivery = {
   annotationsEmitted: 0,
   inlineComments: { attempted: 0, posted: 0, dropped: 0, deduped: 0 },
-  descriptionBadgeUpdated: false,
+  descriptionBadgeUpdated: null,
   outOfDiffReviewPosted: null,
 };
 
@@ -245,35 +246,74 @@ export class ReviewEngine {
       adapterContext.logger,
     );
     const delivery: PresentDelivery = {
-      annotationsEmitted: pendingAnnotations.length,
+      annotationsEmitted: 0,
       inlineComments: deliveryTracker.inlineComments,
       descriptionBadgeUpdated,
       outOfDiffReviewPosted: deliveryTracker.outOfDiffReviewPosted,
     };
 
-    if (octokit && pr && checkRunId != null) {
-      const presented = await finalizePresentation(
-        octokit,
-        pr,
-        checkRunId,
-        findings,
-        summarySections,
-        pendingAnnotations,
-        debugLog,
-        adapterContext.logger,
-      );
-      return { ...presented, delivery };
-    }
-
-    // No check run was finalized (no octokit/pr/checkRunId), but callers still
-    // want the conclusion + summary for step summaries and exit codes.
-    const ordered = reorderSections(summarySections);
-    return {
-      conclusion: determineConclusion(findings),
-      summary: ordered.length > 0 ? ordered.join('\n\n') : buildCheckSummary(findings),
+    return finalizePresentResult(
+      octokit,
+      pr,
+      checkRunId,
+      findings,
+      summarySections,
+      pendingAnnotations,
+      debugLog,
       delivery,
+      adapterContext.logger,
+    );
+  }
+}
+
+/**
+ * `present()`'s two return paths, split out so annotationsEmitted is stamped
+ * correctly on each: only the check-run path (Checks API) actually sends
+ * annotations to GitHub. The no-check-run path — the Action's primary flow,
+ * since `presentFindings` always calls `present()` with `skipCheckRun: true`
+ * — never emits any, so `delivery.annotationsEmitted` stays the 0 it's
+ * initialized with.
+ */
+async function finalizePresentResult(
+  octokit: Octokit | undefined,
+  pr: PRContext | undefined,
+  checkRunId: number | undefined,
+  findings: ReviewFinding[],
+  summarySections: TaggedSection[],
+  pendingAnnotations: CheckAnnotation[],
+  debugLog: string[],
+  delivery: PresentDelivery,
+  logger: Logger,
+): Promise<{
+  conclusion: 'success' | 'failure' | 'neutral';
+  summary: string;
+  delivery: PresentDelivery;
+}> {
+  if (octokit && pr && checkRunId != null) {
+    const presented = await finalizePresentation(
+      octokit,
+      pr,
+      checkRunId,
+      findings,
+      summarySections,
+      pendingAnnotations,
+      debugLog,
+      logger,
+    );
+    return {
+      ...presented,
+      delivery: { ...delivery, annotationsEmitted: pendingAnnotations.length },
     };
   }
+
+  // No check run was finalized (no octokit/pr/checkRunId), but callers still
+  // want the conclusion + summary for step summaries and exit codes.
+  const ordered = reorderSections(summarySections);
+  return {
+    conclusion: determineConclusion(findings),
+    summary: ordered.length > 0 ? ordered.join('\n\n') : buildCheckSummary(findings),
+    delivery,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -444,15 +484,18 @@ function reorderSections(sections: TaggedSection[]): string[] {
 
 /**
  * Compose all plugin description fragments into a single "Lien Review" section
- * and update the PR description once.
+ * and update the PR description once. Returns null when there was nothing to
+ * describe (no octokit/pr, or no plugin contributed a section) — distinct
+ * from `false`, which means an update was actually attempted and failed (see
+ * `updatePRDescription`'s own success/failure return).
  */
 async function finalizeDescription(
   descriptionParts: Map<string, string>,
   octokit: Octokit | undefined,
   pr: PRContext | undefined,
   logger: Logger,
-): Promise<boolean> {
-  if (!octokit || !pr || descriptionParts.size === 0) return false;
+): Promise<boolean | null> {
+  if (!octokit || !pr || descriptionParts.size === 0) return null;
 
   const ordered: string[] = [];
   for (const id of PLUGIN_ORDER) {
@@ -466,13 +509,7 @@ async function finalizeDescription(
   const body = ordered.join('\n\n');
   const markdown = `### Lien Review\n\n${body}`;
 
-  try {
-    await updatePRDescription(octokit, pr, markdown, logger);
-    return true;
-  } catch (err) {
-    logger.warning(`Failed to update PR description: ${err instanceof Error ? err.message : err}`);
-    return false;
-  }
+  return updatePRDescription(octokit, pr, markdown, logger);
 }
 
 async function ensureCheckRun(
@@ -628,8 +665,9 @@ function buildPresentContext(
       descriptionParts.set(pluginId, markdown),
     updateDescription:
       octokit && pr
-        ? (markdown: string, sectionId?: string) =>
-            updatePRDescription(octokit, pr, markdown, logger, sectionId)
+        ? async (markdown: string, sectionId?: string) => {
+            await updatePRDescription(octokit, pr, markdown, logger, sectionId);
+          }
         : undefined,
     postInlineComments:
       octokit && pr ? createPostInlineComments(octokit, pr, logger, deliveryTracker) : undefined,

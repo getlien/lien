@@ -117,6 +117,30 @@ describe('assembleAttestation', () => {
     expect(attestation.verdict).toBe('degraded:comments_dropped');
   });
 
+  // Regression coverage for the CodeRabbit #768 finding: computeVerdict used
+  // to ignore descriptionBadgeUpdated/outOfDiffReviewPosted entirely, so a run
+  // where the PR-description update failed (or the out-of-diff summary
+  // comment failed to post) was still attested "delivered".
+  it('produces verdict "degraded:delivery_incomplete" when the description badge update failed', () => {
+    const attestation = assembleAttestation(baseInput({ descriptionBadgeUpdated: false }));
+    expect(attestation.verdict).toBe('degraded:delivery_incomplete');
+  });
+
+  it('produces verdict "degraded:delivery_incomplete" when the out-of-diff review comment failed', () => {
+    const attestation = assembleAttestation(baseInput({ outOfDiffReviewPosted: false }));
+    expect(attestation.verdict).toBe('degraded:delivery_incomplete');
+  });
+
+  it('stays "delivered" when nothing was attempted (null), not just when it succeeded', () => {
+    // null means "no plugin contributed a description this run" / "no plugin
+    // attempted an out-of-diff comment" — distinct from false ("attempted and
+    // failed"). Only false should degrade the verdict.
+    const attestation = assembleAttestation(
+      baseInput({ descriptionBadgeUpdated: null, outOfDiffReviewPosted: null }),
+    );
+    expect(attestation.verdict).toBe('delivered');
+  });
+
   it('produces verdict "failed:analysis_error" when the pipeline failed before the engine ran', () => {
     const attestation = assembleAttestation(
       baseInput({ conclusion: 'failure', agentAttempted: false, pipelineFailed: true }),
@@ -161,6 +185,9 @@ describe('emptyAttestation', () => {
       filesAnalyzed: 0,
     });
     expect(attestation.provider.passes).toEqual([]);
+    // Nothing was attempted on this early-exit path — null ("not attempted"),
+    // not false ("attempted and failed"), so it must not read as degraded.
+    expect(attestation.delivery.descriptionBadge.updated).toBeNull();
   });
 
   it('builds a "failed:analysis_error" attestation for the pre-engine pipeline failure path', () => {

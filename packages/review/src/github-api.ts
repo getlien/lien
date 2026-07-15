@@ -532,6 +532,10 @@ function stripSection(text: string, startMarker: string, endMarker: string): str
  * @param sectionId - Optional section identifier for per-plugin markers.
  *   When provided, uses `<!-- lien:{sectionId} -->` / `<!-- /lien:{sectionId} -->`.
  *   When omitted, uses the default `<!-- lien-stats -->` markers (backward compat).
+ * @returns true on a successful update, false on failure — never rejects (an
+ *   action shouldn't fail just because the description couldn't be updated),
+ *   but callers that need to know whether the write actually landed (e.g. the
+ *   delivery attestation) can check the return value instead of assuming success.
  */
 export async function updatePRDescription(
   octokit: Octokit,
@@ -539,7 +543,7 @@ export async function updatePRDescription(
   badgeMarkdown: string,
   logger: Logger,
   sectionId?: string,
-): Promise<void> {
+): Promise<boolean> {
   try {
     // Get current PR
     const { data: pr } = await octokit.pulls.get({
@@ -584,9 +588,50 @@ export async function updatePRDescription(
     });
 
     logger.info(`PR description updated with ${sectionId ?? 'complexity stats'}`);
+    return true;
   } catch (error) {
     // Don't fail the action if we can't update the description
     logger.warning(`Failed to update PR description: ${error}`);
+    return false;
+  }
+}
+
+/**
+ * Remove a marker-delimited section from the PR description, if present.
+ * Used to clear a stale badge (e.g. the degraded-attestation notice) once a
+ * rerun no longer needs it — see `postAttestationBadgeIfDegraded`'s
+ * delivered-verdict path in review-pr.ts. A no-op (no API call) when the
+ * section isn't in the current body, so a normal run that never posted the
+ * badge doesn't touch the description at all.
+ */
+export async function removePRDescriptionSection(
+  octokit: Octokit,
+  prContext: PRContext,
+  sectionId: string,
+  logger: Logger,
+): Promise<boolean> {
+  try {
+    const { data: pr } = await octokit.pulls.get({
+      owner: prContext.owner,
+      repo: prContext.repo,
+      pull_number: prContext.pullNumber,
+    });
+    const currentBody = pr.body || '';
+    const { start: startMarker, end: endMarker } = sectionMarkers(sectionId);
+    if (!currentBody.includes(startMarker)) return true;
+
+    const newBody = stripSection(currentBody, startMarker, endMarker);
+    await octokit.pulls.update({
+      owner: prContext.owner,
+      repo: prContext.repo,
+      pull_number: prContext.pullNumber,
+      body: newBody,
+    });
+    logger.info(`Removed stale ${sectionId} section from PR description`);
+    return true;
+  } catch (error) {
+    logger.warning(`Failed to remove ${sectionId} section from PR description: ${error}`);
+    return false;
   }
 }
 
