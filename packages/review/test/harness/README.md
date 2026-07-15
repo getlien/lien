@@ -162,7 +162,7 @@ prompt/pipeline from reaching it.
 
 | Rule | PR | Fixture | Why |
 |---|---|---|---|
-| _(none currently)_ | | | The one entry this table used to carry — `doc-truth/pr658-search-code-rename` — was **promoted to the canary corpus on 2026-07-04** (see the table above): a `--calibrate 10` run scored 10/10 on Finding A and, after re-verifying via `build-prompts.ts` that the guidance-surface passthrough (#665) now carries the fixture's second real finding (`plugins/claude/hooks/augment-explore-task.sh:64`) into the prompt, 9/10 votes from that same calibration run independently reproduced it too — so it's now asserted (Tier 2) alongside Finding A rather than only documented. Full evidence chain and per-run breakdown live in the fixture's `.assertions.ts` header comment. |
+| `error-swallowing` | #752 @ `295cc7e` | `error-swallowing/pr752-undiscriminated-catch-salvage` | `postPRReview`'s catch block salvages EVERY `createReview` error (auth, rate-limit, 5xx, network) the same way it salvages a 422 anchor-validation failure, silently degrading an infra outage into `{posted:0, dropped:<all>}` instead of throwing. CodeRabbit caught it same-SHA on 2026-07-15; Lien Review's live review of the same commit missed it (4 unrelated findings instead). 3-vote baseline on the sanitized fixture: 0/3 — reproduces the live miss. See the fixture's header for the capture-bug (stale `lien-stats` badge leak) found and fixed while building it. |
 
 Run the full multi-model sweep:
 
