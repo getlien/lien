@@ -14,7 +14,6 @@ import { resolveWorkspacePackageEntries } from '../workspace-packages.js';
 export interface ASTChunkOptions {
   minChunkSize?: number;
   // Multi-tenant fields (optional for backward compatibility)
-  repoId?: string; // Repository identifier for multi-tenant scenarios
   orgId?: string; // Organization identifier for multi-tenant scenarios
   /**
    * Absolute path to the workspace/monorepo root. When provided (and the
@@ -120,7 +119,7 @@ function processTopLevelNode(
   content: string,
   context: ASTContext,
   language: SupportedLanguage,
-  tenantContext: { repoId?: string; orgId?: string },
+  tenantContext: { orgId?: string },
 ): ASTChunk {
   const { lines, fileImports, fileExports, importedSymbols, traverser } = context;
 
@@ -160,7 +159,7 @@ function processTopLevelNodes(
   content: string,
   context: ASTContext,
   language: SupportedLanguage,
-  tenantContext: { repoId?: string; orgId?: string },
+  tenantContext: { orgId?: string },
 ): ASTChunk[] {
   return topLevelNodes.map(node =>
     processTopLevelNode(node, filepath, content, context, language, tenantContext),
@@ -189,8 +188,8 @@ export function chunkByAST(
   content: string,
   options: ASTChunkOptions = {},
 ): ASTChunk[] {
-  const { minChunkSize = 5, repoId, orgId, workspaceRoot } = options;
-  const tenantContext = { repoId, orgId };
+  const { minChunkSize = 5, orgId, workspaceRoot } = options;
+  const tenantContext = { orgId };
 
   // Parse and validate
   const { language, rootNode } = parseAndValidate(filepath, content);
@@ -357,7 +356,7 @@ function createChunk(
   symbolInfo: ReturnType<typeof extractSymbolInfo>,
   imports: string[],
   language: SupportedLanguage,
-  tenantContext?: { repoId?: string; orgId?: string },
+  tenantContext?: { orgId?: string },
   fileExports?: string[],
   importedSymbols?: Record<string, string[]>,
 ): ASTChunk {
@@ -406,7 +405,6 @@ function createChunk(
       halsteadEffort: halstead?.effort,
       halsteadBugs: halstead?.bugs,
       // Multi-tenant fields
-      ...(tenantContext?.repoId && { repoId: tenantContext.repoId }),
       ...(tenantContext?.orgId && { orgId: tenantContext.orgId }),
     },
   };
@@ -461,7 +459,7 @@ function createChunkFromRange(
   filepath: string,
   language: SupportedLanguage,
   imports: string[],
-  tenantContext?: { repoId?: string; orgId?: string },
+  tenantContext?: { orgId?: string },
   fileExports?: string[],
   importedSymbols?: Record<string, string[]>,
 ): ASTChunk {
@@ -483,7 +481,6 @@ function createChunkFromRange(
       ...(fileExports && fileExports.length > 0 && { exports: fileExports }),
       ...(importedSymbols && Object.keys(importedSymbols).length > 0 && { importedSymbols }),
       // Multi-tenant fields
-      ...(tenantContext?.repoId && { repoId: tenantContext.repoId }),
       ...(tenantContext?.orgId && { orgId: tenantContext.orgId }),
     },
   };
@@ -508,7 +505,7 @@ function extractUncoveredCode(
   minChunkSize: number,
   imports: string[],
   language: SupportedLanguage,
-  tenantContext?: { repoId?: string; orgId?: string },
+  tenantContext?: { orgId?: string },
   fileExports?: string[],
   importedSymbols?: Record<string, string[]>,
 ): ASTChunk[] {

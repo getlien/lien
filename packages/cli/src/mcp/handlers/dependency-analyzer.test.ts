@@ -1,10 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { SearchResult } from '@liendev/core';
-import {
-  findDependents,
-  groupDependentsByRepo,
-  clearDependencyCache,
-} from './dependency-analyzer.js';
+import { findDependents, clearDependencyCache } from './dependency-analyzer.js';
 
 /**
  * Helper to create a mock SearchResult chunk with sensible defaults.
@@ -18,7 +14,6 @@ function createChunk(
     complexity: number;
     callSites: Array<{ symbol: string; line: number }>;
     symbolName: string;
-    repoId: string;
     startLine: number;
     endLine: number;
   }> = {},
@@ -43,7 +38,6 @@ function createChunk(
 describe('findDependents', () => {
   let mockDB: {
     scanAll: ReturnType<typeof vi.fn>;
-    scanCrossRepo: ReturnType<typeof vi.fn>;
   };
   let mockLog: ReturnType<typeof vi.fn<(message: string, level?: 'warning') => void>>;
 
@@ -52,7 +46,6 @@ describe('findDependents', () => {
     clearDependencyCache();
     mockDB = {
       scanAll: vi.fn().mockResolvedValue([]),
-      scanCrossRepo: vi.fn().mockResolvedValue([]),
     };
     mockLog = vi.fn<(message: string, level?: 'warning') => void>();
   });
@@ -64,7 +57,7 @@ describe('findDependents', () => {
         createChunk('src/target.ts', { exports: ['doStuff'] }),
       ]);
 
-      const result = await findDependents(mockDB as any, 'src/target.ts', false, mockLog);
+      const result = await findDependents(mockDB as any, 'src/target.ts', mockLog);
 
       expect(result.dependents).toHaveLength(1);
       expect(result.dependents[0].filepath).toBe('src/consumer.ts');
@@ -79,7 +72,7 @@ describe('findDependents', () => {
         createChunk('src/consumer.ts', { imports: ['src/target.ts'] }),
       ]);
 
-      const result = await findDependents(mockDB as any, 'src/target.ts', false, mockLog);
+      const result = await findDependents(mockDB as any, 'src/target.ts', mockLog);
 
       const filepaths = result.dependents.map(d => d.filepath);
       expect(filepaths).not.toContain('src/target.ts');
@@ -96,7 +89,7 @@ describe('findDependents', () => {
         createChunk('src/target.ts', { exports: ['Foo', 'Bar'] }),
       ]);
 
-      const result = await findDependents(mockDB as any, 'src/target.ts', false, mockLog);
+      const result = await findDependents(mockDB as any, 'src/target.ts', mockLog);
 
       expect(result.dependents).toHaveLength(1);
       expect(result.dependents[0].filepath).toBe('src/consumer.ts');
@@ -110,7 +103,7 @@ describe('findDependents', () => {
         createChunk('src/utils.ts', { exports: ['helper'] }),
       ]);
 
-      const result = await findDependents(mockDB as any, 'src/utils.ts', false, mockLog);
+      const result = await findDependents(mockDB as any, 'src/utils.ts', mockLog);
 
       expect(result.dependents).toHaveLength(1);
       expect(result.dependents[0].filepath).toBe('src/consumer.ts');
@@ -135,7 +128,7 @@ describe('findDependents', () => {
         }),
       ]);
 
-      const result = await findDependents(mockDB as any, 'src/target.ts', false, mockLog);
+      const result = await findDependents(mockDB as any, 'src/target.ts', mockLog);
 
       const filepaths = result.dependents.map(d => d.filepath);
       expect(filepaths).toContain('src/index.ts');
@@ -165,7 +158,7 @@ describe('findDependents', () => {
         }),
       ]);
 
-      const result = await findDependents(mockDB as any, 'src/target.ts', false, mockLog, 'Foo');
+      const result = await findDependents(mockDB as any, 'src/target.ts', mockLog, 'Foo');
 
       expect(result.dependents).toHaveLength(1);
       expect(result.dependents[0].filepath).toBe('src/uses-foo.ts');
@@ -190,7 +183,7 @@ describe('findDependents', () => {
         chunk,
       ]);
 
-      const result = await findDependents(mockDB as any, 'src/target.ts', false, mockLog, 'doWork');
+      const result = await findDependents(mockDB as any, 'src/target.ts', mockLog, 'doWork');
 
       expect(result.dependents).toHaveLength(1);
       expect(result.dependents[0].usages).toHaveLength(1);
@@ -212,7 +205,7 @@ describe('findDependents', () => {
         }),
       ]);
 
-      const result = await findDependents(mockDB as any, 'src/target.ts', false, mockLog, 'Bar');
+      const result = await findDependents(mockDB as any, 'src/target.ts', mockLog, 'Bar');
 
       // Should log a warning, not throw
       expect(mockLog).toHaveBeenCalledWith(
@@ -244,7 +237,7 @@ describe('findDependents', () => {
         }),
       ]);
 
-      const result = await findDependents(mockDB as any, 'src/target.ts', false, mockLog);
+      const result = await findDependents(mockDB as any, 'src/target.ts', mockLog);
 
       // File complexities
       expect(result.fileComplexities).toHaveLength(2);
@@ -266,7 +259,7 @@ describe('findDependents', () => {
         createChunk('src/consumer.ts', { imports: ['src/target.ts'] }),
       ]);
 
-      const result = await findDependents(mockDB as any, 'src/target.ts', false, mockLog);
+      const result = await findDependents(mockDB as any, 'src/target.ts', mockLog);
 
       expect(result.complexityMetrics.averageComplexity).toBe(0);
       expect(result.complexityMetrics.maxComplexity).toBe(0);
@@ -291,7 +284,7 @@ describe('findDependents', () => {
         }),
       ]);
 
-      const result = await findDependents(mockDB as any, 'src/target.ts', false, mockLog, 'Foo');
+      const result = await findDependents(mockDB as any, 'src/target.ts', mockLog, 'Foo');
 
       expect(result.dependents).toHaveLength(0);
       expect(result.fileComplexities).toHaveLength(0);
@@ -322,7 +315,7 @@ describe('findDependents', () => {
         }),
       ]);
 
-      const result = await findDependents(mockDB as any, 'src/target.ts', false, mockLog, 'Foo');
+      const result = await findDependents(mockDB as any, 'src/target.ts', mockLog, 'Foo');
 
       expect(result.dependents).toHaveLength(1);
       expect(result.dependents[0].filepath).toBe('src/uses-foo.ts');
@@ -345,7 +338,7 @@ describe('findDependents', () => {
         createChunk('test/integration.ts', { imports: ['src/target.ts'] }),
       ]);
 
-      const result = await findDependents(mockDB as any, 'src/target.ts', false, mockLog);
+      const result = await findDependents(mockDB as any, 'src/target.ts', mockLog);
 
       expect(result.productionDependentCount).toBe(1);
       expect(result.testDependentCount).toBe(2);
@@ -362,7 +355,7 @@ describe('findDependents', () => {
         createChunk('test/b.spec.ts', { imports: ['src/target.ts'] }),
       ]);
 
-      const result = await findDependents(mockDB as any, 'src/target.ts', false, mockLog);
+      const result = await findDependents(mockDB as any, 'src/target.ts', mockLog);
 
       // Production files come first
       const firstTestIndex = result.dependents.findIndex(d => d.isTestFile);
@@ -381,7 +374,7 @@ describe('findDependents', () => {
         createChunk('src/consumer.ts', { imports: ['src/target.ts'] }),
       ]);
 
-      const result = await findDependents(mockDB as any, 'src/target.ts', false, mockLog);
+      const result = await findDependents(mockDB as any, 'src/target.ts', mockLog);
 
       expect(result.hitLimit).toBe(false);
     });
@@ -394,7 +387,7 @@ describe('findDependents', () => {
         createChunk('src/unrelated.ts', { imports: ['src/other.ts'] }),
       ]);
 
-      const result = await findDependents(mockDB as any, 'src/target.ts', false, mockLog);
+      const result = await findDependents(mockDB as any, 'src/target.ts', mockLog);
 
       expect(result.dependents).toHaveLength(0);
       expect(result.productionDependentCount).toBe(0);
@@ -416,7 +409,7 @@ describe('findDependents', () => {
         }),
       ]);
 
-      const result = await findDependents(mockDB as any, 'src/a.ts', false, mockLog);
+      const result = await findDependents(mockDB as any, 'src/a.ts', mockLog);
 
       // B imports A, so B is a dependent of A
       expect(result.dependents).toHaveLength(1);
@@ -441,7 +434,6 @@ describe('findDependents', () => {
       const result = await findDependents(
         mockDB as any,
         'src/a.ts',
-        false,
         mockLog,
         undefined,
         undefined,
@@ -480,7 +472,6 @@ describe('findDependents', () => {
       const result = await findDependents(
         mockDB as any,
         'packages/cli/src/mcp/handlers/dependency-analyzer.ts',
-        false,
         mockLog,
       );
 
@@ -512,7 +503,7 @@ describe('findDependents', () => {
         }),
       ]);
 
-      const result = await findDependents(mockDB as any, 'src/a.ts', false, mockLog);
+      const result = await findDependents(mockDB as any, 'src/a.ts', mockLog);
 
       const filepaths = result.dependents.map(d => d.filepath);
       // b is a direct dependent of a — correct.
@@ -538,7 +529,7 @@ describe('findDependents', () => {
         }),
       ]);
 
-      const result = await findDependents(mockDB as any, 'src/a.ts', false, mockLog);
+      const result = await findDependents(mockDB as any, 'src/a.ts', mockLog);
 
       expect(result.dependents.map(d => d.filepath)).toEqual(['src/b.ts']);
       expect(result.dependents[0].hops).toBe(1);
@@ -560,7 +551,6 @@ describe('findDependents', () => {
       const result = await findDependents(
         mockDB as any,
         'src/a.ts',
-        false,
         mockLog,
         undefined,
         undefined,
@@ -592,7 +582,6 @@ describe('findDependents', () => {
       const result = await findDependents(
         mockDB as any,
         'src/a.ts',
-        false,
         mockLog,
         undefined,
         undefined,
@@ -625,7 +614,6 @@ describe('findDependents', () => {
       const result = await findDependents(
         mockDB as any,
         'src/a.ts',
-        false,
         mockLog,
         undefined,
         undefined,
@@ -655,7 +643,6 @@ describe('findDependents', () => {
       const result = await findDependents(
         mockDB as any,
         'src/a.ts',
-        false,
         mockLog,
         undefined,
         undefined,
@@ -679,15 +666,7 @@ describe('findDependents', () => {
         }),
       ]);
 
-      const result = await findDependents(
-        mockDB as any,
-        'src/a.ts',
-        false,
-        mockLog,
-        'fnA',
-        undefined,
-        3,
-      );
+      const result = await findDependents(mockDB as any, 'src/a.ts', mockLog, 'fnA', undefined, 3);
 
       // At depth 1 for symbol fnA, only src/b.ts imports the symbol directly.
       expect(result.dependents.map(d => d.filepath)).toEqual(['src/b.ts']);
@@ -707,7 +686,7 @@ describe('findDependents', () => {
         createChunk('src/uncovered.ts', { imports: ['src/target.ts'] }),
       ]);
 
-      const result = await findDependents(mockDB as any, 'src/target.ts', false, mockLog);
+      const result = await findDependents(mockDB as any, 'src/target.ts', mockLog);
 
       expect(result.productionDependentCount).toBe(2);
       expect(result.uncoveredProductionDependents).toBe(1);
@@ -720,7 +699,7 @@ describe('findDependents', () => {
         createChunk('src/a.test.ts', { imports: ['src/a.ts'] }),
       ]);
 
-      const result = await findDependents(mockDB as any, 'src/target.ts', false, mockLog);
+      const result = await findDependents(mockDB as any, 'src/target.ts', mockLog);
 
       expect(result.productionDependentCount).toBe(1);
       expect(result.uncoveredProductionDependents).toBe(0);
@@ -735,40 +714,10 @@ describe('findDependents', () => {
         createChunk('src/consumer.ts', { imports: ['src/target.ts'] }),
       ]);
 
-      const result = await findDependents(mockDB as any, 'src/target.ts', false, mockLog);
+      const result = await findDependents(mockDB as any, 'src/target.ts', mockLog);
 
       expect(result.dependents).toHaveLength(1);
       expect(result.dependents[0].filepath).toBe('src/consumer.ts');
-    });
-  });
-
-  describe('cross-repo with a cross-repo-capable backend', () => {
-    it('should call scanCrossRepo when vectorDB supports cross-repo and crossRepo=true', async () => {
-      const mockCrossRepoDB: any = {
-        scanAll: vi.fn().mockResolvedValue([]),
-        scanCrossRepo: vi.fn().mockResolvedValue([]),
-        supportsCrossRepo: true,
-      };
-
-      await findDependents(mockCrossRepoDB, 'src/target.ts', true, mockLog);
-
-      expect(mockCrossRepoDB.scanCrossRepo).toHaveBeenCalledWith(
-        expect.objectContaining({ limit: 100000 }),
-      );
-      expect(mockCrossRepoDB.scanAll).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('cross-repo fallback for unsupported backends', () => {
-    it('should log warning and use scanAll when vectorDB lacks cross-repo support', async () => {
-      await findDependents(mockDB as any, 'src/target.ts', true, mockLog);
-
-      expect(mockLog).toHaveBeenCalledWith(
-        expect.stringContaining('crossRepo=true requires a cross-repo-capable backend'),
-        'warning',
-      );
-      expect(mockDB.scanAll).toHaveBeenCalled();
-      expect(mockDB.scanCrossRepo).not.toHaveBeenCalled();
     });
   });
 
@@ -781,27 +730,13 @@ describe('findDependents', () => {
       mockDB.scanAll.mockResolvedValue(chunks);
 
       // First call: should scan
-      const result1 = await findDependents(
-        mockDB as any,
-        'src/target.ts',
-        false,
-        mockLog,
-        undefined,
-        100,
-      );
+      const result1 = await findDependents(mockDB as any, 'src/target.ts', mockLog, undefined, 100);
       expect(mockDB.scanAll).toHaveBeenCalledTimes(1);
       expect(result1.dependents).toHaveLength(1);
 
       // Second call with same indexVersion: should use cache
       mockDB.scanAll.mockResolvedValue([]);
-      const result2 = await findDependents(
-        mockDB as any,
-        'src/target.ts',
-        false,
-        mockLog,
-        undefined,
-        100,
-      );
+      const result2 = await findDependents(mockDB as any, 'src/target.ts', mockLog, undefined, 100);
       expect(mockDB.scanAll).toHaveBeenCalledTimes(1); // not called again
       expect(result2.dependents).toHaveLength(1); // same results from cache
     });
@@ -814,19 +749,12 @@ describe('findDependents', () => {
       mockDB.scanAll.mockResolvedValue(chunks);
 
       // First call with version 100
-      await findDependents(mockDB as any, 'src/target.ts', false, mockLog, undefined, 100);
+      await findDependents(mockDB as any, 'src/target.ts', mockLog, undefined, 100);
       expect(mockDB.scanAll).toHaveBeenCalledTimes(1);
 
       // Second call with version 200: should re-scan
       mockDB.scanAll.mockResolvedValue([createChunk('src/target.ts', { exports: ['foo'] })]);
-      const result2 = await findDependents(
-        mockDB as any,
-        'src/target.ts',
-        false,
-        mockLog,
-        undefined,
-        200,
-      );
+      const result2 = await findDependents(mockDB as any, 'src/target.ts', mockLog, undefined, 200);
       expect(mockDB.scanAll).toHaveBeenCalledTimes(2);
       expect(result2.dependents).toHaveLength(0); // no consumers in new scan
     });
@@ -839,7 +767,7 @@ describe('findDependents', () => {
       mockDB.scanAll.mockResolvedValue(chunks);
 
       // First call: populates cache
-      await findDependents(mockDB as any, 'src/target.ts', false, mockLog, undefined, 100);
+      await findDependents(mockDB as any, 'src/target.ts', mockLog, undefined, 100);
       expect(mockDB.scanAll).toHaveBeenCalledTimes(1);
 
       // Clear cache
@@ -847,25 +775,8 @@ describe('findDependents', () => {
 
       // Same version but cache cleared: should re-scan
       mockDB.scanAll.mockResolvedValue(chunks);
-      await findDependents(mockDB as any, 'src/target.ts', false, mockLog, undefined, 100);
+      await findDependents(mockDB as any, 'src/target.ts', mockLog, undefined, 100);
       expect(mockDB.scanAll).toHaveBeenCalledTimes(2);
-    });
-
-    it('should invalidate cache when crossRepo mode changes', async () => {
-      const chunks = [
-        createChunk('src/target.ts', { exports: ['foo'] }),
-        createChunk('src/consumer.ts', { imports: ['src/target.ts'] }),
-      ];
-      mockDB.scanAll.mockResolvedValue(chunks);
-
-      // First call with crossRepo=false
-      await findDependents(mockDB as any, 'src/target.ts', false, mockLog, undefined, 100);
-      expect(mockDB.scanAll).toHaveBeenCalledTimes(1);
-
-      // Second call with crossRepo=true, same indexVersion: should re-scan
-      mockDB.scanCrossRepo.mockResolvedValue(chunks);
-      await findDependents(mockDB as any, 'src/target.ts', true, mockLog, undefined, 100);
-      expect(mockDB.scanAll.mock.calls.length + mockDB.scanCrossRepo.mock.calls.length).toBe(2);
     });
 
     it('should not cache when indexVersion is not provided', async () => {
@@ -876,90 +787,13 @@ describe('findDependents', () => {
       mockDB.scanAll.mockResolvedValue(chunks);
 
       // First call without indexVersion
-      await findDependents(mockDB as any, 'src/target.ts', false, mockLog);
+      await findDependents(mockDB as any, 'src/target.ts', mockLog);
       expect(mockDB.scanAll).toHaveBeenCalledTimes(1);
 
       // Second call without indexVersion: should scan again
       mockDB.scanAll.mockResolvedValue(chunks);
-      await findDependents(mockDB as any, 'src/target.ts', false, mockLog);
+      await findDependents(mockDB as any, 'src/target.ts', mockLog);
       expect(mockDB.scanAll).toHaveBeenCalledTimes(2);
     });
-  });
-});
-
-describe('groupDependentsByRepo', () => {
-  it('should group dependents by repoId from chunk metadata', () => {
-    const dependents = [
-      { filepath: 'repo-a/src/a.ts', isTestFile: false },
-      { filepath: 'repo-b/src/b.ts', isTestFile: false },
-      { filepath: 'repo-a/src/c.ts', isTestFile: true },
-    ];
-
-    const chunks: SearchResult[] = [
-      createChunk('repo-a/src/a.ts', { repoId: 'repo-a' }),
-      createChunk('repo-b/src/b.ts', { repoId: 'repo-b' }),
-      createChunk('repo-a/src/c.ts', { repoId: 'repo-a' }),
-    ];
-
-    const result = groupDependentsByRepo(dependents, chunks);
-
-    expect(Object.keys(result)).toHaveLength(2);
-    expect(result['repo-a']).toHaveLength(2);
-    expect(result['repo-b']).toHaveLength(1);
-    expect(result['repo-a'].map(d => d.filepath)).toEqual(['repo-a/src/a.ts', 'repo-a/src/c.ts']);
-  });
-
-  it('should fall back to "unknown" when chunk has no repoId', () => {
-    const dependents = [{ filepath: 'src/a.ts', isTestFile: false }];
-
-    const chunks: SearchResult[] = [
-      createChunk('src/a.ts'), // no repoId
-    ];
-
-    const result = groupDependentsByRepo(dependents, chunks);
-
-    expect(result['unknown']).toHaveLength(1);
-    expect(result['unknown'][0].filepath).toBe('src/a.ts');
-  });
-
-  it('should return empty object when no dependents are provided', () => {
-    const result = groupDependentsByRepo([], []);
-    expect(result).toEqual({});
-  });
-
-  it('should handle multiple repos with mixed dependents', () => {
-    const dependents = [
-      { filepath: 'a/src/x.ts', isTestFile: false },
-      { filepath: 'b/src/y.ts', isTestFile: false },
-      { filepath: 'c/src/z.ts', isTestFile: true },
-      { filepath: 'a/src/w.ts', isTestFile: false },
-    ];
-
-    const chunks: SearchResult[] = [
-      createChunk('a/src/x.ts', { repoId: 'alpha' }),
-      createChunk('b/src/y.ts', { repoId: 'beta' }),
-      createChunk('c/src/z.ts', { repoId: 'gamma' }),
-      createChunk('a/src/w.ts', { repoId: 'alpha' }),
-    ];
-
-    const result = groupDependentsByRepo(dependents, chunks);
-
-    expect(Object.keys(result).sort()).toEqual(['alpha', 'beta', 'gamma']);
-    expect(result['alpha']).toHaveLength(2);
-    expect(result['beta']).toHaveLength(1);
-    expect(result['gamma']).toHaveLength(1);
-    expect(result['gamma'][0].isTestFile).toBe(true);
-  });
-
-  it('should assign "unknown" when dependent filepath has no matching chunk', () => {
-    const dependents = [{ filepath: 'src/orphan.ts', isTestFile: false }];
-
-    // Chunks do not include orphan.ts
-    const chunks: SearchResult[] = [createChunk('src/other.ts', { repoId: 'repo-a' })];
-
-    const result = groupDependentsByRepo(dependents, chunks);
-
-    expect(result['unknown']).toHaveLength(1);
-    expect(result['unknown'][0].filepath).toBe('src/orphan.ts');
   });
 });

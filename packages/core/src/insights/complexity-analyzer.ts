@@ -36,25 +36,12 @@ export class ComplexityAnalyzer {
   /**
    * Analyze complexity of codebase or specific files
    * @param files - Optional list of specific files to analyze
-   * @param crossRepo - If true, analyze across all repos (requires a cross-repo-capable backend)
-   * @param repoIds - Optional list of repo IDs to filter to (when crossRepo=true)
    * @returns Complexity report with violations and summary
    */
-  async analyze(
-    files?: string[],
-    crossRepo?: boolean,
-    repoIds?: string[],
-  ): Promise<ComplexityReport> {
-    // 1. Get all chunks from index
-    // For cross-repo, use scanCrossRepo
+  async analyze(files?: string[]): Promise<ComplexityReport> {
     // Note: We fetch all chunks even with --files filter because dependency analysis
     // needs the complete dataset to find dependents accurately.
-    let allChunks: SearchResult[];
-    if (crossRepo && this.vectorDB.supportsCrossRepo) {
-      allChunks = await this.vectorDB.scanCrossRepo({ limit: 100000, repoIds });
-    } else {
-      allChunks = await this.vectorDB.scanAll();
-    }
+    const allChunks: SearchResult[] = await this.vectorDB.scanAll();
 
     // 2. Filter to specified files if provided
     const chunks = files
@@ -174,7 +161,7 @@ export class ComplexityAnalyzer {
     for (const { metadata } of chunks) {
       if (metadata.symbolType !== 'function' && metadata.symbolType !== 'method') continue;
 
-      const key = `${metadata.repoId ?? ''}:${this.normalizeFilePath(metadata.file)}:${metadata.startLine}-${metadata.endLine}`;
+      const key = `${this.normalizeFilePath(metadata.file)}:${metadata.startLine}-${metadata.endLine}`;
       if (seen.has(key)) continue;
 
       seen.add(key);

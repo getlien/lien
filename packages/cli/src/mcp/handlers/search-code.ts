@@ -4,49 +4,23 @@ import { shapeResults, deduplicateResults } from '../utils/metadata-shaper.js';
 import type { ToolContext, MCPToolResult, LogFn } from '../types.js';
 import type { VectorDBInterface, SearchResult } from '@liendev/core';
 
-/**
- * Group search results by repository ID.
- */
-function groupResultsByRepo(results: Array<{ metadata: { repoId?: string } }>) {
-  const grouped: Record<string, typeof results> = {};
-
-  for (const result of results) {
-    const repoId = result.metadata.repoId || 'unknown';
-    if (!grouped[repoId]) {
-      grouped[repoId] = [];
-    }
-    grouped[repoId].push(result);
-  }
-
-  return grouped;
-}
-
 interface SearchParams {
   query: string;
   limit: number;
-  crossRepo?: boolean;
 }
 
 /**
- * Execute the lexical search. Cross-repo search is unsupported by the bundled
- * SQLite backend, so a crossRepo request falls back to a single-repo search.
+ * Execute the lexical search.
  */
 async function executeSearch(
   vectorDB: VectorDBInterface,
   params: SearchParams,
   log: LogFn,
-): Promise<{ results: SearchResult[]; crossRepoFallback: boolean }> {
-  const { query, limit, crossRepo } = params;
-
-  if (crossRepo) {
-    log(
-      'Warning: crossRepo=true requires a cross-repo-capable backend. Falling back to single-repo search.',
-      'warning',
-    );
-  }
+): Promise<SearchResult[]> {
+  const { query, limit } = params;
   const results = await vectorDB.search(query, limit);
   log(`Found ${results.length} results`);
-  return { results, crossRepoFallback: !!crossRepo };
+  return results;
 }
 
 /**
@@ -54,16 +28,9 @@ async function executeSearch(
  */
 function processResults(
   rawResults: SearchResult[],
-  crossRepoFallback: boolean,
   log: LogFn,
 ): { results: SearchResult[]; notes: string[] } {
   const notes: string[] = [];
-  if (crossRepoFallback) {
-    notes.push(
-      'Cross-repo search requires a cross-repo-capable backend. Fell back to single-repo search.',
-    );
-  }
-
   const results = deduplicateResults(rawResults);
 
   if (results.length > 0 && results.every(r => r.relevance === 'not_relevant')) {
@@ -79,25 +46,20 @@ function processResults(
  * Handle search_code tool calls.
  *
  * Runs lexical full-text (FTS5/BM25) search over code, docstrings, and
- * camelCase-split identifiers via `vectorDB.search`. Cross-repo search is
- * unsupported by the bundled single-repo SQLite backend.
+ * camelCase-split identifiers via `vectorDB.search`.
  */
 export async function handleSearchCode(args: unknown, ctx: ToolContext): Promise<MCPToolResult> {
   const { vectorDB, log, checkAndReconnect, getIndexMetadata } = ctx;
 
   return await wrapToolHandler(SearchCodeSchema, async validatedArgs => {
-    const { crossRepo, query, limit } = validatedArgs;
+    const { query, limit } = validatedArgs;
 
-    log(`Searching for: "${query}"${crossRepo ? ' (cross-repo)' : ''}`);
+    log(`Searching for: "${query}"`);
     await checkAndReconnect();
 
-    const { results: rawResults, crossRepoFallback } = await executeSearch(
-      vectorDB,
-      { query, limit: limit ?? 5, crossRepo },
-      log,
-    );
+    const rawResults = await executeSearch(vectorDB, { query, limit: limit ?? 5 }, log);
 
-    const { results, notes } = processResults(rawResults, crossRepoFallback, log);
+    const { results, notes } = processResults(rawResults, log);
 
     log(`Returning ${results.length} results`);
 
@@ -112,7 +74,6 @@ export async function handleSearchCode(args: unknown, ctx: ToolContext): Promise
     return {
       indexInfo: getIndexMetadata(),
       results: shaped,
-      ...(crossRepo && vectorDB.supportsCrossRepo && { groupedByRepo: groupResultsByRepo(shaped) }),
       ...(notes.length > 0 && { note: notes.join(' ') }),
     };
   })(args);

@@ -2,7 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { createHash } from 'crypto';
 import pLimit from 'p-limit';
-import { chunkFile, computeContentHash, extractRepoId } from '@liendev/parser';
+import { chunkFile, computeContentHash } from '@liendev/parser';
 import type { ChunkMetadata } from '@liendev/parser';
 import {
   DEFAULT_CONCURRENCY,
@@ -169,7 +169,6 @@ export async function buildOverlay(
   }
 
   // ── Chunk the diverged files into in-memory batches (async I/O) ─────────
-  const repoId = extractRepoId(rootDir);
   const chunkBatches: Array<{ metadatas: ChunkMetadata[]; contents: string[] }> = [];
   const manifestEntries: FileEntry[] = [];
   // Separate limiter for this CPU-bound parse/chunk phase (chunkFile below) —
@@ -185,7 +184,6 @@ export async function buildOverlay(
           chunkOverlap: DEFAULT_CHUNK_OVERLAP,
           useAST: true,
           astFallback: 'line-based',
-          repoId,
         });
         const stats = await fs.stat(d.abs);
         if (chunks.length > 0) {

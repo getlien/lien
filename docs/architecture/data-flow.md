@@ -344,7 +344,7 @@ chunks_fts  -- FTS5 external-content virtual table (content='chunks')
   kept in sync by AFTER INSERT/UPDATE/DELETE triggers on chunks
 ```
 
-`startLine`/`endLine` are `INTEGER` (the structural-store spike stored them as REAL; fixed in production). Multi-tenant fields (`repoId`, `orgId`, `branch`, `commitSha`) exist in `ChunkMetadata` for a future cross-repo backend but are not stored as columns today.
+`startLine`/`endLine` are `INTEGER` (the structural-store spike stored them as REAL; fixed in production). Multi-tenant fields (`orgId`, `branch`, `commitSha`) exist in `ChunkMetadata` for a possible future multi-tenant backend but are not stored as columns today. Cross-repo MCP mode itself (the `crossRepo`/`repoIds` tool parameters, `supportsCrossRepo`, `scanCrossRepo`, and the `repoId` metadata field) was removed — it was never implemented in the SQLite era.
 
 ### Version File
 

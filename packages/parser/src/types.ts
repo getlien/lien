@@ -66,13 +66,6 @@ export interface ChunkMetadata {
 
   // Multi-tenant fields (optional for backward compatibility)
   /**
-   * Unique repository identifier for multi-tenant scenarios.
-   * Used for cross-repo search and tenant isolation in cross-repo-capable backends.
-   * Typically derived from project root path or GitHub repository identifier.
-   */
-  repoId?: string;
-
-  /**
    * Organization identifier for multi-tenant scenarios.
    * Used for tenant isolation in cross-repo-capable backends.
    */
