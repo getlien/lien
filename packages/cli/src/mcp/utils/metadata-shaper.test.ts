@@ -28,6 +28,7 @@ function createFullResult(): SearchResult {
       halsteadDifficulty: 5,
       halsteadEffort: 500,
       halsteadBugs: 0.03,
+      dependentCount: 7,
     },
     score: 0.5,
     relevance: 'relevant',
@@ -51,6 +52,7 @@ describe('shapeResultMetadata', () => {
     expect(m.parentClass).toBe('ExampleClass');
     expect(m.parameters).toEqual(['a', 'b']);
     expect(m.exports).toEqual(['example']);
+    expect(m.dependentCount).toBe(7);
 
     // Stripped — only allowed keys should be present
     const keys = Object.keys(m);
@@ -62,7 +64,21 @@ describe('shapeResultMetadata', () => {
     expect(keys).not.toContain('halsteadVolume');
   });
 
-  it('find_similar: keeps core fields, strips imports/callSites/halstead', () => {
+  it('search_code: keeps dependentCount 0 (not treated as falsy/empty)', () => {
+    const result = createFullResult();
+    result.metadata.dependentCount = 0;
+    const shaped = shapeResultMetadata(result, 'search_code');
+    expect(shaped.metadata.dependentCount).toBe(0);
+  });
+
+  it('search_code: omits dependentCount when the source result has none', () => {
+    const result = createFullResult();
+    delete (result.metadata as any).dependentCount;
+    const shaped = shapeResultMetadata(result, 'search_code');
+    expect(Object.keys(shaped.metadata)).not.toContain('dependentCount');
+  });
+
+  it('find_similar: keeps core fields, strips imports/callSites/halstead/dependentCount', () => {
     const result = shapeResultMetadata(createFullResult(), 'find_similar');
     const m = result.metadata;
 
@@ -72,9 +88,10 @@ describe('shapeResultMetadata', () => {
     expect(keys).not.toContain('callSites');
     expect(keys).not.toContain('complexity');
     expect(keys).not.toContain('halsteadEffort');
+    expect(keys).not.toContain('dependentCount');
   });
 
-  it('get_files_context: keeps imports/importedSymbols/callSites/symbols but strips halstead', () => {
+  it('get_files_context: keeps imports/importedSymbols/callSites/symbols but strips halstead/dependentCount', () => {
     const result = shapeResultMetadata(createFullResult(), 'get_files_context');
     const m = result.metadata;
 
@@ -89,9 +106,10 @@ describe('shapeResultMetadata', () => {
     const keys = Object.keys(m);
     expect(keys).not.toContain('complexity');
     expect(keys).not.toContain('halsteadVolume');
+    expect(keys).not.toContain('dependentCount');
   });
 
-  it('list_functions: keeps symbols but strips imports/callSites/halstead', () => {
+  it('list_functions: keeps symbols but strips imports/callSites/halstead/dependentCount', () => {
     const result = shapeResultMetadata(createFullResult(), 'list_functions');
     const m = result.metadata;
 
@@ -105,6 +123,7 @@ describe('shapeResultMetadata', () => {
     expect(keys).not.toContain('callSites');
     expect(keys).not.toContain('complexity');
     expect(keys).not.toContain('halsteadEffort');
+    expect(keys).not.toContain('dependentCount');
   });
 
   it('preserves content, score, and relevance', () => {
