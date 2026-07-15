@@ -26,8 +26,11 @@ Examples:
 
 IMPORTANT: Query with concrete KEYWORDS, identifiers, and domain terms that actually appear in the code — NOT natural-language questions. There are no embeddings: a meaning-only paraphrase that shares no words with the code will not match. For an exact symbol name, use list_functions.
 
+Ranking: results are ordered by BM25, then nudged by structural importance — files more other files depend on rank slightly higher among similarly-relevant matches (never enough to outrank a clearly better lexical match). Set LIEN_STRUCTURAL_RANKING=off to disable and fall back to pure BM25 order.
+
 Returns:
-- results[]: { content, score, relevance, metadata: { file, startLine, endLine, language?, symbolName?, symbolType?, signature?, enclosingSymbol? } }
+- results[]: { content, score, relevance, metadata: { file, startLine, endLine, language?, symbolName?, symbolType?, signature?, enclosingSymbol?, dependentCount? } }
+- dependentCount: how many other indexed files import this file — a cheap approximation (not get_dependents' authoritative count); higher means riskier to change carelessly
 - enclosingSymbol: "Class.method" for methods, "functionName" for standalone functions, absent for block chunks
 - relevance: "highly_relevant" | "relevant" | "loosely_related" (not_relevant auto-filtered)`,
   ),

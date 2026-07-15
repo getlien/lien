@@ -1,12 +1,16 @@
 import { normalizeToRelativePath } from '@liendev/core';
 import type { SearchResult, RelevanceCategory } from '@liendev/core';
-import type { ChunkMetadata } from '@liendev/parser';
 
 /**
  * Tool names that support metadata shaping.
  * get_dependents and get_complexity use their own response formats.
  */
 export type ToolName = 'search_code' | 'find_similar' | 'get_files_context' | 'list_functions';
+
+/** The shape `pickMetadata` reads from — SearchResult's metadata (ChunkMetadata
+ * plus the search-path-only additions like dependentCount). Aliased so this
+ * file has one source of truth instead of re-declaring ChunkMetadata fields. */
+type SourceMetadata = SearchResult['metadata'];
 
 /**
  * Slim metadata included in MCP tool responses.
@@ -19,9 +23,9 @@ export interface ToolResultMetadata {
   startLine: number;
   endLine: number;
   language?: string;
-  type?: ChunkMetadata['type'];
+  type?: SourceMetadata['type'];
   symbolName?: string;
-  symbolType?: ChunkMetadata['symbolType'];
+  symbolType?: SourceMetadata['symbolType'];
   signature?: string;
   parentClass?: string;
   parameters?: string[];
@@ -31,6 +35,13 @@ export interface ToolResultMetadata {
   callSites?: Array<{ symbol: string; line: number }>;
   symbols?: { functions: string[]; classes: string[]; interfaces: string[] };
   enclosingSymbol?: string;
+  /**
+   * How many other indexed files import this chunk's file — see
+   * core's vectordb/sqlite/dependent-counts.ts. Only ever populated for
+   * search_code (the FTS `search` path); other tools' SearchResults don't
+   * carry it, so their allowlists don't include this key.
+   */
+  dependentCount?: number;
 }
 
 /**
@@ -45,11 +56,11 @@ export interface ToolResult {
 }
 
 /**
- * Keys that exist on both ChunkMetadata (source) and ToolResultMetadata (output).
+ * Keys that exist on both SourceMetadata (source) and ToolResultMetadata (output).
  * Allowlists are typed against this intersection so adding a key that doesn't
  * exist on both sides is a compile error.
  */
-type AllowlistKey = keyof ChunkMetadata & keyof ToolResultMetadata;
+type AllowlistKey = keyof SourceMetadata & keyof ToolResultMetadata;
 
 /**
  * Per-tool allowlists for optional metadata fields.
@@ -68,6 +79,7 @@ const FIELD_ALLOWLISTS: Record<ToolName, ReadonlySet<AllowlistKey>> = {
     'parentClass',
     'parameters',
     'exports',
+    'dependentCount',
   ]),
   find_similar: new Set<AllowlistKey>([
     'language',
@@ -160,7 +172,7 @@ function cleanMetadataValue(key: string, value: unknown): unknown | null {
  * Required fields (file, startLine, endLine) are always set explicitly.
  */
 function pickMetadata(
-  metadata: ChunkMetadata,
+  metadata: SourceMetadata,
   allowlist: ReadonlySet<AllowlistKey>,
 ): ToolResultMetadata {
   const result: ToolResultMetadata = {

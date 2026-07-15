@@ -3,7 +3,17 @@ import type { RelevanceCategory } from './relevance.js';
 
 export interface SearchResult {
   content: string;
-  metadata: ChunkMetadata;
+  metadata: ChunkMetadata & {
+    /**
+     * How many other indexed files import this chunk's file — a cheap
+     * structural signal (see vectordb/sqlite/dependent-counts.ts), NOT the
+     * authoritative get_dependents count (no re-export chains, no fuzzy path
+     * matching). Only populated by the FTS `search` path today; other
+     * VectorDBInterface methods (scanAll, querySymbols, ...) leave it
+     * undefined.
+     */
+    dependentCount?: number;
+  };
   /**
    * Search score. For lexical `search`, a BM25-derived value where lower
    * means a better match. For scroll/scan operations (scanWithFilter, scanAll,
