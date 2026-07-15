@@ -85,6 +85,16 @@ warning lands via `additionalContext`, it reaches the agent on its very next
 turn — while the change is still in hand, not after a PR review catches it
 later. Disable with `LIEN_DELTA_HOOK=off`.
 
+Every `lien delta` invocation — this hook's fast `--file` runs, a manual
+`lien delta`, and a CI `--base` run alike — is also recorded as one line in a
+local, append-only `delta-events.jsonl` next to your project's index
+(`~/.lien/indices/<repoId>/`). Nothing leaves your machine: no network call,
+no telemetry. Run `lien stats` to see 7/30-day counts of runs, new crossings,
+distinct functions flagged, and functions later seen clean after being
+flagged ("resolved after flag" — an honest presence/absence signal, not proof
+the warning caused the fix). Disable recording entirely with
+`LIEN_DELTA_EVENTS=off`.
+
 ### Explore-agent nudge
 
 A third hook (`PreToolUse:Agent|Task`) appends a short Lien-tool mandate to the
@@ -115,6 +125,7 @@ internal error exits silently rather than blocking your tool call.
 |---|---|
 | `LIEN_ANNOTATE_TTL_MIN` | Read-hook suppression window in minutes (default 5) |
 | `LIEN_DELTA_HOOK=off` | Disables the write-time complexity gate |
+| `LIEN_DELTA_EVENTS=off` | Disables local `lien delta` event recording (used by `lien stats`) |
 | `LIEN_EXPLORE_INJECT=off` | Disables the Explore-agent prompt nudge |
 
 ## Updating

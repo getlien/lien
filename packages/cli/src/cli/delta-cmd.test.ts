@@ -10,6 +10,7 @@ import {
   type ComplexityDeltaThresholds,
 } from '@liendev/parser';
 import * as core from '@liendev/core';
+import { readDeltaEvents } from '../utils/delta-events.js';
 import {
   resolveDeltaThresholds,
   parseThresholdFlag,
@@ -17,6 +18,7 @@ import {
   formatDeltaText,
   fmtValue,
   deltaCommand,
+  buildDeltaEvent,
   type DeltaOptions,
 } from './delta-cmd.js';
 
@@ -112,6 +114,55 @@ describe('deltaExitCode', () => {
 
   it('--soft forces exit 0 even with a regression', () => {
     expect(deltaExitCode(withRegression, true)).toBe(0);
+  });
+});
+
+describe('buildDeltaEvent', () => {
+  const now = new Date('2026-07-15T12:00:00.000Z');
+
+  it('records mode "normal" and the crossing counts for a regression', () => {
+    const result = computeComplexityDelta(
+      [{ filepath: 'src/foo.ts', before: BODY.twoNest, after: BODY.threeNest }],
+      COG_ONLY,
+    );
+    const event = buildDeltaEvent(result, false, 1, now);
+
+    expect(event).toMatchObject({
+      timestamp: now.toISOString(),
+      mode: 'normal',
+      exitCode: 1,
+      counts: { crossings: 1, newOverThreshold: 0, improved: 0 },
+    });
+    expect(event.flagged).toEqual([
+      { filepath: 'src/foo.ts', symbol: 'target', metric: 'cognitive' },
+    ]);
+  });
+
+  it('records mode "soft" when --soft is set', () => {
+    const result = computeComplexityDelta([], COG_ONLY);
+    const event = buildDeltaEvent(result, true, 0, now);
+    expect(event.mode).toBe('soft');
+  });
+
+  it('flagged is empty for a clean or improved-only run', () => {
+    const result = computeComplexityDelta(
+      [{ filepath: 'src/foo.ts', before: BODY.threeNest, after: BODY.oneIf }],
+      COG_ONLY,
+    );
+    const event = buildDeltaEvent(result, false, 0, now);
+    expect(event.flagged).toEqual([]);
+    expect(event.counts.improved).toBe(1);
+  });
+
+  it('qualifies the symbol with its parent class when present', () => {
+    const before = 'class MyClass { target(x){ if(x){ if(x>1){ return 1; } } return 2; } }'; // cog 3
+    const after =
+      'class MyClass { target(x){ if(x){ if(x>1){ if(x>2){ return 1; } } } return 2; } }'; // cog 6
+    const result = computeComplexityDelta([{ filepath: 'a.ts', before, after }], COG_ONLY);
+    const event = buildDeltaEvent(result, false, 1, now);
+    expect(event.flagged).toEqual([
+      { filepath: 'a.ts', symbol: 'MyClass.target', metric: 'cognitive' },
+    ]);
   });
 });
 
@@ -247,7 +298,9 @@ describe('deltaCommand — operational failures exit 2 (Phase-1 findings #2, #3)
 
 describe('deltaCommand — --base <ref> integration (real git fixtures)', () => {
   let dir: string;
+  let home: string;
   let originalCwd: string;
+  let originalHome: string | undefined;
   let logSpy: ReturnType<typeof vi.spyOn>;
   let errSpy: ReturnType<typeof vi.spyOn>;
 
@@ -303,6 +356,12 @@ describe('deltaCommand — --base <ref> integration (real git fixtures)', () => 
     originalCwd = process.cwd();
     process.chdir(dir);
 
+    // Isolate delta-event recording under a temp LIEN_HOME so these tests
+    // never touch the real developer machine's ~/.lien/indices.
+    originalHome = process.env.LIEN_HOME;
+    home = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-delta-cmd-home-'));
+    process.env.LIEN_HOME = home;
+
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
@@ -312,8 +371,11 @@ describe('deltaCommand — --base <ref> integration (real git fixtures)', () => 
 
   afterEach(async () => {
     process.chdir(originalCwd);
+    if (originalHome === undefined) delete process.env.LIEN_HOME;
+    else process.env.LIEN_HOME = originalHome;
     vi.restoreAllMocks();
     await fs.rm(dir, { recursive: true, force: true });
+    await fs.rm(home, { recursive: true, force: true });
   });
 
   it('--base <HEAD sha> is equivalent to the default (no --base)', async () => {
@@ -388,5 +450,82 @@ describe('deltaCommand — --base <ref> integration (real git fixtures)', () => 
     const exitAfterConfig = await runDelta({ format: 'json' });
     expect(exitAfterConfig).toBe(1);
     expect((lastJsonLog() as { summary: { regressions: number } }).summary.regressions).toBe(1);
+  });
+
+  describe('local delta-event recording (instruments the command, not the shell hook)', () => {
+    it('records one event per invocation, readable via readDeltaEvents', async () => {
+      await initRepo();
+      await write('a.ts', BODY.oneIf);
+      await commitAll('init');
+      await write('a.ts', BODY.twoNest); // uncommitted crossing (against threshold 2)
+
+      await runDelta({ format: 'json', threshold: '2' });
+
+      const events = await readDeltaEvents(dir);
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        mode: 'normal',
+        exitCode: 1,
+        counts: { crossings: 1 },
+        flagged: [{ filepath: 'a.ts', symbol: 'target', metric: 'cognitive' }],
+      });
+    });
+
+    it('records mode "soft" and still exit 0 under --soft, even with a regression', async () => {
+      await initRepo();
+      await write('a.ts', BODY.oneIf);
+      await commitAll('init');
+      await write('a.ts', BODY.twoNest);
+
+      const exitCode = await runDelta({ format: 'json', threshold: '2', soft: true });
+      expect(exitCode).toBe(0);
+
+      const [recorded] = await readDeltaEvents(dir);
+      expect(recorded.mode).toBe('soft');
+      expect(recorded.counts.crossings).toBe(1);
+    });
+
+    it('records a clean run with an empty flagged list', async () => {
+      await initRepo();
+      await write('a.ts', BODY.oneIf);
+      await commitAll('init');
+
+      await runDelta({ format: 'json' }); // no working-tree changes vs HEAD
+
+      const [recorded] = await readDeltaEvents(dir);
+      expect(recorded.counts.crossings).toBe(0);
+      expect(recorded.flagged).toEqual([]);
+    });
+
+    it('accumulates one event per run across repeated invocations', async () => {
+      await initRepo();
+      await write('a.ts', BODY.oneIf);
+      await commitAll('init');
+
+      await runDelta({ format: 'json' });
+      await write('a.ts', BODY.twoNest);
+      await runDelta({ format: 'json', threshold: '2' });
+
+      expect(await readDeltaEvents(dir)).toHaveLength(2);
+    });
+
+    it('LIEN_DELTA_EVENTS=off records nothing, and lien delta still runs and exits normally', async () => {
+      const original = process.env.LIEN_DELTA_EVENTS;
+      process.env.LIEN_DELTA_EVENTS = 'off';
+      try {
+        await initRepo();
+        await write('a.ts', BODY.oneIf);
+        await commitAll('init');
+        await write('a.ts', BODY.twoNest);
+
+        const exitCode = await runDelta({ format: 'json', threshold: '2' });
+        expect(exitCode).toBe(1); // the gate itself is unaffected by the kill switch
+
+        expect(await readDeltaEvents(dir)).toEqual([]);
+      } finally {
+        if (original === undefined) delete process.env.LIEN_DELTA_EVENTS;
+        else process.env.LIEN_DELTA_EVENTS = original;
+      }
+    });
   });
 });
