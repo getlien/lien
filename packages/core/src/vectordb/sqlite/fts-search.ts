@@ -56,13 +56,31 @@ interface FtsRow extends Record<string, unknown> {
 }
 
 /**
- * Structural ranking boost tuning. Deliberately small: at an extreme
- * dependentCount of ~200 (a hub file in a large codebase) the multiplier is
- * `1 + 0.15 * ln(201) ≈ 1.8x` — enough to win a near-tie between two
- * similarly-relevant bm25 hits, never enough to promote a weak match over a
- * strongly relevant one from a different bm25 band.
+ * Structural ranking boost tuning. Deliberately small: at a dependentCount of
+ * ~200 (a well-connected hub file) the multiplier is `1 + 0.15 * ln(201) ≈
+ * 1.8x` — enough to win a near-tie between two similarly-relevant bm25 hits.
+ *
+ * Caveat (found in review, worth being honest about rather than papering
+ * over): because relevance bands are continuous ranges, NO nonzero
+ * multiplicative boost can guarantee it never crosses a band boundary — a
+ * `relevant` match (ratio as low as 0.5) with dependentCount≈200 boosts to
+ * ~0.9, which can outrank an unconnected `highly_relevant` match sitting
+ * near the bottom of its band (ratio just above 0.75). This is an accepted
+ * tradeoff of "structural importance can matter more than a marginal lexical
+ * edge for a genuinely central file," not a bug — see MAX_STRUCTURAL_BOOST
+ * below for the (bounded, not "band-safe") ceiling this is capped at.
  */
 export const STRUCTURAL_BOOST_ALPHA = 0.15;
+
+/**
+ * Hard ceiling on the multiplier from `applyStructuralBoost`, independent of
+ * `STRUCTURAL_BOOST_ALPHA`. Bounds worst-case behavior for a pathologically
+ * large dependentCount (e.g. a true god-object in a huge monorepo) — without
+ * this, `log1p` still grows (slowly) without bound. At the realistic max
+ * documented above (~200 dependents) the multiplier is ~1.8x, comfortably
+ * under this 2x ceiling, so normal behavior is unaffected.
+ */
+export const MAX_STRUCTURAL_BOOST_MULTIPLIER = 2;
 
 /**
  * Env escape hatch for the structural ranking boost below (`applyStructuralBoost`
@@ -79,21 +97,28 @@ export function structuralRankingEnabled(): boolean {
  * Blend a bm25-derived relevance ratio (`ratio` from `keywordSearch`, in
  * (0, 1], higher = better lexical match) with a structural importance signal
  * (`dependentCount`: how many other files import this chunk's file — see
- * dependent-counts.ts). `final = ratio * (1 + α · log(1 + dependentCount))`.
+ * dependent-counts.ts).
+ *
+ * `final = ratio * min(MAX_STRUCTURAL_BOOST_MULTIPLIER, 1 + α · log(1 + dependentCount))`
  *
  * `Math.log1p` keeps the boost sublinear: going from 1 to 2 dependents moves
  * the multiplier far more than going from 100 to 200 — a file being imported
- * by *anyone* is the meaningful signal, not the exact count. The result is
- * never less than `ratio`, so this only ever promotes a result within its
- * already-fetched candidate window, never demotes one (matches "structural
- * signal breaks ties / boosts", not "punishes").
+ * by *anyone* is the meaningful signal, not the exact count. The multiplier
+ * is capped at `MAX_STRUCTURAL_BOOST_MULTIPLIER` so an extreme dependentCount
+ * can't grow the boost unboundedly. The result is never less than `ratio`,
+ * so this only ever promotes a result within its already-fetched candidate
+ * window, never demotes one — but it is NOT guaranteed to stay within the
+ * same relevance band as `ratio` (see the caveat on `STRUCTURAL_BOOST_ALPHA`):
+ * a well-connected hub file can cross into a higher band than an unconnected
+ * file with a marginally better lexical match.
  */
 export function applyStructuralBoost(
   ratio: number,
   dependentCount: number,
   alpha: number = STRUCTURAL_BOOST_ALPHA,
 ): number {
-  return ratio * (1 + alpha * Math.log1p(Math.max(0, dependentCount)));
+  const multiplier = 1 + alpha * Math.log1p(Math.max(0, dependentCount));
+  return ratio * Math.min(MAX_STRUCTURAL_BOOST_MULTIPLIER, multiplier);
 }
 
 /** A scored FTS row plus the internal ratio the boost re-sort needs — never returned as-is. */

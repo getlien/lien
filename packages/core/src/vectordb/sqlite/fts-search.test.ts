@@ -4,7 +4,12 @@ import path from 'path';
 import os from 'os';
 import type { ChunkMetadata } from '@liendev/parser';
 import { SqliteBackend } from './sqlite-backend.js';
-import { orQuery, applyStructuralBoost, STRUCTURAL_BOOST_ALPHA } from './fts-search.js';
+import {
+  orQuery,
+  applyStructuralBoost,
+  STRUCTURAL_BOOST_ALPHA,
+  MAX_STRUCTURAL_BOOST_MULTIPLIER,
+} from './fts-search.js';
 
 function chunk(
   file: string,
@@ -77,6 +82,29 @@ describe('applyStructuralBoost', () => {
     expect(withZeroAlpha).toBe(0.5);
     expect(withDoubleAlpha).toBeGreaterThan(withDefaultAlpha);
   });
+
+  it('caps the multiplier at MAX_STRUCTURAL_BOOST_MULTIPLIER for a pathologically large dependentCount', () => {
+    const boosted = applyStructuralBoost(1, 10_000_000);
+    expect(boosted).toBeCloseTo(MAX_STRUCTURAL_BOOST_MULTIPLIER, 5);
+    // And it doesn't grow any further past the cap.
+    expect(applyStructuralBoost(1, 10_000_000_000)).toBeCloseTo(MAX_STRUCTURAL_BOOST_MULTIPLIER, 5);
+  });
+
+  it(
+    'documented caveat: a well-connected hub file CAN cross a relevance band and outrank an ' +
+      'unconnected file with a marginally better lexical match — no capped multiplicative boost ' +
+      'can prevent this near a band boundary, so this pins the known tradeoff instead of hiding it',
+    () => {
+      const relevantBandFloor = 0.5; // toRelevance()'s 'relevant' band starts at 0.5
+      const highlyRelevantBandFloor = 0.75 + 0.001; // just inside 'highly_relevant'
+      const hubDependentCount = 200; // this file's own documented "realistic max"
+
+      const hubBoosted = applyStructuralBoost(relevantBandFloor, hubDependentCount);
+      const unconnectedBoosted = applyStructuralBoost(highlyRelevantBandFloor, 0);
+
+      expect(hubBoosted).toBeGreaterThan(unconnectedBoosted);
+    },
+  );
 });
 
 describe('SqliteBackend.search (FTS5)', () => {
