@@ -160,6 +160,18 @@ spend; see `packages/review/src/stale-literal-signals.ts` for the template.
 - Explain changes at each step with a high-level summary
 - Run tests, check logs, demonstrate correctness
 
+**Dogfood before shipping (MANDATORY).** CI-green + unit tests are not
+shipping criteria on their own. Before a PR is declared merge-ready,
+exercise the change the way its real consumer experiences it and put the
+verbatim evidence in the PR body:
+- CLI/MCP changes → run the actual command/tool against this repo and read the output.
+- Hook/plugin changes → invoke the hook with the real stdin shape Claude Code sends; verify what surfaces (and TTL/fail-open behavior).
+- Review-engine changes → replay through the harness (build-prompts/fixtures) or a captured real run.
+- Site/docs → `npm run docs:build` AND read the rendered result.
+If pre-merge dogfooding is genuinely impossible (needs production traffic),
+the PR must say so explicitly and the dogfood happens immediately
+post-merge — silence is not an option.
+
 ### 5. Demand Elegance (Balanced)
 - For non-trivial changes: pause and ask "is there a more elegant way?"
 - If a fix feels hacky: "Knowing everything I know now, implement the elegant solution"
