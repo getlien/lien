@@ -68,11 +68,7 @@ function extractTemplateName(filepath: string): string | undefined {
  * JSON templates are typically small (define section layout),
  * so we keep them as a single chunk and extract section references.
  */
-export function chunkJSONTemplate(
-  filepath: string,
-  content: string,
-  tenantContext?: { orgId?: string },
-): CodeChunk[] {
+export function chunkJSONTemplate(filepath: string, content: string): CodeChunk[] {
   // Skip empty files
   if (content.trim().length === 0) {
     return [];
@@ -94,7 +90,6 @@ export function chunkJSONTemplate(
         symbolName: templateName,
         symbolType: 'template',
         imports: sectionReferences.length > 0 ? sectionReferences : undefined,
-        ...(tenantContext?.orgId && { orgId: tenantContext.orgId }),
       },
     },
   ];

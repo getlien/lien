@@ -13,8 +13,6 @@ import { resolveWorkspacePackageEntries } from '../workspace-packages.js';
 
 export interface ASTChunkOptions {
   minChunkSize?: number;
-  // Multi-tenant fields (optional for backward compatibility)
-  orgId?: string; // Organization identifier for multi-tenant scenarios
   /**
    * Absolute path to the workspace/monorepo root. When provided (and the
    * root has an npm `workspaces` field), bare package specifiers that name a
@@ -119,7 +117,6 @@ function processTopLevelNode(
   content: string,
   context: ASTContext,
   language: SupportedLanguage,
-  tenantContext: { orgId?: string },
 ): ASTChunk {
   const { lines, fileImports, fileExports, importedSymbols, traverser } = context;
 
@@ -144,7 +141,6 @@ function processTopLevelNode(
     symbolInfo,
     fileImports,
     language,
-    tenantContext,
     fileExports,
     importedSymbols,
   );
@@ -159,11 +155,8 @@ function processTopLevelNodes(
   content: string,
   context: ASTContext,
   language: SupportedLanguage,
-  tenantContext: { orgId?: string },
 ): ASTChunk[] {
-  return topLevelNodes.map(node =>
-    processTopLevelNode(node, filepath, content, context, language, tenantContext),
-  );
+  return topLevelNodes.map(node => processTopLevelNode(node, filepath, content, context, language));
 }
 
 /**
@@ -188,8 +181,7 @@ export function chunkByAST(
   content: string,
   options: ASTChunkOptions = {},
 ): ASTChunk[] {
-  const { minChunkSize = 5, orgId, workspaceRoot } = options;
-  const tenantContext = { orgId };
+  const { minChunkSize = 5, workspaceRoot } = options;
 
   // Parse and validate
   const { language, rootNode } = parseAndValidate(filepath, content);
@@ -199,14 +191,7 @@ export function chunkByAST(
 
   // Find and process top-level nodes
   const topLevelNodes = findTopLevelNodes(rootNode, context.traverser);
-  const topLevelChunks = processTopLevelNodes(
-    topLevelNodes,
-    filepath,
-    content,
-    context,
-    language,
-    tenantContext,
-  );
+  const topLevelChunks = processTopLevelNodes(topLevelNodes, filepath, content, context, language);
 
   // Extract uncovered code (imports, exports, top-level statements)
   const coveredRanges = topLevelNodes.map(n => ({
@@ -220,7 +205,6 @@ export function chunkByAST(
     minChunkSize,
     context.fileImports,
     language,
-    tenantContext,
     context.fileExports,
     context.importedSymbols,
   );
@@ -356,7 +340,6 @@ function createChunk(
   symbolInfo: ReturnType<typeof extractSymbolInfo>,
   imports: string[],
   language: SupportedLanguage,
-  tenantContext?: { orgId?: string },
   fileExports?: string[],
   importedSymbols?: Record<string, string[]>,
 ): ASTChunk {
@@ -404,8 +387,6 @@ function createChunk(
       halsteadDifficulty: halstead?.difficulty,
       halsteadEffort: halstead?.effort,
       halsteadBugs: halstead?.bugs,
-      // Multi-tenant fields
-      ...(tenantContext?.orgId && { orgId: tenantContext.orgId }),
     },
   };
 }
@@ -459,7 +440,6 @@ function createChunkFromRange(
   filepath: string,
   language: SupportedLanguage,
   imports: string[],
-  tenantContext?: { orgId?: string },
   fileExports?: string[],
   importedSymbols?: Record<string, string[]>,
 ): ASTChunk {
@@ -480,8 +460,6 @@ function createChunkFromRange(
       // Symbol-level dependency tracking
       ...(fileExports && fileExports.length > 0 && { exports: fileExports }),
       ...(importedSymbols && Object.keys(importedSymbols).length > 0 && { importedSymbols }),
-      // Multi-tenant fields
-      ...(tenantContext?.orgId && { orgId: tenantContext.orgId }),
     },
   };
 }
@@ -505,7 +483,6 @@ function extractUncoveredCode(
   minChunkSize: number,
   imports: string[],
   language: SupportedLanguage,
-  tenantContext?: { orgId?: string },
   fileExports?: string[],
   importedSymbols?: Record<string, string[]>,
 ): ASTChunk[] {
@@ -515,16 +492,7 @@ function extractUncoveredCode(
 
   return uncoveredRanges
     .map(range =>
-      createChunkFromRange(
-        range,
-        lines,
-        filepath,
-        language,
-        imports,
-        tenantContext,
-        fileExports,
-        importedSymbols,
-      ),
+      createChunkFromRange(range, lines, filepath, language, imports, fileExports, importedSymbols),
     )
     .filter(chunk => (hasExports ? chunk.content.length > 0 : isValidChunk(chunk, minChunkSize)));
 }
