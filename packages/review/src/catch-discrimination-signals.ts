@@ -58,6 +58,15 @@
  *    masking pre-pass (see `maskNonCode`) — found over-firing on this
  *    repo's own `.assertions.ts` fixtures, whose docstrings quote code
  *    snippets like `catch { return false; }` as narrative prose.
+ *  - Masking treats a whole template literal (backtick string) as opaque,
+ *    including any `${...}` interpolation slots — real, executing code that
+ *    can itself contain a discrimination check (e.g. `` `LLM error:
+ *    ${err instanceof Error ? err.message : String(err)}` ``, used only to
+ *    format a log message, found via this module's own census against
+ *    `voting.ts`). Such a check is invisible to criterion (a), so a catch
+ *    that only inspects the error inside an interpolation slot is still
+ *    flagged as a candidate — the agent's own read of the actual code is
+ *    the backstop, per this block's "confirm before reporting" framing.
  */
 
 import type { CodeChunk } from '@liendev/parser';
@@ -98,11 +107,30 @@ const CATCH_RE = /\bcatch\s*(?:\(\s*([A-Za-z_$][\w$]*)\s*(?::\s*[^)]+)?\s*\))?\s
 const GENERIC_DISCRIMINATION_RE = /\binstanceof\b/;
 const BINDING_PROPERTY_SUFFIX = 'status|code|name|statusCode|errno|type';
 
-/** A trailing, unconditional (not nested in any block) throw statement. */
-const TRAILING_THROW_RE = /\bthrow\b[^;{}]*;\s*$/;
+// Both patterns make the trailing `;` optional so an ASI-style statement —
+// legal JS, common outside this repo's own Prettier `semi: true` style — is
+// still recognized instead of silently falling through as "no match".
 
-/** A `return` with a non-empty expression — "returns a value" per the design. */
-const RETURN_WITH_VALUE_RE = /\breturn\s+[^\s;][^;]*;/;
+/**
+ * A trailing, unconditional (not nested in any block) throw statement. Not
+ * multiline — `$` must anchor to the true end of the (already-trimmed)
+ * input, not merely the end of some earlier line, since this specifically
+ * asks "is the LAST statement a throw", not "does a throw exist somewhere".
+ * No `{}` exclusion: by the time text reaches this check it has already
+ * been through {@link extractTopLevelText}, which elides hidden control-block
+ * content entirely — any brace still present here belongs to a transparent
+ * value literal (e.g. `throw wrapError(err, 'msg', { dbPath });`) and must
+ * not stop the match.
+ */
+const TRAILING_THROW_RE = /\bthrow\b[^;]*;?\s*$/;
+
+/**
+ * A `return` with a non-empty expression — "returns a value" per the
+ * design. Multiline: this is an existence check (does a value-return appear
+ * ANYWHERE in the top-level text), so `$` matching each line's end lets an
+ * ASI-style return be found regardless of where it sits in the body.
+ */
+const RETURN_WITH_VALUE_RE = /\breturn\s+[^\s;][^;\n]*(?:;|$)/m;
 
 const LOGGING_CALL_STATEMENT_RE =
   /\b(?:console|logger|log)\s*\.\s*(?:debug|info|warn|warning|error|trace|log)\s*\([^)]*\)\s*;?/gi;
@@ -277,40 +305,76 @@ function findMatchingBrace(text: string, openIdx: number): number {
 }
 
 /**
- * Extract only the depth-0 text of a block body — i.e. everything NOT
- * nested inside a further `{...}` (an `if`/`for`/`try`/etc. block). This is
- * what lets us ask "is the code that ALWAYS runs, regardless of any
- * conditional inside this catch, a trailing throw?" without full
- * control-flow analysis: a nested block's content is opaque to this scan,
- * but its header (e.g. `if (comments.length === 0)`) stays, since only `{`
- * and `}` affect depth.
+ * Trailing context after which a `{` opens an object-literal VALUE (e.g.
+ * `return { posted: 0 }`, `fn({ a: 1 })`, `x = { ... }`) rather than a
+ * control-flow block. Anchored to the end of the text emitted so far.
  */
+const VALUE_BRACE_CONTEXT_RE = /(?:\breturn|[=,([:])\s*$/;
+
+/** Whether a `{` right after `emittedSoFar` opens a value literal, not a control block. */
+function opensValueLiteral(emittedSoFar: string): boolean {
+  return emittedSoFar.trim() === '' || VALUE_BRACE_CONTEXT_RE.test(emittedSoFar);
+}
+
+/**
+ * Extract only the visible text of a block body — i.e. everything NOT
+ * nested inside a control-flow block (`if`/`for`/`try`/`else`/a function
+ * body/etc.). This is what lets us ask "is the code that ALWAYS runs,
+ * regardless of any conditional inside this catch, a trailing throw?"
+ * without full control-flow analysis: a nested block's content is opaque to
+ * this scan, but its header (e.g. `if (comments.length === 0)`) stays.
+ *
+ * An object-literal VALUE brace (`return { posted: 0, dropped: [] };`) is
+ * NOT a control block — hiding it would make a degrade-via-object-return
+ * invisible to {@link hasDegradeAction}. `opensValueLiteral` distinguishes
+ * the two by what precedes the `{`; only braces nested inside an ALREADY
+ * hidden control block are exempt from this check (their content is opaque
+ * either way, so the distinction stops mattering once hidden).
+ */
+/** Running state for {@link extractTopLevelText}'s single pass. */
+interface ExtractCursor {
+  /** Count of enclosing CONTROL blocks currently open (content hidden while > 0). */
+  hiddenDepth: number;
+  out: string;
+}
+
+/**
+ * Apply one `{`/`}` structural character to the cursor: a `{` either opens a
+ * transparent value literal (appended, {@link hiddenDepth} unchanged) or
+ * enters/deepens a hidden control block; a `}` closes whichever is
+ * currently open. Split out of {@link extractTopLevelText} so its own loop
+ * stays flat.
+ */
+function applyBraceChar(ch: '{' | '}', cursor: ExtractCursor): void {
+  if (ch === '{') {
+    if (cursor.hiddenDepth > 0) cursor.hiddenDepth++;
+    else if (opensValueLiteral(cursor.out)) cursor.out += ch;
+    else cursor.hiddenDepth = 1;
+    return;
+  }
+  if (cursor.hiddenDepth > 0) cursor.hiddenDepth--;
+  else cursor.out += ch; // closing a transparent value literal
+}
+
 function extractTopLevelText(body: string): string {
-  let depth = 0;
+  const cursor: ExtractCursor = { hiddenDepth: 0, out: '' };
   let i = 0;
-  let out = '';
   while (i < body.length) {
     const skipped = skipNonStructural(body, i);
     if (skipped !== null) {
-      if (depth === 0) out += body.slice(i, skipped);
+      if (cursor.hiddenDepth === 0) cursor.out += body.slice(i, skipped);
       i = skipped;
       continue;
     }
     const ch = body[i];
-    if (ch === '{') {
-      depth++;
-      i++;
-      continue;
+    if (ch === '{' || ch === '}') {
+      applyBraceChar(ch, cursor);
+    } else if (cursor.hiddenDepth === 0) {
+      cursor.out += ch;
     }
-    if (ch === '}') {
-      depth = Math.max(0, depth - 1);
-      i++;
-      continue;
-    }
-    if (depth === 0) out += ch;
     i++;
   }
-  return out;
+  return cursor.out;
 }
 
 function countNewlines(text: string, upTo: number): number {
@@ -432,9 +496,14 @@ export function classifyCatchBody(binding: string | null, body: string): string 
   // adding a check that would never make sense here.
   if (!binding) return null;
 
-  if (hasDiscrimination(body, binding)) return null;
+  // Mask comments/strings ONCE up front so every check below only sees real
+  // code: a comment like `// check err.status before degrading` must not
+  // exempt a catch that never actually inspects the error at runtime.
+  const masked = maskNonCode(body);
 
-  const topLevel = extractTopLevelText(body);
+  if (hasDiscrimination(masked, binding)) return null;
+
+  const topLevel = extractTopLevelText(masked);
   if (endsWithUnconditionalThrow(topLevel)) return null;
 
   const stripped = stripLoggingCalls(topLevel);

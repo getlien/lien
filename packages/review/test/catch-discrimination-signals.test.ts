@@ -158,6 +158,51 @@ describe('classifyCatchBody', () => {
     const body = '    return fallbackResult();';
     expect(classifyCatchBody(null, body)).toBeNull();
   });
+
+  it('flags a catch that degrades via an object-literal return value (real #752 return shape)', () => {
+    // Found missed by an earlier version: the brace-depth tracker treated
+    // the object literal's own `{}` as a hidden nested block, stripping its
+    // content and defeating the value-returning-return check regardless of
+    // the trailing semicolon. Caught by Lien Review's own CI pass on this PR.
+    const body = [
+      '    logger.warning(`batch failed: ${error}`);',
+      '    return { posted: 0, dropped: comments };',
+    ].join('\n');
+    expect(classifyCatchBody('error', body)).not.toBeNull();
+  });
+
+  it('flags a degrading return with no trailing semicolon (ASI)', () => {
+    const body = '    return fallbackResult()';
+    expect(classifyCatchBody('error', body)).not.toBeNull();
+  });
+
+  it('does not flag a catch that rethrows with no trailing semicolon (ASI)', () => {
+    const body = ['    logger.error(err)', '    throw err'].join('\n');
+    expect(classifyCatchBody('err', body)).toBeNull();
+  });
+
+  it('does not let a comment fake a discrimination check', () => {
+    // Found missed by an earlier version: hasDiscrimination scanned the raw
+    // (unmasked) body, so a comment merely mentioning `err.status` or
+    // `instanceof` exempted a catch that never actually inspects the error
+    // at runtime. Caught by Lien Review's own CI pass on this PR.
+    const body = [
+      '    // check err.status / instanceof before degrading, but we never do',
+      '    return fallback();',
+    ].join('\n');
+    expect(classifyCatchBody('err', body)).not.toBeNull();
+  });
+
+  it('does not flag a rethrow whose call argument is an object literal', () => {
+    // Regression: fixing the object-literal-return visibility (see above)
+    // made `{}` characters appear in topLevelText for value literals, which
+    // broke TRAILING_THROW_RE's original `[^;{}]*` exclusion — a real
+    // rethrow like `throw wrapError(err, 'msg', { dbPath });` (found via
+    // this module's own byte-diff census against overlay-backend.ts) was
+    // no longer recognized as ending in a throw once braces became visible.
+    const body = "    throw wrapError(err, 'Failed to initialize', { dbPath: this.dbPath });";
+    expect(classifyCatchBody('err', body)).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------
