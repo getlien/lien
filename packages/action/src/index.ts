@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   createOctokit,
+  emptyAttestation,
   type ReviewCoreContext,
   type ReviewCoreResult,
   type ReviewFinding,
@@ -94,6 +95,27 @@ function logProviderFailure(findings: ReviewFinding[]): void {
 }
 
 /**
+ * Build the ReviewCoreResult for when `reviewPullRequest()` itself throws
+ * before returning one — e.g. a clone or GitHub API failure outside the
+ * analysis-phase null-return path `emptyResult`/`pipelineFailed` already
+ * covers inside `@liendev/review`. Without this, main()'s outer catch (below)
+ * would set exit code 1 with no step summary, no outputs, and no attestation
+ * ever written — the receipt this feature exists to guarantee would be the
+ * one thing missing on the run that most needs it.
+ */
+export function buildCrashResult(message: string): ReviewCoreResult {
+  return {
+    findings: [],
+    conclusion: 'failure',
+    summaryMarkdown: `Lien Review crashed before producing a result: ${message}`,
+    filesAnalyzed: 0,
+    usage: { totalTokens: 0, cost: 0 },
+    providerFailure: false,
+    attestation: emptyAttestation('failure', 0, 'normal', true),
+  };
+}
+
+/**
  * Finalize a completed review: write the step summary + outputs, note the fork
  * read-only-token limitation if applicable, and return the process exit code
  * (per `fail-on`) so the entrypoint and tests can assert it without reading
@@ -156,9 +178,17 @@ async function main(): Promise<void> {
   };
 
   group('Lien Review');
-  let result;
+  let result: ReviewCoreResult;
+  let crashed = false;
   try {
-    result = await reviewPullRequest(ctx);
+    try {
+      result = await reviewPullRequest(ctx);
+    } catch (error) {
+      crashed = true;
+      const message = error instanceof Error ? error.message : String(error);
+      actionLogger.error(`Lien Review crashed before producing a result: ${message}`);
+      result = buildCrashResult(message);
+    }
     // Full attestation JSON for scripted consumption (e.g. `gh run view --log`
     // grep); the step summary/PR-description renderings stay short by design.
     actionLogger.info(`Attestation: ${JSON.stringify(result.attestation)}`);
@@ -172,7 +202,14 @@ async function main(): Promise<void> {
   // A fork's GITHUB_TOKEN is read-only on `pull_request` (inline comments can't
   // post), but pull_request_target grants a writable token — only warn in the former.
   const forkReadOnly = context.isFork && process.env.GITHUB_EVENT_NAME !== 'pull_request_target';
-  process.exitCode = await finishRun(result, forkReadOnly, inputs.failOn);
+  const exitCode = await finishRun(result, forkReadOnly, inputs.failOn);
+  // A pipeline crash is an operational failure — no review happened at all —
+  // so it must fail the check unconditionally, the same guarantee
+  // `providerFailure` already gets inside `finishRun`/`exitCodeFor` (#764).
+  // Forced here rather than threaded through `exitCodeFor` since this is a
+  // distinct signal (the call threw) that never becomes part of a real
+  // ReviewCoreResult on its own.
+  process.exitCode = crashed ? 1 : exitCode;
 }
 
 /** True when this module is the process entrypoint (not imported by a test). */

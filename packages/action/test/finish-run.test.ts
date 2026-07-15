@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import { emptyAttestation, type ReviewCoreResult } from '@liendev/review';
 
-import { finishRun } from '../src/index.js';
+import { finishRun, buildCrashResult } from '../src/index.js';
 import { actionLogger } from '../src/logger.js';
 
 function makeResult(overrides?: Partial<ReviewCoreResult>): ReviewCoreResult {
@@ -178,6 +178,34 @@ describe('finishRun', () => {
     const exitCode = await finishRun(result, /* forkReadOnly */ false, 'never');
 
     expect(exitCode).toBe(0);
+  });
+
+  // Regression coverage for the CodeRabbit #768 finding: `reviewPullRequest()`
+  // throwing (e.g. a clone failure) used to escape with no result at all — no
+  // attestation, no step summary, no outputs — reaching only main()'s top-level
+  // catch. `buildCrashResult` is what main() now falls back to so the receipt
+  // still gets written before the check fails.
+  describe('buildCrashResult', () => {
+    it('produces a failed:analysis_error attestation carrying the crash message', () => {
+      const result = buildCrashResult('clone failed: ENOTFOUND');
+
+      expect(result.conclusion).toBe('failure');
+      expect(result.providerFailure).toBe(false);
+      expect(result.attestation.verdict).toBe('failed:analysis_error');
+      expect(result.summaryMarkdown).toContain('clone failed: ENOTFOUND');
+    });
+
+    it('still writes the attestation/summary/outputs via finishRun', async () => {
+      vi.spyOn(actionLogger, 'info').mockImplementation(() => {});
+      const result = buildCrashResult('boom');
+
+      const exitCode = await finishRun(result, false, 'never');
+
+      // finishRun alone doesn't force this to fail (that's main()'s job, since
+      // `crashed` isn't part of ReviewCoreResult) — this just proves the crash
+      // result flows through the normal write path without throwing.
+      expect(exitCode).toBe(0);
+    });
   });
 
   describe('attestation output + summary rendering', () => {
