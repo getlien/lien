@@ -35,6 +35,7 @@ import {
   ReviewEngine,
   ComplexityPlugin,
   AgentReviewPlugin,
+  hasProviderFailure,
 } from './index.js';
 import type { CodeChunk } from '@liendev/parser';
 import { performChunkOnlyIndex, analyzeComplexityFromChunks } from '@liendev/parser';
@@ -94,6 +95,16 @@ export interface ReviewCoreResult {
   summaryMarkdown: string;
   filesAnalyzed: number;
   usage: { totalTokens: number; cost: number };
+  /**
+   * True when the agent-review MAIN pass never ran at all — every LLM provider
+   * request failed terminally (see `hasProviderFailure` / `AgentResult.neverRan`).
+   * This is an OPERATIONAL failure, not an advisory finding: a caller (e.g. the
+   * GitHub Action) should treat it as failing regardless of its own advisory/gating
+   * policy, since a review that never ran isn't something to be advisory *about*.
+   * Always `false` when the agent review didn't run for an unrelated reason (not
+   * enabled, or the pipeline failed before reaching the engine).
+   */
+  providerFailure: boolean;
 }
 
 export async function reviewPullRequest(ctx: ReviewCoreContext): Promise<ReviewCoreResult> {
@@ -157,7 +168,12 @@ export async function reviewPullRequest(ctx: ReviewCoreContext): Promise<ReviewC
 // ---------------------------------------------------------------------------
 // Helpers
 
-/** Build a no-findings result for the no-files / analysis-failed early returns. */
+/**
+ * Build a no-findings result for the no-files / analysis-failed early returns.
+ * Both are unrelated to the LLM provider (no files to review; the pipeline
+ * failed before the engine ever ran), so `providerFailure` is always false —
+ * only `hasProviderFailure` on the engine's actual findings sets it.
+ */
 function emptyResult(
   conclusion: 'success' | 'failure',
   summaryMarkdown: string,
@@ -169,6 +185,7 @@ function emptyResult(
     summaryMarkdown,
     filesAnalyzed,
     usage: { totalTokens: 0, cost: 0 },
+    providerFailure: false,
   };
 }
 
@@ -212,6 +229,7 @@ interface PresentedReview {
   conclusion: 'success' | 'failure' | 'neutral';
   summaryMarkdown: string;
   usage: { totalTokens: number; cost: number };
+  providerFailure: boolean;
 }
 
 /** Run the review engine over an analyzed PR and present the findings to GitHub. */
@@ -270,6 +288,7 @@ async function analyzeAndPresent(
     conclusion: presentation.conclusion,
     summaryMarkdown: presentation.summary,
     usage: { totalTokens: agentUsage.totalTokens, cost: agentUsage.cost },
+    providerFailure: hasProviderFailure(findings),
   };
 }
 

@@ -23,7 +23,7 @@ import {
 
 import { readInputs, type FailOn } from './inputs.js';
 import { loadContext } from './context.js';
-import { writeStepSummary, writeOutputs, countErrors, hasProviderFailure } from './summary.js';
+import { writeStepSummary, writeOutputs, countErrors } from './summary.js';
 import { actionLogger, group, endGroup, annotate } from './logger.js';
 
 /**
@@ -75,9 +75,11 @@ function exitCodeFor(
 
 /**
  * Log a clear, actionable message naming why the review couldn't run at all.
- * The finding's own message already carries the raw provider error (e.g. "API
- * error (402): ..."); this adds the common-cause remediation so a maintainer
- * doesn't have to guess.
+ * Only called once `result.providerFailure` (the authoritative signal from
+ * `@liendev/review`) is already known true — this just locates the specific
+ * never-ran notice among `findings` to quote its message (which already
+ * carries the raw provider error, e.g. "API error (402): ..."), then adds the
+ * common-cause remediation so a maintainer doesn't have to guess.
  */
 function logProviderFailure(findings: ReviewFinding[]): void {
   const notice = findings.find(f => (f.metadata as { neverRan?: boolean } | undefined)?.neverRan);
@@ -103,7 +105,7 @@ export async function finishRun(
   failOn: FailOn,
 ): Promise<number> {
   const errorCount = countErrors(result.findings);
-  const providerFailure = hasProviderFailure(result.findings);
+  const providerFailure = result.providerFailure;
 
   await writeStepSummary(result);
   await writeOutputs({

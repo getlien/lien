@@ -5,6 +5,7 @@ import {
   appendIncompleteNotice,
   scaleBudgetForBlastRadius,
   clampText,
+  hasProviderFailure,
 } from '../src/plugins/agent/index.js';
 import { scaleAgentBudget } from '../src/review-pr.js';
 import { DEFAULT_REVIEW_MODEL, MAX_REVIEW_TOKEN_BUDGET } from '../src/defaults.js';
@@ -384,18 +385,19 @@ describe('OpenAIAgentClient budget handling', () => {
   }, 20000);
 });
 
-describe('appendIncompleteNotice — severity by run outcome', () => {
-  function baseResult(overrides: Partial<AgentResult>): AgentResult {
-    return {
-      findings: [],
-      usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0 },
-      turns: 0,
-      stopReason: 'error',
-      incomplete: true,
-      ...overrides,
-    };
-  }
+/** Shared by both the `appendIncompleteNotice` and `hasProviderFailure` suites below. */
+function baseResult(overrides: Partial<AgentResult>): AgentResult {
+  return {
+    findings: [],
+    usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0 },
+    turns: 0,
+    stopReason: 'error',
+    incomplete: true,
+    ...overrides,
+  };
+}
 
+describe('appendIncompleteNotice — severity by run outcome', () => {
   it('escalates a never-ran main pass to an ERROR notice naming the cause', () => {
     const findings: ReviewFinding[] = [];
     appendIncompleteNotice(
@@ -448,6 +450,53 @@ describe('appendIncompleteNotice — severity by run outcome', () => {
     const findings: ReviewFinding[] = [];
     appendIncompleteNotice(findings, 'agent-review', baseResult({ incomplete: false }));
     expect(findings).toHaveLength(0);
+  });
+});
+
+describe('hasProviderFailure — the single source of truth for #764-class detection', () => {
+  // Regression coverage for #764/#765: the action layer (and review-pr.ts's
+  // `ReviewCoreResult.providerFailure`) both key off this function rather than
+  // re-deriving the signal from `metadata` shape or conclusion/summary text.
+  function neverRanNotice(): ReviewFinding[] {
+    const findings: ReviewFinding[] = [];
+    appendIncompleteNotice(
+      findings,
+      'agent-review',
+      baseResult({ neverRan: true, errorMessage: 'API error (402): Insufficient credits' }),
+    );
+    return findings;
+  }
+
+  it('is true when findings carry the never-ran notice', () => {
+    expect(hasProviderFailure(neverRanNotice())).toBe(true);
+  });
+
+  it('is false for a partial (budget) incomplete notice — no neverRan metadata', () => {
+    const findings: ReviewFinding[] = [];
+    appendIncompleteNotice(
+      findings,
+      'agent-review',
+      baseResult({ neverRan: false, stopReason: 'budget' }),
+    );
+    expect(hasProviderFailure(findings)).toBe(false);
+  });
+
+  it('is false for a doc-pass-only incomplete notice (main pass ran fine)', () => {
+    const findings: ReviewFinding[] = [];
+    appendIncompleteNotice(
+      findings,
+      'agent-review',
+      baseResult({ neverRan: true, incompleteFromDocPass: true, stopReason: 'error' }),
+    );
+    expect(hasProviderFailure(findings)).toBe(false);
+  });
+
+  it('is false for an ordinary error finding with no metadata at all', () => {
+    expect(hasProviderFailure([{ severity: 'error' } as ReviewFinding])).toBe(false);
+  });
+
+  it('is false for an empty findings list', () => {
+    expect(hasProviderFailure([])).toBe(false);
   });
 });
 

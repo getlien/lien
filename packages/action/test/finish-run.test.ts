@@ -12,6 +12,7 @@ function makeResult(overrides?: Partial<ReviewCoreResult>): ReviewCoreResult {
     summaryMarkdown: 'All good.',
     filesAnalyzed: 3,
     usage: { totalTokens: 0, cost: 0 },
+    providerFailure: false,
     ...overrides,
   };
 }
@@ -103,7 +104,15 @@ describe('finishRun', () => {
   it('fails the check on a total provider failure even under fail-on=never (#764)', async () => {
     vi.spyOn(actionLogger, 'info').mockImplementation(() => {});
     const error = vi.spyOn(actionLogger, 'error').mockImplementation(() => {});
-    const result = makeResult({ conclusion: 'failure', findings: [neverRanFinding()] });
+    // `providerFailure` is the authoritative signal computed by `@liendev/review`
+    // (see review-pr.ts's `hasProviderFailure`) — `conclusion`/`findings` mirror
+    // what it would actually produce alongside it, but `finishRun` gates on
+    // `providerFailure` directly, not on re-deriving it from findings/strings.
+    const result = makeResult({
+      conclusion: 'failure',
+      findings: [neverRanFinding()],
+      providerFailure: true,
+    });
 
     const exitCode = await finishRun(result, /* forkReadOnly */ false, 'never');
 
@@ -118,10 +127,30 @@ describe('finishRun', () => {
   it('still fails a total provider failure under fail-on=error and fail-on=any', async () => {
     vi.spyOn(actionLogger, 'info').mockImplementation(() => {});
     vi.spyOn(actionLogger, 'error').mockImplementation(() => {});
-    const result = makeResult({ conclusion: 'failure', findings: [neverRanFinding()] });
+    const result = makeResult({
+      conclusion: 'failure',
+      findings: [neverRanFinding()],
+      providerFailure: true,
+    });
 
     expect(await finishRun(result, false, 'error')).toBe(1);
     expect(await finishRun(result, false, 'any')).toBe(1);
+  });
+
+  it('a findings-based failure conclusion (providerFailure=false) still obeys fail-on=never', async () => {
+    // Distinguishes the two ways `conclusion` can be 'failure': ordinary error
+    // findings (e.g. a new complexity violation) must stay advisory under the
+    // default, unlike an operational provider failure (the test above).
+    vi.spyOn(actionLogger, 'info').mockImplementation(() => {});
+    const result = makeResult({
+      conclusion: 'failure',
+      findings: [{ severity: 'error' } as ReviewCoreResult['findings'][number]],
+      providerFailure: false,
+    });
+
+    const exitCode = await finishRun(result, /* forkReadOnly */ false, 'never');
+
+    expect(exitCode).toBe(0);
   });
 
   it('a PARTIAL incomplete run (budget/turn limit, not neverRan) stays advisory under fail-on=never', async () => {

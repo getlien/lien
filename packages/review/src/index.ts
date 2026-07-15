@@ -31,7 +31,7 @@ export { ReviewEngine, createDefaultEngine, type EngineOptions } from './engine.
 
 // Built-in plugins
 export { ComplexityPlugin } from './plugins/complexity.js';
-export { AgentReviewPlugin } from './plugins/agent/index.js';
+export { AgentReviewPlugin, hasProviderFailure } from './plugins/agent/index.js';
 
 // Dependency graph
 export {
