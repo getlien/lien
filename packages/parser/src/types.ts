@@ -63,19 +63,6 @@ export interface ChunkMetadata {
   halsteadDifficulty?: number; // D = (n1/2) × (N2/n2) - error-proneness
   halsteadEffort?: number; // E = D × V - mental effort required
   halsteadBugs?: number; // B = E^(2/3) / 3000 - estimated delivered bugs
-
-  // Cross-repo-capable backend fields (optional for backward compatibility)
-  /**
-   * Git branch name for branch/commit tracking in cross-repo-capable backends.
-   * Used to isolate indexes by branch (e.g., main vs PR branches).
-   */
-  branch?: string;
-
-  /**
-   * Git commit SHA for branch/commit tracking in cross-repo-capable backends.
-   * Used to isolate indexes by commit (e.g., for PR analysis).
-   */
-  commitSha?: string;
 }
 
 export interface ScanOptions {
