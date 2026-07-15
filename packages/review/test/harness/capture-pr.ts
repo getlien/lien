@@ -189,6 +189,29 @@ function parseArgs(argv: string[]): ParsedArgs {
   return { prNumber, outputPath: resolve(outArg), shaOverride };
 }
 
+/**
+ * Strip Lien Review's dynamically-updated stats badge — and anything
+ * appended after it, e.g. CodeRabbit's auto-comment block — from a
+ * captured PR body.
+ *
+ * `gh pr view` always returns the PR's CURRENT description. When `--sha`
+ * pins a commit earlier than the PR's present head, that badge (inserted
+ * by `updatePRDescription` in `github-api.ts` and rewritten "on new
+ * commits") reflects a review of the LATER head, not the pinned one. For
+ * a PR that has since been fixed and re-reviewed, the badge can spell out
+ * the fix in plain language (e.g. "only 422 validation errors trigger
+ * the fallback, other errors still propagate") — leaking the ground
+ * truth straight into the fixture's prompt and silently invalidating any
+ * miss/characterization fixture pinned to the earlier, buggy commit.
+ */
+function stripLienStatsBadge(body: string): string {
+  // Matches both the legacy `<!-- lien-stats -->` marker and the
+  // parameterized `<!-- lien:{sectionId} -->` form emitted by
+  // `sectionMarkers()` in `github-api.ts`.
+  const match = body.match(/<!-- lien(?:-stats|:\S+) -->/);
+  return match ? body.slice(0, match.index).trimEnd() : body;
+}
+
 /** Short or full git commit SHA — 7–40 hex chars, nothing else. */
 const SHA_PATTERN = /^[0-9a-fA-F]{7,40}$/;
 
@@ -441,6 +464,12 @@ async function main(): Promise<void> {
   if (shaOverride) {
     assertShaInPrRange(meta, prNumber, headSha);
     console.error(`[capture] overriding head: ${meta.headRefOid} -> ${headSha}`);
+    const originalBody = meta.body ?? '';
+    const sanitized = stripLienStatsBadge(originalBody);
+    if (sanitized !== originalBody) {
+      console.error('[capture] stripped lien-stats badge (reflects a later commit than --sha)');
+    }
+    meta.body = sanitized;
   }
 
   const { diffText, changedFiles } = selectDiffSource(meta, prNumber, headSha, shaOverride);
