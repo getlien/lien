@@ -198,7 +198,6 @@ function createCodeChunk(
     symbolName?: string;
     symbolType?: LiquidBlock['type'];
     imports?: string[];
-    orgId?: string;
   } = {},
 ): CodeChunk {
   return {
@@ -212,7 +211,6 @@ function createCodeChunk(
       symbolName: options.symbolName,
       symbolType: options.symbolType,
       imports: options.imports?.length ? options.imports : undefined,
-      ...(options.orgId && { orgId: options.orgId }),
     },
   };
 }
@@ -225,7 +223,6 @@ function splitLargeBlock(
   ctx: ChunkContext,
   symbolName: string | undefined,
   imports: string[],
-  tenantContext?: { orgId?: string },
 ): CodeChunk[] {
   const chunks: CodeChunk[] = [];
   const blockLines = block.content.split('\n');
@@ -243,7 +240,7 @@ function splitLargeBlock(
           block.startLine + endOffset,
           filepath,
           'block',
-          { symbolName, symbolType: block.type, imports, ...tenantContext },
+          { symbolName, symbolType: block.type, imports },
         ),
       );
     }
@@ -262,7 +259,6 @@ function processSpecialBlock(
   block: LiquidBlock,
   ctx: ChunkContext,
   coveredLines: Set<number>,
-  tenantContext?: { orgId?: string },
 ): CodeChunk[] {
   // Mark lines as covered
   for (let i = block.startLine; i <= block.endLine; i++) {
@@ -290,12 +286,12 @@ function processSpecialBlock(
         block.endLine + 1,
         ctx.params.filepath,
         'block',
-        { symbolName, symbolType: block.type, imports, ...tenantContext },
+        { symbolName, symbolType: block.type, imports },
       ),
     ];
   }
 
-  return splitLargeBlock(block, ctx, symbolName, imports, tenantContext);
+  return splitLargeBlock(block, ctx, symbolName, imports);
 }
 
 /**
@@ -306,7 +302,6 @@ function flushTemplateChunk(
   chunkStartLine: number,
   endLine: number,
   ctx: ChunkContext,
-  tenantContext?: { orgId?: string },
 ): CodeChunk | null {
   if (currentChunk.length === 0) return null;
 
@@ -322,18 +317,16 @@ function flushTemplateChunk(
     endLine,
     ctx.params.filepath,
     'template',
-    { imports, ...tenantContext },
+    {
+      imports,
+    },
   );
 }
 
 /**
  * Process uncovered template content into chunks
  */
-function processTemplateContent(
-  ctx: ChunkContext,
-  coveredLines: Set<number>,
-  tenantContext?: { orgId?: string },
-): CodeChunk[] {
+function processTemplateContent(ctx: ChunkContext, coveredLines: Set<number>): CodeChunk[] {
   const chunks: CodeChunk[] = [];
   const { lines, params } = ctx;
   const { chunkSize, chunkOverlap } = params;
@@ -342,7 +335,7 @@ function processTemplateContent(
   let chunkStartLine = 0;
 
   const flush = (endLine: number) => {
-    const chunk = flushTemplateChunk(currentChunk, chunkStartLine, endLine, ctx, tenantContext);
+    const chunk = flushTemplateChunk(currentChunk, chunkStartLine, endLine, ctx);
     if (chunk) chunks.push(chunk);
   };
 
@@ -385,7 +378,6 @@ export function chunkLiquidFile(
   content: string,
   chunkSize: number = 75,
   chunkOverlap: number = 10,
-  tenantContext?: { orgId?: string },
 ): CodeChunk[] {
   // Build context once for reuse across helpers
   const contentWithoutComments = removeComments(content);
@@ -400,12 +392,10 @@ export function chunkLiquidFile(
   const coveredLines = new Set<number>();
 
   // Process special blocks
-  const blockChunks = blocks.flatMap(block =>
-    processSpecialBlock(block, ctx, coveredLines, tenantContext),
-  );
+  const blockChunks = blocks.flatMap(block => processSpecialBlock(block, ctx, coveredLines));
 
   // Process uncovered template content
-  const templateChunks = processTemplateContent(ctx, coveredLines, tenantContext);
+  const templateChunks = processTemplateContent(ctx, coveredLines);
 
   // Combine and sort by line number
   return [...blockChunks, ...templateChunks].sort(

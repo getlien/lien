@@ -131,12 +131,4 @@ describe('chunkMarkdownFile', () => {
   it('returns an empty array for an empty file', () => {
     expect(chunkMarkdownFile('empty.md', '')).toEqual([]);
   });
-
-  it('passes through orgId tenant context', () => {
-    const chunks = chunkMarkdownFile('README.md', '# Title\ncontent', 75, 10, {
-      orgId: 'org-1',
-    });
-
-    expect(chunks[0].metadata.orgId).toBe('org-1');
-  });
 });

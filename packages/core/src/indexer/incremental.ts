@@ -91,16 +91,12 @@ async function processFileContent(
   const useAST = true; // Always use AST-based chunking
   const astFallback = 'line-based' as const;
 
-  // orgId is now handled in createVectorDB() via global config and git remote detection
-  const orgId = undefined; // Not needed here - handled in VectorDB factory
-
   // Chunk the file
   const chunks = chunkFile(filepath, content, {
     chunkSize,
     chunkOverlap,
     useAST,
     astFallback,
-    orgId,
     workspaceRoot: rootDir,
   });
 

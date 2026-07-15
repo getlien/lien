@@ -47,7 +47,7 @@ async function initializeDatabase(
 ): Promise<{
   vectorDB: VectorDBInterface;
 }> {
-  // Create the structural store using global config (auto-detects backend and orgId)
+  // Create the structural store using global config (auto-detects backend)
   log('Creating structural store...');
   const vectorDB = await createVectorDB(rootDir, { warn: message => log(message, 'warning') });
 

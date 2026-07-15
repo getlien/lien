@@ -15,8 +15,6 @@ export interface ChunkOptions {
   // Does NOT govern a NativeBindingLoadError (missing/unloadable native
   // parser binding) -- that is a systemic, process-wide failure and always
   // propagates regardless of this setting; see ast/parser.ts.
-  // Multi-tenant fields (optional for backward compatibility)
-  orgId?: string; // Organization identifier for multi-tenant scenarios
   /**
    * Absolute path to the workspace/monorepo root. Enables cross-package
    * import resolution for JS/TS monorepos — see `ASTChunkOptions.workspaceRoot`.
@@ -35,11 +33,10 @@ function chunkSpecialCase(
   content: string,
   chunkSize: number,
   chunkOverlap: number,
-  tenantContext: { orgId?: string },
 ): CodeChunk[] | undefined {
   // Liquid files
   if (filepath.endsWith('.liquid')) {
-    return chunkLiquidFile(filepath, content, chunkSize, chunkOverlap, tenantContext);
+    return chunkLiquidFile(filepath, content, chunkSize, chunkOverlap);
   }
 
   // Shopify JSON template files (templates/**/*.json). Regex ensures
@@ -47,14 +44,14 @@ function chunkSpecialCase(
   // Matches: templates/product.json OR some-path/templates/customers/account.json
   // Rejects: my-templates/config.json OR node_modules/pkg/templates/file.json (filtered by scanner)
   if (filepath.endsWith('.json') && /(?:^|\/)templates\//.test(filepath)) {
-    return chunkJSONTemplate(filepath, content, tenantContext);
+    return chunkJSONTemplate(filepath, content);
   }
 
   // Markdown/MDX — chunk by heading section instead of a fixed-size line
   // window, so search_code retrieves a coherent section (e.g. README
   // "Install") rather than an arbitrary slice.
   if (/\.(md|mdx|markdown)$/i.test(filepath)) {
-    return chunkMarkdownFile(filepath, content, chunkSize, chunkOverlap, tenantContext);
+    return chunkMarkdownFile(filepath, content, chunkSize, chunkOverlap);
   }
 
   return undefined;
@@ -70,13 +67,10 @@ export function chunkFile(
     chunkOverlap = 10,
     useAST = true,
     astFallback = 'line-based',
-    orgId,
     workspaceRoot,
   } = options;
 
-  const specialCaseChunks = chunkSpecialCase(filepath, content, chunkSize, chunkOverlap, {
-    orgId,
-  });
+  const specialCaseChunks = chunkSpecialCase(filepath, content, chunkSize, chunkOverlap);
   if (specialCaseChunks) return specialCaseChunks;
 
   // Try AST-based chunking for supported languages
@@ -84,7 +78,6 @@ export function chunkFile(
     try {
       return chunkByAST(filepath, content, {
         minChunkSize: Math.floor(chunkSize / 10),
-        orgId,
         workspaceRoot,
       });
     } catch (error) {
@@ -111,7 +104,7 @@ export function chunkFile(
   }
 
   // Line-based chunking (original implementation)
-  return chunkByLines(filepath, content, chunkSize, chunkOverlap, { orgId });
+  return chunkByLines(filepath, content, chunkSize, chunkOverlap);
 }
 
 /**
@@ -123,7 +116,6 @@ function buildLineChunk(
   startLine: number,
   endLine: number,
   fileType: string,
-  tenantContext?: { orgId?: string },
 ): CodeChunk {
   return {
     content: chunkContent,
@@ -134,7 +126,6 @@ function buildLineChunk(
       type: 'block',
       language: fileType,
       symbols: extractSymbols(chunkContent, fileType),
-      ...(tenantContext?.orgId && { orgId: tenantContext.orgId }),
     },
   };
 }
@@ -147,7 +138,6 @@ function chunkByLines(
   content: string,
   chunkSize: number,
   chunkOverlap: number,
-  tenantContext?: { orgId?: string },
 ): CodeChunk[] {
   const lines = content.split('\n');
   if (lines.length === 0 || (lines.length === 1 && lines[0].trim() === '')) {
@@ -163,7 +153,7 @@ function chunkByLines(
     const chunkContent = lines.slice(i, endLine).join('\n');
 
     if (chunkContent.trim().length > 0) {
-      chunks.push(buildLineChunk(chunkContent, filepath, i + 1, endLine, fileType, tenantContext));
+      chunks.push(buildLineChunk(chunkContent, filepath, i + 1, endLine, fileType));
     }
 
     if (endLine >= lines.length) break;

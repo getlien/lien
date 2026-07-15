@@ -64,13 +64,7 @@ export interface ChunkMetadata {
   halsteadEffort?: number; // E = D × V - mental effort required
   halsteadBugs?: number; // B = E^(2/3) / 3000 - estimated delivered bugs
 
-  // Multi-tenant fields (optional for backward compatibility)
-  /**
-   * Organization identifier for multi-tenant scenarios.
-   * Used for tenant isolation in cross-repo-capable backends.
-   */
-  orgId?: string;
-
+  // Cross-repo-capable backend fields (optional for backward compatibility)
   /**
    * Git branch name for branch/commit tracking in cross-repo-capable backends.
    * Used to isolate indexes by branch (e.g., main vs PR branches).
