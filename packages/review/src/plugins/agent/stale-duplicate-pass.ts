@@ -85,7 +85,7 @@ const STALE_DUP_INTRO =
   'This is a STALE-DUPLICATE-LITERAL candidate loop — a dedicated second pass ' +
   'scoped to ONE rule, running only because a deterministic scan already found ' +
   'at least one high-confidence candidate. Your ONLY job is to judge the ' +
-  '<stale_duplicate_candidates> worklist below; do not report anything else ' +
+  '<stale_literal_candidates> worklist below; do not report anything else ' +
   '(other bugs, style, doc drift — those are handled elsewhere).';
 
 const STALE_DUP_TOOLS_SECTION = `<tools>
@@ -276,12 +276,22 @@ function renderCandidate(id: string, c: StaleLiteralCandidate, patch: string | u
   return lines.join('\n');
 }
 
-/** Build the `<stale_duplicate_candidates>` worklist — one entry per candidate id. */
+/**
+ * Build the worklist — one entry per candidate id. Uses the SAME
+ * `<stale_literal_candidates>` tag name the shared `STALE_DUPLICATE.prompt`
+ * text (reused verbatim as this pass's `<strategy>`, below) instructs the
+ * model to look for — a real mismatch here (a different tag name than what
+ * the rule text promises) is exactly the "prompt promises a signal it
+ * doesn't inject" bug class the per-rule-loops design doc's §1 called out
+ * for the rename-sweep/doc-truth precedent. Safe to reuse across the main
+ * pass and this pass: they are separate, non-overlapping LLM calls, so the
+ * shared tag name never collides within a single turn.
+ */
 function renderWorklist(context: ReviewContext, candidates: StaleLiteralCandidate[]): string {
   const patches = context.pr?.patches;
   const ids = candidateIds(candidates);
   const lines: string[] = [];
-  lines.push('<stale_duplicate_candidates>');
+  lines.push('<stale_literal_candidates>');
   lines.push(
     'One verdict is REQUIRED per candidate id below (see <output_format>) — ' +
       `${ids.join(', ')}. Each candidate is a literal this PR changed at the CHANGED ` +
@@ -292,7 +302,7 @@ function renderWorklist(context: ReviewContext, candidates: StaleLiteralCandidat
     lines.push('');
     lines.push(renderCandidate(ids[i], c, patches?.get(c.changedSite.file)));
   });
-  lines.push('</stale_duplicate_candidates>');
+  lines.push('</stale_literal_candidates>');
   return lines.join('\n');
 }
 
@@ -393,10 +403,18 @@ export function staleDuplicatePassBudget(_baseBudget: number, context: ReviewCon
 // Post-processing (verdict reduction + honest completeness)
 // ---------------------------------------------------------------------------
 
+/** A verdict value the loop's output contract recognizes. */
+type Verdict = 'stale' | 'intentional-reuse' | 'unverifiable';
+const VALID_VERDICTS: ReadonlySet<string> = new Set<Verdict>([
+  'stale',
+  'intentional-reuse',
+  'unverifiable',
+]);
+
 /** The raw per-candidate shape the model emits inside the standard `findings` array. */
 interface RawVerdictFinding extends AgentFinding {
   candidateId?: string;
-  verdict?: 'stale' | 'intentional-reuse' | 'unverifiable';
+  verdict?: Verdict;
 }
 
 /** Strip the loop-only `candidateId`/`verdict` fields, keeping the standard finding shape. */
@@ -415,17 +433,48 @@ function toCleanFinding(f: RawVerdictFinding): AgentFinding {
 }
 
 /**
+ * True iff every expected candidate id appears in `raw` EXACTLY once, each
+ * with a RECOGNIZED verdict — and `raw` contains no entry with a missing/
+ * unknown candidateId or an unrecognized verdict. Checking candidateId
+ * presence alone (an earlier version of this function) let a malformed
+ * entry — a valid candidateId paired with a missing/garbage verdict — count
+ * as "covered" while still failing `toCleanFinding`'s `verdict === 'stale'`
+ * filter: it silently vanished from BOTH the coverage check and the
+ * findings array, exactly the "quiet gap" this pass's honesty contract
+ * exists to catch. A duplicate or unexpected-id entry is treated the same
+ * way — the contract is "one recognized verdict per expected id", not
+ * merely "every id mentioned somewhere".
+ */
+function hasCompleteVerdictCoverage(ids: string[], raw: RawVerdictFinding[]): boolean {
+  const expected = new Set(ids);
+  const verdictCounts = new Map<string, number>();
+  for (const { candidateId, verdict } of raw) {
+    if (
+      typeof candidateId !== 'string' ||
+      !expected.has(candidateId) ||
+      typeof verdict !== 'string' ||
+      !VALID_VERDICTS.has(verdict)
+    ) {
+      return false;
+    }
+    verdictCounts.set(candidateId, (verdictCounts.get(candidateId) ?? 0) + 1);
+  }
+  return ids.every(id => verdictCounts.get(id) === 1);
+}
+
+/**
  * Reduce this pass's raw per-candidate verdict array (still carried inside
  * `result.findings`, tagged with `candidateId`/`verdict` — see module doc)
  * down to real findings (`verdict === 'stale'` only, cleaned of the loop-
- * only fields), and mark the result honestly incomplete when any worklist
- * candidate id never received a verdict at all — the pr658 Finding-A lesson
- * made machine-checkable: a missing id is a completeness failure the harness
- * can assert on directly, not a semantic judgment call. When the underlying
- * client result was ALREADY incomplete for a real reason (budget/max_turns/
- * error), that reason is kept as-is (more specific than the generic
- * coverage-gap marker); `incomplete_verdict` is only used when the model
- * otherwise returned a syntactically complete verdict.
+ * only fields), and mark the result honestly incomplete when the verdict
+ * array doesn't cleanly cover the worklist (see `hasCompleteVerdictCoverage`)
+ * — the pr658 Finding-A lesson made machine-checkable: a coverage gap is a
+ * completeness failure the harness can assert on directly, not a semantic
+ * judgment call. When the underlying client result was ALREADY incomplete
+ * for a real reason (budget/max_turns/error), that reason is kept as-is
+ * (more specific than the generic coverage-gap marker); `incomplete_verdict`
+ * is only used when the model otherwise returned a syntactically complete
+ * verdict.
  */
 export function postProcessStaleDuplicateResult(
   result: AgentResult,
@@ -433,10 +482,7 @@ export function postProcessStaleDuplicateResult(
 ): AgentResult {
   const ids = candidateIds(computeStaleLiteralCandidates(context));
   const raw = result.findings as RawVerdictFinding[];
-  const covered = new Set(
-    raw.map(f => f.candidateId).filter((id): id is string => typeof id === 'string'),
-  );
-  const coverageIncomplete = ids.some(id => !covered.has(id));
+  const coverageIncomplete = !hasCompleteVerdictCoverage(ids, raw);
   const wasAlreadyIncomplete = result.incomplete;
 
   return {
@@ -463,6 +509,18 @@ function sameLocation(a: AgentFinding, b: AgentFinding): boolean {
  * finding win: when a loop finding and a main-pass finding collide on
  * location, the main-pass one is dropped — the loop finding carries the
  * per-candidate evidence the shared loop's freeform grep pass doesn't.
+ *
+ * Dropping is scoped to main-pass findings whose OWN `ruleId` is also
+ * `stale-duplicate` — i.e. only the shared loop's freeform backstop copy of
+ * the SAME rule, never an unrelated rule's finding that merely happens to
+ * land within `DEDUPE_LINE_PROXIMITY` lines. Proximity-only matching (an
+ * earlier version of this function) could silently drop a real finding from
+ * a completely different rule (e.g. `error-swallowing`) just because it sat
+ * near a stale-duplicate loop finding — a real correctness risk unique to
+ * this "loop wins" direction (doc-truth's "main wins" convention never
+ * risks discarding an unrelated finding, since the dropped side is always
+ * doc-truth's own).
+ *
  * Returns a new array; inputs are not mutated.
  */
 export function mergeStaleDuplicateFindings(
@@ -470,7 +528,9 @@ export function mergeStaleDuplicateFindings(
   loopFindings: AgentFinding[],
 ): AgentFinding[] {
   const forced = loopFindings.map(f => ({ ...f, ruleId: STALE_DUP_RULE_ID }));
-  const survivingMain = mainFindings.filter(mf => !forced.some(lf => sameLocation(mf, lf)));
+  const survivingMain = mainFindings.filter(
+    mf => mf.ruleId !== STALE_DUP_RULE_ID || !forced.some(lf => sameLocation(mf, lf)),
+  );
   return [...survivingMain, ...forced];
 }
 

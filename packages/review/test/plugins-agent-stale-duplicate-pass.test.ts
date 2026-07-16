@@ -202,7 +202,7 @@ describe('buildStaleDuplicatePassPrompts', () => {
   it('builds an initial message with the worklist, changed-site hunk, and surviving sites', () => {
     const message = buildStaleDuplicatePassInitialMessage(eligibleContext());
     expect(message).toContain('<pr_metadata>');
-    expect(message).toContain('<stale_duplicate_candidates>');
+    expect(message).toContain('<stale_literal_candidates>');
     expect(message).toContain('candidate-1');
     expect(message).toContain("'claude-sonnet-4-6'");
     expect(message).toContain('Changed site: src/pr-review.ts:1');
@@ -294,6 +294,59 @@ describe('postProcessStaleDuplicateResult', () => {
     expect(raw.findings).toHaveLength(1);
     expect((raw.findings[0] as Record<string, unknown>).candidateId).toBe('candidate-1');
   });
+
+  // Regression coverage for the CodeRabbit finding on this pass's initial
+  // version: candidateId-presence-only checking let a malformed entry
+  // (right id, missing/garbage verdict) count as "covered" while it was
+  // ALSO dropped from findings by the verdict==='stale' filter — a silent
+  // gap in both directions, the exact thing this pass's honesty contract
+  // exists to prevent.
+  it('is incomplete when a candidate id is present but its verdict is missing', () => {
+    const raw = fakeResult({
+      findings: [
+        finding({ candidateId: 'candidate-1', verdict: undefined, message: 'no verdict' }),
+      ],
+    });
+    const result = postProcessStaleDuplicateResult(raw, eligibleContext());
+    expect(result.incomplete).toBe(true);
+    expect(result.stopReason).toBe('incomplete_verdict');
+    expect(result.findings).toHaveLength(0); // never silently promoted to a finding either
+  });
+
+  it('is incomplete when a candidate id is present but its verdict is not a recognized value', () => {
+    const raw = fakeResult({
+      findings: [
+        finding({ candidateId: 'candidate-1', verdict: 'maybe-stale' as never, message: 'bogus' }),
+      ],
+    });
+    const result = postProcessStaleDuplicateResult(raw, eligibleContext());
+    expect(result.incomplete).toBe(true);
+    expect(result.stopReason).toBe('incomplete_verdict');
+  });
+
+  it('is incomplete when the same candidate id is verdicted twice (duplicate, not "covered")', () => {
+    const raw = fakeResult({
+      findings: [
+        finding({ candidateId: 'candidate-1', verdict: 'unverifiable', message: 'first' }),
+        finding({ candidateId: 'candidate-1', verdict: 'stale', message: 'second' }),
+      ],
+    });
+    const result = postProcessStaleDuplicateResult(raw, eligibleContext());
+    expect(result.incomplete).toBe(true);
+    expect(result.stopReason).toBe('incomplete_verdict');
+  });
+
+  it('is incomplete when an entry names a candidate id outside the worklist', () => {
+    const raw = fakeResult({
+      findings: [
+        finding({ candidateId: 'candidate-1', verdict: 'unverifiable' }),
+        finding({ candidateId: 'candidate-99', verdict: 'stale', message: 'phantom candidate' }),
+      ],
+    });
+    const result = postProcessStaleDuplicateResult(raw, eligibleContext());
+    expect(result.incomplete).toBe(true);
+    expect(result.stopReason).toBe('incomplete_verdict');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -312,16 +365,38 @@ describe('mergeStaleDuplicateFindings', () => {
     expect(merged[0].ruleId).toBe('stale-duplicate');
   });
 
-  it('dedupes a nearby main finding (within ±2 lines) but keeps a distant one', () => {
+  it('dedupes a nearby main-pass stale-duplicate finding (within ±2 lines) but keeps a distant one', () => {
     const main = [
-      finding({ line: 21, message: 'near' }), // distance 1 from the loop finding at line 20 → dropped
-      finding({ line: 30, message: 'far' }), // distance 10 → kept
+      // distance 1 from the loop finding at line 20, SAME rule → dropped
+      finding({ line: 21, ruleId: 'stale-duplicate', message: 'near' }),
+      finding({ line: 30, ruleId: 'stale-duplicate', message: 'far' }), // distance 10 → kept
     ];
     const loop = [finding({ line: 20, message: 'loop' })];
 
     const merged = mergeStaleDuplicateFindings(main, loop);
 
     expect(merged.map(f => f.message).sort()).toEqual(['far', 'loop'].sort());
+  });
+
+  // Regression coverage for the CodeRabbit finding on this pass's initial
+  // version: proximity-only matching could drop an UNRELATED rule's real
+  // finding just because it landed near a stale-duplicate loop finding.
+  it('does NOT drop a nearby main-pass finding from a DIFFERENT rule (proximity alone is not enough)', () => {
+    const main = [finding({ line: 20, ruleId: 'error-swallowing', message: 'unrelated real bug' })];
+    const loop = [finding({ line: 20, message: 'loop finding' })];
+
+    const merged = mergeStaleDuplicateFindings(main, loop);
+
+    expect(merged.map(f => f.message).sort()).toEqual(['loop finding', 'unrelated real bug']);
+  });
+
+  it('does NOT drop a nearby main-pass finding with no ruleId at all', () => {
+    const main = [finding({ line: 20, ruleId: undefined, message: 'unattributed' })];
+    const loop = [finding({ line: 20, message: 'loop finding' })];
+
+    const merged = mergeStaleDuplicateFindings(main, loop);
+
+    expect(merged.map(f => f.message).sort()).toEqual(['loop finding', 'unattributed']);
   });
 
   it('forces ruleId to stale-duplicate on every loop finding', () => {
