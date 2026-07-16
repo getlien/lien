@@ -105,6 +105,29 @@ describe('reviewPullRequest — scope.eligibilityPath', () => {
     await checkout.cleanup();
   });
 
+  it('is "summary_only_diff" when the PR touches no analyzable files, summary is on, AND the diff is non-empty (#572)', async () => {
+    githubApi.getPRChangedFiles.mockResolvedValue(['CLAUDE.md']);
+    githubApi.getPRPatchData.mockResolvedValue({
+      patches: new Map([['CLAUDE.md', '@@ -1,2 +1,1 @@\n-stale line\n context']]),
+      diffLines: new Map([['CLAUDE.md', new Set([1])]]),
+    });
+    const checkout = await makeCheckout();
+    cloneBySha.mockResolvedValueOnce(checkout);
+
+    const result = await reviewPullRequest(
+      baseCtx({
+        config: {
+          threshold: '15',
+          blockOnNewErrors: false,
+          reviewTypes: { complexity: true, summary: true, architectural: false, bugs: false },
+        },
+      }),
+    );
+
+    expect(result.attestation.scope.eligibilityPath).toBe('summary_only_diff');
+    await checkout.cleanup();
+  });
+
   it('is "normal" when the PR touches analyzable files', async () => {
     githubApi.getPRChangedFiles.mockResolvedValue(['foo.ts']);
     const headCheckout = await makeCheckout();

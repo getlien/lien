@@ -7,6 +7,10 @@ import {
   type CodeChunk,
 } from '@liendev/parser';
 import { findDependents, type DependentInfo } from '../mcp/handlers/dependency-analyzer.js';
+import {
+  computeComplexityHeadroom,
+  formatComplexityHeadroomWarning,
+} from '../mcp/handlers/get-files-context.js';
 import { resolveProjectRoot } from './project-root.js';
 import { type AbsolutePath, type RelativePath, toAbsolutePath } from '../types/paths.js';
 
@@ -21,7 +25,11 @@ const MAX_DEPS_LISTED = 4;
 /**
  * Produce a short impact summary for a single file. Output is empty when
  * impact is trivial (no dependents, no complexity warnings, test coverage
- * present) — that's the signal to the PostToolUse hook to stay silent.
+ * present, no near-budget functions) — that's the signal to the PostToolUse
+ * hook to stay silent. When a function in the file is at/near its complexity
+ * budget, the output leads with an imperative nudge line (shared with
+ * `get_files_context`'s `complexityHeadroomWarning`) — the plan-time nudge:
+ * surfacing it on Read, before the agent edits, not after via `lien delta`.
  *
  * All errors result in empty stdout and exit 0, so a missing index or
  * unknown file never breaks the hook pipeline.
@@ -147,6 +155,14 @@ async function run(file: string): Promise<void> {
     const tests =
       findTestAssociationsFromChunks([filepath], allChunks, rootDir).get(filepath) ?? [];
     const complexity = computeComplexitySummary(allChunks, filepath);
+    // Plan-time nudge (mirrors get_files_context's complexityHeadroom): reuses
+    // the exact same computation the MCP tool uses, so a "near budget" verdict
+    // can never disagree between the read-hook annotation and get_files_context.
+    // `allChunks` spans the target file plus its dependents/dependencies, so
+    // filter down to the target file's own chunks first — other files' near-
+    // budget functions must not leak into this file's nudge (mirrors
+    // computeComplexitySummary's own `[filepath]` scoping below).
+    const headroom = computeComplexityHeadroom(allChunks.filter(c => c.metadata.file === filepath));
     const dependentCount = result.dependents.length;
     const uncovered = result.uncoveredProductionDependents;
     // Dependents' max complexity feeds the blast-radius risk score. The
@@ -164,7 +180,9 @@ async function run(file: string): Promise<void> {
       rootDir,
     );
 
-    if (isTrivial(dependentCount, complexity.warningCount, tests.length)) return;
+    if (isTrivial(dependentCount, complexity.warningCount, tests.length, headroom.entries.length)) {
+      return;
+    }
 
     emitAnnotation(
       filepath,
@@ -175,10 +193,25 @@ async function run(file: string): Promise<void> {
       uncovered,
       maxDependentComplexity,
       hasHighComplexityUncovered,
+      headroom,
     );
   } finally {
     if (needsChdir) process.chdir(originalCwd);
   }
+}
+
+/** Return type of `computeComplexityHeadroom` — the plan-time nudge data. */
+type ComplexityHeadroom = ReturnType<typeof computeComplexityHeadroom>;
+
+/**
+ * Prepend the shared headroom nudge (if any) to the annotation's other lines,
+ * so a near/over-budget function is the first thing the agent reads — not
+ * buried after dependents/test-coverage bullets. Pure and exported so the
+ * wiring is unit-testable without indexing a real project.
+ */
+export function withHeadroomWarning(lines: string[], headroom: ComplexityHeadroom): string[] {
+  const warning = formatComplexityHeadroomWarning(headroom.entries, headroom.overflow);
+  return warning ? [warning, ...lines] : lines;
 }
 
 function emitAnnotation(
@@ -190,6 +223,7 @@ function emitAnnotation(
   uncovered: number,
   maxDependentComplexity: number,
   hasHighComplexityUncovered: boolean,
+  headroom: ComplexityHeadroom,
 ): void {
   const risk = computeBlastRadiusRisk({
     dependentCount,
@@ -207,15 +241,16 @@ function emitAnnotation(
     lines.push(`  • ${formatComplexity(complexity)}`);
   }
 
-  console.log(lines.join('\n'));
+  console.log(withHeadroomWarning(lines, headroom).join('\n'));
 }
 
 export function isTrivial(
   dependentCount: number,
   complexityWarnings: number,
   testCount: number,
+  headroomCount = 0,
 ): boolean {
-  return dependentCount <= 1 && complexityWarnings === 0 && testCount > 0;
+  return dependentCount <= 1 && complexityWarnings === 0 && testCount > 0 && headroomCount === 0;
 }
 
 interface ComplexitySummary {

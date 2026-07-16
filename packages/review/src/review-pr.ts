@@ -54,6 +54,11 @@ import {
   type SkippedPass,
 } from './attestation.js';
 import { cloneBySha, type CloneResult } from './clone.js';
+import {
+  isSummaryOnlyEligible,
+  scaleSummaryOnlyBudget,
+  SUMMARY_ONLY_MAX_TURNS,
+} from './plugins/agent/summary-only-pass.js';
 
 /**
  * LLM provider selection for the agent-review plugin. Either an OpenAI-compatible
@@ -152,6 +157,12 @@ export async function reviewPullRequest(ctx: ReviewCoreContext): Promise<ReviewC
       );
     }
 
+    // Whether the diff-only summary-only mode (issue #572) is in play for
+    // this run. Threaded into `runAnalysisPhase` purely to tag
+    // `eligibilityPath` correctly; `buildPluginConfigs` below re-derives the
+    // same condition to pick the agent's budget (see `summaryOnlyEligibleFor`).
+    const summaryOnlyEligible = summaryOnlyEligibleFor(filesToAnalyze, summaryEnabled, pr);
+
     const analysis = await runAnalysisPhase(
       filesToAnalyze,
       ctx.config.threshold,
@@ -160,6 +171,7 @@ export async function reviewPullRequest(ctx: ReviewCoreContext): Promise<ReviewC
       pr.baseSha,
       token,
       logger,
+      summaryOnlyEligible,
     );
     if (!analysis) {
       return emptyResult(
@@ -223,12 +235,55 @@ function isAgentEnabled(ctx: ReviewCoreContext): boolean {
   );
 }
 
+/**
+ * Whether the diff-only summary-only mode (issue #572) applies: zero
+ * analyzable files, the `summary` review type on, and a non-empty PR diff.
+ * Shared by `reviewPullRequest` (to tag `eligibilityPath`) and
+ * `resolveAgentBudget` (to pick the agent's budget) so both layers agree on
+ * the exact same triple condition — see `isSummaryOnlyEligible`'s doc
+ * comment for why each layer re-evaluates it instead of passing one shared
+ * boolean around.
+ */
+export function summaryOnlyEligibleFor(
+  filesToAnalyze: string[],
+  summaryEnabled: boolean,
+  pr: PRContext,
+): boolean {
+  return isSummaryOnlyEligible(
+    filesToAnalyze.length === 0,
+    summaryEnabled,
+    (pr.patches?.size ?? 0) > 0,
+  );
+}
+
+/**
+ * Pick the agent's turn/token budget: the diff-proportional, low-capped
+ * summary-only budget when the summary-only mode (issue #572) applies,
+ * otherwise the normal chunks-driven `scaleAgentBudget`.
+ */
+export function resolveAgentBudget(
+  ctx: ReviewCoreContext,
+  filesToAnalyze: string[],
+  chunks: CodeChunk[],
+  summaryEnabled: boolean,
+): { maxTurns: number; maxTokenBudget: number } {
+  const model = ctx.llm?.model ?? '';
+  if (summaryOnlyEligibleFor(filesToAnalyze, summaryEnabled, ctx.pr)) {
+    return {
+      maxTurns: SUMMARY_ONLY_MAX_TURNS,
+      maxTokenBudget: scaleSummaryOnlyBudget(ctx.pr.patches, model),
+    };
+  }
+  return scaleAgentBudget(filesToAnalyze.length, chunks, model);
+}
+
 /** Assemble the per-plugin engine config (complexity threshold + agent LLM settings). */
 function buildPluginConfigs(
   ctx: ReviewCoreContext,
   filesToAnalyze: string[],
   chunks: CodeChunk[],
 ): Record<string, Record<string, unknown>> {
+  const summaryEnabled = !!ctx.config.reviewTypes.summary;
   return {
     complexity: {
       threshold: parseInt(ctx.config.threshold, 10),
@@ -242,7 +297,8 @@ function buildPluginConfigs(
           baseUrl: ctx.llm.provider === 'openai' ? ctx.llm.baseUrl : undefined,
           inputCostPerMTok: ctx.llm.inputCostPerMTok,
           outputCostPerMTok: ctx.llm.outputCostPerMTok,
-          ...scaleAgentBudget(filesToAnalyze.length, chunks, ctx.llm.model),
+          summaryEnabled,
+          ...resolveAgentBudget(ctx, filesToAnalyze, chunks, summaryEnabled),
         }
       : {},
   };
@@ -562,8 +618,17 @@ interface AnalysisPhaseResult {
   baselineReport: ComplexityReport | null;
   deltas: ComplexityDelta[] | null;
   baseClone: CloneResult | null;
-  /** 'normal' when the PR had analyzable files; 'full_repo_fallback' otherwise (#572/#754). */
+  /**
+   * 'normal' when the PR had analyzable files; 'summary_only_diff' when it
+   * didn't but the diff-only summary-only mode applies (#572); otherwise
+   * 'full_repo_fallback' (#572/#754).
+   */
   eligibilityPath: EligibilityPath;
+}
+
+/** The fallback branch's `eligibilityPath` — see `AnalysisPhaseResult.eligibilityPath`. */
+function fallbackEligibilityPath(summaryOnlyEligible: boolean): EligibilityPath {
+  return summaryOnlyEligible ? 'summary_only_diff' : 'full_repo_fallback';
 }
 
 async function runAnalysisPhase(
@@ -574,6 +639,7 @@ async function runAnalysisPhase(
   baseSha: string,
   token: string,
   logger: Logger,
+  summaryOnlyEligible: boolean,
 ): Promise<AnalysisPhaseResult | null> {
   if (filesToAnalyze.length > 0) {
     const headResult = await runComplexityAnalysis(filesToAnalyze, threshold, headCloneDir, logger);
@@ -633,7 +699,7 @@ async function runAnalysisPhase(
       baselineReport: null,
       deltas: null,
       baseClone: null,
-      eligibilityPath: 'full_repo_fallback',
+      eligibilityPath: fallbackEligibilityPath(summaryOnlyEligible),
     };
   }
   return {
@@ -653,7 +719,7 @@ async function runAnalysisPhase(
     baselineReport: null,
     deltas: null,
     baseClone: null,
-    eligibilityPath: 'full_repo_fallback',
+    eligibilityPath: fallbackEligibilityPath(summaryOnlyEligible),
   };
 }
 

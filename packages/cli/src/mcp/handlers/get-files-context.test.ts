@@ -5,6 +5,7 @@ import {
   handleGetFilesContext,
   clearTestAssociationScanCache,
   computeComplexityHeadroom,
+  formatComplexityHeadroomWarning,
 } from './get-files-context.js';
 import type { ToolContext } from '../types.js';
 import type { SearchResult } from '@liendev/core';
@@ -406,6 +407,50 @@ describe('computeComplexityHeadroom (Mechanism 3)', () => {
     expect(entries.map(e => e.symbol)).toEqual(['f7', 'f6', 'f5', 'f4', 'f3']); // worst-first
     expect(overflow).toBe(2);
   });
+
+  it('accepts a minimal { metadata } chunk shape (not just full SearchResult)', () => {
+    // annotate-cmd.ts passes @liendev/parser's CodeChunk (content + metadata,
+    // no score/relevance) — this is what makes that reuse possible.
+    const { entries } = computeComplexityHeadroom([
+      { metadata: makeFnChunk('bareChunk', { cognitive: 18 }).metadata },
+    ]);
+    expect(entries).toEqual([
+      { symbol: 'bareChunk', metric: 'cognitive', value: 18, threshold: 15 },
+    ]);
+  });
+});
+
+describe('formatComplexityHeadroomWarning', () => {
+  it('returns undefined when there are no entries', () => {
+    expect(formatComplexityHeadroomWarning([])).toBeUndefined();
+  });
+
+  it('renders a single near-budget entry as an imperative one-liner', () => {
+    const warning = formatComplexityHeadroomWarning([
+      { symbol: 'scanPatches', metric: 'cognitive', value: 14, threshold: 15 },
+    ]);
+    expect(warning).toBe(
+      '⚠ Lien: scanPatches cognitive 14/15 — avoid adding complexity here; prefer extraction.',
+    );
+  });
+
+  it('tags an over-threshold entry with "(over)" and joins multiple entries', () => {
+    const warning = formatComplexityHeadroomWarning([
+      { symbol: 'extractSymbols', metric: 'cognitive', value: 18, threshold: 15 },
+      { symbol: 'helper', metric: 'cyclomatic', value: 13, threshold: 15 },
+    ]);
+    expect(warning).toBe(
+      '⚠ Lien: extractSymbols cognitive 18/15 (over), helper cyclomatic 13/15 — avoid adding complexity here; prefer extraction.',
+    );
+  });
+
+  it('appends an overflow count when more functions are near/over budget than shown', () => {
+    const warning = formatComplexityHeadroomWarning(
+      [{ symbol: 'a', metric: 'cognitive', value: 18, threshold: 15 }],
+      2,
+    );
+    expect(warning).toContain('(+2 more near/over budget)');
+  });
 });
 
 describe('handleGetFilesContext — complexityHeadroom in the response', () => {
@@ -458,5 +503,43 @@ describe('handleGetFilesContext — complexityHeadroom in the response', () => {
     const parsed = JSON.parse(result.content![0].text);
     expect(parsed).not.toHaveProperty('complexityHeadroom');
     expect(parsed).not.toHaveProperty('complexityHeadroomMore');
+  });
+
+  it('leads with complexityHeadroomWarning — the plan-time nudge — before the data field', async () => {
+    const ctx = ctxReturning([makeFnChunk('extractSymbols', { cognitive: 18, file: 'src/a.ts' })]);
+    const result = await handleGetFilesContext(
+      { filepaths: 'src/a.ts', includeRelated: false },
+      ctx,
+    );
+    const text = result.content![0].text as string;
+    const parsed = JSON.parse(text);
+    expect(parsed.complexityHeadroomWarning).toBe(
+      '⚠ Lien: extractSymbols cognitive 18/15 (over) — avoid adding complexity here; prefer extraction.',
+    );
+    // Not just present — it must appear before complexityHeadroom in the
+    // serialized JSON, so it's the first thing the agent reads.
+    expect(text.indexOf('complexityHeadroomWarning')).toBeLessThan(
+      text.indexOf('"complexityHeadroom"'),
+    );
+  });
+
+  it('omits complexityHeadroomWarning entirely when nothing is near budget', async () => {
+    const ctx = ctxReturning([makeFnChunk('tidy', { cognitive: 4, file: 'src/a.ts' })]);
+    const result = await handleGetFilesContext(
+      { filepaths: 'src/a.ts', includeRelated: false },
+      ctx,
+    );
+    const parsed = JSON.parse(result.content![0].text);
+    expect(parsed).not.toHaveProperty('complexityHeadroomWarning');
+  });
+
+  it('includes complexityHeadroomWarning in the batch (multi-file) response shape too', async () => {
+    const ctx = ctxReturning([makeFnChunk('extractSymbols', { cognitive: 18, file: 'src/a.ts' })]);
+    const result = await handleGetFilesContext(
+      { filepaths: ['src/a.ts'], includeRelated: false },
+      ctx,
+    );
+    const parsed = JSON.parse(result.content![0].text);
+    expect(parsed.files['src/a.ts'].complexityHeadroomWarning).toContain('extractSymbols');
   });
 });

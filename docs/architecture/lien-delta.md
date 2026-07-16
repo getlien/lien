@@ -767,3 +767,78 @@ tool's own output, not only in this doc.
   structural index itself is already scoped per `repoId`. A user with several
   worktrees of the same repo gets one independent log per worktree (same
   isolation the index already has), not a merged view.
+
+---
+
+# The plan-time nudge — moving the headroom signal before the write
+
+Everything above (Phase 1, Phase 2, `--base`, the event log) still leaves one
+gap: `lien delta` and `delta-write.sh` both fire **after** code is written.
+Mechanism 3 (`complexityHeadroom` in `get_files_context`, section E above)
+moved the *data* earlier — to the mandatory pre-edit `get_files_context` call —
+but it was still data, not a nudge an agent could miss. This section covers
+turning that data into an unmissable imperative warning, and doing so for the
+*other* mandatory pre-edit moment: reading the file.
+
+## Why not a new `PreToolUse:Edit|Write` hook
+
+The obvious design is a third plugin hook, `PreToolUse` on
+`Edit|Write|MultiEdit`, mirroring `delta-write.sh`'s `PostToolUse` counterpart.
+It doesn't work, per
+[claude-code-hook-channels.md](claude-code-hook-channels.md): `PreToolUse`'s
+only channel that delivers content the model reads is
+`hookSpecificOutput.updatedInput.prompt`, and that's specific to the
+subagent-launch tool (`augment-explore-task.sh` rewrites a launched
+subagent's own prompt) — `Edit`/`Write`'s `tool_input` has `file_path`,
+`old_string`/`new_string` or `content`, never a `prompt` field to rewrite.
+`PreToolUse`'s other channel, `exit 2` + stderr, reaches the model too — but
+by *blocking* the tool call. Using it for an advisory nudge would silently
+convert "steer away from this function" into a hard stop, and would violate
+every existing hook's fail-open discipline (a warning must never block the
+edit).
+
+**Decision:** fall back to the channel that already works. `annotate-read.sh`
+(`PostToolUse:Read`, `additionalContext`) already fires right before the
+mandatory `get_files_context` → `Edit` sequence in the normal agent workflow.
+Enriching its existing annotation reaches the same moment — "before you write"
+— through infrastructure that's already proven to reach the model, with TTL
+suppression inherited for free instead of rebuilt.
+
+## What changed
+
+- **`get-files-context.ts`**: `computeComplexityHeadroom`'s parameter type
+  widened from `SearchResult[]` to a minimal `{ metadata: ChunkMetadata }`
+  shape (`HeadroomInputChunk`) — no behavior change, but now callable with
+  `@liendev/parser`'s `CodeChunk[]` too, which is what `annotate-cmd.ts` has in
+  hand. A new `formatComplexityHeadroomWarning(entries, overflow)` renders the
+  headroom array as one imperative line (`⚠ Lien: <fn> <metric> <value>/<threshold>
+  [(over)], … — avoid adding complexity here; prefer extraction.`), shared by
+  both callers below so the wording can never drift between them.
+- **`get_files_context` response**: gains an optional `complexityHeadroomWarning`
+  string field, spread into the response object *before* `complexityHeadroom`
+  so it's the first thing the agent reads in the serialized JSON. Purely
+  additive — `complexityHeadroom` itself is unchanged, so nothing that already
+  parses it breaks.
+- **`lien annotate` / `annotate-read.sh`**: `annotate-cmd.ts` now computes the
+  same headroom for the file it's annotating (scoped to that file's own
+  chunks — `allChunks` from `findDependents` spans dependents too, so it's
+  filtered down first) and, when non-empty, prepends the shared warning line
+  ahead of the "Lien impact for …" header — literally the first line the
+  agent sees. `isTrivial` gained a fourth `headroomCount` parameter (defaulted
+  to `0` so existing 3-arg callers are unaffected): a near/over-budget function
+  now forces the annotation to print even when dependents/tests/complexity
+  would otherwise call it trivial.
+
+## What was deliberately deferred
+
+A `delta-events.jsonl` entry for "nudge shown" (to let `lien stats` eventually
+correlate warnings-shown against later crossings-flagged) was scoped out of
+this change. `DeltaEvent`'s shape (`mode`, `exitCode`, `counts.crossings`) is
+built around a *delta run*, not a *read-time annotation* — there's no exit
+code or crossings count for "the agent read a file and saw a warning." Fitting
+a nudge event into that shape would mean either overloading `DeltaEvent`'s
+existing fields with meanings they don't have, or introducing a second
+event/log format alongside it — real design work, not a natural extension of
+the current schema. Left as a follow-up once there's a clearer answer for what
+"correlate nudge-shown with later-resolved" should even mean when the nudge
+fires on Read, potentially many turns before any edit happens.

@@ -17,6 +17,7 @@ import type { BlastRadiusReport } from '../../blast-radius.js';
 import { renderBlastRadiusMarkdown } from '../../blast-radius-render.js';
 import { renderStaleLiteralSection } from '../../stale-literal-signals.js';
 import { renderUndiscriminatedCatchSection } from '../../catch-discrimination-signals.js';
+import { renderComparisonChangeSection } from '../../comparison-change-signals.js';
 import { renderRemovedExportsSection } from '../../removed-export-signals.js';
 import { renderVariantSweepSection } from '../../variant-sweep-signals.js';
 import { renderUntrustedInputSection } from '../../untrusted-input-signals.js';
@@ -24,6 +25,7 @@ import { renderRenameSweepSection } from '../../rename-sweep-signals.js';
 import { renderGuidanceSurfaceSection } from '../../guidance-surface-signals.js';
 import { renderDocClaimsSection } from '../../doc-claims-signals.js';
 import { renderTestCoverageSection } from '../../test-coverage-signals.js';
+import { renderSiblingSurfacesSection } from '../../sibling-surface-signals.js';
 import type { ResolvedRules } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -181,6 +183,12 @@ export interface BuildInitialMessageOptions {
    * Rules active for this run. Used to gate rule-scoped signal injection —
    * e.g. `<undiscriminated_catch_candidates>` only makes sense to compute
    * and render when `error-swallowing` is actually active for this PR.
+   * `incomplete-handling` gates two signals: `<variant_sweep_candidates>`
+   * (an added enum/union variant whose consumer sites weren't updated) and
+   * `<sibling_surfaces>` (a sibling family member that didn't receive a
+   * mirrored change) — both are the same partial-implementation-gap shape
+   * that rule targets, just at different granularity (variant vs. field).
+   * `boundary-change` likewise gates `<comparison_change_candidates>`.
    * Omit (CLI callers that don't resolve rules) to skip that gating.
    */
   rules?: ResolvedRules;
@@ -211,11 +219,17 @@ export function buildInitialMessage(
   if (isRuleActive(opts.rules, 'incomplete-handling')) {
     appendIfPresent(sections, renderVariantSweepSection(context));
   }
+  if (isRuleActive(opts.rules, 'boundary-change')) {
+    appendIfPresent(sections, renderComparisonChangeSection(context));
+  }
   appendIfPresent(sections, renderUntrustedInputSection(context));
   appendIfPresent(sections, renderRenameSweepSection(context));
   appendIfPresent(sections, renderGuidanceSurfaceSection(context));
   appendIfPresent(sections, renderDocClaimsSection(context));
   appendIfPresent(sections, renderTestCoverageSection(context));
+  if (isRuleActive(opts.rules, 'incomplete-handling')) {
+    appendIfPresent(sections, renderSiblingSurfacesSection(context));
+  }
   sections.push(
     'Investigate this PR. Use the investigation strategy described in your instructions, then output findings as JSON.',
   );

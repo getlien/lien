@@ -7,12 +7,14 @@ import {
   clampText,
   hasProviderFailure,
 } from '../src/plugins/agent/index.js';
-import { scaleAgentBudget } from '../src/review-pr.js';
+import { scaleAgentBudget, resolveAgentBudget, summaryOnlyEligibleFor } from '../src/review-pr.js';
+import type { ReviewCoreContext } from '../src/review-pr.js';
 import { DEFAULT_REVIEW_MODEL, MAX_REVIEW_TOKEN_BUDGET } from '../src/defaults.js';
 import { silentLogger } from '../src/test-helpers.js';
 import type { Logger } from '../src/logger.js';
 import type { PresentContext, ReviewFinding } from '../src/plugin-types.js';
 import type { AgentResult } from '../src/plugins/agent/types.js';
+import type { PRContext } from '../src/types.js';
 
 // ---------------------------------------------------------------------------
 // fetch mock helpers (OpenAI-compatible chat/completions)
@@ -575,6 +577,54 @@ describe('scaleAgentBudget — model-aware multiplier', () => {
       ...scaleAgentBudget(5, [{ content: 'x'.repeat(40_002) }], DEFAULT_REVIEW_MODEL),
     };
     expect(() => plugin.configSchema.parse(cfg)).not.toThrow();
+  });
+});
+
+describe('summaryOnlyEligibleFor / resolveAgentBudget — issue #572 budget selection', () => {
+  function pr(patches?: Map<string, string>): PRContext {
+    return {
+      owner: 'o',
+      repo: 'r',
+      pullNumber: 1,
+      title: 't',
+      baseSha: 'base',
+      headSha: 'head',
+      patches,
+    };
+  }
+
+  function llmCtx(patches?: Map<string, string>): ReviewCoreContext {
+    return {
+      pr: pr(patches),
+      llm: { provider: 'openai', apiKey: 'k', model: DEFAULT_REVIEW_MODEL } as never,
+    } as unknown as ReviewCoreContext;
+  }
+
+  it('summaryOnlyEligibleFor is true only for the exact triple', () => {
+    expect(summaryOnlyEligibleFor([], true, pr(new Map([['a.md', 'd']])))).toBe(true);
+    expect(summaryOnlyEligibleFor(['x.ts'], true, pr(new Map([['a.md', 'd']])))).toBe(false);
+    expect(summaryOnlyEligibleFor([], false, pr(new Map([['a.md', 'd']])))).toBe(false);
+    expect(summaryOnlyEligibleFor([], true, pr())).toBe(false);
+  });
+
+  it('resolveAgentBudget picks the low-capped summary-only budget under the gate', () => {
+    const patches = new Map([['CLAUDE.md', 'x'.repeat(4_000)]]);
+    const { maxTurns, maxTokenBudget } = resolveAgentBudget(llmCtx(patches), [], [], true);
+    expect(maxTurns).toBeLessThanOrEqual(8);
+    expect(maxTokenBudget).toBeLessThan(60_000); // well under scaleAgentBudget's floor
+  });
+
+  it('resolveAgentBudget falls back to scaleAgentBudget outside the gate', () => {
+    const chunks = [{ content: 'x'.repeat(40_000) }];
+    const withFiles = resolveAgentBudget(llmCtx(new Map()), ['a.ts', 'b.ts'], chunks, true);
+    const expected = scaleAgentBudget(2, chunks, DEFAULT_REVIEW_MODEL);
+    expect(withFiles).toEqual(expected);
+  });
+
+  it('resolveAgentBudget uses the normal budget when summary is disabled, even with patches', () => {
+    const patches = new Map([['CLAUDE.md', 'x'.repeat(4_000)]]);
+    const result = resolveAgentBudget(llmCtx(patches), [], [], false);
+    expect(result).toEqual(scaleAgentBudget(0, [], DEFAULT_REVIEW_MODEL));
   });
 });
 

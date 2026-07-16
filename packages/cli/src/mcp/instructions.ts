@@ -14,7 +14,8 @@ REQUIRED before Edit/Write on any file:
   associations. Batch form: { filepaths: [...] } for multi-file edits.
   Always check testAssociations and run those tests after changes.
   If it returns complexityHeadroom, those functions are at/near their
-  complexity budget — avoid adding complexity to them.
+  complexity budget — avoid adding complexity to them. complexityHeadroomWarning
+  (when present) is the same signal as one imperative line — read it first.
 
 REQUIRED before renaming, removing, or changing the signature of any exported
 symbol:
