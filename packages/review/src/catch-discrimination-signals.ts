@@ -10,6 +10,21 @@
  * baseline: 0/3 — see
  * `test/harness/fixtures/error-swallowing/pr752-undiscriminated-catch-salvage`).
  *
+ * Follow-up (2026-07-16): a re-calibration on the prod default model found
+ * the fixture had plateaued at 0/10 (down from the 5/10 measured at ship
+ * time) — every vote visited the right catch, then excused it by reading the
+ * docstring on the ADJACENT `postBodyThenRetryCommentsIndividually` function
+ * (which legitimately justifies THAT function's own inner catch) and
+ * borrowing it for the DIFFERENT, actually-buggy catch in `postPRReview`.
+ * The HEADER below was sharpened to require judging the flagged catch on its
+ * own body, not a sibling's. Re-measured post-fix: still 0/10 (non-converging
+ * — see the fixture's header for the full before/after trace analysis), but
+ * the sibling-borrowing mistake itself was eliminated from every vote's
+ * reasoning (traces now correctly separate the two catches by line number);
+ * the plateau persists via an independently-reconstructed "it's reported via
+ * the return value, so it's not really swallowing" rationalization instead —
+ * a distinct failure mode from the one this fix targeted.
+ *
  * The rule asks the agent to notice, for each catch block, whether it
  * actually discriminates between error classes before choosing to degrade
  * instead of rethrow — a judgment call that's easy to skip when a catch's
@@ -595,8 +610,15 @@ const HEADER =
   'fallback/degrade path instead. Confirm before reporting: if the degrade path ' +
   'is only correct for ONE error class (e.g. one specific HTTP status) while ' +
   'other classes (auth, rate-limit, 5xx, network) take the identical path, ' +
-  'that is error-swallowing — report it. If the catch genuinely handles every ' +
-  'error the same way correctly, stay silent. This is a heuristic pointer, not ' +
+  'that is error-swallowing — report it. Judge the flagged catch on ITS OWN ' +
+  'body only: a docstring, comment, or naming on a DIFFERENT function — a ' +
+  'sibling it calls into, or an adjacent function nearby — that justifies ' +
+  "THAT function's own error handling does not justify this one. " +
+  '"Intentional degradation" means the code inside THIS catch\'s own body ' +
+  '(the line range above) discriminates error types or rethrows unexpected ' +
+  'ones — a nearby comment about a different catch accepting some failure is ' +
+  'not evidence for this one. If the catch genuinely handles every error the ' +
+  'same way correctly, stay silent. This is a heuristic pointer, not ' +
   "a verified verdict, and it does NOT substitute for reading the catch's " +
   'enclosing function in full (get_files_context or read_file): the `reason` ' +
   'field names the shape found, but only the surrounding code tells you what ' +

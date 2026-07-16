@@ -351,6 +351,20 @@ describe('renderUndiscriminatedCatchCandidates', () => {
     );
   });
 
+  it("header forbids borrowing a sibling function's justification for the flagged catch (PR752 vote-plateau fix)", () => {
+    const rendered = renderUndiscriminatedCatchCandidates([
+      { file: 'src/a.ts', line: 1, endLine: 5, binding: 'err', reason: 'x' },
+    ]);
+    expect(rendered).toContain('Judge the flagged catch on ITS OWN body only');
+    expect(rendered).toContain(
+      'a sibling it calls into, or an adjacent function nearby — that justifies ' +
+        "THAT function's own error handling does not justify this one",
+    );
+    expect(rendered).toContain(
+      '"Intentional degradation" means the code inside THIS catch\'s own body',
+    );
+  });
+
   it('caps at MAX_CANDIDATES with an explicit omission note — never truncates silently', () => {
     const many = Array.from({ length: 14 }, (_, i) => ({
       file: `src/f${i}.ts`,
