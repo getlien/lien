@@ -391,6 +391,104 @@ describe('OpenAIAgentClient budget handling', () => {
   }, 20000);
 });
 
+// ---------------------------------------------------------------------------
+// #792's 3-vote screen: a natural-stop turn corrupted at the wire ("wholesale-
+// corrupted stop-turn", e.g. `{"findings":":[{",": ":", "}` — syntactically
+// valid JSON but shaped wrong, so readVerdict correctly rejects it) triggers
+// the existing summary-retry, same as any other missing-verdict bail. These
+// tests cover the NEW bounded second attempt inside that retry: one more
+// try when the first retry's own response is itself unrecoverable — never an
+// unbounded loop, and a still-failed pair must surface as `incomplete`, not a
+// silent clean 0-findings result.
+// ---------------------------------------------------------------------------
+describe('OpenAIAgentClient — bounded second retry attempt for corrupted stop-turns (#792)', () => {
+  // Verbatim payload from both stale-duplicate screen runs (shape B).
+  const CORRUPTED_STOP_TURN = '{"findings":":[{",": ":", "}';
+
+  it('makes a bounded second attempt when the first retry is also corrupted, and recovers', async () => {
+    mockFetch([
+      toolCallTurn(100), // turn 1: investigation
+      stopTurn(CORRUPTED_STOP_TURN, 50), // turn 2: natural stop, corrupted → triggers retry
+      stopTurn(CORRUPTED_STOP_TURN, 50), // retry attempt 1: corrupted again
+      stopTurn(CLEAN_JSON, 50), // retry attempt 2 (bounded): recovers
+    ]);
+    const client = makeClient(1_000_000);
+
+    const result = await client.run('sys', 'init', [], noopTool);
+
+    expect(result.incomplete).toBe(false);
+    expect(result.summary?.overview).toBe('All good');
+    // 2 main-loop turns + 2 retry attempts, all recorded on the trace.
+    expect(result.trace.turns).toHaveLength(4);
+  }, 15000);
+
+  it('surfaces incomplete (not a silent clean review) when both retry attempts stay corrupted', async () => {
+    mockFetch([
+      toolCallTurn(100),
+      stopTurn(CORRUPTED_STOP_TURN, 50),
+      stopTurn(CORRUPTED_STOP_TURN, 50), // retry attempt 1: corrupted
+      stopTurn(CORRUPTED_STOP_TURN, 50), // retry attempt 2 (bounded): also corrupted
+    ]);
+    const client = makeClient(1_000_000);
+
+    const result = await client.run('sys', 'init', [], noopTool);
+
+    expect(result.incomplete).toBe(true);
+    expect(result.summary).toBeUndefined();
+    expect(result.findings).toHaveLength(0);
+  }, 15000);
+
+  it('is bounded — does not keep retrying past the second attempt', async () => {
+    // Only 4 responses queued (2 main-loop + 2 retry). If the client tried a
+    // 3rd retry attempt, chatCompletion would hit the exhausted queue (empty
+    // body) and its own internal transient-failure retry, which would show up
+    // as extra request bodies. Assert exactly 4 requests were sent.
+    const { bodies } = mockFetch([
+      toolCallTurn(100),
+      stopTurn(CORRUPTED_STOP_TURN, 50),
+      stopTurn(CORRUPTED_STOP_TURN, 50),
+      stopTurn(CORRUPTED_STOP_TURN, 50),
+    ]);
+    const client = makeClient(1_000_000);
+
+    await client.run('sys', 'init', [], noopTool);
+
+    expect(bodies).toHaveLength(4);
+  }, 15000);
+
+  it('logs a warning naming the bounded second-attempt retry', async () => {
+    const { logger, lines } = capturingLogger();
+    mockFetch([
+      toolCallTurn(100),
+      stopTurn(CORRUPTED_STOP_TURN, 50),
+      stopTurn(CORRUPTED_STOP_TURN, 50),
+      stopTurn(CLEAN_JSON, 50),
+    ]);
+    const client = makeClient(1_000_000, logger);
+
+    await client.run('sys', 'init', [], noopTool);
+
+    expect(lines.some(l => l.includes('attempting one more bounded retry'))).toBe(true);
+  }, 15000);
+
+  it('does not make a second attempt when the first retry already recovers a verdict', async () => {
+    // Non-regression: the pre-existing single-retry path (budget test above,
+    // "recovers a verdict via the json-forced summary-retry after a bail")
+    // must not gain a spurious extra call when the first retry succeeds.
+    const { bodies } = mockFetch([
+      toolCallTurn(100),
+      stopTurn(CORRUPTED_STOP_TURN, 50),
+      stopTurn(CLEAN_JSON, 50), // retry attempt 1: recovers immediately
+    ]);
+    const client = makeClient(1_000_000);
+
+    const result = await client.run('sys', 'init', [], noopTool);
+
+    expect(result.incomplete).toBe(false);
+    expect(bodies).toHaveLength(3);
+  }, 15000);
+});
+
 /** Shared by both the `appendIncompleteNotice` and `hasProviderFailure` suites below. */
 function baseResult(overrides: Partial<AgentResult>): AgentResult {
   return {

@@ -196,3 +196,111 @@ describe('AnthropicAgentClient never-ran (terminal API failure)', () => {
     expect(createMock).toHaveBeenCalledTimes(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// #792's 3-vote screen: a natural-stop turn corrupted at the wire ("wholesale-
+// corrupted stop-turn", e.g. `{"findings":":[{",": ":", "}` — syntactically
+// valid JSON but shaped wrong, so extraction correctly rejects it) triggers
+// the existing summary-retry, same as any other missing-verdict bail. These
+// tests cover the NEW bounded second attempt inside that retry — parity with
+// the OpenAI client's fix for the same canary.
+// ---------------------------------------------------------------------------
+describe('AnthropicAgentClient — bounded second retry attempt for corrupted stop-turns (#792)', () => {
+  const CORRUPTED_STOP_TURN = '{"findings":":[{",": ":", "}';
+  const CLEAN_JSON =
+    '```json\n{"findings":[],"summary":{"riskLevel":"low","overview":"recovered","keyChanges":[]}}\n```';
+
+  it('makes a bounded second attempt when the first retry is also corrupted, and recovers', async () => {
+    createMock
+      .mockResolvedValueOnce(
+        msg([thinkingBlock('investigating'), toolUseBlock], 100, 0, 'tool_use'),
+      )
+      .mockResolvedValueOnce(msg([textBlock(CORRUPTED_STOP_TURN)], 50, 0, 'end_turn'))
+      .mockResolvedValueOnce(msg([textBlock(CORRUPTED_STOP_TURN)], 50, 0, 'end_turn'))
+      .mockResolvedValueOnce(msg([textBlock(CLEAN_JSON)], 50, 0, 'end_turn'));
+    const { logger } = capturingLogger();
+
+    const result = await makeClient(1_000_000, logger).run(
+      'sys',
+      'init',
+      TOOLS as never,
+      async () => 'ok',
+    );
+
+    expect(result.incomplete).toBe(false);
+    expect(result.summary?.overview).toBe('recovered');
+    expect(createMock).toHaveBeenCalledTimes(4);
+  });
+
+  it('surfaces incomplete (not a silent clean review) when both retry attempts stay corrupted', async () => {
+    createMock
+      .mockResolvedValueOnce(
+        msg([thinkingBlock('investigating'), toolUseBlock], 100, 0, 'tool_use'),
+      )
+      .mockResolvedValueOnce(msg([textBlock(CORRUPTED_STOP_TURN)], 50, 0, 'end_turn'))
+      .mockResolvedValueOnce(msg([textBlock(CORRUPTED_STOP_TURN)], 50, 0, 'end_turn'))
+      .mockResolvedValueOnce(msg([textBlock(CORRUPTED_STOP_TURN)], 50, 0, 'end_turn'));
+    const { logger } = capturingLogger();
+
+    const result = await makeClient(1_000_000, logger).run(
+      'sys',
+      'init',
+      TOOLS as never,
+      async () => 'ok',
+    );
+
+    expect(result.incomplete).toBe(true);
+    expect(result.summary).toBeUndefined();
+    expect(result.findings).toHaveLength(0);
+  });
+
+  it('is bounded — exactly 4 calls total, not an open retry loop', async () => {
+    createMock
+      .mockResolvedValueOnce(
+        msg([thinkingBlock('investigating'), toolUseBlock], 100, 0, 'tool_use'),
+      )
+      .mockResolvedValueOnce(msg([textBlock(CORRUPTED_STOP_TURN)], 50, 0, 'end_turn'))
+      .mockResolvedValueOnce(msg([textBlock(CORRUPTED_STOP_TURN)], 50, 0, 'end_turn'))
+      .mockResolvedValueOnce(msg([textBlock(CORRUPTED_STOP_TURN)], 50, 0, 'end_turn'));
+    const { logger } = capturingLogger();
+
+    await makeClient(1_000_000, logger).run('sys', 'init', TOOLS as never, async () => 'ok');
+
+    expect(createMock).toHaveBeenCalledTimes(4);
+  });
+
+  it('logs a warning naming the bounded second-attempt retry', async () => {
+    createMock
+      .mockResolvedValueOnce(
+        msg([thinkingBlock('investigating'), toolUseBlock], 100, 0, 'tool_use'),
+      )
+      .mockResolvedValueOnce(msg([textBlock(CORRUPTED_STOP_TURN)], 50, 0, 'end_turn'))
+      .mockResolvedValueOnce(msg([textBlock(CORRUPTED_STOP_TURN)], 50, 0, 'end_turn'))
+      .mockResolvedValueOnce(msg([textBlock(CLEAN_JSON)], 50, 0, 'end_turn'));
+    const { logger, lines } = capturingLogger();
+
+    await makeClient(1_000_000, logger).run('sys', 'init', TOOLS as never, async () => 'ok');
+
+    expect(lines.some(l => l.includes('attempting one more bounded retry'))).toBe(true);
+  });
+
+  it('does not make a second attempt when the first retry already recovers a verdict', async () => {
+    createMock
+      .mockResolvedValueOnce(
+        msg([thinkingBlock('investigating'), toolUseBlock], 100, 0, 'tool_use'),
+      )
+      .mockResolvedValueOnce(msg([textBlock(CORRUPTED_STOP_TURN)], 50, 0, 'end_turn'))
+      .mockResolvedValueOnce(msg([textBlock(CLEAN_JSON)], 50, 0, 'end_turn'));
+    const { logger } = capturingLogger();
+
+    const result = await makeClient(1_000_000, logger).run(
+      'sys',
+      'init',
+      TOOLS as never,
+      async () => 'ok',
+    );
+
+    expect(result.incomplete).toBe(false);
+    expect(createMock).toHaveBeenCalledTimes(3);
+  });
+});
