@@ -1,13 +1,27 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import path from 'path';
 import os from 'os';
+import * as coreModule from '@liendev/core';
 import {
   annotateCommand,
   isTrivial,
   formatDependents,
   formatTests,
   formatComplexity,
+  withHeadroomWarning,
 } from './annotate-cmd.js';
+
+// Only `createVectorDB` is mocked (and only used by the plan-time-nudge
+// integration block below) — every other integration test in this file
+// exercises the real factory against an empty tmp home. `...actual` keeps
+// `ComplexityAnalyzer` (also imported by annotate-cmd.ts) real throughout.
+vi.mock('@liendev/core', async () => {
+  const actual = await vi.importActual<typeof import('@liendev/core')>('@liendev/core');
+  return {
+    ...actual,
+    createVectorDB: vi.fn(actual.createVectorDB),
+  };
+});
 
 describe('isTrivial', () => {
   it('is trivial when no deps, no complexity, and tests present', () => {
@@ -25,6 +39,38 @@ describe('isTrivial', () => {
 
   it('is non-trivial above the dependent threshold', () => {
     expect(isTrivial(2, 0, 1)).toBe(false);
+  });
+
+  it('defaults headroomCount to 0 — pre-existing 3-arg callers are unaffected', () => {
+    expect(isTrivial(0, 0, 1)).toBe(true);
+  });
+
+  it('is non-trivial when a function is near/over its complexity budget, even otherwise-trivial', () => {
+    expect(isTrivial(0, 0, 1, 1)).toBe(false);
+    expect(isTrivial(1, 0, 1, 2)).toBe(false);
+  });
+
+  it('is trivial when headroomCount is explicitly 0', () => {
+    expect(isTrivial(0, 0, 1, 0)).toBe(true);
+  });
+});
+
+describe('withHeadroomWarning', () => {
+  const lines = ['Lien impact for src/a.ts:', '  • No test coverage.'];
+
+  it('passes lines through unchanged when there are no headroom entries', () => {
+    expect(withHeadroomWarning(lines, { entries: [], overflow: 0 })).toBe(lines);
+  });
+
+  it('prepends the shared nudge line ahead of the existing lines', () => {
+    const result = withHeadroomWarning(lines, {
+      entries: [{ symbol: 'scanPatches', metric: 'cognitive', value: 18, threshold: 15 }],
+      overflow: 0,
+    });
+    expect(result[0]).toBe(
+      '⚠ Lien: scanPatches cognitive 18/15 (over) — avoid adding complexity here; prefer extraction.',
+    );
+    expect(result.slice(1)).toEqual(lines);
   });
 });
 
@@ -151,5 +197,92 @@ describe('annotateCommand (integration)', () => {
     // VectorDB init against an empty tmp home should fail or return empty;
     // either way, the command must not throw or print errors.
     expect(errSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('annotateCommand — plan-time nudge (integration)', () => {
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  let errSpy: ReturnType<typeof vi.spyOn>;
+
+  // A real, stable file so `resolvePaths`' existsSync check passes — same
+  // one the "missing index" test above already relies on resolving cleanly.
+  const target = 'packages/cli/src/cli/index.ts';
+
+  beforeEach(() => {
+    logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    errSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    logSpy.mockRestore();
+    errSpy.mockRestore();
+    vi.mocked(coreModule.createVectorDB).mockClear();
+  });
+
+  it('leads the printed annotation with the shared headroom nudge line', async () => {
+    const overBudgetChunk = {
+      content: '',
+      metadata: {
+        file: target,
+        startLine: 1,
+        endLine: 20,
+        type: 'function',
+        language: 'typescript',
+        symbolName: 'overBudgetFn',
+        symbolType: 'function',
+        cognitiveComplexity: 20,
+        imports: [],
+      },
+      score: 0,
+      relevance: 'not_relevant',
+    };
+    vi.mocked(coreModule.createVectorDB).mockResolvedValueOnce({
+      initialize: vi.fn().mockResolvedValue(undefined),
+      scanAll: vi.fn().mockResolvedValue([overBudgetChunk]),
+    } as unknown as Awaited<ReturnType<typeof coreModule.createVectorDB>>);
+
+    await annotateCommand(target);
+
+    expect(errSpy).not.toHaveBeenCalled();
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    const printed = logSpy.mock.calls[0][0] as string;
+    const printedLines = printed.split('\n');
+    expect(printedLines[0]).toBe(
+      '⚠ Lien: overBudgetFn cognitive 20/15 (over) — avoid adding complexity here; prefer extraction.',
+    );
+    expect(printed).toContain(`Lien impact for ${target}:`);
+  });
+
+  it('stays on the non-nudge path (no leading warning line) when nothing is near budget', async () => {
+    const quietChunk = {
+      content: '',
+      metadata: {
+        file: target,
+        startLine: 1,
+        endLine: 5,
+        type: 'function',
+        language: 'typescript',
+        symbolName: 'tidyFn',
+        symbolType: 'function',
+        cognitiveComplexity: 2,
+        imports: [],
+      },
+      score: 0,
+      relevance: 'not_relevant',
+    };
+    vi.mocked(coreModule.createVectorDB).mockResolvedValueOnce({
+      initialize: vi.fn().mockResolvedValue(undefined),
+      scanAll: vi.fn().mockResolvedValue([quietChunk]),
+    } as unknown as Awaited<ReturnType<typeof coreModule.createVectorDB>>);
+
+    await annotateCommand(target);
+
+    expect(errSpy).not.toHaveBeenCalled();
+    // Still non-trivial (no test coverage), so it prints — but the first line
+    // must be the impact header, not a nudge, since nothing is near budget.
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    const printed = logSpy.mock.calls[0][0] as string;
+    expect(printed.split('\n')[0]).toBe(`Lien impact for ${target}:`);
+    expect(printed).not.toContain('avoid adding complexity');
   });
 });

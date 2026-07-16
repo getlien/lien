@@ -304,15 +304,24 @@ const HEADROOM_METRICS: ReadonlyArray<{
 ];
 
 /**
+ * Minimal chunk shape the headroom computation needs: just the metadata,
+ * not the full `SearchResult` (score/relevance are irrelevant here). Accepts
+ * `SearchResult[]` (the MCP path, via the index) and `@liendev/parser`'s
+ * `CodeChunk[]` (the CLI `annotate` path, via `findDependents`) alike, so both
+ * callers share this one computation — see `annotate-cmd.ts`.
+ */
+export type HeadroomInputChunk = { metadata: SearchResult['metadata'] };
+
+/**
  * Compute the complexity headroom for a file from its already-fetched chunks.
  *
  * No re-parse: cyclomatic/cognitive metrics are stored per chunk in the index
- * and are carried on `SearchResult.metadata`. For each function/method at
- * >= 80% of a threshold, emit its single worst metric (highest value/threshold
- * ratio) — one entry per function, never two. Sorted worst-first and capped at
+ * and are carried on chunk metadata. For each function/method at >= 80% of a
+ * threshold, emit its single worst metric (highest value/threshold ratio) —
+ * one entry per function, never two. Sorted worst-first and capped at
  * MAX_HEADROOM_PER_FILE, with an overflow count for the remainder.
  */
-export function computeComplexityHeadroom(chunks: SearchResult[]): {
+export function computeComplexityHeadroom(chunks: readonly HeadroomInputChunk[]): {
   entries: ComplexityHeadroomEntry[];
   overflow: number;
 } {
@@ -353,6 +362,29 @@ export function computeComplexityHeadroom(chunks: SearchResult[]): {
   const overflow = Math.max(0, sorted.length - MAX_HEADROOM_PER_FILE);
 
   return { entries, overflow };
+}
+
+/**
+ * Render headroom entries as one imperative, agent-actionable warning line —
+ * the plan-time nudge. `computeComplexityHeadroom` only produces data; this is
+ * the "make it unmissable" step, shared by the `get_files_context` response
+ * (`complexityHeadroomWarning`) and the CLI `annotate` command (which leads
+ * its printed annotation with this same line — see `annotate-cmd.ts`).
+ *
+ * Returns `undefined` when there's nothing to warn about, so callers can
+ * `if (warning)` rather than checking `entries.length` themselves.
+ */
+export function formatComplexityHeadroomWarning(
+  entries: ComplexityHeadroomEntry[],
+  overflow = 0,
+): string | undefined {
+  if (entries.length === 0) return undefined;
+  const parts = entries.map(
+    e =>
+      `${e.symbol} ${e.metric} ${e.value}/${e.threshold}${e.value >= e.threshold ? ' (over)' : ''}`,
+  );
+  const more = overflow > 0 ? ` (+${overflow} more near/over budget)` : '';
+  return `⚠ Lien: ${parts.join(', ')}${more} — avoid adding complexity here; prefer extraction.`;
 }
 
 /**
@@ -433,6 +465,14 @@ function buildSingleFileResponse(
     chunks: shapeResults(data.chunks, 'get_files_context'),
     testAssociations: data.testAssociations,
     // Omit entirely when nothing is near budget (the common case → zero bytes).
+    // The warning field is spread first so it's the first thing the agent
+    // reads in the serialized JSON — the imperative nudge, not just data.
+    ...(data.headroom.length > 0 && {
+      complexityHeadroomWarning: formatComplexityHeadroomWarning(
+        data.headroom,
+        data.headroomOverflow,
+      ),
+    }),
     ...(data.headroom.length > 0 && { complexityHeadroom: data.headroom }),
     ...(data.headroomOverflow > 0 && { complexityHeadroomMore: data.headroomOverflow }),
     ...(note && { note }),
@@ -452,6 +492,7 @@ function buildMultiFileResponse(
     {
       chunks: ReturnType<typeof shapeResults>;
       testAssociations: string[];
+      complexityHeadroomWarning?: string;
       complexityHeadroom?: ComplexityHeadroomEntry[];
       complexityHeadroomMore?: number;
     }
@@ -460,6 +501,12 @@ function buildMultiFileResponse(
     shaped[filepath] = {
       chunks: shapeResults(data.chunks, 'get_files_context'),
       testAssociations: data.testAssociations,
+      ...(data.headroom.length > 0 && {
+        complexityHeadroomWarning: formatComplexityHeadroomWarning(
+          data.headroom,
+          data.headroomOverflow,
+        ),
+      }),
       ...(data.headroom.length > 0 && { complexityHeadroom: data.headroom }),
       ...(data.headroomOverflow > 0 && { complexityHeadroomMore: data.headroomOverflow }),
     };

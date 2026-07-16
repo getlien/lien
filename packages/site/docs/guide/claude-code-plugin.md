@@ -58,10 +58,34 @@ It reports dependent count and blast-radius risk (with reasoning), test
 coverage, and — when present — a complexity warning (max cyclomatic complexity
 and how many functions in the file are over the warn threshold). It stays
 silent when impact is trivial (0-1 dependents, no complexity warnings,
-existing test coverage), and it won't repeat for the same file within a
-session for a TTL (default 5 minutes, `LIEN_ANNOTATE_TTL_MIN`). The effect is
-that you see who depends on a file and how well it's tested *before* you touch
-it, without having to call `get_files_context` yourself.
+existing test coverage, no near-budget functions), and it won't repeat for the
+same file within a session for a TTL (default 5 minutes,
+`LIEN_ANNOTATE_TTL_MIN`). The effect is that you see who depends on a file and
+how well it's tested *before* you touch it, without having to call
+`get_files_context` yourself.
+
+#### The plan-time nudge — before you write, not after
+
+When a function in the file is already at or near its complexity budget
+(cyclomatic/cognitive ≥ 80% of threshold — the same computation
+`get_files_context`'s `complexityHeadroom` uses), the annotation *leads* with
+an imperative warning line instead of burying it as data:
+
+```
+⚠ Lien: extractSymbols cognitive 18/15 (over) — avoid adding complexity here; prefer extraction.
+Lien impact for packages/cli/src/cli/annotate-cmd.ts:
+  • 2 files import this — packages/cli/src/cli/index.ts, packages/cli/src/cli/annotate-cmd.test.ts; risk: medium (2 callers, 1 untested).
+  • Test coverage: packages/cli/src/cli/annotate-cmd.test.ts.
+```
+
+This is the moment `lien delta` can't reach: the write-gate hook below only
+fires *after* an edit, once the complexity is already in the file. Reading a
+file is the step that happens right before editing it in the mandatory
+workflow, so surfacing the same "near budget" signal here — via the one
+verified `PostToolUse` channel — gets it in front of the agent while there's
+still a chance to steer around the hot function or extract instead of adding
+to it. `get_files_context`'s response carries the identical signal as a
+`complexityHeadroomWarning` field for the same reason.
 
 ### The write gate — `lien delta` on every edit
 

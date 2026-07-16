@@ -18,7 +18,7 @@ for which hook output channels actually reach the model.
 
 | Hook | Event | What it does | Kill switch |
 | --- | --- | --- | --- |
-| `annotate-read.sh` | PostToolUse: `Read` | Surfaces dependents/coverage/complexity for the file just read, as an `additionalContext` annotation. Suppressed per file per session within a TTL. | `LIEN_ANNOTATE_TTL_MIN=<minutes>` (default 5) |
+| `annotate-read.sh` | PostToolUse: `Read` | Surfaces dependents/coverage/complexity for the file just read, as an `additionalContext` annotation. When a function in the file is at/near its complexity budget, the annotation *leads* with an imperative nudge line ("avoid adding complexity here; prefer extraction") — the plan-time nudge, surfaced before the agent edits rather than after via `delta-write.sh`. Suppressed per file per session within a TTL. | `LIEN_ANNOTATE_TTL_MIN=<minutes>` (default 5) |
 | `delta-write.sh` | PostToolUse: `Edit\|Write\|MultiEdit` | Runs `lien delta --file <path> --format json`; warns only when the edit pushed a function to a new complexity-threshold crossing. Silent on everything else (improvements, pre-existing violations, advisory movement). | `LIEN_DELTA_HOOK=off` |
 | `augment-explore-task.sh` | PreToolUse: `Agent\|Task` | When the subagent being launched is `Explore` (or `lien:Explore`/`project:Explore`), appends a Lien-tool-usage mandate to its prompt. Skips if the repo has no `structural.db` index yet, or the prompt already names a Lien MCP tool. | `LIEN_EXPLORE_INJECT=off` |
 | `annotate-clean.sh` | SessionStart | GCs `annotated-sessions/` dirs untouched for >24h; pre-warms the npx fallback in the background so the first real hook call of the session doesn't pay a cold `npx` install. | none |
@@ -34,6 +34,21 @@ or CI) is recorded locally as one JSONL line in `delta-events.jsonl` next to
 the project's index; nothing leaves the machine. Run `lien stats` for 7/30-day
 counts. Kill switch: `LIEN_DELTA_EVENTS=off`. See
 [docs/architecture/lien-delta.md](../../docs/architecture/lien-delta.md#measuring-the-nudge-loop--delta-eventsjsonl--lien-stats).
+
+### Why the nudge rides `annotate-read.sh`, not a new `PreToolUse:Edit` hook
+
+The obvious design for a "before you edit" complexity nudge is a `PreToolUse`
+hook on `Edit|Write|MultiEdit`. It doesn't work: per
+[docs/architecture/claude-code-hook-channels.md](../../docs/architecture/claude-code-hook-channels.md),
+`PreToolUse`'s only channel that reaches the model is `updatedInput.prompt`,
+and that's specific to the subagent-launch tool (`augment-explore-task.sh`) —
+`Edit`/`Write`'s `tool_input` has no `prompt` field to rewrite. The other
+`PreToolUse` channel, `exit 2` + stderr, *blocks* the tool call — turning an
+advisory nudge into a hard stop and breaking every hook's fail-open contract.
+So the nudge instead enriches `annotate-read.sh`'s existing `PostToolUse:Read`
+annotation, which already fires before the mandatory `get_files_context` /
+`Edit` step in the normal workflow, reaches the model via the verified
+`additionalContext` channel, and inherits the same TTL suppression for free.
 
 ### The Explore agent
 
