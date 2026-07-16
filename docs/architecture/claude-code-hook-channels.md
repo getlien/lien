@@ -35,6 +35,27 @@ The subagent-launching tool is named `Agent` in current Claude Code, `Task` in
 older versions. Hook-dev docs and community examples often still say `Task`.
 Match both — `"matcher": "Agent|Task"` (`plugins/claude/hooks/hooks.json`).
 
+**Re-audited 2026-07-16, still correct.** The official tool reference
+(`code.claude.com/docs/en/tools-reference`, fetched the same day) lists
+`Agent` as the sole subagent-spawn tool; `Task` no longer exists as a tool
+name at all (the `Task*` family that remains — `TaskCreate`/`TaskGet`/
+`TaskList`/`TaskOutput`/`TaskStop`/`TaskUpdate` — is the unrelated
+session task-list feature, not the subagent launcher). The plugin's
+`"Agent|Task"` matcher already covers the current name, so
+`augment-explore-task.sh` fires normally — confirmed by replaying both
+`tool_name: "Agent"` and `tool_name: "Task"` payloads through the script,
+now covered permanently by `packages/cli/test/augment-explore-hook.test.ts`.
+`Task` stays in the matcher as a free legacy-version alias; no reason to
+remove it.
+
+Same audit also checked `delta-write.sh`'s `"Edit|Write|MultiEdit"` matcher:
+`Edit`/`Write` are current; `MultiEdit` was removed from Claude Code with no
+replacement tool name (its batch-edit use case folded into `Edit`'s
+`replace_all`). Same conclusion — harmless legacy alias, not a live bug,
+since `Edit`/`Write` alone already fire the hook on every current edit.
+`MultiEdit`'s presence is already exercised by `delta-write-hook.test.ts`
+and was left as-is.
+
 ## How to apply
 
 | Intent | Channel |
