@@ -153,6 +153,25 @@ git commit -m "test: add integration tests for MCP"
 git commit -m "chore: update dependencies"
 ```
 
+### 4. CI Gates
+
+Beyond the 6 pre-commit gates above, one required PR check enforces a
+CLAUDE.md policy directly: **"Require harness evidence or bypass label"**
+(`.github/workflows/harness-attestation.yml`). Any PR touching
+`packages/review/src/plugins/agent/**` must show evidence of a >= 9/10
+harness calibration run (a `harness.yml` run link, a `harness-result.json`
+summary, a `calibrate` mention, or a deterministic fixture-comparison
+census — byte-identical/byte-diff/sha256/`build-prompts.ts`) in the PR body.
+
+The `skip-harness-gate` label is an **owner-only** bypass for non-behavioral
+changes — it is not a self-serve escape hatch, and agents must never
+self-apply it to get past this check on their own PR. The gate only honors
+the label if its most recent `labeled` event was applied by a login on the
+allowlist in `.github/scripts/harness-gate-check.mjs`; anyone else's label
+application is ignored and the PR falls through to the ordinary evidence
+check. See that script and the workflow file's header comment for the full
+policy and its known limitations.
+
 ## Releasing
 
 Lien versions and publishes via [Changesets](https://github.com/changesets/changesets), driven by `.changeset/config.json` and `.github/workflows/release.yml`. Published packages: `@liendev/parser`, `@liendev/core`, `@liendev/lien` (the `cli` package). `review`, `action`, and `site` are `"private": true` and never published. The three published packages are `linked` — they always bump together, even when only one has code changes.
