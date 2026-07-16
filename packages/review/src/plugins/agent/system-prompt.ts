@@ -26,6 +26,7 @@ import { renderGuidanceSurfaceSection } from '../../guidance-surface-signals.js'
 import { renderDocClaimsSection } from '../../doc-claims-signals.js';
 import { renderTestCoverageSection } from '../../test-coverage-signals.js';
 import { renderSiblingSurfacesSection } from '../../sibling-surface-signals.js';
+import { renderUnreadFieldSection } from '../../unread-field-signals.js';
 import type { ResolvedRules } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -183,11 +184,13 @@ export interface BuildInitialMessageOptions {
    * Rules active for this run. Used to gate rule-scoped signal injection —
    * e.g. `<undiscriminated_catch_candidates>` only makes sense to compute
    * and render when `error-swallowing` is actually active for this PR.
-   * `incomplete-handling` gates two signals: `<variant_sweep_candidates>`
-   * (an added enum/union variant whose consumer sites weren't updated) and
+   * `incomplete-handling` gates three signals: `<variant_sweep_candidates>`
+   * (an added enum/union variant whose consumer sites weren't updated),
    * `<sibling_surfaces>` (a sibling family member that didn't receive a
-   * mirrored change) — both are the same partial-implementation-gap shape
-   * that rule targets, just at different granularity (variant vs. field).
+   * mirrored change), and `<unread_field_candidates>` (an added interface/
+   * type-literal/class field with no read site anywhere in the corpus) —
+   * all three are the same partial-implementation-gap shape that rule
+   * targets, just at different granularity (variant vs. family vs. field).
    * `boundary-change` likewise gates `<comparison_change_candidates>`.
    * Omit (CLI callers that don't resolve rules) to skip that gating.
    */
@@ -229,6 +232,7 @@ export function buildInitialMessage(
   appendIfPresent(sections, renderTestCoverageSection(context));
   if (isRuleActive(opts.rules, 'incomplete-handling')) {
     appendIfPresent(sections, renderSiblingSurfacesSection(context));
+    appendIfPresent(sections, renderUnreadFieldSection(context));
   }
   sections.push(
     'Investigate this PR. Use the investigation strategy described in your instructions, then output findings as JSON.',
