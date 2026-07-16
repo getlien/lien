@@ -92,7 +92,15 @@ const LOW_SIGNAL_STRINGS = new Set([
   'function',
 ]);
 
-const STRING_RE = /(['"`])((?:\\.|(?!\1).)*?)\1/g;
+// Note: the inner group must not let a backslash match via two different
+// alternatives — `(?:\\.|(?!\1).)*?`'s two branches can BOTH consume a lone
+// backslash (`\\.` takes it + the next char; `(?!\1).` takes just it), which
+// gives the engine an exponential number of ways to fail to match on an
+// unmatched-quote line dense with backslashes (catastrophic backtracking,
+// confirmed to hang on a real dead-regex comment in zod's types.ts — see
+// packages/review/test/stale-literal-signals.test.ts). `[^\\]` removes the
+// ambiguity: a backslash can only ever be consumed by the `\\.` branch.
+const STRING_RE = /(['"`])((?:[^\\]|\\.)*?)\1/g;
 const COMMENT_RE = /^(\/\/|\/\*|\*|#|--|<!--)/;
 const TEST_PATH_RE = /(\.test\.|\.spec\.|\/tests?\/|__tests__|\/spec\/|\/fixtures\/)/;
 const CONFIG_PATH_RE =

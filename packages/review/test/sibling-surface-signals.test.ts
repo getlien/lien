@@ -236,6 +236,85 @@ describe('extractSiblingSurfaces — direction B (family-pattern divergence)', (
 });
 
 // ---------------------------------------------------------------------------
+// STRING_RE — ReDoS regression (same fix/rationale as stale-literal-signals.ts:
+// `(?:\\.|(?!\1).)*?`'s dual backslash-consuming branches caused catastrophic
+// backtracking; fixed to `(?:[^\\]|\\.)*?`). Exercised through
+// extractSiblingSurfaces since STRING_RE/collectStringTokens aren't exported.
+// ---------------------------------------------------------------------------
+
+describe('STRING_RE — ReDoS regression', () => {
+  // Reuses the guzzle-shaped family fixture (two siblings sharing
+  // `validateOptions(` clears the cohesion gate) so the pathological line,
+  // added to CurlHandler.php's patch, actually reaches collectStringTokens
+  // via extractUnmirroredAdditions's diff scan.
+  function contextWithAddedLine(extraLine: string): ReviewContext {
+    const patch = `@@ -1,4 +1,5 @@
+ <?php
+ class CurlHandler {
+     public function handle($options) {
+         $this->validateOptions($options);
++${extraLine}
+     }
+ }`;
+    const patches = new Map([['src/Handler/CurlHandler.php', patch]]);
+    const repoChunks = [
+      makeChunk('src/Handler/CurlHandler.php', 1, CURL_HANDLER_CONTENT),
+      makeChunk('src/Handler/StreamHandler.php', 1, STREAM_HANDLER_CONTENT),
+    ];
+    return makeContext({
+      patches,
+      repoChunks,
+      changedFiles: ['src/Handler/CurlHandler.php'],
+    });
+  }
+
+  it('extracts single-, double-, and backtick-quoted literals identically', () => {
+    const line =
+      '$a = \'feature-flag-alpha\'; $b = "src/config/app.json"; $c = `build-output-dir`;';
+    const entries = extractSiblingSurfaces(contextWithAddedLine(line));
+    const displays = entries.map(e => e.display);
+    expect(displays).toEqual(
+      expect.arrayContaining([
+        "'feature-flag-alpha'",
+        '"src/config/app.json"',
+        '`build-output-dir`',
+      ]),
+    );
+  });
+
+  it('extracts a literal containing an escaped quote of its own delimiter', () => {
+    const line = "$msg = 'it\\'s a config-value-here';";
+    const entries = extractSiblingSurfaces(contextWithAddedLine(line));
+    expect(entries.some(e => e.display.includes('config-value-here'))).toBe(true);
+  });
+
+  it('does not hang on a backslash-dense line with no matching closing quote', () => {
+    // Shape of the real-world trigger: packages/zod/src/v3/types.ts:607, a
+    // commented-out ~928-char regex literal with 133 backslashes and an
+    // opening backtick with no closing backtick before end-of-line. Bound is
+    // generous (500ms) to stay flake-proof in CI while still catching a
+    // regression to exponential blowup (17.6s+ at n=30 in the original bug).
+    const pathological = '// old regex: ' + '`' + '\\d'.repeat(400) + ' -- dead code, never closed';
+
+    const start = Date.now();
+    extractSiblingSurfaces(contextWithAddedLine(pathological));
+    const elapsed = Date.now() - start;
+
+    expect(elapsed).toBeLessThan(500);
+  });
+
+  it('does not hang on a large synthetic worst-case (20k+ chars, no closing quote)', () => {
+    const pathological = "x '" + '\\a'.repeat(10_000);
+
+    const start = Date.now();
+    extractSiblingSurfaces(contextWithAddedLine(pathological));
+    const elapsed = Date.now() - start;
+
+    expect(elapsed).toBeLessThan(500);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Negative / noise cases
 // ---------------------------------------------------------------------------
 
