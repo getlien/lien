@@ -278,6 +278,16 @@ export function findTestAssociations(
 const NEAR_BUDGET_RATIO = 0.8;
 /** Cap the per-file headroom list so the payload stays lean. */
 const MAX_HEADROOM_PER_FILE = 5;
+/**
+ * Cap on how many entries the human-readable WARNING LINE renders — tighter
+ * than `MAX_HEADROOM_PER_FILE` (5, the data-level cap on the `complexityHeadroom`
+ * array). A dogfood run surfaced a real 5-entry file rendering as a ~250-char
+ * line; readability degrades past 3-4 entries, so the string caps at the 3
+ * worst and names the rest instead of silently dropping them. The full,
+ * uncapped list still round-trips via `complexityHeadroom` — only the string
+ * is capped.
+ */
+const MAX_RENDERED_HEADROOM_ENTRIES = 3;
 
 /**
  * The metrics surfaced as headroom. Deliberately just cyclomatic + cognitive —
@@ -371,6 +381,15 @@ export function computeComplexityHeadroom(chunks: readonly HeadroomInputChunk[])
  * (`complexityHeadroomWarning`) and the CLI `annotate` command (which leads
  * its printed annotation with this same line — see `annotate-cmd.ts`).
  *
+ * Renders at most `MAX_RENDERED_HEADROOM_ENTRIES` (the 3 worst), re-sorted
+ * defensively by overage ratio (value/threshold) rather than trusting caller
+ * order — over-threshold entries (ratio >= 1) always sort ahead of merely-near
+ * ones, so a rendered entry is never bumped by a less-severe one. Anything cut
+ * from the render — both entries beyond the top 3 and the pre-existing
+ * `overflow` count beyond `computeComplexityHeadroom`'s own cap — is folded
+ * into one explicit "… and N more at/near budget" remainder; nothing is
+ * silently dropped.
+ *
  * Returns `undefined` when there's nothing to warn about, so callers can
  * `if (warning)` rather than checking `entries.length` themselves.
  */
@@ -379,11 +398,14 @@ export function formatComplexityHeadroomWarning(
   overflow = 0,
 ): string | undefined {
   if (entries.length === 0) return undefined;
-  const parts = entries.map(
+  const sorted = [...entries].sort((a, b) => b.value / b.threshold - a.value / a.threshold);
+  const rendered = sorted.slice(0, MAX_RENDERED_HEADROOM_ENTRIES);
+  const parts = rendered.map(
     e =>
       `${e.symbol} ${e.metric} ${e.value}/${e.threshold}${e.value >= e.threshold ? ' (over)' : ''}`,
   );
-  const more = overflow > 0 ? ` (+${overflow} more near/over budget)` : '';
+  const remainder = entries.length - rendered.length + overflow;
+  const more = remainder > 0 ? `, … and ${remainder} more at/near budget` : '';
   return `⚠ Lien: ${parts.join(', ')}${more} — avoid adding complexity here; prefer extraction.`;
 }
 
