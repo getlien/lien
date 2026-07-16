@@ -13,6 +13,7 @@ function makeResult(overrides?: Partial<ReviewCoreResult>): ReviewCoreResult {
     filesAnalyzed: 3,
     usage: { totalTokens: 0, cost: 0 },
     providerFailure: false,
+    incompleteMainPass: false,
     attestation: emptyAttestation('success', 3, 'normal'),
     ...overrides,
   };
@@ -154,10 +155,62 @@ describe('finishRun', () => {
     expect(exitCode).toBe(0);
   });
 
-  it('a PARTIAL incomplete run (budget/turn limit, not neverRan) stays advisory under fail-on=never', async () => {
-    // Some turns completed before the run bailed — this is a warning-severity
-    // notice (see appendIncompleteNotice), not the never-ran operational failure,
-    // so it must not force a failing exit code by itself.
+  // Regression coverage for the trust-residue fix (companion to #765/#764): a
+  // PARTIAL incomplete MAIN pass (budget/turn limit, or an unrecoverable
+  // corrupted stop-turn — #795) used to stay advisory under fail-on=never,
+  // reaching a green check on an honestly-surfaced "review did not finish"
+  // notice. `incompleteMainPass` is the authoritative signal from
+  // `@liendev/review` (see review-pr.ts's `hasIncompleteMainPass`) —
+  // `conclusion`/`findings` mirror what it would actually produce alongside
+  // it, but `finishRun` gates on `incompleteMainPass` directly, same as
+  // `providerFailure`.
+  function mainIncompleteFinding(): ReviewCoreResult['findings'][number] {
+    return {
+      pluginId: 'agent-review',
+      filepath: '',
+      line: 0,
+      severity: 'warning',
+      category: 'summary',
+      message: 'Lien Review did not finish — it hit the token budget limit while investigating.',
+      metadata: { incomplete: true, stopReason: 'budget', mainPassIncomplete: true },
+    };
+  }
+
+  it('fails the check on a PARTIAL incomplete MAIN pass even under fail-on=never', async () => {
+    vi.spyOn(actionLogger, 'info').mockImplementation(() => {});
+    const error = vi.spyOn(actionLogger, 'error').mockImplementation(() => {});
+    const result = makeResult({
+      conclusion: 'neutral',
+      findings: [mainIncompleteFinding()],
+      incompleteMainPass: true,
+    });
+
+    const exitCode = await finishRun(result, /* forkReadOnly */ false, 'never');
+
+    expect(exitCode).toBe(1);
+    expect(error).toHaveBeenCalled();
+    const logged = error.mock.calls.map(c => c[0]).join('\n');
+    expect(logged).toContain('fail-on: never');
+  });
+
+  it('still fails a PARTIAL incomplete MAIN pass under fail-on=error and fail-on=any', async () => {
+    vi.spyOn(actionLogger, 'info').mockImplementation(() => {});
+    vi.spyOn(actionLogger, 'error').mockImplementation(() => {});
+    const result = makeResult({
+      conclusion: 'neutral',
+      findings: [mainIncompleteFinding()],
+      incompleteMainPass: true,
+    });
+
+    expect(await finishRun(result, false, 'error')).toBe(1);
+    expect(await finishRun(result, false, 'any')).toBe(1);
+  });
+
+  it('an EXTRA-pass-only incomplete (doc-truth) stays advisory under fail-on=never', async () => {
+    // The main pass ran fine — only doc-truth's second pass didn't finish.
+    // `incompleteMainPass` stays false (see `appendIncompleteNotice`'s
+    // `isExtraPassOnly` carve-out), so this must NOT force a failing exit
+    // code — coverage-preserving incompleteness stays advisory.
     vi.spyOn(actionLogger, 'info').mockImplementation(() => {});
     const result = makeResult({
       conclusion: 'neutral',
@@ -169,10 +222,12 @@ describe('finishRun', () => {
           severity: 'warning',
           category: 'summary',
           message:
-            'Lien Review did not finish — it hit the token budget limit while investigating.',
+            'The documentation-truthfulness pass did not finish — it hit the token budget limit. ' +
+            'Doc-claim verification is partial; code findings are unaffected.',
           metadata: { incomplete: true, stopReason: 'budget' },
         } as ReviewCoreResult['findings'][number],
       ],
+      incompleteMainPass: false,
     });
 
     const exitCode = await finishRun(result, /* forkReadOnly */ false, 'never');
@@ -191,6 +246,7 @@ describe('finishRun', () => {
 
       expect(result.conclusion).toBe('failure');
       expect(result.providerFailure).toBe(false);
+      expect(result.incompleteMainPass).toBe(false);
       expect(result.attestation.verdict).toBe('failed:analysis_error');
       expect(result.summaryMarkdown).toContain('clone failed: ENOTFOUND');
     });

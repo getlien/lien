@@ -60,7 +60,11 @@ export {
 
 // Built-in plugins
 export { ComplexityPlugin } from './plugins/complexity.js';
-export { AgentReviewPlugin, hasProviderFailure } from './plugins/agent/index.js';
+export {
+  AgentReviewPlugin,
+  hasProviderFailure,
+  hasIncompleteMainPass,
+} from './plugins/agent/index.js';
 
 // Dependency graph
 export {

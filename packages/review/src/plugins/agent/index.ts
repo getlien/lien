@@ -578,6 +578,7 @@ export function appendIncompleteNotice(
   // review is partial — the main pass finished normally. Doc-truth keeps its
   // own dedicated branch (unchanged wording, already tested); any other
   // named pass gets the same shape via the generic field.
+  const isExtraPassOnly = !!result.incompleteFromDocPass || !!result.incompleteFromPass;
   const message = result.incompleteFromDocPass
     ? `The documentation-truthfulness pass did not finish — it ${reason}. ` +
       `Doc-claim verification is partial; code findings are unaffected.`
@@ -593,7 +594,17 @@ export function appendIncompleteNotice(
     severity: 'warning' as const,
     category: 'summary',
     message,
-    metadata: { incomplete: true, stopReason: result.stopReason, overview: message },
+    metadata: {
+      incomplete: true,
+      stopReason: result.stopReason,
+      overview: message,
+      // Only set for the MAIN pass itself stopping short of a verdict — an
+      // extra pass (doc-truth, or a generically-named one) being incomplete
+      // does NOT compromise the main pass's own bug-finding coverage, so it
+      // stays out of this flag. See `hasIncompleteMainPass`, the SSOT a
+      // conclusion-mapper keys off to distinguish the two.
+      ...(isExtraPassOnly ? {} : { mainPassIncomplete: true }),
+    },
   });
 }
 
@@ -657,6 +668,26 @@ function appendNeverRanNotice(
  */
 export function hasProviderFailure(findings: ReviewFinding[]): boolean {
   return findings.some(f => (f.metadata as { neverRan?: boolean } | undefined)?.neverRan === true);
+}
+
+/**
+ * True when `findings` contains a MAIN-pass incomplete notice — the agent's
+ * primary bug-finding pass stopped (budget/turn limit, or an unrecoverable
+ * corrupted/unparseable stop-turn — see `extractFindingsFromText`) without
+ * producing a usable verdict for the whole PR. Distinct from
+ * `hasProviderFailure` (the main pass never got a single response at all)
+ * and from an EXTRA pass alone being incomplete (doc-truth, or a
+ * generically-named pass): those don't compromise the main pass's own
+ * coverage, so `appendIncompleteNotice` never sets `mainPassIncomplete` for
+ * them. This is the single source of truth callers outside this module (the
+ * transport-agnostic review core, the GitHub Action) key off, mirroring
+ * `hasProviderFailure` — an honestly-partial review must not read as clean
+ * either, just via a distinct signal from a total non-run.
+ */
+export function hasIncompleteMainPass(findings: ReviewFinding[]): boolean {
+  return findings.some(
+    f => (f.metadata as { mainPassIncomplete?: boolean } | undefined)?.mainPassIncomplete === true,
+  );
 }
 
 /** Cap the provider error to a short, single-line cause for the notice. */
