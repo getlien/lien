@@ -3,10 +3,10 @@ name: Harness Attestation Gate
 # Cheap, no-LLM audit trail for CLAUDE.md's mandatory harness-calibration
 # rule: any PR touching packages/review/src/plugins/agent/** must show
 # evidence of having cleared the >= 9/10 harness bar (a link to a
-# harness.yml run or artifact, or a pasted harness-result.json summary, in
-# the PR body) or explicitly opt out via the `skip-harness-gate` label for
-# non-behavioral changes (docs, comments, refactors with no prompt/rule
-# behavior change).
+# harness.yml run or artifact, a pasted harness-result.json summary, or a
+# deterministic fixture-comparison census, in the PR body) or explicitly opt
+# out via the `skip-harness-gate` label for non-behavioral changes (docs,
+# comments, refactors with no prompt/rule behavior change).
 #
 # This does NOT run the paid OpenRouter calibration itself -- that's
 # .github/workflows/harness.yml (workflow_dispatch only, costs real money).
@@ -19,6 +19,30 @@ name: Harness Attestation Gate
 # touch the path, which leaves those PRs' required check stuck "pending"
 # forever. Always running and conditionally passing keeps this safe to mark
 # required in branch protection.
+#
+# ----------------------------------------------------------------------------
+# OWNER-ONLY BYPASS LABEL POLICY
+# ----------------------------------------------------------------------------
+# `skip-harness-gate` is an OWNER-only bypass. Gates pass on EVIDENCE; the
+# label is not a self-serve escape hatch. Agents must NEVER self-apply it to
+# get past this check on their own PR. Two incidents (PR #768, PR #799) had
+# an agent apply the label itself to bypass the evidence requirement.
+#
+# This workflow now honors the label only if the MOST RECENT `labeled` event
+# for it (per the PR's GitHub timeline) was performed by a login in the
+# allowlist maintained in .github/scripts/harness-gate-check.mjs
+# (`ALLOWLISTED_LABEL_APPLIERS`). A label applied by anyone else is ignored
+# -- the PR falls through to the ordinary evidence check exactly as if
+# unlabeled, with a log line explaining why.
+#
+# HONEST LIMITATION: agents in this repo currently operate under the
+# owner's own `gh`/GITHUB_TOKEN credentials, so this check cannot
+# distinguish an agent-performed label event from a human-performed one when
+# both are attributed to the same login. This change closes the "anyone can
+# bypass by applying the label" hole and makes the policy machine-enforced
+# where possible; the agent-vs-owner distinction requires a separate bot
+# identity for agent actions and is tracked as a follow-up, not solved here.
+# ----------------------------------------------------------------------------
 
 on:
   pull_request:
@@ -32,12 +56,18 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
+      issues: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
 
       - name: Check whether this PR touches an agent-review rule
         id: touch
@@ -51,16 +81,20 @@ jobs:
             echo "touched=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Check PR body for harness evidence
-        if: steps.touch.outputs.touched == 'true' && !contains(github.event.pull_request.labels.*.name, 'skip-harness-gate')
+      - name: Determine whether skip-harness-gate label is owner-applied
+        id: applier
+        if: steps.touch.outputs.touched == 'true' && contains(github.event.pull_request.labels.*.name, 'skip-harness-gate')
         env:
-          PR_BODY: ${{ github.event.pull_request.body }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          if printf '%s' "$PR_BODY" | grep -qEi 'harness-result|actions/runs/[0-9]+|calibrate'; then
-            echo "Found harness evidence in PR body."
-            exit 0
-          fi
+          TIMELINE_JSON="$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/timeline" --paginate --slurp)"
+          EFFECTIVE_SKIP="$(TIMELINE_JSON="$TIMELINE_JSON" node .github/scripts/harness-gate-check.mjs applier)"
+          echo "effective_skip=$EFFECTIVE_SKIP" >> "$GITHUB_OUTPUT"
 
-          echo "::error::This PR touches packages/review/src/plugins/agent/** but the PR body has no harness evidence (a link to a harness.yml run/artifact, or a 'calibrate' mention) and no 'skip-harness-gate' label. Per CLAUDE.md, rule/prompt changes need a >=9/10 calibration run (npm run test:harness -- --rule <rule-id> --calibrate 10) before merging. Paste the harness.yml run link (or harness-result.json summary) in the PR description, or add the 'skip-harness-gate' label for non-behavioral changes."
-          exit 1
+      - name: Check PR body for harness evidence
+        if: steps.touch.outputs.touched == 'true' && steps.applier.outputs.effective_skip != 'true'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: node .github/scripts/harness-gate-check.mjs evidence
