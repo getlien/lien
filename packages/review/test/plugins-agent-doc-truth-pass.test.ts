@@ -4,12 +4,19 @@ import {
   shouldRunDocTruthPass,
   buildDocTruthPassPrompts,
   buildDocTruthPassInitialMessage,
+  buildDocTruthPassInitialMessageV2,
   mergeDocTruthFindings,
   mergeDocPassIntoResult,
   docTruthPassBudget,
+  isDocTruthV2Enabled,
+  buildClaimWorklist,
+  allClaimIds,
+  postProcessDocTruthResult,
   DOC_TRUTH_PASS_SPEC,
   DOC_PASS_MAX_TURNS,
 } from '../src/plugins/agent/doc-truth-pass.js';
+import { buildSystemPrompt } from '../src/plugins/agent/system-prompt.js';
+import { DOC_TRUTH } from '../src/plugins/agent/rules.js';
 import { createTestContext } from '../src/test-helpers.js';
 import type { ReviewContext } from '../src/plugin-types.js';
 import type { AgentConfig, AgentFinding, AgentResult } from '../src/plugins/agent/types.js';
@@ -101,7 +108,21 @@ function fakeResult(findings: AgentFinding[] = [], trace?: AgentTrace): AgentRes
 
 afterEach(() => {
   delete process.env.LIEN_REVIEW_DOC_PASS;
+  delete process.env.LIEN_DOC_TRUTH_V2;
 });
+
+/** A raw v2 verdict/finding entry — extends the plain `finding()` helper with the v2-only
+ *  `claimId`/`verdict` fields, mirroring stale-duplicate-pass.test.ts's `finding()` pattern. */
+function verdictFinding(overrides: Record<string, unknown> = {}): AgentFinding {
+  return {
+    filepath: 'docs/architecture/worktree.md',
+    line: 1,
+    severity: 'warning',
+    category: 'bug',
+    message: 'msg',
+    ...overrides,
+  } as AgentFinding;
+}
 
 // ---------------------------------------------------------------------------
 // shouldRunDocTruthPass
@@ -397,5 +418,274 @@ describe('DOC_TRUTH_PASS_SPEC', () => {
   it('buildPrompts delegates to buildDocTruthPassPrompts', () => {
     const ctx = contextWithPatches([['docs/architecture/worktree.md', DOC_CLAIM_PATCH]]);
     expect(DOC_TRUTH_PASS_SPEC.buildPrompts(ctx)).toEqual(buildDocTruthPassPrompts(ctx));
+  });
+
+  it('postProcessResult is postProcessDocTruthResult', () => {
+    expect(DOC_TRUTH_PASS_SPEC.postProcessResult).toBe(postProcessDocTruthResult);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v2 — per-claim verdict contract (flag-gated; LIEN_DOC_TRUTH_V2)
+// ---------------------------------------------------------------------------
+
+describe('isDocTruthV2Enabled', () => {
+  it('is false by default (env unset)', () => {
+    expect(isDocTruthV2Enabled()).toBe(false);
+  });
+
+  it.each(['on', '1', 'true', 'ON', 'TRUE'])('is true for LIEN_DOC_TRUTH_V2=%s', value => {
+    process.env.LIEN_DOC_TRUTH_V2 = value;
+    expect(isDocTruthV2Enabled()).toBe(true);
+  });
+
+  it.each(['off', '0', 'false', 'nonsense'])('is false for LIEN_DOC_TRUTH_V2=%s', value => {
+    process.env.LIEN_DOC_TRUTH_V2 = value;
+    expect(isDocTruthV2Enabled()).toBe(false);
+  });
+});
+
+describe('buildClaimWorklist / allClaimIds — id assignment stability', () => {
+  it('assigns one sequential id per doc claim, none for rename items when there are none', () => {
+    const ctx = contextWithPatches([['docs/architecture/worktree.md', DOC_CLAIM_PATCH]]);
+    const worklist = buildClaimWorklist(ctx);
+    expect(worklist.docClaimIds).toEqual(['claim-1']);
+    expect(worklist.renameSignals).toEqual([]);
+    expect(worklist.overflowClaims).toBe(0);
+    expect(allClaimIds(worklist)).toEqual(['claim-1']);
+  });
+
+  it('assigns ids across doc claims THEN rename-sweep items, prose before survivors, in one sequential namespace', () => {
+    const ctx = contextWithPatches([
+      ['docs/architecture/worktree.md', DOC_CLAIM_PATCH],
+      ...RENAME_SWEEP_FILES,
+    ]);
+    const worklist = buildClaimWorklist(ctx);
+
+    expect(worklist.docClaimIds).toEqual(['claim-1']);
+    expect(worklist.renameSignals).toHaveLength(1);
+    const { proseIds, survivorIds, signal } = worklist.renameSignals[0];
+    expect(signal.mapping.from).toBe('oldSearchToken');
+    expect(signal.mapping.to).toBe('newSearchToken');
+    expect(proseIds).toEqual(['claim-2', 'claim-3', 'claim-4', 'claim-5', 'claim-6']);
+    expect(survivorIds).toEqual([]); // this fixture's rename fully replaced the token — no survivors
+
+    expect(allClaimIds(worklist)).toEqual([
+      'claim-1',
+      'claim-2',
+      'claim-3',
+      'claim-4',
+      'claim-5',
+      'claim-6',
+    ]);
+  });
+
+  it('is stable across repeated calls on the same context (same ids, same order)', () => {
+    const ctx = contextWithPatches([
+      ['docs/architecture/worktree.md', DOC_CLAIM_PATCH],
+      ...RENAME_SWEEP_FILES,
+    ]);
+    expect(allClaimIds(buildClaimWorklist(ctx))).toEqual(allClaimIds(buildClaimWorklist(ctx)));
+  });
+
+  it('caps doc claims at DOC_TRUTH_V2_MAX_CLAIMS (20) with an overflow count, no ids beyond the cap', () => {
+    // 25 distinct single-line claim patches on 25 distinct doc files — each trips the
+    // 'requirement' claim shape ("requires") independently.
+    const entries: Array<[string, string]> = Array.from({ length: 25 }, (_, i) => [
+      `docs/architecture/doc${i}.md`,
+      `@@ -1,1 +1,2 @@\n # Title\n+This step ${i} requires a fresh checkout.`,
+    ]);
+    const ctx = contextWithPatches(entries);
+    const worklist = buildClaimWorklist(ctx);
+    expect(worklist.docClaimIds).toHaveLength(20);
+    expect(worklist.overflowClaims).toBe(5);
+    expect(allClaimIds(worklist)).toHaveLength(20);
+  });
+});
+
+describe('buildDocTruthPassPrompts / buildDocTruthPassInitialMessageV2 — v2 contract rendering', () => {
+  it('is byte-identical to the pre-v2 prompts when the flag is off', () => {
+    const ctx = contextWithPatches([
+      ['docs/architecture/worktree.md', DOC_CLAIM_PATCH],
+      ...RENAME_SWEEP_FILES,
+    ]);
+    const { systemPrompt, initialMessage } = buildDocTruthPassPrompts(ctx);
+    expect(systemPrompt).toBe(buildSystemPrompt({ active: [DOC_TRUTH], skipped: [] }));
+    expect(initialMessage).toBe(buildDocTruthPassInitialMessage(ctx));
+    expect(systemPrompt).not.toContain('output_format_v2_override');
+    expect(initialMessage).not.toContain('PER-CLAIM VERDICT CONTRACT');
+    expect(initialMessage).not.toContain('[claim-1]');
+  });
+
+  it('appends the v2 output-contract override to the system prompt, enumerating every claim id', () => {
+    process.env.LIEN_DOC_TRUTH_V2 = 'on';
+    const ctx = contextWithPatches([
+      ['docs/architecture/worktree.md', DOC_CLAIM_PATCH],
+      ...RENAME_SWEEP_FILES,
+    ]);
+    const { systemPrompt } = buildDocTruthPassPrompts(ctx);
+
+    expect(systemPrompt).toContain('<output_format_v2_override>');
+    expect(systemPrompt).toContain('SUPERSEDES the <output_format> section above');
+    expect(systemPrompt).toContain('claim-1, claim-2, claim-3, claim-4, claim-5, claim-6');
+    // The v1 output_format section is still present (appended AFTER, not replaced) — the
+    // supersession is a prompt-reading convention, not a text removal.
+    expect(systemPrompt).toContain('<output_format>');
+    // Full doc-truth tool access is unchanged (unlike stale-duplicate's hard tool cut).
+    expect(systemPrompt).toContain('get_dependents');
+    expect(systemPrompt).toContain('get_complexity');
+  });
+
+  it('renders <doc_claims> and <rename_sweep> with [claim-N] ids and the contract note', () => {
+    process.env.LIEN_DOC_TRUTH_V2 = 'on';
+    const ctx = contextWithPatches([
+      ['docs/architecture/worktree.md', DOC_CLAIM_PATCH],
+      ...RENAME_SWEEP_FILES,
+    ]);
+    const { initialMessage } = buildDocTruthPassPrompts(ctx);
+
+    expect(initialMessage).toContain('PER-CLAIM VERDICT CONTRACT');
+    expect(initialMessage).toContain('<doc_claims>');
+    expect(initialMessage).toContain('[claim-1] docs/architecture/worktree.md:');
+    expect(initialMessage).toContain('<rename_sweep>');
+    expect(initialMessage).toContain('[claim-2]');
+    expect(initialMessage).toContain('`oldSearchToken` → `newSearchToken`');
+    // Exactly one actual <doc_claims>/<rename_sweep> BLOCK renders (closing tags are a clean
+    // signal — DOC_PASS_INTRO's own prose mentions the opening tag name by name for guidance).
+    expect((initialMessage.match(/<\/doc_claims>/g) ?? []).length).toBe(1);
+    expect((initialMessage.match(/<\/rename_sweep>/g) ?? []).length).toBe(1);
+  });
+
+  it('buildDocTruthPassInitialMessageV2 omits <doc_claims>/<rename_sweep> entirely when the worklist is empty', () => {
+    const ctx = contextWithPatches([['packages/core/src/overlay.ts', CODE_PATCH]]);
+    const message = buildDocTruthPassInitialMessageV2(ctx, buildClaimWorklist(ctx));
+    // DOC_PASS_INTRO's own prose still names "<doc_claims>" for guidance even when the block is
+    // absent (matching v1's intro wording); the closing tag is the reliable "block rendered" signal.
+    expect(message).not.toContain('</doc_claims>');
+    expect(message).not.toContain('</rename_sweep>');
+    expect(message).toContain('PER-CLAIM VERDICT CONTRACT');
+  });
+});
+
+describe('postProcessDocTruthResult', () => {
+  const singleClaimCtx = () =>
+    contextWithPatches([['docs/architecture/worktree.md', DOC_CLAIM_PATCH]]);
+
+  it('is the identity (same reference) when the flag is off', () => {
+    const result = fakeResult([verdictFinding({ claimId: 'claim-1', verdict: 'contradicted' })]);
+    expect(postProcessDocTruthResult(result, singleClaimCtx())).toBe(result);
+  });
+
+  it('drops an "accurate" verdict entirely (stays silent when confirmed)', () => {
+    process.env.LIEN_DOC_TRUTH_V2 = 'on';
+    const result = fakeResult([
+      verdictFinding({ claimId: 'claim-1', verdict: 'accurate', message: 'confirmed' }),
+    ]);
+    const processed = postProcessDocTruthResult(result, singleClaimCtx());
+    expect(processed.findings).toHaveLength(0);
+    expect(processed.incomplete).toBe(false);
+  });
+
+  it('keeps a "contradicted" verdict as a real finding, stripped of claimId/verdict', () => {
+    process.env.LIEN_DOC_TRUTH_V2 = 'on';
+    const result = fakeResult([
+      verdictFinding({ claimId: 'claim-1', verdict: 'contradicted', message: 'stale claim' }),
+    ]);
+    const processed = postProcessDocTruthResult(result, singleClaimCtx());
+    expect(processed.findings).toHaveLength(1);
+    expect(processed.findings[0].message).toBe('stale claim');
+    expect((processed.findings[0] as Record<string, unknown>).claimId).toBeUndefined();
+    expect((processed.findings[0] as Record<string, unknown>).verdict).toBeUndefined();
+    expect(processed.incomplete).toBe(false);
+  });
+
+  it('keeps an "unverifiable" verdict as a real (warning) finding', () => {
+    process.env.LIEN_DOC_TRUTH_V2 = 'on';
+    const result = fakeResult([
+      verdictFinding({ claimId: 'claim-1', verdict: 'unverifiable', message: 'could not locate' }),
+    ]);
+    const processed = postProcessDocTruthResult(result, singleClaimCtx());
+    expect(processed.findings).toHaveLength(1);
+    expect(processed.findings[0].message).toBe('could not locate');
+    expect(processed.incomplete).toBe(false);
+  });
+
+  it('passes an ad hoc finding (no claimId) through unchanged, alongside a required verdict', () => {
+    process.env.LIEN_DOC_TRUTH_V2 = 'on';
+    const result = fakeResult([
+      verdictFinding({ claimId: 'claim-1', verdict: 'accurate' }),
+      verdictFinding({ filepath: 'other.md', line: 9, message: 'spotted myself', ruleId: 'x' }),
+    ]);
+    const processed = postProcessDocTruthResult(result, singleClaimCtx());
+    expect(processed.findings).toHaveLength(1);
+    expect(processed.findings[0].message).toBe('spotted myself');
+    expect(processed.incomplete).toBe(false);
+  });
+
+  it('marks the result incomplete with stopReason "incomplete_verdict" when the id is missing entirely', () => {
+    process.env.LIEN_DOC_TRUTH_V2 = 'on';
+    const result = fakeResult([]); // claim-1 never got a verdict
+    const processed = postProcessDocTruthResult(result, singleClaimCtx());
+    expect(processed.incomplete).toBe(true);
+    expect(processed.stopReason).toBe('incomplete_verdict');
+  });
+
+  it('is incomplete when a claimId is present but its verdict is missing/invalid', () => {
+    process.env.LIEN_DOC_TRUTH_V2 = 'on';
+    const result = fakeResult([verdictFinding({ claimId: 'claim-1', verdict: undefined })]);
+    const processed = postProcessDocTruthResult(result, singleClaimCtx());
+    expect(processed.incomplete).toBe(true);
+    expect(processed.stopReason).toBe('incomplete_verdict');
+    expect(processed.findings).toHaveLength(0); // never guess-promoted either
+  });
+
+  it('is incomplete when a claimId is present but its verdict is not a recognized value', () => {
+    process.env.LIEN_DOC_TRUTH_V2 = 'on';
+    const result = fakeResult([
+      verdictFinding({ claimId: 'claim-1', verdict: 'maybe' as never, message: 'bogus' }),
+    ]);
+    const processed = postProcessDocTruthResult(result, singleClaimCtx());
+    expect(processed.incomplete).toBe(true);
+    expect(processed.stopReason).toBe('incomplete_verdict');
+  });
+
+  it('is incomplete when the same claimId is verdicted twice (duplicate)', () => {
+    process.env.LIEN_DOC_TRUTH_V2 = 'on';
+    const result = fakeResult([
+      verdictFinding({ claimId: 'claim-1', verdict: 'accurate', message: 'first' }),
+      verdictFinding({ claimId: 'claim-1', verdict: 'contradicted', message: 'second' }),
+    ]);
+    const processed = postProcessDocTruthResult(result, singleClaimCtx());
+    expect(processed.incomplete).toBe(true);
+    expect(processed.stopReason).toBe('incomplete_verdict');
+  });
+
+  it('is incomplete when an entry names a claimId outside the worklist', () => {
+    process.env.LIEN_DOC_TRUTH_V2 = 'on';
+    const result = fakeResult([
+      verdictFinding({ claimId: 'claim-1', verdict: 'accurate' }),
+      verdictFinding({ claimId: 'claim-99', verdict: 'contradicted', message: 'phantom' }),
+    ]);
+    const processed = postProcessDocTruthResult(result, singleClaimCtx());
+    expect(processed.incomplete).toBe(true);
+    expect(processed.stopReason).toBe('incomplete_verdict');
+  });
+
+  it('keeps the ORIGINAL stopReason when the client was already incomplete for a real reason', () => {
+    process.env.LIEN_DOC_TRUTH_V2 = 'on';
+    const result = fakeResult([], undefined);
+    result.incomplete = true;
+    result.stopReason = 'budget';
+    const processed = postProcessDocTruthResult(result, singleClaimCtx());
+    expect(processed.incomplete).toBe(true);
+    expect(processed.stopReason).toBe('budget'); // NOT overwritten to incomplete_verdict
+  });
+
+  it('does not mutate the input result', () => {
+    process.env.LIEN_DOC_TRUTH_V2 = 'on';
+    const result = fakeResult([verdictFinding({ claimId: 'claim-1', verdict: 'contradicted' })]);
+    postProcessDocTruthResult(result, singleClaimCtx());
+    expect(result.findings).toHaveLength(1);
+    expect((result.findings[0] as Record<string, unknown>).claimId).toBe('claim-1');
   });
 });
