@@ -132,7 +132,13 @@ canary showed this can still happen even inside a dedicated, single-rule
 pass) becomes a machine-checkable completeness failure instead of a semantic
 judgment call the harness's assertions would otherwise have to infer. Both
 ship dark (default-off config/env flags) —
-mechanism proven, lift not yet calibrated. If you add a rule that keeps
+mechanism proven, lift not yet calibrated. The same contract has since been
+backported into doc-truth's own pass as an opt-in v2 mode
+(`LIEN_DOC_TRUTH_V2=on`, PR #807, also dark) — early paid screening there
+(3 votes) held the certified doc-truth canary and hit zero verdict-coverage
+gaps across a 48-id worklist, but per this guide's own golden rule 4, a
+screen is not a calibration; `--calibrate 10` on it is still the owner's
+call. If you add a rule that keeps
 losing the findings competition and its candidates are enumerable with a
 closed verdict set, a dedicated pass is the precedent to reach for — but
 only after proving competition is the bottleneck, and only for a rule that

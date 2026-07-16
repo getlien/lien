@@ -1,9 +1,11 @@
 # Agent-review pass architecture — `ReviewPassSpec` and the extra-pass executor
 
 Status: generalized executor + attestation v2 shipped (PR #799, merged).
-Three passes plug into it today — **doc-truth is production-on by default**;
-the **stale-duplicate** and **incomplete-handling** candidate loops are
-built, merged, and dark (default-off; see "Which passes are live" below).
+Three passes plug into it today — **doc-truth is production-on by default**
+(v1); the **stale-duplicate** and **incomplete-handling** candidate loops
+are built, merged, and dark (default-off), and doc-truth itself gained a
+dark, env-only v2 mode (PR #807) that backports the same per-candidate-
+verdict contract into its own pass — see "Which passes are live" below.
 See [ADR-014](decisions/0014-per-rule-candidate-loop-passes.md) for the
 decision this doc implements and its evidence/economics.
 
@@ -97,7 +99,7 @@ measured as a problem.
 
 | Pass | File | Gate (opt-in AND eligibility) | Budget formula | Toolset | Verdict vocabulary | Production status |
 |---|---|---|---|---|---|---|
-| doc-truth | `doc-truth-pass.ts` | `docTruthPass !== false` AND `LIEN_REVIEW_DOC_PASS` not disabling AND ≥1 doc claim | `round(base × 0.4)` | full 6-tool set (same as main pass) | open findings list (not per-candidate) | **Production-on** (default true) |
+| doc-truth | `doc-truth-pass.ts` | `docTruthPass !== false` AND `LIEN_REVIEW_DOC_PASS` not disabling AND ≥1 doc claim | `round(base × 0.4)` | full 6-tool set (same as main pass) | v1 (default): open findings list. v2 (`LIEN_DOC_TRUTH_V2=on`, dark): `accurate \| contradicted \| unverifiable` per claim id | **Production-on** (v1 default true; v2 dark, env-only) |
 | stale-duplicate loop | `stale-duplicate-pass.ts` | `config.staleDuplicatePass` or `LIEN_STALE_DUP_PASS=on` AND ≥1 high-confidence, same-file candidate | `clamp(2000 + 800×min(n,8), 4000, 30000)` | `read_file`, `grep_codebase` only | `stale \| intentional-reuse \| unverifiable` | **Dark** (default false) |
 | incomplete-handling loop | `incomplete-handling-pass.ts` | `config.incompleteHandlingPass` or `LIEN_INCOMPLETE_PASS=on` AND ≥1 candidate (any of 3 shapes) | `clamp(2500 + 900×min(n,20), 5000, 35000)` | `read_file`, `get_files_context`, `grep_codebase` | `incomplete \| handled \| intentional \| unverifiable` | **Dark** (default false) |
 
@@ -123,6 +125,28 @@ within 2 lines) *at least as severe* — main pass wins on a tie
 (`mergeDocTruthFindings`, `doc-truth-pass.ts:215`). Result-state merge lifts
 a low/absent risk level to `medium` when doc-truth found `error`-severity
 contradictions (`mergeDocPassIntoResult`).
+
+**v2 (PR #807, merged same night as the two candidate loops above): doc-truth
+backports the per-candidate-verdict contract into its own pass.** Env-only
+opt-in (`LIEN_DOC_TRUTH_V2=on`, no config field — `isDocTruthV2Enabled`,
+default off), entirely inside `doc-truth-pass.ts` with zero changes to
+`review-pass.ts`, `attestation.ts`, or `index.ts`'s `EXTRA_PASSES`. Every
+`<doc_claims>` entry and `<rename_sweep>` item gets a stable `claim-N` id
+(`buildClaimWorklist`), and the model must emit exactly one verdict
+(`accurate | contradicted | unverifiable`) per id via an appended
+`<output_format_v2_override>` system-prompt section — same
+`postProcessResult` mechanism the two candidate loops use
+(`postProcessDocTruthResult`, wired into `DOC_TRUTH_PASS_SPEC`), including
+the same `incomplete_verdict` honesty rigor for a missing/duplicate/
+unrecognized-id or invalid-verdict claim entry. One deliberate difference:
+unlike the two loops, v2's contract stays **open beyond the worklist** — an
+extra finding for a claim the model spots itself (no `claimId`) still passes
+through as an ordinary finding, matching the rule's existing "also skim for
+any claim not listed" allowance. With the flag off, every v2 function is
+verified byte-identical to v1's own output (PR #807's byte-diff census). This
+is now the third pass built on the per-candidate-verdict pattern — evidence
+the pattern generalizes beyond the two purpose-built loops it was designed
+for, back onto the original pass that inspired it.
 
 ### stale-duplicate candidate loop
 
@@ -185,12 +209,16 @@ way the stale-duplicate pilot's equivalent guard was.
 
 ## Per-candidate verdict contract and `incomplete_verdict` honesty semantics
 
-Both candidate loops replace an open findings-list contract with **one
-verdict object required per candidate id**, carried as extra fields
-(`candidateId`, `verdict`) inside the standard `findings` JSON array — so
-the shared client's existing parse/validate pipeline needs zero changes.
-Each pass's `postProcessResult` hook (`postProcessStaleDuplicateResult`,
-`postProcessIncompleteHandlingResult`):
+All three passes now use variants of the same contract: **one verdict
+object required per candidate/claim id**, carried as extra fields
+(`candidateId`/`claimId`, `verdict`) inside the standard `findings` JSON
+array — so the shared client's existing parse/validate pipeline needs zero
+changes. The two candidate loops closed the contract to the worklist
+entirely; doc-truth's v2 mode (above) keeps it open to ad hoc findings
+beyond the worklist, a deliberate difference reflecting that rule's own
+"also skim for anything not listed" allowance. Each pass's own
+`postProcessResult` hook (`postProcessStaleDuplicateResult`,
+`postProcessIncompleteHandlingResult`, `postProcessDocTruthResult`):
 
 1. Checks `hasCompleteVerdictCoverage`: every expected candidate id appears
    **exactly once**, each with a recognized verdict value. A duplicate id,
@@ -201,8 +229,10 @@ Each pass's `postProcessResult` hook (`postProcessStaleDuplicateResult`,
 2. Filters to only the "real finding" verdict(s) (`stale` for the pilot;
    `incomplete` for the unified loop — and, for the latter, only when
    `candidateId` also names a real worklist entry, closing a hallucinated-id
-   loophole a code reviewer caught during PR #804), stripping the
-   loop-only fields via `toCleanFinding`.
+   loophole a code reviewer caught during PR #804; `contradicted`/
+   `unverifiable` for doc-truth v2, dropping `accurate` ones and passing
+   any ad hoc no-`claimId` finding through unchanged), stripping the
+   loop-only fields via `toCleanFinding`/`toCleanDocTruthFinding`.
 3. Marks the pass's own result `incomplete` (stop reason
    `'incomplete_verdict'`, a new `AgentStopReason` value,
    `packages/review/src/plugins/agent/types.ts`) when coverage failed — but
@@ -280,7 +310,10 @@ fires exactly once per pass that ran.
 
 - **doc-truth** — production-on, has been since PR #733. Kill-switches:
   `config.docTruthPass: false` or `LIEN_REVIEW_DOC_PASS=0` (documented in
-  `packages/action/README.md` as the one Action-level tunable env var).
+  `packages/action/README.md` as the one Action-level tunable env var). Its
+  v2 per-claim-verdict contract (PR #807, `LIEN_DOC_TRUTH_V2=on`, env-only,
+  no config field) is a separate, **dark** opt-in layered on top — v1's
+  open-findings-list behavior is unchanged when v2 is off.
 - **stale-duplicate loop** — merged (PR #803, guard-fixed in PR #805) but
   **dark**: `config.staleDuplicatePass` defaults `false`; opt in via that
   config key or `LIEN_STALE_DUP_PASS=on`. Not exposed through
