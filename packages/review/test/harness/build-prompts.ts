@@ -14,6 +14,12 @@
  * surfaced here too, since it is built by a separate function
  * (`buildDocTruthPassPrompts`) from the main pass's `buildInitialMessage`.
  *
+ * Same for the stale-duplicate candidate-loop PILOT (`staleDuplicatePass`,
+ * per-rule-loops design doc §4) — dark by default, so `fires` is false
+ * unless the fixture's captured config (or LIEN_STALE_DUP_PASS=on in the
+ * environment this script runs in) opts in AND the loop-eligibility
+ * threshold is met.
+ *
  * Usage: tsx build-prompts.ts <fixture.json>
  */
 
@@ -25,6 +31,11 @@ import {
   shouldRunDocTruthPass,
   buildDocTruthPassPrompts,
 } from '../../src/plugins/agent/doc-truth-pass.js';
+import {
+  shouldRunStaleDuplicatePass,
+  buildStaleDuplicatePassPrompts,
+  applyStaleDuplicateMainOverride,
+} from '../../src/plugins/agent/stale-duplicate-pass.js';
 import type { AgentConfig } from '../../src/plugins/agent/types.js';
 
 import { loadFixture } from './fixture-loader.js';
@@ -37,19 +48,22 @@ async function main(): Promise<void> {
   }
   const fixturePath = resolve(fixtureArg);
   const ctx = await loadFixture(fixturePath);
+  const config = ctx.config as unknown as AgentConfig | undefined;
 
   const triggerCtx = buildTriggerContext(ctx);
-  const rules = selectRules(BUILTIN_RULES, triggerCtx);
+  const rules = applyStaleDuplicateMainOverride(selectRules(BUILTIN_RULES, triggerCtx));
 
   const systemPrompt = buildSystemPrompt(rules);
   const initialMessage = buildInitialMessage(ctx, { blastRadius: null, rules });
 
-  const docTruthFires = shouldRunDocTruthPass(
-    ctx,
-    ctx.config as unknown as AgentConfig | undefined,
-  );
+  const docTruthFires = shouldRunDocTruthPass(ctx, config);
   const docTruthPass = docTruthFires
     ? { fires: true as const, ...buildDocTruthPassPrompts(ctx) }
+    : { fires: false as const };
+
+  const staleDuplicateFires = shouldRunStaleDuplicatePass(ctx, config);
+  const staleDuplicatePass = staleDuplicateFires
+    ? { fires: true as const, ...buildStaleDuplicatePassPrompts(ctx) }
     : { fires: false as const };
 
   const output = {
@@ -59,6 +73,7 @@ async function main(): Promise<void> {
     systemPrompt,
     initialMessage,
     docTruthPass,
+    staleDuplicatePass,
   };
 
   process.stdout.write(JSON.stringify(output, null, 2) + '\n');

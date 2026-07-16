@@ -498,7 +498,7 @@ is not a qualifying test; an actual test file + line is.`,
   source: 'builtin',
 };
 
-const STALE_DUPLICATE: ReviewRule = {
+export const STALE_DUPLICATE: ReviewRule = {
   id: 'stale-duplicate',
   name: 'Stale Duplicate Literal',
   description:

@@ -550,6 +550,28 @@ describe('appendIncompleteNotice — severity by run outcome', () => {
     expect(findings[0].message).toContain('code findings are unaffected');
   });
 
+  it('keeps a stale-duplicate-loop-only incomplete a WARNING, naming that pass generically', () => {
+    // The generic incompleteFromPass counterpart to incompleteFromDocPass —
+    // any future named extra pass (not just doc-truth) gets the same
+    // "that pass's findings are partial, main review unaffected" shape.
+    const findings: ReviewFinding[] = [];
+    appendIncompleteNotice(
+      findings,
+      'agent-review',
+      baseResult({
+        neverRan: true,
+        incompleteFromPass: 'stale-duplicate',
+        stopReason: 'incomplete_verdict',
+      }),
+    );
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].message).toContain('The stale-duplicate pass did not finish');
+    expect(findings[0].message).toContain('did not produce a verdict for every candidate');
+    expect(findings[0].message).toContain("main review's findings are unaffected");
+  });
+
   it('is a no-op for a complete run', () => {
     const findings: ReviewFinding[] = [];
     appendIncompleteNotice(findings, 'agent-review', baseResult({ incomplete: false }));

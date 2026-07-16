@@ -58,6 +58,12 @@ export interface AgentConfig {
    * available — see `summary-only-pass.ts`'s `isSummaryOnlyMode`.
    */
   summaryEnabled?: boolean;
+  /**
+   * Run the stale-duplicate candidate-loop PILOT (per-rule-loops design doc
+   * §4). Default false — this is a dark-launched pilot; set true (or env
+   * LIEN_STALE_DUP_PASS=on) to enable it. See `stale-duplicate-pass.ts`.
+   */
+  staleDuplicatePass?: boolean;
 }
 
 /** A single finding produced by the agent during review. */
@@ -202,8 +208,15 @@ export interface AgentTrace {
   turns: TurnTrace[];
 }
 
-/** Why the agent's tool-use loop ended. */
-export type AgentStopReason = 'completed' | 'budget' | 'max_turns' | 'error';
+/**
+ * Why the agent's tool-use loop ended. `incomplete_verdict` is set by a
+ * candidate-loop pass's `postProcessResult` (see `review-pass.ts`) when the
+ * model returned a syntactically complete verdict (has a summary — the
+ * client's OWN `incomplete` check passes) but didn't cover every candidate
+ * id in its own worklist — a distinct honesty gap from budget/max_turns/error,
+ * which are all client-transport-level stops.
+ */
+export type AgentStopReason = 'completed' | 'budget' | 'max_turns' | 'error' | 'incomplete_verdict';
 
 /** Result of an agent review run, including findings, usage, and turn count. */
 export interface AgentResult {
@@ -245,6 +258,18 @@ export interface AgentResult {
    * the doc pass instead of implying the whole review is partial.
    */
   incompleteFromDocPass?: boolean;
+  /**
+   * Set by a candidate-loop pass's `mergeResultState` (e.g.
+   * `stale-duplicate-pass.ts`) to this pass's own `name` when ONLY that pass
+   * is incomplete and the main pass finished cleanly — the generic
+   * counterpart to `incompleteFromDocPass` for any pass beyond doc-truth, so
+   * `appendIncompleteNotice` (index.ts) can name the right pass in its
+   * notice instead of implying the whole review is partial. Doc-truth keeps
+   * its own dedicated boolean (unchanged, to avoid touching its already-
+   * tested wording); a future pass should prefer this generic field over
+   * adding another dedicated boolean.
+   */
+  incompleteFromPass?: string;
   /** Per-turn trace data — only populated when the caller wires up trace capture. */
   trace?: AgentTrace;
 }
