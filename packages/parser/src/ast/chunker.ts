@@ -207,6 +207,12 @@ export function chunkByAST(
     language,
     context.fileExports,
     context.importedSymbols,
+    // When no top-level node was recognized (e.g. a file containing only bare
+    // statements/calls, like a single `test(...)` block with no exported
+    // declaration), coveredRanges is empty and the single "uncovered" range
+    // below is the entire file — the file's only chance at a chunk. See
+    // extractUncoveredCode for why minChunkSize must not apply there.
+    topLevelNodes.length === 0,
   );
 
   // Combine and sort by line number
@@ -475,6 +481,21 @@ function isValidChunk(chunk: ASTChunk, minChunkSize: number): boolean {
 /**
  * Extract code that wasn't covered by function/class chunks
  * (imports, exports, top-level statements)
+ *
+ * `minChunkSize` exists to avoid emitting noise chunks for small leftover
+ * gaps *alongside* real function/class chunks in an otherwise normal file
+ * (e.g. a lone blank-line gap between two functions). It must not apply when
+ * the resulting chunk is the sole representation of the file's content —
+ * doing so wouldn't shrink a chunk, it would silently drop the whole file
+ * from the index. Two cases bypass it, both via `skipMinSize` below:
+ *   - `hasExports`: barrel/re-export-only files (see "barrel/re-export
+ *     files" tests in chunker.test.ts).
+ *   - `fileHasNoTopLevelChunks`: files with zero recognized top-level nodes
+ *     at all — e.g. a file containing only a bare `test(...)` call with no
+ *     exported declaration. `coveredRanges` is empty in that case, so there
+ *     is exactly one uncovered range and it spans the entire file.
+ * Either way, `chunk.content.length > 0` still filters out empty/whitespace-
+ * only files.
  */
 function extractUncoveredCode(
   lines: string[],
@@ -485,16 +506,18 @@ function extractUncoveredCode(
   language: SupportedLanguage,
   fileExports?: string[],
   importedSymbols?: Record<string, string[]>,
+  fileHasNoTopLevelChunks = false,
 ): ASTChunk[] {
   const uncoveredRanges = findUncoveredRanges(coveredRanges, lines.length);
 
   const hasExports = fileExports && fileExports.length > 0;
+  const skipMinSize = hasExports || fileHasNoTopLevelChunks;
 
   return uncoveredRanges
     .map(range =>
       createChunkFromRange(range, lines, filepath, language, imports, fileExports, importedSymbols),
     )
-    .filter(chunk => (hasExports ? chunk.content.length > 0 : isValidChunk(chunk, minChunkSize)));
+    .filter(chunk => (skipMinSize ? chunk.content.length > 0 : isValidChunk(chunk, minChunkSize)));
 }
 
 /**

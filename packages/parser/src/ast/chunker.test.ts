@@ -640,6 +640,66 @@ export { default as qux } from './qux';`;
     });
   });
 
+  describe('small files with no recognized top-level node (#772)', () => {
+    // production's chunkFile() computes minChunkSize = Math.floor(chunkSize / 10)
+    // with the default chunkSize of 75, i.e. 7 -- passed explicitly here so
+    // these tests pin the exact boundary hit during real indexing, independent
+    // of chunkByAST's own bare default (5).
+    const PROD_MIN_CHUNK_SIZE = 7;
+
+    it('should produce a chunk for a small file containing only a bare test() call', () => {
+      // The exact shape that was silently dropped during PR #772's dogfood:
+      // a bare top-level call expression is not a recognized top-level node
+      // (not a function/class/interface/variable declaration), so the whole
+      // file used to fall through to the minChunkSize-filtered "uncovered
+      // code" path and vanish -- no chunk, no manifest entry, no error.
+      const content = `import { test, expect } from 'vitest';
+
+test('does something', () => {
+  expect(1).toBe(1);
+});`;
+
+      const chunks = chunkByAST('tiny.test.ts', content, { minChunkSize: PROD_MIN_CHUNK_SIZE });
+
+      expect(chunks.length).toBeGreaterThan(0);
+      expect(chunks.some(c => c.content.includes("test('does something'"))).toBe(true);
+    });
+
+    it('should produce a chunk for a small single-function file', () => {
+      const content = `export function foo() {
+  return 1;
+}`;
+
+      const chunks = chunkByAST('foo.ts', content, { minChunkSize: PROD_MIN_CHUNK_SIZE });
+
+      expect(chunks.length).toBeGreaterThan(0);
+      expect(chunks.some(c => c.metadata.symbolName === 'foo')).toBe(true);
+    });
+
+    it('should produce a chunk for a 1-line export', () => {
+      const content = 'export const foo = 1;';
+
+      const chunks = chunkByAST('foo.ts', content, { minChunkSize: PROD_MIN_CHUNK_SIZE });
+
+      expect(chunks.length).toBe(1);
+      expect(chunks[0].content).toBe(content);
+    });
+
+    it('should still produce no chunks for an empty file', () => {
+      const chunks = chunkByAST('empty.ts', '', { minChunkSize: PROD_MIN_CHUNK_SIZE });
+
+      expect(chunks).toHaveLength(0);
+    });
+
+    it('should still produce no chunks for a whitespace-only file', () => {
+      const content = '   \n\t\n   \n';
+
+      const chunks = chunkByAST('whitespace.ts', content, { minChunkSize: PROD_MIN_CHUNK_SIZE });
+
+      expect(chunks).toHaveLength(0);
+    });
+  });
+
   describe('error handling', () => {
     it('should throw error for unsupported language', () => {
       const content = 'print("Hello")';
