@@ -43,9 +43,18 @@
  * the falsifying fact.
  *
  * Capture command (fixture carries pr.headSha 4480f85ed931…, base c7be7b68…):
- *   npx tsx packages/review/test/harness/capture-pr.ts 711 \
- *     packages/review/test/harness/fixtures/doc-truth/pr711-changeset-export-claim.fixture.json \
- *     --sha 4480f85ed931e461a7591176d6a863a0aec750b8
+ *   PR #711 was squash-merged (single-parent merge commit ee2bee8), so its
+ *   branch commits — including this fixture's pinned 4480f85 — are NOT
+ *   reachable from origin/main and are absent from a fresh clone/worktree;
+ *   `git rev-parse --verify 4480f85...^{commit}` fails there with "unknown
+ *   revision", which is what surfaces as "stale SHA, couldn't regenerate".
+ *   GitHub still serves the branch's commits via the PR's own
+ *   `refs/pull/711/head` ref (same gotcha documented for the `crossrepo/`
+ *   fixtures in this harness's README), so fetch that first:
+ *     git fetch origin refs/pull/711/head
+ *     npx tsx packages/review/test/harness/capture-pr.ts 711 \
+ *       packages/review/test/harness/fixtures/doc-truth/pr711-changeset-export-claim.fixture.json \
+ *       --sha 4480f85ed931e461a7591176d6a863a0aec750b8
  *
  * Structural note for calibration: `.changeset/**` is a doc-truth guidance
  * surface, so the changeset prose rides in <guidance_surface_changes>; the
