@@ -49,7 +49,7 @@ import {
   computeStaleLiteralCandidates,
   type StaleLiteralCandidate,
 } from '../../stale-literal-signals.js';
-import type { ReviewPassSpec } from './review-pass.js';
+import { renderPassPrHeader, type ReviewPassSpec } from './review-pass.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -209,13 +209,6 @@ function candidateIds(candidates: StaleLiteralCandidate[]): string[] {
   return candidates.map((_, i) => `candidate-${i + 1}`);
 }
 
-/** The PR title/body header, mirroring the main pass's <pr_metadata> block. */
-function renderPrHeader(context: ReviewContext): string | null {
-  if (!context.pr) return null;
-  const body = context.pr.body ? `\nDescription: ${context.pr.body}` : '';
-  return `<pr_metadata>\nTitle: ${context.pr.title}${body}\n</pr_metadata>`;
-}
-
 const HUNK_HEADER_RE = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
 
 /**
@@ -361,7 +354,7 @@ ${buildOutputFormat(ids)}`;
 export function buildStaleDuplicatePassInitialMessage(context: ReviewContext): string {
   const candidates = computeStaleLiteralCandidates(context);
   const sections: string[] = [];
-  const header = renderPrHeader(context);
+  const header = renderPassPrHeader(context);
   if (header) sections.push(header);
   sections.push(renderWorklist(context, candidates));
   sections.push('Judge every candidate above and output your verdicts as JSON.');

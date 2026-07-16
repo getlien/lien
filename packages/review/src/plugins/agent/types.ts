@@ -64,6 +64,14 @@ export interface AgentConfig {
    * LIEN_STALE_DUP_PASS=on) to enable it. See `stale-duplicate-pass.ts`.
    */
   staleDuplicatePass?: boolean;
+  /**
+   * Run the incomplete-handling candidate loop (per-rule-loops design doc
+   * §7 item 5) — unifies the variant-sweep/sibling-surface/unread-field
+   * signals into one dedicated pass. Default false — dark-launched; set
+   * true (or env LIEN_INCOMPLETE_PASS=on) to enable it. See
+   * `incomplete-handling-pass.ts`.
+   */
+  incompleteHandlingPass?: boolean;
 }
 
 /** A single finding produced by the agent during review. */
