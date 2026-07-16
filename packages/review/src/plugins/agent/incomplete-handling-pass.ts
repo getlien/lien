@@ -517,10 +517,16 @@ function hasCompleteVerdictCoverage(ids: string[], raw: RawVerdictFinding[]): bo
 
 /**
  * Reduce this pass's raw per-candidate verdict array down to real findings
- * (`verdict === 'incomplete'` only, cleaned of the loop-only fields), and
- * mark the result honestly incomplete when the verdict array doesn't
- * cleanly cover the worklist — same honesty contract as the pilot's
- * `postProcessStaleDuplicateResult`. When the underlying client result was
+ * (`verdict === 'incomplete'` AND `candidateId` names a real worklist entry
+ * only, cleaned of the loop-only fields), and mark the result honestly
+ * incomplete when the verdict array doesn't cleanly cover the worklist —
+ * same honesty contract as the pilot's `postProcessStaleDuplicateResult`.
+ * The candidateId check is required, not just the verdict value: a
+ * hallucinated/out-of-worklist id (`hasCompleteVerdictCoverage` already
+ * flags the RESULT incomplete for it) must not ALSO leak through as a real
+ * finding just because it happens to carry `verdict: 'incomplete'` — a
+ * phantom candidate is not a genuine one, regardless of the honesty flag
+ * (CodeRabbit finding on this PR). When the underlying client result was
  * ALREADY incomplete for a real reason (budget/max_turns/error), that
  * reason is kept as-is; `incomplete_verdict` is only used when the model
  * otherwise returned a syntactically complete verdict.
@@ -530,13 +536,21 @@ export function postProcessIncompleteHandlingResult(
   context: ReviewContext,
 ): AgentResult {
   const ids = candidateIds(computeIncompleteHandlingCandidates(context));
+  const expected = new Set(ids);
   const raw = result.findings as RawVerdictFinding[];
   const coverageIncomplete = !hasCompleteVerdictCoverage(ids, raw);
   const wasAlreadyIncomplete = result.incomplete;
 
   return {
     ...result,
-    findings: raw.filter(f => f.verdict === 'incomplete').map(toCleanFinding),
+    findings: raw
+      .filter(
+        f =>
+          f.verdict === 'incomplete' &&
+          typeof f.candidateId === 'string' &&
+          expected.has(f.candidateId),
+      )
+      .map(toCleanFinding),
     incomplete: wasAlreadyIncomplete || coverageIncomplete,
     stopReason:
       !wasAlreadyIncomplete && coverageIncomplete ? 'incomplete_verdict' : result.stopReason,

@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { CodeChunk } from '@liendev/parser';
 
 import {
@@ -226,9 +226,25 @@ function fakeResult(overrides: Partial<AgentResult> = {}): AgentResult {
   };
 }
 
-afterEach(() => {
+// Restore caller state rather than unconditionally deleting — a preconfigured
+// value in the surrounding environment must survive this file's tests intact
+// (CodeRabbit finding on this PR).
+let previousIncompletePass: string | undefined;
+let previousIncompleteMain: string | undefined;
+
+beforeEach(() => {
+  previousIncompletePass = process.env.LIEN_INCOMPLETE_PASS;
+  previousIncompleteMain = process.env.LIEN_INCOMPLETE_MAIN;
   delete process.env.LIEN_INCOMPLETE_PASS;
   delete process.env.LIEN_INCOMPLETE_MAIN;
+});
+
+afterEach(() => {
+  if (previousIncompletePass === undefined) delete process.env.LIEN_INCOMPLETE_PASS;
+  else process.env.LIEN_INCOMPLETE_PASS = previousIncompletePass;
+
+  if (previousIncompleteMain === undefined) delete process.env.LIEN_INCOMPLETE_MAIN;
+  else process.env.LIEN_INCOMPLETE_MAIN = previousIncompleteMain;
 });
 
 // ---------------------------------------------------------------------------
@@ -618,6 +634,10 @@ describe('postProcessIncompleteHandlingResult', () => {
     const result = postProcessIncompleteHandlingResult(raw, variantOnlyContext());
     expect(result.incomplete).toBe(true);
     expect(result.stopReason).toBe('incomplete_verdict');
+    // The phantom out-of-worklist entry must never leak through as a real
+    // finding despite carrying verdict:"incomplete" (CodeRabbit finding on
+    // this PR: the honesty flag alone doesn't prove it was discarded).
+    expect(result.findings).toHaveLength(0);
   });
 
   it('requires a verdict per id across a mixed (3-shape) worklist', () => {
