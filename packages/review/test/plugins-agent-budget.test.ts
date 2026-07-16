@@ -9,7 +9,11 @@ import {
 } from '../src/plugins/agent/index.js';
 import { scaleAgentBudget, resolveAgentBudget, summaryOnlyEligibleFor } from '../src/review-pr.js';
 import type { ReviewCoreContext } from '../src/review-pr.js';
-import { DEFAULT_REVIEW_MODEL, MAX_REVIEW_TOKEN_BUDGET } from '../src/defaults.js';
+import {
+  DEFAULT_REVIEW_MODEL,
+  MAX_REVIEW_TOKEN_BUDGET,
+  REVIEW_TOKEN_BUDGET_MULTIPLIERS,
+} from '../src/defaults.js';
 import { silentLogger } from '../src/test-helpers.js';
 import type { Logger } from '../src/logger.js';
 import type { PresentContext, ReviewFinding } from '../src/plugin-types.js';
@@ -556,13 +560,31 @@ describe('scaleAgentBudget — model-aware multiplier', () => {
   });
 
   it('always returns an integer budget (the config schema requires int)', () => {
-    // 40002 chars → ceil(/4)=10001 → base 76001 (odd). ×2.0 stays whole (152002),
-    // but Math.round in the implementation stays defensive for any future
-    // model with a fractional multiplier — this just guards the int contract.
+    // 40002 chars → ceil(/4)=10001 → base 76001 (odd). Kimi's ×2.0 stays whole
+    // (152002) on its own, so this only guards the int contract for Kimi's
+    // current multiplier — the rounding path itself is exercised below.
     const odd = [{ content: 'x'.repeat(40_002) }];
     const { maxTokenBudget } = scaleAgentBudget(5, odd, DEFAULT_REVIEW_MODEL);
     expect(Number.isInteger(maxTokenBudget)).toBe(true);
     expect(maxTokenBudget).toBe(152_002);
+  });
+
+  it('rounds a genuinely fractional multiplier to an integer', () => {
+    // Kimi's 2.0x can never produce a fraction (integer base * 2 is always
+    // integer), so it can't exercise Math.round. Register a synthetic model
+    // with a fractional multiplier to prove the rounding actually happens,
+    // not just that Kimi's current value happens to stay whole.
+    const testModel = 'test/fractional-multiplier-model';
+    REVIEW_TOKEN_BUDGET_MULTIPLIERS[testModel] = 1.3;
+    try {
+      // base 76001 (odd, from the 40002-char case above) × 1.3 = 98801.3.
+      const { maxTokenBudget } = scaleAgentBudget(5, [{ content: 'x'.repeat(40_002) }], testModel);
+      expect(Number.isInteger(maxTokenBudget)).toBe(true);
+      expect(maxTokenBudget).toBe(Math.round(76_001 * 1.3));
+      expect(maxTokenBudget).toBe(98_801);
+    } finally {
+      delete REVIEW_TOKEN_BUDGET_MULTIPLIERS[testModel];
+    }
   });
 
   it('produces a config the agent-review schema accepts', () => {

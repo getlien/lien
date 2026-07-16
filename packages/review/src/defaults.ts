@@ -65,10 +65,12 @@ export const MAX_REVIEW_TOKEN_BUDGET = 250_000;
  * one-off. 1.5x was originally calibrated (#598) to the FLOOR of observed
  * need ("~160-180K for a real multi-file review"), leaving no headroom above
  * it; 2.0x moves the typical medium-PR budget from ~162K to ~216K, clearing
- * that range with margin. Cost impact is ~$0.00092/token and ONLY applies to
- * runs that actually use the extra headroom (a ceiling raise doesn't change
- * agent behavior on runs that already finish under budget) — a few cents on
- * the affected runs, nothing on the rest.
+ * that range with margin. Cost impact, at the observed blended rate of
+ * ~$0.92/million tokens (~$0.00092 per 1,000 tokens — job 87554927152's
+ * $0.1368/148,298 tokens), is a few cents on the runs that actually use the
+ * extra headroom (e.g. the cited job's 48,583-token increase: ~$0.045) — a
+ * ceiling raise doesn't change agent behavior on runs that already finish
+ * under budget, so those cost nothing extra.
  */
 export const REVIEW_TOKEN_BUDGET_MULTIPLIERS: Record<string, number> = {
   [DEFAULT_REVIEW_MODEL]: 2.0,
