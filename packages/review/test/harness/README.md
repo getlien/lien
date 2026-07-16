@@ -120,13 +120,18 @@ npx tsx <lien>/packages/review/test/harness/capture-pr.ts 2334 \
 | --- | :---: | --- | --- | --- |
 | encode/starlette | #2334 | `crossrepo/pr2334-etag-weak-indicator-strip` | `.strip(" W/")` char-set gotcha | characterization (measured 5/10 — borderline-judgment, see header) |
 | encode/starlette | #2191 | `crossrepo/pr2191-templateresponse-offbyone` | positional-args index collision | **canary** (certified 10/10, 2026-07-12) |
-| pallets/werkzeug | #2678 | `crossrepo/pr2678-multipart-index-offset` | slice-relative index used as absolute | characterization (cert deferred) |
-| pallets/werkzeug | #2017 | `crossrepo/pr2017-multipart-boundary-regex` | unescaped client boundary in regex | characterization (cert deferred) |
+| pallets/werkzeug | #2678 | `crossrepo/pr2678-multipart-index-offset` | slice-relative index used as absolute | **canary** (certified 10/10, 2026-07-16) |
+| pallets/werkzeug | #2017 | `crossrepo/pr2017-multipart-boundary-regex` | unescaped client boundary in regex | characterization (measured 8/10 — below bar, see header) |
 
-The two `characterization`-tagged entries have 3/3 Kimi vote evidence but
-not yet a `--calibrate 10` certification — promote by running the
-calibration, recording the result in the header, and flipping the tag to
-`canary` (the bar is the same ≥9/10 as everywhere else).
+The two remaining `characterization`-tagged entries are both below the ≥9/10
+bar, for different reasons: `pr2334-etag-weak-indicator-strip` has 3/3 Kimi
+vote evidence but scores 5/10 on `--calibrate 10` (borderline judgment, not a
+budget deferral). `pr2017-multipart-boundary-regex` raw-scored 10/10 on
+`--calibrate 10` (2026-07-16), but a post-cert dogfood assert-cli smoke test
+(perfect/empty/distractor, see below) found its keyword list's bare
+identifiers/domain nouns let 2 of the 10 votes false-pass on unrelated
+findings; re-scored against the corrected keyword list its true rate is
+8/10. See each header before spending more calibration budget or re-promoting.
 
 ## Negative-regression fixtures
 
