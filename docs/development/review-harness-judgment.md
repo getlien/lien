@@ -111,16 +111,43 @@ saturated — discovery, verification budget, or the findings list — before
 writing another prompt line. Traces answer this: does the model never see
 it, see it and run out of budget, or see it and decline?
 
-## The two-pass architecture
+## The extra-pass architecture
 
 Since PR #733, `analyze()` runs a second, claims-only pass when a PR's touched
 doc surfaces carry claim-shaped prose: doc-truth rule alone, evidence-carrying
 worklist, no competing rules, ~40% budget, findings deduped and merged,
 failure-isolated (an incomplete doc pass surfaces its own notice rather than
 reading as "no doc issues"). Kill-switches: config `docTruthPass: false` or
-`LIEN_REVIEW_DOC_PASS=0`. If you add a rule that keeps losing the findings
-competition, this is the precedent to reach for — but only after proving
-competition is the bottleneck.
+`LIEN_REVIEW_DOC_PASS=0`.
+
+PR #799 generalized that one hardcoded pass into a `ReviewPassSpec` contract
+plus a serial `runExtraPasses` executor, so any rule with a boundable,
+enumerable candidate worklist can get its own dedicated pass the same way.
+Two more have since been built this way — `stale-duplicate-pass.ts` (PR
+#803) and `incomplete-handling-pass.ts` (PR #804) — each replacing doc-truth's
+open findings list with a **per-candidate-ID-required verdict contract**: the
+model must return exactly one verdict per candidate id, so a candidate
+silently dropped from a long worklist (the `doc-truth/pr658-search-code-rename`
+canary showed this can still happen even inside a dedicated, single-rule
+pass) becomes a machine-checkable completeness failure instead of a semantic
+judgment call the harness's assertions would otherwise have to infer. Both
+ship dark (default-off config/env flags) —
+mechanism proven, lift not yet calibrated. The same contract has since been
+backported into doc-truth's own pass as an opt-in v2 mode
+(`LIEN_DOC_TRUTH_V2=on`, PR #807, also dark) — early paid screening there
+(3 votes) held the certified doc-truth canary and hit zero verdict-coverage
+gaps across a 48-id worklist, but per this guide's own golden rule 4, a
+screen is not a calibration; `--calibrate 10` on it is still the owner's
+call. If you add a rule that keeps
+losing the findings competition and its candidates are enumerable with a
+closed verdict set, a dedicated pass is the precedent to reach for — but
+only after proving competition is the bottleneck, and only for a rule that
+actually fits the candidate-loop shape (an open-investigation rule like
+`concurrency-race` or `boundary-change` does not — see
+[ADR-014](../architecture/decisions/0014-per-rule-candidate-loop-passes.md)
+for the full reasoning and evidence, and
+[Agent-Review Pass Architecture](../architecture/review-pass-architecture.md)
+for the contract-level detail).
 
 ## Known frontiers (don't re-litigate without new evidence)
 
@@ -139,7 +166,9 @@ competition is the bottleneck.
 - Harness mechanics + runbooks: `packages/review/test/harness/README.md`
 - Rules + trigger logic: `packages/review/src/plugins/agent/rules.ts`
 - Deterministic signals: `packages/review/src/*-signals.ts`
-- The doc-truth second pass: `packages/review/src/plugins/agent/doc-truth-pass.ts`
+- The extra-pass executor: `packages/review/src/plugins/agent/review-pass.ts`
+- The three shipped passes: `doc-truth-pass.ts`, `stale-duplicate-pass.ts`,
+  `incomplete-handling-pass.ts` (same directory)
 - Calibration driver: `packages/review/test/harness/run.ts` (`--calibrate`,
   `--trace`, `--fixture`, `--rule`, `--model`, `--bail`; traces persist to
   `.wip/traces/` by default)
