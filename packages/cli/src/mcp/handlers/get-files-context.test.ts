@@ -449,7 +449,71 @@ describe('formatComplexityHeadroomWarning', () => {
       [{ symbol: 'a', metric: 'cognitive', value: 18, threshold: 15 }],
       2,
     );
-    expect(warning).toContain('(+2 more near/over budget)');
+    expect(warning).toContain('… and 2 more at/near budget');
+  });
+
+  it('renders exactly 3 entries with no remainder', () => {
+    const warning = formatComplexityHeadroomWarning([
+      { symbol: 'a', metric: 'cognitive', value: 18, threshold: 15 },
+      { symbol: 'b', metric: 'cognitive', value: 14, threshold: 15 },
+      { symbol: 'c', metric: 'cognitive', value: 13, threshold: 15 },
+    ]);
+    expect(warning).toBe(
+      '⚠ Lien: a cognitive 18/15 (over), b cognitive 14/15, c cognitive 13/15 — avoid adding complexity here; prefer extraction.',
+    );
+    expect(warning).not.toContain('more');
+  });
+
+  it('caps at 3 rendered entries and names the correct remainder count for 4+', () => {
+    const warning = formatComplexityHeadroomWarning([
+      { symbol: 'a', metric: 'cognitive', value: 20, threshold: 15 },
+      { symbol: 'b', metric: 'cognitive', value: 18, threshold: 15 },
+      { symbol: 'c', metric: 'cognitive', value: 14, threshold: 15 },
+      { symbol: 'd', metric: 'cognitive', value: 13, threshold: 15 },
+    ]);
+    expect(warning).toBe(
+      '⚠ Lien: a cognitive 20/15 (over), b cognitive 18/15 (over), c cognitive 14/15, … and 1 more at/near budget — avoid adding complexity here; prefer extraction.',
+    );
+  });
+
+  it('caps a 5-entry file (the dogfood shape) at 3 with "… and 2 more"', () => {
+    const warning = formatComplexityHeadroomWarning([
+      { symbol: 'a', metric: 'cognitive', value: 20, threshold: 15 },
+      { symbol: 'b', metric: 'cognitive', value: 18, threshold: 15 },
+      { symbol: 'c', metric: 'cognitive', value: 17, threshold: 15 },
+      { symbol: 'd', metric: 'cognitive', value: 14, threshold: 15 },
+      { symbol: 'e', metric: 'cognitive', value: 13, threshold: 15 },
+    ]);
+    expect(warning).toContain('… and 2 more at/near budget');
+    expect(warning).not.toContain(' d ');
+    expect(warning).not.toContain(' e ');
+  });
+
+  it('never drops an over-threshold entry in favor of a merely-near one, regardless of input order', () => {
+    // Deliberately scrambled input order (near entries first) proves the
+    // formatter re-sorts by ratio itself rather than trusting caller order.
+    const warning = formatComplexityHeadroomWarning([
+      { symbol: 'near3', metric: 'cognitive', value: 12, threshold: 15 }, // ratio 0.80
+      { symbol: 'over1', metric: 'cognitive', value: 20, threshold: 15 }, // ratio 1.33
+      { symbol: 'near1', metric: 'cognitive', value: 14, threshold: 15 }, // ratio 0.93
+      { symbol: 'over2', metric: 'cognitive', value: 18, threshold: 15 }, // ratio 1.20
+      { symbol: 'near2', metric: 'cognitive', value: 13, threshold: 15 }, // ratio 0.87
+    ]);
+    // Both over-threshold entries must survive the cap even though they were
+    // not first in the input; the lowest-ratio near entries (near2, near3)
+    // are the ones dropped.
+    expect(warning).toBe(
+      '⚠ Lien: over1 cognitive 20/15 (over), over2 cognitive 18/15 (over), near1 cognitive 14/15, … and 2 more at/near budget — avoid adding complexity here; prefer extraction.',
+    );
+  });
+
+  it('renders a single entry unchanged (no remainder logic engaged)', () => {
+    const warning = formatComplexityHeadroomWarning([
+      { symbol: 'onlyOne', metric: 'cyclomatic', value: 16, threshold: 15 },
+    ]);
+    expect(warning).toBe(
+      '⚠ Lien: onlyOne cyclomatic 16/15 (over) — avoid adding complexity here; prefer extraction.',
+    );
   });
 });
 
