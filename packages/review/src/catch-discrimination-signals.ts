@@ -596,7 +596,12 @@ const HEADER =
   'is only correct for ONE error class (e.g. one specific HTTP status) while ' +
   'other classes (auth, rate-limit, 5xx, network) take the identical path, ' +
   'that is error-swallowing — report it. If the catch genuinely handles every ' +
-  'error the same way correctly, stay silent.';
+  'error the same way correctly, stay silent. This is a heuristic pointer, not ' +
+  "a verified verdict, and it does NOT substitute for reading the catch's " +
+  'enclosing function in full (get_files_context or read_file): the `reason` ' +
+  'field names the shape found, but only the surrounding code tells you what ' +
+  'the fallback path actually does for each error class — inspect it before ' +
+  'deciding.';
 
 function renderEntry(c: UndiscriminatedCatchCandidate): string {
   const bindingLabel = c.binding ? `\`${c.binding}\`` : '(no binding)';

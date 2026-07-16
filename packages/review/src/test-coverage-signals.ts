@@ -41,7 +41,11 @@ const HEADER =
   'observation, not an instruction to report each one as a finding (missing ' +
   'tests are out of scope for individual findings — see Rules); use it only ' +
   'as context, e.g. for the summary/overview when substantial new logic ' +
-  'ships with no test coverage at all.';
+  'ships with no test coverage at all. A file NOT listed here has SOME test ' +
+  'file associated with it — that does not mean this PR’s specific change is ' +
+  'covered. It does NOT substitute for the boundary-change protocol’s ' +
+  'MANDATORY get_files_context call: you must still inspect the actual test ' +
+  'content for an assertion on the exact divergence input, per the protocol.';
 
 // ---------------------------------------------------------------------------
 // Computation

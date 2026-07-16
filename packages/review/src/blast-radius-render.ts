@@ -15,6 +15,20 @@ const LEVEL_LABEL: Record<string, string> = {
 };
 
 /**
+ * The Tests/Complexity columns are pre-computed facts about a DEPENDENT, not a
+ * verdict on this PR's change: "Tests ✓" means a test file exists for that
+ * dependent, not that it exercises this PR's specific behavior change, and the
+ * complexity number is a static metric, not a correctness check. This table
+ * does NOT substitute for get_files_context / read_file on a listed dependent
+ * when you need to confirm the change is actually handled correctly there.
+ */
+const NON_SUBSTITUTION_NOTE =
+  'Tests column = a test file exists for that dependent, NOT that it covers ' +
+  "this PR's change; Complexity = a static metric, not a correctness check. " +
+  'This table does not substitute for get_files_context / read_file on a ' +
+  'dependent when you need to confirm the change is actually handled there.';
+
+/**
  * Render a blast-radius report as markdown wrapped in a `<blast_radius>` XML tag.
  * Returns an empty string when the report has no entries, so callers can
  * unconditionally append without an emptiness check.
@@ -25,6 +39,7 @@ export function renderBlastRadiusMarkdown(report: BlastRadiusReport): string {
   const lines: string[] = [];
   lines.push('<blast_radius>');
   lines.push(renderSummary(report));
+  lines.push(NON_SUBSTITUTION_NOTE);
   lines.push('');
   lines.push(...renderTable(report.entries));
 

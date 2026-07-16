@@ -454,6 +454,21 @@ describe('renderRenameSweepSignals', () => {
     ]);
     expect(md).toContain('[+7 more surviving reference(s)');
   });
+
+  it('LEAD does not let the sweep substitute for doc-truth’s get_files_context call', () => {
+    const md = renderRenameSweepSignals([
+      {
+        mapping: { from: 'a_symbol', to: 'b_symbol', occurrenceCount: 5, fileCount: 3 },
+        proseTouched: [],
+        proseOverflow: 0,
+        survivors: [{ file: 'x.ts', line: 1, snippet: 'a_symbol', repoWide: true }],
+        survivorOverflow: 0,
+      },
+    ]);
+    expect(md).toContain(
+      "it does NOT substitute for the doc-truth protocol's get_files_context call on the described symbol",
+    );
+  });
 });
 
 describe('renderRenameSweepSection', () => {

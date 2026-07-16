@@ -342,6 +342,15 @@ describe('renderUndiscriminatedCatchCandidates', () => {
     expect(rendered).toContain('</undiscriminated_catch_candidates>');
   });
 
+  it('header does not let the model treat the candidate as a verified verdict — must still inspect the enclosing function', () => {
+    const rendered = renderUndiscriminatedCatchCandidates([
+      { file: 'src/a.ts', line: 1, endLine: 5, binding: 'err', reason: 'x' },
+    ]);
+    expect(rendered).toContain(
+      "This is a heuristic pointer, not a verified verdict, and it does NOT substitute for reading the catch's enclosing function in full (get_files_context or read_file)",
+    );
+  });
+
   it('caps at MAX_CANDIDATES with an explicit omission note — never truncates silently', () => {
     const many = Array.from({ length: 14 }, (_, i) => ({
       file: `src/f${i}.ts`,

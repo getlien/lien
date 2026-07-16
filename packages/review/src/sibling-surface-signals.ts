@@ -907,7 +907,11 @@ const SIBLING_SURFACES_HEADER =
   'that this file never does. For each, verify whether the omission is intentional: an option ' +
   'or code path implemented in one family member but silently absent from a sibling that ' +
   'handles the same surface is a finding; if the sibling structurally cannot support it ' +
-  '(documented, or a genuinely different responsibility), stay silent.';
+  '(documented, or a genuinely different responsibility), stay silent. This is a structural/' +
+  'textual match, not a verified judgment, and it does NOT substitute for incomplete-handling’s ' +
+  'get_files_context / read_file call on the sibling file — confirm what the sibling actually ' +
+  'does before deciding the omission is a real gap rather than a documented or structural ' +
+  'difference.';
 
 /**
  * Entries for the same file, direction, sibling set, and mirror-ness share one

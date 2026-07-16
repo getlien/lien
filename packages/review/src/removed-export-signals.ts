@@ -462,7 +462,12 @@ const HEADER =
   'near-certain breaking change — verify and report it (structural-analysis). ' +
   'A removed export that a changeset describes as unchanged/non-breaking is a ' +
   'contradiction (boundary-change). No surviving references + accurate ' +
-  'changeset = likely intentional; stay silent.';
+  'changeset = likely intentional; stay silent. Each surviving reference is a ' +
+  'text-match hit, not a confirmed call site, and this block does NOT ' +
+  "substitute for structural-analysis's get_files_context / get_dependents " +
+  'calls: inspect the referencing file (not just the file:line shown here) ' +
+  'to confirm it is a real usage, not a comment or unrelated string, before ' +
+  'reporting a breaking change.';
 
 /** Render one removed-export entry line. */
 function renderEntry(c: RemovedExportContext): string {

@@ -380,6 +380,15 @@ describe('renderRemovedExports', () => {
     expect(md).toContain('boundary-change');
   });
 
+  it('header does not let a surviving reference substitute for structural-analysis’s tool calls', () => {
+    const md = renderRemovedExports([
+      { symbol: 'X', file: 'a.ts', survivingReferences: [], changesetFile: null },
+    ]);
+    expect(md).toContain(
+      "this block does NOT substitute for structural-analysis's get_files_context / get_dependents calls",
+    );
+  });
+
   it('caps at 15 entries with an explicit omission note', () => {
     const contexts: RemovedExportContext[] = Array.from({ length: 20 }, (_, i) => ({
       symbol: `Sym${i}`,
