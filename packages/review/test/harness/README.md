@@ -627,6 +627,14 @@ corpus sweep). Before spending another round:
 - Calibration <9/10 with Tier 2 keyword check — widen the keyword set to
   include the phrasings the model actually produces. If you have to widen
   to >5 keywords, the prompt itself probably needs work.
+- `capture-pr.ts --sha <sha>` fails with `could not resolve sha "…": unknown
+  revision` — the pinned SHA belongs to a squash-merged PR branch, so a
+  fresh clone/worktree never has the commit object (only the single-parent
+  squash commit lands on the base branch's history). Not crossrepo-only —
+  this repo's own historical PRs hit it too (see
+  `doc-truth/pr711-changeset-export-claim.assertions.ts`'s header). Fix:
+  fetch the PR's own ref before capturing, `git fetch origin
+  refs/pull/<n>/head`, then re-run the capture command unchanged.
 
 ## Typechecking
 

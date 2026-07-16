@@ -460,6 +460,23 @@ async function main(): Promise<void> {
     sh(`gh pr view ${prNumber} --json title,body,baseRefOid,headRefOid,files`),
   ) as PrMeta;
 
+  // `gh pr view`'s baseRefOid can drift for a MERGED PR: GitHub sometimes
+  // reports the base branch's tip near merge time rather than the branch's
+  // actual fork point, which can be a LATER commit than where the branch
+  // diverged (e.g. sibling PRs squash-merged into the base branch around the
+  // same time). Recomputing the true fork point locally is a no-op when
+  // baseRefOid already IS an ancestor of headRefOid (the common case for
+  // open or just-merged PRs), and self-heals the drifted case so downstream
+  // ancestor checks and diff ranges aren't silently computed against the
+  // wrong base. Left as-is if either sha isn't resolvable locally yet (e.g.
+  // a squash-merged PR needs `git fetch origin refs/pull/<n>/head` first) —
+  // resolveSha/assertShaInPrRange surface a clear error either way.
+  try {
+    meta.baseRefOid = sh(`git merge-base "${meta.headRefOid}" "${meta.baseRefOid}"`).trim();
+  } catch {
+    // leave meta.baseRefOid as reported; downstream checks will error clearly
+  }
+
   const headSha = shaOverride ? resolveSha(shaOverride) : meta.headRefOid;
   if (shaOverride) {
     assertShaInPrRange(meta, prNumber, headSha);
