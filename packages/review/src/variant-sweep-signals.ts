@@ -1016,7 +1016,11 @@ const HEADER =
   "to handle this variant and doesn't (e.g. it isn't just an intentional catch-all " +
   'default, and the gap is not already disclosed in this PR), report it under ' +
   'incomplete-handling. If the omission is a deliberate fallback or already handled ' +
-  'some other way, stay silent.';
+  'some other way, stay silent. This is a textual consumer match, not a verified ' +
+  'judgment, and it does NOT substitute for incomplete-handling’s get_files_context ' +
+  '/ read_file call on the consumer site — confirm what the consumer actually does ' +
+  'with the variant before deciding the omission is a real gap rather than an ' +
+  'intentional catch-all or already-disclosed behavior.';
 
 function renderHandled(names: string[]): string {
   const shown = names.slice(0, MAX_HANDLED_LISTED);

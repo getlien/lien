@@ -139,8 +139,9 @@ describe('selectRules', () => {
     expect(selectRules(BUILTIN_RULES, js).skipped).toContain('incomplete-handling');
   });
 
-  it('incomplete-handling prompt references the <sibling_surfaces> signal alongside the grep fallback', () => {
+  it('incomplete-handling prompt references both <variant_sweep_candidates> and <sibling_surfaces> alongside the grep fallback', () => {
     const rule = BUILTIN_RULES.find(r => r.id === 'incomplete-handling');
+    expect(rule?.prompt).toContain('<variant_sweep_candidates>');
     expect(rule?.prompt).toContain('<sibling_surfaces>');
     expect(rule?.prompt).toContain('grep for all consumers and verify they handle it');
   });
