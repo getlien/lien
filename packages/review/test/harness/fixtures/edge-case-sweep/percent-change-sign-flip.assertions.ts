@@ -51,6 +51,10 @@
  * above (the named sign-flip AND the zero-baseline/NaN/Infinity variant)
  * still pass. This canary's prior offline re-score PREDATES this
  * tightening — the upcoming corpus recalibration sweep re-measures it.
+ *
+ * 3-vote screen 2026-07-16: 3/3 at main@5fadbe1a — pre-#787 budget raise,
+ * all other this-week changes in [SCREEN ONLY — calibrate-10 certification
+ * pending]
  */
 
 import type { FixtureAssertions } from '../../assertions.js';

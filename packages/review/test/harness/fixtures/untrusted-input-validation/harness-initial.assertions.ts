@@ -38,6 +38,11 @@
  * calibration PREDATES this tightening; no stored vote traces exist in this
  * worktree to offline re-score — the upcoming corpus recalibration sweep
  * re-measures it.
+ *
+ * 3-vote screen 2026-07-16 post-#787 state: 3/3 [SCREEN ONLY — calibrate-10
+ * certification pending]. Earlier same-day pre-#787 screen (main@5fadbe1a):
+ * 2/3 — one vote emitted corrupted verdict JSON ({": ":", "}) -> zero
+ * findings; gone post-#787.
  */
 
 import type { FixtureAssertions } from '../../assertions.js';

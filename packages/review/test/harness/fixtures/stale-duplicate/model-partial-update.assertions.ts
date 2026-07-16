@@ -38,6 +38,13 @@
  * phrasing. This canary's 10/10 PREDATES this tightening; no stored vote
  * traces exist in this worktree to offline re-score — the upcoming corpus
  * recalibration sweep re-measures it.
+ *
+ * 3-vote screen 2026-07-16 post-#787 state: 2/3 [SCREEN ONLY — calibrate-10
+ * certification pending]. Failed vote (same shape pre- and post-#787, 2/3
+ * both): healthy tool turns then a stop-turn emitting ~28 chars of
+ * corrupted JSON ({"findings":":[{",": ":", "}) -> zero findings. Not a
+ * budget shape — #787 did not move it; this is the corrupted-key verdict
+ * family (#723's recovery does not catch it).
  */
 
 import type { FixtureAssertions } from '../../assertions.js';

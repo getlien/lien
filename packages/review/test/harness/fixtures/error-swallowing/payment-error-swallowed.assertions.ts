@@ -52,6 +52,10 @@
  * canary's 10/10 PREDATES this tightening; no stored vote traces exist in
  * this worktree to offline re-score — the upcoming corpus recalibration
  * sweep re-measures it.
+ *
+ * 3-vote screen 2026-07-16: 3/3 at main@5fadbe1a — pre-#787 budget raise,
+ * all other this-week changes in [SCREEN ONLY — calibrate-10 certification
+ * pending]
  */
 
 import type { FixtureAssertions } from '../../assertions.js';
