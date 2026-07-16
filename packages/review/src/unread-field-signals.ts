@@ -34,23 +34,39 @@
  * judgment still exists without the signal."
  *
  *  - **Wholesale consumption (spread / `JSON.stringify` / serialization).**
- *    If ANY corpus chunk that mentions the type name also spreads an object
- *    (`...x`) or calls `JSON.stringify(`, every field of that type is
- *    suppressed — we can't prove the field isn't consumed as part of a whole-
- *    object pass-through, so we don't claim it is unread. Coarse (type-level,
- *    not field-level; doesn't verify the SAME variable is spread) by design —
- *    a narrower per-field check would need real data-flow tracking this
- *    module deliberately doesn't attempt.
+ *    If a `: TypeName` annotation has a spread (`...x`) or `JSON.stringify(`
+ *    within `WHOLESALE_PROXIMITY_CHARS` characters after it anywhere in the
+ *    corpus, every field of that type is suppressed — we can't prove the
+ *    field isn't consumed as part of a whole-object pass-through, so we
+ *    don't claim it is unread. Deliberately type-level, not field-level (a
+ *    narrower per-field check would need real data-flow tracking this module
+ *    doesn't attempt), and proximity-based rather than a bare co-occurrence
+ *    check: an earlier version matched the type name and a spread/stringify
+ *    ANYWHERE in the same chunk, which false-fired on this module's OWN doc
+ *    comment naming `RuleTriggers` (found via dogfooding) — requiring an
+ *    actual type annotation, with comments masked out first, fixes that
+ *    specific false-suppression while keeping the check textual (not real
+ *    data-flow: the nearby spread/stringify need not touch the same
+ *    variable the annotation introduced).
  *  - **Exported "public API" types.** A field on a type that's re-exported by
- *    an `index.ts`/`index.js` barrel found anywhere in the corpus (a wildcard
- *    `export * from`, or a named mention of the type) is suppressed — its
- *    real consumers may live outside this indexed corpus (an external SDK
- *    consumer, or another package this review run didn't index). This is a
+ *    an `index.ts`/`index.js` barrel is suppressed — its real consumers may
+ *    live outside this indexed corpus (an external SDK consumer, or another
+ *    package this review run didn't index). Two ways in: a NAMED export
+ *    statement mentioning the type directly, or a wildcard `export * from
+ *    '<specifier>'` whose specifier's basename matches the declaring file's
+ *    own basename. That basename match is required, not optional — an
+ *    earlier version treated ANY wildcard barrel found ANYWHERE in the
+ *    corpus as evidence, which (found via dogfooding) suppressed every
+ *    candidate in the entire codebase the moment a single, wholly unrelated
+ *    package had its own ordinary `export * from './foo.js'` barrel — nearly
+ *    universal in real code, and fatal to the signal's recall. It's still a
  *    coarse, corpus-wide textual check, not a per-package public-surface
  *    resolution: it can't tell a PUBLISHED package's real npm-facing barrel
  *    from a PRIVATE monorepo package's own internal `index.ts` (both look
- *    identical texturally) — so it over-suppresses inside private packages
- *    too. A documented false-negative-prone simplification, not a bug: fewer
+ *    identical texturally), and a same-basename file in an unrelated
+ *    directory can still false-match the wildcard form — so it still
+ *    over-suppresses sometimes, just no longer catastrophically. A
+ *    documented false-negative-prone simplification, not a bug: fewer
  *    candidates, never a wrong one.
  *  - **Test-fixture files.** A field declared in a file matching the test-path
  *    convention (`*.test.ts`, `__tests__/`, etc.) is skipped entirely — test
@@ -164,6 +180,8 @@ const CLASS_PROPERTY_LINE_RE =
 
 /** A spread of an identifier, or a `JSON.stringify(` call — coarse wholesale-consumption evidence. */
 const WHOLESALE_RE = /\bJSON\.stringify\s*\(|\.\.\.\s*[A-Za-z_$]/;
+/** How close (chars) a spread/`JSON.stringify(` must be AFTER a `: typeName` annotation to count — see {@link chunkHasWholesaleConsumption}. */
+const WHOLESALE_PROXIMITY_CHARS = 400;
 
 // ---------------------------------------------------------------------------
 // Low-level text utilities (masking/brace-matching, mirrors variant-sweep-signals.ts)
@@ -619,48 +637,107 @@ export function computeAddedFields(context: ReviewContext): AddedField[] {
 // Suppression: exported "public API" barrel reachability + wholesale consumption
 // ---------------------------------------------------------------------------
 
+const WILDCARD_EXPORT_RE = /export\s*\*\s*from\s*['"]([^'"]+)['"]/g;
+
+/** File basename with its extension (and any TS/JS suffix on the specifier side) stripped. */
+function baseNameNoExt(file: string): string {
+  const base = file.slice(file.lastIndexOf('/') + 1);
+  return base.replace(/\.(?:[cm]?[jt]sx?)$/, '');
+}
+
 /**
- * Is `typeName` re-exported by an `index.ts`/`index.js` barrel found anywhere
- * in the corpus? A wildcard `export * from` counts too — we can't rule out
- * what it re-exports, so it's conservative to treat it as "might include this
- * type" rather than requiring a literal name match. See module doc's
- * "Exported public API types" note for the known over-suppression tradeoff.
+ * Does a wildcard `export * from '<specifier>'` module specifier plausibly
+ * point at the declaring file — i.e. does its last path segment (extension
+ * stripped) match the file's own basename? A barrel's wildcard target is
+ * usually a relative specifier (`./foo.js`, `../bar/foo.js`) whose basename
+ * mirrors the real file it re-exports; requiring that match is what stops
+ * an ENTIRELY UNRELATED barrel elsewhere in the corpus (any package's own
+ * `export * from './something-else.js'`) from suppressing every type in the
+ * whole codebase — the bug an earlier, unscoped version of this check hit
+ * during dogfooding (a schemas barrel in a different package suppressed a
+ * field on an unrelated type in another package entirely).
  */
-function isReachableFromIndexBarrel(typeName: string, repoChunks: CodeChunk[]): boolean {
+function wildcardSpecifierMatchesFile(specifier: string, fileBase: string): boolean {
+  return baseNameNoExt(specifier) === fileBase;
+}
+
+/**
+ * Is `typeName`, declared in `file`, re-exported by an `index.ts`/`index.js`
+ * barrel found anywhere in the corpus? Two ways in: a wildcard `export *
+ * from` whose specifier's basename matches `file`'s own basename (we can't
+ * resolve real module paths without a resolver, so a basename match is the
+ * scoped proxy — see {@link wildcardSpecifierMatchesFile}), or a named
+ * export statement that mentions `typeName` directly. See module doc's
+ * "Exported public API types" note for the remaining over-suppression
+ * tradeoff (a same-basename file in an unrelated directory can still
+ * false-match the wildcard form).
+ */
+function isReachableFromIndexBarrel(
+  typeName: string,
+  file: string,
+  repoChunks: CodeChunk[],
+): boolean {
+  const fileBase = baseNameNoExt(file);
   const nameRe = new RegExp(`\\bexport\\b[^;\\n]*\\b${escapeRegExp(typeName)}\\b`);
   for (const chunk of repoChunks) {
     if (!INDEX_BARREL_RE.test(chunk.metadata.file)) continue;
     const masked = maskComments(chunk.content);
-    if (/export\s*\*\s*from/.test(masked)) return true;
+    for (const m of masked.matchAll(new RegExp(WILDCARD_EXPORT_RE.source, 'g'))) {
+      if (wildcardSpecifierMatchesFile(m[1], fileBase)) return true;
+    }
     if (nameRe.test(masked)) return true;
   }
   return false;
 }
 
 /**
- * Does any corpus chunk that mentions `typeName` also spread an object or
- * call `JSON.stringify(`? Coarse, type-level, deliberately over-suppressing —
- * see module doc.
+ * Does a `: typeName` type annotation appear with a spread or
+ * `JSON.stringify(` within {@link WHOLESALE_PROXIMITY_CHARS} characters
+ * AFTER it, anywhere in this chunk? Requiring the annotation — not just the
+ * bare type name — matters: a doc comment or an unrelated field merely
+ * NAMING the type (`RuleTriggers.filePatterns` in a docstring, `triggers:
+ * RuleTriggers` three unrelated fields away from someone else's spread) is
+ * not evidence any VALUE of this type is ever spread/serialized. Comments
+ * are masked first, so a prose mention can't itself count as the
+ * annotation. Still coarse (proximity, not real data-flow — the nearby
+ * spread/stringify need not touch the SAME variable the annotation
+ * introduced), but far tighter than "the type name and a spread anywhere in
+ * the same file", which false-fired on this module's OWN doc comment
+ * mentioning `RuleTriggers` during dogfooding.
  */
+function chunkHasWholesaleConsumption(typeName: string, content: string): boolean {
+  const masked = maskComments(content);
+  const typedRe = new RegExp(`:\\s*${escapeRegExp(typeName)}\\b`, 'g');
+  for (const m of masked.matchAll(typedRe)) {
+    const windowStart = m.index + m[0].length;
+    const window = masked.slice(windowStart, windowStart + WHOLESALE_PROXIMITY_CHARS);
+    if (WHOLESALE_RE.test(window)) return true;
+  }
+  return false;
+}
+
+/** Does any corpus chunk show wholesale consumption evidence for `typeName`? */
 function hasWholesaleConsumption(typeName: string, repoChunks: CodeChunk[]): boolean {
   for (const chunk of repoChunks) {
     if (!chunk.content.includes(typeName)) continue;
-    if (WHOLESALE_RE.test(maskComments(chunk.content))) return true;
+    if (chunkHasWholesaleConsumption(typeName, chunk.content)) return true;
   }
   return false;
 }
 
 function isSuppressedType(
   typeName: string,
+  file: string,
   repoChunks: CodeChunk[],
   cache: Map<string, boolean>,
 ): boolean {
-  const cached = cache.get(typeName);
+  const key = `${file}:${typeName}`;
+  const cached = cache.get(key);
   if (cached !== undefined) return cached;
   const suppressed =
-    isReachableFromIndexBarrel(typeName, repoChunks) ||
+    isReachableFromIndexBarrel(typeName, file, repoChunks) ||
     hasWholesaleConsumption(typeName, repoChunks);
-  cache.set(typeName, suppressed);
+  cache.set(key, suppressed);
   return suppressed;
 }
 
@@ -751,7 +828,7 @@ function filterUnreadCandidates(
   for (const a of added) {
     const decl = declByKey.get(`${a.kind}:${a.typeName}:${a.file}`);
     if (!decl) continue;
-    if (isSuppressedType(a.typeName, repoChunks, suppressionCache)) continue;
+    if (isSuppressedType(a.typeName, a.file, repoChunks, suppressionCache)) continue;
     if (hasReadSite(a.field, a.file, decl, repoChunks)) continue;
     out.push({ typeName: a.typeName, field: a.field, file: a.file, line: a.line, kind: a.kind });
   }

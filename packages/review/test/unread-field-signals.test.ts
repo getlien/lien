@@ -377,6 +377,23 @@ describe('computeUnreadFieldCandidates', () => {
     expect(computeUnreadFieldCandidates(baseContext(repoChunks))).toEqual([]);
   });
 
+  it('does NOT suppress on a bare co-occurrence of the type name and an unrelated spread (regression, found via dogfooding)', () => {
+    // A docstring mentioning the type by name, plus a wholly unrelated spread
+    // later in the same chunk, must not be read as "this type is spread" —
+    // there is no `: Options` type annotation anywhere near the spread. An
+    // earlier version matched on bare co-occurrence and false-suppressed this
+    // module's OWN doc comment naming `RuleTriggers.filePatterns`.
+    const consumer = [
+      '// See Options.timeout for the request timeout contract.',
+      'function mergeDefaults(a: Record<string, unknown>, b: Record<string, unknown>) {',
+      '  return { ...a, ...b };',
+      '}',
+    ].join('\n');
+    const repoChunks = [...optionsChunks(), makeChunk('src/unrelated.ts', 1, consumer)];
+    const candidates = computeUnreadFieldCandidates(baseContext(repoChunks));
+    expect(candidates).toHaveLength(1);
+  });
+
   it('suppresses a candidate when the type is re-exported by a wildcard barrel (FP trap: public API)', () => {
     const barrel = makeChunk('src/index.ts', 1, "export * from './options.js';");
     const repoChunks = [...optionsChunks(), barrel];
@@ -391,6 +408,19 @@ describe('computeUnreadFieldCandidates', () => {
 
   it('does not suppress when a barrel exists but never mentions this type', () => {
     const barrel = makeChunk('src/index.ts', 1, "export { Something } from './other.js';");
+    const repoChunks = [...optionsChunks(), barrel];
+    const candidates = computeUnreadFieldCandidates(baseContext(repoChunks));
+    expect(candidates).toHaveLength(1);
+  });
+
+  it('does NOT suppress via a wildcard barrel whose specifier targets an unrelated file (regression, found via dogfooding)', () => {
+    // An earlier version treated ANY `export * from` found ANYWHERE in the
+    // corpus as evidence the type might be re-exported, regardless of what
+    // the barrel actually points at — this suppressed every candidate in an
+    // entire real codebase the moment an unrelated package had its own
+    // ordinary barrel. The specifier here ('./other-module.js') shares no
+    // basename with the declaring file ('options.ts'), so it must not count.
+    const barrel = makeChunk('other/pkg/index.ts', 1, "export * from './other-module.js';");
     const repoChunks = [...optionsChunks(), barrel];
     const candidates = computeUnreadFieldCandidates(baseContext(repoChunks));
     expect(candidates).toHaveLength(1);
