@@ -132,6 +132,72 @@ describe('extractChangedLiterals', () => {
 });
 
 // ---------------------------------------------------------------------------
+// STRING_RE — ReDoS regression (catastrophic backtracking, see
+// `(?:\\.|(?!\1).)*?`'s dual backslash-consuming branches, fixed to
+// `(?:[^\\]|\\.)*?`). Exercised through extractChangedLiterals since STRING_RE
+// itself isn't exported.
+// ---------------------------------------------------------------------------
+
+describe('STRING_RE — ReDoS regression', () => {
+  function patchOf(line: string): Map<string, string> {
+    return new Map([['src/a.ts', `@@ -1,1 +1,1 @@\n+${line}`]]);
+  }
+
+  it('extracts single-, double-, and backtick-quoted literals identically', () => {
+    const line = `const a = 'feature-flag-alpha'; const b = "src/config/app.json"; const c = \`build-output-dir\`;`;
+    const values = extractChangedLiterals(patchOf(line)).map(l => l.value);
+    expect(values).toEqual(
+      expect.arrayContaining(['feature-flag-alpha', 'src/config/app.json', 'build-output-dir']),
+    );
+  });
+
+  it('extracts a literal containing an escaped quote of its own delimiter', () => {
+    const line = `const msg = 'it\\'s a config-value-here';`;
+    const values = extractChangedLiterals(patchOf(line)).map(l => l.value);
+    expect(values).toContain("it\\'s a config-value-here");
+  });
+
+  it('extracts multiple distinct literals from one line', () => {
+    const line = `path.join('src/config', 'app.settings.json', 'defaults-v2');`;
+    const values = extractChangedLiterals(patchOf(line)).map(l => l.value);
+    expect(values).toEqual(
+      expect.arrayContaining(['src/config', 'app.settings.json', 'defaults-v2']),
+    );
+  });
+
+  it('does not hang on a backslash-dense line with no matching closing quote', () => {
+    // Shape of the real-world trigger: packages/zod/src/v3/types.ts:607, a
+    // commented-out ~928-char regex literal with 133 backslashes and an
+    // opening backtick with no closing backtick before end-of-line. The
+    // vulnerable regex explored an exponential number of ways to fail to
+    // match this (2^k for k backslashes); the fixed regex resolves it
+    // immediately. Bound is generous (500ms) to stay flake-proof in CI while
+    // still catching any regression back to exponential blowup (which took
+    // 17.6s+ at a much smaller n=30 in the original bug).
+    const pathological = 'x = `old regex: ' + '\\d'.repeat(400) + ' -- dead code, never closed';
+    const patches = patchOf(pathological);
+
+    const start = Date.now();
+    const values = extractChangedLiterals(patches);
+    const elapsed = Date.now() - start;
+
+    expect(elapsed).toBeLessThan(500);
+    expect(values).toEqual([]); // no closing backtick -> no literal extracted, not a crash
+  });
+
+  it('does not hang on a large synthetic worst-case (20k+ chars, no closing quote)', () => {
+    const pathological = "x '" + '\\a'.repeat(10_000);
+    const patches = patchOf(pathological);
+
+    const start = Date.now();
+    extractChangedLiterals(patches);
+    const elapsed = Date.now() - start;
+
+    expect(elapsed).toBeLessThan(500);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // computeStaleLiteralCandidates
 // ---------------------------------------------------------------------------
 

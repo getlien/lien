@@ -165,7 +165,11 @@ const MAX_TOTAL_ENTRIES = 15;
 /** Total block char budget — entries beyond this are dropped with an omission note. */
 const MAX_BLOCK_CHARS = 3000;
 
-const STRING_RE = /(['"`])((?:\\.|(?!\1).)*?)\1/g;
+// Note: see the identical fix + rationale in stale-literal-signals.ts's
+// STRING_RE — `(?!\1).` let a backslash match two ways, causing catastrophic
+// backtracking on an unmatched-quote line dense with backslashes. `[^\\]`
+// removes the ambiguity.
+const STRING_RE = /(['"`])((?:[^\\]|\\.)*?)\1/g;
 const CAMEL_ID_RE = /\b[A-Za-z][a-z0-9]*(?:[A-Z][a-z0-9]*)+\b/g;
 const SNAKE_ID_RE = /\b[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+\b/g;
 const CALL_RE = /\b([A-Za-z_][A-Za-z0-9_]*)\s*\(/g;
