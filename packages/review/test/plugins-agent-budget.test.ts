@@ -539,16 +539,16 @@ describe('scaleAgentBudget — model-aware multiplier', () => {
   // base = 4000 + 10000 + 60000 + 2000 = 76000 (within [60K, ceiling], unclamped).
   const chunks = [{ content: 'x'.repeat(40_000) }];
 
-  it('scales the budget up ~1.5x for Kimi vs a lean model', () => {
+  it('scales the budget up ~2x for Kimi vs a lean model', () => {
     const lean = scaleAgentBudget(5, chunks, 'some/lean-model').maxTokenBudget;
     const kimi = scaleAgentBudget(5, chunks, DEFAULT_REVIEW_MODEL).maxTokenBudget;
     expect(lean).toBe(76_000);
-    expect(kimi).toBe(114_000);
-    expect(kimi).toBe(lean * 1.5);
+    expect(kimi).toBe(152_000);
+    expect(kimi).toBe(lean * 2.0);
   });
 
   it('clamps the scaled budget to the shared ceiling', () => {
-    // 15 files (maxTurns 12) + large content pushes base*1.5 past the ceiling.
+    // 15 files (maxTurns 12) + large content pushes base*2.0 past the ceiling.
     const big = [{ content: 'x'.repeat(400_000) }];
     expect(scaleAgentBudget(15, big, DEFAULT_REVIEW_MODEL).maxTokenBudget).toBe(
       MAX_REVIEW_TOKEN_BUDGET,
@@ -556,11 +556,13 @@ describe('scaleAgentBudget — model-aware multiplier', () => {
   });
 
   it('always returns an integer budget (the config schema requires int)', () => {
-    // 40002 chars → ceil(/4)=10001 → base 76001 (odd); ×1.5 = 114001.5 must round.
+    // 40002 chars → ceil(/4)=10001 → base 76001 (odd). ×2.0 stays whole (152002),
+    // but Math.round in the implementation stays defensive for any future
+    // model with a fractional multiplier — this just guards the int contract.
     const odd = [{ content: 'x'.repeat(40_002) }];
     const { maxTokenBudget } = scaleAgentBudget(5, odd, DEFAULT_REVIEW_MODEL);
     expect(Number.isInteger(maxTokenBudget)).toBe(true);
-    expect(maxTokenBudget).toBe(114_002);
+    expect(maxTokenBudget).toBe(152_002);
   });
 
   it('produces a config the agent-review schema accepts', () => {
