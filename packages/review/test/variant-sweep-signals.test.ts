@@ -200,6 +200,45 @@ describe('computeAddedVariants', () => {
     ]);
   });
 
+  it('detects a new numeric arm added to a numeric union type', () => {
+    const content = 'export type StatusCode = 200 | 404 | 500 | 503;';
+    const patches = new Map([
+      [
+        'src/status.ts',
+        patch(
+          '@@ -1,1 +1,1 @@',
+          '-export type StatusCode = 200 | 404 | 500;',
+          '+export type StatusCode = 200 | 404 | 500 | 503;',
+        ),
+      ],
+    ]);
+    const chunks = [makeChunk('src/status.ts', 1, content)];
+    const added = computeAddedVariants(makeContext({ patches, chunks }));
+    expect(added).toEqual([
+      { typeName: 'StatusCode', variant: '503', file: 'src/status.ts', kind: 'union' },
+    ]);
+  });
+
+  it('detects a new arm added to a union with no trailing semicolon (last statement in chunk)', () => {
+    // No trailing `;` — a no-semicolon style file/chunk boundary.
+    const content = "export type FailOn = 'error' | 'never' | 'any'";
+    const patches = new Map([
+      [
+        'src/inputs.ts',
+        patch(
+          '@@ -1,1 +1,1 @@',
+          "-export type FailOn = 'error' | 'never'",
+          "+export type FailOn = 'error' | 'never' | 'any'",
+        ),
+      ],
+    ]);
+    const chunks = [makeChunk('src/inputs.ts', 1, content)];
+    const added = computeAddedVariants(makeContext({ patches, chunks }));
+    expect(added).toEqual([
+      { typeName: 'FailOn', variant: 'any', file: 'src/inputs.ts', kind: 'union' },
+    ]);
+  });
+
   it('detects a new arm added to a multi-line pipe-style union (EditorId shape)', () => {
     const content = EDITOR_ID_UNION;
     const patches = new Map([['src/init.ts', EDITOR_ID_UNION_PATCH]]);
@@ -404,6 +443,90 @@ describe('computeVariantSweepContexts', () => {
       'cursor',
       'windsurf',
     ]);
+  });
+
+  it('flags a stale switch over a numeric union that omits the new numeric arm', () => {
+    const patches = new Map([
+      [
+        'src/status.ts',
+        patch(
+          '@@ -1,1 +1,1 @@',
+          '-export type StatusCode = 200 | 404 | 500;',
+          '+export type StatusCode = 200 | 404 | 500 | 503;',
+        ),
+      ],
+    ]);
+    const chunks = [
+      makeChunk('src/status.ts', 1, 'export type StatusCode = 200 | 404 | 500 | 503;'),
+    ];
+    const consumer = [
+      'function describe(code: StatusCode): string {',
+      '  switch (code) {',
+      "    case 200: return 'OK';",
+      "    case 404: return 'Not Found';",
+      "    case 500: return 'Server Error';",
+      "    default: return 'Unknown';",
+      '  }',
+      '}',
+    ].join('\n');
+    const repoChunks = [makeChunk('src/consumer.ts', 1, consumer)];
+    const contexts = computeVariantSweepContexts(makeContext({ patches, chunks, repoChunks }));
+    expect(contexts).toHaveLength(1);
+    expect(contexts[0]).toMatchObject({ typeName: 'StatusCode', variant: '503', kind: 'union' });
+    expect(contexts[0].consumers[0].handledVariants.sort()).toEqual(['200', '404', '500']);
+  });
+
+  it('flags a mapping table keyed by bracket-access for a non-identifier const-object key', () => {
+    const content = [
+      'export const Editors = {',
+      '  cursor: 1,',
+      "  'claude-code': 2,",
+      '  zed: 3,',
+      '} as const;',
+    ].join('\n');
+    const patches = new Map([
+      [
+        'src/editors.ts',
+        patch(
+          '@@ -1,3 +1,4 @@',
+          ' export const Editors = {',
+          '   cursor: 1,',
+          "   'claude-code': 2,",
+          '+  zed: 3,',
+          ' } as const;',
+        ),
+      ],
+    ]);
+    const chunks = [makeChunk('src/editors.ts', 1, content)];
+    // References the non-identifier key via bracket access (the only valid
+    // syntax for it) and the identifier key via dot access — omits `zed`.
+    const consumer = [
+      'function cost(e: typeof Editors): number {',
+      '  if (e === Editors.cursor) return 1;',
+      "  if (e === Editors['claude-code']) return 2;",
+      '  return 0;',
+      '}',
+    ].join('\n');
+    const repoChunks = [makeChunk('src/cost.ts', 1, consumer)];
+    const contexts = computeVariantSweepContexts(makeContext({ patches, chunks, repoChunks }));
+    expect(contexts).toHaveLength(1);
+    expect(contexts[0]).toMatchObject({
+      typeName: 'Editors',
+      variant: 'zed',
+      kind: 'const-object',
+    });
+    expect(contexts[0].consumers[0].handledVariants.sort()).toEqual(['claude-code', 'cursor']);
+  });
+
+  it('does not treat qualified-reference text INSIDE a string literal as a real consumer match', () => {
+    const patches = new Map([['src/color.ts', COLOR_ENUM_PATCH]]);
+    const chunks = [makeChunk('src/color.ts', 1, COLOR_ENUM)];
+    // Not real code — a log/fixture string that merely CONTAINS matching
+    // text. Must not be misread as a switch enumerating Red and Blue.
+    const stringOnly =
+      'const msg = "unhandled: case Color.Red: case Color.Blue: — check the switch";';
+    const repoChunks = [makeChunk('src/log.ts', 1, stringOnly)];
+    expect(computeVariantSweepContexts(makeContext({ patches, chunks, repoChunks }))).toEqual([]);
   });
 
   it('handles multiple independent families in the same PR without crosstalk', () => {

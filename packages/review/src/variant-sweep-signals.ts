@@ -47,9 +47,12 @@
  *    this directly satisfies the "non-enum object literals" case).
  *  - Consumer detection requires a DOT-QUALIFIED reference (`TypeName.
  *    Member`) for enum/const-object members — the idiomatic, high-precision
- *    form (`case Color.Red:`, `x === Color.Red`, `[Color.Red]: ...`). Union
- *    members (string/numeric literals, no natural qualifier) fall back to
- *    the bare quoted/keyed literal value, which is lower precision by
+ *    form (`case Color.Red:`, `x === Color.Red`, `[Color.Red]: ...`). A
+ *    const-object key that isn't a valid identifier (e.g. kebab-case) falls
+ *    back to bracket notation (`Editors['claude-code']`) instead, since dot
+ *    access isn't valid syntax for it. Union members (string/numeric
+ *    literals, no natural qualifier) fall back to the bare quoted/keyed
+ *    literal value (unquoted for numeric arms), which is lower precision by
  *    construction — documented, not papered over.
  *  - A consumer site is only ever a `case` label, an equality comparison
  *    (`===`/`==`/`!==`/`!=`), an `instanceof` check (union-of-identifier
@@ -63,6 +66,16 @@
  *    comment skipping — a member whose VALUE itself contains a nested
  *    object is not expected for these idiomatic shapes and is a documented
  *    limitation, not a crash.
+ *  - `isGenuinelyNew`'s "was this identifier ever removed" check scans the
+ *    WHOLE file's removed-diff-text, not just the lines belonging to this
+ *    variant's own family/declaration. A same-named member removed from an
+ *    unrelated declaration elsewhere in the same file's diff can therefore
+ *    suppress a genuine addition (false negative). Scoping this to the
+ *    owning declaration/hunk would need old-side-aware family parsing (the
+ *    diff-side scan is currently new-side only) — left as a known gap
+ *    rather than a v1 blocker; a coincidental same-named removal elsewhere
+ *    in the same file's diff is a narrow enough case that it wasn't judged
+ *    worth the parsing cost yet.
  */
 
 import type { CodeChunk } from '@liendev/parser';
@@ -120,6 +133,9 @@ const TS_JS_FILE_RE = /\.(?:[cm]?[jt]sx?)$/;
 const HUNK_HEADER_RE = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
 
 const VALID_IDENT_RE = /^[A-Za-z_$][\w$]*$/;
+
+/** A bare (unquoted) numeric union arm — e.g. the `200`/`404` in `type Code = 200 | 404`. */
+const NUMERIC_LITERAL_RE = /^-?\d+(?:\.\d+)?$/;
 
 const ENUM_HEADER_RE =
   /\b(?:export\s+)?(?:declare\s+)?(?:const\s+)?enum\s+([A-Za-z_$][\w$]*)\s*\{/g;
@@ -180,7 +196,10 @@ function classifySpan(text: string, i: number): Span | null {
  * declaration HEADERS safely, since a docstring/fixture string quoting
  * `enum Foo {` as prose must never be read as a real declaration).
  */
-function maskSpans(text: string, shouldMask: (kind: Span['kind']) => boolean): string {
+function maskSpans(
+  text: string,
+  shouldMask: (span: Span, start: number, text: string) => boolean,
+): string {
   let i = 0;
   let out = '';
   while (i < text.length) {
@@ -190,7 +209,7 @@ function maskSpans(text: string, shouldMask: (kind: Span['kind']) => boolean): s
       i++;
       continue;
     }
-    if (shouldMask(span.kind)) {
+    if (shouldMask(span, i, text)) {
       for (let k = i; k < span.end; k++) out += text[k] === '\n' ? '\n' : ' ';
     } else {
       out += text.slice(i, span.end);
@@ -201,11 +220,52 @@ function maskSpans(text: string, shouldMask: (kind: Span['kind']) => boolean): s
 }
 
 function maskComments(text: string): string {
-  return maskSpans(text, kind => kind === 'comment');
+  return maskSpans(text, span => span.kind === 'comment');
 }
 
 function maskCommentsAndStrings(text: string): string {
   return maskSpans(text, () => true);
+}
+
+/** Nearest non-whitespace character before index `i`, or '' at the start of `text`. */
+function prevNonSpace(text: string, i: number): string {
+  let k = i - 1;
+  while (k >= 0 && /\s/.test(text[k])) k--;
+  return k >= 0 ? text[k] : '';
+}
+
+/** Nearest non-whitespace character at/after index `i`, or '' at the end of `text`. */
+function nextNonSpace(text: string, i: number): string {
+  let k = i;
+  while (k < text.length && /\s/.test(text[k])) k++;
+  return k < text.length ? text[k] : '';
+}
+
+/**
+ * Is this string span a computed-member-access key — `Foo['bar']` — rather
+ * than a free-standing string expression? Recognized by its immediate
+ * bracket context (`[` before, `]` after, ignoring whitespace), not by
+ * position within a larger expression.
+ */
+function isBracketIndexString(span: Span, start: number, text: string): boolean {
+  return prevNonSpace(text, start) === '[' && nextNonSpace(text, span.end) === ']';
+}
+
+/**
+ * Mask comments and "prose" string literals, but NOT a string used as a
+ * computed member-access key (`Editors['claude-code']`) — that's syntax a
+ * qualified-reference scan must still be able to match, not prose that
+ * could coincidentally contain matching text. Used by
+ * {@link collectMatchesInChunk} for enum/const-object consumer scans, where
+ * {@link maskCommentsAndStrings}'s blanket string-masking would blind the
+ * scan to bracket-accessed non-identifier keys.
+ */
+function maskCommentsAndProseStrings(text: string): string {
+  return maskSpans(
+    text,
+    (span, start, t) =>
+      span.kind === 'comment' || (span.kind === 'string' && !isBracketIndexString(span, start, t)),
+  );
 }
 
 /**
@@ -427,6 +487,7 @@ function unionArmVariant(armText: string): string | null {
   const strLit = armText.match(/^['"]([^'"]*)['"]$/);
   if (strLit) return strLit[1];
   if (VALID_IDENT_RE.test(armText)) return armText;
+  if (NUMERIC_LITERAL_RE.test(armText)) return armText;
   return null;
 }
 
@@ -438,9 +499,12 @@ function findUnionDeclarations(content: string, baseLine: number): FamilyDeclara
     const typeName = m[1];
     const bodyStart = m.index + m[0].length;
     const semiIdx = findTopLevelSemicolon(commentMasked, bodyStart);
-    if (semiIdx === -1) continue;
+    // A union alias with no trailing semicolon (e.g. the last statement in a
+    // no-semicolon-style file/chunk) still has a real body — fall back to
+    // the end of the content rather than dropping the declaration entirely.
+    const bodyEnd = semiIdx === -1 ? commentMasked.length : semiIdx;
 
-    const body = commentMasked.slice(bodyStart, semiIdx);
+    const body = commentMasked.slice(bodyStart, bodyEnd);
     const members: FamilyMember[] = [];
     for (const seg of splitTopLevel(body, '|')) {
       const t = seg.text.trim();
@@ -455,7 +519,7 @@ function findUnionDeclarations(content: string, baseLine: number): FamilyDeclara
       kind: 'union',
       members,
       declStartLine: baseLine + countNewlines(content, m.index),
-      declEndLine: baseLine + countNewlines(content, semiIdx),
+      declEndLine: baseLine + countNewlines(content, bodyEnd),
     });
   }
   return out;
@@ -668,16 +732,26 @@ interface TokenPatterns {
   mappingKeys: RegExp[];
 }
 
-/** Enum / const-object members are referenced dot-qualified: `TypeName.Member`. */
+/**
+ * Enum / const-object members are usually referenced dot-qualified:
+ * `TypeName.Member`. A const-object key that isn't a valid identifier (e.g.
+ * a kebab-case string key) can't be dot-accessed at all — `Editors.claude-
+ * code` doesn't parse as a property access — so real consumer code is
+ * forced to use bracket notation (`Editors['claude-code']`) instead; fall
+ * back to that form when the variant name itself isn't a valid identifier.
+ */
 function buildQualifiedTokenPatterns(typeName: string, variant: string): TokenPatterns {
-  const dot = `\\b${escapeRegExp(typeName)}\\.${escapeRegExp(variant)}\\b`;
+  const typeEsc = escapeRegExp(typeName);
+  const qualified = VALID_IDENT_RE.test(variant)
+    ? `\\b${typeEsc}\\.${escapeRegExp(variant)}\\b`
+    : `\\b${typeEsc}\\s*\\[\\s*['"]${escapeRegExp(variant)}['"]\\s*\\]`;
   return {
     references: [
-      new RegExp(`\\bcase\\s+${dot}\\s*:`),
-      new RegExp(`${dot}\\s*(?:===|==|!==|!=)`),
-      new RegExp(`(?:===|==|!==|!=)\\s*${dot}`),
+      new RegExp(`\\bcase\\s+${qualified}\\s*:`),
+      new RegExp(`${qualified}\\s*(?:===|==|!==|!=)`),
+      new RegExp(`(?:===|==|!==|!=)\\s*${qualified}`),
     ],
-    mappingKeys: [new RegExp(`\\[\\s*${dot}\\s*\\]\\s*:`)],
+    mappingKeys: [new RegExp(`\\[\\s*${qualified}\\s*\\]\\s*:`)],
   };
 }
 
@@ -689,13 +763,16 @@ function buildQualifiedTokenPatterns(typeName: string, variant: string): TokenPa
  */
 function buildUnionTokenPatterns(variant: string): TokenPatterns {
   const v = escapeRegExp(variant);
-  const quoted = `['"]${v}['"]`;
+  // Numeric arms (`200`, `404`) are never quoted in real code — `case 200:`,
+  // not `case '200':` — so they need an unquoted, word-bounded literal
+  // pattern instead of the string-arm `quoted` form.
+  const literal = NUMERIC_LITERAL_RE.test(variant) ? `\\b${v}\\b` : `['"]${v}['"]`;
   const references = [
-    new RegExp(`\\bcase\\s+${quoted}\\s*:`),
-    new RegExp(`${quoted}\\s*(?:===|==|!==|!=)`),
-    new RegExp(`(?:===|==|!==|!=)\\s*${quoted}`),
+    new RegExp(`\\bcase\\s+${literal}\\s*:`),
+    new RegExp(`${literal}\\s*(?:===|==|!==|!=)`),
+    new RegExp(`(?:===|==|!==|!=)\\s*${literal}`),
   ];
-  const mappingKeys = [new RegExp(`${quoted}\\s*:`)];
+  const mappingKeys = [new RegExp(`${literal}\\s*:`)];
   if (VALID_IDENT_RE.test(variant)) {
     references.push(new RegExp(`\\binstanceof\\s+${v}\\b`));
     mappingKeys.push(new RegExp(`\\b${v}\\s*:`));
@@ -713,12 +790,22 @@ function buildTokenPatterns(
     : buildQualifiedTokenPatterns(typeName, variant);
 }
 
-/** For each variant in `tokenMap` that has a matching reference in `content`, its first matching line (0-based). */
+/**
+ * For each variant in `tokenMap` that has a matching reference in `content`,
+ * its first matching line (0-based). `kind` picks the masking strategy:
+ * enum/const-object patterns are dot- or bracket-qualified identifiers, so
+ * masking string contents too avoids a false consumer match from a string
+ * literal that merely CONTAINS matching text (e.g. `"case Color.Red:"` in a
+ * log message or test fixture). Union patterns are themselves quoted string
+ * literals, so masking strings would blind the scan to every real match —
+ * only comments are masked for that kind.
+ */
 function collectMatchesInChunk(
   content: string,
   tokenMap: Map<string, TokenPatterns>,
+  kind: VariantFamilyKind,
 ): Map<string, number> {
-  const masked = maskComments(content);
+  const masked = kind === 'union' ? maskComments(content) : maskCommentsAndProseStrings(content);
   const lines = masked.split('\n');
   const found = new Map<string, number>();
 
@@ -816,7 +903,7 @@ function recordChunkConsumers(
   byVariant: Map<string, VariantConsumerSite[]>,
   seenSite: Set<string>,
 ): void {
-  const matches = collectMatchesInChunk(chunk.content, tokenMap);
+  const matches = collectMatchesInChunk(chunk.content, tokenMap, group.kind);
   const matchedExisting = [...matches.keys()].filter(k => existingSet.has(k));
   if (matchedExisting.length < MIN_EXISTING_REFERENCES) return;
 
