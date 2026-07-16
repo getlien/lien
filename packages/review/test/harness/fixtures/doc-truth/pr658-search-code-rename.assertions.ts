@@ -231,15 +231,36 @@
  * residual (matches a finding that *agrees* "meaning-based" framing is fine,
  * not just one that falsifies it — flagged but explicitly left unfixed by
  * the #784 sweep's minimal-diff scope) had to close rather than ride on
- * Finding A's now-removed backstop. Added a second, AND'd
- * `expectFindingMentions` requiring the correction/mechanism side of the
- * claim (`lexical` / `bm25` / `no embeddings` / `not meaning-based` / `not
- * semantic`) alongside the existing claim-naming keywords. Verified via the
- * four-verdict offline smoke test below: the same defensive-conclusion
- * distractor that exposed the residual still lacks these correction terms
- * and now correctly fails Tier 2, while all 3 real post-#787 votes' Finding
- * B wording ("performs lexical BM25 keyword search... not meaning-based")
- * satisfies both keyword lists.
+ * Finding A's now-removed backstop. Requires a SINGLE finding to name both
+ * the claim ("meaning-based") and its correction/mechanism (`lexical` /
+ * `bm25` / `no embeddings` / `not meaning-based` / `not semantic`).
+ *
+ * FIRST DRAFT BUG (caught by CodeRabbit on this PR's own review, PR #794):
+ * the initial implementation used two separate `expectFindingMentions`
+ * calls for the claim and correction keyword lists. `expectFindingMentions`
+ * flattens every finding's text into one haystack before matching, so two
+ * separate calls check "the claim appears somewhere across all findings"
+ * AND "a correction term appears somewhere across all findings" —
+ * independently, not within the same finding. On this all-about-lexical-
+ * search rename PR, almost any multi-finding result contains "lexical" or
+ * "bm25" *somewhere* for reasons unrelated to Finding B, so a distractor
+ * finding that only mentions "meaning-based" (the defensive, wrong-
+ * conclusion shape this exact residual is about) would still false-pass
+ * as long as any sibling finding used the word "lexical" — reintroducing
+ * the stance-blind gap this tightening was meant to close, just one level
+ * indirected. Fixed by checking both keyword lists against each finding's
+ * own text (`result.findings.some(f => ...)`) via a direct
+ * `HarnessAssertionError` throw, so both terms must land in the SAME
+ * finding.
+ *
+ * Verified via the four-verdict offline smoke test below, PLUS a fifth
+ * adversarial check added specifically to prove the CodeRabbit fix: the
+ * defensive-conclusion distractor finding (no correction terms) alongside
+ * a second, unrelated real finding that legitimately uses "lexical BM25" —
+ * correctly FAILS post-fix (would have false-passed under the two-call
+ * draft). All 3 real post-#787 votes' Finding B wording ("performs lexical
+ * BM25 keyword search... not meaning-based") names both the claim and its
+ * correction within that one finding, so the fix doesn't cost any recall.
  *
  * FOUR-VERDICT SMOKE TEST (assert-cli.ts, zero LLM spend, 2026-07-16):
  *   1. Perfect verdict (real vote 3 from the post-#787 screen trace, 9
@@ -249,19 +270,33 @@
  *      description above: augment-explore-task.sh:64, doc-truth category,
  *      reaches the defensive "fine, just incomplete" conclusion, no
  *      schema.ts anchor, no correction/mechanism wording) -> FAIL (Tier 2:
- *      claim-naming keyword list has no anchor to fall back on now that
- *      Finding A isn't checked, and the correction-phrase list catches the
- *      stance-blind gap).
+ *      no single finding names both the claim and its correction).
  *   4. B-only verdict (real vote 1 from the post-#787 screen trace — 5
  *      findings incl. Finding B, Finding A genuinely absent — the currently
  *      common real shape per PR #792's screen) -> PASS. This is the point of
  *      the re-scope: a vote the OLD assertion rejected now certifies,
  *      because it correctly reflects what doc-truth reliably delivers on
  *      this diff.
- *   Verbatim assert-cli.ts output for all four in the PR body.
+ *   5. Adversarial cross-finding check (post-CodeRabbit-fix only): verdict 3's
+ *      distractor PLUS a second, unrelated real finding mentioning "lexical
+ *      BM25" for a different reason -> FAIL. Confirms the per-finding fix
+ *      actually closes the cross-finding leakage, not just the single-
+ *      finding case verdict 3 already covered.
+ *   Verbatim assert-cli.ts output for all five in the PR body.
  */
 
+import { HarnessAssertionError } from '../../assertions.js';
 import type { FixtureAssertions } from '../../assertions.js';
+
+const FINDING_B_CLAIM_KEYWORDS = ['meaning-based', 'meaning based'];
+const FINDING_B_CORRECTION_KEYWORDS = [
+  'lexical',
+  'bm25',
+  'no embeddings',
+  'not meaning-based',
+  'not meaning based',
+  'not semantic',
+];
 
 const assertions: FixtureAssertions = {
   description:
@@ -273,27 +308,35 @@ const assertions: FixtureAssertions = {
     // RE-SCOPE DECISION"): Finding B (augment-explore-task.sh:64) is what
     // this pipeline reliably delivers post-#787; Finding A (schema.ts) is
     // now a tracked characterization expectation documented above, not a
-    // pass/fail check. Two AND'd checks operationalize "a substantive,
-    // correctly-framed Finding B" rather than a vacuous keyword hit:
-    //   - the claim itself is named ("meaning-based")
-    //   - the correction/mechanism is named too (lexical/BM25/no
-    //     embeddings/"not meaning-based") — closing the stance-blind
-    //     residual the #784 sweep flagged but left unfixed, now required
-    //     since this is the sole certified Tier-2 signal.
-    // Together with Tier 1 (doc-truth fired, ruling out empty/degenerate
-    // runs), this pair is what "substantive findings" means for this gate.
-    h.expectFindingMentions(['meaning-based', 'meaning based'], result);
-    h.expectFindingMentions(
-      [
-        'lexical',
-        'bm25',
-        'no embeddings',
-        'not meaning-based',
-        'not meaning based',
-        'not semantic',
-      ],
-      result,
-    );
+    // pass/fail check. Require a SINGLE finding to name both the claim
+    // ("meaning-based") AND its correction/mechanism (lexical/BM25/no
+    // embeddings/"not meaning-based") — closing the stance-blind residual
+    // the #784 sweep flagged but left unfixed, now required since this is
+    // the sole certified Tier-2 signal. Checked per-finding rather than via
+    // two separate `expectFindingMentions` calls: those flatten every
+    // finding's text into one haystack, so a distractor finding merely
+    // mentioning "meaning-based" plus an unrelated sibling finding
+    // mentioning "lexical" (near-guaranteed on this all-about-lexical-search
+    // rename PR) would false-pass — caught by CodeRabbit on this PR's own
+    // review, see PR #794. Together with Tier 1 (doc-truth fired, ruling
+    // out empty/degenerate runs), this is what "substantive findings" means
+    // for this gate.
+    const hasCorrectlyFramedFindingB = result.findings.some(f => {
+      const haystack = [f.message, f.suggestion ?? '', f.evidence ?? ''].join('\n').toLowerCase();
+      return (
+        FINDING_B_CLAIM_KEYWORDS.some(kw => haystack.includes(kw)) &&
+        FINDING_B_CORRECTION_KEYWORDS.some(kw => haystack.includes(kw))
+      );
+    });
+    if (!hasCorrectlyFramedFindingB) {
+      throw new HarnessAssertionError(
+        `Tier 2: expected a single finding to mention both the claim ` +
+          `(${FINDING_B_CLAIM_KEYWORDS.map(k => `"${k}"`).join(' or ')}) and its ` +
+          `correction/mechanism (${FINDING_B_CORRECTION_KEYWORDS.map(k => `"${k}"`).join(' or ')}) ` +
+          `— no single finding satisfied both. Findings: ${result.findings.length}.`,
+        2,
+      );
+    }
     // Finding A (schema.ts `embeddings.enabled` stale claim) — TRACKED
     // CHARACTERIZATION, NON-GATING as of 2026-07-16. See header for the
     // measured rate (best-read 1/3, and that 1 a piggyback, not a
