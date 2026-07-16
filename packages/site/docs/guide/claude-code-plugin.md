@@ -148,7 +148,7 @@ hook's per-file-per-session TTL suppression so an edit burst on one file only
 reminds once per window (default 5 minutes, `LIEN_ANNOTATE_TTL_MIN`). Disable
 with `LIEN_TEST_REMINDER=off`.
 
-### Explore-agent nudge
+### Explore-agent nudge, and a plan-time nudge for builder subagents
 
 A third hook (`PreToolUse:Agent|Task`) appends a short Lien-tool mandate to the
 prompt whenever Claude Code launches its built-in `Explore` subagent —
@@ -158,6 +158,15 @@ no-op if the repo has no index yet, or if the prompt already names a Lien MCP
 tool. The plugin doesn't ship its own Explore agent definition — this targets
 Claude Code's built-in `Explore` subagent (or one installed the legacy way via
 `lien init --legacy`).
+
+The same hook also covers every other subagent_type — the ones that actually
+write code. When such a prompt names a repo-relative file that resolves on
+disk and `lien annotate` reports a function at/near its complexity budget, the
+hook appends a compact "Lien plan-time note" naming the near-budget functions,
+capped the same way the read-hook's warning line is (3 entries, #788). Silent
+whenever no named path resolves or nothing is near budget — spawned agents get
+no nudge by default today, so this closes that gap for the subagents doing the
+actual writing. Disable with `LIEN_SUBAGENT_NUDGE=off`.
 
 ## Why hooks, not CLAUDE.md rules
 
@@ -182,6 +191,7 @@ internal error exits silently rather than blocking your tool call.
 | `LIEN_TEST_REMINDER=off` | Disables the post-edit test-association reminder |
 | `LIEN_DELTA_EVENTS=off` | Disables local `lien delta` event recording (used by `lien stats`) |
 | `LIEN_EXPLORE_INJECT=off` | Disables the Explore-agent prompt nudge |
+| `LIEN_SUBAGENT_NUDGE=off` | Disables the builder-subagent plan-time complexity nudge |
 
 ## Updating
 
