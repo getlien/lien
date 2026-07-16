@@ -54,9 +54,26 @@ export const MAX_REVIEW_TOKEN_BUDGET = 250_000;
  *
  * Keyed on the model slug so it tracks the actual model in use (incl. A/B
  * overrides), not just the default.
+ *
+ * Raised 1.5x → 2.0x (2026-07) after PR #781's job 87554927152 showed the
+ * 1.5x floor was too tight: the main pass hit the wrap-up nudge after just 3
+ * read_file turns (100,215 of 145,749 tokens, 68.8% — over the 60% nearBudget
+ * threshold), forcing it to abandon mid-verification of a real finding
+ * (numeric-union-arm consumer detection) and emit 0 findings. A 10-run sample
+ * of the workflow found the nudge fires in ~4 of 7 pass-instances on
+ * content-heavy small-file-count PRs — this is a routine failure mode, not a
+ * one-off. 1.5x was originally calibrated (#598) to the FLOOR of observed
+ * need ("~160-180K for a real multi-file review"), leaving no headroom above
+ * it; 2.0x moves the typical medium-PR budget from ~162K to ~216K, clearing
+ * that range with margin. Cost impact, at the observed blended rate of
+ * ~$0.92/million tokens (~$0.00092 per 1,000 tokens — job 87554927152's
+ * $0.1368/148,298 tokens), is a few cents on the runs that actually use the
+ * extra headroom (e.g. the cited job's 48,583-token increase: ~$0.045) — a
+ * ceiling raise doesn't change agent behavior on runs that already finish
+ * under budget, so those cost nothing extra.
  */
 export const REVIEW_TOKEN_BUDGET_MULTIPLIERS: Record<string, number> = {
-  [DEFAULT_REVIEW_MODEL]: 1.5,
+  [DEFAULT_REVIEW_MODEL]: 2.0,
 };
 
 /** Budget multiplier for a model slug (1× when unknown). */
