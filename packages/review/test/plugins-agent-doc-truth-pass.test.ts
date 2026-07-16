@@ -45,6 +45,25 @@ const CODE_PATCH = `@@ -1,3 +1,4 @@
 +  return UNIQUE_CODE_MARKER_XYZ; // disabled when true
  }`;
 
+/**
+ * A single-token identifier swap landing inside a comment. Repeated across
+ * >= MIN_FILES files with >= MIN_OCCURRENCES total occurrences (see
+ * rename-sweep-signals.ts), this trips the rename-sweep detector: same glue,
+ * one differing identifier position, above both thresholds.
+ */
+const RENAME_SWEEP_PATCH = `@@ -1,2 +1,2 @@
+-// uses oldSearchToken to look up code
++// uses newSearchToken to look up code`;
+
+/** changedFiles carrying a rename-sweep patch across enough distinct files. */
+const RENAME_SWEEP_FILES: Array<[string, string]> = [
+  'packages/core/src/file1.ts',
+  'packages/core/src/file2.ts',
+  'packages/core/src/file3.ts',
+  'packages/core/src/file4.ts',
+  'packages/core/src/file5.ts',
+].map(f => [f, RENAME_SWEEP_PATCH]);
+
 function contextWithPatches(
   entries: Array<[string, string]>,
   extra?: Partial<ReviewContext>,
@@ -190,6 +209,42 @@ describe('buildDocTruthPassPrompts', () => {
     expect(message).not.toContain('<complexity_regressions>');
     expect(message).not.toContain('<stale_literal_candidates>');
     expect(message).not.toContain('<untrusted_input_sites>');
+    // No rename-sweep in THIS fixture — it carries no mechanical rename.
+    expect(message).not.toContain('<rename_sweep>');
+  });
+
+  // Regression coverage: the doc-truth rule text (rules.ts) explicitly tells
+  // the model to "check for a <rename_sweep> block" as a supplementary
+  // claim-verification worklist, but the block was never rendered into this
+  // pass's initial message — the rule promised a block that never arrived.
+  it('includes the <rename_sweep> block when the diff carries a mechanical rename sweep', () => {
+    const ctx = contextWithPatches([
+      ['docs/architecture/worktree.md', DOC_CLAIM_PATCH],
+      ...RENAME_SWEEP_FILES,
+    ]);
+    const message = buildDocTruthPassInitialMessage(ctx);
+
+    expect(message).toContain('<rename_sweep>');
+    expect(message).toContain('`oldSearchToken` → `newSearchToken`');
+    expect(message).toContain('</rename_sweep>');
+
+    // Positioned after <doc_claims> (a supplementary worklist), before the
+    // guidance-surface hunks.
+    const docClaimsIdx = message.indexOf('<doc_claims>');
+    const renameSweepIdx = message.indexOf('<rename_sweep>');
+    const guidanceIdx = message.indexOf('<guidance_surface_changes>');
+    expect(docClaimsIdx).toBeGreaterThan(-1);
+    expect(docClaimsIdx).toBeLessThan(renameSweepIdx);
+    expect(renameSweepIdx).toBeLessThan(guidanceIdx);
+  });
+
+  it('omits the <rename_sweep> block when the diff has no mechanical rename sweep', () => {
+    const ctx = contextWithPatches([
+      ['docs/architecture/worktree.md', DOC_CLAIM_PATCH],
+      ['packages/core/src/overlay.ts', CODE_PATCH],
+    ]);
+    const message = buildDocTruthPassInitialMessage(ctx);
+    expect(message).not.toContain('<rename_sweep>');
   });
 });
 
