@@ -58,6 +58,20 @@
  * understates it. Tagged `characterization` (not canary): the model declines it
  * consistently and defensibly, so the harness renders it as a non-gating `~`
  * line and excludes it from the exit code.
+ *
+ * KEYWORD-INTEGRITY SWEEP (2026-07-16): the Tier-2 list was bare-noun-heavy
+ * ('unchanged', 'public export', 'public api', 'breaking', 'removed',
+ * 'index.ts', 'lienerrorcode', 'patch', 'semver', 'major', 'minor',
+ * 'migration', and the single bare word 'export' — the worst offender)
+ * and false-passed a hand-written distractor via assert-cli.ts: a finding
+ * about a stale JSDoc subsystem-grouping comment listing the same removed
+ * enum members matched lienerrorcode/embedding_generation_failed/removed/
+ * export without ever touching the changeset's "otherwise unchanged" claim.
+ * Tightened to compound phrases quoting that claim or naming the
+ * EmbeddingError public-export removal specifically. The 0/10 pre-signal
+ * numbers above PREDATE this tightening; no stored vote traces exist in this
+ * worktree to offline re-score — the upcoming corpus recalibration sweep
+ * re-measures it.
  */
 
 import type { FixtureAssertions } from '../../assertions.js';
@@ -70,32 +84,38 @@ const assertions: FixtureAssertions = {
   rule: 'doc-truth',
   expect: (result, h) => {
     h.expectRuleFired('doc-truth', result);
+    // Kept to compound phrases quoting the changeset's exact false claim
+    // ("otherwise unchanged") or naming the removed EmbeddingError export
+    // specifically — not bare 'unchanged'/'public export'/'public api'/
+    // 'breaking'/'removed'/'index.ts'/'lienerrorcode'/'patch'/'semver'/
+    // 'major'/'minor'/'migration'/'export', each of which is generic enough
+    // that an unrelated finding about a DIFFERENT part of this same tiny
+    // diff (e.g. a stale JSDoc subsystem-grouping comment listing the
+    // removed enum members) would also satisfy (verified via assert-cli.ts:
+    // exactly that distractor false-passed the original list via
+    // lienerrorcode/embedding_generation_failed/removed/export, without ever
+    // touching the changeset's "otherwise unchanged" claim or the
+    // EmbeddingError public-export removal).
     h.expectFindingMentions(
       [
-        // The removed public symbol — the crux
-        'embeddingerror',
-        // The false / understated claim
         'otherwise unchanged',
-        'unchanged',
-        'public error exports',
-        // The breaking-change framing a correct finding uses
-        'public export',
-        'public api',
-        'public-api',
-        'breaking',
-        'removed',
-        'no longer exported',
-        // Anchors
-        'index.ts',
-        'lienerrorcode',
-        'embedding_generation_failed',
-        // The semver angle (secondary)
-        'patch',
-        'semver',
-        'major',
-        'minor',
-        'migration',
-        'export',
+        'public error exports are otherwise unchanged',
+        'embeddingerror',
+        'removes embeddingerror',
+        'removed embeddingerror',
+        'embeddingerror is removed',
+        'embeddingerror was removed',
+        'embeddingerror is no longer exported',
+        'no longer exports embeddingerror',
+        'changeset says',
+        'changeset claims',
+        'patch bump understates',
+        'should be a major',
+        'should be a minor',
+        'this is a breaking change',
+        'this is breaking',
+        'breaking, not a patch',
+        'not just a patch',
       ],
       result,
     );

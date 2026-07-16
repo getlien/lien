@@ -85,6 +85,17 @@
  * CALIBRATION (kimi-k2.7-code): CERTIFIED 2026-07-12 — --calibrate 10
  * scored 10/10 ($0.39). Prior evidence: 3/3 Kimi screen + blind-CC
  * catch (2026-07 Python round).
+ *
+ * KEYWORD-INTEGRITY SWEEP (2026-07-16): the list included bare 'positional
+ * argument'/'positional arg' — the comment above them claimed they were
+ * "combined with index/positional-arg language" to require co-occurrence,
+ * but expectFindingMentions is a flat OR list, so either phrase alone
+ * false-passed a hand-written distractor via assert-cli.ts (a "callers
+ * should use keyword arguments only" API-design nit that never mentions
+ * args[2]/wrong index/scrambled). Dropped both; the remaining index/slot/
+ * scramble-specific terms are unaffected. This canary's 10/10 PREDATES this
+ * tightening; no stored vote traces exist in this worktree to offline
+ * re-score — the upcoming corpus recalibration sweep re-measures it.
  */
 import type { FixtureAssertions } from '../../assertions.js';
 
@@ -117,12 +128,15 @@ const assertions: FixtureAssertions = {
         'same index',
         'collide',
         'collision',
-        // The domain — combined with index/positional-arg language so a
-        // finding must be about the ARGUMENT PLUMBING, not just anything
-        // touching this function (e.g. a test-cleanup nit that happens to
-        // say "TemplateResponse" would not match any of these)
-        'positional argument',
-        'positional arg',
+        // The domain — kept to compound slot-collision phrases naming the
+        // actual argument-plumbing mechanism. Dropped bare 'positional
+        // argument'/'positional arg': despite the comment above originally
+        // intending these to require index/positional-arg language
+        // together, expectFindingMentions is a flat OR list, so either
+        // phrase alone let a distractor pass (verified via assert-cli.ts —
+        // a "callers should use keyword arguments only" API-design nit,
+        // never mentioning args[2]/wrong index/scrambled, matched via
+        // 'positional argument' alone).
         'headers slot',
         'status_code slot',
         'args tuple',

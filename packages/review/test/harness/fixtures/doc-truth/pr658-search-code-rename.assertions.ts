@@ -110,6 +110,24 @@
  * 2026-07-04 post-merge sweep (rename-sweep signal #663 + doc-truth rule
  * and guidance passthrough #665) showed 3/3 votes catching Finding A via
  * `doc-truth`. That 3-vote sweep is superseded by the calibrate-10 above.
+ *
+ * KEYWORD-INTEGRITY SWEEP (2026-07-16): Finding A's list was bare-noun-heavy
+ * ('embeddings', 'search_code', 'find_similar', 'lexical', 'bm25',
+ * 'full-text', 'stale', 'no longer' — all central vocabulary for this
+ * 40-file rename PR) and false-passed a hand-written distractor about
+ * augment-explore-task.sh:64 that reached the WRONG, defensive conclusion
+ * ("the meaning-based guidance is fine, just incomplete") via assert-cli.ts
+ * — it matched purely on 'search_code', with no schema.ts anchor at all.
+ * Tightened Finding A to the file anchor + compound "reports as
+ * disabled"/correction phrases only; re-verified against both the literal
+ * schema.ts wording AND the null-embeddings.ts sibling variant (6/10 of the
+ * original calibration's votes per above) — both still pass. Finding B
+ * ('meaning-based') was left untouched per minimal-diff, though note it is
+ * itself stance-blind (matches a finding that *agrees* the guidance is
+ * accurate, not just one that falsifies it) — a residual worth a future
+ * pass, not fixed here. No stored vote traces exist to offline re-score
+ * (fresh worktree); this canary's 10/10 PREDATES this tightening — the
+ * upcoming corpus recalibration sweep re-measures it.
  */
 
 import type { FixtureAssertions } from '../../assertions.js';
@@ -120,27 +138,26 @@ const assertions: FixtureAssertions = {
   rule: 'doc-truth',
   expect: (result, h) => {
     h.expectRuleFired('doc-truth', result);
+    // Kept to the specific file anchor and compound phrases naming the
+    // EXACT false claim ("reports as disabled") or its correction — not bare
+    // 'embeddings' / 'search_code' / 'find_similar' / 'lexical' / 'bm25' /
+    // 'full-text' / 'stale' / 'no longer', each of which is central
+    // vocabulary for this entire 40-file rename PR and would be satisfied by
+    // an unrelated finding merely discussing the same rename theme (verified
+    // via assert-cli.ts: a distractor about augment-explore-task.sh's
+    // "meaning-based" line — reaching the WRONG, defensive conclusion that
+    // the guidance is fine — false-passed the original list purely via
+    // 'search_code'; it has no 'schema.ts'/'embeddings.enabled' anchor and
+    // correctly fails against this one).
     h.expectFindingMentions(
       [
-        // File / symbol anchors
         'schema.ts',
         'embeddings.enabled',
-        'embeddings',
-        // The specific stale claim and its correction
-        'search_code',
-        'find_similar',
         'report as disabled',
         'reports as disabled',
-        'lexical',
-        'bm25',
-        'full-text',
-        // Vocabulary the model reaches for when describing the drift
-        'stale',
-        'no longer',
         'disabled when embeddings',
         'does not depend on embeddings',
         "doesn't depend on embeddings",
-        '#657',
       ],
       result,
     );
