@@ -208,6 +208,8 @@ Lien Review is a separate product surface from the CLI/MCP pipeline above: a sel
 
 Critically, `packages/review` depends on **`@liendev/parser` only** — it does not import `@liendev/core`, so it carries none of the storage-layer dependency weight (this is the point of [ADR-009](decisions/0009-extract-parser-package.md)). See [`packages/action/README.md`](../../packages/action/README.md) for the full setup guide, or the [Lien Review site page](../../packages/site/docs/guide/lien-review.md).
 
+Beyond the main investigation, the agent review can run additional dedicated LLM passes (doc-truth is on by default; two candidate-loop passes exist dark-launched) via a generalized `ReviewPassSpec` executor — see [Agent-Review Pass Architecture](./review-pass-architecture.md) ([ADR-014](decisions/0014-per-rule-candidate-loop-passes.md)).
+
 **Retired**: the earlier hosted-SaaS shape for review — `packages/runner` (a NATS-based review runner) and `platform/` (a Laravel 12 control plane + its K8s infra) — was removed in favor of this self-hostable Action.
 
 ## Data Flow

@@ -164,6 +164,25 @@ hook protocol changes.
 
 ---
 
+### 🔁 [Agent-Review Pass Architecture](./review-pass-architecture.md)
+**`ReviewPassSpec` and the extra-pass executor (Lien Review)**
+
+Explains how Lien Review's agent-review plugin runs additional dedicated LLM
+passes beyond the main investigation:
+- The `ReviewPassSpec` contract and the serial `runExtraPasses` orchestrator
+- The three shipped passes (doc-truth, stale-duplicate loop,
+  incomplete-handling loop) — gates, budgets, toolsets, verdict vocabularies
+- The per-candidate-verdict output contract and `incomplete_verdict` honesty semantics
+- Attestation v2 (`provider.passes[]` / `BudgetAttestation` per pass)
+- Which passes are production-on vs. dark-launched today
+
+**Read this** if you're adding a rule to the agent-review plugin or touching
+`packages/review/src/plugins/agent/review-pass.ts`. See also
+[ADR-014](decisions/0014-per-rule-candidate-loop-passes.md) for the decision
+and its evidence.
+
+---
+
 ## 🎯 Quick Reference
 
 ### For New Contributors
@@ -187,6 +206,7 @@ hook protocol changes.
 | Worktree-shared indexing | [Worktree-Aware Indexing](./worktree-aware-indexing.md) |
 | Pre-commit complexity gate (`lien delta`) | [lien delta](./lien-delta.md) |
 | Plugin hook design (what reaches the model) | [Claude Code Hook Output Channels](./claude-code-hook-channels.md) |
+| Lien Review's extra LLM passes (doc-truth, candidate loops) | [Agent-Review Pass Architecture](./review-pass-architecture.md) |
 
 ### For Debugging
 
@@ -336,7 +356,8 @@ Our Mermaid diagrams follow these conventions:
 - ✅ Worktree-aware indexing shipped (0.55.0) and hardened for concurrency (0.59.0): a linked git worktree shares its main checkout's index instead of building a full independent copy — see [Worktree-Aware Indexing](./worktree-aware-indexing.md)
 - ✅ `lien delta` shipped in two phases (0.57.0-0.58.0): a pre-commit complexity-delta CLI gate, then a write-time edit-hook warning — see [lien delta](./lien-delta.md)
 - ✅ `lien gc` added (0.60.0): garbage-collects stale and orphaned `~/.lien/indices` directories
-- ✅ ADR-008 superseded by ADR-011; ADR-011, ADR-012 added
+- ✅ Lien Review's agent-review plugin generalized its doc-truth second pass into a reusable `ReviewPassSpec` executor, added two dedicated (dark-launched) candidate-loop passes, and bumped the delivery attestation to v2 — see [Agent-Review Pass Architecture](./review-pass-architecture.md) (ADR-014)
+- ✅ ADR-008 superseded by ADR-011; ADR-011, ADR-012, ADR-013, ADR-014 added
 
 ### v0.49.x
 - ✅ Docs resynced to match current package layout and product surface

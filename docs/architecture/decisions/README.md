@@ -30,6 +30,7 @@ For more information, see [adr.github.io](https://adr.github.io/).
 | [ADR-011](0011-sqlite-structural-store-fts5-lexical-search.md) | Replace LanceDB + Embeddings with a SQLite Structural Store and FTS5 Lexical Search | 2026-07-04 | Accepted |
 | [ADR-012](0012-self-hostable-review-action.md) | Self-Hostable GitHub Action for PR Review | 2026-06-27 | Accepted |
 | [ADR-013](0013-prebuilt-native-parser-napi-rs.md) | Prebuilt Native Parser via napi-rs (`@liendev/parser-native`) | 2026-07-08 | Accepted |
+| [ADR-014](0014-per-rule-candidate-loop-passes.md) | Per-Rule Candidate-Loop Passes for Agent Review | 2026-07-16 | Accepted |
 
 ## ADR Format
 
