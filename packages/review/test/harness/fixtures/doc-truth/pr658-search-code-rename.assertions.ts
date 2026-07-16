@@ -8,7 +8,8 @@
  * asserted "user-facing docs were updated consistently". CodeRabbit's
  * review on the same PR caught two real findings that Lien Review missed:
  *
- * Finding A (asserted below, Tier 1 + Tier 2):
+ * Finding A (documented below; TRACKED CHARACTERIZATION as of 2026-07-16,
+ * see "OWNER RE-SCOPE DECISION" — no longer part of the certified gate):
  *   `packages/core/src/config/schema.ts:62`, the `embeddings.enabled` doc
  *   comment. The diff mechanically renamed the identifier in place:
  *     - "...keep working; semantic_search and find_similar report as disabled."
@@ -35,7 +36,8 @@
  *   catching this finding via doc-truth.) Corroborating GitHub
  *   thread: https://github.com/getlien/lien/pull/658#discussion_r3522630327
  *
- * Finding B (asserted below, Tier 2 — promoted 2026-07-04, see below):
+ * Finding B (asserted below, Tier 2 — promoted 2026-07-04, see below; still
+ * the CERTIFIED signal after the 2026-07-16 re-scope):
  *   `plugins/claude/hooks/augment-explore-task.sh:64` described
  *   `search_code` as "REQUIRED for meaning-based discovery" — the tool is
  *   keyword/BM25 search, not meaning-based, so the hook's own guidance
@@ -138,6 +140,125 @@
  * forced-turn/length degenerate-loop truncation shape (#787's target) and 1
  * Finding-A omission. #787 fixed the truncation shape; the Finding-A
  * omission remains the blocker.
+ *
+ * ---------------------------------------------------------------------
+ * OWNER RE-SCOPE DECISION (2026-07-16, post-PR-#792 screen; see PR #792
+ * body for the full 11-canary triage table this decision is drawn from):
+ *
+ * PR #792's 3-vote screen of this fixture measured 1/3 post-#787. Both
+ * misses are healthy, non-degenerate runs: doc-truth fires, produces 5 real
+ * findings, and Finding B (augment-explore-task.sh) is among them every
+ * time — but Finding A (schema.ts `embeddings.enabled`) is consistently
+ * absent from the model's findings list. This is the doc-truth arc's
+ * documented output-economy/omission frontier (see
+ * docs/development/review-harness-judgment.md, "The deterministic-signal
+ * pattern — and its limit": pre-computing the question and the answer isn't
+ * enough when a finding must still WIN a competition for a scarce findings
+ * slot; proven architecture-level by the Sonnet/Kimi model-swap in the
+ * gap-analysis campaign). This PR's diff touches 5+ doc surfaces that all
+ * restate the same rename-staleness theme; Finding A is real but is
+ * consistently the one that loses that competition inside the dedicated
+ * doc-truth pass itself — recurring even with rule competition removed,
+ * which makes it an architectural limit of the current single-pass
+ * findings list, not flakiness or a budget/prompt bug to chase further.
+ *
+ * Options considered:
+ *   1. Keep grinding the doc-truth prompt/coverage to force Finding A's
+ *      recall up. Rejected — this is the documented frontier, not a
+ *      reachability or budget bug; #787 already fixed the one budget-shaped
+ *      failure mode this fixture had. Further prompt tuning here would be
+ *      re-litigating a closed finding per the judgment guide's golden rules.
+ *   2. Tag the whole fixture `characterization` (non-gating). Rejected —
+ *      the harness's only non-gating mechanism is whole-fixture (see
+ *      run.ts: `passed = characterization || …`), which would also stop
+ *      gating on Finding B and "doc-truth fired at all" — throwing away the
+ *      one signal this pipeline DOES reliably deliver on this diff.
+ *   3. [DECISION] Split the gate: keep this fixture tagged `canary` and
+ *      CERTIFY on what the pipeline reliably does — doc-truth fires
+ *      (Tier 1, unchanged) AND Finding B is present, correctly framed as a
+ *      falsification rather than a vacuous mention (Tier 2, below). Finding
+ *      A becomes a TRACKED CHARACTERIZATION EXPECTATION: visible in this
+ *      header with a dated measured rate, but it no longer executes as a
+ *      pass/fail check and never gates the vote. The harness has no
+ *      per-check soft-probe primitive (only the fixture-level
+ *      `characterization` tag, ruled out above as too coarse) — inventing
+ *      one for a single fixture isn't warranted, so the honest
+ *      implementation is: the code simply doesn't check Finding A anymore,
+ *      and this comment is the record.
+ *
+ * Finding A's history, reconciled: it was part of the original 10/10
+ * cert (2026-07-04, see above) and survived the 2026-07-16 keyword-integrity
+ * sweep's re-verification — but both of those measurements ran against a
+ * keyword list broad enough that Finding A's Tier-2 check could pass
+ * without Finding A itself firing (the 4/10 runs, and the coattail-riding
+ * on Finding B's vocabulary, documented above and in the #784 PR body).
+ * After #784 tightened Finding A to the schema.ts file anchor specifically,
+ * NO fresh paid calibration ran against that tightened check before today
+ * — the 2026-07-16 screen above is the first real signal on it, and it's
+ * poor (0/3 pre-#787, 1/3 post-#787). Re-reading the post-#787 traces
+ * directly (`.wip/traces/2026-07-16T08-49-48Z-pr658-search-code-rename/`)
+ * for this PR: the one pass (vote 3) didn't even surface Finding A as its
+ * own finding — it appears only inside the *evidence* field of a different
+ * finding (the `find_similar` semantic-claim finding at
+ * packages/site/docs/guide/mcp-tools.md:103, whose evidence cites
+ * "schema.ts:60 comment groups search_code and find_similar as reporting
+ * disabled when the embedding worker is disabled"). So Finding A's true
+ * measured rate, on the tightened check, across the only 3 votes ever run
+ * against it, is best read as 1/3 (and that 1 a piggyback, not a dedicated
+ * finding) — consistent with "may never have been truly pinned" rather than
+ * a regression from a previously-solid 10/10.
+ *
+ * Follow-up: doc-truth v2 per-claim judgment (a dedicated per-claim
+ * verification step, rather than one shared findings list competing across
+ * every doc claim on the diff) is the structural fix for this class of
+ * omission — see the two-pass architecture note in
+ * docs/development/review-harness-judgment.md for the precedent ("if you
+ * add a rule that keeps losing the findings competition, this is the
+ * precedent to reach for — but only after proving competition is the
+ * bottleneck", which PR #792's screen now does for Finding A specifically).
+ * When that per-claim pass exists, re-add Finding A to this fixture's
+ * certified Tier 2 gate.
+ *
+ * Reference only — Finding A's last-known (pre-2026-07-16) keyword list,
+ * kept here so doc-truth v2's per-claim pass has a ready-made check to
+ * restore rather than re-deriving it from scratch:
+ *   ['schema.ts', 'embeddings.enabled', 'report as disabled',
+ *    'reports as disabled', 'disabled when embeddings',
+ *    'does not depend on embeddings', "doesn't depend on embeddings"]
+ *
+ * Finding B tightened alongside this re-scope (2026-07-16): now the SOLE
+ * certified Tier-2 signal, so its previously-documented stance-blind
+ * residual (matches a finding that *agrees* "meaning-based" framing is fine,
+ * not just one that falsifies it — flagged but explicitly left unfixed by
+ * the #784 sweep's minimal-diff scope) had to close rather than ride on
+ * Finding A's now-removed backstop. Added a second, AND'd
+ * `expectFindingMentions` requiring the correction/mechanism side of the
+ * claim (`lexical` / `bm25` / `no embeddings` / `not meaning-based` / `not
+ * semantic`) alongside the existing claim-naming keywords. Verified via the
+ * four-verdict offline smoke test below: the same defensive-conclusion
+ * distractor that exposed the residual still lacks these correction terms
+ * and now correctly fails Tier 2, while all 3 real post-#787 votes' Finding
+ * B wording ("performs lexical BM25 keyword search... not meaning-based")
+ * satisfies both keyword lists.
+ *
+ * FOUR-VERDICT SMOKE TEST (assert-cli.ts, zero LLM spend, 2026-07-16):
+ *   1. Perfect verdict (real vote 3 from the post-#787 screen trace, 9
+ *      findings incl. both Finding A's substance and Finding B) -> PASS.
+ *   2. Empty verdict (no findings) -> FAIL (Tier 1: doc-truth didn't fire).
+ *   3. Plausible-but-wrong distractor (reconstructed from this header's own
+ *      description above: augment-explore-task.sh:64, doc-truth category,
+ *      reaches the defensive "fine, just incomplete" conclusion, no
+ *      schema.ts anchor, no correction/mechanism wording) -> FAIL (Tier 2:
+ *      claim-naming keyword list has no anchor to fall back on now that
+ *      Finding A isn't checked, and the correction-phrase list catches the
+ *      stance-blind gap).
+ *   4. B-only verdict (real vote 1 from the post-#787 screen trace — 5
+ *      findings incl. Finding B, Finding A genuinely absent — the currently
+ *      common real shape per PR #792's screen) -> PASS. This is the point of
+ *      the re-scope: a vote the OLD assertion rejected now certifies,
+ *      because it correctly reflects what doc-truth reliably delivers on
+ *      this diff.
+ *   Verbatim assert-cli.ts output for all four in the PR body.
  */
 
 import type { FixtureAssertions } from '../../assertions.js';
@@ -148,37 +269,40 @@ const assertions: FixtureAssertions = {
   rule: 'doc-truth',
   expect: (result, h) => {
     h.expectRuleFired('doc-truth', result);
-    // Kept to the specific file anchor and compound phrases naming the
-    // EXACT false claim ("reports as disabled") or its correction — not bare
-    // 'embeddings' / 'search_code' / 'find_similar' / 'lexical' / 'bm25' /
-    // 'full-text' / 'stale' / 'no longer', each of which is central
-    // vocabulary for this entire 40-file rename PR and would be satisfied by
-    // an unrelated finding merely discussing the same rename theme (verified
-    // via assert-cli.ts: a distractor about augment-explore-task.sh's
-    // "meaning-based" line — reaching the WRONG, defensive conclusion that
-    // the guidance is fine — false-passed the original list purely via
-    // 'search_code'; it has no 'schema.ts'/'embeddings.enabled' anchor and
-    // correctly fails against this one).
+    // CERTIFIED Tier 2 (owner decision 2026-07-16 — see header "OWNER
+    // RE-SCOPE DECISION"): Finding B (augment-explore-task.sh:64) is what
+    // this pipeline reliably delivers post-#787; Finding A (schema.ts) is
+    // now a tracked characterization expectation documented above, not a
+    // pass/fail check. Two AND'd checks operationalize "a substantive,
+    // correctly-framed Finding B" rather than a vacuous keyword hit:
+    //   - the claim itself is named ("meaning-based")
+    //   - the correction/mechanism is named too (lexical/BM25/no
+    //     embeddings/"not meaning-based") — closing the stance-blind
+    //     residual the #784 sweep flagged but left unfixed, now required
+    //     since this is the sole certified Tier-2 signal.
+    // Together with Tier 1 (doc-truth fired, ruling out empty/degenerate
+    // runs), this pair is what "substantive findings" means for this gate.
+    h.expectFindingMentions(['meaning-based', 'meaning based'], result);
     h.expectFindingMentions(
       [
-        'schema.ts',
-        'embeddings.enabled',
-        'report as disabled',
-        'reports as disabled',
-        'disabled when embeddings',
-        'does not depend on embeddings',
-        "doesn't depend on embeddings",
+        'lexical',
+        'bm25',
+        'no embeddings',
+        'not meaning-based',
+        'not meaning based',
+        'not semantic',
       ],
       result,
     );
-    // Finding B — plugins/claude/hooks/augment-explore-task.sh:64 calling
-    // search_code "meaning-based" when it's lexical BM25. Promoted from
-    // documented-but-unasserted on 2026-07-04: build-prompts.ts confirmed the
-    // guidance_surface_changes passthrough (#665) now carries this hunk into
-    // the prompt, and 9/10 votes in the promotion calibrate-10 independently
-    // reproduced the claim, all quoting "meaning-based" verbatim. See the
-    // header comment's "Finding B" section for the full evidence chain.
-    h.expectFindingMentions(['meaning-based', 'meaning based'], result);
+    // Finding A (schema.ts `embeddings.enabled` stale claim) — TRACKED
+    // CHARACTERIZATION, NON-GATING as of 2026-07-16. See header for the
+    // measured rate (best-read 1/3, and that 1 a piggyback, not a
+    // dedicated finding) and the doc-truth-v2 follow-up that returns this
+    // to the certified gate. The harness has no per-check soft-probe
+    // primitive (only the whole-fixture `characterization` tag, which
+    // would also un-gate Finding B above) — the honest structure per the
+    // owner decision is that this check simply no longer runs; this
+    // comment plus the header are the record, not new harness machinery.
   },
   votes: 3,
   passThreshold: 9,
