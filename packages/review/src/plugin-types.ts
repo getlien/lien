@@ -126,6 +126,27 @@ export interface ReviewContext {
    * the delivery attestation's `budget.allocatedTokens`.
    */
   reportBudget?: (allocatedTokens: number) => void;
+  /**
+   * Callback for an EXTRA pass (beyond the main investigation — see
+   * `plugins/agent/review-pass.ts`'s `ReviewPassSpec`/`runExtraPasses`) to
+   * report its own outcome once it has run: name, stop reason, whether it
+   * never completed a turn, and its own allocated/spent tokens. Distinct
+   * from `reportBudget`/`reportUsage` (which stay main-pass-only, reporting
+   * the run's AGGREGATE spend) so a pass's own incomplete/budget-starved
+   * outcome is attributable to THAT pass in the delivery attestation's
+   * `provider.passes[]` / `BudgetAttestation.passes[]`, instead of only being
+   * visible by having been folded into the main pass's own `incomplete`/
+   * `stopReason` (see `doc-truth-pass.ts`'s `mergeDocPassIntoResult`) — the
+   * fold that caused a doc-truth-only budget starvation to be misattributed
+   * to the main pass before this callback existed.
+   */
+  reportPassResult?: (result: {
+    name: string;
+    stopReason: import('./plugins/agent/types.js').AgentStopReason;
+    neverRan: boolean;
+    allocatedTokens: number;
+    spentTokens: number;
+  }) => void;
 }
 
 // ---------------------------------------------------------------------------

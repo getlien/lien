@@ -8,6 +8,7 @@ import {
   formatAttestationBadgeLine,
   ATTESTATION_VERSION,
   type AttestationInput,
+  type ExtraPassAttestationInput,
   type ReviewFinding,
 } from '../src/index.js';
 
@@ -56,9 +57,9 @@ function incompleteFinding(stopReason: 'budget' | 'max_turns'): ReviewFinding {
 }
 
 describe('assembleAttestation', () => {
-  it('is versioned as v1', () => {
+  it('is versioned as v2', () => {
     expect(assembleAttestation(baseInput()).attestationVersion).toBe(ATTESTATION_VERSION);
-    expect(ATTESTATION_VERSION).toBe(1);
+    expect(ATTESTATION_VERSION).toBe(2);
   });
 
   it('produces verdict "delivered" for a clean, fully-delivered run', () => {
@@ -71,6 +72,7 @@ describe('assembleAttestation', () => {
       allocatedTokens: 100_000,
       spentTokens: 12_000,
       starved: false,
+      passes: [{ name: 'main', allocatedTokens: 100_000, spentTokens: 12_000, starved: false }],
     });
   });
 
@@ -174,10 +176,96 @@ describe('assembleAttestation', () => {
     ]);
     expect(attestation.verdict).toBe('delivered');
   });
+
+  // ---------------------------------------------------------------------------
+  // Two-pass attestation (the per-rule-loops generalization this file's
+  // ATTESTATION_VERSION bump to 2 is for): a clean run where the doc-truth
+  // second pass also fired must get its OWN provider.passes[] entry and its
+  // OWN budget.passes[] breakdown — not folded into the main pass's numbers.
+  // ---------------------------------------------------------------------------
+  describe('two-pass attestation (main + doc-truth)', () => {
+    function docTruthPass(
+      overrides?: Partial<ExtraPassAttestationInput>,
+    ): ExtraPassAttestationInput {
+      return {
+        name: 'doc-truth',
+        stopReason: 'completed',
+        neverRan: false,
+        allocatedTokens: 40_000,
+        spentTokens: 8_000,
+        ...overrides,
+      };
+    }
+
+    it('reports a SEPARATE provider.passes[] entry for the extra pass, not just main', () => {
+      const attestation = assembleAttestation(baseInput({ extraPasses: [docTruthPass()] }));
+      expect(attestation.provider.passes).toEqual([
+        { name: 'main', ran: true, stopReason: 'completed', neverRan: false },
+        { name: 'doc-truth', ran: true, stopReason: 'completed', neverRan: false },
+      ]);
+    });
+
+    it('aggregates budget.allocatedTokens/spentTokens across BOTH passes, with a per-pass breakdown', () => {
+      // Main: 100K allocated / 12K spent (baseInput's defaults). Doc-truth:
+      // 40K allocated / 8K spent. Before this generalization, allocatedTokens
+      // was main-only (100K) while spentTokens already summed both passes
+      // (20K) — an inconsistent, understated ceiling. Both now aggregate.
+      const attestation = assembleAttestation(baseInput({ extraPasses: [docTruthPass()] }));
+      expect(attestation.budget).toEqual({
+        allocatedTokens: 140_000,
+        spentTokens: 20_000,
+        starved: false,
+        passes: [
+          { name: 'main', allocatedTokens: 100_000, spentTokens: 12_000, starved: false },
+          { name: 'doc-truth', allocatedTokens: 40_000, spentTokens: 8_000, starved: false },
+        ],
+      });
+    });
+
+    it('attributes a doc-truth-only budget starvation to doc-truth, not main (the bug this fixes)', () => {
+      // Main pass finished cleanly (stopReason 'completed', no incomplete
+      // finding); ONLY the doc-truth pass ran out of budget. Before this
+      // generalization, the doc pass's incomplete state got folded into the
+      // MAIN pass's own stopReason upstream (mergeDocPassIntoResult), so this
+      // scenario was indistinguishable from the main pass itself starving.
+      const attestation = assembleAttestation(
+        baseInput({
+          extraPasses: [
+            docTruthPass({ stopReason: 'budget', allocatedTokens: 40_000, spentTokens: 40_000 }),
+          ],
+        }),
+      );
+      expect(attestation.verdict).toBe('degraded:budget_starved');
+      expect(attestation.provider.passes).toEqual([
+        { name: 'main', ran: true, stopReason: 'completed', neverRan: false },
+        { name: 'doc-truth', ran: true, stopReason: 'budget', neverRan: false },
+      ]);
+      // Aggregate flags starved...
+      expect(attestation.budget.starved).toBe(true);
+      // ...and the per-pass breakdown shows exactly WHICH pass starved.
+      const [mainBudget, docTruthBudget] = attestation.budget.passes;
+      expect(mainBudget.starved).toBe(false);
+      expect(docTruthBudget.starved).toBe(true);
+    });
+
+    it('does not include extra passes at all when the agent-review plugin never ran', () => {
+      const attestation = assembleAttestation(
+        baseInput({ agentAttempted: false, extraPasses: [docTruthPass()] }),
+      );
+      expect(attestation.provider.passes).toEqual([]);
+      expect(attestation.budget.passes).toEqual([]);
+      expect(attestation.budget).toEqual({
+        allocatedTokens: 0,
+        spentTokens: 0,
+        starved: false,
+        passes: [],
+      });
+    });
+  });
 });
 
 describe('emptyAttestation', () => {
-  it('builds a "delivered" v1 attestation for the zero-files early-exit path', () => {
+  it('builds a "delivered" attestation for the zero-files early-exit path', () => {
     const attestation = emptyAttestation('success', 0, 'zero_files_early_exit');
     expect(attestation.verdict).toBe('delivered');
     expect(attestation.scope).toEqual({
@@ -230,11 +318,26 @@ describe('computeVerdict', () => {
     const verdict = computeVerdict({
       pipelineFailed: true,
       providerFailure: true,
-      mainPass: { name: 'main', ran: true, stopReason: 'budget', neverRan: false },
-      budget: { allocatedTokens: 1, spentTokens: 1, starved: true },
+      passes: [{ name: 'main', ran: true, stopReason: 'budget', neverRan: false }],
       inlineComments: { attempted: 1, posted: 0, dropped: 1, deduped: 0 },
     });
     expect(verdict).toBe('failed:analysis_error');
+  });
+
+  it('attributes budget_starved to whichever pass actually stopped on budget, not just passes[0]', () => {
+    // main completed cleanly; a LATER pass (e.g. doc-truth) is the one that
+    // starved — the verdict must still resolve to degraded:budget_starved,
+    // driven by that pass, not by main's own (clean) stopReason.
+    const verdict = computeVerdict({
+      pipelineFailed: false,
+      providerFailure: false,
+      passes: [
+        { name: 'main', ran: true, stopReason: 'completed', neverRan: false },
+        { name: 'doc-truth', ran: true, stopReason: 'budget', neverRan: false },
+      ],
+      inlineComments: { attempted: 0, posted: 0, dropped: 0, deduped: 0 },
+    });
+    expect(verdict).toBe('degraded:budget_starved');
   });
 });
 

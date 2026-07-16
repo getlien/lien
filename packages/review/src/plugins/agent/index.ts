@@ -24,12 +24,13 @@ import { OpenAIAgentClient, toOpenAITools } from './openai-client.js';
 import { buildSystemPrompt, buildInitialMessage } from './system-prompt.js';
 import { BUILTIN_RULES, buildTriggerContext, selectRules } from './rules.js';
 import { AGENT_TOOLS, dispatchTool } from './tools.js';
+import { DOC_TRUTH_PASS_SPEC } from './doc-truth-pass.js';
 import {
-  runDocTruthPass,
-  mergeDocTruthFindings,
-  mergeDocPassIntoResult,
-  appendDocTruthTurns,
-} from './doc-truth-pass.js';
+  runExtraPasses,
+  type ReviewPassSpec,
+  type PassClientRunner,
+  type PassOutcome,
+} from './review-pass.js';
 import {
   isSummaryOnlyMode,
   buildSummaryOnlyPrompts,
@@ -40,6 +41,14 @@ import {
   DEFAULT_OPENROUTER_BASE_URL,
   MAX_REVIEW_TOKEN_BUDGET,
 } from '../../defaults.js';
+
+/**
+ * The ordered list of extra passes `analyze()`/`analyzeSummaryOnly()` run
+ * after the main investigation (see `review-pass.ts`'s "N-pass plumbing").
+ * Doc-truth is the first (and, for now, only) entry — a future dedicated
+ * candidate-loop rule (per the per-rule-loops design doc) is added here.
+ */
+const EXTRA_PASSES: ReviewPassSpec[] = [DOC_TRUTH_PASS_SPEC];
 
 const configSchema = z.object({
   apiKey: z.string().min(1),
@@ -195,42 +204,31 @@ export class AgentReviewPlugin implements ReviewPlugin {
       maxTokenBudget,
     );
 
-    // Second, claims-only doc-truth pass for doc-touching PRs (issue #732).
-    // A dedicated pass with no competing rules keeps documentation drift from
-    // being out-competed by the PR's real code bugs in a single findings list.
-    // Its trace/usage fold into the main run; a failure returns null and leaves
-    // the main-pass output untouched. Skipped entirely when the main pass never
-    // ran (provider down) — a second pass would only fire more doomed requests,
-    // and its own incomplete state must not overwrite the never-ran marker.
-    // `runDocTruthPass` reports its own gated-off/failed outcome to the
-    // attestation; this is the one case it never even gets called for, so it's
-    // reported here instead.
-    if (result.neverRan) {
-      context.reportSkip?.({
-        plugin: 'agent-review:doc-truth',
-        reason: 'main pass never ran (provider failure)',
-      });
-    }
-    const docResult = result.neverRan
-      ? null
-      : await this.runSecondDocPass(context, config, apiKey, provider, logger, toolExecutor);
-    if (docResult) {
-      appendDocTruthTurns(result.trace, docResult.trace);
-      context.reportUsage?.(docResult.usage);
-    }
+    // Extra passes beyond the main investigation (doc-truth today; see
+    // `EXTRA_PASSES` and `review-pass.ts`'s "N-pass plumbing"). Each pass's
+    // trace/usage fold into the main run, and its findings/result-state
+    // (an unfinished pass, error-severity doc findings lifting the summary's
+    // risk level) fold into `result`/`agentFindings` in list order. A pass
+    // failure never fails the whole review — `runExtraPasses` catches and
+    // reports it, leaving the main-pass output untouched. Every extra pass
+    // is skipped entirely when the main pass never ran (provider down) — a
+    // second request would only fire more doomed calls, and a failure-
+    // isolated pass's own incomplete state must not overwrite the never-ran
+    // marker.
+    const { findings: agentFindings, outcomes } = await runExtraPasses(
+      EXTRA_PASSES,
+      context,
+      config,
+      logger,
+      result,
+      result.findings,
+      this.extraPassClientRunner(provider, config, apiKey, logger, toolExecutor),
+    );
 
     reportAgentRun(this.id, context, logger, result);
+    reportPassOutcomes(context, outcomes);
 
     const pluginId = this.id;
-    const agentFindings = mergeDocTruthFindings(result.findings, docResult?.findings ?? []);
-    // Fold doc-pass result state (an unfinished pass, error-severity doc
-    // findings) into the main result before the notices are appended: it lifts
-    // the PRIMARY summary's risk level for doc-truth errors, and marks the run
-    // incomplete so `appendIncompleteNotice` emits the doc-pass notice. The
-    // render path (`present`/`formatCheckSummary`) now renders every summary
-    // finding, so that appended notice is visible as its own section — this
-    // fold shapes the primary block, it no longer has to be the only summary.
-    mergeDocPassIntoResult(result, docResult, agentFindings);
     const findings = agentFindings.map(f => mapToReviewFinding(f, pluginId));
     appendSummaryFinding(findings, pluginId, result.summary);
     appendIncompleteNotice(findings, pluginId, result);
@@ -286,25 +284,20 @@ export class AgentReviewPlugin implements ReviewPlugin {
       maxTokenBudget,
     );
 
-    if (result.neverRan) {
-      context.reportSkip?.({
-        plugin: 'agent-review:doc-truth',
-        reason: 'main pass never ran (provider failure)',
-      });
-    }
-    const docResult = result.neverRan
-      ? null
-      : await this.runSecondDocPass(context, config, apiKey, provider, logger, toolExecutor);
-    if (docResult) {
-      appendDocTruthTurns(result.trace, docResult.trace);
-      context.reportUsage?.(docResult.usage);
-    }
+    const { findings: agentFindings, outcomes } = await runExtraPasses(
+      EXTRA_PASSES,
+      context,
+      config,
+      logger,
+      result,
+      result.findings,
+      this.extraPassClientRunner(provider, config, apiKey, logger, toolExecutor),
+    );
 
     reportAgentRun(this.id, context, logger, result);
+    reportPassOutcomes(context, outcomes);
 
     const pluginId = this.id;
-    const agentFindings = mergeDocTruthFindings(result.findings, docResult?.findings ?? []);
-    mergeDocPassIntoResult(result, docResult, agentFindings);
     const findings = agentFindings.map(f => mapToReviewFinding(f, pluginId));
     appendSummaryFinding(findings, pluginId, result.summary);
     appendIncompleteNotice(findings, pluginId, result);
@@ -313,20 +306,20 @@ export class AgentReviewPlugin implements ReviewPlugin {
   }
 
   /**
-   * Run the doc-truth second pass, wiring the shared tool executor into a client
-   * runner the pass can invoke with its own (smaller) turn/token budget. Returns
-   * null when the pass is gated off or fails — kept as a thin method so
-   * `analyze()` stays under its complexity budget.
+   * Build the client-runner factory `runExtraPasses` needs: a thin closure
+   * over the shared `runAgentClient`, substituting each pass's own turn cap.
+   * Shared by `analyze()` and `analyzeSummaryOnly()` — kept as a method (not
+   * inlined) so neither grows a duplicated closure and `analyze()` stays
+   * under its complexity budget.
    */
-  private runSecondDocPass(
-    context: ReviewContext,
+  private extraPassClientRunner(
+    provider: string,
     config: AgentConfig,
     apiKey: string,
-    provider: string,
     logger: Logger,
     toolExecutor: ToolExecutor,
-  ): Promise<AgentResult | null> {
-    return runDocTruthPass(context, config, logger, (sys, init, budget, maxTurns) =>
+  ): (spec: ReviewPassSpec) => PassClientRunner {
+    return () => (sys, init, budget, maxTurns) =>
       runAgentClient(
         provider,
         { ...config, maxTurns },
@@ -336,8 +329,7 @@ export class AgentReviewPlugin implements ReviewPlugin {
         init,
         toolExecutor,
         budget,
-      ),
-    );
+      );
   }
 
   async present(findings: ReviewFinding[], context: PresentContext): Promise<void> {
@@ -460,6 +452,19 @@ function reportAgentRun(
   context.reportUsage?.(result.usage);
   if (result.trace) {
     context.reportTrace?.(result.trace);
+  }
+}
+
+/**
+ * Forward every extra pass's outcome to the delivery attestation via
+ * `context.reportPassResult` — see `plugin-types.ts`'s doc comment on that
+ * callback for why this is separate from `reportBudget`/`reportUsage` (those
+ * stay main-pass-only aggregates; this attributes an extra pass's own
+ * stop reason/tokens to that pass specifically).
+ */
+function reportPassOutcomes(context: ReviewContext, outcomes: PassOutcome[]): void {
+  for (const outcome of outcomes) {
+    context.reportPassResult?.(outcome);
   }
 }
 

@@ -280,8 +280,7 @@ describe('EMPTY_DELIVERY', () => {
     const verdict = computeVerdict({
       pipelineFailed: false,
       providerFailure: false,
-      mainPass: { name: 'main', ran: false, stopReason: 'not_run', neverRan: false },
-      budget: { allocatedTokens: 0, spentTokens: 0, starved: false },
+      passes: [{ name: 'main', ran: false, stopReason: 'not_run', neverRan: false }],
       inlineComments: EMPTY_DELIVERY.inlineComments,
       descriptionBadgeUpdated: EMPTY_DELIVERY.descriptionBadgeUpdated,
       outOfDiffReviewPosted: EMPTY_DELIVERY.outOfDiffReviewPosted,

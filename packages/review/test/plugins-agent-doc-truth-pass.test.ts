@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 
 import {
   shouldRunDocTruthPass,
@@ -6,21 +6,13 @@ import {
   buildDocTruthPassInitialMessage,
   mergeDocTruthFindings,
   mergeDocPassIntoResult,
-  appendDocTruthTurns,
   docTruthPassBudget,
-  runDocTruthPass,
+  DOC_TRUTH_PASS_SPEC,
   DOC_PASS_MAX_TURNS,
 } from '../src/plugins/agent/doc-truth-pass.js';
-import { createTestContext, silentLogger } from '../src/test-helpers.js';
+import { createTestContext } from '../src/test-helpers.js';
 import type { ReviewContext } from '../src/plugin-types.js';
-import type { Logger } from '../src/logger.js';
-import type {
-  AgentConfig,
-  AgentFinding,
-  AgentResult,
-  AgentTrace,
-  TurnTrace,
-} from '../src/plugins/agent/types.js';
+import type { AgentConfig, AgentFinding, AgentResult } from '../src/plugins/agent/types.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures / helpers
@@ -105,27 +97,6 @@ function fakeResult(findings: AgentFinding[] = [], trace?: AgentTrace): AgentRes
     incomplete: false,
     trace,
   };
-}
-
-function turn(turnNumber: number, toolNames: string[] = []): TurnTrace {
-  return {
-    turnNumber,
-    responseText: '',
-    toolCalls: toolNames.map(name => ({ name, input: {}, output: 'ok' })),
-    finishReason: 'stop',
-  };
-}
-
-function trace(turns: TurnTrace[]): AgentTrace {
-  return { systemPrompt: 's', initialMessage: 'i', model: 'm', turns };
-}
-
-function capturingLogger(): { logger: Logger; lines: string[] } {
-  const lines: string[] = [];
-  const record = (m: string): void => {
-    lines.push(m);
-  };
-  return { logger: { info: record, warning: record, error: record, debug: record }, lines };
 }
 
 afterEach(() => {
@@ -397,139 +368,34 @@ describe('mergeDocPassIntoResult', () => {
 });
 
 // ---------------------------------------------------------------------------
-// appendDocTruthTurns
+// DOC_TRUTH_PASS_SPEC (the ReviewPassSpec doc-truth plugs into the generic
+// executor with — see review-pass.ts for the gate/run/failure-isolation/
+// trace-append tests that used to live here as runDocTruthPass/
+// appendDocTruthTurns, now generalized and tested against synthetic specs)
 // ---------------------------------------------------------------------------
 
-describe('appendDocTruthTurns', () => {
-  it('appends renumbered, phase-labeled doc turns so both passes stay in one trace', () => {
-    const mainTrace = trace([turn(1, ['grep_codebase']), turn(2)]);
-    const docTrace = trace([turn(1, ['get_files_context']), turn(2)]);
-
-    appendDocTruthTurns(mainTrace, docTrace);
-
-    expect(mainTrace.turns).toHaveLength(4);
-    expect(mainTrace.turns[2].turnNumber).toBe(3);
-    expect(mainTrace.turns[2].phase).toBe('doc-truth');
-    expect(mainTrace.turns[3].turnNumber).toBe(4);
-    // Tool calls from BOTH passes are now flattenable (keeps expectToolCalled
-    // working for main-pass assertions AND surfaces the doc pass's tools).
-    const toolNames = mainTrace.turns.flatMap(t => t.toolCalls.map(c => c.name));
-    expect(toolNames).toContain('grep_codebase');
-    expect(toolNames).toContain('get_files_context');
+describe('DOC_TRUTH_PASS_SPEC', () => {
+  it('wires this module’s own pure functions into the ReviewPassSpec contract', () => {
+    expect(DOC_TRUTH_PASS_SPEC.name).toBe('doc-truth');
+    expect(DOC_TRUTH_PASS_SPEC.skipPlugin).toBe('agent-review:doc-truth');
+    expect(DOC_TRUTH_PASS_SPEC.maxTurns).toBe(DOC_PASS_MAX_TURNS);
+    expect(DOC_TRUTH_PASS_SPEC.budget(100_000)).toBe(docTruthPassBudget(100_000));
+    expect(DOC_TRUTH_PASS_SPEC.mergeFindings).toBe(mergeDocTruthFindings);
+    expect(DOC_TRUTH_PASS_SPEC.mergeResultState).toBe(mergeDocPassIntoResult);
   });
 
-  it('is a no-op when either trace is absent', () => {
-    const mainTrace = trace([turn(1)]);
-    expect(() => appendDocTruthTurns(undefined, trace([turn(1)]))).not.toThrow();
-    appendDocTruthTurns(mainTrace, undefined);
-    expect(mainTrace.turns).toHaveLength(1);
+  it('gateReason is docTruthSkipReason — null (should run) when claims are present', () => {
+    const ctx = contextWithPatches([['docs/architecture/worktree.md', DOC_CLAIM_PATCH]]);
+    expect(DOC_TRUTH_PASS_SPEC.gateReason(ctx, cfg())).toBeNull();
   });
-});
 
-// ---------------------------------------------------------------------------
-// runDocTruthPass (client injected — zero LLM)
-// ---------------------------------------------------------------------------
-
-describe('runDocTruthPass', () => {
-  it('does not invoke the client and returns null when the pass is gated off', async () => {
+  it('gateReason names the real reason when gated off (not a generic boolean)', () => {
     const ctx = contextWithPatches([['packages/core/src/overlay.ts', CODE_PATCH]]); // no claims
-    let called = false;
-    const res = await runDocTruthPass(ctx, cfg(), silentLogger, async () => {
-      called = true;
-      return fakeResult();
-    });
-    expect(res).toBeNull();
-    expect(called).toBe(false);
+    expect(DOC_TRUTH_PASS_SPEC.gateReason(ctx, cfg())).toContain('no doc claims');
   });
 
-  it('runs the client with the doc-pass budget/turns and returns its result', async () => {
+  it('buildPrompts delegates to buildDocTruthPassPrompts', () => {
     const ctx = contextWithPatches([['docs/architecture/worktree.md', DOC_CLAIM_PATCH]]);
-    const captured: { sys?: string; init?: string; budget?: number; maxTurns?: number } = {};
-    const res = await runDocTruthPass(
-      ctx,
-      cfg({ maxTokenBudget: 100_000 }),
-      silentLogger,
-      async (sys, init, budget, maxTurns) => {
-        Object.assign(captured, { sys, init, budget, maxTurns });
-        return fakeResult([finding({ filepath: 'docs/architecture/worktree.md', line: 2 })]);
-      },
-    );
-
-    expect(res).not.toBeNull();
-    expect(res!.findings).toHaveLength(1);
-    expect(captured.budget).toBe(40_000);
-    expect(captured.maxTurns).toBe(DOC_PASS_MAX_TURNS);
-    expect(captured.sys).toContain('doc-truth');
-    expect(captured.init).toContain('<doc_claims>');
-  });
-
-  it('isolates a pass failure: a throwing client yields null and a logged warning', async () => {
-    const ctx = contextWithPatches([['docs/architecture/worktree.md', DOC_CLAIM_PATCH]]);
-    const { logger, lines } = capturingLogger();
-    const res = await runDocTruthPass(ctx, cfg(), logger, async () => {
-      throw new Error('boom');
-    });
-    expect(res).toBeNull();
-    expect(lines.some(l => l.includes('doc-truth pass failed') && l.includes('boom'))).toBe(true);
-  });
-
-  // Regression coverage for the CodeRabbit #768 finding: reportDocTruthPassSkip
-  // used to report a generic "no doc claims" reason for every gated-off case,
-  // and a thrown pass-2 error vanished from the attestation entirely (neither
-  // "ran" nor "skipped"). `runDocTruthPass` now reports its own precise reason
-  // for both the gate and the failure, straight from the one place that knows it.
-  it('reports the CONFIG-disabled reason, not the generic "no doc claims" one', async () => {
-    const ctx = contextWithPatches([['docs/architecture/worktree.md', DOC_CLAIM_PATCH]]);
-    const reportSkip = vi.fn();
-    await runDocTruthPass(
-      { ...ctx, reportSkip },
-      cfg({ docTruthPass: false }),
-      silentLogger,
-      async () => fakeResult(),
-    );
-    expect(reportSkip).toHaveBeenCalledWith({
-      plugin: 'agent-review:doc-truth',
-      reason: expect.stringContaining('config'),
-    });
-  });
-
-  it('reports the ENV-disabled reason', async () => {
-    const ctx = contextWithPatches([['docs/architecture/worktree.md', DOC_CLAIM_PATCH]]);
-    process.env.LIEN_REVIEW_DOC_PASS = '0';
-    const reportSkip = vi.fn();
-    await runDocTruthPass({ ...ctx, reportSkip }, cfg(), silentLogger, async () => fakeResult());
-    expect(reportSkip).toHaveBeenCalledWith({
-      plugin: 'agent-review:doc-truth',
-      reason: expect.stringContaining('LIEN_REVIEW_DOC_PASS'),
-    });
-  });
-
-  it('reports "no doc claims" only when that is the actual reason', async () => {
-    const ctx = contextWithPatches([['packages/core/src/overlay.ts', CODE_PATCH]]); // no claims
-    const reportSkip = vi.fn();
-    await runDocTruthPass({ ...ctx, reportSkip }, cfg(), silentLogger, async () => fakeResult());
-    expect(reportSkip).toHaveBeenCalledWith({
-      plugin: 'agent-review:doc-truth',
-      reason: expect.stringContaining('no doc claims'),
-    });
-  });
-
-  it('reports a FAILED outcome (not silence) when the client throws', async () => {
-    const ctx = contextWithPatches([['docs/architecture/worktree.md', DOC_CLAIM_PATCH]]);
-    const reportSkip = vi.fn();
-    await runDocTruthPass({ ...ctx, reportSkip }, cfg(), silentLogger, async () => {
-      throw new Error('boom');
-    });
-    expect(reportSkip).toHaveBeenCalledWith({
-      plugin: 'agent-review:doc-truth',
-      reason: expect.stringContaining('failed: boom'),
-    });
-  });
-
-  it('does not report anything when the pass runs to completion', async () => {
-    const ctx = contextWithPatches([['docs/architecture/worktree.md', DOC_CLAIM_PATCH]]);
-    const reportSkip = vi.fn();
-    await runDocTruthPass({ ...ctx, reportSkip }, cfg(), silentLogger, async () => fakeResult());
-    expect(reportSkip).not.toHaveBeenCalled();
+    expect(DOC_TRUTH_PASS_SPEC.buildPrompts(ctx)).toEqual(buildDocTruthPassPrompts(ctx));
   });
 });

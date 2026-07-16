@@ -166,12 +166,13 @@ export interface ToolInvocation {
 export interface TurnTrace {
   turnNumber: number;
   /**
-   * Which review pass produced this turn. Absent means the main pass; the
-   * dedicated doc-truth second pass (issue #732) stamps its appended turns
-   * `'doc-truth'` so a merged trace stays interpretable. Optional/additive —
+   * Which review pass produced this turn. Absent means the main pass; an
+   * extra pass (see `review-pass.ts`'s `ReviewPassSpec.name` — the doc-truth
+   * second pass, issue #732, is the first) stamps its appended turns with its
+   * own pass name so a merged trace stays interpretable. Optional/additive —
    * existing consumers ignore it.
    */
-  phase?: 'main' | 'doc-truth';
+  phase?: string;
   /** Full assistant message content, captured before extractResponse. */
   responseText: string;
   /**
