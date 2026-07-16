@@ -112,6 +112,13 @@ describe('renderTestCoverageGaps', () => {
     expect(md).not.toContain('src/file10.ts');
     expect(md).toContain('+3 more changed file(s) with no associated tests omitted');
   });
+
+  it('header warns that absence from the list does not mean the boundary-change divergence input is covered', () => {
+    const md = renderTestCoverageGaps(['src/a.ts']);
+    expect(md).toContain(
+      'It does NOT substitute for the boundary-change protocol’s MANDATORY get_files_context call',
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------

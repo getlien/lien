@@ -590,6 +590,14 @@ describe('renderSiblingSurfaces', () => {
     expect(block).toContain('StreamHandler.php');
   });
 
+  it('header does not let the match substitute for incomplete-handling’s tool calls on the sibling', () => {
+    const entries = extractSiblingSurfaces(guzzleLikeContext());
+    const block = renderSiblingSurfaces(entries);
+    expect(block).toContain(
+      'it does NOT substitute for incomplete-handling’s get_files_context / read_file call on the sibling file',
+    );
+  });
+
   it('groups multiple identifiers for the same file/siblings onto one line', () => {
     const entries = extractSiblingSurfaces(guzzleLikeContext());
     const block = renderSiblingSurfaces(entries);

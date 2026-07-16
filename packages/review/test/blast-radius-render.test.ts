@@ -62,6 +62,13 @@ describe('renderBlastRadiusMarkdown', () => {
     expect(out).toContain('5 untested');
   });
 
+  it('warns that the Tests/Complexity columns do not substitute for get_files_context / read_file', () => {
+    const out = renderBlastRadiusMarkdown(makeReport());
+    expect(out).toContain(
+      'This table does not substitute for get_files_context / read_file on a dependent',
+    );
+  });
+
   it('renders tested/untested markers correctly', () => {
     const out = renderBlastRadiusMarkdown(
       makeReport({

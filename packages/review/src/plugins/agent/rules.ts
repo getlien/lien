@@ -288,7 +288,11 @@ When a function consumes a typed object (interface, type, config, options), chec
 - **Partial iteration**: A function iterates over some properties of a config/options object but skips others that affect behavior.
 - **Declared but unimplemented**: A type defines a contract (e.g., trigger conditions, handler map, feature flags), but the implementation only handles a subset. This is especially dangerous when the type is part of a public API or config schema — users will set the field expecting it to work.
 
-Focus on fields/variants introduced or modified in this PR. A \`<variant_sweep_candidates>\` section may be in your initial message: when present, it pre-computes enum members / union arms / const-object keys this PR added, paired with switch/if-chain/mapping consumers elsewhere that enumerate the type's OTHER variants but omit the new one — confirm each entry (it may be an intentional catch-all default, or already disclosed) rather than re-grepping for consumers yourself. For interface/config fields (not enum/union variants) or a family not covered there, still grep for all consumers and verify they handle it.`,
+Focus on fields/variants introduced or modified in this PR. Two precomputed signal blocks may be in your initial message, each covering a different omission shape:
+- A \`<variant_sweep_candidates>\` section pre-computes enum members / union arms / const-object keys this PR added, paired with switch/if-chain/mapping consumers elsewhere that enumerate the type's OTHER variants but omit the new one — confirm each entry (it may be an intentional catch-all default, or already disclosed) rather than re-grepping for consumers yourself.
+- A \`<sibling_surfaces>\` section pre-computes a DIFFERENT shape: same-extension or "mirror" sibling files (e.g. other handlers/decoders/bindings in the same family) that silently lack a feature or call this PR added to one member. Confirm each entry against the sibling's actual code before reporting — no grep needed for these, they are already located; stay silent when the sibling structurally cannot support the omitted behavior.
+
+For interface/config fields (not enum/union variants) or a family neither block covers, still grep for all consumers and verify they handle it.`,
   example: `### Good finding — interface field declared but never consumed:
 {
   "filepath": "src/rules.ts",
@@ -374,7 +378,14 @@ author believes — your job is to verify independently.
 MANDATORY protocol when this rule is active:
 
 1. Identify the exact input value(s) at which the old and new
-   semantics diverge. For \`> 5\` → \`>= 5\`, divergence is at
+   semantics diverge. A \`<comparison_change_candidates>\` section may
+   be in your initial message: when present, it pre-computes this
+   discovery step (operator changes, conditional-context literal
+   changes, index-arithmetic off-by-ones) — start from its entries
+   rather than re-scanning the whole diff line-by-line for
+   comparison-shaped edits. It can miss compound changes (operator
+   AND literal changed on the same line), so still skim the \`<diff>\`
+   for anything not listed. For \`> 5\` → \`>= 5\`, divergence is at
    input 5. For \`== 0\` → \`=== 0\`, divergence is at input '0'
    (string) vs 0 (number).
 2. **You MUST call \`get_files_context\` on the changed file** to
@@ -758,6 +769,11 @@ MANDATORY protocol when this rule is active:
    hunks for any claim-bearing line not listed. If there is no \`<doc_claims>\`
    block AND no claim-bearing line in the touched prose, the rule has nothing
    to do — that is the only clean way to finish with zero findings.
+   Also check for a \`<rename_sweep>\` block: when present, it pre-computes a
+   MECHANICAL identifier rename swept across many files, with the
+   prose-touched lines and any surviving old-name references already located
+   — treat each as a claim-verification item the same way, rather than
+   needing to notice the rename pattern yourself inside a large, uniform diff.
 2. For EACH claim, locate the code it describes using material ALREADY in
    your prompt: the diff hunks, \`<changed_functions>\`, and — for symbols in
    changed code — \`get_files_context\` (it reads the indexed chunks). Do

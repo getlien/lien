@@ -561,7 +561,11 @@ const LEAD = [
   '(1) for every PROSE-TOUCHED line, read the post-image sentence and confirm the claim it now makes is',
   'still TRUE of the new name — emit a finding if the sentence is now stale or false;',
   '(2) for every SURVIVOR, decide whether that old-name reference should have been renamed too — emit a',
-  'finding if the rename is incomplete. Stay silent on an item only after checking it.',
+  'finding if the rename is incomplete. Stay silent on an item only after checking it. This is a',
+  'text-match sweep, not a verified reading of the code: it does NOT substitute for the doc-truth',
+  "protocol's get_files_context call on the described symbol — confirm each prose-touched sentence",
+  'and each survivor against the actual current code before deciding a claim is stale or a rename is',
+  'incomplete.',
 ].join(' ');
 
 /**

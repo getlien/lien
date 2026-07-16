@@ -599,6 +599,21 @@ describe('renderVariantSweepCandidates', () => {
     expect(md).toContain('src/consumer.ts:3 (handles: Blue, Red)');
   });
 
+  it('header does not let the match substitute for incomplete-handling’s tool calls on the consumer site', () => {
+    const md = renderVariantSweepCandidates([
+      {
+        typeName: 'Color',
+        variant: 'Green',
+        file: 'src/color.ts',
+        kind: 'enum',
+        consumers: [{ file: 'src/consumer.ts', line: 3, handledVariants: ['Blue', 'Red'] }],
+      },
+    ]);
+    expect(md).toContain(
+      'it does NOT substitute for incomplete-handling’s get_files_context / read_file call on the consumer site',
+    );
+  });
+
   it('caps at MAX_ENTRIES (12) with an explicit omission note — never truncates silently', () => {
     const contexts = Array.from({ length: 15 }, (_, i) => ({
       typeName: `Type${i}`,

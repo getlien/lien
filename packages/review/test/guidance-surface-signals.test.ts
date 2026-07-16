@@ -162,6 +162,15 @@ describe('renderGuidanceSurfaceChanges', () => {
     expect(md).toContain('doc-truth');
   });
 
+  it('header does not let a raw hunk substitute for verifying code outside the diff', () => {
+    const md = renderGuidanceSurfaceChanges([
+      { file: 'plugins/claude/hooks/augment-explore-task.sh', patch: HOOK_PATCH },
+    ]);
+    expect(md).toContain(
+      'call get_files_context (or read_file) on the described symbol to check, per the doc-truth protocol',
+    );
+  });
+
   it('passes through doc/ADR/changeset hunks and frames both kinds of surface', () => {
     const md = renderGuidanceSurfaceChanges([
       { file: 'docs/architecture/decisions/0011-remove-embeddings.md', patch: ADR_PATCH },

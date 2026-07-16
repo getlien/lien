@@ -3,6 +3,7 @@ import type { CodeChunk } from '@liendev/parser';
 import type { ReviewRule, ResolvedRules } from '../src/plugins/agent/types.js';
 import {
   BUILTIN_RULES,
+  DOC_TRUTH,
   buildTriggerContext,
   globToRegex,
   safeRegex,
@@ -136,6 +137,13 @@ describe('selectRules', () => {
 
     const js = makeTriggerContext({ languages: new Set(['javascript']) });
     expect(selectRules(BUILTIN_RULES, js).skipped).toContain('incomplete-handling');
+  });
+
+  it('incomplete-handling prompt references both <variant_sweep_candidates> and <sibling_surfaces> alongside the grep fallback', () => {
+    const rule = BUILTIN_RULES.find(r => r.id === 'incomplete-handling');
+    expect(rule?.prompt).toContain('<variant_sweep_candidates>');
+    expect(rule?.prompt).toContain('<sibling_surfaces>');
+    expect(rule?.prompt).toContain('grep for all consumers and verify they handle it');
   });
 
   it('skips concurrency-race when diff has no concurrency keywords', () => {
@@ -566,6 +574,11 @@ describe('buildSystemPrompt', () => {
 // ---------------------------------------------------------------------------
 
 describe('boundary-change rule', () => {
+  it('prompt references the <comparison_change_candidates> signal for the discovery step', () => {
+    const rule = BUILTIN_RULES.find(r => r.id === 'boundary-change');
+    expect(rule?.prompt).toContain('<comparison_change_candidates>');
+  });
+
   it('activates on operator shifts in the diff', () => {
     const ctx = makeTriggerContext({
       diffText:
@@ -743,6 +756,13 @@ describe('boundary-change rule', () => {
     // Sanity check: only boundary-change opts in via requiresBlastRadius.
     const requiring = BUILTIN_RULES.filter(r => r.requiresBlastRadius === true).map(r => r.id);
     expect(requiring).toEqual(['boundary-change']);
+  });
+});
+
+describe('doc-truth rule', () => {
+  it('prompt references the <rename_sweep> block alongside <doc_claims>', () => {
+    expect(DOC_TRUTH.prompt).toContain('<doc_claims>');
+    expect(DOC_TRUTH.prompt).toContain('<rename_sweep>');
   });
 });
 
