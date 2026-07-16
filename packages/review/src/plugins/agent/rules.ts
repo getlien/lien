@@ -288,7 +288,7 @@ When a function consumes a typed object (interface, type, config, options), chec
 - **Partial iteration**: A function iterates over some properties of a config/options object but skips others that affect behavior.
 - **Declared but unimplemented**: A type defines a contract (e.g., trigger conditions, handler map, feature flags), but the implementation only handles a subset. This is especially dangerous when the type is part of a public API or config schema — users will set the field expecting it to work.
 
-Focus on fields/variants introduced or modified in this PR. If a new field is added to a type, grep for all consumers and verify they handle it.`,
+Focus on fields/variants introduced or modified in this PR. A \`<variant_sweep_candidates>\` section may be in your initial message: when present, it pre-computes enum members / union arms / const-object keys this PR added, paired with switch/if-chain/mapping consumers elsewhere that enumerate the type's OTHER variants but omit the new one — confirm each entry (it may be an intentional catch-all default, or already disclosed) rather than re-grepping for consumers yourself. For interface/config fields (not enum/union variants) or a family not covered there, still grep for all consumers and verify they handle it.`,
   example: `### Good finding — interface field declared but never consumed:
 {
   "filepath": "src/rules.ts",
