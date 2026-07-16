@@ -237,7 +237,38 @@ describe('computeStaleLiteralCandidates', () => {
     expect(cand!.staleSites[0].isComment).toBe(true);
   });
 
-  it('marks survivors in test files', () => {
+  it('marks a test-file survivor site but still surfaces the candidate when a real-code survivor also exists', () => {
+    // A mixed candidate (one production survivor + one test-file echo) must
+    // NOT be dropped by isTestOrConfigOnly — that rule only fires when EVERY
+    // survivor is test/config. The test-file site still carries the isTest tag.
+    const patches = new Map([
+      ['src/a.ts', "@@ -1,1 +1,1 @@\n-const m = 'model-x-9000';\n+const m = pick();"],
+    ]);
+    const diffLines = new Map([['src/a.ts', new Set([1])]]);
+    const repoChunks = [
+      makeChunk('src/a.ts', 1, 'const m = pick();'),
+      makeChunk('src/other.ts', 1, "adapterContext.model = 'model-x-9000';"),
+      makeChunk('src/a.test.ts', 5, "expect(m).toBe('model-x-9000');"),
+    ];
+    const candidates = computeStaleLiteralCandidates(
+      makeContext({ patches, repoChunks, diffLines }),
+    );
+    const cand = candidates.find(c => c.literal === "'model-x-9000'");
+    expect(cand).toBeDefined();
+    const testSite = cand!.staleSites.find(s => s.file === 'src/a.test.ts');
+    expect(testSite?.isTest).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Precision tightening: suppress benign reuse, rank structurally-related
+// survivors first (see the module's isTestOrConfigOnly / isUbiquitousSharedConstant)
+// ---------------------------------------------------------------------------
+
+describe('isTestOrConfigOnly suppression', () => {
+  it('drops a candidate whose only survivor is a sibling test file', () => {
+    // Class 3 from the precision census: a literal reused only across
+    // sibling test files (e.g. a fixture name) is not a production duplicate.
     const patches = new Map([
       ['src/a.ts', "@@ -1,1 +1,1 @@\n-const m = 'model-x-9000';\n+const m = pick();"],
     ]);
@@ -249,8 +280,149 @@ describe('computeStaleLiteralCandidates', () => {
     const candidates = computeStaleLiteralCandidates(
       makeContext({ patches, repoChunks, diffLines }),
     );
-    const cand = candidates.find(c => c.literal === "'model-x-9000'");
-    expect(cand!.staleSites[0].isTest).toBe(true);
+    expect(candidates.find(c => c.literal === "'model-x-9000'")).toBeUndefined();
+  });
+
+  it('drops a candidate whose only survivors are config/manifest files', () => {
+    // Class 2: an entry-point path repeated across every package's build config.
+    const patches = new Map([
+      [
+        'src/a.ts',
+        "@@ -1,1 +1,1 @@\n-const entry = 'src/index.ts';\n+const entry = resolveEntry();",
+      ],
+    ]);
+    const diffLines = new Map([['src/a.ts', new Set([1])]]);
+    const repoChunks = [
+      makeChunk('src/a.ts', 1, 'const entry = resolveEntry();'),
+      makeChunk('packages/core/tsup.config.ts', 4, "entry: ['src/index.ts'],"),
+      makeChunk('packages/cli/vitest.config.ts', 17, "include: ['src/index.ts'],"),
+    ];
+    const candidates = computeStaleLiteralCandidates(
+      makeContext({ patches, repoChunks, diffLines }),
+    );
+    expect(candidates.find(c => c.literal === "'src/index.ts'")).toBeUndefined();
+  });
+
+  it('does NOT drop a test/config-only candidate when the changed literal is itself test/config code', () => {
+    // Carve-out: the touched literal's own site is a config file, so a
+    // config-only survivor may still be a genuine same-file/config duplicate.
+    const patches = new Map([
+      [
+        'packages/core/tsup.config.ts',
+        "@@ -3,1 +3,1 @@\n-  entry: 'src/legacy-entry.ts',\n+  entry: resolveEntry(),",
+      ],
+    ]);
+    const diffLines = new Map([['packages/core/tsup.config.ts', new Set([3])]]);
+    const repoChunks = [
+      makeChunk('packages/core/tsup.config.ts', 3, '  entry: resolveEntry(),'),
+      makeChunk('packages/core/vitest.config.ts', 10, "  entry: 'src/legacy-entry.ts',"),
+    ];
+    const candidates = computeStaleLiteralCandidates(
+      makeContext({ patches, repoChunks, diffLines }),
+    );
+    expect(candidates.find(c => c.literal === "'src/legacy-entry.ts'")).toBeDefined();
+  });
+
+  it('keeps a comment-only survivor (not test/config-only, handled separately by confidence)', () => {
+    const patches = new Map([
+      ['src/a.ts', "@@ -1,1 +1,1 @@\n-const m = 'model-x-9000';\n+const m = pick();"],
+    ]);
+    const diffLines = new Map([['src/a.ts', new Set([1])]]);
+    const repoChunks = [
+      makeChunk('src/a.ts', 1, 'const m = pick();'),
+      makeChunk('src/notes.ts', 5, "// historical default was 'model-x-9000'"),
+    ];
+    const candidates = computeStaleLiteralCandidates(
+      makeContext({ patches, repoChunks, diffLines }),
+    );
+    expect(candidates.find(c => c.literal === "'model-x-9000'")).toBeDefined();
+  });
+});
+
+describe('isUbiquitousSharedConstant suppression', () => {
+  it('drops a candidate whose production survivors span 3+ unrelated project areas', () => {
+    // Class 1: a shared file-extension-style literal reused by design across
+    // unrelated packages, not a locally forgotten update.
+    const patches = new Map([
+      [
+        'packages/review/src/a.ts',
+        "@@ -1,1 +1,1 @@\n-const ext = '.widget-ext';\n+const ext = resolveExt();",
+      ],
+    ]);
+    const diffLines = new Map([['packages/review/src/a.ts', new Set([1])]]);
+    const repoChunks = [
+      makeChunk('packages/review/src/a.ts', 1, 'const ext = resolveExt();'),
+      makeChunk('packages/parser/src/scanner.ts', 10, "const e = '.widget-ext';"),
+      makeChunk('packages/core/src/indexer.ts', 20, "const e = '.widget-ext';"),
+      makeChunk('docs/guide/formats.md', 5, 'Supported: `.widget-ext`'),
+    ];
+    const candidates = computeStaleLiteralCandidates(
+      makeContext({ patches, repoChunks, diffLines }),
+    );
+    expect(candidates.find(c => c.literal === "'.widget-ext'")).toBeUndefined();
+  });
+
+  it('keeps a candidate whose production survivors stay within the same project area as the change', () => {
+    // A genuine stale duplicate localized to one package (2 sibling files)
+    // must NOT be suppressed just because it has multiple survivor sites.
+    const patches = new Map([
+      [
+        'packages/review/src/a.ts',
+        "@@ -1,1 +1,1 @@\n-const model = 'model-y-2000';\n+const model = resolveModel();",
+      ],
+    ]);
+    const diffLines = new Map([['packages/review/src/a.ts', new Set([1])]]);
+    const repoChunks = [
+      makeChunk('packages/review/src/a.ts', 1, 'const model = resolveModel();'),
+      makeChunk('packages/review/src/b.ts', 1, "const fallback = 'model-y-2000';"),
+      makeChunk('packages/review/src/c.ts', 1, "const legacy = 'model-y-2000';"),
+    ];
+    const candidates = computeStaleLiteralCandidates(
+      makeContext({ patches, repoChunks, diffLines }),
+    );
+    expect(candidates.find(c => c.literal === "'model-y-2000'")).toBeDefined();
+  });
+
+  it('keeps a candidate spanning only 2 unrelated areas (below the ubiquity threshold)', () => {
+    // Below UBIQUITY_AREA_THRESHOLD (3) — a real duplicate that happens to
+    // span exactly two packages must still surface.
+    const patches = new Map([
+      [
+        'packages/review/src/a.ts',
+        "@@ -1,1 +1,1 @@\n-const model = 'model-z-3000';\n+const model = resolveModel();",
+      ],
+    ]);
+    const diffLines = new Map([['packages/review/src/a.ts', new Set([1])]]);
+    const repoChunks = [
+      makeChunk('packages/review/src/a.ts', 1, 'const model = resolveModel();'),
+      makeChunk('packages/cli/src/b.ts', 1, "const fallback = 'model-z-3000';"),
+    ];
+    const candidates = computeStaleLiteralCandidates(
+      makeContext({ patches, repoChunks, diffLines }),
+    );
+    expect(candidates.find(c => c.literal === "'model-z-3000'")).toBeDefined();
+  });
+});
+
+describe('ranking: same-project-area survivors first', () => {
+  it('ranks a candidate with a same-area production survivor above an equal-confidence, unrelated-area one', () => {
+    const patch =
+      "@@ -1,2 +1,2 @@\n-const a = 'sibling-alpha-token';\n-const b = 'distant-beta-token';\n+const a = f();\n+const b = g();";
+    const patches = new Map([['packages/review/src/a.ts', patch]]);
+    const repoChunks = [
+      // 'sibling-alpha-token' survives in the SAME area (packages/review).
+      makeChunk('packages/review/src/sibling.ts', 1, "const x = 'sibling-alpha-token';"),
+      // 'distant-beta-token' survives only in an unrelated area.
+      makeChunk('packages/cli/src/distant.ts', 1, "const y = 'distant-beta-token';"),
+    ];
+
+    const candidates = computeStaleLiteralCandidates(makeContext({ patches, repoChunks }));
+    const literals = candidates.map(c => c.literal);
+    // Both are 'high' confidence (value-emitting real code, single survivor
+    // each) — the same-area one must be ranked first.
+    expect(literals.indexOf("'sibling-alpha-token'")).toBeLessThan(
+      literals.indexOf("'distant-beta-token'"),
+    );
   });
 });
 

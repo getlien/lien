@@ -52,6 +52,8 @@ export interface StaleSite {
   snippet: string;
   isComment: boolean;
   isTest: boolean;
+  /** Build/tooling config or manifest (tsup/vitest/eslint config, tsconfig, package.json). */
+  isConfig: boolean;
 }
 
 export interface StaleLiteralCandidate {
@@ -92,8 +94,17 @@ const LOW_SIGNAL_STRINGS = new Set([
 
 const STRING_RE = /(['"`])((?:\\.|(?!\1).)*?)\1/g;
 const COMMENT_RE = /^(\/\/|\/\*|\*|#|--|<!--)/;
-const TEST_PATH_RE = /(\.test\.|\.spec\.|\/tests?\/|__tests__|\/spec\/)/;
+const TEST_PATH_RE = /(\.test\.|\.spec\.|\/tests?\/|__tests__|\/spec\/|\/fixtures\/)/;
+const CONFIG_PATH_RE =
+  /(\.config\.|(^|\/)tsconfig[^/]*\.json$|(^|\/)package(-lock)?\.json$|(^|\/)pnpm-lock\.yaml$)/;
 const VALUE_EMITTING_RE = /[=:]|=>|\breturn\b/;
+
+/**
+ * Survivor sites span 3+ of these before a literal is treated as ubiquitous
+ * shared vocabulary (a file-extension list, a copied config default) rather
+ * than one feature's forgotten update site — see {@link isUbiquitousSharedConstant}.
+ */
+const UBIQUITY_AREA_THRESHOLD = 3;
 
 // ---------------------------------------------------------------------------
 // Literal extraction
@@ -288,6 +299,7 @@ function recordSurvivorsForLine(
   absLine: number,
   file: string,
   isTest: boolean,
+  isConfig: boolean,
   touchedValues: Set<string>,
   sitesByLiteral: Map<string, StaleSite[]>,
   seenSites: Set<string>,
@@ -306,7 +318,7 @@ function recordSurvivorsForLine(
     seenSites.add(siteKey);
 
     classified ??= classifySnippet(line);
-    const site: StaleSite = { file, line: absLine, ...classified, isTest };
+    const site: StaleSite = { file, line: absLine, ...classified, isTest, isConfig };
     if (sites) sites.push(site);
     else sitesByLiteral.set(value, [site]);
   }
@@ -341,6 +353,7 @@ function scanRepoForStaleSites(
     const file = chunk.metadata.file;
     const fileChanged = changedLines.get(file);
     const isTest = TEST_PATH_RE.test(file);
+    const isConfig = CONFIG_PATH_RE.test(file);
     const lines = chunk.content.split('\n');
 
     for (let i = 0; i < lines.length; i++) {
@@ -357,6 +370,7 @@ function scanRepoForStaleSites(
         absLine,
         file,
         isTest,
+        isConfig,
         touchedValues,
         sitesByLiteral,
         seenSites,
@@ -367,9 +381,60 @@ function scanRepoForStaleSites(
   return { sitesByLiteral, timedOut, chunksScanned };
 }
 
+/**
+ * Package (`packages/<name>`) or top-level directory a file lives under — a
+ * cheap proxy for "the same feature/module" that avoids needing the import
+ * graph. Root-level files with no directory fall back to the whole path.
+ */
+function projectArea(file: string): string {
+  const pkgMatch = file.match(/^packages\/([^/]+)\//);
+  if (pkgMatch) return `packages/${pkgMatch[1]}`;
+  const topMatch = file.match(/^([^/]+)\//);
+  return topMatch ? topMatch[1] : file;
+}
+
+/** Survivor sites that carry real signal: not a comment, not test/fixture code, not config. */
+function productionSites(sites: StaleSite[]): StaleSite[] {
+  return sites.filter(s => !s.isComment && !s.isTest && !s.isConfig);
+}
+
+/**
+ * A candidate whose only survivors are test/fixture or config code, while the
+ * literal itself was changed in ordinary production code, is almost always
+ * benign reuse — a fixture name shared across sibling test files, an
+ * entry-point path repeated in every package's build config — rather than a
+ * forgotten production update. Comment-only survivors don't count as
+ * "test/config only" here; they're a separate, already-low-confidence shape
+ * (see {@link scoreConfidence}). The carve-out below (skip when the changed
+ * literal is ITSELF test/config code) keeps this from silencing genuine
+ * test/config-internal duplication.
+ */
+function isTestOrConfigOnly(changedFile: string, sites: StaleSite[]): boolean {
+  if (TEST_PATH_RE.test(changedFile) || CONFIG_PATH_RE.test(changedFile)) return false;
+  return sites.every(s => s.isTest || s.isConfig);
+}
+
+/**
+ * A literal whose surviving PRODUCTION sites span {@link UBIQUITY_AREA_THRESHOLD}
+ * or more distinct project areas is shared vocabulary by design (a
+ * file-extension list, a copied config default) rather than one feature's
+ * forgotten update site — a genuine stale duplicate overwhelmingly survives
+ * within the same package as the change, not scattered across the repo.
+ */
+function isUbiquitousSharedConstant(sites: StaleSite[]): boolean {
+  const areas = new Set(productionSites(sites).map(s => projectArea(s.file)));
+  return areas.size >= UBIQUITY_AREA_THRESHOLD;
+}
+
+/** Does at least one production survivor live in the same project area as the change? */
+function hasSameAreaSurvivor(changedFile: string, sites: StaleSite[]): boolean {
+  const changedArea = projectArea(changedFile);
+  return productionSites(sites).some(s => projectArea(s.file) === changedArea);
+}
+
 function scoreConfidence(sites: StaleSite[]): StaleLiteralCandidate['confidence'] {
-  const realCode = sites.filter(s => !s.isComment && !s.isTest);
-  if (realCode.length === 0) return 'low'; // only comments/tests survive — weak signal
+  const realCode = productionSites(sites);
+  if (realCode.length === 0) return 'low'; // only comments/tests/config survive — weak signal
   return realCode.some(s => VALUE_EMITTING_RE.test(s.snippet)) ? 'high' : 'medium';
 }
 
@@ -409,33 +474,47 @@ export function computeStaleLiteralCandidates(context: ReviewContext): StaleLite
 
 /**
  * Turn scan results into the final ranked, capped candidate list: attach each
- * touched literal to its surviving sites (dropping literals with none), score
- * confidence, then sort highest-confidence-and-most-sites first.
+ * touched literal to its surviving sites (dropping literals with none),
+ * filter out the benign shapes handled by {@link isTestOrConfigOnly} and
+ * {@link isUbiquitousSharedConstant}, score confidence, then sort
+ * highest-confidence, same-project-area, most-sites first — the cap is
+ * always full on a busy PR, so ranking which 8 survive matters as much as
+ * filtering.
  */
 function buildRankedCandidates(
   literals: ChangedLiteral[],
   sitesByLiteral: Map<string, StaleSite[]>,
 ): StaleLiteralCandidate[] {
-  const candidates: StaleLiteralCandidate[] = [];
+  const scored: Array<{ candidate: StaleLiteralCandidate; sameArea: boolean }> = [];
+
   for (const lit of literals) {
     const staleSites = sitesByLiteral.get(lit.value);
     if (!staleSites || staleSites.length === 0) continue;
-    candidates.push({
-      literal: lit.display,
-      kind: lit.kind,
-      changedSite: { file: lit.file, line: lit.changedLine },
-      staleSites,
-      confidence: scoreConfidence(staleSites),
+    if (isTestOrConfigOnly(lit.file, staleSites)) continue;
+    if (isUbiquitousSharedConstant(staleSites)) continue;
+
+    scored.push({
+      candidate: {
+        literal: lit.display,
+        kind: lit.kind,
+        changedSite: { file: lit.file, line: lit.changedLine },
+        staleSites,
+        confidence: scoreConfidence(staleSites),
+      },
+      sameArea: hasSameAreaSurvivor(lit.file, staleSites),
     });
   }
 
-  candidates.sort((a, b) => {
-    const byConf = CONFIDENCE_RANK[b.confidence] - CONFIDENCE_RANK[a.confidence];
+  scored.sort((a, b) => {
+    const byConf =
+      CONFIDENCE_RANK[b.candidate.confidence] - CONFIDENCE_RANK[a.candidate.confidence];
     if (byConf !== 0) return byConf;
-    return b.staleSites.length - a.staleSites.length;
+    const bySameArea = Number(b.sameArea) - Number(a.sameArea);
+    if (bySameArea !== 0) return bySameArea;
+    return b.candidate.staleSites.length - a.candidate.staleSites.length;
   });
 
-  return candidates.slice(0, MAX_CANDIDATES);
+  return scored.slice(0, MAX_CANDIDATES).map(s => s.candidate);
 }
 
 /** Log the budget-exceeded diagnostic: elapsed time, scan coverage, and touched-literal count. */
@@ -560,7 +639,11 @@ export function renderStaleLiteralCandidates(candidates: StaleLiteralCandidate[]
         `still present at [confidence: ${c.confidence}]:`,
     );
     for (const s of c.staleSites) {
-      const tags = [s.isComment ? 'comment' : null, s.isTest ? 'test' : null]
+      const tags = [
+        s.isComment ? 'comment' : null,
+        s.isTest ? 'test' : null,
+        s.isConfig ? 'config' : null,
+      ]
         .filter(Boolean)
         .join(', ');
       const suffix = tags ? ` (${tags})` : '';
