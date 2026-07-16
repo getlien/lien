@@ -10,7 +10,7 @@ If you're developing Lien itself, see [CONTRIBUTING.md](../../CONTRIBUTING.md#do
 
 ## Hooks
 
-`hooks/hooks.json` wires five scripts into the Claude Code hook lifecycle. All
+`hooks/hooks.json` wires six scripts into the Claude Code hook lifecycle. All
 are best-effort — a missing `lien`/`jq`, an unindexed repo, or any internal
 error just exits 0 silently, never blocking the underlying tool call. See
 [claude-code-hook-channels.md](../../docs/architecture/claude-code-hook-channels.md)
@@ -20,6 +20,7 @@ for which hook output channels actually reach the model.
 | --- | --- | --- | --- |
 | `annotate-read.sh` | PostToolUse: `Read` | Surfaces dependents/coverage/complexity for the file just read, as an `additionalContext` annotation. When a function in the file is at/near its complexity budget, the annotation *leads* with an imperative nudge line ("avoid adding complexity here; prefer extraction") — the plan-time nudge, surfaced before the agent edits rather than after via `delta-write.sh`. Suppressed per file per session within a TTL. | `LIEN_ANNOTATE_TTL_MIN=<minutes>` (default 5) |
 | `delta-write.sh` | PostToolUse: `Edit\|Write\|MultiEdit` | Runs `lien delta --file <path> --format json`; warns only when the edit pushed a function to a new complexity-threshold crossing. Silent on everything else (improvements, pre-existing violations, advisory movement). | `LIEN_DELTA_HOOK=off` |
+| `test-reminder.sh` | PostToolUse: `Edit\|Write\|MultiEdit` | Runs `lien annotate <path> --tests-only` (a cheap test-association-only lookup); when the edited file has associated tests, emits one compact `additionalContext` line naming them and asking the model to run them before completing. Silent when the file has no known tests. Shares `annotate-read.sh`'s per-file-per-session TTL suppression (same `annotated-sessions/` dir, namespaced hash) so an edit burst only reminds once per window. | `LIEN_TEST_REMINDER=off` |
 | `augment-explore-task.sh` | PreToolUse: `Agent\|Task` | When the subagent being launched is `Explore` (or `lien:Explore`/`project:Explore`), appends a Lien-tool-usage mandate to its prompt. Skips if the repo has no `structural.db` index yet, or the prompt already names a Lien MCP tool. | `LIEN_EXPLORE_INJECT=off` |
 | `annotate-clean.sh` | SessionStart | GCs `annotated-sessions/` dirs untouched for >24h; pre-warms the npx fallback in the background so the first real hook call of the session doesn't pay a cold `npx` install. | none |
 | `annotate-end.sh` | SessionEnd | Removes the current session's `annotated-sessions/` dir on graceful exit. Belt-and-braces — SessionStart's 24h GC is the load-bearing cleanup (covers crashes/force-quits). | none |

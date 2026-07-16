@@ -140,6 +140,10 @@ program
 program
   .command('annotate <file>')
   .description('Print a short impact summary for a single file (for hook annotation)')
+  .option(
+    '--tests-only',
+    'Print only the post-edit test-association reminder line (for the write hook)',
+  )
   .action(annotateCommand);
 
 program

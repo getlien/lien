@@ -22,6 +22,17 @@ import { type AbsolutePath, type RelativePath, toAbsolutePath } from '../types/p
 const MAX_TESTS_LISTED = 2;
 const MAX_DEPS_LISTED = 4;
 
+export interface AnnotateOptions {
+  /**
+   * Skip the full impact summary (dependents/complexity/BFS) and print only
+   * the test-association reminder line, or nothing if the file has no
+   * associated tests. Used by the post-edit `test-reminder.sh` hook, which
+   * only needs test-association data, not the full read-time annotation —
+   * see `runTestsOnly`.
+   */
+  testsOnly?: boolean;
+}
+
 /**
  * Produce a short impact summary for a single file. Output is empty when
  * impact is trivial (no dependents, no complexity warnings, test coverage
@@ -31,12 +42,16 @@ const MAX_DEPS_LISTED = 4;
  * `get_files_context`'s `complexityHeadroomWarning`) — the plan-time nudge:
  * surfacing it on Read, before the agent edits, not after via `lien delta`.
  *
+ * With `options.testsOnly`, skips all of the above and prints only the
+ * post-edit test-association reminder (or nothing, if the file has no
+ * associated tests) — see `runTestsOnly`.
+ *
  * All errors result in empty stdout and exit 0, so a missing index or
  * unknown file never breaks the hook pipeline.
  */
-export async function annotateCommand(file: string): Promise<void> {
+export async function annotateCommand(file: string, options?: AnnotateOptions): Promise<void> {
   try {
-    await run(file);
+    await run(file, options);
   } catch {
     // Silent — never break the consuming hook.
   }
@@ -118,9 +133,15 @@ function adaptChunkImports(chunks: DependencyAnalysisChunk[]): CodeChunk[] {
 // signature honest without leaking the SearchResult import here.
 type DependencyAnalysisChunk = Awaited<ReturnType<typeof findDependents>>['allChunks'][number];
 
-async function run(file: string): Promise<void> {
+async function run(file: string, options?: AnnotateOptions): Promise<void> {
   const paths = resolvePaths(file);
   if (!paths) return;
+
+  if (options?.testsOnly) {
+    await runTestsOnly(paths);
+    return;
+  }
+
   const { originalCwd, rootDir, filepath } = paths;
 
   // Align cwd with the project root for the analysis pass. Lien's
@@ -198,6 +219,45 @@ async function run(file: string): Promise<void> {
   } finally {
     if (needsChdir) process.chdir(originalCwd);
   }
+}
+
+/**
+ * The cheap path for the post-edit `test-reminder.sh` hook: test-association
+ * lookup only, skipping `findDependents`'s BFS over the import graph and the
+ * complexity/blast-radius computation the full annotation needs. A single
+ * `vectorDB.scanAll()` (the same column-projected full-table read
+ * `get_files_context` uses for its own test-association scan) is all this
+ * needs — reusing the index's existing knowledge, no new analysis.
+ *
+ * Prints nothing when the file has no associated tests (the signal for the
+ * hook to stay silent).
+ */
+async function runTestsOnly(paths: ResolvedPaths): Promise<void> {
+  const { originalCwd, rootDir, filepath } = paths;
+  const needsChdir = originalCwd !== rootDir;
+  if (needsChdir) process.chdir(rootDir);
+  try {
+    const vectorDB = await createVectorDB(rootDir);
+    await vectorDB.initialize();
+    const allChunks = adaptChunkImports(await vectorDB.scanAll());
+    const tests =
+      findTestAssociationsFromChunks([filepath], allChunks, rootDir).get(filepath) ?? [];
+    if (tests.length === 0) return;
+    console.log(formatTestReminder(filepath, tests));
+  } finally {
+    if (needsChdir) process.chdir(originalCwd);
+  }
+}
+
+/**
+ * Render the one-line post-edit reminder. Pure and exported so the wording
+ * and truncation are unit-testable without indexing a real project.
+ */
+export function formatTestReminder(filepath: string, tests: string[]): string {
+  const shown = tests.slice(0, MAX_TESTS_LISTED).join(', ');
+  const extra =
+    tests.length > MAX_TESTS_LISTED ? ` (+${tests.length - MAX_TESTS_LISTED} more)` : '';
+  return `Lien: you changed ${filepath} — associated tests: ${shown}${extra}. Run them before completing.`;
 }
 
 /** Return type of `computeComplexityHeadroom` — the plan-time nudge data. */
