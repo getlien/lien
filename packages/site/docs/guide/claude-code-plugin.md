@@ -31,6 +31,14 @@ This is Claude Code-specific. For other MCP-compatible editors (Cursor,
 Windsurf, OpenCode, Kilo Code, Antigravity), see the
 [installation guide](/guide/installation).
 
+::: tip Not using Claude Code?
+Most other agentic editors read a plain instruction file instead of hooks.
+See [Cross-Editor Agent Setup](/guide/cross-editor-setup) for copy-paste
+`AGENTS.md`/`.github/copilot-instructions.md` blocks that carry the same
+mandate — with the same honesty caveat: rules-file compliance is best-effort,
+not the deterministic guarantee a hook gives you.
+:::
+
 ## What you get
 
 ### MCP tools

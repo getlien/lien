@@ -37,7 +37,10 @@ lien init --editor kilo-code
 lien init --editor antigravity
 ```
 
-This writes the correct MCP config for your editor.
+This writes the correct MCP config for your editor. Once the MCP tools are
+wired up, see [Cross-Editor Agent Setup](/guide/cross-editor-setup) for a
+copy-paste `AGENTS.md` block that tells your agent to actually use them
+before editing — most non-Claude-Code editors read that file natively.
 
 ::: details What does `lien init` create?
 
@@ -135,5 +138,6 @@ lien serve --root /path/to/your/project
 - Learn about [configuration options](/guide/configuration)
 - Explore [MCP tools](/guide/mcp-tools)
 - Read about [CLI commands](/guide/cli-commands)
+- Not on Claude Code? See [Cross-Editor Agent Setup](/guide/cross-editor-setup)
 
 
