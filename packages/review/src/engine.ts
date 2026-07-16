@@ -691,13 +691,31 @@ function buildPresentContext(
 
 /**
  * Ground truth for one `postInlineComments` call, feeding both the
- * plugin-facing `{posted, skipped}` contract and the delivery attestation.
- * Invariant: `attempted === posted + dropped + deduped`.
+ * plugin-facing `{posted, skipped, dropped}` contract and the delivery
+ * attestation. Invariant: `attempted === posted + dropped + deduped`.
+ *
+ * `skipped` and `dropped` answer different questions and must not be
+ * collapsed into one count: `skipped` is "was there a REASON not to post
+ * this, unrelated to whether posting would have worked?" (out of diff, or an
+ * equivalent comment already exists from a prior run — see `dedupSkipped`).
+ * `dropped` is "did GitHub actually reject an attempted post?" — a real
+ * delivery failure from `postPRReview`'s per-comment salvage path (#752).
+ * `dropped` also folds in the out-of-diff count for attestation purposes
+ * (nothing landed inline either way — see `InlineCommentsAttestation.dropped`'s
+ * own doc comment), but `skipped` must stay benign-only: it used to also
+ * have `dropped.length` folded in (the only way a `{posted, skipped}`-only
+ * contract, before `dropped` existed as its own field, could account for a
+ * real failure at all) — that silently re-merged "nothing to worry about"
+ * and "this actually failed" into the same number for any plugin reading
+ * `skipped`. Now every consumer that cares about a real failure reads
+ * `dropped` directly instead.
  */
 interface InlinePostOutcome {
   posted: number;
+  /** Benign: out of diff, or already commented (deduped). Never a delivery failure. */
   skipped: number;
   attempted: number;
+  /** A real delivery failure (GitHub rejected the post) — see the class comment above. */
   dropped: number;
   deduped: number;
 }
@@ -771,7 +789,10 @@ async function postPluginInlineComments(
   );
   return {
     posted,
-    skipped: skipped + dropped.length,
+    // `skipped` stays the benign-only count computed above — a real
+    // `dropped.length` GitHub rejection must NOT be folded back in here (see
+    // the class comment on `InlinePostOutcome`).
+    skipped,
     attempted,
     dropped: outOfDiffCount + dropped.length,
     deduped: dedupSkipped,

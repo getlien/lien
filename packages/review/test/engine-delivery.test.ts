@@ -120,6 +120,102 @@ describe('ReviewEngine.present() delivery truth', () => {
     });
   });
 
+  // Regression coverage for the trust-residue fix: `postInlineComments`'s
+  // plugin-facing return used to fold a real GitHub post rejection into
+  // `skipped` (on top of it already being counted in `dropped`), destroying
+  // the "benign, nothing to worry about" vs "this actually failed" distinction
+  // for any plugin reading the return value directly (not just the engine's
+  // own `delivery.inlineComments`, which always read `dropped` and was never
+  // affected). Same batch-422-then-per-comment-salvage scenario as above, but
+  // this asserts on the RAW return value `ctx.postInlineComments!()` hands
+  // back to the calling plugin.
+  it("postInlineComments' own return keeps skipped (benign) and dropped (real failure) separate", async () => {
+    const patch = '@@ -1,2 +5,3 @@\n+line5\n+line6\n+line7';
+    const octokit = {
+      paginate: {
+        iterator: vi.fn((fn: unknown, _params: unknown) => {
+          if (fn === octokit.pulls.listFiles) {
+            return onePage([{ filename: 'src/a.ts', patch }]);
+          }
+          return onePage([]);
+        }),
+      },
+      pulls: {
+        listFiles: vi.fn(),
+        listReviewComments: vi.fn(),
+        createReview: vi.fn().mockRejectedValueOnce({ status: 422 }).mockResolvedValueOnce({}),
+        createReviewComment: vi
+          .fn()
+          .mockResolvedValueOnce({}) // comment 1: posted
+          .mockRejectedValueOnce(new Error('422 Unprocessable')), // comment 2: dropped
+      },
+    };
+
+    let rawOutcome: { posted: number; skipped: number; dropped: number } | undefined;
+    const engine = new ReviewEngine();
+    engine.register(
+      createTestPlugin({
+        present: async (_findings, ctx: PresentContext) => {
+          rawOutcome = await ctx.postInlineComments!(
+            [finding({ line: 5 }), finding({ line: 6 })],
+            'summary body',
+          );
+        },
+      }),
+    );
+
+    await engine.present([], createAdapterContext({ octokit, pr: mockPR }));
+
+    // No out-of-diff findings and no dedup in this scenario, so `skipped`
+    // (benign-only) must be 0 — NOT 1, which is what folding the real
+    // `dropped` rejection in would have produced.
+    expect(rawOutcome).toEqual({ posted: 1, skipped: 0, attempted: 2, dropped: 1, deduped: 0 });
+  });
+
+  it('postInlineComments keeps a benign out-of-diff skip separate from a real dropped post', async () => {
+    // Three findings: one at line 100 (outside the diff — benign skip), two
+    // anchorable ones (lines 5, 6) where the batch 422s and the per-comment
+    // salvage posts one, drops one. `skipped` must reflect ONLY the
+    // out-of-diff finding; `dropped` must reflect ONLY the real rejection.
+    const patch = '@@ -1,2 +5,3 @@\n+line5\n+line6\n+line7';
+    const octokit = {
+      paginate: {
+        iterator: vi.fn((fn: unknown, _params: unknown) => {
+          if (fn === octokit.pulls.listFiles) {
+            return onePage([{ filename: 'src/a.ts', patch }]);
+          }
+          return onePage([]);
+        }),
+      },
+      pulls: {
+        listFiles: vi.fn(),
+        listReviewComments: vi.fn(),
+        createReview: vi.fn().mockRejectedValueOnce({ status: 422 }).mockResolvedValueOnce({}),
+        createReviewComment: vi
+          .fn()
+          .mockResolvedValueOnce({})
+          .mockRejectedValueOnce(new Error('422 Unprocessable')),
+      },
+    };
+
+    let rawOutcome: { posted: number; skipped: number; dropped: number } | undefined;
+    const engine = new ReviewEngine();
+    engine.register(
+      createTestPlugin({
+        present: async (_findings, ctx: PresentContext) => {
+          rawOutcome = await ctx.postInlineComments!(
+            [finding({ line: 100 }), finding({ line: 5 }), finding({ line: 6 })],
+            'summary body',
+          );
+        },
+      }),
+    );
+
+    await engine.present([], createAdapterContext({ octokit, pr: mockPR }));
+
+    expect(rawOutcome).toEqual({ posted: 1, skipped: 1, attempted: 3, dropped: 2, deduped: 0 });
+  });
+
   it('outOfDiffReviewPosted is true on a successful out-of-diff review comment', async () => {
     const octokit = {
       pulls: { createReview: vi.fn().mockResolvedValue({}) },

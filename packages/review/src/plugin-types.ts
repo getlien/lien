@@ -296,11 +296,19 @@ export interface PresentContext {
    * Post findings as inline PR review comments.
    * Handles diff-line filtering and deduplication automatically.
    * Only available in GitHub App context (pr + octokit present).
+   *
+   * `skipped` and `dropped` are distinct: `skipped` is benign (out of diff,
+   * or already commented from a prior run) — nothing to act on. `dropped` is
+   * a real delivery failure (GitHub rejected the post; see `postPRReview`'s
+   * per-comment salvage path, #752) — see `InlinePostOutcome` in engine.ts
+   * for the full rationale. A caller that only needs "how many landed" can
+   * ignore both; one that wants to distinguish "nothing to worry about" from
+   * "this actually failed" must read `dropped`, not `skipped`.
    */
   postInlineComments?(
     findings: ReviewFinding[],
     summaryBody: string,
-  ): Promise<{ posted: number; skipped: number }>;
+  ): Promise<{ posted: number; skipped: number; dropped: number }>;
 
   /**
    * Post a PR review with a summary body only (no inline comments — use
