@@ -39,6 +39,18 @@
  * not fire) still fails at Tier 1, as expected. No widening was needed.
  * Certification against the >= 9/10 bar is pending a paid calibrate-10 (the
  * main session runs it).
+ *
+ * KEYWORD-INTEGRITY SWEEP (2026-07-16): gate (B) was bare-noun-heavy (bare
+ * 'negative', 'sign', 'direction', 'guard', 'silently', 'misleading',
+ * 'falls through') and false-passed a hand-written distractor via
+ * assert-cli.ts: a pure string-formatting readability nit ("hard to
+ * misplace the negative sign") matched via 'negative'+'sign' without
+ * describing any actual wrong-output boundary case. Tightened to the
+ * specific literal outputs/fix vocabulary and compound sign-flip/negative-
+ * baseline phrases; re-verified both real sibling-bug shapes documented
+ * above (the named sign-flip AND the zero-baseline/NaN/Infinity variant)
+ * still pass. This canary's prior offline re-score PREDATES this
+ * tightening — the upcoming corpus recalibration sweep re-measures it.
  */
 
 import type { FixtureAssertions } from '../../assertions.js';
@@ -53,28 +65,30 @@ const assertions: FixtureAssertions = {
       ['formatpercentchange', 'percent change', 'percentage change', 'percentchange'],
       result,
     );
-    // (B) an edge-case symptom on a boundary input (any of the sibling bugs).
+    // (B) an edge-case symptom on a boundary input (any of the sibling
+    // bugs). Dropped bare 'negative'/'sign'/'direction'/'guard'/'silently'/
+    // 'misleading'/'falls through' — a distractor about a pure
+    // string-formatting readability nit ("hard to misplace the negative
+    // sign") false-passed the original list via bare 'negative'+'sign',
+    // never describing an actual wrong-output boundary case (verified via
+    // assert-cli.ts).
     h.expectFindingMentions(
       [
         'nan',
         'infinity',
-        'negative',
         'zero-baseline',
         'zero baseline',
         'before === 0',
-        'sign',
-        'direction',
+        'negative baseline',
         'inverts',
         'inverted',
+        'sign flip',
+        'wrong sign',
+        'flips the sign',
         '+50%',
         '-50%',
         '∞',
         '0%',
-        'misleading',
-        'silently',
-        'falls through',
-        'fall-through',
-        'guard',
         'isfinite',
         'finite',
       ],

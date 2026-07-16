@@ -19,6 +19,7 @@ import { renderStaleLiteralSection } from '../../stale-literal-signals.js';
 import { renderUndiscriminatedCatchSection } from '../../catch-discrimination-signals.js';
 import { renderComparisonChangeSection } from '../../comparison-change-signals.js';
 import { renderRemovedExportsSection } from '../../removed-export-signals.js';
+import { renderVariantSweepSection } from '../../variant-sweep-signals.js';
 import { renderUntrustedInputSection } from '../../untrusted-input-signals.js';
 import { renderRenameSweepSection } from '../../rename-sweep-signals.js';
 import { renderGuidanceSurfaceSection } from '../../guidance-surface-signals.js';
@@ -181,12 +182,14 @@ export interface BuildInitialMessageOptions {
   /**
    * Rules active for this run. Used to gate rule-scoped signal injection —
    * e.g. `<undiscriminated_catch_candidates>` only makes sense to compute
-   * and render when `error-swallowing` is actually active for this PR, and
-   * likewise `<sibling_surfaces>` only when `incomplete-handling` is active
-   * (a sibling family member that didn't receive a mirrored change is a
-   * partial-implementation gap, the same failure shape that rule already
-   * targets for interface fields/union variants). Omit (CLI callers that
-   * don't resolve rules) to skip that gating.
+   * and render when `error-swallowing` is actually active for this PR.
+   * `incomplete-handling` gates two signals: `<variant_sweep_candidates>`
+   * (an added enum/union variant whose consumer sites weren't updated) and
+   * `<sibling_surfaces>` (a sibling family member that didn't receive a
+   * mirrored change) — both are the same partial-implementation-gap shape
+   * that rule targets, just at different granularity (variant vs. field).
+   * `boundary-change` likewise gates `<comparison_change_candidates>`.
+   * Omit (CLI callers that don't resolve rules) to skip that gating.
    */
   rules?: ResolvedRules;
 }
@@ -212,6 +215,9 @@ export function buildInitialMessage(
   appendIfPresent(sections, renderStaleLiteralSection(context));
   if (isRuleActive(opts.rules, 'error-swallowing')) {
     appendIfPresent(sections, renderUndiscriminatedCatchSection(context));
+  }
+  if (isRuleActive(opts.rules, 'incomplete-handling')) {
+    appendIfPresent(sections, renderVariantSweepSection(context));
   }
   if (isRuleActive(opts.rules, 'boundary-change')) {
     appendIfPresent(sections, renderComparisonChangeSection(context));

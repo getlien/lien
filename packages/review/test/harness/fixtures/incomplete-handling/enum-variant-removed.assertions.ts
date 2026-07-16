@@ -33,6 +33,17 @@
  * previously-passing votes still pass with these Tier-2 checks; no widening
  * was needed. Certification against the >= 9/10 bar is pending a paid
  * calibrate-10 (the main session runs it).
+ *
+ * KEYWORD-INTEGRITY SWEEP (2026-07-16): both gates were bare-noun-heavy
+ * ('switch', 'default branch', 'default case' in (A); bare 'silently' /
+ * 'empty array' / 'unhandled' in (B)) and false-passed a hand-written
+ * distractor via assert-cli.ts: a finding about createUser never assigning
+ * `role` (a real, different bug) matched (A) via 'switch'/'default branch'
+ * and (B) via bare 'silently', without ever naming getPermissionsForRole or
+ * Guest. Tightened both gates to drop the bare terms; see each gate's own
+ * comment. No stored vote traces exist in this worktree to offline
+ * re-score — this canary's prior calibration PREDATES this tightening; the
+ * upcoming corpus recalibration sweep re-measures it.
  */
 
 import type { FixtureAssertions } from '../../assertions.js';
@@ -42,37 +53,39 @@ const assertions: FixtureAssertions = {
   rule: 'incomplete-handling',
   expect: (result, h) => {
     h.expectRuleFired('incomplete-handling', result);
-    // (A) the switch / silent-default / exhaustiveness anchor.
+    // (A) the switch / silent-default / exhaustiveness anchor. Dropped bare
+    // 'switch', 'userrole', 'default case', 'default branch' — a distractor
+    // about a *different* function (createUser never assigning `role`,
+    // whose downstream impact is described as hitting "a switch statement's
+    // ... default branch") false-passed the original list via those bare
+    // terms without ever naming getPermissionsForRole or its specific
+    // silent-default code shape (verified via assert-cli.ts).
     h.expectFindingMentions(
       [
         'getpermissionsforrole',
-        'userrole',
         'default: return []',
         'silent default',
         'silent `default`',
-        'default case',
-        'default branch',
         'exhaustive',
         'exhaustiveness',
         'never check',
         ': never',
-        'switch',
       ],
       result,
     );
-    // (B) the silent-permission-loss impact.
+    // (B) the silent-permission-loss impact. Dropped bare 'silently' /
+    // 'empty array' / 'unhandled' — the same createUser distractor also
+    // false-passed this gate via bare 'silently' alone.
     h.expectFindingMentions(
       [
         'guest',
         'empty permission',
         'zero permission',
-        'empty array',
         'permission set',
         'silently receive',
+        'silently returns empty',
+        'silently return empty',
         'silently lose',
-        'silently return',
-        'silently',
-        'unhandled',
         'lose all access',
         'locked out',
         'no permissions',

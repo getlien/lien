@@ -68,6 +68,19 @@
  * second-shakiest fixture (after pr687's truncation block). Tagged
  * `characterization` (not canary): the harness renders it as a non-gating `~`
  * line and excludes it from the exit code.
+ *
+ * KEYWORD-INTEGRITY SWEEP (2026-07-16): the Tier-2 list was bare-noun-heavy
+ * ('rust', 'cargo', 'toolchain', 'per-platform', 'published', 'prebuilt',
+ * 'fallback' — generic install-story vocabulary this whole docs PR uses)
+ * and false-passed a hand-written distractor via assert-cli.ts: a finding
+ * about the per-platform table not clarifying when Alpine/musl support
+ * shipped — a real, different documentation gap — matched via
+ * rust/cargo/per-platform/published/prebuilt/toolchain/build:native without
+ * ever naming index.js's fallback or quoting the "no compiler" claim.
+ * Tightened to compound phrases naming the loader fallback specifically or
+ * quoting the doc's exact claim. The 2/10 and 0/10 pre-signal numbers above
+ * PREDATE this tightening; no stored vote traces exist in this worktree to
+ * offline re-score — the upcoming corpus recalibration sweep re-measures it.
  */
 
 import type { FixtureAssertions } from '../../assertions.js';
@@ -80,31 +93,34 @@ const assertions: FixtureAssertions = {
   rule: 'doc-truth',
   expect: (result, h) => {
     h.expectRuleFired('doc-truth', result);
+    // Kept to compound phrases naming the loader's fallback specifically or
+    // quoting the doc's exact "no compiler/toolchain required" claim — not
+    // bare 'rust'/'cargo'/'toolchain'/'per-platform'/'published'/'prebuilt'/
+    // 'fallback', each of which is generic install-story vocabulary this
+    // whole docs PR uses and would be satisfied by an unrelated finding
+    // about a *different* gap in the same install docs (verified via
+    // assert-cli.ts: a distractor about the per-platform table not
+    // clarifying when Alpine/musl support was added — a real, different
+    // documentation gap — false-passed the original list via
+    // rust/cargo/per-platform/published/prebuilt/toolchain/build:native,
+    // without ever naming index.js's fallback or quoting the "no compiler"
+    // claim it contradicts).
     h.expectFindingMentions(
       [
-        // The falsifying loader fact
-        'build:native',
-        'parser-native',
-        'index.js',
-        'loadbinding',
-        'fallback',
-        'fall back',
-        'source build',
-        'local build',
-        'build from source',
-        // The claim being flagged
-        'prebuilt',
-        'no compiler',
-        'no toolchain',
-        'toolchain',
-        // Vocabulary a correct finding reaches for
-        'rust',
-        'cargo',
-        'optionaldependencies',
-        'per-platform',
-        'published',
-        'publishes',
-        'native binar',
+        'index.js falls back',
+        'index.js fall back',
+        'parser-native/index.js',
+        'loadbinding falls back',
+        'the loader falls back',
+        'falls back to a source build',
+        'falls back to building from source',
+        'no compiler or build toolchain required',
+        'no toolchain required',
+        'until the release pipeline publishes',
+        'until the release pipeline',
+        'requires the rust toolchain',
+        'needs the rust toolchain',
+        'still requires cargo',
       ],
       result,
     );

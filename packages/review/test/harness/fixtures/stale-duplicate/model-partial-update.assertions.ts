@@ -25,6 +25,19 @@
  * runs traced to a broken capture (native parser unbuilt → markdown-only
  * corpus → <stale_literal_candidates> rendered "None" and suppressed the
  * finding). capture-pr.ts now rejects such partial captures loudly.
+ *
+ * KEYWORD-INTEGRITY SWEEP (2026-07-16): the widening list was bare-noun-heavy
+ * ('sonnet', 'stale', 'hardcoded', 'attribution', 'metadata', 'outside the
+ * diff', 'single source', 'one source of truth' — all generic
+ * stale-duplicate vocabulary) and false-passed a hand-written distractor via
+ * assert-cli.ts: a finding about a *different* hardcoded literal in the same
+ * file (a separately-duplicated default-model fallback string) matched via
+ * hardcoded/stale/outside the diff/single source, without ever naming
+ * adapterContext, line 300, or the claude-sonnet-4-6 literal. Tightened to
+ * the site anchor plus narrower model-string variants and compound hoist
+ * phrasing. This canary's 10/10 PREDATES this tightening; no stored vote
+ * traces exist in this worktree to offline re-score — the upcoming corpus
+ * recalibration sweep re-measures it.
  */
 
 import type { FixtureAssertions } from '../../assertions.js';
@@ -34,25 +47,28 @@ const assertions: FixtureAssertions = {
   rule: 'stale-duplicate',
   expect: (result, h) => {
     h.expectRuleFired('stale-duplicate', result);
+    // Kept to the specific site anchor (adapterContext / line 300 / the
+    // literal model string) and compound hoist phrasing — not bare
+    // 'sonnet'/'stale'/'hardcoded'/'attribution'/'metadata'/'outside the
+    // diff'/'single source'/'one source of truth', each generic enough that
+    // an unrelated stale-duplicate finding about a *different* hardcoded
+    // literal elsewhere in the same file (e.g. a separately-hardcoded
+    // default-model fallback string) also satisfies (verified via
+    // assert-cli.ts: exactly that distractor false-passed the original list
+    // via hardcoded/stale/outside the diff/single source, without ever
+    // naming adapterContext, line 300, or the claude-sonnet-4-6 literal).
     h.expectFindingMentions(
       [
         'adaptercontext',
         'line 300',
         'claude-sonnet-4-6',
+        'claude-sonnet',
+        'sonnet-4-6',
         'selectedmodel',
         'hoist',
-        'single source',
-        'one source of truth',
-        // Widen to absorb phrasing drift across runs. Any correct
-        // rendering of this finding will use one of the above OR one
-        // of these — they're the synonyms the model reaches for when
-        // it doesn't echo the literal back.
-        'sonnet',
-        'stale',
-        'hardcoded',
-        'attribution',
-        'metadata',
-        'outside the diff',
+        'single source of truth for the model',
+        'one source of truth for the model',
+        'shared const for the model',
       ],
       result,
     );
