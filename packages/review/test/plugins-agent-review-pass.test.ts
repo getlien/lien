@@ -130,6 +130,47 @@ describe('runReviewPass', () => {
     expect(captured).toEqual({ sys: 'sys', init: 'init', budget: 20_000, maxTurns: 7 });
   });
 
+  it('passes context through to budget() so a candidate-count-scaled pass can size itself', async () => {
+    const ctx = createTestContext({ changedFiles: ['marker.ts'] });
+    let seenContext: ReviewContext | undefined;
+    const spec = makeSpec({
+      budget: (base, context) => {
+        seenContext = context;
+        return base;
+      },
+    });
+
+    await runReviewPass(spec, ctx, cfg(), silentLogger, async () => fakeResult());
+
+    expect(seenContext).toBe(ctx);
+  });
+
+  it('runs postProcessResult on the raw client result before returning it', async () => {
+    const ctx = createTestContext();
+    const spec = makeSpec({
+      postProcessResult: (result, context) => ({
+        ...result,
+        findings: [finding({ message: `post-processed:${context.changedFiles.length}` })],
+      }),
+    });
+
+    const result = await runReviewPass(spec, ctx, cfg(), silentLogger, async () =>
+      fakeResult({ findings: [finding({ message: 'raw' })] }),
+    );
+
+    expect(result!.findings).toEqual([finding({ message: 'post-processed:0' })]);
+  });
+
+  it('is a pass-through identity when postProcessResult is omitted (doc-truth needs nothing here)', async () => {
+    const ctx = createTestContext();
+    const spec = makeSpec(); // no postProcessResult
+    const raw = fakeResult({ findings: [finding({ message: 'unchanged' })] });
+
+    const result = await runReviewPass(spec, ctx, cfg(), silentLogger, async () => raw);
+
+    expect(result).toEqual(raw);
+  });
+
   it('isolates a pass failure: a throwing client yields null, logs a warning, reports the failure', async () => {
     const reportSkip = vi.fn();
     const ctx = { ...createTestContext(), reportSkip };

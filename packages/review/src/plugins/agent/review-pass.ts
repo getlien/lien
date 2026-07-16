@@ -53,8 +53,15 @@ export interface ReviewPassSpec {
   gateReason(context: ReviewContext, config: AgentConfig): string | null;
   /** Build this pass's system + initial prompts. */
   buildPrompts(context: ReviewContext): { systemPrompt: string; initialMessage: string };
-  /** This pass's token budget, computed from the main pass's base budget. */
-  budget(baseBudget: number): number;
+  /**
+   * This pass's token budget, computed from the main pass's base budget.
+   * `context` is available for a candidate-loop pass that scales its budget
+   * by its own candidate count (per the per-rule-loops design doc §2) rather
+   * than a flat fraction — doc-truth's own `docTruthPassBudget` ignores it
+   * (a function declaring fewer parameters than an interface's function type
+   * is still a valid implementation of that type).
+   */
+  budget(baseBudget: number, context: ReviewContext): number;
   /** Turn cap for this pass's client loop. */
   maxTurns: number;
   /** Fold this pass's findings into the running merged list. */
@@ -65,6 +72,18 @@ export interface ReviewPassSpec {
     passResult: AgentResult | null,
     mergedFindings: AgentFinding[],
   ): void;
+  /**
+   * Optional post-processing hook run on this pass's raw client result
+   * before it is logged/returned to the caller. A candidate-loop pass whose
+   * output contract is "one verdict per candidate id" (per the per-rule-
+   * loops design doc §2/§4) uses this to (a) reduce the raw per-candidate
+   * verdict array down to real findings and (b) mark the result incomplete
+   * when the model's output didn't cover every candidate — even though the
+   * underlying client returned a syntactically complete verdict (has a
+   * summary). Identity (no post-processing) when omitted; doc-truth's own
+   * open findings-list shape needs nothing here.
+   */
+  postProcessResult?(result: AgentResult, context: ReviewContext): AgentResult;
 }
 
 /** A pass's client loop, closed over the pass-agnostic transport (provider/apiKey/toolExecutor). */
@@ -95,8 +114,9 @@ export async function runReviewPass(
   }
   try {
     const { systemPrompt, initialMessage } = spec.buildPrompts(context);
-    const budget = spec.budget(config.maxTokenBudget);
-    const result = await runClient(systemPrompt, initialMessage, budget, spec.maxTurns);
+    const budget = spec.budget(config.maxTokenBudget, context);
+    const rawResult = await runClient(systemPrompt, initialMessage, budget, spec.maxTurns);
+    const result = spec.postProcessResult ? spec.postProcessResult(rawResult, context) : rawResult;
     logger.info(
       `[agent] ${spec.name} pass: ${result.findings.length} finding(s) in ${result.turns} turn(s) ($${result.usage.cost.toFixed(4)})`,
     );
@@ -178,7 +198,7 @@ export async function runExtraPasses(
         name: spec.name,
         stopReason: passResult.stopReason,
         neverRan: passResult.neverRan ?? false,
-        allocatedTokens: spec.budget(config.maxTokenBudget),
+        allocatedTokens: spec.budget(config.maxTokenBudget, context),
         spentTokens: passResult.usage.totalTokens,
       });
     }

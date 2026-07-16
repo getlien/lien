@@ -26,6 +26,10 @@ import { BUILTIN_RULES, buildTriggerContext, selectRules } from './rules.js';
 import { AGENT_TOOLS, dispatchTool } from './tools.js';
 import { DOC_TRUTH_PASS_SPEC } from './doc-truth-pass.js';
 import {
+  STALE_DUPLICATE_PASS_SPEC,
+  applyStaleDuplicateMainOverride,
+} from './stale-duplicate-pass.js';
+import {
   runExtraPasses,
   type ReviewPassSpec,
   type PassClientRunner,
@@ -45,10 +49,14 @@ import {
 /**
  * The ordered list of extra passes `analyze()`/`analyzeSummaryOnly()` run
  * after the main investigation (see `review-pass.ts`'s "N-pass plumbing").
- * Doc-truth is the first (and, for now, only) entry — a future dedicated
- * candidate-loop rule (per the per-rule-loops design doc) is added here.
+ * Doc-truth is the proven precedent; the stale-duplicate candidate loop is
+ * the pilot (per-rule-loops design doc §4) — dark by default, see
+ * `stale-duplicate-pass.ts`'s own gate for why adding it here changes no
+ * default behavior. The two passes have no data dependency on each other,
+ * so declaration order doesn't matter for correctness (see review-pass.ts's
+ * "serial for v1" note) — doc-truth stays first as the longer-proven pass.
  */
-const EXTRA_PASSES: ReviewPassSpec[] = [DOC_TRUTH_PASS_SPEC];
+const EXTRA_PASSES: ReviewPassSpec[] = [DOC_TRUTH_PASS_SPEC, STALE_DUPLICATE_PASS_SPEC];
 
 const configSchema = z.object({
   apiKey: z.string().min(1),
@@ -88,6 +96,12 @@ const configSchema = z.object({
    * diff-only summary-only mode — see `summary-only-pass.ts`.
    */
   summaryEnabled: z.boolean().default(false),
+  /**
+   * Run the stale-duplicate candidate-loop PILOT (per-rule-loops design doc
+   * §4). Default false — dark-launched opt-in; set true (or env
+   * LIEN_STALE_DUP_PASS=on) to enable. See `stale-duplicate-pass.ts`.
+   */
+  staleDuplicatePass: z.boolean().default(false),
 });
 
 export interface AgentReviewPluginOptions {
@@ -146,9 +160,12 @@ export class AgentReviewPlugin implements ReviewPlugin {
         logger,
       });
 
-    // Select active rules based on PR content (languages, diff keywords)
+    // Select active rules based on PR content (languages, diff keywords).
+    // applyStaleDuplicateMainOverride is a no-op unless LIEN_STALE_DUP_MAIN=off
+    // (see stale-duplicate-pass.ts) — the pilot's future "loop only, no
+    // shared-loop backstop" A/B arm.
     const triggerCtx = buildTriggerContext(context);
-    const rules = selectRules(BUILTIN_RULES, triggerCtx);
+    const rules = applyStaleDuplicateMainOverride(selectRules(BUILTIN_RULES, triggerCtx));
     logger.info(
       `[${this.id}] Rules: ${rules.active.map(r => r.id).join(', ')} (skipped: ${rules.skipped.join(', ') || 'none'})`,
     );
@@ -519,8 +536,10 @@ export function scaleBudgetForBlastRadius(baseBudget: number, riskLevel?: string
  * A NEVER-RAN main pass (every provider request failed — infrastructure, not a
  * partial review) escalates to an `error` finding so the check concludes
  * `failure` rather than the passing `neutral` a `warning` maps to. A partial
- * run, or an incomplete that came only from the failure-isolated doc-truth
- * pass, stays a `warning` (fail-open) — but still never reads as clean.
+ * run, or an incomplete that came only from a failure-isolated extra pass
+ * (doc-truth, or the stale-duplicate loop via the generic
+ * `incompleteFromPass`), stays a `warning` (fail-open) — but still never
+ * reads as clean.
  */
 export function appendIncompleteNotice(
   findings: ReviewFinding[],
@@ -528,18 +547,24 @@ export function appendIncompleteNotice(
   result: AgentResult,
 ): void {
   if (!result.incomplete) return;
-  if (result.neverRan && !result.incompleteFromDocPass) {
+  if (result.neverRan && !result.incompleteFromDocPass && !result.incompleteFromPass) {
     appendNeverRanNotice(findings, pluginId, result);
     return;
   }
   const reason = describeIncompleteStop(result.stopReason);
-  // An incomplete that came only from the doc-truth SECOND pass must not
-  // imply the whole review is partial — the main pass finished normally.
+  // An incomplete that came only from an EXTRA pass (doc-truth, or a
+  // generically-named one via `incompleteFromPass`) must not imply the whole
+  // review is partial — the main pass finished normally. Doc-truth keeps its
+  // own dedicated branch (unchanged wording, already tested); any other
+  // named pass gets the same shape via the generic field.
   const message = result.incompleteFromDocPass
     ? `The documentation-truthfulness pass did not finish — it ${reason}. ` +
       `Doc-claim verification is partial; code findings are unaffected.`
-    : `Lien Review did not finish — it ${reason} while investigating. ` +
-      `Any findings shown are partial; re-run the review to retry.`;
+    : result.incompleteFromPass
+      ? `The ${result.incompleteFromPass} pass did not finish — it ${reason}. ` +
+        `That pass's findings are partial; the main review's findings are unaffected.`
+      : `Lien Review did not finish — it ${reason} while investigating. ` +
+        `Any findings shown are partial; re-run the review to retry.`;
   findings.push({
     pluginId,
     filepath: '',
@@ -560,6 +585,8 @@ function describeIncompleteStop(stopReason: AgentResult['stopReason']): string {
       return 'hit the turn limit';
     case 'completed':
       return 'ended without emitting a parseable JSON verdict';
+    case 'incomplete_verdict':
+      return 'did not produce a verdict for every candidate';
     default:
       return 'stopped unexpectedly';
   }

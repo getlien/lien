@@ -215,7 +215,17 @@ export function buildInitialMessage(
   appendIfPresent(sections, renderChangedFunctions(context));
   appendIfPresent(sections, renderBlastRadius(opts));
   appendIfPresent(sections, renderRemovedExportsSection(context));
-  appendIfPresent(sections, renderStaleLiteralSection(context));
+  // stale-duplicate's `always: true` trigger meant this rendered
+  // unconditionally before the candidate-loop pilot's LIEN_STALE_DUP_MAIN
+  // override existed (see stale-duplicate-pass.ts). Unlike the other gated
+  // signals below, an omitted `opts.rules` here still renders the block
+  // (isRuleActiveOrUnresolved) — preserving every existing caller that
+  // doesn't resolve rules at all (CLI callers, and the signal's own unit
+  // tests), so this is a no-op change unless a caller BOTH resolves rules
+  // AND sets the override flag.
+  if (isRuleActiveOrUnresolved(opts.rules, 'stale-duplicate')) {
+    appendIfPresent(sections, renderStaleLiteralSection(context));
+  }
   if (isRuleActive(opts.rules, 'error-swallowing')) {
     appendIfPresent(sections, renderUndiscriminatedCatchSection(context));
   }
@@ -253,6 +263,19 @@ function appendIfPresent(sections: string[], value: string | null): void {
  */
 function isRuleActive(rules: ResolvedRules | undefined, ruleId: string): boolean {
   return rules?.active.some(r => r.id === ruleId) ?? false;
+}
+
+/**
+ * Same as {@link isRuleActive}, but treats an OMITTED `rules` as "render it"
+ * rather than "skip it" — for a signal that rendered unconditionally before
+ * it grew a rule-gate (stale-duplicate's `<stale_literal_candidates>`, gated
+ * only so `LIEN_STALE_DUP_MAIN=off` can suppress it — see
+ * stale-duplicate-pass.ts). A caller that never resolves rules at all keeps
+ * getting the block exactly as before; only a caller that resolves rules AND
+ * strips stale-duplicate from `active` (the override) loses it.
+ */
+function isRuleActiveOrUnresolved(rules: ResolvedRules | undefined, ruleId: string): boolean {
+  return rules === undefined || isRuleActive(rules, ruleId);
 }
 
 function renderPrMetadata(context: ReviewContext): string | null {
