@@ -279,7 +279,9 @@ export class AnthropicAgentClient {
     // its own trace — that's what we want to surface on bail.
     const lastLoopTurn = turnTraces[turnTraces.length - 1];
 
-    let parsed = lastResponse ? extractResponse(lastResponse.content) : { findings: [] };
+    let parsed = lastResponse
+      ? extractResponse(lastResponse.content, this.logger)
+      : { findings: [] };
     if (!parsed.summary && lastResponse) {
       const remainingBudget = this.maxTokenBudget - (totalInputTokens + totalOutputTokens);
       const retry = await this.runSummaryRetry(
@@ -423,7 +425,7 @@ export class AnthropicAgentClient {
         inputTokens,
         outputTokens,
       };
-      const parsed = extractResponse(response.content);
+      const parsed = extractResponse(response.content, this.logger);
       return { parsed, traceTurn, inputTokens, outputTokens };
     } catch (err) {
       this.logger.warning(
@@ -504,10 +506,13 @@ const RETRY_USER_PROMPT =
  * so the verdict may not live in the last one — then hands the joined text to
  * the shared fence-priority recovery pipeline (see `extractFindingsFromText`).
  */
-function extractResponse(content: Anthropic.Messages.ContentBlock[]): {
+function extractResponse(
+  content: Anthropic.Messages.ContentBlock[],
+  logger?: Logger,
+): {
   findings: AgentFinding[];
   summary?: AgentSummary;
 } {
   const text = joinTextBlocks(content);
-  return text ? extractFindingsFromText(text) : { findings: [] };
+  return text ? extractFindingsFromText(text, logger) : { findings: [] };
 }

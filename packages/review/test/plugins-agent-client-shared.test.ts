@@ -212,6 +212,71 @@ describe('readVerdict', () => {
   it('ignores non-array and empty-array corrupted candidates', () => {
     expect(readVerdict({ oops: 'text', other: [], summary }).findings).toHaveLength(0);
   });
+
+  // Live incident: Lien Review run on PR #772 (2026-07-15, prod Kimi model).
+  // findings was a VALID empty array (a genuine clean review) but the summary
+  // landed under a leaked chat-template fragment as the key. readVerdict read
+  // obj.summary by exact key only, so the run was reported as incomplete
+  // ("did not finish, re-run") even though it had actually completed clean.
+  // This is the verbatim payload from the log.
+  it('recovers a summary emitted under a corrupted key (the PR #772 incident)', () => {
+    const parsed = JSON.parse(
+      '{"findings":[],":<parameter name=":{"riskLevel":"low","overview":"This PR adds a plan-time complexity nudge.","keyChanges":["added nudge"]}}',
+    );
+    const { findings, summary: s } = readVerdict(parsed);
+    expect(findings).toHaveLength(0);
+    expect(s).toEqual({
+      riskLevel: 'low',
+      overview: 'This PR adds a plan-time complexity nudge.',
+      keyChanges: ['added nudge'],
+    });
+  });
+
+  it('logs a warning naming the corrupted key when the summary is recovered', () => {
+    const warnings: string[] = [];
+    const logger = { ...silentLogger, warning: (m: string) => void warnings.push(m) };
+    readVerdict({ findings: [], corruptKey: summary }, logger);
+    expect(warnings.some(m => m.includes('corruptKey'))).toBe(true);
+  });
+
+  // Mirror sanity: the pre-existing findings-under-corrupted-key recovery
+  // (#723) must be unaffected by adding the summary-side recovery.
+  it('still recovers findings under a corrupted key when the summary is valid (no regression)', () => {
+    const { findings, summary: s } = readVerdict({ ':  ': [finding, finding], summary });
+    expect(findings).toHaveLength(2);
+    expect(s).toEqual(summary);
+  });
+
+  it('leaves a verdict with both fields valid untouched', () => {
+    const { findings, summary: s } = readVerdict({ findings: [finding], summary });
+    expect(findings).toHaveLength(1);
+    expect(s).toEqual(summary);
+  });
+
+  it('stays incomplete when summary is missing and no candidate is summary-shaped', () => {
+    const { summary: s } = readVerdict({ findings: [finding], oops: 'text', other: [1, 2, 3] });
+    expect(s).toBeUndefined();
+  });
+
+  it('stays incomplete when two candidate keys are both summary-shaped (never guess)', () => {
+    const candidateA = { riskLevel: 'low', overview: 'A', keyChanges: [] };
+    const candidateB = { riskLevel: 'high', overview: 'B', keyChanges: [] };
+    const { summary: s } = readVerdict({ findings: [finding], keyA: candidateA, keyB: candidateB });
+    expect(s).toBeUndefined();
+  });
+
+  // Deliberate precedence: findings-side and summary-side recovery act on
+  // disjoint value shapes (arrays vs. summary-shaped objects) and are
+  // independent — an invalid/absent findings array does not block summary
+  // recovery, and vice versa (each is judged solely on its own key).
+  it('recovers the summary even when findings has no valid recovery candidate', () => {
+    const { findings, summary: s } = readVerdict({
+      oops: [{ bogus: true }], // not a valid findings array — findings recovery fails
+      corruptKey: summary, // still a single, unambiguous summary candidate
+    });
+    expect(findings).toHaveLength(0);
+    expect(s).toEqual(summary);
+  });
 });
 
 describe('extractFindingsFromText (fence-priority verdict recovery)', () => {
@@ -256,6 +321,21 @@ describe('extractFindingsFromText (fence-priority verdict recovery)', () => {
     const out = extractFindingsFromText(fence({ findings: [finding] }));
     expect(out.summary).toBeUndefined();
     expect(out.findings).toHaveLength(1);
+  });
+
+  // End-to-end through the raw-body candidate path with the verbatim #772
+  // incident payload (not pre-parsed), proving the recovery reaches a real
+  // model response, not just the readVerdict unit.
+  it('recovers the verbatim PR #772 incident payload as a complete verdict', () => {
+    const raw =
+      '{"findings":[],":<parameter name=":{"riskLevel":"low","overview":"This PR adds a plan-time complexity nudge.","keyChanges":["added nudge"]}}';
+    const out = extractFindingsFromText(raw);
+    expect(out.findings).toHaveLength(0);
+    expect(out.summary).toEqual({
+      riskLevel: 'low',
+      overview: 'This PR adds a plan-time complexity nudge.',
+      keyChanges: ['added nudge'],
+    });
   });
 
   it('returns an empty verdict for unparseable / summary-less prose', () => {
