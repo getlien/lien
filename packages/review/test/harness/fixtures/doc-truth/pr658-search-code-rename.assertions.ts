@@ -128,6 +128,16 @@
  * pass, not fixed here. No stored vote traces exist to offline re-score
  * (fresh worktree); this canary's 10/10 PREDATES this tightening — the
  * upcoming corpus recalibration sweep re-measures it.
+ *
+ * 3-vote screen 2026-07-16 post-#787 state: 1/3 [SCREEN ONLY — calibrate-10
+ * certification pending]. Post-#787 both failed votes FIRE doc-truth with 5
+ * findings (incl. Finding B, augment-explore-task.sh) but omit Finding A
+ * (schema.ts embeddings.enabled claim) — the omission frontier, not a
+ * budget/truncation failure. Earlier same-day pre-#787 screen
+ * (main@5fadbe1a): 0/3, with 2 empty-verdict votes showing the
+ * forced-turn/length degenerate-loop truncation shape (#787's target) and 1
+ * Finding-A omission. #787 fixed the truncation shape; the Finding-A
+ * omission remains the blocker.
  */
 
 import type { FixtureAssertions } from '../../assertions.js';

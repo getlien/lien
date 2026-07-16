@@ -32,6 +32,10 @@
  * previously-passing votes still pass with these Tier-2 checks; no widening
  * was needed. Certification against the >= 9/10 bar is pending a paid
  * calibrate-10 (the main session runs it).
+ *
+ * 3-vote screen 2026-07-16: 3/3 at main@5fadbe1a — pre-#787 budget raise,
+ * all other this-week changes in [SCREEN ONLY — calibrate-10 certification
+ * pending]
  */
 
 import type { FixtureAssertions } from '../../assertions.js';

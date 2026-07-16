@@ -67,6 +67,11 @@
  * numeric-threshold-shift trigger keywords even though the bug is an
  * off-by-one index collision rather than a comparison operator. This is
  * the best rule-fit of the three starlette fixtures in this batch.
+ *
+ * 3-vote screen 2026-07-16 post-#787 state: 3/3 [SCREEN ONLY — calibrate-10
+ * certification pending]. Earlier same-day pre-#787 screen (main@5fadbe1a):
+ * 2/3 — one silent no-findings vote (trace lost to a session crash before
+ * it could be read).
  */
 
 /*

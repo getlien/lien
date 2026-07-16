@@ -44,6 +44,16 @@
  * comment. No stored vote traces exist in this worktree to offline
  * re-score — this canary's prior calibration PREDATES this tightening; the
  * upcoming corpus recalibration sweep re-measures it.
+ *
+ * 3-vote screen 2026-07-16 post-#787 state: 2/3 [SCREEN ONLY — calibrate-10
+ * certification pending]. Post-#787 failed vote: the model emitted a
+ * complete, correct verdict (right ruleId, getPermissionsForRole silent
+ * default) but appended trailing 'Wait, I need to double-check…' prose
+ * after the closing brace, breaking verdict extraction -> recorded as no
+ * findings. Earlier same-day pre-#787 screen (main@5fadbe1a): 1/3 — one
+ * rule-attribution near-miss (exact finding under ruleId edge-case-sweep)
+ * and one forced-verdict degenerate-JSON blowout (finish_reason=length,
+ * 62K+47K chars) that #787 appears to have fixed.
  */
 
 import type { FixtureAssertions } from '../../assertions.js';

@@ -52,6 +52,9 @@
  * its prompt directs mentally executing changed functions with "zero" and
  * "boundary" inputs, and `data_start == 0` vs `data_start > 0` is exactly the
  * boundary case this diff mishandles.
+ *
+ * 3-vote screen 2026-07-16 post-#787 state: 3/3 [SCREEN ONLY — calibrate-10
+ * certification pending] (one vote passed with the budget nudge echoed).
  */
 
 /*

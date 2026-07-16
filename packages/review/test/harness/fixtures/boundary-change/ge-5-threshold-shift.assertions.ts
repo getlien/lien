@@ -30,6 +30,10 @@
  * kimi-k2.7-code both emit "test pair" in 12/12 traced runs, so gate (3) is a
  * real, achievable substance check that locks the improvement in. See PR #591
  * (recalibration) plus the boundary-rule improvement that added gate (3).
+ *
+ * 3-vote screen 2026-07-16: 3/3 at main@5fadbe1a — pre-#787 budget raise,
+ * all other this-week changes in [SCREEN ONLY — calibrate-10 certification
+ * pending]
  */
 
 import type { FixtureAssertions } from '../../assertions.js';
