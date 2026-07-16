@@ -94,6 +94,36 @@ You have these tools to investigate the codebase:
 - grep_codebase: Search the entire repository working tree for a text pattern (regex) — use ONLY for a shape the worklist doesn't cover (the rule text's closing paragraph). Do NOT re-grep for literals the worklist already lists; that discovery work is already done.
 </tools>`;
 
+/**
+ * Guards against the one measured false-positive class in this loop: a
+ * confirmed FP probe on a real captured PR had this pass verdict "stale" on
+ * a test-helper mock that hardcoded a production rule's display `name` and
+ * `category` strings purely to build a fake object, reasoning about a
+ * hypothetical FUTURE rename desyncing the mock — even though nothing at
+ * runtime reads those strings today (rule gating is by id, never by name/
+ * category). The loop's prompt had no guidance telling it that inert
+ * test-double duplication and behavior-driving duplication are different
+ * things; this section adds exactly that.
+ */
+const STALE_DUP_VERDICT_GUIDANCE = `<verdict_guidance>
+Before verdicting a candidate "stale", check whether the surviving literal
+actually drives runtime behavior. A literal is a real stale-duplicate risk
+when the surviving site is production code that READS it to make a decision
+— a config value, a dispatch key, a threshold, or a user-facing string the
+changed site also drives — so a future edit to the changed site silently
+desyncs real behavior. A literal is NOT stale when the surviving site is a
+test double: a mock, stub, or fixture builder that hardcodes a name/category/
+id string purely to construct a fake object for test readability. Nothing at
+runtime consumes that copy, so drift between it and the production literal
+has zero behavioral consequence — verdict it "intentional-reuse", not
+"stale", even if renaming the production literal would someday leave the
+mock referencing a stale name. The one exception: if the surviving site is a
+test ASSERTION that exercises the CHANGED behavior itself and would keep
+passing against the pre-change (now-stale) expected value, that is a real
+bug — a test silently validating stale behavior — and should still be
+verdicted "stale".
+</verdict_guidance>`;
+
 // ---------------------------------------------------------------------------
 // Loop eligibility gate
 // ---------------------------------------------------------------------------
@@ -342,6 +372,8 @@ ${STALE_DUP_TOOLS_SECTION}
 <strategy>
 ${STALE_DUPLICATE.prompt}
 </strategy>
+
+${STALE_DUP_VERDICT_GUIDANCE}
 
 <examples>
 ${STALE_DUPLICATE.example}

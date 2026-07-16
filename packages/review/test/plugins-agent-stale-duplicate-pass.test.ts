@@ -199,6 +199,18 @@ describe('buildStaleDuplicatePassPrompts', () => {
     expect(systemPrompt).toContain('candidate-1');
   });
 
+  // Regression coverage for the confirmed FP probe finding on a real captured
+  // PR: this pass verdicted "stale" on a test-helper mock hardcoding a
+  // production rule's display name/category purely to build a fake object —
+  // reasoning about a hypothetical future rename, not actual runtime drift.
+  it('includes verdict guidance distinguishing runtime-behavior literals from inert test-double duplication', () => {
+    const { systemPrompt } = buildStaleDuplicatePassPrompts(eligibleContext());
+    expect(systemPrompt).toContain('<verdict_guidance>');
+    expect(systemPrompt).toContain('test double');
+    expect(systemPrompt).toContain('intentional-reuse');
+    expect(systemPrompt).toContain('test ASSERTION');
+  });
+
   it('builds an initial message with the worklist, changed-site hunk, and surviving sites', () => {
     const message = buildStaleDuplicatePassInitialMessage(eligibleContext());
     expect(message).toContain('<pr_metadata>');
