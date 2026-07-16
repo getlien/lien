@@ -24,6 +24,20 @@
  * Tier 2: the finding mentions one of the four sub-pattern vocabulary
  * families. Set is wide because four sub-patterns can each render with
  * different language; any correct rendering of any one pattern will land.
+ *
+ * KEYWORD-INTEGRITY SWEEP (2026-07-16): the list included bare
+ * 'validate'/'validation'/'schema'/'shape'/'untrusted'/'runtime'/
+ * 'type-check'/'typeof'/'unguarded'/'unvalidated'/'cast' — generic enough
+ * that a distractor about a FOURTH, undocumented site (voting.ts reading
+ * `process.env.OPENROUTER_API_KEY` into a fetch header without validation —
+ * a real but different untrusted-input gap, not one of the three sites this
+ * fixture documents) false-passed via 'validation'/'runtime' alone
+ * (verified via assert-cli.ts). Tightened to the specific function/symbol/
+ * API names from the three documented sites; re-verified both the
+ * loadResult-cast and parseInt-NaN variants still pass. This canary's prior
+ * calibration PREDATES this tightening; no stored vote traces exist in this
+ * worktree to offline re-score — the upcoming corpus recalibration sweep
+ * re-measures it.
  */
 
 import type { FixtureAssertions } from '../../assertions.js';
@@ -36,32 +50,28 @@ const assertions: FixtureAssertions = {
   expect: (result, h) => {
     h.expectRuleFired('untrusted-input-validation', result);
     h.expectAnyToolCalled(['get_files_context', 'read_file'], result);
+    // Kept to the specific function/symbol/API names from the three
+    // documented buggy sites — not bare 'validate'/'validation'/'schema'/
+    // 'shape'/'untrusted'/'runtime'/'type-check'/'typeof'/'unguarded'/
+    // 'unvalidated'/'cast', each generic enough that an unrelated
+    // input-validation finding about a DIFFERENT harness file also
+    // satisfies (verified via assert-cli.ts: a distractor about voting.ts
+    // reading OPENROUTER_API_KEY without validation — a real, different
+    // untrusted-input gap, not one of the three documented sites — matched
+    // via 'validation'/'runtime' alone).
     h.expectFindingMentions(
       [
-        // Function/symbol names from the buggy code
         'loadresult',
         'fixtureshape',
         'parseflags',
-        // Vocabulary the model reaches for across the four sub-patterns
         'json.parse',
         'parseint',
-        'cast',
         'as partial',
         'as harnessresult',
-        'validate',
-        'validation',
-        'schema',
-        'shape',
-        'nan',
         'number.isinteger',
         'isfinite',
-        'untrusted',
-        'runtime',
-        'type-check',
-        'typeof',
-        'unguarded',
-        'unvalidated',
         'array.isarray',
+        'nan',
       ],
       result,
     );

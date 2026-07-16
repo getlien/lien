@@ -80,6 +80,22 @@
  * (~6-7/10), so the harness renders it as a non-gating `~` line and excludes it
  * from the exit code. The feature itself is certified on the canary corpus
  * (pr658 10/10, accurate-doc 10/10 precision with the strict language).
+ *
+ * KEYWORD-INTEGRITY SWEEP (2026-07-16): the Tier-2 list above was
+ * bare-noun-heavy ('manifest', 'structural.db', 'resolveindexstrategy',
+ * 'hasmanifest', 'hasdb', 'overlay', 'gate', 'requires', 'only', 'both' —
+ * every one of them central vocabulary for this exact function) and
+ * false-passed a hand-written distractor via assert-cli.ts: an unguarded
+ * JSON.parse-crash finding about the SAME resolveIndexStrategy function,
+ * naming the same identifiers, but never stating the doc understates a
+ * two-condition gate as one. Tightened to compound phrases that state the
+ * two-vs-one-condition contrast itself. The 6-7/10 measured rate above
+ * PREDATES this tightening and almost certainly overstated the true rate —
+ * the fixture's own frontier framing (a real, hard-to-close gap) is
+ * unchanged, but the number itself needs a fresh measurement; no stored vote
+ * traces exist in this worktree to offline re-score. The corpus
+ * recalibration sweep should treat this fixture's rate as unknown, not 6-7/10,
+ * until re-run.
  */
 
 import type { FixtureAssertions } from '../../assertions.js';
@@ -92,30 +108,37 @@ const assertions: FixtureAssertions = {
   rule: 'doc-truth',
   expect: (result, h) => {
     h.expectRuleFired('doc-truth', result);
+    // Kept to compound phrases that state the TWO-VS-ONE-CONDITION contrast
+    // itself — not bare 'manifest'/'structural.db'/'resolveindexstrategy'/
+    // 'hasmanifest'/'hasdb'/'overlay'/'gate'/'requires'/'only'/'both', each
+    // of which is central vocabulary for this whole function and would be
+    // satisfied by an unrelated finding about a *different* bug in the same
+    // resolveIndexStrategy (verified via assert-cli.ts: a distractor about
+    // an unguarded JSON.parse crash on a corrupted manifest.json — a real,
+    // different bug in the same function — false-passed the original list
+    // purely via resolveindexstrategy/hasmanifest/hasdb/manifest.json/
+    // falls back/gate, without ever stating the doc understates a
+    // two-condition gate as one).
     h.expectFindingMentions(
       [
-        // The crux: the omitted second gate condition
-        'manifest.json',
-        'manifest',
-        // The doc's stated (narrow) gate
-        'structural.db',
-        'has an index',
-        // The code that enforces the real gate
-        'resolveindexstrategy',
-        'hasmanifest',
-        'hasdb',
-        // Vocabulary a correct finding reaches for
-        'overlay',
-        'worktree-aware-indexing',
-        'both',
-        'requires',
-        'standalone',
-        'fall back',
-        'falls back',
-        'base index',
-        'gate',
-        'incomplete',
-        'only',
+        'structural.db and manifest.json',
+        'structural.db AND manifest.json',
+        'has structural.db but no manifest.json',
+        'structural.db but no manifest.json',
+        'structural.db but not manifest.json',
+        'without a manifest.json',
+        'missing manifest.json',
+        'omits manifest.json',
+        'omit manifest.json',
+        'only requires structural.db',
+        'only checks structural.db',
+        'only says structural.db',
+        'says only structural.db',
+        'second condition',
+        'two conditions',
+        'both conditions',
+        'understates the gate',
+        'narrower gate',
       ],
       result,
     );

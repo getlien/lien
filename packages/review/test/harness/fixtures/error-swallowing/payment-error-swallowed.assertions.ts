@@ -38,6 +38,20 @@
  * previously-passing votes still pass with these Tier-2 checks; no widening
  * was needed. Certification against the >= 9/10 bar is pending a paid
  * calibrate-10 (the main session runs it).
+ *
+ * KEYWORD-INTEGRITY SWEEP (2026-07-16): gate (B) was bare-noun-heavy (bare
+ * 'silent'/'silently'/'distinguish'/'orderservice'/'processorder'/
+ * 'checkoutservice'/'expresscheckout') and, combined with gate (A)'s
+ * legitimate 'charge'/'paymentservice' anchors, false-passed a hand-written
+ * distractor via assert-cli.ts: a finding about OrderService::processOrder
+ * not validating the order total is positive (a real, different bug)
+ * matched (A) via 'charge'/'paymentservice' and (B) via
+ * 'orderservice'+'silently', without ever describing the swallow's
+ * caller-facing masking effect. Tightened (B) to the specific
+ * failure-mode/propagation vocabulary; gate (A) was left untouched. This
+ * canary's 10/10 PREDATES this tightening; no stored vote traces exist in
+ * this worktree to offline re-score — the upcoming corpus recalibration
+ * sweep re-measures it.
  */
 
 import type { FixtureAssertions } from '../../assertions.js';
@@ -70,23 +84,27 @@ const assertions: FixtureAssertions = {
       ],
       result,
     );
-    // (B) the lost-exception-propagation / can't-distinguish impact.
+    // (B) the lost-exception-propagation / can't-distinguish impact. Dropped
+    // bare 'silent'/'silently'/'distinguish'/'orderservice'/'processorder'/
+    // 'checkoutservice'/'expresscheckout' — a distractor about a *different*
+    // bug (OrderService::processOrder not validating the order total is
+    // positive before calling charge) false-passed via 'orderservice' +
+    // 'silently' (and gate (A) via bare 'charge'/'paymentservice'), without
+    // ever describing the swallow's caller-facing masking effect (verified
+    // via assert-cli.ts).
     h.expectFindingMentions(
       [
         'runtimeexception',
         'exception propagation',
+        'lost exception',
         'error context',
         'already paid',
         'invalid total',
         'gateway failure',
         'gateway error',
-        'silent',
-        'silently',
-        'distinguish',
-        'orderservice',
-        'processorder',
-        'checkoutservice',
-        'expresscheckout',
+        "can't distinguish",
+        'cannot distinguish',
+        'can not distinguish',
       ],
       result,
     );

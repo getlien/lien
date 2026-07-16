@@ -59,6 +59,18 @@
  * in-prompt a strict reviewer might read it as "accurate as far as it goes".
  * Tagged `characterization` (not canary): the harness renders it as a
  * non-gating `~` line and excludes it from the exit code.
+ *
+ * KEYWORD-INTEGRITY SWEEP (2026-07-16): the Tier-2 list was bare-noun-heavy
+ * ('adr-011', 'config-system', 'retired', 'backend', 'qdrant', 'lancedb',
+ * 'dropped', 'incomplete', 'missing' — all vocabulary for the general
+ * retired-config-key topic this whole PR touches) and false-passed a
+ * hand-written distractor via assert-cli.ts: a real, different documentation
+ * gap (ADR-011 not specifying WHEN the config save is triggered) matched
+ * every generic term without ever naming the omitted embeddings.* /
+ * core.embeddingBatchSize keys. Tightened to those specific key identifiers
+ * plus compound omission phrases. The 0/10 and 1/10 pre-signal numbers above
+ * PREDATE this tightening; no stored vote traces exist in this worktree to
+ * offline re-score — the upcoming corpus recalibration sweep re-measures it.
  */
 
 import type { FixtureAssertions } from '../../assertions.js';
@@ -71,31 +83,34 @@ const assertions: FixtureAssertions = {
   rule: 'doc-truth',
   expect: (result, h) => {
     h.expectRuleFired('doc-truth', result);
+    // Kept to the specific omitted config-key identifiers and compound
+    // omission phrases — not bare 'adr-011'/'config-system'/'retired'/
+    // 'backend'/'qdrant'/'lancedb'/'dropped'/'incomplete'/'missing', each of
+    // which describes the general retired-config-key topic this whole PR
+    // touches and would be satisfied by an unrelated finding about a
+    // *different* gap in the same docs (verified via assert-cli.ts: a
+    // distractor about ADR-011 not specifying WHEN the config save is
+    // triggered — a real, different documentation gap — false-passed the
+    // original list via adr-011/backend/qdrant/dropped/incomplete, without
+    // ever naming the omitted embeddings.*/core.embeddingBatchSize keys).
     h.expectFindingMentions(
       [
-        // The omitted keys — the crux
-        'embeddings.*',
-        'embeddings',
         'core.embeddingbatchsize',
         'embeddingbatchsize',
-        // The docs in tension
-        'adr-011',
-        'config-system',
-        // The retired-key vocabulary both docs share
-        'retired',
-        'backend',
-        'qdrant',
-        'lancedb',
-        'still load',
-        'warn once',
-        'dropped',
-        'degrade',
-        // How a correct finding frames the gap
-        'omit',
-        'incomplete',
-        'inconsistent',
-        'does not mention',
-        'missing',
+        'embeddings.* is missing',
+        'embeddings.* is omitted',
+        'omits embeddings.*',
+        'omitting embeddings.*',
+        'missing embeddings.*',
+        'does not mention embeddings.*',
+        "doesn't mention embeddings.*",
+        'no mention of embeddings.*',
+        'lists only backend',
+        'only lists backend',
+        'only mentions backend',
+        'narrower than adr-011',
+        'incomplete compared to adr-011',
+        'adr-011 documents embeddings',
       ],
       result,
     );

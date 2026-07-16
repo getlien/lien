@@ -19,6 +19,17 @@
  * sibling branch `test/capture-pr658-fixture` is the fixture to run
  * `--calibrate 10` against on kimi before shipping (≥ 9/10). This hand-authored
  * fixture is the free CC-mode smoke test, NOT the calibration gate.
+ *
+ * KEYWORD-INTEGRITY SWEEP (2026-07-16): the Tier-2 list was bare-noun-heavy
+ * ('lexical', 'bm25', 'fallback', 'disabled', 'still', 'outdated',
+ * 'resolvesearchmode' — all generic to any stale-comment finding on this
+ * same doc block) and false-passed a hand-written distractor via
+ * assert-cli.ts: a finding about a *different* stale claim on the same
+ * comment (config-level mode selection, not the disabled/no-results
+ * framing) matched via lexical/fallback/resolvesearchmode/outdated/still.
+ * Tightened to compound phrases that state the disabled-vs-still-active
+ * contradiction itself. Not a calibration gate (hand-authored CC-mode smoke
+ * fixture, no paid votes to re-score) — untagged/non-canary either way.
  */
 
 import type { FixtureAssertions } from '../../assertions.js';
@@ -30,24 +41,29 @@ const assertions: FixtureAssertions = {
   rule: 'doc-truth',
   expect: (result, h) => {
     h.expectRuleFired('doc-truth', result);
+    // Kept to compound phrases that state the CONTRADICTION itself (the
+    // "disabled" claim vs. the code still returning results) — not bare
+    // 'lexical'/'bm25'/'fallback'/'disabled'/'still'/'outdated'/
+    // 'resolvesearchmode', each of which a distractor about a *different*
+    // stale claim on the same resolveSearchMode comment (e.g. a claim about
+    // config-level mode SELECTION, not about the disabled/no-results
+    // framing) also legitimately uses. Verified via assert-cli.ts: such a
+    // distractor false-passed the original list via lexical/fallback/
+    // resolvesearchmode/outdated/still and correctly fails against this one.
     h.expectFindingMentions(
       [
-        // The true behavior the claim contradicts
-        'lexical',
-        'bm25',
-        'fall back',
-        'fallback',
-        // The false claim being flagged
-        'disabled',
-        'reports as',
-        'no results',
-        // Framing a correct finding tends to use
-        'resolvesearchmode',
-        'stale',
-        'contradict',
-        'falsif',
-        'still',
-        'outdated',
+        'reports as disabled, but',
+        'reports as disabled but',
+        'claims disabled but',
+        'disabled but returns',
+        'disabled but falls back',
+        'disabled but still',
+        'contradicts the disabled claim',
+        'the disabled claim is stale',
+        'is not actually disabled',
+        "isn't actually disabled",
+        'no longer disabled',
+        'search is not disabled',
       ],
       result,
     );

@@ -35,6 +35,17 @@
  * previously-passing votes still pass with these Tier-2 checks; no widening
  * was needed. Certification against the >= 9/10 bar is pending a paid
  * calibrate-10 (the main session runs it).
+ *
+ * KEYWORD-INTEGRITY SWEEP (2026-07-16): gate (B) was bare-noun-heavy
+ * ('concurrent', 'negative', 'credit_balance', 'dispatch' alone) and
+ * false-passed a hand-written distractor (a real, *different* TOCTOU on
+ * `CreditService::purchaseCredits` — see the "Note" above) via assert-cli.ts.
+ * Tightened to the specific buggy function/call-chain identifiers and
+ * compound double-webhook/negative-balance phrases; gate (A) was left
+ * untouched (see the tightened gate's own comment for the full before/after).
+ * No stored vote traces exist to offline re-score (fresh worktree) — any
+ * PRIOR calibration number for this canary PREDATES this tightening; the
+ * upcoming corpus recalibration sweep re-measures it.
  */
 
 import type { FixtureAssertions } from '../../assertions.js';
@@ -61,21 +72,33 @@ const assertions: FixtureAssertions = {
       ],
       result,
     );
-    // (B) the credit-billing impact of the unguarded check.
+    // (B) the credit-billing impact of the unguarded check. Kept to the
+    // specific buggy function/call-chain identifiers (hasCredits,
+    // canRunReview, deductCredit, NATS dispatch) and compound
+    // double-webhook/negative-balance phrases — NOT bare 'concurrent',
+    // 'negative', 'credit_balance', or 'dispatch' alone, each of which a
+    // distractor about a *different* CreditService race (e.g. the
+    // purchaseCredits stripe_payment_intent_id idempotency gap noted above)
+    // also legitimately uses, without ever naming hasCredits or the
+    // webhook-dispatch mechanism. Verified via assert-cli.ts: a hand-written
+    // purchaseCredits distractor false-passed the original list and
+    // correctly fails against this one.
     h.expectFindingMentions(
       [
         'hascredits',
-        'credit_balance',
-        'credit balance',
-        'concurrent',
-        'negative',
-        'overdrawn',
-        'over-spend',
-        'overspend',
-        'nats',
         'canrunreview',
         'deductcredit',
-        'dispatch',
+        'nats',
+        'dispatch to nats',
+        'dispatching to nats',
+        'concurrent webhook',
+        'concurrent webhooks',
+        'two webhooks',
+        'both webhooks',
+        'balance going negative',
+        'balance negative',
+        'balance overdrawn',
+        'account overdrawn',
       ],
       result,
     );
