@@ -115,6 +115,51 @@ describe('chunkFile', () => {
   // It's designed to produce a best-effort AST even for malformed code. The astFallback: 'error'
   // option is mainly useful for catching edge cases like the Tree-sitter "Invalid argument" error
   // that occurs with very large files (1000+ lines).
+
+  describe('small files (#772 regression)', () => {
+    // These exercise the real production entry point with default options
+    // (chunkSize 75 -> minChunkSize 7, useAST true), matching what `lien index`
+    // actually runs. See ast/chunker.test.ts for the underlying boundary tests.
+    it('should not silently drop a small file containing only a bare test() call', () => {
+      const content = `import { test, expect } from 'vitest';
+
+test('does something', () => {
+  expect(1).toBe(1);
+});`;
+
+      const chunks = chunkFile('tiny.test.ts', content);
+
+      expect(chunks.length).toBeGreaterThan(0);
+    });
+
+    it('should not silently drop a small single-function file', () => {
+      const content = `export function foo() {
+  return 1;
+}`;
+
+      const chunks = chunkFile('foo.ts', content);
+
+      expect(chunks.length).toBeGreaterThan(0);
+    });
+
+    it('should not silently drop a 1-line export', () => {
+      const chunks = chunkFile('foo.ts', 'export const foo = 1;');
+
+      expect(chunks.length).toBeGreaterThan(0);
+    });
+
+    it('should still produce no chunks for an empty file', () => {
+      const chunks = chunkFile('empty.ts', '');
+
+      expect(chunks).toHaveLength(0);
+    });
+
+    it('should still produce no chunks for a whitespace-only file', () => {
+      const chunks = chunkFile('whitespace.ts', '   \n\t\n   \n');
+
+      expect(chunks).toHaveLength(0);
+    });
+  });
 });
 
 describe('chunkText', () => {
