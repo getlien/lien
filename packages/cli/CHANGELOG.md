@@ -1,5 +1,25 @@
 # @liendev/lien
 
+## 0.66.0
+
+### Minor Changes
+
+- 19188f7: Add the plan-time complexity nudge — surfacing near/over-budget functions as an imperative warning _before_ an agent edits, not just after (`lien delta`) or as inert data (`get_files_context`'s `complexityHeadroom`).
+  - `get_files_context` gains an optional `complexityHeadroomWarning` string field, spread ahead of `complexityHeadroom` in the response so it's the first thing an agent reads when a function in the file is at/near its complexity budget. Purely additive — `complexityHeadroom` itself is unchanged.
+  - `lien annotate` (and therefore the plugin's `annotate-read.sh` read-hook) now computes the same headroom for the file it annotates and, when non-empty, leads the printed annotation with the same shared warning line — reusing `get_files_context`'s exact computation so the two can never disagree. The annotation now also fires (instead of staying silent) when a file has a near-budget function even if it would otherwise look trivial (no dependents, existing test coverage).
+  - No new hook: a `PreToolUse:Edit|Write` hook was considered and rejected — per `docs/architecture/claude-code-hook-channels.md`, `PreToolUse` has no channel that delivers model-visible content for `Edit`/`Write` without either doing nothing or blocking the edit outright (`exit 2`). The existing `PostToolUse:Read` annotation hook already fires right before the mandatory `get_files_context` → `Edit` sequence, so it carries the nudge instead — inheriting the existing per-file TTL suppression for free.
+
+- a662147: Add the post-edit test-association reminder — closing the read → write → verify loop the way the plan-time nudge closed read → write.
+  - `lien annotate` gains a `--tests-only` flag: prints one compact line naming the tests associated with the file ("Lien: you changed \<file\> — associated tests: \<tests\>. Run them before completing."), or nothing when the file has no associated tests. It's the cheap path — a single index scan for test associations, skipping the full annotation's dependency-graph BFS and complexity analysis entirely.
+  - The Claude Code plugin gains a `test-reminder.sh` hook on `PostToolUse:Edit|Write|MultiEdit` (a sibling of `delta-write.sh`, each script stays single-purpose) that surfaces that line via `additionalContext` after an edit. Silent when there are no associations or the repo has no index; TTL-suppressed per file per session (same touchfile pattern as `annotate-read.sh`, namespaced so the two never collide); fail-open throughout — hook errors never block the edit. Kill switch: `LIEN_TEST_REMINDER=off`.
+
+### Patch Changes
+
+- 0e74ffb: Cap the complexity headroom warning line at the 3 worst entries. A dogfood run of PR #772 surfaced a real 5-entry file rendering as a ~250-char single line — past 3-4 entries the warning became hard to read. The line now shows the 3 worst entries (over-threshold first, by highest overage ratio, then nearest-to-threshold) and folds anything beyond that into an explicit "… and N more at/near budget" remainder — never a silent truncation. The full, uncapped list is unaffected: `get_files_context`'s `complexityHeadroom` array still carries every near/over-budget entry; only the human-readable warning string is capped. Shared by both consumers (`get_files_context`'s `complexityHeadroomWarning` field and `lien annotate`'s printed nudge line) since both call the one formatter.
+- Updated dependencies [8175bf5]
+  - @liendev/parser@0.66.0
+  - @liendev/core@0.66.0
+
 ## 0.65.0
 
 ### Minor Changes
