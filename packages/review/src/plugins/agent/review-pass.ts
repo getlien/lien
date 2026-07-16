@@ -86,6 +86,19 @@ export interface ReviewPassSpec {
   postProcessResult?(result: AgentResult, context: ReviewContext): AgentResult;
 }
 
+/**
+ * The PR title/body header, mirroring the main pass's `<pr_metadata>` block.
+ * Shared by every extra pass's prompt builder (doc-truth, stale-duplicate,
+ * incomplete-handling) — extracted here on this module's third identical
+ * copy rather than left duplicated a third time (CLAUDE.md's DRY guidance:
+ * wait for the 3rd use).
+ */
+export function renderPassPrHeader(context: ReviewContext): string | null {
+  if (!context.pr) return null;
+  const body = context.pr.body ? `\nDescription: ${context.pr.body}` : '';
+  return `<pr_metadata>\nTitle: ${context.pr.title}${body}\n</pr_metadata>`;
+}
+
 /** A pass's client loop, closed over the pass-agnostic transport (provider/apiKey/toolExecutor). */
 export type PassClientRunner = (
   systemPrompt: string,

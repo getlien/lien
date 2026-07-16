@@ -30,6 +30,10 @@ import {
   applyStaleDuplicateMainOverride,
 } from './stale-duplicate-pass.js';
 import {
+  INCOMPLETE_HANDLING_PASS_SPEC,
+  applyIncompleteHandlingMainOverride,
+} from './incomplete-handling-pass.js';
+import {
   runExtraPasses,
   type ReviewPassSpec,
   type PassClientRunner,
@@ -52,11 +56,19 @@ import {
  * Doc-truth is the proven precedent; the stale-duplicate candidate loop is
  * the pilot (per-rule-loops design doc §4) — dark by default, see
  * `stale-duplicate-pass.ts`'s own gate for why adding it here changes no
- * default behavior. The two passes have no data dependency on each other,
- * so declaration order doesn't matter for correctness (see review-pass.ts's
- * "serial for v1" note) — doc-truth stays first as the longer-proven pass.
+ * default behavior. The incomplete-handling candidate loop (design doc §7
+ * item 5) is the second build, unifying the variant-sweep/sibling-surface/
+ * unread-field signals into one dedicated pass — also dark by default, see
+ * `incomplete-handling-pass.ts`. None of these three passes has a data
+ * dependency on either of the others, so declaration order doesn't matter
+ * for correctness (see review-pass.ts's "serial for v1" note) — doc-truth
+ * stays first as the longer-proven pass.
  */
-const EXTRA_PASSES: ReviewPassSpec[] = [DOC_TRUTH_PASS_SPEC, STALE_DUPLICATE_PASS_SPEC];
+const EXTRA_PASSES: ReviewPassSpec[] = [
+  DOC_TRUTH_PASS_SPEC,
+  STALE_DUPLICATE_PASS_SPEC,
+  INCOMPLETE_HANDLING_PASS_SPEC,
+];
 
 const configSchema = z.object({
   apiKey: z.string().min(1),
@@ -102,6 +114,12 @@ const configSchema = z.object({
    * LIEN_STALE_DUP_PASS=on) to enable. See `stale-duplicate-pass.ts`.
    */
   staleDuplicatePass: z.boolean().default(false),
+  /**
+   * Run the incomplete-handling candidate loop (per-rule-loops design doc
+   * §7 item 5). Default false — dark-launched opt-in; set true (or env
+   * LIEN_INCOMPLETE_PASS=on) to enable. See `incomplete-handling-pass.ts`.
+   */
+  incompleteHandlingPass: z.boolean().default(false),
 });
 
 export interface AgentReviewPluginOptions {
@@ -161,11 +179,14 @@ export class AgentReviewPlugin implements ReviewPlugin {
       });
 
     // Select active rules based on PR content (languages, diff keywords).
-    // applyStaleDuplicateMainOverride is a no-op unless LIEN_STALE_DUP_MAIN=off
-    // (see stale-duplicate-pass.ts) — the pilot's future "loop only, no
-    // shared-loop backstop" A/B arm.
+    // applyStaleDuplicateMainOverride/applyIncompleteHandlingMainOverride are
+    // no-ops unless LIEN_STALE_DUP_MAIN=off / LIEN_INCOMPLETE_MAIN=off (see
+    // stale-duplicate-pass.ts / incomplete-handling-pass.ts) — each pass's
+    // future "loop only, no shared-loop backstop" A/B arm.
     const triggerCtx = buildTriggerContext(context);
-    const rules = applyStaleDuplicateMainOverride(selectRules(BUILTIN_RULES, triggerCtx));
+    const rules = applyIncompleteHandlingMainOverride(
+      applyStaleDuplicateMainOverride(selectRules(BUILTIN_RULES, triggerCtx)),
+    );
     logger.info(
       `[${this.id}] Rules: ${rules.active.map(r => r.id).join(', ')} (skipped: ${rules.skipped.join(', ') || 'none'})`,
     );

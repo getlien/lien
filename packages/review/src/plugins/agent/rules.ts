@@ -276,7 +276,7 @@ For code with DB transactions, locks, or shared state:
   source: 'builtin',
 };
 
-const INCOMPLETE_HANDLING: ReviewRule = {
+export const INCOMPLETE_HANDLING: ReviewRule = {
   id: 'incomplete-handling',
   name: 'Incomplete Interface/Type Handling',
   description:

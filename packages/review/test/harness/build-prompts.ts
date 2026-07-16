@@ -15,10 +15,11 @@
  * (`buildDocTruthPassPrompts`) from the main pass's `buildInitialMessage`.
  *
  * Same for the stale-duplicate candidate-loop PILOT (`staleDuplicatePass`,
- * per-rule-loops design doc §4) — dark by default, so `fires` is false
- * unless the fixture's captured config (or LIEN_STALE_DUP_PASS=on in the
- * environment this script runs in) opts in AND the loop-eligibility
- * threshold is met.
+ * per-rule-loops design doc §4) and the incomplete-handling candidate loop
+ * (`incompleteHandlingPass`, design doc §7 item 5) — both dark by default,
+ * so `fires` is false unless the fixture's captured config (or the
+ * relevant env flag in the environment this script runs in) opts in AND
+ * that loop's own eligibility gate is met.
  *
  * Usage: tsx build-prompts.ts <fixture.json>
  */
@@ -36,6 +37,11 @@ import {
   buildStaleDuplicatePassPrompts,
   applyStaleDuplicateMainOverride,
 } from '../../src/plugins/agent/stale-duplicate-pass.js';
+import {
+  shouldRunIncompleteHandlingPass,
+  buildIncompleteHandlingPassPrompts,
+  applyIncompleteHandlingMainOverride,
+} from '../../src/plugins/agent/incomplete-handling-pass.js';
 import type { AgentConfig } from '../../src/plugins/agent/types.js';
 
 import { loadFixture } from './fixture-loader.js';
@@ -51,7 +57,9 @@ async function main(): Promise<void> {
   const config = ctx.config as unknown as AgentConfig | undefined;
 
   const triggerCtx = buildTriggerContext(ctx);
-  const rules = applyStaleDuplicateMainOverride(selectRules(BUILTIN_RULES, triggerCtx));
+  const rules = applyIncompleteHandlingMainOverride(
+    applyStaleDuplicateMainOverride(selectRules(BUILTIN_RULES, triggerCtx)),
+  );
 
   const systemPrompt = buildSystemPrompt(rules);
   const initialMessage = buildInitialMessage(ctx, { blastRadius: null, rules });
@@ -66,6 +74,11 @@ async function main(): Promise<void> {
     ? { fires: true as const, ...buildStaleDuplicatePassPrompts(ctx) }
     : { fires: false as const };
 
+  const incompleteHandlingFires = shouldRunIncompleteHandlingPass(ctx, config);
+  const incompleteHandlingPass = incompleteHandlingFires
+    ? { fires: true as const, ...buildIncompleteHandlingPassPrompts(ctx) }
+    : { fires: false as const };
+
   const output = {
     fixturePath,
     ruleIds: rules.active.map(r => r.id),
@@ -74,6 +87,7 @@ async function main(): Promise<void> {
     initialMessage,
     docTruthPass,
     staleDuplicatePass,
+    incompleteHandlingPass,
   };
 
   process.stdout.write(JSON.stringify(output, null, 2) + '\n');

@@ -29,7 +29,7 @@ import type { AgentConfig, AgentFinding, AgentResult, ResolvedRules } from './ty
 import { DOC_TRUTH } from './rules.js';
 import { buildSystemPrompt } from './system-prompt.js';
 import { envDisabled } from './agent-client-shared.js';
-import type { ReviewPassSpec } from './review-pass.js';
+import { renderPassPrHeader, type ReviewPassSpec } from './review-pass.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -134,13 +134,6 @@ function pushIfPresent(sections: string[], value: string | null | undefined): vo
   if (value) sections.push(value);
 }
 
-/** The PR title/body header, mirroring the main pass's <pr_metadata> block. */
-function renderPrHeader(context: ReviewContext): string | null {
-  if (!context.pr) return null;
-  const body = context.pr.body ? `\nDescription: ${context.pr.body}` : '';
-  return `<pr_metadata>\nTitle: ${context.pr.title}${body}\n</pr_metadata>`;
-}
-
 /**
  * Build the claims-only initial message: the PR header, the intro that scopes
  * the pass to doc-truth, the <doc_claims> worklist WITH its pre-fetched
@@ -156,7 +149,7 @@ function renderPrHeader(context: ReviewContext): string | null {
  */
 export function buildDocTruthPassInitialMessage(context: ReviewContext): string {
   const sections: string[] = [];
-  pushIfPresent(sections, renderPrHeader(context));
+  pushIfPresent(sections, renderPassPrHeader(context));
   sections.push(DOC_PASS_INTRO);
   pushIfPresent(sections, renderDocClaimsSection(context));
   pushIfPresent(sections, renderRenameSweepSection(context));
