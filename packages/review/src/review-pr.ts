@@ -52,6 +52,7 @@ import {
   type Attestation,
   type EligibilityPath,
   type SkippedPass,
+  type ExtraPassAttestationInput,
 } from './attestation.js';
 import { cloneBySha, type CloneResult } from './clone.js';
 import {
@@ -327,6 +328,14 @@ interface RunTelemetry {
   agentUsage: AgentUsage;
   allocatedTokens: number;
   passesSkipped: SkippedPass[];
+  /**
+   * Any extra pass beyond main that actually ran (e.g. doc-truth), one entry
+   * per pass — see `reportPassResult` on `ReviewContext`. `agentUsage` above
+   * already sums every pass's spend (main + extras); this is the per-pass
+   * breakdown `buildRunAttestation` needs to attribute budget/outcome to the
+   * RIGHT pass instead of only ever the main one.
+   */
+  extraPasses: ExtraPassAttestationInput[];
 }
 
 /**
@@ -369,6 +378,7 @@ async function runEngineForReview(
     agentUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0 },
     allocatedTokens: 0,
     passesSkipped: [],
+    extraPasses: [],
   };
 
   telemetry.findings = await engine.run({
@@ -390,9 +400,26 @@ async function runEngineForReview(
       telemetry.allocatedTokens = tokens;
     },
     reportSkip: skip => telemetry.passesSkipped.push(skip),
+    reportPassResult: result => telemetry.extraPasses.push(result),
   });
   logger.info(`Engine produced ${telemetry.findings.length} total findings`);
   return telemetry;
+}
+
+/**
+ * The MAIN pass's own spent tokens, derived from the run's aggregate spend
+ * (`telemetry.agentUsage.totalTokens`, which sums main + every extra pass —
+ * see `accumulateUsage`) minus what the extra passes themselves reported
+ * spending. No new plumbing needed to track main's spend separately: as long
+ * as `reportUsage` fires exactly once per pass that ran (main via
+ * `reportAgentRun`, each extra pass via `runExtraPasses` — both true today),
+ * this subtraction is exact.
+ */
+export function deriveMainSpentTokens(
+  aggregateSpentTokens: number,
+  extraPasses: ExtraPassAttestationInput[],
+): number {
+  return aggregateSpentTokens - extraPasses.reduce((sum, p) => sum + p.spentTokens, 0);
 }
 
 /** Assemble the attestation from the run's telemetry + the present() delivery outcome. */
@@ -412,7 +439,8 @@ function buildRunAttestation(
     agentAttempted,
     providerFailure,
     allocatedTokens: telemetry.allocatedTokens,
-    spentTokens: telemetry.agentUsage.totalTokens,
+    spentTokens: deriveMainSpentTokens(telemetry.agentUsage.totalTokens, telemetry.extraPasses),
+    extraPasses: telemetry.extraPasses,
     passesSkipped: telemetry.passesSkipped,
     annotationsEmitted: presentation.delivery.annotationsEmitted,
     inlineComments: presentation.delivery.inlineComments,

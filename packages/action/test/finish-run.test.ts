@@ -233,7 +233,7 @@ describe('finishRun', () => {
       const { readFile } = await import('node:fs/promises');
       const summary = await readFile(summaryPath, 'utf8');
       expect(summary).toContain('<summary>Delivery attestation</summary>');
-      expect(summary).toContain('"attestationVersion": 1');
+      expect(summary).toContain('"attestationVersion": 2');
       expect(summary).toContain('"verdict": "delivered"');
     });
 

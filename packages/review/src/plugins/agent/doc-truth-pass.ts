@@ -11,23 +11,25 @@
  * the doc-claim signals in the prompt — no blast radius, no complexity, no code
  * bugs to chase. Its findings fold back into the main review's output.
  *
- * The orchestration (running the client, merging usage/trace/findings) lives in
- * `index.ts`'s `analyze()`; this module holds the deterministic, LLM-free pieces
- * it composes: the gate, the prompt builder, and the merge helpers. The client
- * runner is injected into `runDocTruthPass` so failure isolation and gating are
- * unit-testable with zero LLM spend.
+ * This module holds doc-truth's deterministic, LLM-free pieces: the gate, the
+ * prompt builder, the budget, and the merge helpers. They are bundled at the
+ * bottom into `DOC_TRUTH_PASS_SPEC`, a `ReviewPassSpec` (see `review-pass.ts`)
+ * that the generic `runReviewPass`/`runExtraPasses` executor runs — that
+ * generic executor owns the client-run/failure-isolation/reporting plumbing
+ * this module used to own itself (`runDocTruthPass`, `appendDocTruthTurns`),
+ * so every piece here stays unit-testable with zero LLM spend.
  */
 
 import type { ReviewContext } from '../../plugin-types.js';
 import { renderGuidanceSurfaceSection } from '../../guidance-surface-signals.js';
 import { extractDocClaims, renderDocClaimsSection } from '../../doc-claims-signals.js';
 import { renderRenameSweepSection } from '../../rename-sweep-signals.js';
-import type { Logger } from '../../logger.js';
 
-import type { AgentConfig, AgentFinding, AgentResult, AgentTrace, ResolvedRules } from './types.js';
+import type { AgentConfig, AgentFinding, AgentResult, ResolvedRules } from './types.js';
 import { DOC_TRUTH } from './rules.js';
 import { buildSystemPrompt } from './system-prompt.js';
 import { envDisabled } from './agent-client-shared.js';
+import type { ReviewPassSpec } from './review-pass.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -97,12 +99,13 @@ const DOC_PASS_INTRO =
 /**
  * Precisely why the doc-truth pass would not run right now, or null if it
  * should run. Kept separate from `shouldRunDocTruthPass`'s boolean so a
- * caller reporting the skip to the delivery attestation (see `runDocTruthPass`
- * below) can name the REAL reason — config-disabled, env-disabled, or no
- * doc claims are three different operational states that a bare boolean
- * collapses into one.
+ * caller reporting the skip to the delivery attestation (see this module's
+ * `DOC_TRUTH_PASS_SPEC.gateReason`, run by `review-pass.ts`'s
+ * `runReviewPass`) can name the REAL reason — config-disabled, env-disabled,
+ * or no doc claims are three different operational states that a bare
+ * boolean collapses into one.
  */
-function docTruthSkipReason(context: ReviewContext, config?: AgentConfig): string | null {
+export function docTruthSkipReason(context: ReviewContext, config?: AgentConfig): string | null {
   if (config?.docTruthPass === false) return 'disabled via config (docTruthPass: false)';
   if (envDisabled(process.env[DOC_PASS_ENV])) return `disabled via ${DOC_PASS_ENV} env var`;
   const patches = context.pr?.patches;
@@ -190,65 +193,8 @@ export function docTruthPassBudget(baseBudget: number): number {
   return Math.round(baseBudget * DOC_PASS_BUDGET_FRACTION);
 }
 
-// ---------------------------------------------------------------------------
-// Runner (client injected for zero-LLM testing)
-// ---------------------------------------------------------------------------
-
-/**
- * Runs the doc-truth client loop for the given prompts and budget. Injected
- * into `runDocTruthPass` so the gate, prompt build, and failure isolation are
- * unit-testable without a real client. `index.ts` supplies a closure over
- * `runAgentClient` (with the shared tool executor) as the production impl.
- */
-export type DocTruthClientRunner = (
-  systemPrompt: string,
-  initialMessage: string,
-  maxTokenBudget: number,
-  maxTurns: number,
-) => Promise<AgentResult>;
-
 /** Plugin name the doc-truth pass reports itself under in the delivery attestation. */
 const DOC_TRUTH_SKIP_PLUGIN = 'agent-review:doc-truth';
-
-/**
- * Run the second, claims-only doc-truth pass when the PR warrants it. Returns
- * the pass's AgentResult, or null when the pass is gated off OR when it fails —
- * a pass-2 error must never fail the whole review, so it is caught, logged, and
- * swallowed here (the caller keeps the main-pass findings).
- *
- * Reports its own outcome to `context.reportSkip` in both the gated-off and
- * failed cases — this is the one place that knows the REAL reason (the exact
- * gate that fired, or the caught error), so a caller doesn't need to duplicate
- * `shouldRunDocTruthPass`'s check just to guess why nothing came back. A run
- * that never reaches this function at all (the main pass never ran) is
- * reported by the caller instead — this pass is never invoked in that case.
- */
-export async function runDocTruthPass(
-  context: ReviewContext,
-  config: AgentConfig,
-  logger: Logger,
-  runClient: DocTruthClientRunner,
-): Promise<AgentResult | null> {
-  const skipReason = docTruthSkipReason(context, config);
-  if (skipReason) {
-    context.reportSkip?.({ plugin: DOC_TRUTH_SKIP_PLUGIN, reason: skipReason });
-    return null;
-  }
-  try {
-    const { systemPrompt, initialMessage } = buildDocTruthPassPrompts(context);
-    const budget = docTruthPassBudget(config.maxTokenBudget);
-    const result = await runClient(systemPrompt, initialMessage, budget, DOC_PASS_MAX_TURNS);
-    logger.info(
-      `[agent] doc-truth pass: ${result.findings.length} finding(s) in ${result.turns} turn(s) ($${result.usage.cost.toFixed(4)})`,
-    );
-    return result;
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    logger.warning(`[agent] doc-truth pass failed: ${message}`);
-    context.reportSkip?.({ plugin: DOC_TRUTH_SKIP_PLUGIN, reason: `failed: ${message}` });
-    return null;
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Merge helpers
@@ -323,21 +269,25 @@ export function mergeDocPassIntoResult(
   return main;
 }
 
+// ---------------------------------------------------------------------------
+// ReviewPassSpec (plugs doc-truth into the generalized executor)
+// ---------------------------------------------------------------------------
+
 /**
- * Append the doc pass's turns to the main trace so the single trace surfaced via
- * `reportTrace` carries BOTH passes: the harness derives tool calls and turn
- * count from `trace.turns`, so main-pass `expectToolCalled` assertions keep
- * working while the doc pass's tool calls also become visible. Doc turns are
- * renumbered to continue after the main pass and stamped `phase: 'doc-truth'`.
- * No-op when either trace is absent (production runners don't capture traces).
+ * Doc-truth bundled as a `ReviewPassSpec` (see `review-pass.ts`) — the first
+ * (and, before that generalization, only) entry in `index.ts`'s extra-pass
+ * list. Every field here is one of this module's own pure functions; the
+ * generic executor supplies the gate-check/run/failure-isolation/reporting
+ * plumbing that used to be doc-truth-specific (`runDocTruthPass`,
+ * `appendDocTruthTurns`).
  */
-export function appendDocTruthTurns(
-  mainTrace: AgentTrace | undefined,
-  docTrace: AgentTrace | undefined,
-): void {
-  if (!mainTrace || !docTrace) return;
-  const offset = mainTrace.turns.length;
-  for (const turn of docTrace.turns) {
-    mainTrace.turns.push({ ...turn, turnNumber: offset + turn.turnNumber, phase: 'doc-truth' });
-  }
-}
+export const DOC_TRUTH_PASS_SPEC: ReviewPassSpec = {
+  name: 'doc-truth',
+  skipPlugin: DOC_TRUTH_SKIP_PLUGIN,
+  gateReason: docTruthSkipReason,
+  buildPrompts: buildDocTruthPassPrompts,
+  budget: docTruthPassBudget,
+  maxTurns: DOC_PASS_MAX_TURNS,
+  mergeFindings: mergeDocTruthFindings,
+  mergeResultState: mergeDocPassIntoResult,
+};

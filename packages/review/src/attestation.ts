@@ -21,16 +21,29 @@ import type { ReviewFinding } from './plugin-types.js';
 import type { AgentStopReason } from './plugins/agent/types.js';
 
 // ---------------------------------------------------------------------------
-// Schema (v1)
+// Schema (v2)
 // ---------------------------------------------------------------------------
 
-export const ATTESTATION_VERSION = 1 as const;
+/**
+ * v2 (this generalization): `provider.passes[]` grows past length 1 for the
+ * first time — one entry per pass the agent-review plugin actually ran
+ * (main, plus any extra pass like doc-truth), not just the main pass — and
+ * `BudgetAttestation` gains a per-pass breakdown. Both are additive shape
+ * changes, but the version bump is a deliberate owner call (not the
+ * "additive fields don't bump it" convention) because this is the first time
+ * `passes`/`budget` carry more than one pass's worth of data; a consumer that
+ * assumed `passes.length <= 1` would have silently ignored real data before
+ * this bump. v1 attestations (`passes: [mainPass]` only) remain valid v2
+ * shapes — nothing about the v1 schema was removed or renamed.
+ */
+export const ATTESTATION_VERSION = 2 as const;
 
 /** `AgentStopReason` plus `'not_run'` for a pass that was never attempted. */
 export type ProviderStopReason = AgentStopReason | 'not_run';
 
 export interface ProviderPassAttestation {
-  name: 'main';
+  /** `'main'` for the primary investigation, or an extra pass's own name (e.g. `'doc-truth'`). */
+  name: string;
   ran: boolean;
   stopReason: ProviderStopReason;
   /** Every provider request failed terminally — zero completed turns. */
@@ -43,11 +56,29 @@ export interface SkippedPass {
   reason: string;
 }
 
-export interface BudgetAttestation {
+/** One pass's own token allocation/spend — the breakdown behind `BudgetAttestation`'s aggregate. */
+export interface PassBudgetAttestation {
+  name: string;
   allocatedTokens: number;
   spentTokens: number;
-  /** Ran out of budget before finishing — the main pass's `stopReason` was `'budget'`. */
+  /** This SPECIFIC pass ran out of budget before finishing (`stopReason === 'budget'`). */
   starved: boolean;
+}
+
+export interface BudgetAttestation {
+  /** Sum of every pass's `allocatedTokens`. */
+  allocatedTokens: number;
+  /** Sum of every pass's `spentTokens`. */
+  spentTokens: number;
+  /** True when ANY pass starved — see `passes[]` for which one. */
+  starved: boolean;
+  /**
+   * Per-pass breakdown. Before this field existed, a doc-truth-only budget
+   * starvation was only visible aggregated into the main pass's numbers —
+   * indistinguishable from the main pass itself starving. Empty when the
+   * agent-review plugin didn't run at all.
+   */
+  passes: PassBudgetAttestation[];
 }
 
 export interface InlineCommentsAttestation {
@@ -159,33 +190,53 @@ export function deriveMainPassAttestation(
 
 /**
  * Verdict precedence (most to least severe): a provider that never ran at all
- * outranks everything — nothing was analyzed. Budget starvation is a more
- * specific, more actionable diagnosis than the generic "partial" bucket, so
- * it's checked first among incomplete-stop reasons. Dropped inline comments
- * and other delivery failures only matter once the review itself came back
- * clean. `descriptionBadgeUpdated`/`outOfDiffReviewPosted` are checked against
- * `=== false` specifically (not falsy) — `null`/`undefined` means "nothing was
- * attempted this run", which is not a failure.
+ * outranks everything — nothing was analyzed. Among the passes that DID run,
+ * the first one (in `passes` order — main first, then any extra pass) whose
+ * `stopReason !== 'completed'` decides the degraded verdict: budget
+ * starvation is a more specific, more actionable diagnosis than the generic
+ * "partial" bucket, so a pass that stopped on `'budget'` reports
+ * `degraded:budget_starved` and anything else reports
+ * `degraded:provider_partial` — attributed to WHICHEVER pass actually
+ * stopped, not hardcoded to the main pass (the bug this generalization
+ * fixes: before per-pass attestation existed, a doc-truth-only budget
+ * starvation was folded into the main pass's own `stopReason` upstream — see
+ * `doc-truth-pass.ts`'s `mergeDocPassIntoResult` — so this verdict looked
+ * identical whether it was main or an extra pass that actually starved).
+ * Dropped inline comments and other delivery failures only matter once every
+ * pass came back clean. `descriptionBadgeUpdated`/`outOfDiffReviewPosted` are
+ * checked against `=== false` specifically (not falsy) — `null`/`undefined`
+ * means "nothing was attempted this run", which is not a failure.
  */
 export function computeVerdict(input: {
   pipelineFailed: boolean;
   providerFailure: boolean;
-  mainPass: ProviderPassAttestation;
-  budget: BudgetAttestation;
+  passes: ProviderPassAttestation[];
   inlineComments: InlineCommentsAttestation;
   descriptionBadgeUpdated?: boolean | null;
   outOfDiffReviewPosted?: boolean | null;
 }): AttestationVerdict {
   if (input.pipelineFailed) return 'failed:analysis_error';
   if (input.providerFailure) return 'failed:provider_never_ran';
-  if (input.mainPass.ran && input.mainPass.stopReason !== 'completed') {
-    return input.budget.starved ? 'degraded:budget_starved' : 'degraded:provider_partial';
+  const incompletePass = input.passes.find(p => p.ran && p.stopReason !== 'completed');
+  if (incompletePass) {
+    return incompletePass.stopReason === 'budget'
+      ? 'degraded:budget_starved'
+      : 'degraded:provider_partial';
   }
   if (input.inlineComments.dropped > 0) return 'degraded:comments_dropped';
   if (input.descriptionBadgeUpdated === false || input.outOfDiffReviewPosted === false) {
     return 'degraded:delivery_incomplete';
   }
   return 'delivered';
+}
+
+/** One extra pass's outcome + its own budget, as reported by `plugins/agent/review-pass.ts`'s `PassOutcome`. */
+export interface ExtraPassAttestationInput {
+  name: string;
+  stopReason: ProviderStopReason;
+  neverRan: boolean;
+  allocatedTokens: number;
+  spentTokens: number;
 }
 
 export interface AttestationInput {
@@ -197,8 +248,16 @@ export interface AttestationInput {
   agentAttempted: boolean;
   /** `hasProviderFailure(findings)` — the existing SSOT (see plugins/agent/index.ts). */
   providerFailure: boolean;
+  /** The MAIN pass's own allocated ceiling and spent tokens (not the run's aggregate — see `extraPasses`). */
   allocatedTokens: number;
   spentTokens: number;
+  /**
+   * Any pass beyond main that actually ran (e.g. doc-truth) — one entry per
+   * pass, each with its own outcome and budget. Defaults to `[]`: the common
+   * case (no extra pass fired, or none exists) needs nothing here. Ignored
+   * when `agentAttempted` is false (an extra pass can't run without main).
+   */
+  extraPasses?: ExtraPassAttestationInput[];
   passesSkipped: SkippedPass[];
   annotationsEmitted: number;
   inlineComments: InlineCommentsAttestation;
@@ -209,22 +268,68 @@ export interface AttestationInput {
   pipelineFailed?: boolean;
 }
 
+/** Build one pass's budget entry — shared between the main pass and every extra pass. */
+function passBudget(
+  name: string,
+  stopReason: ProviderStopReason,
+  allocated: number,
+  spent: number,
+): PassBudgetAttestation {
+  return { name, allocatedTokens: allocated, spentTokens: spent, starved: stopReason === 'budget' };
+}
+
+/**
+ * Build the full `passes[]` (main + extra) and the aggregated
+ * `BudgetAttestation` from them. Extracted from `assembleAttestation` to
+ * keep that function's own complexity down — this is the piece that grew
+ * when per-pass attestation generalized past a single hardcoded main pass.
+ * Both are empty/zeroed when the agent-review plugin was never attempted —
+ * an extra pass can't run without main (see `runExtraPasses`).
+ */
+function buildPassesAndBudget(
+  input: AttestationInput,
+  mainPass: ProviderPassAttestation,
+): { passes: ProviderPassAttestation[]; budget: BudgetAttestation } {
+  if (!input.agentAttempted) {
+    return {
+      passes: [],
+      budget: { allocatedTokens: 0, spentTokens: 0, starved: false, passes: [] },
+    };
+  }
+  const extraPasses = input.extraPasses ?? [];
+  const passes: ProviderPassAttestation[] = [
+    mainPass,
+    ...extraPasses.map(p => ({
+      name: p.name,
+      ran: true,
+      stopReason: p.stopReason,
+      neverRan: p.neverRan,
+    })),
+  ];
+  const passBudgets: PassBudgetAttestation[] = [
+    passBudget(mainPass.name, mainPass.stopReason, input.allocatedTokens, input.spentTokens),
+    ...extraPasses.map(p => passBudget(p.name, p.stopReason, p.allocatedTokens, p.spentTokens)),
+  ];
+  const budget: BudgetAttestation = {
+    allocatedTokens: passBudgets.reduce((sum, p) => sum + p.allocatedTokens, 0),
+    spentTokens: passBudgets.reduce((sum, p) => sum + p.spentTokens, 0),
+    starved: passBudgets.some(p => p.starved),
+    passes: passBudgets,
+  };
+  return { passes, budget };
+}
+
 export function assembleAttestation(input: AttestationInput): Attestation {
   const mainPass = deriveMainPassAttestation(
     input.findings,
     input.agentAttempted,
     input.providerFailure,
   );
-  const budget: BudgetAttestation = {
-    allocatedTokens: input.allocatedTokens,
-    spentTokens: input.spentTokens,
-    starved: mainPass.stopReason === 'budget',
-  };
+  const { passes, budget } = buildPassesAndBudget(input, mainPass);
   const verdict = computeVerdict({
     pipelineFailed: input.pipelineFailed ?? false,
     providerFailure: input.providerFailure,
-    mainPass,
-    budget,
+    passes,
     inlineComments: input.inlineComments,
     descriptionBadgeUpdated: input.descriptionBadgeUpdated,
     outOfDiffReviewPosted: input.outOfDiffReviewPosted,
@@ -233,7 +338,7 @@ export function assembleAttestation(input: AttestationInput): Attestation {
   return {
     attestationVersion: ATTESTATION_VERSION,
     run: { conclusion: input.conclusion, filesAnalyzed: input.filesAnalyzed },
-    provider: { passes: input.agentAttempted ? [mainPass] : [] },
+    provider: { passes },
     budget,
     passesSkipped: input.passesSkipped,
     delivery: {

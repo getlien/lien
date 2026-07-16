@@ -50,6 +50,8 @@ export {
   type ProviderStopReason,
   type SkippedPass,
   type BudgetAttestation,
+  type PassBudgetAttestation,
+  type ExtraPassAttestationInput,
   type InlineCommentsAttestation,
   type DeliveryAttestation,
   type ScopeAttestation,
