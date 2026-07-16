@@ -7,6 +7,7 @@ import {
   extractFindingsWithReasoningFallback,
   readVerdict,
   embeddedJsonObject,
+  firstBalancedJsonObject,
   isValidSummary,
   isValidFinding,
   AGENT_LOG_MAX,
@@ -159,6 +160,43 @@ describe('embeddedJsonObject', () => {
   it('returns undefined when there is no object', () => {
     expect(embeddedJsonObject('no braces here')).toBeUndefined();
     expect(embeddedJsonObject('}{')).toBeUndefined(); // close precedes open
+  });
+});
+
+describe('firstBalancedJsonObject', () => {
+  it('finds a simple object with nothing around it', () => {
+    expect(firstBalancedJsonObject('{"a":1}')).toBe('{"a":1}');
+  });
+
+  it('stops at the first balanced close, ignoring trailing content — even more braces', () => {
+    // The exact failure mode #792's incomplete-handling canary hit: naive
+    // first-{-to-last-} slicing (embeddedJsonObject) overshoots past the real
+    // verdict into trailing prose that has its own braces.
+    const text = '{"a":1} then some prose with a distractor {not json} in it';
+    expect(firstBalancedJsonObject(text)).toBe('{"a":1}');
+    expect(embeddedJsonObject(text)).toBe('{"a":1} then some prose with a distractor {not json}');
+  });
+
+  it('respects braces inside string literals (does not close early)', () => {
+    expect(firstBalancedJsonObject('{"a":"{ not a real close }"}')).toBe(
+      '{"a":"{ not a real close }"}',
+    );
+  });
+
+  it('respects escaped quotes inside strings', () => {
+    expect(firstBalancedJsonObject('{"a":"she said \\"hi\\""}')).toBe('{"a":"she said \\"hi\\""}');
+  });
+
+  it('handles nested objects, closing at the outermost brace', () => {
+    expect(firstBalancedJsonObject('{"a":{"b":2}} trailing junk')).toBe('{"a":{"b":2}}');
+  });
+
+  it('returns undefined when there is no opening brace', () => {
+    expect(firstBalancedJsonObject('no braces here')).toBeUndefined();
+  });
+
+  it('returns undefined when the braces never balance (truncated response)', () => {
+    expect(firstBalancedJsonObject('{"a": {"b": 1')).toBeUndefined();
   });
 });
 
@@ -350,6 +388,71 @@ describe('extractFindingsFromText (fence-priority verdict recovery)', () => {
     const good = fence({ findings: [], summary });
     const out = extractFindingsFromText(`${good}\n${broken}`);
     expect(out.summary).toEqual(summary);
+  });
+
+  // ---------------------------------------------------------------------
+  // #792's 3-vote screen surfaced two natural-stop verdict corruption
+  // shapes neither #723 nor #775's corrupted-key recovery covers. Both
+  // reproduced here from the real captured traces
+  // (.wip/traces/2026-07-16T08-4[68]-*, shallow-canary-screen worktree).
+  // ---------------------------------------------------------------------
+
+  it('shape A (#792 incomplete-handling): recovers a complete verdict followed by trailing prose with its own braces', () => {
+    // Verbatim shape from the real retry-turn capture: a complete, valid
+    // verdict, then a stray "```" fence marker, then "Wait, I need to
+    // double-check…" prose that goes on to mention another (revised) verdict
+    // — i.e. more `{`/`}` characters AFTER the real one. The old
+    // embeddedJsonObject slice (first `{` … last `}`) spans across all of it
+    // and fails to parse; firstBalancedJsonObject stops at the first close.
+    const verdict = JSON.stringify({ findings: [finding], summary });
+    const text =
+      `\n${verdict}\n` +
+      '```\n\n' +
+      'Wait, I need to double-check the `requireAdmin` issue. Is it possible that ' +
+      'the intent is to keep email-based admin checks alongside roles? Let me ' +
+      'reconsider and produce a revised verdict: ' +
+      JSON.stringify({ findings: [], summary: { ...summary, overview: 'REVISED' } });
+    const out = extractFindingsFromText(text);
+    expect(out.summary).toEqual(summary);
+    expect(out.findings).toHaveLength(1);
+  });
+
+  it('shape B (#792 stale-duplicate): a wholesale-corrupted stop-turn stays unrecovered', () => {
+    // Verbatim 28-char corrupted payload from both stale-duplicate screen
+    // runs. It happens to be syntactically valid JSON (all the punctuation
+    // lands inside quoted strings), so it parses — but `findings` is a
+    // string, not an array, and no other key is summary-shaped, so
+    // readVerdict's validation correctly rejects it. Content recovery here
+    // is genuinely impossible; this must stay a `{findings: []}` non-verdict
+    // so the caller's retry path (see openai/anthropic-client tests) fires.
+    const corrupted = '{"findings":":[{",": ":", "}';
+    expect(extractFindingsFromText(corrupted)).toEqual({ findings: [] });
+  });
+
+  it('non-regression: still recovers a bare embedded object with no distractor braces (#775 path)', () => {
+    // Guards the pre-existing embeddedJsonObject-only path: when the trailing
+    // content has no extra braces, firstBalancedJsonObject and
+    // embeddedJsonObject agree, and the verdict is recovered either way.
+    const verdict = JSON.stringify({ findings: [], summary });
+    const out = extractFindingsFromText(`Here is my analysis.\n${verdict}\nThat's everything.`);
+    expect(out.summary).toEqual(summary);
+  });
+
+  it('logs a warning naming the balanced-object recovery (mirroring #775 style)', () => {
+    const warnings: string[] = [];
+    const logger = { ...silentLogger, warning: (m: string) => void warnings.push(m) };
+    const verdict = JSON.stringify({ findings: [finding], summary });
+    const text = `${verdict}\nWait, I need to double-check {this distractor}.`;
+    extractFindingsFromText(text, logger);
+    expect(warnings.some(m => m.includes('balanced-object extraction'))).toBe(true);
+  });
+
+  it('does not log a recovery warning for the plain raw-body / fence paths (no false positives)', () => {
+    const warnings: string[] = [];
+    const logger = { ...silentLogger, warning: (m: string) => void warnings.push(m) };
+    extractFindingsFromText(JSON.stringify({ findings: [finding], summary }), logger);
+    extractFindingsFromText(fence({ findings: [], summary }), logger);
+    expect(warnings).toHaveLength(0);
   });
 });
 

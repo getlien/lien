@@ -89,7 +89,12 @@ export function logTurn(logger: Logger, turn: TurnTrace | undefined, label?: str
  *  1. each ```json fence, LAST first — the model emits its verdict last, so a
  *     few-shot/example fence earlier in the prose must not win;
  *  2. the raw body (a response_format:json_object / forced-verdict turn);
- *  3. a JSON object embedded in surrounding prose (model ignored json_object).
+ *  3. the first balanced JSON object in the text (brace-depth scan — recovers
+ *     a complete, valid verdict followed by trailing prose, e.g. "Wait, I need
+ *     to double-check…" appended after the closing brace, #792's
+ *     incomplete-handling canary);
+ *  4. a naive first-open-to-last-close slice of the whole text (model ignored
+ *     json_object and wrapped the verdict in prose with no other braces).
  *
  * Prefer a candidate carrying a `summary` (the verdict marker) so an
  * `{"findings": [...]}`-only example can't beat the real verdict; fall back to
@@ -103,10 +108,21 @@ export function extractFindingsFromText(
   summary?: AgentSummary;
 } {
   const fences = [...text.matchAll(/```json\s*\n([\s\S]*?)\n\s*```/g)].map(m => m[1]).reverse();
-  const candidates = [...fences, text.trim(), embeddedJsonObject(text)];
+  // Each candidate carries an optional `recovered` label so a candidate that
+  // needed active recovery (vs. a plain fence/raw-body parse) logs a warning
+  // naming it — mirroring #775's corrupted-key recovery logging.
+  const candidates: Array<{ value: string | undefined; recovered?: string }> = [
+    ...fences.map(value => ({ value })),
+    { value: text.trim() },
+    {
+      value: firstBalancedJsonObject(text),
+      recovered: 'balanced-object extraction (trailing content after the closing brace)',
+    },
+    { value: embeddedJsonObject(text) },
+  ];
 
   let fallback: { findings: AgentFinding[] } | undefined;
-  for (const candidate of candidates) {
+  for (const { value: candidate, recovered } of candidates) {
     if (!candidate) continue;
     let parsed: unknown;
     try {
@@ -115,10 +131,25 @@ export function extractFindingsFromText(
       continue; // not parseable — try the next candidate
     }
     const { findings, summary } = readVerdict(parsed, logger);
-    if (summary) return { findings, summary };
-    if (findings.length > 0 && !fallback) fallback = { findings };
+    if (summary) {
+      logRecovery(logger, recovered, 'a verdict');
+      return { findings, summary };
+    }
+    if (findings.length > 0 && !fallback) {
+      logRecovery(logger, recovered, 'findings');
+      fallback = { findings };
+    }
   }
   return fallback ?? { findings: [] };
+}
+
+/** Logs a named-candidate recovery — mirroring #775's corrupted-key style. No-op when `recovered` is unset. */
+function logRecovery(
+  logger: Logger | undefined,
+  recovered: string | undefined,
+  what: 'a verdict' | 'findings',
+): void {
+  if (recovered) logger?.warning(`[agent] Recovered ${what} via ${recovered}`);
 }
 
 /**
@@ -230,6 +261,42 @@ export function embeddedJsonObject(content: string): string | undefined {
   const start = content.indexOf('{');
   const end = content.lastIndexOf('}');
   return start !== -1 && end > start ? content.slice(start, end + 1) : undefined;
+}
+
+/**
+ * Scan from the first `{` and track brace depth — respecting string literals
+ * and escapes — to find the first *complete, balanced* JSON object, stopping
+ * as soon as depth returns to zero and ignoring everything after.
+ *
+ * Recovers a verdict that is otherwise valid but has trailing content
+ * appended after its closing brace — observed on the incomplete-handling
+ * canary post-#787 (#792 3-vote screen): the model emits a complete, correct
+ * verdict, then appends "Wait, I need to double-check…" prose (which itself
+ * contains further `{`/`}` characters). `embeddedJsonObject`'s naive
+ * first-open/last-close slice overshoots into that trailing content and
+ * produces unparseable JSON; this stops at the first balanced close instead.
+ * Returns undefined if the text has no `{` or never balances (e.g. a
+ * genuinely truncated response) — never guesses at an unbalanced slice.
+ */
+/** Matches a double-quoted JSON string literal, escapes included. */
+const JSON_STRING_LITERAL = /"(?:\\.|[^"\\])*"/g;
+
+export function firstBalancedJsonObject(text: string): string | undefined {
+  const start = text.indexOf('{');
+  if (start === -1) return undefined;
+
+  // Mask string contents with same-length `"` filler so quotes/escapes never
+  // have to be tracked char-by-char in the scan below — braces inside a
+  // string literal (e.g. prose like "{user, token}") can't skew the depth
+  // count, and offsets into `masked` line up 1:1 with `text.slice(start)`.
+  const masked = text.slice(start).replace(JSON_STRING_LITERAL, m => '"'.repeat(m.length));
+
+  let depth = 0;
+  for (let i = 0; i < masked.length; i++) {
+    if (masked[i] === '{') depth++;
+    else if (masked[i] === '}' && --depth === 0) return text.slice(start, start + i + 1);
+  }
+  return undefined; // never balanced — no complete object found
 }
 
 /** Type guard to validate a summary object. */

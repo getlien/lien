@@ -420,7 +420,7 @@ export class OpenAIAgentClient {
       if (retry) {
         totalInputTokens += retry.inputTokens;
         totalOutputTokens += retry.outputTokens;
-        turnTraces.push(retry.traceTurn);
+        turnTraces.push(...retry.traceTurns);
         if (retry.parsed.summary || retry.parsed.findings.length > 0) {
           parsed = retry.parsed;
         }
@@ -514,24 +514,21 @@ export class OpenAIAgentClient {
   }
 
   /**
-   * Final cheap call asking the model to emit just the findings JSON
-   * after the main loop ran out of budget. Returns the parsed result,
-   * a TurnTrace for the retry call, and per-call token counts. Returns
-   * null if the retry itself fails (logged); the caller falls back to
-   * the (empty) findings already extracted.
+   * One forced-verdict completion attempt: a cheap call asking the model to
+   * emit just the findings JSON. Returns the parsed result, a TurnTrace, and
+   * per-call token counts — or null if the request itself fails (logged).
+   * Pulled out of `runSummaryRetry` so a second, bounded attempt (below) can
+   * reuse it without duplicating the request/trace-building logic.
    */
-  private async runSummaryRetry(
+  private async attemptVerdictCompletion(
     messages: ChatMessage[],
-    turn: number,
+    turnNumber: number,
   ): Promise<{
     parsed: { findings: AgentFinding[]; summary?: AgentSummary };
     traceTurn: TurnTrace;
     inputTokens: number;
     outputTokens: number;
   } | null> {
-    this.logger.info('[agent] No JSON output — requesting summary...');
-    await new Promise(resolve => setTimeout(resolve, 3_000));
-    messages.push({ role: 'user', content: RETRY_NUDGE });
     try {
       // forceVerdict: response_format:json_object guarantees a JSON response,
       // the reliable safety net when the loop bailed without a verdict.
@@ -540,7 +537,7 @@ export class OpenAIAgentClient {
       const outputTokens = response.usage?.completion_tokens ?? 0;
       const choice = response.choices[0];
       const traceTurn: TurnTrace = {
-        turnNumber: turn + 1,
+        turnNumber,
         responseText: choice?.message.content ?? '',
         reasoning: choice?.message.reasoning ?? undefined,
         toolCalls: [],
@@ -560,6 +557,55 @@ export class OpenAIAgentClient {
       );
       return null;
     }
+  }
+
+  /**
+   * Final cheap call(s) asking the model to emit just the findings JSON
+   * after the main loop ran out of budget or ended without a verdict.
+   * Returns the parsed result, the TurnTrace(s) for the retry call(s), and
+   * per-call token counts. Returns null only if the first attempt's request
+   * itself fails (logged); the caller falls back to the (empty) findings
+   * already extracted.
+   *
+   * Makes ONE bounded extra attempt — not a retry loop — when the first
+   * retry's own response is itself unparseable/empty (no summary, no
+   * findings): a wholesale-corrupted stop-turn (e.g.
+   * `{"findings":":[{",": ":", "}`, observed twice on the stale-duplicate
+   * canary, #792's 3-vote screen) has no recoverable content, so the only
+   * useful move left is asking again, once, before surfacing `incomplete`
+   * (never a silent 0-findings-as-if-clean result — see `run()`'s
+   * `incomplete = !parsed.summary` computation).
+   */
+  private async runSummaryRetry(
+    messages: ChatMessage[],
+    turn: number,
+  ): Promise<{
+    parsed: { findings: AgentFinding[]; summary?: AgentSummary };
+    traceTurns: TurnTrace[];
+    inputTokens: number;
+    outputTokens: number;
+  } | null> {
+    this.logger.info('[agent] No JSON output — requesting summary...');
+    await new Promise(resolve => setTimeout(resolve, 3_000));
+    messages.push({ role: 'user', content: RETRY_NUDGE });
+
+    const first = await this.attemptVerdictCompletion(messages, turn + 1);
+    if (!first) return null;
+    if (first.parsed.summary || first.parsed.findings.length > 0) {
+      return { ...first, traceTurns: [first.traceTurn] };
+    }
+
+    this.logger.warning(
+      '[agent] Retry verdict was unparseable — attempting one more bounded retry',
+    );
+    const second = await this.attemptVerdictCompletion(messages, turn + 2);
+    if (!second) return { ...first, traceTurns: [first.traceTurn] };
+    return {
+      parsed: second.parsed,
+      traceTurns: [first.traceTurn, second.traceTurn],
+      inputTokens: first.inputTokens + second.inputTokens,
+      outputTokens: first.outputTokens + second.outputTokens,
+    };
   }
 
   private async chatCompletion(
