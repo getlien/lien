@@ -31,6 +31,11 @@ import {
   appendDocTruthTurns,
 } from './doc-truth-pass.js';
 import {
+  isSummaryOnlyMode,
+  buildSummaryOnlyPrompts,
+  SUMMARY_ONLY_MAX_TURNS,
+} from './summary-only-pass.js';
+import {
   DEFAULT_REVIEW_MODEL,
   DEFAULT_OPENROUTER_BASE_URL,
   MAX_REVIEW_TOKEN_BUDGET,
@@ -69,6 +74,11 @@ const configSchema = z.object({
    * (issue #732). Default true; env LIEN_REVIEW_DOC_PASS=0 also disables it.
    */
   docTruthPass: z.boolean().default(true),
+  /**
+   * Whether the `summary` review type is enabled (issue #572). Gates the
+   * diff-only summary-only mode — see `summary-only-pass.ts`.
+   */
+  summaryEnabled: z.boolean().default(false),
 });
 
 export interface AgentReviewPluginOptions {
@@ -92,7 +102,14 @@ export class AgentReviewPlugin implements ReviewPlugin {
   shouldActivate(context: ReviewContext): boolean {
     const apiKey =
       (context.config.apiKey as string) ?? (context.config.anthropicApiKey as string) ?? '';
-    return apiKey.length > 0 && context.chunks.length > 0;
+    if (apiKey.length === 0) return false;
+    if (context.chunks.length > 0) return true;
+    // No analyzable chunks — only activate for the diff-only summary-only
+    // mode (issue #572): summary review type enabled AND the PR's raw diff
+    // is available. Every other condition (apiKey, chunks>0) is unchanged
+    // from before this mode existed.
+    const config = context.config as unknown as AgentConfig;
+    return isSummaryOnlyMode(context, !!config.summaryEnabled);
   }
 
   async analyze(context: ReviewContext): Promise<ReviewFinding[]> {
@@ -100,6 +117,14 @@ export class AgentReviewPlugin implements ReviewPlugin {
     const logger = context.logger;
     const apiKey = config.apiKey ?? config.anthropicApiKey ?? '';
     const provider = config.provider ?? (config.anthropicApiKey ? 'anthropic' : 'openai');
+
+    // Diff-only summary-only mode (issue #572) — strictly gated, see
+    // `shouldActivate` above. Kept as an early-return to a dedicated method
+    // rather than branching inline so the normal (chunks-driven) path below
+    // is untouched by this mode's existence.
+    if (isSummaryOnlyMode(context, !!config.summaryEnabled)) {
+      return this.analyzeSummaryOnly(context, config, apiKey, provider, logger);
+    }
 
     // Build dependency graph from in-memory chunks (no embeddings needed)
     const graph = buildDependencyGraph(context.repoChunks!);
@@ -205,6 +230,80 @@ export class AgentReviewPlugin implements ReviewPlugin {
     // render path (`present`/`formatCheckSummary`) now renders every summary
     // finding, so that appended notice is visible as its own section — this
     // fold shapes the primary block, it no longer has to be the only summary.
+    mergeDocPassIntoResult(result, docResult, agentFindings);
+    const findings = agentFindings.map(f => mapToReviewFinding(f, pluginId));
+    appendSummaryFinding(findings, pluginId, result.summary);
+    appendIncompleteNotice(findings, pluginId, result);
+
+    return findings;
+  }
+
+  /**
+   * Diff-only summary-only mode (issue #572). Kept as its OWN method — not a
+   * branch spliced into `analyze()`'s body — so the normal (chunks-driven)
+   * path above is provably unaffected by this mode's existence: every line of
+   * `analyze()` after the early-return guard runs exactly as it did before
+   * this mode was added. Deliberately mirrors that tail (doc-truth pass, then
+   * merge/map/append) rather than sharing it, for the same reason.
+   *
+   * The doc-truth SECOND pass still runs here (unlike the summary-only main
+   * pass, its gate — `docTruthSkipReason` — reads `context.pr.patches`
+   * directly, not chunks) — a docs-only PR is exactly the case doc-truth
+   * verification is for, so it is not disabled in this mode.
+   */
+  private async analyzeSummaryOnly(
+    context: ReviewContext,
+    config: AgentConfig,
+    apiKey: string,
+    provider: string,
+    logger: Logger,
+  ): Promise<ReviewFinding[]> {
+    const graph = buildDependencyGraph(context.repoChunks ?? []);
+    const toolExecutor = (name: string, input: Record<string, unknown>) =>
+      dispatchTool(name, input, {
+        repoChunks: context.repoChunks ?? [],
+        repoRootDir: context.repoRootDir!,
+        graph,
+        logger,
+      });
+
+    const { systemPrompt, initialMessage } = buildSummaryOnlyPrompts(context);
+    // The final budget was already scaled diff-proportionally by
+    // `scaleSummaryOnlyBudget` upstream (review-pr.ts's buildPluginConfigs) —
+    // unlike the normal path, there's no blast-radius upscale to layer on top
+    // (no chunks means no blast radius is computed).
+    const maxTokenBudget = config.maxTokenBudget;
+    context.reportBudget?.(maxTokenBudget);
+
+    const result = await runAgentClient(
+      provider,
+      { ...config, maxTurns: SUMMARY_ONLY_MAX_TURNS },
+      apiKey,
+      logger,
+      systemPrompt,
+      initialMessage,
+      toolExecutor,
+      maxTokenBudget,
+    );
+
+    if (result.neverRan) {
+      context.reportSkip?.({
+        plugin: 'agent-review:doc-truth',
+        reason: 'main pass never ran (provider failure)',
+      });
+    }
+    const docResult = result.neverRan
+      ? null
+      : await this.runSecondDocPass(context, config, apiKey, provider, logger, toolExecutor);
+    if (docResult) {
+      appendDocTruthTurns(result.trace, docResult.trace);
+      context.reportUsage?.(docResult.usage);
+    }
+
+    reportAgentRun(this.id, context, logger, result);
+
+    const pluginId = this.id;
+    const agentFindings = mergeDocTruthFindings(result.findings, docResult?.findings ?? []);
     mergeDocPassIntoResult(result, docResult, agentFindings);
     const findings = agentFindings.map(f => mapToReviewFinding(f, pluginId));
     appendSummaryFinding(findings, pluginId, result.summary);
