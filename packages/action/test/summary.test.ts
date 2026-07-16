@@ -27,6 +27,7 @@ function makeResult(overrides?: Partial<ReviewCoreResult>): ReviewCoreResult {
     filesAnalyzed: 3,
     usage: { totalTokens: 0, cost: 0 },
     providerFailure: false,
+    incompleteMainPass: false,
     attestation: emptyAttestation('success', 3, 'normal'),
     ...overrides,
   };

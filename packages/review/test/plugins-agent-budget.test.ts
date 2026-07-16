@@ -6,6 +6,7 @@ import {
   scaleBudgetForBlastRadius,
   clampText,
   hasProviderFailure,
+  hasIncompleteMainPass,
 } from '../src/plugins/agent/index.js';
 import { scaleAgentBudget, resolveAgentBudget, summaryOnlyEligibleFor } from '../src/review-pr.js';
 import type { ReviewCoreContext } from '../src/review-pr.js';
@@ -532,6 +533,9 @@ describe('appendIncompleteNotice — severity by run outcome', () => {
     expect(findings[0].severity).toBe('warning');
     expect(findings[0].message).toContain('did not finish');
     expect(findings[0].message).not.toContain('did not run');
+    // The MAIN pass itself stopped short of a verdict — `hasIncompleteMainPass`'s
+    // SSOT flag must be set so a conclusion-mapper can't silently read this as clean.
+    expect(findings[0].metadata).toMatchObject({ mainPassIncomplete: true });
   });
 
   it('keeps a doc-pass-only incomplete a WARNING even if that pass never ran', () => {
@@ -548,6 +552,9 @@ describe('appendIncompleteNotice — severity by run outcome', () => {
     expect(findings[0].severity).toBe('warning');
     expect(findings[0].message).toContain('documentation-truthfulness pass');
     expect(findings[0].message).toContain('code findings are unaffected');
+    // An EXTRA-pass-only incomplete must NOT set the main-pass flag — the main
+    // pass's own coverage is intact, so this stays advisory (see `hasIncompleteMainPass`).
+    expect(findings[0].metadata).not.toHaveProperty('mainPassIncomplete');
   });
 
   it('keeps a stale-duplicate-loop-only incomplete a WARNING, naming that pass generically', () => {
@@ -570,6 +577,7 @@ describe('appendIncompleteNotice — severity by run outcome', () => {
     expect(findings[0].message).toContain('The stale-duplicate pass did not finish');
     expect(findings[0].message).toContain('did not produce a verdict for every candidate');
     expect(findings[0].message).toContain("main review's findings are unaffected");
+    expect(findings[0].metadata).not.toHaveProperty('mainPassIncomplete');
   });
 
   it('is a no-op for a complete run', () => {
@@ -623,6 +631,76 @@ describe('hasProviderFailure — the single source of truth for #764-class detec
 
   it('is false for an empty findings list', () => {
     expect(hasProviderFailure([])).toBe(false);
+  });
+});
+
+describe('hasIncompleteMainPass — the trust-residue fix companion to hasProviderFailure', () => {
+  // Regression coverage for the "an honestly-incomplete review lands a GREEN
+  // check" trust residue (companion to #764/#765, observed live on #795): the
+  // action layer (and review-pr.ts's `ReviewCoreResult.incompleteMainPass`)
+  // both key off this function rather than re-deriving the signal from
+  // `metadata` shape or conclusion/summary text.
+  it('is true for a PARTIAL (budget) main-pass incomplete notice', () => {
+    const findings: ReviewFinding[] = [];
+    appendIncompleteNotice(
+      findings,
+      'agent-review',
+      baseResult({ neverRan: false, stopReason: 'budget' }),
+    );
+    expect(hasIncompleteMainPass(findings)).toBe(true);
+  });
+
+  it('is true for an unrecoverable corrupted stop-turn (stopReason: completed, no verdict — #795)', () => {
+    const findings: ReviewFinding[] = [];
+    appendIncompleteNotice(
+      findings,
+      'agent-review',
+      baseResult({ neverRan: false, stopReason: 'completed' }),
+    );
+    expect(hasIncompleteMainPass(findings)).toBe(true);
+  });
+
+  it('is false for a total never-ran provider failure (hasProviderFailure covers that instead)', () => {
+    const findings: ReviewFinding[] = [];
+    appendIncompleteNotice(
+      findings,
+      'agent-review',
+      baseResult({ neverRan: true, errorMessage: 'API error (402): Insufficient credits' }),
+    );
+    expect(hasIncompleteMainPass(findings)).toBe(false);
+    expect(hasProviderFailure(findings)).toBe(true);
+  });
+
+  it('is false for a doc-pass-only incomplete notice (main pass ran fine)', () => {
+    const findings: ReviewFinding[] = [];
+    appendIncompleteNotice(
+      findings,
+      'agent-review',
+      baseResult({ neverRan: true, incompleteFromDocPass: true, stopReason: 'error' }),
+    );
+    expect(hasIncompleteMainPass(findings)).toBe(false);
+  });
+
+  it('is false for a named-extra-pass-only incomplete notice (main pass ran fine)', () => {
+    const findings: ReviewFinding[] = [];
+    appendIncompleteNotice(
+      findings,
+      'agent-review',
+      baseResult({
+        neverRan: true,
+        incompleteFromPass: 'stale-duplicate',
+        stopReason: 'incomplete_verdict',
+      }),
+    );
+    expect(hasIncompleteMainPass(findings)).toBe(false);
+  });
+
+  it('is false for an ordinary error finding with no metadata at all', () => {
+    expect(hasIncompleteMainPass([{ severity: 'error' } as ReviewFinding])).toBe(false);
+  });
+
+  it('is false for an empty findings list', () => {
+    expect(hasIncompleteMainPass([])).toBe(false);
   });
 });
 

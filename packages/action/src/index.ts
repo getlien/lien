@@ -59,6 +59,7 @@ function exitCodeFor(
   errorCount: number,
   warningCount: number,
   providerFailure: boolean,
+  incompleteMainPass: boolean,
 ): number {
   // A total provider failure means the agent review never ran at all — an
   // operational failure, not an advisory finding. A user who enabled (and is
@@ -66,6 +67,19 @@ function exitCodeFor(
   // this fails regardless of `fail-on`, including the advisory default
   // `never`. See the "Fail-loudly guarantee" section of the action README.
   if (providerFailure) return 1;
+  // An incomplete MAIN pass (budget/turn exhaustion, or an unrecoverable
+  // corrupted stop-turn — see `hasIncompleteMainPass`) means the agent
+  // couldn't vouch for full coverage of the PR. It's a lesser degree of the
+  // same "operational shortfall, not an advisory finding" trust violation
+  // `providerFailure` guards above, so it gets the identical treatment: fail
+  // regardless of `fail-on`, including `never`. Without this, the exact bug
+  // this fixes recurs — an honestly-surfaced "review did not complete"
+  // notice (severity `warning`, conclusion `neutral`) exits 0 under the
+  // advisory default, presenting a degraded run as a clean pass. An
+  // EXTRA-pass-only incomplete (doc-truth, or a named pass) does NOT set
+  // this — the main pass's own coverage is intact, so it stays advisory
+  // (respects `fail-on` normally, below).
+  if (incompleteMainPass) return 1;
   if (failOn === 'never') return 0;
   // 'any' is strictly stricter than 'error': fail on a failure conclusion (e.g.
   // analysis failed with no findings) OR on any error/warning finding.
@@ -95,6 +109,26 @@ function logProviderFailure(findings: ReviewFinding[]): void {
 }
 
 /**
+ * Log a clear, actionable message naming why the review's coverage is only
+ * partial. Only called once `result.incompleteMainPass` (the authoritative
+ * signal from `@liendev/review`) is already known true — mirrors
+ * `logProviderFailure`'s shape for the lesser-degree "ran, but didn't finish"
+ * case.
+ */
+function logIncompleteMainPass(findings: ReviewFinding[]): void {
+  const notice = findings.find(
+    f => (f.metadata as { mainPassIncomplete?: boolean } | undefined)?.mainPassIncomplete,
+  );
+  const cause = notice?.message ?? 'the main review pass did not finish.';
+  actionLogger.error(
+    `Lien Review is incomplete: ${cause} This fails the check even with fail-on: never — an ` +
+      'incomplete review cannot vouch for full coverage of this PR, so it is not an advisory ' +
+      'finding. Re-run once the underlying issue (budget/turn limits, or a provider hiccup ' +
+      'mid-review) is resolved.',
+  );
+}
+
+/**
  * Build the ReviewCoreResult for when `reviewPullRequest()` itself throws
  * before returning one — e.g. a clone or GitHub API failure outside the
  * analysis-phase null-return path `emptyResult`/`pipelineFailed` already
@@ -111,6 +145,7 @@ export function buildCrashResult(message: string): ReviewCoreResult {
     filesAnalyzed: 0,
     usage: { totalTokens: 0, cost: 0 },
     providerFailure: false,
+    incompleteMainPass: false,
     attestation: emptyAttestation('failure', 0, 'normal', true),
   };
 }
@@ -128,6 +163,7 @@ export async function finishRun(
 ): Promise<number> {
   const errorCount = countErrors(result.findings);
   const providerFailure = result.providerFailure;
+  const incompleteMainPass = result.incompleteMainPass;
 
   await writeStepSummary(result);
   await writeOutputs({
@@ -142,13 +178,21 @@ export async function finishRun(
   // pull_request_target, which grants forks a writable token.
   if (forkReadOnly) emitForkWarning();
   if (providerFailure) logProviderFailure(result.findings);
+  if (incompleteMainPass) logIncompleteMainPass(result.findings);
 
   const warningCount = result.findings.filter(f => f.severity === 'warning').length;
   actionLogger.info(
     `Review complete: ${result.findings.length} findings (${errorCount} errors), ` +
       `conclusion=${result.conclusion}, files=${result.filesAnalyzed}`,
   );
-  return exitCodeFor(failOn, result.conclusion, errorCount, warningCount, providerFailure);
+  return exitCodeFor(
+    failOn,
+    result.conclusion,
+    errorCount,
+    warningCount,
+    providerFailure,
+    incompleteMainPass,
+  );
 }
 
 async function main(): Promise<void> {

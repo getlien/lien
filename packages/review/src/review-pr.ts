@@ -40,6 +40,7 @@ import {
   ComplexityPlugin,
   AgentReviewPlugin,
   hasProviderFailure,
+  hasIncompleteMainPass,
   updatePRDescription,
   removePRDescriptionSection,
   EMPTY_DELIVERY,
@@ -123,6 +124,18 @@ export interface ReviewCoreResult {
    * enabled, or the pipeline failed before reaching the engine).
    */
   providerFailure: boolean;
+  /**
+   * True when the agent-review MAIN pass ran but stopped without a usable
+   * verdict for the whole PR — budget/turn exhaustion, or an unrecoverable
+   * corrupted/unparseable stop-turn (see `hasIncompleteMainPass` /
+   * `appendIncompleteNotice`). Distinct from `providerFailure` (the main pass
+   * never got a single response at all): this is a DEGRADED run, not a total
+   * non-run, but still an operational shortfall a caller should not silently
+   * present as a clean pass. Always `false` when only an EXTRA pass
+   * (doc-truth, or a named pass) was incomplete — that doesn't compromise the
+   * main pass's own coverage.
+   */
+  incompleteMainPass: boolean;
   /** Machine-readable receipt of this run — provider health, budget, delivery, verdict (v1). */
   attestation: Attestation;
 }
@@ -222,6 +235,7 @@ function emptyResult(
     filesAnalyzed,
     usage: { totalTokens: 0, cost: 0 },
     providerFailure: false,
+    incompleteMainPass: false,
     attestation: emptyAttestation(conclusion, filesAnalyzed, eligibilityPath, pipelineFailed),
   };
 }
@@ -311,6 +325,7 @@ interface PresentedReview {
   summaryMarkdown: string;
   usage: { totalTokens: number; cost: number };
   providerFailure: boolean;
+  incompleteMainPass: boolean;
   attestation: Attestation;
 }
 
@@ -487,6 +502,7 @@ async function analyzeAndPresent(
 
   const presentation = await presentFindings(engine, findings, adapterContext, logger);
   const providerFailure = hasProviderFailure(findings);
+  const incompleteMainPass = hasIncompleteMainPass(findings);
   const attestation = buildRunAttestation(
     analysis,
     filesToAnalyze,
@@ -504,6 +520,7 @@ async function analyzeAndPresent(
     summaryMarkdown: presentation.summary,
     usage: { totalTokens: agentUsage.totalTokens, cost: agentUsage.cost },
     providerFailure,
+    incompleteMainPass,
     attestation,
   };
 }
