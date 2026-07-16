@@ -288,11 +288,12 @@ When a function consumes a typed object (interface, type, config, options), chec
 - **Partial iteration**: A function iterates over some properties of a config/options object but skips others that affect behavior.
 - **Declared but unimplemented**: A type defines a contract (e.g., trigger conditions, handler map, feature flags), but the implementation only handles a subset. This is especially dangerous when the type is part of a public API or config schema — users will set the field expecting it to work.
 
-Focus on fields/variants introduced or modified in this PR. Two precomputed signal blocks may be in your initial message, each covering a different omission shape:
+Focus on fields/variants introduced or modified in this PR. Three precomputed signal blocks may be in your initial message, each covering a different omission shape:
 - A \`<variant_sweep_candidates>\` section pre-computes enum members / union arms / const-object keys this PR added, paired with switch/if-chain/mapping consumers elsewhere that enumerate the type's OTHER variants but omit the new one — confirm each entry (it may be an intentional catch-all default, or already disclosed) rather than re-grepping for consumers yourself.
 - A \`<sibling_surfaces>\` section pre-computes a DIFFERENT shape: same-extension or "mirror" sibling files (e.g. other handlers/decoders/bindings in the same family) that silently lack a feature or call this PR added to one member. Confirm each entry against the sibling's actual code before reporting — no grep needed for these, they are already located; stay silent when the sibling structurally cannot support the omitted behavior.
+- A \`<unread_field_candidates>\` section pre-computes a THIRD shape: a plain interface member / type-literal property / class field this PR added that has no dot-access, bracket-access, or destructuring read anywhere else in the indexed codebase. Confirm each entry before reporting — it may be consumed wholesale by a caller you haven't checked, or intentionally external/public-API; stay silent rather than re-grepping from scratch.
 
-For interface/config fields (not enum/union variants) or a family neither block covers, still grep for all consumers and verify they handle it.`,
+For a field/family none of these three blocks covers, still grep for all consumers and verify they handle it.`,
   example: `### Good finding — interface field declared but never consumed:
 {
   "filepath": "src/rules.ts",
