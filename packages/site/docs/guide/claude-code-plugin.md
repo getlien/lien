@@ -1,10 +1,11 @@
 # Claude Code Plugin
 
-Installing Lien as a Claude Code plugin gets you more than an MCP config. Two
-`PostToolUse` hooks push structural context and complexity accounting into the
-agent's next turn automatically — after a read, before a commit — without the
-agent having to ask, and without depending on it remembering to. This page
-covers what ships and what each hook actually does.
+Installing Lien as a Claude Code plugin gets you more than an MCP config.
+Three `PostToolUse` hooks push structural context, complexity accounting, and
+test reminders into the agent's next turn automatically — after a read, after
+a write, before a commit — without the agent having to ask, and without
+depending on it remembering to. This page covers what ships and what each
+hook actually does.
 
 ## Install
 
@@ -119,6 +120,26 @@ flagged ("resolved after flag" — an honest presence/absence signal, not proof
 the warning caused the fix). Disable recording entirely with
 `LIEN_DELTA_EVENTS=off`.
 
+### The test reminder — close the loop after you write
+
+`test-reminder.sh` also fires on `PostToolUse:Edit|Write|MultiEdit`, alongside
+the write gate. It runs `lien annotate <path> --tests-only` — a cheap
+test-association-only lookup against the existing index, no dependency-graph
+walk — and, when the file you just changed has associated tests, injects one
+compact `additionalContext` line naming them:
+
+```
+Lien: you changed packages/review/src/github-api.ts — associated tests: packages/review/test/github-api.test.ts. Run them before completing.
+```
+
+This closes the read → write → verify loop: the read hook shows you test
+coverage before you edit, and this one reminds you to actually run those tests
+after — the step agents most often skip once the diff looks done. It stays
+silent when the file has no known test associations, and shares the read
+hook's per-file-per-session TTL suppression so an edit burst on one file only
+reminds once per window (default 5 minutes, `LIEN_ANNOTATE_TTL_MIN`). Disable
+with `LIEN_TEST_REMINDER=off`.
+
 ### Explore-agent nudge
 
 A third hook (`PreToolUse:Agent|Task`) appends a short Lien-tool mandate to the
@@ -135,10 +156,11 @@ Claude Code's built-in `Explore` subagent (or one installed the legacy way via
 A rule written into `CLAUDE.md` only helps if the agent remembers to follow
 it, and that gets less reliable as a session's context fills up. A
 `PostToolUse` hook fires deterministically on every matching tool call,
-regardless of what's still in context. Lien's own `CLAUDE.md` notes that this
-hook pair automates two of its own MANDATORY policies — checking file context
-before an edit, and running `lien delta` before a commit — which is also why
-the plugin runs on Lien's own development, not just its users' repos.
+regardless of what's still in context. Lien's own `CLAUDE.md` notes that these
+hooks automate three of its own MANDATORY policies — checking file context
+before an edit, running the associated tests after a change, and running
+`lien delta` before a commit — which is also why the plugin runs on Lien's
+own development, not just its users' repos.
 
 ## Configuration
 
@@ -147,8 +169,9 @@ internal error exits silently rather than blocking your tool call.
 
 | Env var | Effect |
 |---|---|
-| `LIEN_ANNOTATE_TTL_MIN` | Read-hook suppression window in minutes (default 5) |
+| `LIEN_ANNOTATE_TTL_MIN` | Read-hook and test-reminder suppression window in minutes (default 5) |
 | `LIEN_DELTA_HOOK=off` | Disables the write-time complexity gate |
+| `LIEN_TEST_REMINDER=off` | Disables the post-edit test-association reminder |
 | `LIEN_DELTA_EVENTS=off` | Disables local `lien delta` event recording (used by `lien stats`) |
 | `LIEN_EXPLORE_INJECT=off` | Disables the Explore-agent prompt nudge |
 

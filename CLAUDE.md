@@ -12,7 +12,7 @@ Local-first structural code search tool (lexical FTS5 search + dependency analys
 **Monorepo Structure:**
 - `packages/` — TypeScript packages: `parser` and `core` publish as `@liendev/parser`/`@liendev/core`; `cli` publishes as `@liendev/lien`; `review`, `action`, and `site` are private (unpublished).
 - Dependency chain: `parser` ← `core` ← `cli`; `review` depends on `parser` only (not `core`); `action` wraps `review` as a self-hostable GitHub Action ([ADR-012](docs/architecture/decisions/0012-self-hostable-review-action.md)).
-- `plugins/claude/` — the dogfooded Claude Code plugin (MCP server config + hooks). Hooks auto-annotate reads and run the `lien delta` gate on writes, i.e. they automate two of this file's own MANDATORY policies — see `plugins/claude/README.md`.
+- `plugins/claude/` — the dogfooded Claude Code plugin (MCP server config + hooks). Hooks auto-annotate reads, and on writes run the `lien delta` gate plus a test-association reminder, i.e. they automate three of this file's own MANDATORY policies — see `plugins/claude/README.md`.
 - `lien-review-testbed/` — tracked, multi-language fixture app used by the review-agent test harness. Not a demo to clean up.
 
 **Package Structure:**
