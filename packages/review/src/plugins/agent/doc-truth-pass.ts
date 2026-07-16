@@ -21,6 +21,7 @@
 import type { ReviewContext } from '../../plugin-types.js';
 import { renderGuidanceSurfaceSection } from '../../guidance-surface-signals.js';
 import { extractDocClaims, renderDocClaimsSection } from '../../doc-claims-signals.js';
+import { renderRenameSweepSection } from '../../rename-sweep-signals.js';
 import type { Logger } from '../../logger.js';
 
 import type { AgentConfig, AgentFinding, AgentResult, AgentTrace, ResolvedRules } from './types.js';
@@ -140,9 +141,13 @@ function renderPrHeader(context: ReviewContext): string | null {
 /**
  * Build the claims-only initial message: the PR header, the intro that scopes
  * the pass to doc-truth, the <doc_claims> worklist WITH its pre-fetched
- * evidence, and the <guidance_surface_changes> hunks (the isGuidanceSurface-
- * filtered, budget-capped diff of exactly the touched doc surfaces — the same
- * block the doc-truth rule and the doc_claims header reference by name). No
+ * evidence, the <rename_sweep> block when the diff carries a mechanical
+ * identifier-rename sweep (the doc-truth rule's protocol explicitly tells the
+ * agent to check for this block — see rules.ts — as a supplementary
+ * claim-verification worklist, so it must actually be rendered here), and the
+ * <guidance_surface_changes> hunks (the isGuidanceSurface-filtered,
+ * budget-capped diff of exactly the touched doc surfaces — the same block the
+ * doc-truth rule and the doc_claims header reference by name). No
  * blast-radius, complexity, or other-rule signals: no competition, no
  * distraction.
  */
@@ -151,6 +156,7 @@ export function buildDocTruthPassInitialMessage(context: ReviewContext): string 
   pushIfPresent(sections, renderPrHeader(context));
   sections.push(DOC_PASS_INTRO);
   pushIfPresent(sections, renderDocClaimsSection(context));
+  pushIfPresent(sections, renderRenameSweepSection(context));
   pushIfPresent(sections, renderGuidanceSurfaceSection(context));
   sections.push(
     'Verify each claim against the code, then output findings as JSON. If every ' +
