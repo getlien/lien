@@ -17,6 +17,7 @@ import type { BlastRadiusReport } from '../../blast-radius.js';
 import { renderBlastRadiusMarkdown } from '../../blast-radius-render.js';
 import { renderStaleLiteralSection } from '../../stale-literal-signals.js';
 import { renderUndiscriminatedCatchSection } from '../../catch-discrimination-signals.js';
+import { renderComparisonChangeSection } from '../../comparison-change-signals.js';
 import { renderRemovedExportsSection } from '../../removed-export-signals.js';
 import { renderUntrustedInputSection } from '../../untrusted-input-signals.js';
 import { renderRenameSweepSection } from '../../rename-sweep-signals.js';
@@ -211,6 +212,9 @@ export function buildInitialMessage(
   appendIfPresent(sections, renderStaleLiteralSection(context));
   if (isRuleActive(opts.rules, 'error-swallowing')) {
     appendIfPresent(sections, renderUndiscriminatedCatchSection(context));
+  }
+  if (isRuleActive(opts.rules, 'boundary-change')) {
+    appendIfPresent(sections, renderComparisonChangeSection(context));
   }
   appendIfPresent(sections, renderUntrustedInputSection(context));
   appendIfPresent(sections, renderRenameSweepSection(context));
