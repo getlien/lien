@@ -40,7 +40,10 @@
 //     Exits 0 with a stdout message if harness evidence wording is found,
 //     exits 1 with an actionable stderr message otherwise.
 //
-// No npm dependencies -- node:process only.
+// No npm dependencies -- node:process, node:path, node:url only.
+
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const LABEL_NAME = 'skip-harness-gate';
 
@@ -147,6 +150,9 @@ function main() {
 }
 
 // Only run as a CLI when invoked directly (not when imported for tests).
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Compare resolved filesystem paths rather than string-building a
+// `file://` URL out of process.argv[1] -- the latter would silently never
+// match for any path needing URL-encoding (spaces, unicode).
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main();
 }
