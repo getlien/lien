@@ -738,9 +738,24 @@ describe('extractCommentProse', () => {
     expect(extractCommentProse('"""Required.')).toBe('Required.');
   });
 
+  // Regression (Lien Review finding on this PR): a closer with an EXTRA star (`**/`, as opposed
+  // to the plain `*/`) must be stripped in full, not leave a stray trailing `*` behind.
+  it('strips a doubled-star closer (`**/`) in full, leaving no stray star', () => {
+    expect(extractCommentProse('/** Defaults to true. **/')).toBe('Defaults to true.');
+    expect(extractCommentProse('/* Defaults to true. **/')).toBe('Defaults to true.');
+  });
+
   it('extracts a .describe(...) call — the config-schema-description shape', () => {
     expect(extractCommentProse(".describe('Defaults to 20 when omitted.'),")).toBe(
       'Defaults to 20 when omitted.',
+    );
+  });
+
+  // Regression (CodeRabbit finding on this PR): an escaped quote inside the description string
+  // must not be mistaken for the closing delimiter.
+  it('does not truncate a .describe(...) string at an escaped quote', () => {
+    expect(extractCommentProse(".describe('User\\'s mode defaults to safe.'),")).toBe(
+      "User\\'s mode defaults to safe.",
     );
   });
 
@@ -860,6 +875,28 @@ describe('extractDocClaims — widened to changed CODE files', () => {
     expect(extractDocClaims(new Map([[SCHEMA_FILE, patch]]))).toHaveLength(10);
   });
 
+  // Regression (CodeRabbit finding on this PR): the cap must count NET-NEW code claims, not
+  // raw pre-dedup candidates — a source's own duplicate of an already-seen claim must not spend
+  // budget a later, genuinely unique claim from that same source needs.
+  it('code-claim cap counts net-new claims, not pre-dedup candidates', () => {
+    const dupLine = 'The batch size defaults to 32.';
+    const codeLines = [
+      ...Array.from({ length: 10 }, () => `// ${dupLine}`),
+      '// A totally separate claim requires special handling here.',
+    ];
+    const patches = new Map([
+      [DOC, added(dupLine)], // smaller hunk — sorts first, seeds `seen` before the code file
+      [SCHEMA_FILE, added(...codeLines)],
+    ]);
+    const claims = extractDocClaims(patches);
+    // Only 2 distinct claims survive: the guidance one, and the 11th code line's unique claim —
+    // the 10 duplicate code lines contribute nothing and must not have consumed the cap.
+    expect(claims).toHaveLength(2);
+    expect(claims.some(c => c.file === SCHEMA_FILE && c.claimText.includes('separate claim'))).toBe(
+      true,
+    );
+  });
+
   it('does not let a comment-heavy code diff crowd out doc-surface claims', () => {
     const codeLines = Array.from({ length: 15 }, (_, i) => `// Feature${i} defaults to ${i}.`);
     const patches = new Map([
@@ -923,6 +960,30 @@ describe('findClaimEvidence — referenced-file diff prefetch', () => {
     const ev = findClaimEvidence(claim, undefined, new Set(), patches)!;
     expect(ev.file).toBe(WORKFLOW_FILE);
     expect(ev.fromDiff).toBe(true);
+  });
+
+  // Regression (CodeRabbit finding on this PR): an EXACT path match must win over a suffix match
+  // regardless of Map iteration order, and an AMBIGUOUS suffix (two candidates share it) must
+  // resolve to neither rather than an arbitrary one.
+  it('prefers an exact path match over a same-suffix decoy, regardless of iteration order', () => {
+    const claim = claimWithCitedPath('see lien-review.yml', { path: 'lien-review.yml' });
+    const patches = new Map([
+      ['some/other/lien-review.yml', 'decoy patch'], // suffix match, but NOT exact — and first
+      ['lien-review.yml', 'the real one'], // exact match
+    ]);
+    const ev = findClaimEvidence(claim, undefined, new Set(), patches)!;
+    expect(ev.file).toBe('lien-review.yml');
+    expect(ev.excerpt).toContain('the real one');
+  });
+
+  it('does not resolve an ambiguous suffix shared by two changed files', () => {
+    const claim = claimWithCitedPath('see lien-review.yml', { path: 'lien-review.yml' });
+    const patches = new Map([
+      ['a/lien-review.yml', 'patch A'],
+      ['b/lien-review.yml', 'patch B'],
+    ]);
+    const ev = findClaimEvidence(claim, undefined, new Set(), patches)!;
+    expect(ev.citedPathMissing).toBe(true);
   });
 
   it('prefers the PR diff hunk over an indexed chunk when the cited file is both changed and indexed', () => {

@@ -376,9 +376,11 @@ const DOC_COMMENT_RE = /^\/\/[!/]\s?(.*)$/;
 const BLOCK_CONT_RE = /^\*(?!\/)\s?(.*)$/;
 /** A block-comment opener (`/**` or `/*`), with any same-line trailing text. The trailing
  *  optional group strips a same-line CLOSING marker off a single-line block comment so it
- *  doesn't leak into the captured prose; a multi-line opener with no closer on this line (just
- *  trailing text) still captures correctly since that group is optional. */
-const BLOCK_OPEN_RE = /^\/\*\*?\s?(.*?)(?:\s*\*\/)?$/;
+ *  doesn't leak into the captured prose — `\*+` (one or more stars) so a closer with extra
+ *  stars (e.g. a doc-comment ending in a doubled star before the slash) is stripped in full
+ *  rather than leaving a stray star behind; a multi-line opener with no closer on this line
+ *  (just trailing text) still captures correctly since that group is optional. */
+const BLOCK_OPEN_RE = /^\/\*\*?\s?(.*?)(?:\s*\*+\/)?$/;
 /** A Python/Rust-style triple-quoted docstring delimiter, with any same-line trailing text. Same
  *  optional-trailing-closer handling as `BLOCK_OPEN_RE`, for a same-line one-liner docstring. */
 const TRIPLE_QUOTE_RE = /^(?:"""|''')\s?(.*?)(?:"""|''')?$/;
@@ -396,11 +398,12 @@ const COMMENT_LINE_MATCHERS: readonly RegExp[] = [
  *  sibling case: a description string rather than a doc COMMENT). Single-line only (KISS) — a
  *  description string that wraps onto its own line inside a multi-line `.describe(\n  '...'\n)`
  *  call is not extracted; the canonical, acceptance-tested case (pr658's schema.ts) is a plain
- *  comment line, not this shape. */
-const DESCRIBE_CALL_RE = /\.describe\(\s*(['"`])((?:(?!\1).)*)\1/;
+ *  comment line, not this shape. The alternation's first branch (`\\.`) consumes an escaped char
+ *  (e.g. `\'`) as a pair so the string doesn't appear to close early on an escaped quote. */
+const DESCRIBE_CALL_RE = /\.describe\(\s*(['"`])((?:\\.|(?!\1).)*)\1/;
 /** A `description: '...'` object-literal key — the JSON-schema-description shape. Same
- *  single-line-only scope as `DESCRIBE_CALL_RE`. */
-const DESCRIPTION_KEY_RE = /\bdescription\s*:\s*(['"`])((?:(?!\1).)*)\1/;
+ *  single-line-only scope and escaped-delimiter handling as `DESCRIBE_CALL_RE`. */
+const DESCRIPTION_KEY_RE = /\bdescription\s*:\s*(['"`])((?:\\.|(?!\1).)*)\1/;
 
 /**
  * Comment-shaped lines that are NOT the claim-shaped prose this scan wants, excluded before
@@ -494,40 +497,54 @@ function collectClaimSources(patches: Map<string, string>): ClaimSource[] {
   return [...guidance, ...code].sort((a, b) => a.patch.length - b.patch.length);
 }
 
-/**
- * Extract the claims for one source, respecting `codeClaimBudget` (the number of code-derived
- * claims still allowed — see `MAX_CODE_CLAIMS`) when `source.mode === 'code'`. Split out of
- * `extractDocClaims` purely to keep that function's own branching shallow.
- */
-function claimsFromSource(source: ClaimSource, codeClaimBudget: number): DocClaim[] {
-  if (source.mode === 'code' && codeClaimBudget <= 0) return [];
+/** Extract every candidate claim for one source — no cap, no dedup (see `extractDocClaims`,
+ *  which applies both, in that order, AFTER extraction so a duplicate never spends code-claim
+ *  budget it never needed). Split out of `extractDocClaims` purely to keep that function's own
+ *  branching shallow. */
+function claimsFromSource(source: ClaimSource): DocClaim[] {
   const lines =
     source.mode === 'guidance'
       ? addedProseLines(source.patch)
       : addedCodeCommentLines(source.patch);
-  const claims = extractClaims(source.file, lines);
-  return source.mode === 'code' ? claims.slice(0, codeClaimBudget) : claims;
+  return extractClaims(source.file, lines);
+}
+
+/**
+ * Build a per-extraction-run admit predicate: true (and records the claim as seen) iff `claim`
+ * is net-new (not a duplicate already admitted) AND, for a code-derived claim, still within the
+ * `MAX_CODE_CLAIMS` budget. Cap-checking runs AFTER the dedup check — not via a pre-dedup slice
+ * on each source's own candidate list — so a source's own duplicate of an already-seen claim
+ * (e.g. the same `.describe(...)` string copy-pasted across sibling schema files) never spends
+ * code-claim budget a later, genuinely new claim could have used.
+ */
+function claimAdmitter(): (claim: DocClaim, mode: ClaimSource['mode']) => boolean {
+  const seen = new Set<string>();
+  let codeClaimCount = 0;
+  return (claim, mode) => {
+    if (mode === 'code' && codeClaimCount >= MAX_CODE_CLAIMS) return false;
+    if (seen.has(claim.claimText)) return false;
+    seen.add(claim.claimText);
+    if (mode === 'code') codeClaimCount++;
+    return true;
+  };
 }
 
 /**
  * Collect claim-shaped lines from every changed guidance/doc surface AND changed code file
  * (comments/docstrings/description literals only — see `collectClaimSources`), smallest hunk
- * first. Identical claim lines are deduped across both sources. Code-derived claims are capped
- * separately at `MAX_CODE_CLAIMS` so a comment-heavy code diff cannot crowd out doc-surface
- * claims. Returns ALL claims up to that cap (uncapped for doc-surface claims — the render layer
- * applies `MAX_CLAIMS` and notes any overflow). Exposed for testing.
+ * first. Identical claim lines are deduped across both sources (see `claimAdmitter`).
+ * Code-derived claims are capped separately at `MAX_CODE_CLAIMS` so a comment-heavy code diff
+ * cannot crowd out doc-surface claims. Returns ALL claims up to that cap (uncapped for
+ * doc-surface claims — the render layer applies `MAX_CLAIMS` and notes any overflow). Exposed
+ * for testing.
  */
 export function extractDocClaims(patches: Map<string, string>): DocClaim[] {
   const claims: DocClaim[] = [];
-  const seen = new Set<string>();
-  let codeClaimCount = 0;
+  const admit = claimAdmitter();
 
   for (const source of collectClaimSources(patches)) {
-    for (const claim of claimsFromSource(source, MAX_CODE_CLAIMS - codeClaimCount)) {
-      if (seen.has(claim.claimText)) continue;
-      seen.add(claim.claimText);
-      claims.push(claim);
-      if (source.mode === 'code') codeClaimCount++;
+    for (const claim of claimsFromSource(source)) {
+      if (admit(claim, source.mode)) claims.push(claim);
     }
   }
 
@@ -908,14 +925,29 @@ function buildDiffEvidence(file: string, patch: string): DocClaimEvidence {
  * map or the cited path isn't one of its keys, so the caller falls through to the indexed-chunk
  * lookup (see `findCitedPathEvidence`).
  */
+/**
+ * Resolve `citedPath` against `candidates`: an EXACT match always wins (checked first,
+ * regardless of iteration order); otherwise a suffix match (`candidate.endsWith('/' + citedPath)`)
+ * is accepted only when EXACTLY ONE candidate qualifies — a citation ambiguous between two
+ * same-named files in different directories should attach to neither rather than an arbitrary
+ * one. Returns undefined when nothing (or more than one suffix candidate) qualifies.
+ */
+function resolveExactOrUniqueSuffix(
+  candidates: readonly string[],
+  citedPath: string,
+): string | undefined {
+  const exact = candidates.find(f => f === citedPath);
+  if (exact) return exact;
+  const suffixMatches = candidates.filter(f => f.endsWith(`/${citedPath}`));
+  return suffixMatches.length === 1 ? suffixMatches[0] : undefined;
+}
+
 function findCitedPathDiffEvidence(
   cited: DocClaimCitedPath,
   patches: Map<string, string> | undefined,
 ): DocClaimEvidence | undefined {
   if (!patches) return undefined;
-  const matchedFile = [...patches.keys()].find(
-    f => f === cited.path || f.endsWith(`/${cited.path}`),
-  );
+  const matchedFile = resolveExactOrUniqueSuffix([...patches.keys()], cited.path);
   if (!matchedFile) return undefined;
   return buildDiffEvidence(matchedFile, patches.get(matchedFile) ?? '');
 }
