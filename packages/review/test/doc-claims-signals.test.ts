@@ -5,6 +5,8 @@ import {
   extractAnchors,
   extractCitedPath,
   extractDocClaims,
+  extractCommentProse,
+  addedCodeCommentLines,
   findClaimEvidence,
   attachEvidence,
   renderDocClaims,
@@ -684,5 +686,397 @@ describe('attachEvidence and renderer', () => {
     const md = renderDocClaims(claims);
     expect(md.match(/^- docs\//gm)).toHaveLength(20); // all claims survive
     expect(md).toContain('evidence located but omitted to respect the input budget');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractCommentProse — code-file comment/docstring/description-literal shapes
+// ---------------------------------------------------------------------------
+
+describe('extractCommentProse', () => {
+  it("extracts a JSDoc/block-comment continuation line (pr658 Finding A's exact shape)", () => {
+    expect(
+      extractCommentProse('     * keep working; search_code and find_similar report as disabled.'),
+    ).toBe('keep working; search_code and find_similar report as disabled.');
+  });
+
+  it('extracts a // line comment', () => {
+    expect(extractCommentProse('// The batch size defaults to 32.')).toBe(
+      'The batch size defaults to 32.',
+    );
+  });
+
+  it('extracts a # line comment (Python/Ruby style)', () => {
+    expect(extractCommentProse('# The batch size defaults to 32.')).toBe(
+      'The batch size defaults to 32.',
+    );
+  });
+
+  it('extracts a Rust /// doc-comment', () => {
+    expect(extractCommentProse('/// The batch size defaults to 32.')).toBe(
+      'The batch size defaults to 32.',
+    );
+  });
+
+  // Regression (Lien Review finding on this PR, #814): a same-line block-comment/triple-quote
+  // CLOSER must not leak into the captured prose.
+  it('strips the same-line closer off a single-line block comment (`/** ... */`)', () => {
+    expect(extractCommentProse('/** Defaults to true. */')).toBe('Defaults to true.');
+    expect(extractCommentProse('/* Defaults to true. */')).toBe('Defaults to true.');
+  });
+
+  it('still captures a block-comment opener with no closer on this line (multi-line JSDoc)', () => {
+    expect(extractCommentProse('/** Defaults to true')).toBe('Defaults to true');
+  });
+
+  it('strips the same-line closer off a single-line triple-quoted docstring', () => {
+    expect(extractCommentProse('"""Required."""')).toBe('Required.');
+    expect(extractCommentProse("'''Required.'''")).toBe('Required.');
+  });
+
+  it('still captures a triple-quote opener with no closer on this line (multi-line docstring)', () => {
+    expect(extractCommentProse('"""Required.')).toBe('Required.');
+  });
+
+  // Regression (Lien Review finding on this PR): a closer with an EXTRA star (`**/`, as opposed
+  // to the plain `*/`) must be stripped in full, not leave a stray trailing `*` behind.
+  it('strips a doubled-star closer (`**/`) in full, leaving no stray star', () => {
+    expect(extractCommentProse('/** Defaults to true. **/')).toBe('Defaults to true.');
+    expect(extractCommentProse('/* Defaults to true. **/')).toBe('Defaults to true.');
+  });
+
+  it('extracts a .describe(...) call — the config-schema-description shape', () => {
+    expect(extractCommentProse(".describe('Defaults to 20 when omitted.'),")).toBe(
+      'Defaults to 20 when omitted.',
+    );
+  });
+
+  // Regression (CodeRabbit finding on this PR): an escaped quote inside the description string
+  // must not be mistaken for the closing delimiter.
+  it('does not truncate a .describe(...) string at an escaped quote', () => {
+    expect(extractCommentProse(".describe('User\\'s mode defaults to safe.'),")).toBe(
+      "User\\'s mode defaults to safe.",
+    );
+  });
+
+  it('extracts a description: "..." object-literal key', () => {
+    expect(extractCommentProse('description: "Required when scope is set to file.",')).toBe(
+      'Required when scope is set to file.',
+    );
+  });
+
+  it('does not extract a shebang line', () => {
+    expect(extractCommentProse('#!/usr/bin/env node')).toBeUndefined();
+  });
+
+  it('does not extract a preprocessor directive or region marker', () => {
+    expect(extractCommentProse('#include <stdio.h>')).toBeUndefined();
+    expect(extractCommentProse('#region Constants')).toBeUndefined();
+  });
+
+  it('does not extract a plain code line with no comment/description shape', () => {
+    expect(extractCommentProse('const s = "search reports as disabled";')).toBeUndefined();
+  });
+
+  it('excludes a TODO comment even when it reads as claim-shaped', () => {
+    expect(extractCommentProse('// TODO: this should default to 32 eventually')).toBeUndefined();
+  });
+
+  it('excludes an attribution line', () => {
+    expect(extractCommentProse('// Copyright 2026, required for all files.')).toBeUndefined();
+  });
+
+  it('excludes a doc-comment tag line even when claim-shaped', () => {
+    expect(extractCommentProse('// @param batchSize - defaults to 32')).toBeUndefined();
+  });
+
+  it('returns undefined for an empty/whitespace-only line', () => {
+    expect(extractCommentProse('   ')).toBeUndefined();
+  });
+});
+
+describe('addedCodeCommentLines', () => {
+  it('collects only ADDED comment-shaped lines from a patch, ignoring code and trailing comments', () => {
+    const patch = [
+      '@@ -1,3 +1,5 @@',
+      ' export function f() {',
+      '+  // The batch size defaults to 32.',
+      '+  return UNIQUE_MARKER; // trailing comment is not extracted',
+      '+}',
+    ].join('\n');
+    expect(addedCodeCommentLines(patch)).toEqual(['The batch size defaults to 32.']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractDocClaims — widened to changed CODE files (pr658 Finding A)
+// ---------------------------------------------------------------------------
+
+describe('extractDocClaims — widened to changed CODE files', () => {
+  const SCHEMA_FILE = 'packages/core/src/config/schema.ts';
+  const SEARCH_SCHEMA_FILE = 'packages/cli/src/mcp/schemas/search.schema.ts';
+
+  it('ACCEPTANCE: extracts the exact pr658 Finding A claim from a JSDoc comment in a changed CODE file', () => {
+    // The real added line from PR #658's schema.ts hunk: the rename to `search_code` was
+    // textually correct but left the underlying "reports as disabled" claim stale (#657 made
+    // search_code lexical, not embedding-gated) — see this module's header and the pr658 fixture.
+    const patch = added('     * keep working; search_code and find_similar report as disabled.');
+    const claims = extractDocClaims(new Map([[SCHEMA_FILE, patch]]));
+    expect(claims).toHaveLength(1);
+    expect(claims[0]).toMatchObject({
+      file: SCHEMA_FILE,
+      shape: 'state',
+      claimText: 'keep working; search_code and find_similar report as disabled.',
+    });
+  });
+
+  it('still ignores an ordinary (non-comment) code line even when claim-shaped', () => {
+    const patch = added('  const s = "search reports as disabled";');
+    expect(extractDocClaims(new Map([[SCHEMA_FILE, patch]]))).toHaveLength(0);
+  });
+
+  it('extracts a .describe(...) claim from a zod schema file (the description-literal shape)', () => {
+    const patch = added("    .describe('Defaults to 20 when omitted.'),");
+    const claims = extractDocClaims(new Map([[SEARCH_SCHEMA_FILE, patch]]));
+    expect(claims).toHaveLength(1);
+    expect(claims[0]).toMatchObject({ file: SEARCH_SCHEMA_FILE, shape: 'default' });
+  });
+
+  it('extracts a citedPath from a code-comment claim (bridges into referenced-file prefetch)', () => {
+    const patch = added('// This flag defaults to on in .github/workflows/lien-review.yml.');
+    const claims = extractDocClaims(new Map([['packages/action/src/index.ts', patch]]));
+    expect(claims).toHaveLength(1);
+    expect(claims[0].citedPath).toEqual({ path: '.github/workflows/lien-review.yml' });
+  });
+
+  it('does NOT extract from a guidance surface via the code-file path (no double-scan)', () => {
+    // A .md guidance surface is scanned via addedProseLines already; confirm the widening doesn't
+    // also run the code-comment scan over it (which would be redundant, not wrong, but the
+    // dedupe-by-claimText would hide a double-scan bug for a claim whose PROSE line doesn't look
+    // like a comment at all — e.g. a bare markdown line never matches `extractCommentProse`).
+    const patch = added('The batch size defaults to 32.');
+    const claims = extractDocClaims(new Map([[DOC, patch]]));
+    expect(claims).toHaveLength(1);
+  });
+
+  it('negatives end-to-end: TODO / attribution / section-header / plain-code-string lines produce no claims', () => {
+    const patch = added(
+      '// TODO: should default to 32 eventually',
+      '// Copyright 2026, required for all files.',
+      '// ---- Configuration ----',
+      'const s = "search reports as disabled";',
+    );
+    expect(extractDocClaims(new Map([[SCHEMA_FILE, patch]]))).toHaveLength(0);
+  });
+
+  it('caps code-derived claims at MAX_CODE_CLAIMS (10), separately from doc-surface claims', () => {
+    const lines = Array.from({ length: 15 }, (_, i) => `// Feature${i} defaults to ${i}.`);
+    const patch = added(...lines);
+    expect(extractDocClaims(new Map([[SCHEMA_FILE, patch]]))).toHaveLength(10);
+  });
+
+  // Regression (CodeRabbit finding on this PR): the cap must count NET-NEW code claims, not
+  // raw pre-dedup candidates — a source's own duplicate of an already-seen claim must not spend
+  // budget a later, genuinely unique claim from that same source needs.
+  it('code-claim cap counts net-new claims, not pre-dedup candidates', () => {
+    const dupLine = 'The batch size defaults to 32.';
+    const codeLines = [
+      ...Array.from({ length: 10 }, () => `// ${dupLine}`),
+      '// A totally separate claim requires special handling here.',
+    ];
+    const patches = new Map([
+      [DOC, added(dupLine)], // smaller hunk — sorts first, seeds `seen` before the code file
+      [SCHEMA_FILE, added(...codeLines)],
+    ]);
+    const claims = extractDocClaims(patches);
+    // Only 2 distinct claims survive: the guidance one, and the 11th code line's unique claim —
+    // the 10 duplicate code lines contribute nothing and must not have consumed the cap.
+    expect(claims).toHaveLength(2);
+    expect(claims.some(c => c.file === SCHEMA_FILE && c.claimText.includes('separate claim'))).toBe(
+      true,
+    );
+  });
+
+  it('does not let a comment-heavy code diff crowd out doc-surface claims', () => {
+    const codeLines = Array.from({ length: 15 }, (_, i) => `// Feature${i} defaults to ${i}.`);
+    const patches = new Map([
+      [SCHEMA_FILE, added(...codeLines)],
+      [DOC, added('The batch size defaults to 32.')],
+    ]);
+    const claims = extractDocClaims(patches);
+    expect(claims).toHaveLength(11); // 10 code claims (capped) + 1 doc-surface claim
+    expect(claims.filter(c => c.file === DOC)).toHaveLength(1);
+    expect(claims.filter(c => c.file === SCHEMA_FILE)).toHaveLength(10);
+  });
+
+  it('ranks a small code-comment hunk ahead of a much larger doc-surface hunk (smallest-hunk-first fairness)', () => {
+    const bigDocPatch = added(
+      ...Array.from({ length: 30 }, (_, i) => `Some descriptive prose line number ${i}.`),
+      'The batch size defaults to 32.',
+    );
+    const tinyCodePatch = added(
+      '     * keep working; search_code and find_similar report as disabled.',
+    );
+    const claims = extractDocClaims(
+      new Map([
+        [DOC, bigDocPatch],
+        [SCHEMA_FILE, tinyCodePatch],
+      ]),
+    );
+    expect(claims[0].file).toBe(SCHEMA_FILE); // the tiny hunk sorts first
+  });
+});
+
+// ---------------------------------------------------------------------------
+// findClaimEvidence — referenced-file diff prefetch (issue: PR #811's own review)
+// ---------------------------------------------------------------------------
+
+describe('findClaimEvidence — referenced-file diff prefetch', () => {
+  const WORKFLOW_FILE = '.github/workflows/lien-review.yml';
+
+  function workflowPatch(): string {
+    return added("  LIEN_STALE_DUP_PASS: 'on'", "  LIEN_INCOMPLETE_PASS: 'on'");
+  }
+
+  it('prefetches the diff hunk for a cited file that is part of the PR, even with NO repo index at all', () => {
+    const claim = claimWithCitedPath(
+      'sets `LIEN_STALE_DUP_PASS` in .github/workflows/lien-review.yml',
+      { path: WORKFLOW_FILE },
+    );
+    const patches = new Map([[WORKFLOW_FILE, workflowPatch()]]);
+    const ev = findClaimEvidence(claim, undefined, new Set(), patches)!;
+    expect(ev.fromDiff).toBe(true);
+    expect(ev.fromDoc).toBe(false);
+    expect(ev.file).toBe(WORKFLOW_FILE);
+    expect(ev.excerpt).toContain('LIEN_STALE_DUP_PASS');
+    expect(ev.startLine).toBe(1);
+  });
+
+  it('resolves a cited path that is a suffix of a changed file key (leniency parity with the indexed-chunk lookup)', () => {
+    const claim = claimWithCitedPath('see workflows/lien-review.yml', {
+      path: 'workflows/lien-review.yml',
+    });
+    const patches = new Map([[WORKFLOW_FILE, workflowPatch()]]);
+    const ev = findClaimEvidence(claim, undefined, new Set(), patches)!;
+    expect(ev.file).toBe(WORKFLOW_FILE);
+    expect(ev.fromDiff).toBe(true);
+  });
+
+  // Regression (CodeRabbit finding on this PR): an EXACT path match must win over a suffix match
+  // regardless of Map iteration order, and an AMBIGUOUS suffix (two candidates share it) must
+  // resolve to neither rather than an arbitrary one.
+  it('prefers an exact path match over a same-suffix decoy, regardless of iteration order', () => {
+    const claim = claimWithCitedPath('see lien-review.yml', { path: 'lien-review.yml' });
+    const patches = new Map([
+      ['some/other/lien-review.yml', 'decoy patch'], // suffix match, but NOT exact — and first
+      ['lien-review.yml', 'the real one'], // exact match
+    ]);
+    const ev = findClaimEvidence(claim, undefined, new Set(), patches)!;
+    expect(ev.file).toBe('lien-review.yml');
+    expect(ev.excerpt).toContain('the real one');
+  });
+
+  it('does not resolve an ambiguous suffix shared by two changed files', () => {
+    const claim = claimWithCitedPath('see lien-review.yml', { path: 'lien-review.yml' });
+    const patches = new Map([
+      ['a/lien-review.yml', 'patch A'],
+      ['b/lien-review.yml', 'patch B'],
+    ]);
+    const ev = findClaimEvidence(claim, undefined, new Set(), patches)!;
+    expect(ev.citedPathMissing).toBe(true);
+  });
+
+  it('prefers the PR diff hunk over an indexed chunk when the cited file is both changed and indexed', () => {
+    const claim = claimWithCitedPath('see packages/review/src/defaults.ts', {
+      path: 'packages/review/src/defaults.ts',
+    });
+    const patches = new Map([
+      ['packages/review/src/defaults.ts', added('export const X = 1; // from diff')],
+    ]);
+    const chunks = [
+      chunk('packages/review/src/defaults.ts', 40, 'export const X = 2; // from index'),
+    ];
+    const ev = findClaimEvidence(claim, chunks, new Set(), patches)!;
+    expect(ev.fromDiff).toBe(true);
+    expect(ev.excerpt).toContain('from diff');
+    expect(ev.excerpt).not.toContain('from index');
+  });
+
+  it('falls back to the indexed chunk when the cited file is not part of the PR diff', () => {
+    const claim = claimWithCitedPath('see packages/review/src/defaults.ts', {
+      path: 'packages/review/src/defaults.ts',
+    });
+    const patches = new Map([['some/other/file.ts', added('unrelated')]]);
+    const chunks = [chunk('packages/review/src/defaults.ts', 40, 'export const X = 2;')];
+    const ev = findClaimEvidence(claim, chunks, new Set(), patches)!;
+    expect(ev.fromDiff).toBeFalsy();
+    expect(ev.file).toBe('packages/review/src/defaults.ts');
+  });
+
+  it('degrades loudly, naming the index AND the PR diff, when the cited path resolves against neither', () => {
+    const claim = claimWithCitedPath('see packages/review/src/ghost.ts', {
+      path: 'packages/review/src/ghost.ts',
+    });
+    const patches = new Map([['some/other/file.ts', added('unrelated')]]);
+    const chunks = [chunk('packages/review/src/defaults.ts', 1, 'export const X = 1;')];
+    const ev = findClaimEvidence(claim, chunks, new Set(), patches)!;
+    expect(ev.citedPathMissing).toBe(true);
+
+    const md = renderDocClaims([{ ...claim, evidence: ev }]);
+    expect(md).toContain('was not found in the index or PR diff');
+    expect(md).not.toContain('```'); // a one-line note, not a fenced block
+  });
+
+  it('caps an oversized diff-hunk excerpt with a loud truncation note', () => {
+    const claim = claimWithCitedPath('see packages/review/src/big.ts', {
+      path: 'packages/review/src/big.ts',
+    });
+    const bigPatch = added('x '.repeat(500));
+    const patches = new Map([['packages/review/src/big.ts', bigPatch]]);
+    const ev = findClaimEvidence(claim, undefined, new Set(), patches)!;
+    expect(ev.excerpt).toContain('[diff truncated to respect the input budget]');
+    expect(ev.excerpt.length).toBeLessThan(bigPatch.length);
+  });
+
+  it('renders the "evidence (PR diff)" label distinctly from sibling-doc/plain evidence', () => {
+    const claim = claimWithCitedPath('see .github/workflows/lien-review.yml', {
+      path: WORKFLOW_FILE,
+    });
+    const patches = new Map([[WORKFLOW_FILE, workflowPatch()]]);
+    const ev = findClaimEvidence(claim, undefined, new Set(), patches)!;
+    const md = renderDocClaims([{ ...claim, evidence: ev }]);
+    expect(md).toContain('evidence (PR diff)');
+  });
+
+  it('backward-compatible: omitting the patches argument entirely preserves the pre-existing repoChunks-only behavior', () => {
+    const claim = claimWithCitedPath('see packages/review/src/defaults.ts', {
+      path: 'packages/review/src/defaults.ts',
+    });
+    const chunks = [
+      chunk('packages/review/src/defaults.ts', 12, 'export const DEFAULT_REVIEW_MODEL = 1;'),
+    ];
+    const ev = findClaimEvidence(claim, chunks, new Set())!; // no 4th arg — old call shape
+    expect(ev.fromDiff).toBeUndefined();
+    expect(ev.file).toBe('packages/review/src/defaults.ts');
+  });
+});
+
+describe('attachEvidence — referenced-file diff prefetch wiring', () => {
+  it('passes context.pr.patches through so a citedPath claim gets diff evidence', () => {
+    const WORKFLOW_FILE = '.github/workflows/lien-review.yml';
+    const ctx = {
+      changedFiles: [],
+      chunks: [],
+      pr: { patches: new Map([[WORKFLOW_FILE, added("LIEN_STALE_DUP_PASS: 'on'")]]) },
+    } as unknown as ReviewContext;
+    const claims = attachEvidence(
+      [
+        claimWithCitedPath('sets LIEN_STALE_DUP_PASS in .github/workflows/lien-review.yml', {
+          path: WORKFLOW_FILE,
+        }),
+      ],
+      ctx,
+    );
+    expect(claims[0].evidence?.fromDiff).toBe(true);
   });
 });

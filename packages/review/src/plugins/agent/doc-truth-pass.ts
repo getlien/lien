@@ -332,11 +332,11 @@ function renderDocClaimEntryWithId(id: string, claim: DocClaim): string {
   if (claim.evidence.citedPathMissing) {
     return (
       `${header}\n  (evidence: the cited file "${claim.evidence.file}" was not found in the ` +
-      'index — the citation itself may be stale)'
+      'index or PR diff — the citation itself may be stale)'
     );
   }
-  const { file, startLine, excerpt, fromDoc } = claim.evidence;
-  const label = fromDoc ? 'evidence (sibling doc)' : 'evidence';
+  const { file, startLine, excerpt, fromDoc, fromDiff } = claim.evidence;
+  const label = fromDiff ? 'evidence (PR diff)' : fromDoc ? 'evidence (sibling doc)' : 'evidence';
   return `${header}\n  ${label} — ${file}:${startLine}:\n  \`\`\`\n${excerpt}\n  \`\`\``;
 }
 
