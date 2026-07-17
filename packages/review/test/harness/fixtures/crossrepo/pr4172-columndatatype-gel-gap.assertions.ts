@@ -18,8 +18,10 @@
  * open GitHub issue found describing it (`gh search issues` for "arktype
  * gel", "arktype duration", "drizzle-arktype unknown" all empty) —
  * ground-truthed by direct code cross-reference, not a linked fix commit.
- * Reported upstream: drizzle-team/drizzle-orm#<ISSUE_NUMBER> (filed
- * 2026-07-17, re-verified against main HEAD immediately before filing).
+ * Reported upstream: drizzle-team/drizzle-orm#6027 (filed 2026-07-17,
+ * re-verified against main HEAD — still `9d6453215d18705986c2081124437bb6a03fb943`,
+ * unchanged since the 2026-07-16 ground-truth capture — immediately before
+ * filing).
  *
  * CAPTURE NOTE (why this fixture is hand-trimmed, not `capture-pr.ts`'d
  * wholesale): PR #4172's raw diff is ~23,200 additions across 104 files (a
