@@ -556,6 +556,28 @@ describe('buildDocTruthPassPrompts / buildDocTruthPassInitialMessageV2 — v2 co
     expect((initialMessage.match(/<\/rename_sweep>/g) ?? []).length).toBe(1);
   });
 
+  // Referenced-file evidence prefetch (issue: PR #811's own review) — v2 render parity with v1's
+  // renderClaimEntry: a claim whose citation resolves against the PR's own diff must carry the
+  // "evidence (PR diff)" label here too, not just in the v1 renderer.
+  it('v2 worklist labels referenced-file evidence "evidence (PR diff)" when the citation resolves against the PR diff', () => {
+    process.env.LIEN_DOC_TRUTH_V2 = 'on';
+    const WORKFLOW_FILE = '.github/workflows/lien-review.yml';
+    const docPatch = `@@ -1,2 +1,3 @@
+ # Review pass architecture
++By default, this repo's \`LIEN_STALE_DUP_PASS\` env var is set in \`${WORKFLOW_FILE}\`.`;
+    const workflowPatch = `@@ -10,1 +10,1 @@
+-  LIEN_STALE_DUP_PASS: 'off'
++  LIEN_STALE_DUP_PASS: 'on'`;
+    const ctx = contextWithPatches([
+      ['docs/architecture/review-pass-architecture.md', docPatch],
+      [WORKFLOW_FILE, workflowPatch],
+    ]);
+    const { initialMessage } = buildDocTruthPassPrompts(ctx);
+
+    expect(initialMessage).toContain('evidence (PR diff)');
+    expect(initialMessage).toContain("LIEN_STALE_DUP_PASS: 'on'");
+  });
+
   it('buildDocTruthPassInitialMessageV2 omits <doc_claims>/<rename_sweep> entirely when the worklist is empty', () => {
     const ctx = contextWithPatches([['packages/core/src/overlay.ts', CODE_PATCH]]);
     const message = buildDocTruthPassInitialMessageV2(ctx, buildClaimWorklist(ctx));

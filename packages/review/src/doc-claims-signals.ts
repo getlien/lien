@@ -34,11 +34,46 @@
  * should arrive pre-verified), and a citation that does NOT resolve gets a
  * one-line "not found" note instead — a stale citation is itself doc-truth
  * signal, not something to search around.
+ *
+ * `collectClaimSources`/`addedCodeCommentLines` widen extraction to changed CODE files (not just
+ * guidance/doc surfaces) — motivated by pr658's Finding A, the canonical case
+ * this widening exists to catch: the stale `embeddings.enabled` doc COMMENT
+ * in `packages/core/src/config/schema.ts`, an ordinary source file that
+ * `collectGuidanceSurfaceChanges` never looks at, so the claim was never
+ * LISTED for any contract (v1's open findings list or v2's per-claim one) to
+ * force engagement with. The scan stays tight to the same claim-shaped-prose
+ * discipline as the doc-surface scan, but the LINE shape narrows further: a
+ * changed code file's added line only counts when it reads as a comment,
+ * docstring, or description-valued string literal (`.describe(...)`,
+ * `description: "..."` — the zod/JSON-schema shape) — ordinary code is never
+ * scanned. TODOs, attribution lines, and doc-comment tags (`@param`, …) are
+ * excluded before classification even though they're comment-shaped: a TODO
+ * describes intended/future work, not a claim about current behavior (see
+ * `extractCommentProse`). Claims mined this way share the render/render-cap
+ * pipeline with doc-surface claims but are capped separately
+ * (`MAX_CODE_CLAIMS`) so a comment-heavy code diff can't crowd out the
+ * doc-surface claims that are the historically reliable signal.
+ *
+ * `findCitedPathDiffEvidence` widens evidence PREFETCH for a claim's own file
+ * citation (`DocClaim.citedPath`) to the PR's own diff, not just the indexed
+ * `repoChunks`. Motivated by PR #811's own review: a doc claim cited
+ * `.github/workflows/lien-review.yml`, which WAS part of that PR's diff but
+ * is not an AST-analyzable language, so it never appears in `repoChunks` —
+ * the doc-truth pass reported "not available in the review material… before
+ * budget exhaustion" instead of comparing against the one hunk that would
+ * have settled it in one read. When a citation names a file that's part of
+ * THIS PR, its diff hunk is fetched directly (byte-capped like every other
+ * signal) in preference to any indexed excerpt — the diff is the more
+ * PR-relevant material and needs no index entry to exist. Falls back to the
+ * existing indexed-chunk lookup when the cited file isn't part of the diff,
+ * and to the existing "not found" note (now naming both sources checked)
+ * when neither resolves — degrading loudly rather than silently omitting.
  */
 
 import type { CodeChunk } from '@liendev/parser';
 import type { ReviewContext } from './plugin-types.js';
-import { collectGuidanceSurfaceChanges } from './guidance-surface-signals.js';
+import { collectGuidanceSurfaceChanges, isGuidanceSurface } from './guidance-surface-signals.js';
+import { filterAnalyzableFiles } from './analysis.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -81,13 +116,22 @@ export interface DocClaimEvidence {
    */
   fromDoc: boolean;
   /**
-   * True when this entry is a one-line "cited file not found in the index"
-   * note rather than a located excerpt — the claim named its own evidence
-   * file (see `DocClaim.citedPath`) but that file doesn't resolve against
-   * `repoChunks`. `file` carries the cited (unresolved) path; `excerpt` is
-   * unused. A stale citation is itself doc-truth signal (issue #749).
+   * True when this entry is a one-line "cited file not found" note rather
+   * than a located excerpt — the claim named its own evidence file (see
+   * `DocClaim.citedPath`) but that file resolves against neither the PR's
+   * own diff nor `repoChunks`. `file` carries the cited (unresolved) path;
+   * `excerpt` is unused. A stale citation is itself doc-truth signal (issue
+   * #749).
    */
   citedPathMissing?: boolean;
+  /**
+   * True when this evidence is the cited file's raw PR diff hunk (referenced-
+   * file evidence prefetch) rather than an indexed chunk excerpt — the file
+   * is part of THIS PR's diff but was not necessarily analyzable/indexed
+   * (e.g. a workflow YAML, see PR #811). Always false alongside `fromDoc`
+   * (a diff hunk isn't chunk-sourced).
+   */
+  fromDiff?: boolean;
 }
 
 /**
@@ -132,6 +176,13 @@ export interface DocClaim {
 
 /** Cap the worklist so the prompt stays compact (protects the input budget). */
 const MAX_CLAIMS = 20;
+/**
+ * Separate, smaller cap on claims mined from changed CODE files (comments/
+ * docstrings/description literals — see `claimsFromSource`). Kept apart
+ * from `MAX_CLAIMS` so a comment-heavy code diff cannot crowd out doc-surface
+ * claims, the historically reliable signal, from the render cap above.
+ */
+const MAX_CODE_CLAIMS = 10;
 /** Per-claim character cap — a claim line is a pointer, not the whole hunk. */
 const MAX_CLAIM_CHARS = 200;
 /** Per-claim evidence excerpt cap — enough to carry the described code, not a hunk. */
@@ -290,10 +341,12 @@ function stripLinkTargets(text: string): string {
   return text.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1');
 }
 
-/** Extract classified claim lines from one file's patch. */
-function extractClaimsFromPatch(file: string, patch: string): DocClaim[] {
+/** Extract classified claim lines already reduced to candidate prose (either a doc surface's
+ *  added prose lines, or a code file's added comment/docstring/description lines — see the two
+ *  callers below). */
+function extractClaims(file: string, lines: string[]): DocClaim[] {
   const claims: DocClaim[] = [];
-  for (const raw of addedProseLines(patch)) {
+  for (const raw of lines) {
     const text = stripLinkTargets(raw);
     const match = classifyClaim(text);
     if (!match) continue;
@@ -308,22 +361,169 @@ function extractClaimsFromPatch(file: string, patch: string): DocClaim[] {
   return claims;
 }
 
+// ---------------------------------------------------------------------------
+// Code-file comment/docstring/description-literal extraction (widened
+// claim-discovery surface — see this module's header for the pr658 motivation)
+// ---------------------------------------------------------------------------
+
+/** A `//` or `#` line comment — NOT a Rust/C++ doc-comment (`///`/`//!`, handled separately so
+ *  that convention stays visually distinguishable) or a shebang/preprocessor directive
+ *  (`#!`, `#include`, `#pragma`, `#region`/`#endregion`) — those aren't prose. */
+const LINE_COMMENT_RE = /^(?:\/\/(?![!/])|#(?!!|include\b|pragma\b|region\b|endregion\b))\s?(.*)$/;
+/** A Rust/C++ doc-comment: `///` (outer) or `//!` (inner). */
+const DOC_COMMENT_RE = /^\/\/[!/]\s?(.*)$/;
+/** A JSDoc/block-comment CONTINUATION line: a leading `*` that is not the comment's closing line. */
+const BLOCK_CONT_RE = /^\*(?!\/)\s?(.*)$/;
+/** A block-comment opener (`/**` or `/*`), with any same-line trailing text. */
+const BLOCK_OPEN_RE = /^\/\*\*?\s?(.*)$/;
+/** A Python/Rust-style triple-quoted docstring delimiter, with any same-line trailing text. */
+const TRIPLE_QUOTE_RE = /^(?:"""|''')\s?(.*)$/;
+
+/** Comment/docstring line shapes, most-specific first (first match wins). */
+const COMMENT_LINE_MATCHERS: readonly RegExp[] = [
+  DOC_COMMENT_RE,
+  LINE_COMMENT_RE,
+  BLOCK_CONT_RE,
+  BLOCK_OPEN_RE,
+  TRIPLE_QUOTE_RE,
+];
+
+/** A zod-style `.describe('...')` call — the config-schema-description shape (Finding A's
+ *  sibling case: a description string rather than a doc COMMENT). Single-line only (KISS) — a
+ *  description string that wraps onto its own line inside a multi-line `.describe(\n  '...'\n)`
+ *  call is not extracted; the canonical, acceptance-tested case (pr658's schema.ts) is a plain
+ *  comment line, not this shape. */
+const DESCRIBE_CALL_RE = /\.describe\(\s*(['"`])((?:(?!\1).)*)\1/;
+/** A `description: '...'` object-literal key — the JSON-schema-description shape. Same
+ *  single-line-only scope as `DESCRIBE_CALL_RE`. */
+const DESCRIPTION_KEY_RE = /\bdescription\s*:\s*(['"`])((?:(?!\1).)*)\1/;
+
 /**
- * Collect claim-shaped lines from every changed guidance/doc surface, smallest
- * hunk first (reusing `collectGuidanceSurfaceChanges`' ordering so a voluminous
- * doc can't crowd a small changeset's claims out of the cap downstream).
- * Identical claim lines are deduped. Returns ALL claims (uncapped); the render
- * layer caps and notes any overflow. Exposed for testing.
+ * Comment-shaped lines that are NOT the claim-shaped prose this scan wants, excluded before
+ * classification (the "when in doubt, exclude" discipline this module's header calls for on the
+ * newly-widened, noisier code-comment surface):
+ *  - a TODO/FIXME/XXX/HACK note — describes INTENDED/future work, not current behavior, so a
+ *    claim-shaped TODO ("TODO: should default to 32") would otherwise false-classify as a claim
+ *    about what the code does NOW;
+ *  - an attribution/authorship line;
+ *  - a doc-comment TAG (`@param`, `@returns`, `@example`, …) — structural metadata, not a
+ *    behavioral sentence, even though some tags read as imperative prose.
+ */
+const NOISE_LINE_RE = /^(?:TODO|FIXME|XXX|HACK)\b[:.]?/i;
+const ATTRIBUTION_RE = /^(?:copyright\b|co-authored-by|signed-off-by)/i;
+const TAG_LINE_RE = /^@\w+\b/;
+
+/**
+ * Extract claim-candidate prose from one line of a code file's patch, or undefined when the line
+ * is not a comment/docstring/description-literal shape (ordinary code) or is noise (see above). A
+ * `.describe(...)`/`description: "..."` match is checked FIRST since those lines are otherwise
+ * ordinary code; everything else must additionally read as a comment/docstring line. Exposed for
+ * testing.
+ */
+export function extractCommentProse(rawLine: string): string | undefined {
+  const line = rawLine.trim();
+  if (!line) return undefined;
+
+  const described = DESCRIBE_CALL_RE.exec(line) ?? DESCRIPTION_KEY_RE.exec(line);
+  const prose = described
+    ? described[2]
+    : COMMENT_LINE_MATCHERS.map(re => re.exec(line)?.[1]).find(p => p !== undefined);
+  if (prose === undefined) return undefined;
+
+  const trimmed = prose.trim();
+  if (
+    !trimmed ||
+    NOISE_LINE_RE.test(trimmed) ||
+    ATTRIBUTION_RE.test(trimmed) ||
+    TAG_LINE_RE.test(trimmed)
+  ) {
+    return undefined;
+  }
+  return trimmed;
+}
+
+/**
+ * The candidate-claim prose lines of one changed CODE file's patch: ADDED lines whose text is a
+ * comment, docstring, or description-valued string literal (see `extractCommentProse`) — never
+ * arbitrary code. This is the widened surface pr658's Finding A motivated: a JSDoc comment on a
+ * `LienConfig` field in `packages/core/src/config/schema.ts`, an ordinary source file the
+ * doc-surface-only scan could never see. Exposed for testing.
+ */
+export function addedCodeCommentLines(patch: string): string[] {
+  const out: string[] = [];
+  for (const { text, isAdded } of newFileLines(patch)) {
+    if (!isAdded) continue;
+    const prose = extractCommentProse(text);
+    if (prose) out.push(prose);
+  }
+  return out;
+}
+
+/** One claim source to scan: a changed file's patch, tagged with which line-extraction mode
+ *  applies (`addedProseLines` for a guidance/doc surface, `addedCodeCommentLines` for code). */
+interface ClaimSource {
+  file: string;
+  patch: string;
+  mode: 'guidance' | 'code';
+}
+
+/**
+ * Every changed file worth scanning for claims — guidance/doc surfaces (`collectGuidanceSurfaceChanges`)
+ * PLUS non-guidance changed files with an analyzable code extension (`filterAnalyzableFiles`,
+ * the same "code file" definition `review-pr.ts` uses) — merged into ONE smallest-hunk-first
+ * order. A single fairness ordering (rather than "all doc surfaces, then all code files") means a
+ * small, surgical code-comment change (pr658's schema.ts: one line) ranks ahead of a large
+ * doc-surface rewrite purely on hunk size, the same budget-fairness rationale
+ * `collectGuidanceSurfaceChanges` already documents.
+ */
+function collectClaimSources(patches: Map<string, string>): ClaimSource[] {
+  const guidance: ClaimSource[] = collectGuidanceSurfaceChanges(patches).map(c => ({
+    ...c,
+    mode: 'guidance',
+  }));
+  const codeFiles = filterAnalyzableFiles([...patches.keys()]).filter(f => !isGuidanceSurface(f));
+  const code: ClaimSource[] = codeFiles.map(file => ({
+    file,
+    patch: patches.get(file) ?? '',
+    mode: 'code',
+  }));
+  return [...guidance, ...code].sort((a, b) => a.patch.length - b.patch.length);
+}
+
+/**
+ * Extract the claims for one source, respecting `codeClaimBudget` (the number of code-derived
+ * claims still allowed — see `MAX_CODE_CLAIMS`) when `source.mode === 'code'`. Split out of
+ * `extractDocClaims` purely to keep that function's own branching shallow.
+ */
+function claimsFromSource(source: ClaimSource, codeClaimBudget: number): DocClaim[] {
+  if (source.mode === 'code' && codeClaimBudget <= 0) return [];
+  const lines =
+    source.mode === 'guidance'
+      ? addedProseLines(source.patch)
+      : addedCodeCommentLines(source.patch);
+  const claims = extractClaims(source.file, lines);
+  return source.mode === 'code' ? claims.slice(0, codeClaimBudget) : claims;
+}
+
+/**
+ * Collect claim-shaped lines from every changed guidance/doc surface AND changed code file
+ * (comments/docstrings/description literals only — see `collectClaimSources`), smallest hunk
+ * first. Identical claim lines are deduped across both sources. Code-derived claims are capped
+ * separately at `MAX_CODE_CLAIMS` so a comment-heavy code diff cannot crowd out doc-surface
+ * claims. Returns ALL claims up to that cap (uncapped for doc-surface claims — the render layer
+ * applies `MAX_CLAIMS` and notes any overflow). Exposed for testing.
  */
 export function extractDocClaims(patches: Map<string, string>): DocClaim[] {
   const claims: DocClaim[] = [];
   const seen = new Set<string>();
+  let codeClaimCount = 0;
 
-  for (const { file, patch } of collectGuidanceSurfaceChanges(patches)) {
-    for (const claim of extractClaimsFromPatch(file, patch)) {
+  for (const source of collectClaimSources(patches)) {
+    for (const claim of claimsFromSource(source, MAX_CODE_CLAIMS - codeClaimCount)) {
       if (seen.has(claim.claimText)) continue;
       seen.add(claim.claimText);
       claims.push(claim);
+      if (source.mode === 'code') codeClaimCount++;
     }
   }
 
@@ -657,21 +857,86 @@ function pickCitedChunk(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Referenced-file evidence prefetch (issue: PR #811's own review)
+// ---------------------------------------------------------------------------
+
+/** Cap on a prefetched referenced-file diff-hunk excerpt. Bigger than `MAX_EVIDENCE_CHARS`
+ *  since a raw hunk carries diff punctuation/context an indexed-chunk excerpt doesn't, but still
+ *  bounded — mirrors `guidance-surface-signals.ts`'s own per-file cap discipline for the same
+ *  shape of problem (one huge referenced file must not dominate the block). */
+const MAX_DIFF_EVIDENCE_CHARS = 800;
+
+/** The NEW-file starting line of a patch's FIRST hunk (`@@ -a,b +START,len @@`), or 0 when the
+ *  header can't be parsed — best-effort, since a raw hunk (unlike an indexed chunk) carries no
+ *  authoritative line-number metadata of its own. */
+function firstHunkNewStartLine(patch: string): number {
+  const m = /^@@ -\d+(?:,\d+)? \+(\d+)/m.exec(patch);
+  return m ? Number(m[1]) : 0;
+}
+
+/** Build diff-hunk evidence for a cited file that's part of THIS PR (see
+ *  `findCitedPathDiffEvidence`): the byte-capped raw patch, tagged `fromDiff` so the renderer
+ *  frames it as a diff rather than a plain source excerpt. */
+function buildDiffEvidence(file: string, patch: string): DocClaimEvidence {
+  const capped =
+    patch.length > MAX_DIFF_EVIDENCE_CHARS
+      ? `${patch.slice(0, MAX_DIFF_EVIDENCE_CHARS)}\n[diff truncated to respect the input budget]`
+      : patch;
+  return {
+    file,
+    startLine: firstHunkNewStartLine(patch),
+    excerpt: capped.replace(/```/g, "'''"),
+    anchor: file,
+    fromDoc: false,
+    fromDiff: true,
+  };
+}
+
 /**
- * Resolve a claim's own file citation (see `DocClaim.citedPath`) against the
- * repo index. A citation is authoritative — a claim that ships its own
- * pointer should arrive pre-verified — so a resolved hit is returned directly,
- * bypassing the generic anchor/tier scan entirely (it outranks every tier).
- * When the cited path does NOT resolve to any indexed chunk, returns a
- * one-line `citedPathMissing` note instead: a stale citation is itself
- * doc-truth signal, not something to search around (issue #749).
+ * Resolve a claim's file citation against the PR's OWN diff (`context.pr.patches`) — the
+ * referenced-file evidence prefetch this section is named for. Motivated by PR #811's own
+ * review: a doc claim cited `.github/workflows/lien-review.yml`, which WAS part of that PR's
+ * diff but isn't an AST-analyzable language, so it never reaches `repoChunks` and the indexed-
+ * chunk lookup below can never find it — yet the exact material to verify the claim was sitting
+ * in the diff the whole time. Resolution mirrors the indexed-chunk lookup's own leniency (exact
+ * path, or a path this cited path is a suffix of). Returns undefined when there is no `patches`
+ * map or the cited path isn't one of its keys, so the caller falls through to the indexed-chunk
+ * lookup (see `findCitedPathEvidence`).
+ */
+function findCitedPathDiffEvidence(
+  cited: DocClaimCitedPath,
+  patches: Map<string, string> | undefined,
+): DocClaimEvidence | undefined {
+  if (!patches) return undefined;
+  const matchedFile = [...patches.keys()].find(
+    f => f === cited.path || f.endsWith(`/${cited.path}`),
+  );
+  if (!matchedFile) return undefined;
+  return buildDiffEvidence(matchedFile, patches.get(matchedFile) ?? '');
+}
+
+/**
+ * Resolve a claim's own file citation (see `DocClaim.citedPath`) against, in priority order: the
+ * PR's own diff (`findCitedPathDiffEvidence` — the referenced-file evidence prefetch, preferred
+ * when available since it's the more PR-relevant material and needs no index entry to exist),
+ * then the repo index. A citation is authoritative — a claim that ships its own pointer should
+ * arrive pre-verified — so a resolved hit from EITHER source is returned directly, bypassing the
+ * generic anchor/tier scan entirely (it outranks every tier). When the cited path resolves
+ * against NEITHER, returns a one-line `citedPathMissing` note instead: a stale citation is itself
+ * doc-truth signal, not something to search around (issue #749) — degrading loudly rather than
+ * silently omitting.
  */
 function findCitedPathEvidence(
   cited: DocClaimCitedPath,
   claimText: string,
-  repoChunks: CodeChunk[],
+  repoChunks: CodeChunk[] | undefined,
+  patches: Map<string, string> | undefined,
 ): DocClaimEvidence {
-  const resolvedFile = repoChunks.find(
+  const diffEvidence = findCitedPathDiffEvidence(cited, patches);
+  if (diffEvidence) return diffEvidence;
+
+  const resolvedFile = repoChunks?.find(
     c => c.metadata.file === cited.path || c.metadata.file.endsWith(`/${cited.path}`),
   )?.metadata.file;
 
@@ -686,7 +951,7 @@ function findCitedPathEvidence(
     };
   }
 
-  const fileChunks = repoChunks.filter(c => c.metadata.file === resolvedFile);
+  const fileChunks = repoChunks!.filter(c => c.metadata.file === resolvedFile);
   const keywordAnchors = extractAnchors(claimText).filter(a => a !== cited.symbol);
   const { chunk, centerOn } = pickCitedChunk(fileChunks, cited.symbol, keywordAnchors);
   const built = buildExcerpt(chunk, centerOn, IDENTITY);
@@ -701,19 +966,25 @@ function findCitedPathEvidence(
 
 /**
  * Locate the code (or sibling doc) a single claim describes. An explicit
- * self-citation (`claim.citedPath`) is resolved first and, when present,
- * short-circuits the rest of this function — see `findCitedPathEvidence`.
- * Otherwise tries a case-sensitive anchor pass (identifiers/keys are
- * case-bearing), then a case-insensitive fallback. Returns undefined when no
- * anchor resolves or there is no repo index to search.
+ * self-citation (`claim.citedPath`) is resolved first — against the PR's own
+ * diff, then the repo index (see `findCitedPathEvidence`) — and, when
+ * present, short-circuits the rest of this function; this is the ONE path
+ * that can still produce evidence with no repo index at all (a citation
+ * resolving purely against `patches`). Otherwise tries a case-sensitive
+ * anchor pass against `repoChunks` (identifiers/keys are case-bearing), then
+ * a case-insensitive fallback. Returns undefined when no anchor resolves or
+ * there is no repo index to search.
  */
 export function findClaimEvidence(
   claim: DocClaim,
   repoChunks: CodeChunk[] | undefined,
   changed: Set<string>,
+  patches?: Map<string, string>,
 ): DocClaimEvidence | undefined {
+  if (claim.citedPath)
+    return findCitedPathEvidence(claim.citedPath, claim.claimText, repoChunks, patches);
+
   if (!repoChunks || repoChunks.length === 0) return undefined;
-  if (claim.citedPath) return findCitedPathEvidence(claim.citedPath, claim.claimText, repoChunks);
   const anchors = extractAnchors(claim.claimText);
   if (anchors.length === 0) return undefined;
 
@@ -745,9 +1016,10 @@ export function findClaimEvidence(
 export function attachEvidence(claims: DocClaim[], context: ReviewContext): DocClaim[] {
   const repoChunks = context.repoChunks;
   const changed = collectChangedFiles(context);
+  const patches = context.pr?.patches;
   return claims.map((claim, i) => {
     if (i >= MAX_CLAIMS) return claim; // beyond the render cap — evidence would never show
-    const evidence = findClaimEvidence(claim, repoChunks, changed);
+    const evidence = findClaimEvidence(claim, repoChunks, changed, patches);
     return evidence ? { ...claim, evidence } : claim;
   });
 }
@@ -758,12 +1030,15 @@ export function attachEvidence(claims: DocClaim[], context: ReviewContext): DocC
 
 const DOC_CLAIMS_HEADER =
   'Pre-computed: behavioral/structural claims this PR added to its touched ' +
-  'guidance/doc surfaces (ADRs, site guides, changesets, CLAUDE.md, hooks). ' +
-  'This is the doc-truth discovery step done for you — do NOT skip it; it is ' +
+  'guidance/doc surfaces (ADRs, site guides, changesets, CLAUDE.md, hooks) AND ' +
+  'to comments/docstrings/description strings in changed CODE files. This is ' +
+  'the doc-truth discovery step done for you — do NOT skip it; it is ' +
   'your primary claim inventory. The scan can miss claims and can list prose ' +
   'that is merely descriptive, so also skim the touched hunks for any not here. ' +
   'Most entries carry an `evidence` excerpt: the code (or a sibling doc, for ' +
-  'omission claims) the claim describes, located deterministically for you — ' +
+  'omission claims, or — when the claim cites a file that is itself part of ' +
+  "this PR — that file's own diff hunk) the claim describes, located " +
+  'deterministically for you — ' +
   'COMPARE the claim against that excerpt. The locator can pick the wrong site, ' +
   'so first confirm the excerpt IS the described code; then: if it CONFIRMS the ' +
   'claim, stay silent; if it CONTRADICTS the claim — or the diff changed the ' +
@@ -796,12 +1071,12 @@ function renderClaimEntry(claim: DocClaim, remaining: number): string[] {
   if (claim.evidence.citedPathMissing) {
     return [
       header,
-      `  (evidence: the cited file "${claim.evidence.file}" was not found in the index — the citation itself may be stale)`,
+      `  (evidence: the cited file "${claim.evidence.file}" was not found in the index or PR diff — the citation itself may be stale)`,
     ];
   }
 
-  const { file, startLine, excerpt, fromDoc } = claim.evidence;
-  const label = fromDoc ? 'evidence (sibling doc)' : 'evidence';
+  const { file, startLine, excerpt, fromDoc, fromDiff } = claim.evidence;
+  const label = fromDiff ? 'evidence (PR diff)' : fromDoc ? 'evidence (sibling doc)' : 'evidence';
   const block = [`  ${label} — ${file}:${startLine}:`, '  ```', excerpt, '  ```'].join('\n');
   if (block.length > remaining) {
     return [
