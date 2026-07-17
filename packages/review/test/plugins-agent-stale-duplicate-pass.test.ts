@@ -236,10 +236,11 @@ describe('buildStaleDuplicatePassPrompts', () => {
 // ---------------------------------------------------------------------------
 
 describe('staleDuplicatePassBudget', () => {
-  it('scales with candidate count, clamped to the floor for a single candidate', () => {
+  it('scales with candidate count, clamped to the shared one-round-trip floor for a single candidate', () => {
     const budget = staleDuplicatePassBudget(100_000, eligibleContext());
-    // 1 candidate: 2000 + 800*1 = 2800, clamped up to the 4000 floor.
-    expect(budget).toBe(4_000);
+    // 1 candidate: 2000 + 800*1 = 2800, clamped up to the 11,000 floor (#811 fix —
+    // was 4,000, smaller than a single Kimi turn's measured 5,526-6,564 tokens).
+    expect(budget).toBe(11_000);
   });
 
   it('is independent of the main pass base budget (candidate-count driven, not a fraction)', () => {

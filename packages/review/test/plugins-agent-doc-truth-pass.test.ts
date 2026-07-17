@@ -15,6 +15,7 @@ import {
   DOC_TRUTH_PASS_SPEC,
   DOC_PASS_MAX_TURNS,
 } from '../src/plugins/agent/doc-truth-pass.js';
+import { EXTRA_PASS_MIN_BUDGET_TOKENS } from '../src/plugins/agent/review-pass.js';
 import { buildSystemPrompt } from '../src/plugins/agent/system-prompt.js';
 import { DOC_TRUTH } from '../src/plugins/agent/rules.js';
 import { createTestContext } from '../src/test-helpers.js';
@@ -245,9 +246,31 @@ describe('buildDocTruthPassPrompts', () => {
 // ---------------------------------------------------------------------------
 
 describe('docTruthPassBudget', () => {
-  it('is ~40% of the base budget, rounded to an integer', () => {
+  it('is ~40% of the base budget, rounded to an integer, when that clears the floor', () => {
     expect(docTruthPassBudget(100_000)).toBe(40_000);
     expect(docTruthPassBudget(50_001)).toBe(20_000); // round(20000.4)
+  });
+
+  it('clamps to EXTRA_PASS_MIN_BUDGET_TOKENS for the exact #811 summary-only base (regression)', () => {
+    // PR #811's measured main-pass (summary-only mode) allocation was 6,054 —
+    // 40% of that is 2,422, smaller than a single Kimi turn (5,526-6,564
+    // measured), which is exactly what starved doc-truth on that run.
+    expect(docTruthPassBudget(6_054)).toBe(EXTRA_PASS_MIN_BUDGET_TOKENS);
+    expect(docTruthPassBudget(6_054)).toBeGreaterThanOrEqual(EXTRA_PASS_MIN_BUDGET_TOKENS);
+  });
+
+  it("clamps to the floor across summary-only mode's whole 6,000-20,000 base range", () => {
+    // scaleSummaryOnlyBudget's own clamp range (#572) — 40% of the top of
+    // that range (20,000 → 8,000) still sits under the floor.
+    expect(docTruthPassBudget(6_000)).toBe(EXTRA_PASS_MIN_BUDGET_TOKENS);
+    expect(docTruthPassBudget(20_000)).toBe(EXTRA_PASS_MIN_BUDGET_TOKENS);
+  });
+
+  it('the fraction takes over exactly where it first clears the floor', () => {
+    // 0.4 * 27,500 = 11,000 == the floor exactly; one base-unit higher, the
+    // fraction (rounded) exceeds it.
+    expect(docTruthPassBudget(27_500)).toBe(EXTRA_PASS_MIN_BUDGET_TOKENS);
+    expect(docTruthPassBudget(27_510)).toBe(11_004); // round(27510 * 0.4)
   });
 });
 

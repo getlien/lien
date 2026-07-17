@@ -49,7 +49,11 @@ import {
   computeStaleLiteralCandidates,
   type StaleLiteralCandidate,
 } from '../../stale-literal-signals.js';
-import { renderPassPrHeader, type ReviewPassSpec } from './review-pass.js';
+import {
+  renderPassPrHeader,
+  EXTRA_PASS_MIN_BUDGET_TOKENS,
+  type ReviewPassSpec,
+} from './review-pass.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -63,7 +67,6 @@ export const STALE_DUP_PASS_MAX_TURNS = 6;
 
 const STALE_DUP_BASE_OVERHEAD_TOKENS = 2_000;
 const STALE_DUP_PER_CANDIDATE_TOKENS = 800;
-const STALE_DUP_MIN_BUDGET = 4_000;
 const STALE_DUP_MAX_BUDGET = 30_000;
 /** Mirrors stale-literal-signals.ts's own MAX_CANDIDATES cap. */
 const STALE_DUP_SIGNAL_MAX_CANDIDATES = 8;
@@ -414,14 +417,23 @@ export function buildStaleDuplicatePassPrompts(context: ReviewContext): {
  * design doc §2), clamped floor/ceiling — mirrors `summary-only-pass.ts`'s
  * `scaleSummaryOnlyBudget` clamp pattern rather than doc-truth's flat
  * fraction: a 1-candidate loop shouldn't pay the same budget as an 8-
- * candidate one.
+ * candidate one. The floor is `EXTRA_PASS_MIN_BUDGET_TOKENS` (shared with
+ * doc-truth/incomplete-handling — see that constant's doc comment): PR #811
+ * measured this loop's own turn 1 (3 candidates, 4 read_file requests) at
+ * 6,564 tokens against a THEN-floor of 4,000 — bigger than its entire
+ * allocation before any tool result came back. Since the per-candidate
+ * scaling here tops out at 8,400 (8 candidates × 800 + 2,000 base, per
+ * `STALE_DUP_SIGNAL_MAX_CANDIDATES`), the new floor dominates for every
+ * candidate count this loop can see today; the scaling term still exists so
+ * a future cap increase (more candidates) scales up past the floor rather
+ * than needing a second formula change.
  */
 export function staleDuplicatePassBudget(_baseBudget: number, context: ReviewContext): number {
   const candidateCount = computeStaleLiteralCandidates(context).length;
   const scaled =
     STALE_DUP_BASE_OVERHEAD_TOKENS +
     STALE_DUP_PER_CANDIDATE_TOKENS * Math.min(candidateCount, STALE_DUP_SIGNAL_MAX_CANDIDATES);
-  return Math.min(Math.max(scaled, STALE_DUP_MIN_BUDGET), STALE_DUP_MAX_BUDGET);
+  return Math.min(Math.max(scaled, EXTRA_PASS_MIN_BUDGET_TOKENS), STALE_DUP_MAX_BUDGET);
 }
 
 // ---------------------------------------------------------------------------

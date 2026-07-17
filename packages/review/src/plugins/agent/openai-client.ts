@@ -34,6 +34,27 @@ const RETRY_NUDGE =
   'You ran out of budget. Output ONLY the JSON block now with your findings and summary. No tool calls.';
 
 /**
+ * Bound on the summary-retry's own completion request (`max_tokens`), scaled
+ * to whatever budget headroom remains when the main loop bails. Mirrors
+ * `AnthropicAgentClient`'s `requestMaxTokens`, which already does this for
+ * every request including its own retry — this client's retry previously
+ * requested a flat 24,576 unconditionally (see `chatCompletion`'s old
+ * default), regardless of how far over budget the loop already was. On
+ * PR #811's starved run that "cheap safety net" call cost MORE than the
+ * pass's entire original allocation in both starved passes (doc-truth:
+ * +11,388 tokens on a 2,422 budget; stale-duplicate: +5,695 on 4,400) — a
+ * real findings+summary verdict fits comfortably under
+ * RETRY_MIN_MAX_TOKENS even for a several-finding review, so the floor never
+ * starves the retry of room to complete; the ceiling matches the loop's
+ * normal per-request size. Exported for unit testing.
+ */
+const RETRY_MIN_MAX_TOKENS = 2_048;
+const RETRY_MAX_MAX_TOKENS = 24_576;
+export function retryMaxTokens(remainingBudget: number): number {
+  return Math.min(RETRY_MAX_MAX_TOKENS, Math.max(remainingBudget, RETRY_MIN_MAX_TOKENS));
+}
+
+/**
  * Transient-failure retry for the chat endpoint. OpenRouter/Kimi intermittently
  * returns a 200 with an empty/truncated body, a 429/5xx, or hangs the
  * connection — all recover on a retry. 2 attempts (one retry) absorbs flakes
@@ -416,7 +437,8 @@ export class OpenAIAgentClient {
     // Gated on a completed turn: a never-ran run (every request failed) has no
     // conversation to summarize, so skip the doomed retry (and its 3s sleep).
     if (!parsed.summary && completedTurns > 0) {
-      const retry = await this.runSummaryRetry(messages, turn);
+      const remainingBudget = this.maxTokenBudget - (totalInputTokens + totalOutputTokens);
+      const retry = await this.runSummaryRetry(messages, turn, remainingBudget);
       if (retry) {
         totalInputTokens += retry.inputTokens;
         totalOutputTokens += retry.outputTokens;
@@ -523,6 +545,7 @@ export class OpenAIAgentClient {
   private async attemptVerdictCompletion(
     messages: ChatMessage[],
     turnNumber: number,
+    maxTokens: number,
   ): Promise<{
     parsed: { findings: AgentFinding[]; summary?: AgentSummary };
     traceTurn: TurnTrace;
@@ -532,7 +555,7 @@ export class OpenAIAgentClient {
     try {
       // forceVerdict: response_format:json_object guarantees a JSON response,
       // the reliable safety net when the loop bailed without a verdict.
-      const response = await this.chatCompletion(messages, [], true);
+      const response = await this.chatCompletion(messages, [], true, maxTokens);
       const inputTokens = response.usage?.prompt_tokens ?? 0;
       const outputTokens = response.usage?.completion_tokens ?? 0;
       const choice = response.choices[0];
@@ -579,6 +602,7 @@ export class OpenAIAgentClient {
   private async runSummaryRetry(
     messages: ChatMessage[],
     turn: number,
+    remainingBudget: number,
   ): Promise<{
     parsed: { findings: AgentFinding[]; summary?: AgentSummary };
     traceTurns: TurnTrace[];
@@ -589,7 +613,11 @@ export class OpenAIAgentClient {
     await new Promise(resolve => setTimeout(resolve, 3_000));
     messages.push({ role: 'user', content: RETRY_NUDGE });
 
-    const first = await this.attemptVerdictCompletion(messages, turn + 1);
+    // Computed once and reused for both attempts (parity with the Anthropic
+    // client's `remainingBudget` handling) — a badly-starved pass gets a
+    // small, bounded request instead of the flat 24,576-token ceiling.
+    const maxTokens = retryMaxTokens(remainingBudget);
+    const first = await this.attemptVerdictCompletion(messages, turn + 1, maxTokens);
     if (!first) return null;
     if (first.parsed.summary || first.parsed.findings.length > 0) {
       return { ...first, traceTurns: [first.traceTurn] };
@@ -598,7 +626,7 @@ export class OpenAIAgentClient {
     this.logger.warning(
       '[agent] Retry verdict was unparseable — attempting one more bounded retry',
     );
-    const second = await this.attemptVerdictCompletion(messages, turn + 2);
+    const second = await this.attemptVerdictCompletion(messages, turn + 2, maxTokens);
     if (!second) return { ...first, traceTurns: [first.traceTurn] };
     return {
       parsed: second.parsed,
@@ -612,13 +640,18 @@ export class OpenAIAgentClient {
     messages: ChatMessage[],
     tools: ToolDef[],
     forceVerdict = false,
+    // Overridable only by the summary-retry (see `runSummaryRetry`), which
+    // scales it down via `retryMaxTokens` once the loop has bailed — every
+    // other call site (every normal turn, including the in-loop forced-finish
+    // turn) keeps the unchanged flat default.
+    maxTokens = RETRY_MAX_MAX_TOKENS,
   ): Promise<ChatResponse> {
     const body: Record<string, unknown> = {
       model: this.model,
       messages,
       // Headroom so a multi-finding verdict completes instead of truncating
       // mid-JSON (a truncated verdict is unparseable and wastes the whole run).
-      max_tokens: 24_576,
+      max_tokens: maxTokens,
       temperature: 0,
       // High reasoning drives investigation quality, but on the forced-verdict
       // turn the findings are already decided — high effort there just makes the

@@ -92,7 +92,11 @@ import {
   computeUnreadFieldCandidates,
   type UnreadFieldCandidate,
 } from '../../unread-field-signals.js';
-import { renderPassPrHeader, type ReviewPassSpec } from './review-pass.js';
+import {
+  renderPassPrHeader,
+  EXTRA_PASS_MIN_BUDGET_TOKENS,
+  type ReviewPassSpec,
+} from './review-pass.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -108,7 +112,6 @@ export const INCOMPLETE_PASS_MAX_TURNS = 8;
 
 const BASE_OVERHEAD_TOKENS = 2_500;
 const PER_CANDIDATE_TOKENS = 900;
-const MIN_BUDGET = 5_000;
 const MAX_BUDGET = 35_000;
 
 /** Mirrors variant-sweep-signals.ts's own MAX_ENTRIES cap — that module's compute()
@@ -447,13 +450,20 @@ export function buildIncompleteHandlingPassPrompts(context: ReviewContext): {
 /**
  * Budget scaled by this pass's own combined candidate count (per the
  * per-rule-loops design doc §2), clamped floor/ceiling — mirrors the
- * pilot's `staleDuplicatePassBudget`.
+ * pilot's `staleDuplicatePassBudget`. The floor is
+ * `EXTRA_PASS_MIN_BUDGET_TOKENS` (shared across all three extra passes —
+ * see that constant's doc comment / PR #811): unlike the stale-duplicate
+ * pilot, this pass's scaling ceiling (2,500 + 900×20 = 20,500) still sits
+ * above the floor, so real scaling shows through once combined candidate
+ * count exceeds ~9-10, while a 1-2 candidate run (this repo's real-PR
+ * census: sibling-surface firing on 9/40) gets the same one-real-round-trip
+ * floor doc-truth/stale-duplicate get.
  */
 export function incompleteHandlingPassBudget(_baseBudget: number, context: ReviewContext): number {
   const candidateCount = computeIncompleteHandlingCandidates(context).length;
   const scaled =
     BASE_OVERHEAD_TOKENS + PER_CANDIDATE_TOKENS * Math.min(candidateCount, MAX_TOTAL_CANDIDATES);
-  return Math.min(Math.max(scaled, MIN_BUDGET), MAX_BUDGET);
+  return Math.min(Math.max(scaled, EXTRA_PASS_MIN_BUDGET_TOKENS), MAX_BUDGET);
 }
 
 // ---------------------------------------------------------------------------

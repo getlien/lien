@@ -504,10 +504,11 @@ describe('buildIncompleteHandlingPassPrompts', () => {
 // ---------------------------------------------------------------------------
 
 describe('incompleteHandlingPassBudget', () => {
-  it('scales with combined candidate count, clamped to the floor for a single candidate', () => {
+  it('scales with combined candidate count, clamped to the shared one-round-trip floor for a single candidate', () => {
     const budget = incompleteHandlingPassBudget(100_000, variantOnlyContext());
-    // 1 candidate: 2500 + 900*1 = 3400, clamped up to the 5000 floor.
-    expect(budget).toBe(5_000);
+    // 1 candidate: 2500 + 900*1 = 3400, clamped up to the 11,000 floor (#811 fix —
+    // was 5,000, smaller than a single Kimi turn's measured 5,526-6,564 tokens).
+    expect(budget).toBe(11_000);
   });
 
   it('is independent of the main pass base budget (candidate-count driven, not a fraction)', () => {
