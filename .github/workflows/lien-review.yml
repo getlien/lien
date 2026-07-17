@@ -74,3 +74,12 @@ jobs:
         env:
           INPUT_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           INPUT_OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          # Dedicated candidate-loop passes (stale-duplicate-pass.ts,
+          # incomplete-handling-pass.ts) — dark/opt-in for @liendev/review
+          # consumers by default; this repo's own reviews opt in here to
+          # dogfood them (see docs/architecture/review-pass-architecture.md's
+          # status line for the mechanism and evidence status). Both gates
+          # read these env vars directly via process.env — no action.yml
+          # input plumbing needed.
+          LIEN_STALE_DUP_PASS: 'on'
+          LIEN_INCOMPLETE_PASS: 'on'
