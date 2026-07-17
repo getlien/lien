@@ -718,6 +718,26 @@ describe('extractCommentProse', () => {
     );
   });
 
+  // Regression (Lien Review finding on this PR, #814): a same-line block-comment/triple-quote
+  // CLOSER must not leak into the captured prose.
+  it('strips the same-line closer off a single-line block comment (`/** ... */`)', () => {
+    expect(extractCommentProse('/** Defaults to true. */')).toBe('Defaults to true.');
+    expect(extractCommentProse('/* Defaults to true. */')).toBe('Defaults to true.');
+  });
+
+  it('still captures a block-comment opener with no closer on this line (multi-line JSDoc)', () => {
+    expect(extractCommentProse('/** Defaults to true')).toBe('Defaults to true');
+  });
+
+  it('strips the same-line closer off a single-line triple-quoted docstring', () => {
+    expect(extractCommentProse('"""Required."""')).toBe('Required.');
+    expect(extractCommentProse("'''Required.'''")).toBe('Required.');
+  });
+
+  it('still captures a triple-quote opener with no closer on this line (multi-line docstring)', () => {
+    expect(extractCommentProse('"""Required.')).toBe('Required.');
+  });
+
   it('extracts a .describe(...) call — the config-schema-description shape', () => {
     expect(extractCommentProse(".describe('Defaults to 20 when omitted.'),")).toBe(
       'Defaults to 20 when omitted.',

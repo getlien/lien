@@ -374,10 +374,14 @@ const LINE_COMMENT_RE = /^(?:\/\/(?![!/])|#(?!!|include\b|pragma\b|region\b|endr
 const DOC_COMMENT_RE = /^\/\/[!/]\s?(.*)$/;
 /** A JSDoc/block-comment CONTINUATION line: a leading `*` that is not the comment's closing line. */
 const BLOCK_CONT_RE = /^\*(?!\/)\s?(.*)$/;
-/** A block-comment opener (`/**` or `/*`), with any same-line trailing text. */
-const BLOCK_OPEN_RE = /^\/\*\*?\s?(.*)$/;
-/** A Python/Rust-style triple-quoted docstring delimiter, with any same-line trailing text. */
-const TRIPLE_QUOTE_RE = /^(?:"""|''')\s?(.*)$/;
+/** A block-comment opener (`/**` or `/*`), with any same-line trailing text. The trailing
+ *  optional group strips a same-line CLOSING marker off a single-line block comment so it
+ *  doesn't leak into the captured prose; a multi-line opener with no closer on this line (just
+ *  trailing text) still captures correctly since that group is optional. */
+const BLOCK_OPEN_RE = /^\/\*\*?\s?(.*?)(?:\s*\*\/)?$/;
+/** A Python/Rust-style triple-quoted docstring delimiter, with any same-line trailing text. Same
+ *  optional-trailing-closer handling as `BLOCK_OPEN_RE`, for a same-line one-liner docstring. */
+const TRIPLE_QUOTE_RE = /^(?:"""|''')\s?(.*?)(?:"""|''')?$/;
 
 /** Comment/docstring line shapes, most-specific first (first match wins). */
 const COMMENT_LINE_MATCHERS: readonly RegExp[] = [
