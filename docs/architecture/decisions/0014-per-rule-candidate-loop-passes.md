@@ -207,20 +207,55 @@ in the same PR.
 
 ### Negative / Risks
 
-- **Lift is unproven for both new loops.** No priced A/B exists yet
-  comparing a dedicated candidate loop against the shared loop's own
-  signal-augmented findings list on the same fixtures — #803 and #804 were
-  explicit $0-paid-LLM-spend build tasks (mechanism only, "do NOT run
-  calibrations" per their briefs). The one priced recalibration in this
-  arc, PR #805's stale-duplicate FP-guard fix, measured a *wording* fix's
-  effect (a `calibrate-10` held 10/10 on the canonical true-positive fixture
-  at $0.3471, and a 3-vote FP probe against captured PR #770 dropped from 2
-  wrongful `stale` verdicts to 0) — real evidence the guard works, but not
-  evidence the dedicated-loop *architecture* out-performs the shared loop
-  it sits beside. The pilot's own success criteria call for mining 2–3 more
-  stale-duplicate fixtures (cross-repo candidates were named but not yet
-  captured) before a statistically meaningful lift comparison is possible;
-  that mining has not happened as of this ADR.
+- **Lift is now measured for `incomplete-handling`, on one fixture and one
+  of its three candidate shapes; `stale-duplicate`'s dedicated-loop-vs-
+  shared-loop lift remains unmeasured.** A same-day A/B against a real,
+  ground-truthed external bug — drizzle-team/drizzle-orm#4172, which added
+  6 Gel `ColumnDataType` variants (`dateDuration`, `duration`,
+  `relDuration`, `localTime`, `localDate`, `localDateTime`) that all four
+  downstream schema-integration packages' `columnToSchema` if-chains still
+  don't handle — measured the shared main pass converting the candidate to
+  a real finding on only 1/3 screened votes (the other 2/3 read all four
+  affected files, per their own tool-call trace, and still emitted nothing
+  of any rule), against the dedicated `incomplete-handling` loop converting
+  3/3, then holding 10/10 on `--calibrate 10` (one legitimate keyword-gate
+  widening was needed along the way; both re-verified against a
+  perfect/empty/distractor smoke test that never false-passed). Fixture:
+  `packages/review/test/harness/fixtures/crossrepo/
+  pr4172-columndatatype-gel-gap.assertions.ts` (promoted 2026-07-17; full
+  result history in its own header). This is the first controlled,
+  same-fixture comparison of a dedicated candidate loop against the shared
+  loop's own signal-augmented findings list — the gap #803 and #804
+  explicitly left open (both were $0-paid-LLM-spend build tasks, "do NOT
+  run calibrations" per their briefs). It is deliberately narrow evidence,
+  not a corpus-wide lift claim: one fixture, one candidate shape
+  (`variant-sweep`; the rule's other two shapes, `sibling-surface` and
+  `unread-field`, are untested by it), on the prod default model only.
+  `stale-duplicate`'s own dedicated-loop-vs-shared-loop lift is still
+  unmeasured — PR #805's stale-duplicate recalibration priced a *wording*
+  fix's effect (`calibrate-10` held 10/10 on the canonical true-positive
+  fixture at $0.3471, and a 3-vote FP probe against captured PR #770
+  dropped from 2 wrongful `stale` verdicts of 51 to 0 after the fix), not a
+  shared-vs-loop comparison. The pilot's own success criteria still call
+  for mining 2–3 more stale-duplicate fixtures (cross-repo candidates were
+  named but not yet captured) before a statistically meaningful lift
+  comparison is possible for that rule; that mining has not happened as of
+  this ADR.
+- **The FP guard shipped in both loops' prompts from day one (see Decision
+  point 2) has now been probed on both sides, clean on both.**
+  `stale-duplicate`'s guard (PR #805, above) dropped a real, observed
+  2-of-51 wrongful-`stale` rate against test-double literals to 0 after a
+  wording fix. `incomplete-handling`'s otherwise-identical guard was
+  separately probed the same day against two real, unrelated, loop-eligible
+  lien PRs (#772, #773 — chosen because their sibling-surface candidates
+  were judged benign in advance: deliberately-different modules sharing a
+  filename/directory pattern, not forgotten mirrors) and recorded **zero**
+  wrongful `incomplete` verdicts across 81 total candidate verdicts (3
+  votes × (15 + 12) candidates). That probe is an in-session measurement,
+  not yet landed as its own tracked artifact in this repository — cited
+  here for the same reason this ADR already cites an unpublished design
+  memo in References: an honest record of what was actually measured,
+  pending its own write-up.
 - **Per-PR firing-rate economics required real-PR census work, not
   assumption, and produced a genuine surprise.** The raw `<stale_literal_
   candidates>` block (unconditional signal, no loop-eligibility filter)
@@ -293,6 +328,10 @@ in the same PR.
   pass
 - PR #799, #803, #804, #805, #807 — the shipped implementation and its
   dogfood/census evidence cited throughout this ADR
+- `packages/review/test/harness/fixtures/crossrepo/
+  pr4172-columndatatype-gel-gap.assertions.ts` — the shared-vs-loop lift
+  fixture cited under Consequences/Negative (drizzle-team/drizzle-orm#4172,
+  promoted 2026-07-17); full result history in its own header
 - An unpublished, owner-approved per-rule-loops design memo prepared in a
   parallel working session (not part of this repository's tracked history)
   supplied the initial architecture proposal this ADR records the team's

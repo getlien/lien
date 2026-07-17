@@ -122,16 +122,24 @@ npx tsx <lien>/packages/review/test/harness/capture-pr.ts 2334 \
 | encode/starlette | #2191 | `crossrepo/pr2191-templateresponse-offbyone` | positional-args index collision | **canary** (certified 10/10, 2026-07-12) |
 | pallets/werkzeug | #2678 | `crossrepo/pr2678-multipart-index-offset` | slice-relative index used as absolute | **canary** (certified 10/10, 2026-07-16) |
 | pallets/werkzeug | #2017 | `crossrepo/pr2017-multipart-boundary-regex` | unescaped client boundary in regex | characterization (measured 8/10 — below bar, see header) |
+| drizzle-team/drizzle-orm | #4172 | `crossrepo/pr4172-columndatatype-gel-gap` | 6 new Gel `ColumnDataType` variants unhandled by 4 downstream packages | **canary** (certified 10/10, 2026-07-17 — first TypeScript entry in this corpus; also the loop-vs-shared A/B fixture, see header) |
 
-The two remaining `characterization`-tagged entries are both below the ≥9/10
-bar, for different reasons: `pr2334-etag-weak-indicator-strip` has 3/3 Kimi
-vote evidence but scores 5/10 on `--calibrate 10` (borderline judgment, not a
-budget deferral). `pr2017-multipart-boundary-regex` raw-scored 10/10 on
-`--calibrate 10` (2026-07-16), but a post-cert dogfood assert-cli smoke test
-(perfect/empty/distractor, see below) found its keyword list's bare
-identifiers/domain nouns let 2 of the 10 votes false-pass on unrelated
-findings; re-scored against the corrected keyword list its true rate is
-8/10. See each header before spending more calibration budget or re-promoting.
+The two `characterization`-tagged starlette/werkzeug entries are both below
+the ≥9/10 bar, for different reasons: `pr2334-etag-weak-indicator-strip` has
+3/3 Kimi vote evidence but scores 5/10 on `--calibrate 10` (borderline
+judgment, not a budget deferral). `pr2017-multipart-boundary-regex`
+raw-scored 10/10 on `--calibrate 10` (2026-07-16), but a post-cert dogfood
+assert-cli smoke test (perfect/empty/distractor, see below) found its
+keyword list's bare identifiers/domain nouns let 2 of the 10 votes
+false-pass on unrelated findings; re-scored against the corrected keyword
+list its true rate is 8/10. See each header before spending more
+calibration budget or re-promoting.
+
+`pr4172-columndatatype-gel-gap` pins its fixture's `config` to
+`{ incompleteHandlingPass: true }` (baked into the captured `ReviewContext`,
+not an external env var) — see its header for why that needs zero harness
+plumbing changes, and for the same-fixture A/B evidence (shared main pass
+1/3 vs the dedicated loop 3/3 screen, 10/10 calibrated) that promoted it.
 
 ## Negative-regression fixtures
 
