@@ -3,11 +3,17 @@
 Status: generalized executor + attestation v2 shipped (PR #799, merged).
 Three passes plug into it today — **doc-truth is production-on by default**
 (v1); the **stale-duplicate** and **incomplete-handling** candidate loops
-are built, merged, and dark (default-off), and doc-truth itself gained a
-dark, env-only v2 mode (PR #807) that backports the same per-candidate-
-verdict contract into its own pass — see "Which passes are live" below.
-See [ADR-014](decisions/0014-per-rule-candidate-loop-passes.md) for the
-decision this doc implements and its evidence/economics.
+are built, merged, and dark (default-off) for `@liendev/review`/
+`@liendev/action` consumers, and doc-truth itself gained a dark, env-only
+v2 mode (PR #807) that backports the same per-candidate-verdict contract
+into its own pass — see "Which passes are live" below. As of 2026-07-17,
+this monorepo's own `.github/workflows/lien-review.yml` opts both loops in
+on itself (`LIEN_STALE_DUP_PASS=on` / `LIEN_INCOMPLETE_PASS=on`) to dogfood
+them on its own PRs; the package/action defaults are unchanged. See
+[ADR-014](decisions/0014-per-rule-candidate-loop-passes.md) for the
+decision this doc implements and its evidence/economics — the evidence
+behind this opt-in is session-local so far and will be written up there
+once promoted into a durable fixture.
 
 ## Motivation
 
