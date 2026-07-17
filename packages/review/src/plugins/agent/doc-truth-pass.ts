@@ -71,7 +71,11 @@ import type { AgentConfig, AgentFinding, AgentResult, ResolvedRules } from './ty
 import { DOC_TRUTH } from './rules.js';
 import { buildSystemPrompt } from './system-prompt.js';
 import { envDisabled } from './agent-client-shared.js';
-import { renderPassPrHeader, type ReviewPassSpec } from './review-pass.js';
+import {
+  renderPassPrHeader,
+  EXTRA_PASS_MIN_BUDGET_TOKENS,
+  type ReviewPassSpec,
+} from './review-pass.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -88,7 +92,15 @@ export const DOC_PASS_MAX_TURNS = 6;
 /**
  * The doc pass's token budget as a fraction of the main pass's base budget.
  * ~40% is ample for a claims-only pass whose input is the (already compact)
- * doc-claim signals rather than the full diff + all signals.
+ * doc-claim signals rather than the full diff + all signals — PROVIDED the
+ * base itself is normal-mode-sized (`scaleAgentBudget`'s ≥60K floor, where
+ * 40% is ≥24K). This fraction was never re-validated against summary-only
+ * mode's deliberately tiny 6,000-20,000 base (added by #572): 40% of a
+ * 6,054 base is 2,422 tokens — smaller than a single Kimi reasoning+tool
+ * turn (PR #811 measured 5,526-6,564/turn), so the pass hard-stopped before
+ * its first tool call ever dispatched. `docTruthPassBudget` now clamps this
+ * fraction to `EXTRA_PASS_MIN_BUDGET_TOKENS` so a tiny base can no longer
+ * starve it below one real round-trip.
  */
 export const DOC_PASS_BUDGET_FRACTION = 0.4;
 
@@ -458,9 +470,14 @@ pass's result incomplete.
 // Budget
 // ---------------------------------------------------------------------------
 
-/** The doc pass's token budget: a fraction of the main pass's base budget. */
+/**
+ * The doc pass's token budget: a fraction of the main pass's base budget,
+ * floored at `EXTRA_PASS_MIN_BUDGET_TOKENS` so a tiny base (summary-only
+ * mode) can't shrink it below one real tool round-trip (see PR #811 /
+ * `DOC_PASS_BUDGET_FRACTION`'s doc comment).
+ */
 export function docTruthPassBudget(baseBudget: number): number {
-  return Math.round(baseBudget * DOC_PASS_BUDGET_FRACTION);
+  return Math.max(Math.round(baseBudget * DOC_PASS_BUDGET_FRACTION), EXTRA_PASS_MIN_BUDGET_TOKENS);
 }
 
 /** Plugin name the doc-truth pass reports itself under in the delivery attestation. */

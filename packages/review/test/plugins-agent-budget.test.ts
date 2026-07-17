@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { OpenAIAgentClient, envDisabled } from '../src/plugins/agent/openai-client.js';
+import {
+  OpenAIAgentClient,
+  envDisabled,
+  retryMaxTokens,
+} from '../src/plugins/agent/openai-client.js';
 import {
   AgentReviewPlugin,
   appendIncompleteNotice,
@@ -202,6 +206,49 @@ describe('OpenAIAgentClient budget handling', () => {
     expect(result.incomplete).toBe(false); // retry recovered a verdict
     expect(result.summary?.overview).toBe('recovered');
   }, 15000);
+
+  it('caps the summary-retry request to a small bounded max_tokens on a starved bail (#811)', async () => {
+    // Same starved shape as the test above, but this asserts the WIRE-LEVEL
+    // fix: turn 1 (2000 tokens) already blows the 1000-token budget, so the
+    // retry's remainingBudget is deeply negative — its request must carry
+    // the floored RETRY_MIN_MAX_TOKENS (2048), not the old flat 24,576.
+    const rawVerdict = JSON.stringify({
+      findings: [],
+      summary: { riskLevel: 'low', overview: 'recovered', keyChanges: [] },
+    });
+    const { bodies } = mockFetch([toolCallTurn(2000), stopTurn(rawVerdict, 100)]);
+    const client = makeClient(1000);
+
+    await client.run('sys', 'init', [], noopTool);
+
+    expect(bodies[0].max_tokens).toBe(24_576); // turn 1: unaffected, normal ceiling
+    expect(bodies[1].max_tokens).toBe(2_048); // the retry: capped to the floor
+  }, 15000);
+
+  it('keeps the retry at the normal 24,576 ceiling when ample budget remains (no regression)', async () => {
+    // Forces the retry via max_turns (not budget) with a huge budget, so
+    // remainingBudget is deeply positive — the #792 suite below also uses a
+    // huge budget, but doesn't assert on max_tokens directly, so this makes
+    // the "unaffected when not starved" claim explicit for the retry path.
+    const rawVerdict = JSON.stringify({
+      findings: [],
+      summary: { riskLevel: 'low', overview: 'recovered', keyChanges: [] },
+    });
+    const { bodies } = mockFetch([toolCallTurn(100), stopTurn(rawVerdict, 50)]);
+    const client = new OpenAIAgentClient({
+      apiKey: 'test',
+      baseUrl: 'http://mock.local',
+      model: 'test-model',
+      maxTurns: 1,
+      maxTokenBudget: 1_000_000,
+      logger: silentLogger,
+    });
+
+    const result = await client.run('sys', 'init', [], noopTool);
+
+    expect(result.summary?.overview).toBe('recovered'); // retry did fire and recover
+    expect(bodies[1].max_tokens).toBe(24_576);
+  });
 
   it('logs the last-turn reasoning when a run is incomplete', async () => {
     const { logger, lines } = capturingLogger();
@@ -716,6 +763,32 @@ describe('envDisabled (LIEN_REVIEW_LOG_AGENT parsing — logging on by default)'
     expect(envDisabled('true')).toBe(false);
     expect(envDisabled('')).toBe(false);
     expect(envDisabled(undefined)).toBe(false);
+  });
+});
+
+describe('retryMaxTokens — bounding the summary-retry request (#811)', () => {
+  it('floors to 2,048 when remaining budget is deeply negative (the starved case)', () => {
+    // #811's actual numbers: doc-truth's turn 1 alone spent 5,526 against a
+    // 2,422 budget (remaining -3,104); stale-dup's spent 6,564 against 4,400
+    // (remaining -2,164). Both must floor to the same small request cap.
+    expect(retryMaxTokens(-3_104)).toBe(2_048);
+    expect(retryMaxTokens(-2_164)).toBe(2_048);
+  });
+
+  it('floors to 2,048 at and just above zero remaining budget', () => {
+    expect(retryMaxTokens(0)).toBe(2_048);
+    expect(retryMaxTokens(1_000)).toBe(2_048);
+  });
+
+  it('passes remaining budget through unchanged between the floor and the ceiling', () => {
+    expect(retryMaxTokens(2_048)).toBe(2_048);
+    expect(retryMaxTokens(10_000)).toBe(10_000);
+    expect(retryMaxTokens(24_576)).toBe(24_576);
+  });
+
+  it('clamps to the 24,576 ceiling when ample budget remains (matches the old flat request)', () => {
+    expect(retryMaxTokens(24_577)).toBe(24_576);
+    expect(retryMaxTokens(999_900)).toBe(24_576); // e.g. a 1M-token-budget pass
   });
 });
 

@@ -4,6 +4,7 @@ import {
   runReviewPass,
   appendPassTurns,
   runExtraPasses,
+  EXTRA_PASS_MIN_BUDGET_TOKENS,
   type ReviewPassSpec,
 } from '../src/plugins/agent/review-pass.js';
 import { createTestContext, silentLogger } from '../src/test-helpers.js';
@@ -76,6 +77,20 @@ function makeSpec(overrides: Partial<ReviewPassSpec> = {}): ReviewPassSpec {
     ...overrides,
   };
 }
+
+// ---------------------------------------------------------------------------
+// EXTRA_PASS_MIN_BUDGET_TOKENS
+// ---------------------------------------------------------------------------
+
+describe('EXTRA_PASS_MIN_BUDGET_TOKENS', () => {
+  it('is at least one measured Kimi turn (#811: 5,526-6,564 tokens/turn) with real margin', () => {
+    // Not a tautology on the current value — a regression that drops the
+    // floor back toward the old per-pass minimums (4,000/5,000) would fail
+    // this outright, since those are both below the measured per-turn cost.
+    expect(EXTRA_PASS_MIN_BUDGET_TOKENS).toBeGreaterThanOrEqual(10_000);
+    expect(EXTRA_PASS_MIN_BUDGET_TOKENS).toBeLessThanOrEqual(12_000);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // runReviewPass

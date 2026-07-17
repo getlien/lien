@@ -87,6 +87,26 @@ export interface ReviewPassSpec {
 }
 
 /**
+ * Absolute floor (tokens) under every extra pass's own budget formula —
+ * whatever a pass computes (doc-truth's fraction of the main base,
+ * stale-duplicate/incomplete-handling's per-candidate scaling), the result
+ * is never allowed below this. Sized from PR #811's measured per-turn
+ * appetite on Kimi: a single reasoning + tool-request turn cost 5,526-6,564
+ * tokens BEFORE any tool result came back (`get_files_context`/`read_file`)
+ * — bigger than doc-truth's (2,422) and stale-duplicate's (4,400) entire
+ * pre-fix allocations, so either one hard-stopped the tool-calling loop
+ * before it ever dispatched the call it asked for. 11,000 affords one such
+ * turn plus a smaller follow-up/verdict turn with margin: "one real tool
+ * round-trip", not the ~24K+ headroom normal-mode's `scaleAgentBudget`
+ * passes enjoy. Shared across all three passes (this module's third
+ * identical floor rather than a fourth copy of the same constant + the same
+ * justifying comment — CLAUDE.md's DRY guidance: wait for the 3rd use). See
+ * the PR body's before/after table for the exact #811 numbers this floor
+ * fixes.
+ */
+export const EXTRA_PASS_MIN_BUDGET_TOKENS = 11_000;
+
+/**
  * The PR title/body header, mirroring the main pass's `<pr_metadata>` block.
  * Shared by every extra pass's prompt builder (doc-truth, stale-duplicate,
  * incomplete-handling) — extracted here on this module's third identical
