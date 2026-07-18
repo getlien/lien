@@ -395,10 +395,11 @@ id in ${ids.join(', ')}, no more, no fewer — in a \`\`\`json code fence:
   }
 }
 
-EVERY entry requires candidateId, verdict, filepath, line, severity, and message —
+EVERY entry requires candidateId, verdict, filepath, line, severity, category, and message —
 even for handled/intentional/unverifiable verdicts (fill filepath/line from the
-candidate's own site, severity "warning", message explaining the disposition).
-A missing candidateId for any worklist entry makes this pass's result incomplete.
+candidate's own site, severity "warning", category any short slug e.g. "logic_error", message
+explaining the disposition). A missing category silently drops the ENTIRE entry, same as a
+missing candidateId — both make this pass's result incomplete.
 </output_format>`;
 }
 
