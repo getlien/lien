@@ -33,8 +33,10 @@
  * design brief: "when in doubt, suppress the candidate — the rule's LLM
  * judgment still exists without the signal."
  *
- *  - **Wholesale consumption (spread / `JSON.stringify` / serialization).**
- *    If a `: TypeName` annotation has a spread (`...x`) or `JSON.stringify(`
+ *  - **Wholesale consumption (spread / `JSON.stringify` / serialization /
+ *    shorthand-property hand-off).** If a `: TypeName` annotation has a
+ *    spread (`...x`), `JSON.stringify(`, or — see below — a shorthand-
+ *    property object-literal reference to the SAME annotated variable,
  *    within `WHOLESALE_PROXIMITY_CHARS` characters after it anywhere in the
  *    corpus, every field of that type is suppressed — we can't prove the
  *    field isn't consumed as part of a whole-object pass-through, so we
@@ -48,6 +50,31 @@
  *    specific false-suppression while keeping the check textual (not real
  *    data-flow: the nearby spread/stringify need not touch the same
  *    variable the annotation introduced).
+ *    The shorthand-property case is narrower and DOES tie back to the
+ *    annotated variable's own name (mining sweep, hono #4451 ground truth):
+ *    `app.fetch(req, { event, requestContext, context })` hands the whole
+ *    `requestContext` value (typed `LatticeRequestContextV2`, carrying the
+ *    PR's new `serviceNetworkArn` field) opaquely to another consumer via a
+ *    bare shorthand property — not a spread, not `JSON.stringify`, so the
+ *    original check missed it and flagged a real, actively-consumed field as
+ *    unread. `{ requestContext }` reads as "hand off the CURRENT value of
+ *    variable `requestContext`" the same way `...requestContext` would, so
+ *    it counts as the same wholesale evidence — scoped to the specific
+ *    variable name captured from the type annotation (`varName: TypeName`),
+ *    not "any object literal with 2+ shorthand keys anywhere nearby".
+ *  - **JSX attribute usage (`<div tw="...">`).** Read detection also
+ *    recognizes the field name appearing as a JSX attribute on any element —
+ *    invisible to the dot/bracket/destructure patterns above, since a JSX
+ *    attribute is compiled to a prop key, never a `.field`/`['field']`
+ *    access or a destructured binding in the SOURCE text. Motivating case
+ *    (mining sweep, zod's OG-image generator): Satori's custom JSX renderer
+ *    reads `HTMLAttributes.tw` (an inline-Tailwind escape hatch) exclusively
+ *    via `<div tw="...">`-shaped call sites. Bounded to a fixed character
+ *    window after the opening `<Tag` (mirrors the wholesale check's
+ *    proximity design, and — per #810's ReDoS-hardening precedent —
+ *    deliberately uses a BOUNDED quantifier rather than an unbounded `*`, so
+ *    a minified file dense with `<`/`>` comparison operators can't make this
+ *    pattern's worst case anything other than linear).
  *  - **Exported "public API" types.** A field on a type that's re-exported by
  *    an `index.ts`/`index.js` barrel is suppressed — its real consumers may
  *    live outside this indexed corpus (an external SDK consumer, or another
@@ -72,6 +99,19 @@
  *    convention (`*.test.ts`, `__tests__/`, etc.) is skipped entirely — test
  *    fixture objects routinely carry properties the test itself never reads
  *    back out, and that's not a production bug.
+ *  - **Generated `.d.ts` declaration files.** A field declared in a `.d.ts`
+ *    file whose name carries a codegen marker (`-bundle`, `-generated`/
+ *    `.generated.`, `.gen.`) or whose leading content carries a generator
+ *    marker comment (`@generated`, `DO NOT EDIT`, "automatically generated")
+ *    is skipped the same way a test-fixture file is. Motivating case (mining
+ *    sweep, drizzle-kit): `grammar.ohm-bundle.d.ts`, an Ohm.js-generated
+ *    grammar action-dictionary type listing EVERY grammar rule as an
+ *    optional handler property — the exact same "declared, most never
+ *    populated/read by any one consumer" shape as a test fixture, just for
+ *    generated parser code instead. Deliberately narrow: a HAND-WRITTEN
+ *    `.d.ts` (an ambient module declaration a person authored) carries
+ *    neither signal and is NOT suppressed — blindly suppressing every
+ *    `.d.ts` would hide real gaps in hand-authored type-only files.
  *  - **Dynamic/bracket access.** Read detection covers `obj.field`,
  *    `obj['field']`/`obj["field"]` (bracket string-literal key access), and
  *    both destructuring shapes (`const { field } = x`, `function f({ field })`)
@@ -153,6 +193,22 @@ const TEST_PATH_RE =
 /** An `index.ts`/`index.js` (or `.tsx`/`.jsx`) barrel file anywhere in the corpus. */
 const INDEX_BARREL_RE = /(^|\/)index\.[cm]?[jt]sx?$/;
 
+/** A TypeScript declaration file. */
+const DTS_FILE_RE = /\.d\.ts$/;
+
+/**
+ * A `.d.ts` filename stem carrying a common codegen marker: `-bundle`/`.bundle.` (this mining
+ * sweep's own drizzle-kit ground truth, `grammar.ohm-bundle.d.ts`), `-generated`/`.generated.`/
+ * `_generated`, or `.gen.`. Checked against the basename only — see {@link isGeneratedDeclarationFile}.
+ */
+const GENERATED_DTS_STEM_RE = /[.\-_](?:bundle|generated|gen)(?:[.\-_]|$)/i;
+
+/** A leading generator-marker comment (`@generated`, `DO NOT EDIT`, "automatically generated"). */
+const GENERATED_MARKER_RE = /@generated\b|\bDO NOT EDIT\b|\bautomatically generated\b/i;
+/** Only scan the file's own leading characters for a generator marker — a match deep inside a
+ *  large file is not reliable evidence the WHOLE file is generated. */
+const GENERATED_MARKER_SCAN_CHARS = 500;
+
 const HUNK_HEADER_RE = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
 
 const INTERFACE_HEADER_RE =
@@ -182,6 +238,14 @@ const CLASS_PROPERTY_LINE_RE =
 const WHOLESALE_RE = /\bJSON\.stringify\s*\(|\.\.\.\s*[A-Za-z_$]/;
 /** How close (chars) a spread/`JSON.stringify(` must be AFTER a `: typeName` annotation to count — see {@link chunkHasWholesaleConsumption}. */
 const WHOLESALE_PROXIMITY_CHARS = 400;
+
+/**
+ * How many characters after a JSX tag's opening `<Tag` to scan for the field name used as an
+ * attribute — see {@link buildJsxAttrReadPattern}. A BOUNDED window (not an unbounded `*`
+ * repetition) so a minified file dense with `<`/`>` comparison operators can't make this
+ * pattern's worst case anything other than linear (#810's ReDoS-hardening precedent).
+ */
+const JSX_ATTR_SCAN_CHARS = 240;
 
 // ---------------------------------------------------------------------------
 // Low-level text utilities (masking/brace-matching, mirrors variant-sweep-signals.ts)
@@ -603,6 +667,38 @@ function collectAddedFieldsForFile(
   }
 }
 
+// ---------------------------------------------------------------------------
+// File-level skip checks (test fixtures, generated declaration files)
+// ---------------------------------------------------------------------------
+
+/**
+ * The chunk most likely to hold `file`'s own leading lines (smallest `startLine`) — a generator
+ * marker comment near the top of the file wouldn't be visible from a later, non-head chunk if
+ * the file was split across several.
+ */
+function headChunkContent(file: string, chunks: CodeChunk[]): string {
+  let head: CodeChunk | undefined;
+  for (const chunk of chunks) {
+    if (chunk.metadata.file !== file) continue;
+    if (!head || chunk.metadata.startLine < head.metadata.startLine) head = chunk;
+  }
+  return head?.content ?? '';
+}
+
+/**
+ * Is `file` a GENERATED `.d.ts` declaration file — skipped the same way a test-fixture file is
+ * (module doc's "Generated `.d.ts` declaration files" note)? Deliberately narrow: a HAND-WRITTEN
+ * `.d.ts` carries neither a codegen filename marker nor a leading generator-marker comment and
+ * is NOT skipped by this check.
+ */
+function isGeneratedDeclarationFile(file: string, chunks: CodeChunk[]): boolean {
+  if (!DTS_FILE_RE.test(file)) return false;
+  const base = file.slice(file.lastIndexOf('/') + 1);
+  if (GENERATED_DTS_STEM_RE.test(base)) return true;
+  const head = headChunkContent(file, chunks).slice(0, GENERATED_MARKER_SCAN_CHARS);
+  return GENERATED_MARKER_RE.test(head);
+}
+
 /**
  * Find every interface member / type-literal property / class field this PR
  * genuinely adds (unlike `variant-sweep-signals.ts`, the containing
@@ -621,6 +717,7 @@ export function computeAddedFields(context: ReviewContext): AddedField[] {
   for (const [file, patch] of patches) {
     if (!TS_JS_FILE_RE.test(file)) continue;
     if (TEST_PATH_RE.test(file)) continue; // FP trap: test-fixture files
+    if (isGeneratedDeclarationFile(file, chunks)) continue; // FP trap: generated .d.ts
     collectAddedFieldsForFile(file, patch, chunks, seen, entries);
   }
 
@@ -691,27 +788,53 @@ function isReachableFromIndexBarrel(
 }
 
 /**
- * Does a `: typeName` type annotation appear with a spread or
- * `JSON.stringify(` within {@link WHOLESALE_PROXIMITY_CHARS} characters
- * AFTER it, anywhere in this chunk? Requiring the annotation — not just the
- * bare type name — matters: a doc comment or an unrelated field merely
- * NAMING the type (`RuleTriggers.filePatterns` in a docstring, `triggers:
- * RuleTriggers` three unrelated fields away from someone else's spread) is
- * not evidence any VALUE of this type is ever spread/serialized. Comments
- * are masked first, so a prose mention can't itself count as the
- * annotation. Still coarse (proximity, not real data-flow — the nearby
- * spread/stringify need not touch the SAME variable the annotation
- * introduced), but far tighter than "the type name and a spread anywhere in
- * the same file", which false-fired on this module's OWN doc comment
- * mentioning `RuleTriggers` during dogfooding.
+ * Matches `varName: TypeName` / `varName?: TypeName` (capturing `varName` when present) or a
+ * bare `: TypeName` with no preceding identifier at all (a return-type annotation, a generic
+ * wrapper, etc.) — the capture group is OPTIONAL specifically so this still matches every shape
+ * the original bare `:\s*typeName\b` check did; see {@link chunkHasWholesaleConsumption}.
+ */
+function typedAnnotationRegex(typeName: string): RegExp {
+  return new RegExp(`([A-Za-z_$][\\w$]*)?\\??\\s*:\\s*${escapeRegExp(typeName)}\\b`, 'g');
+}
+
+/**
+ * Does `varName` appear as a bare shorthand property inside an object literal (`{ event,
+ * varName, context }`) within `window`? A shorthand property hands off the CURRENT value of
+ * `varName` wholesale to whatever consumes the new object — the same "can't prove the field
+ * isn't part of a whole-object pass-through" evidence a spread or `JSON.stringify` gives, just
+ * via different syntax (mining sweep, hono #4451 ground truth: `app.fetch(req, { event,
+ * requestContext, context })`). Requires `varName` to sit directly between `{`/`,` and `,`/`}`
+ * (no colon after it) so an ordinary `varName: something` key-value pair, or a `.varName`
+ * access, is not mistaken for a shorthand hand-off.
+ */
+function hasShorthandHandoff(varName: string, window: string): boolean {
+  return new RegExp(`[{,]\\s*${escapeRegExp(varName)}\\s*[,}]`).test(window);
+}
+
+/**
+ * Does a `: typeName` type annotation appear with a spread, `JSON.stringify(`, or a shorthand-
+ * property hand-off of the SAME annotated variable, within {@link WHOLESALE_PROXIMITY_CHARS}
+ * characters AFTER it, anywhere in this chunk? Requiring the annotation — not just the bare type
+ * name — matters: a doc comment or an unrelated field merely NAMING the type
+ * (`RuleTriggers.filePatterns` in a docstring, `triggers: RuleTriggers` three unrelated fields
+ * away from someone else's spread) is not evidence any VALUE of this type is ever spread/
+ * serialized/handed off. Comments are masked first, so a prose mention can't itself count as the
+ * annotation. Still coarse (proximity, not real data-flow — the nearby spread/stringify need not
+ * touch the SAME variable the annotation introduced), but far tighter than "the type name and a
+ * spread anywhere in the same file", which false-fired on this module's OWN doc comment
+ * mentioning `RuleTriggers` during dogfooding. The shorthand-property check is scoped tighter
+ * still — it only fires for a shorthand reference to the SPECIFIC variable the annotation named,
+ * not "any object literal with shorthand keys nearby" (see {@link hasShorthandHandoff}).
  */
 function chunkHasWholesaleConsumption(typeName: string, content: string): boolean {
   const masked = maskComments(content);
-  const typedRe = new RegExp(`:\\s*${escapeRegExp(typeName)}\\b`, 'g');
+  const typedRe = typedAnnotationRegex(typeName);
   for (const m of masked.matchAll(typedRe)) {
+    const varName = m[1];
     const windowStart = m.index + m[0].length;
     const window = masked.slice(windowStart, windowStart + WHOLESALE_PROXIMITY_CHARS);
     if (WHOLESALE_RE.test(window)) return true;
+    if (varName && hasShorthandHandoff(varName, window)) return true;
   }
   return false;
 }
@@ -746,6 +869,21 @@ function isSuppressedType(
 // ---------------------------------------------------------------------------
 
 /**
+ * A JSX attribute usage of `name` on any element (`<div name="...">`, `<Foo name />`,
+ * `<Foo name={expr}>`) — see module doc's "JSX attribute usage" note. Requires whitespace
+ * directly before the name (so a longer identifier merely ENDING in `name`, e.g. `className`
+ * for field `name`, can't match) and `=`/whitespace/a (self-)closing `>` directly after (so a
+ * longer identifier STARTING with `name` can't match either). Bounded to
+ * {@link JSX_ATTR_SCAN_CHARS} characters after the opening `<Tag` with a single bounded
+ * quantifier (not an unbounded `*`), so this pattern's worst case stays linear regardless of
+ * input size — see {@link JSX_ATTR_SCAN_CHARS}'s doc.
+ */
+function buildJsxAttrReadPattern(name: string): RegExp {
+  const esc = escapeRegExp(name);
+  return new RegExp(`<[A-Za-z][^<>]{0,${JSX_ATTR_SCAN_CHARS}}\\s${esc}\\b(?:=|\\s|/?>)`);
+}
+
+/**
  * Read patterns for one field name. Excludes only a PLAIN simple assignment
  * (`.field = value`, the pure-write/population shape) — compound assignment
  * (`+=`) and increment/decrement (`++`/`--`) read-then-write, so they count
@@ -763,6 +901,8 @@ function buildFieldReadPatterns(name: string): RegExp[] {
     new RegExp(`\\{[^{}]*\\b${esc}\\b[^{}]*\\}\\s*(?::\\s*[\\w.<>[\\],\\s]+)?=(?!=)`),
     // Destructuring function parameter: `function f({ field }: T)` / `({ field }) =>`.
     new RegExp(`\\([^()]*\\{[^{}]*\\b${esc}\\b[^{}]*\\}`),
+    // JSX attribute usage: `<div field="...">` / `<Foo field />` / `<Foo field={expr}>`.
+    buildJsxAttrReadPattern(name),
   ];
 }
 
@@ -806,6 +946,7 @@ function buildDeclarationIndex(context: ReviewContext): Map<string, TypeDeclarat
   const declByKey = new Map<string, TypeDeclaration>();
   for (const file of context.pr?.patches?.keys() ?? []) {
     if (!TS_JS_FILE_RE.test(file) || TEST_PATH_RE.test(file)) continue;
+    if (isGeneratedDeclarationFile(file, context.chunks)) continue; // FP trap: generated .d.ts
     for (const chunk of context.chunks) {
       if (chunk.metadata.file !== file) continue;
       for (const decl of findTypeDeclarations(chunk.content, chunk.metadata.startLine)) {
