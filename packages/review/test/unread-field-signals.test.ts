@@ -683,6 +683,17 @@ describe('computeUnreadFieldCandidates', () => {
     expect(computeUnreadFieldCandidates(baseContext(repoChunks))).toEqual([]);
   });
 
+  // Regression: flagged on this PR's own review (lien-stats summary for commit 5e366b2) — a
+  // NESTED brace expression inside an earlier JSX attribute (`style={{ color: 'red' }}`, the
+  // common "object literal passed as a JSX expression" shape) broke the single-level-only
+  // brace-skip, so a LATER attribute name was never reached at all.
+  it('still matches the field name as an attribute AFTER an earlier attribute with a NESTED brace expression', () => {
+    const consumer =
+      'function Card(props: Options) {\n  return <div style={{ color: \'red\' }} timeout="5s">hi</div>;\n}';
+    const repoChunks = [...optionsChunks(), makeChunk('src/card.tsx', 1, consumer)];
+    expect(computeUnreadFieldCandidates(baseContext(repoChunks))).toEqual([]);
+  });
+
   // Regression: flagged on this PR's own review (lien-stats summary for commit 0b06fe3) — a
   // `name: TypeName` match inside an UNRELATED interface/class body is a PROPERTY declaration,
   // not a variable, so a coincidental shorthand reference to that same name elsewhere must not

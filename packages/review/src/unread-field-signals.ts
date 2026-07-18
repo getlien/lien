@@ -1069,18 +1069,22 @@ function isSuppressedType(
 
 /**
  * The "gap" between a JSX tag's opening `<Tag` and the attribute name this pattern is looking
- * for: either an ordinary non-`<`/`>`/`{`/`}` character, OR one WHOLE single-level `{...}`
- * expression container consumed as one unit. The latter is what stops a PRIOR attribute's brace
- * expression from being scanned character-by-character — CodeRabbit's review on this PR's own
- * #818 found `<div className={ timeout }>` false-matched field `timeout` as if it were an
- * attribute NAME, because the naive `[^<>]*` gap could wander INSIDE that expression and land on
- * the local variable `timeout` used as its VALUE. Consuming a `{...}` group in one bite means the
- * scan can only ever test a candidate match at a position that is a genuine attribute-name slot,
- * never partway through a value expression. No ambiguity between the two alternatives at any
- * position (a `{` can only start the second branch, everything else can only match the first),
- * so this doesn't reintroduce catastrophic-backtracking risk — see {@link JSX_ATTR_SCAN_CHARS}.
+ * for: either an ordinary non-`<`/`>`/`{`/`}` character, OR one WHOLE `{...}` expression
+ * container consumed as one unit — up to ONE level of brace nesting inside it (`{{ ... }}`, the
+ * common "object literal passed as a JSX expression" shape, e.g. `style={{ color: 'red' }}`).
+ * Consuming a `{...}` group in one bite (rather than scanning through it character by character)
+ * is what stops a PRIOR attribute's brace expression from being read into: CodeRabbit's review on
+ * this PR's own #818 found `<div className={ timeout }>` false-matched field `timeout` as if it
+ * were an attribute NAME, because the naive `[^<>]*` gap could wander INSIDE that expression and
+ * land on the local variable `timeout` used as its VALUE. The one-level nesting allowance is a
+ * follow-up on the SAME PR's review: the original single-level-only version couldn't skip PAST
+ * `style={{ color: 'red' }}` at all (its own object-literal braces broke the naive `[^{}]*`
+ * capture), so a LATER attribute like `tw="..."` was never reached and read as unread. No
+ * ambiguity between the alternatives at any position (a `{` can only start the brace-group
+ * branch, everything else can only match the plain-character branch), so this doesn't
+ * reintroduce catastrophic-backtracking risk — see {@link JSX_ATTR_SCAN_CHARS}.
  */
-const JSX_ATTR_GAP = `(?:[^<>{}]|\\{[^{}]*\\})`;
+const JSX_ATTR_GAP = `(?:[^<>{}]|\\{(?:[^{}]|\\{[^{}]*\\})*\\})`;
 
 /**
  * A JSX attribute usage of `name` on any element (`<div name="...">`, `<Foo name />`,
