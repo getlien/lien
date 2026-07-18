@@ -81,7 +81,15 @@ jobs:
       published: ${{ steps.changesets.outputs.published }}
       published-packages: ${{ steps.changesets.outputs.publishedPackages }}
     steps:
+      # Checked out (and the Version PR below opened/updated) with RELEASE_PAT
+      # rather than the default GITHUB_TOKEN: PRs authored by github-actions[bot]
+      # via GITHUB_TOKEN land `action_required` on every workflow run and need a
+      # human to click "Approve and run workflows" before CI can even start.
+      # Using a real account's PAT makes the Version Packages PR author a known
+      # contributor instead, so its own CI runs without that manual gate.
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.RELEASE_PAT }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -145,7 +153,9 @@ jobs:
           # Version Packages PR lands with unsigned commits and can't merge.
           commitMode: github-api
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # RELEASE_PAT (see checkout step above), not the default GITHUB_TOKEN
+          # -- see the checkout step's comment for why.
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PAT }}
           # No NPM_TOKEN needed - uses OIDC provenance
 
   registry-smoke:
