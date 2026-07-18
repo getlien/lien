@@ -173,4 +173,23 @@ describe('scanCodebase', () => {
 
     expect(worktreeRelative).toContain(path.join('src', 'foo.ts'));
   });
+
+  // Regression lock for the dot-directory glob gap: glob's default `dot:false`
+  // means a bare `**/*.yml` never descends into `.github/`, so the default
+  // (no includePatterns) fallback must carry an explicit `.github/**` entry
+  // for CI workflow YAML to be scanned at all.
+  it('includes .github/workflows/*.yml under the default (no includePatterns) fallback', async () => {
+    testDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-test-scanner-github-yaml-'));
+
+    await fs.mkdir(path.join(testDir, '.github', 'workflows'), { recursive: true });
+    await fs.writeFile(
+      path.join(testDir, '.github', 'workflows', 'ci.yml'),
+      'name: CI\non: push\n',
+    );
+
+    const files = await scanCodebase({ rootDir: testDir });
+    const relative = files.map(f => path.relative(testDir, f));
+
+    expect(relative).toContain(path.join('.github', 'workflows', 'ci.yml'));
+  });
 });

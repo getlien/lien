@@ -158,6 +158,10 @@ Detected via `astro.config.*`. Indexes:
 
 Liquid (`.liquid`) files are indexed via the default scan pattern—no ecosystem preset or auto-detection is required. They work out of the box alongside all other supported file types.
 
+### YAML
+
+YAML (`.yml`/`.yaml`) files are indexed via the default scan pattern, chunked by top-level key into `search_code`-able config sections (e.g. a GitHub Actions `jobs.review` block). This includes `.github/**` explicitly, so CI workflow files under `.github/workflows/` are indexed even though the default scan otherwise skips dot-directories. Other dot-directory CI configs (e.g. `.circleci/config.yml`, a root `.gitlab-ci.yml`) are **not yet indexed**—only `.github/**` is covered today.
+
 ### Monorepos
 
 Lien automatically detects multiple ecosystems in monorepos. For example, a repo with both `package.json` and `backend/composer.json` will index both Node.js and Laravel code with appropriate patterns.

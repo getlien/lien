@@ -69,6 +69,7 @@ Find code with terms: jwt token validation verify
 - "payment transaction charge refund"
 - "parse json response body"
 - "authorization middleware guard"
+- "harness evidence gate skip label" (also matches YAML config, e.g. a GitHub Actions workflow step)
 
 **Poor queries:**
 - "how does login work?" (a question — use the code's own terms instead)

@@ -124,7 +124,7 @@ Lien indexes and understands code in:
 - Swift
 
 **Indexed for lexical search** (chunking + FTS5):
-- All of the above, plus C/C++, Vue, Scala, Markdown, and more!
+- All of the above, plus C/C++, Vue, Scala, Markdown, YAML (config sections, e.g. GitHub Actions workflows), and more!
 
 ## Complexity Analysis
 

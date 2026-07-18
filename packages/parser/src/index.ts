@@ -28,6 +28,7 @@ export {
   MAX_CHUNKS_PER_FILE,
   PARSE_STAGE_MAX_CONCURRENCY,
   getParseStageConcurrency,
+  DEFAULT_INDEX_INCLUDE_PATTERNS,
 } from './constants.js';
 
 // =============================================================================

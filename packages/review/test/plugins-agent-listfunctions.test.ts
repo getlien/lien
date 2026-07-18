@@ -52,6 +52,20 @@ const docChunk = createTestChunk({
   },
 });
 
+// A YAML 'config' chunk carries a dotted key-path symbolName but is a config
+// section, not a code symbol. It must not appear in list_functions results.
+const configChunk = createTestChunk({
+  content: 'jobs:\n  review:\n    runs-on: ubuntu-latest\n',
+  metadata: {
+    file: '.github/workflows/lien-review.yml',
+    startLine: 1,
+    endLine: 3,
+    type: 'config',
+    symbolName: 'jobs.review',
+    language: 'yaml',
+  },
+});
+
 describe('listFunctions — markdown doc chunks are not treated as symbols', () => {
   it('lists real code symbols but excludes doc-heading breadcrumbs', () => {
     const res = run([codeChunk, docChunk]);
@@ -74,5 +88,17 @@ describe('listFunctions — markdown doc chunks are not treated as symbols', () 
     const names = (res.results ?? []).map(r => r.symbolName);
     expect(names).not.toContain('Guide > Install');
     expect(res.count).toBe(0);
+  });
+});
+
+describe('listFunctions — YAML config chunks are not treated as symbols', () => {
+  it('lists real code symbols but excludes config key-path breadcrumbs', () => {
+    const res = run([codeChunk, configChunk]);
+    const names = (res.results ?? []).map(r => r.symbolName);
+
+    expect(res.error).toBeUndefined();
+    expect(names).toContain('doThing');
+    expect(names).not.toContain('jobs.review');
+    expect(res.count).toBe(1);
   });
 });
