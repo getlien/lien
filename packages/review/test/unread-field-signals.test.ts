@@ -353,6 +353,35 @@ describe('computeAddedFields', () => {
     ]);
   });
 
+  // Regression: flagged on this PR's own review — the generator-marker text must appear inside
+  // an actual COMMENT, not inside a string literal or ordinary code. A hand-written declaration
+  // whose only "DO NOT EDIT" is a string value must still be treated as hand-written.
+  it('does NOT ignore a hand-written .d.ts whose marker text only appears inside a string literal', () => {
+    const content = [
+      'export type Warning = "DO NOT EDIT";',
+      'export interface Schema {',
+      '  field: number;',
+      '}',
+    ].join('\n');
+    const patches = new Map([
+      [
+        'src/schema.d.ts',
+        patch(
+          '@@ -0,0 +1,4 @@',
+          '+export type Warning = "DO NOT EDIT";',
+          '+export interface Schema {',
+          '+  field: number;',
+          '+}',
+        ),
+      ],
+    ]);
+    const chunks = [makeChunk('src/schema.d.ts', 1, content)];
+    const added = computeAddedFields(makeContext({ patches, chunks }));
+    expect(added).toEqual([
+      { typeName: 'Schema', field: 'field', file: 'src/schema.d.ts', line: 3, kind: 'interface' },
+    ]);
+  });
+
   it('ignores non-TS/JS files', () => {
     const patches = new Map([['src/options.rs', OPTIONS_PATCH]]);
     const chunks = [makeChunk('src/options.rs', 1, OPTIONS_INTERFACE)];
@@ -692,6 +721,23 @@ describe('computeUnreadFieldCandidates', () => {
       '  handle(o: Options): void {',
       '    app.fetch(req, { event, o, context });',
       '  }',
+      '}',
+    ].join('\n');
+    const repoChunks = [...optionsChunks(), makeChunk('src/consumer.ts', 1, consumer)];
+    expect(computeUnreadFieldCandidates(baseContext(repoChunks))).toEqual([]);
+  });
+
+  // Regression: flagged on this PR's own review (lien-stats summary for commit 77d9424) — the
+  // destructuring-binding exclusions used to run against the WHOLE window, so ANY destructuring
+  // occurrence anywhere nearby vetoed every hand-off in that window, including a genuinely
+  // separate, valid one. `const { o: alias } = wrapper` (a real destructuring binding, renaming
+  // "o" to "alias") must not block the SEPARATE, later `{ o }` hand-off from being detected.
+  it('still suppresses a real hand-off even when an unrelated destructuring binding exists earlier in the same window', () => {
+    const consumer = [
+      'function handle(o: Options): void {',
+      '  const { o: alias } = wrapper;',
+      '  console.log(alias);',
+      '  app.fetch(req, { event, o, context });',
       '}',
     ].join('\n');
     const repoChunks = [...optionsChunks(), makeChunk('src/consumer.ts', 1, consumer)];

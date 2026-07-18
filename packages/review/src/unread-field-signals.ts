@@ -324,6 +324,34 @@ function maskCommentsAndStrings(text: string): string {
   return maskSpans(text, () => true);
 }
 
+/**
+ * The INVERSE of {@link maskComments}: keeps only comment spans verbatim, blanking everything
+ * else — ordinary code AND string literals alike — with same-length whitespace (newlines kept).
+ * Used to require a generator marker (`isGeneratedDeclarationFile`) to appear inside an ACTUAL
+ * comment, not inside a string literal or ordinary code — flagged on this PR's own review: a
+ * hand-written declaration like `type Warning = "DO NOT EDIT";` must not be misread as a
+ * generator marker just because the literal TEXT "DO NOT EDIT" appears somewhere in the file.
+ */
+function commentsOnly(text: string): string {
+  let i = 0;
+  let out = '';
+  while (i < text.length) {
+    const span = classifySpan(text, i);
+    if (span === null) {
+      out += text[i] === '\n' ? '\n' : ' ';
+      i++;
+      continue;
+    }
+    if (span.kind === 'comment') {
+      out += text.slice(i, span.end);
+    } else {
+      for (let k = i; k < span.end; k++) out += text[k] === '\n' ? '\n' : ' ';
+    }
+    i = span.end;
+  }
+  return out;
+}
+
 function prevNonSpace(text: string, i: number): string {
   let k = i - 1;
   while (k >= 0 && /\s/.test(text[k])) k--;
@@ -691,15 +719,17 @@ function headChunkContent(file: string, chunks: CodeChunk[]): string {
 /**
  * Is `file` a GENERATED `.d.ts` declaration file — skipped the same way a test-fixture file is
  * (module doc's "Generated `.d.ts` declaration files" note)? Deliberately narrow: a HAND-WRITTEN
- * `.d.ts` carries neither a codegen filename marker nor a leading generator-marker comment and
- * is NOT skipped by this check.
+ * `.d.ts` carries neither a codegen filename marker nor a leading generator-marker COMMENT and is
+ * NOT skipped by this check — the marker text must appear inside an actual comment
+ * ({@link commentsOnly}), not inside a string literal or ordinary code (flagged on this PR's own
+ * review: `type Warning = "DO NOT EDIT";` must not count).
  */
 function isGeneratedDeclarationFile(file: string, chunks: CodeChunk[]): boolean {
   if (!DTS_FILE_RE.test(file)) return false;
   const base = file.slice(file.lastIndexOf('/') + 1);
   if (GENERATED_DTS_STEM_RE.test(base)) return true;
   const head = headChunkContent(file, chunks).slice(0, GENERATED_MARKER_SCAN_CHARS);
-  return GENERATED_MARKER_RE.test(head);
+  return GENERATED_MARKER_RE.test(commentsOnly(head));
 }
 
 /**
@@ -801,48 +831,15 @@ function typedAnnotationRegex(typeName: string): RegExp {
 }
 
 /**
- * A destructured function PARAMETER where the `{...}` is the FIRST thing after the opening `(`
- * (only whitespace between) — `function f({ name }: T)` / `({ name }) =>`. Deliberately
- * STRICTER than {@link destructuringParamPattern} (which also matches `foo(a, { name })`, a
- * call passing an object-literal argument AFTER another argument): requiring `{` to
- * IMMEDIATELY follow `(` is what separates a lone/first destructured parameter from the hono
- * #4451 hand-off shape this fix targets, `app.fetch(req, { event, name, context })` — there,
- * `req, ` sits between `(` and `{`, so this pattern does NOT match it. `destructuringParamPattern`
- * itself is deliberately NOT reused here (unlike the assignment exclusion below): it cannot tell
- * `function f({ name })` from `foo(a, { name })` by text alone, and reusing it would exclude the
- * exact wholesale hand-off shape this module is trying to detect. A single-argument hand-off call
- * shaped exactly like a lone destructured parameter (`render({ name })`) remains a documented
- * residual — genuinely ambiguous from pure text, and rare next to the multi-argument shape the
- * real ground truth showed.
- */
-function destructuringFirstParamPattern(name: string): RegExp {
-  const esc = escapeRegExp(name);
-  return new RegExp(`\\(\\s*\\{[^{}]*\\b${esc}\\b[^{}]*\\}`);
-}
-
-/**
- * A destructured `for`-loop binding: `for (const { name } of items)` / `for (let { name } in
- * obj)`. A third destructuring BINDING shape (alongside assignment and parameter) that a bare
- * `[{,]\s*name\s*[,}]` scan can't distinguish from a value-position shorthand hand-off — flagged
- * as a residual gap on this PR's own review (lien-stats summary for commit 15af218) after the
- * assignment/parameter cases were fixed.
- */
-function destructuringForLoopPattern(name: string): RegExp {
-  const esc = escapeRegExp(name);
-  return new RegExp(
-    `\\bfor\\s*\\(\\s*(?:const|let|var)\\s*\\{[^{}]*\\b${esc}\\b[^{}]*\\}\\s*(?:of|in)\\b`,
-  );
-}
-
-/**
  * Matches a `{...}` group that opens in an EXPRESSION/VALUE position — immediately (whitespace
- * aside) after `=`, `(`, `,`, `[`, `:`, `=>`, or `return` — capturing its inner (single-level)
- * content. This is what an object LITERAL's opening brace looks like, as opposed to a function/
- * block body's opening brace, which instead typically follows `)` (a parameter list) or is a
- * bare top-level statement — see {@link hasShorthandHandoff}'s doc for why this distinction
- * matters.
+ * aside) after `=`, `(`, `,`, `[`, `:`, `=>`, or `return` — capturing the ANCHOR itself (group 1)
+ * alongside its inner (single-level) content (group 2). This is what an object LITERAL's opening
+ * brace looks like, as opposed to a function/block body's opening brace, which instead typically
+ * follows `)` (a parameter list) or is a bare top-level statement — see {@link
+ * hasShorthandHandoff}'s doc for why this distinction matters, and for why the captured anchor
+ * matters too (a `(` anchor is ambiguous with a destructured parameter).
  */
-const OBJECT_LITERAL_GROUP_RE = /(?:=|\(|,|\[|:|=>|\breturn)\s*\{([^{}]*)\}/g;
+const OBJECT_LITERAL_GROUP_RE = /(=|\(|,|\[|:|=>|\breturn)\s*\{([^{}]*)\}/g;
 
 /**
  * Blank out every bracket/paren-delimited span — `[...]`/`(...)`, at any nesting depth — with
@@ -867,6 +864,36 @@ function maskBracketsAndParens(text: string): string {
 }
 
 /**
+ * Is THIS SPECIFIC matched group (not the whole surrounding window) a destructuring BINDING
+ * rather than a value-position hand-off? Two shapes, checked against just this group's own
+ * anchor/position — flagged on this PR's own review (lien-stats summary for commit 77d9424):
+ * an earlier version ran these checks against the WHOLE window, so ANY destructuring occurrence
+ * anywhere nearby (even for a wholly separate statement) vetoed every hand-off in that window,
+ * including a genuinely separate, valid one (`const { o: alias } = wrapper; app.fetch(req, { o
+ * });` incorrectly returned "not a hand-off" because of the FIRST statement, even though the
+ * SECOND is real).
+ *  - Reassignment-destructuring (`({ varName } = wrapper)`): this group's own closing `}` is
+ *    immediately followed by `=` (not `==`), with an optional type annotation in between. A
+ *    `const`/`let`/`var` DECLARATION form (`const { varName } = wrapper`) never reaches this
+ *    check at all — its `{` follows a declaration keyword, not one of {@link
+ *    OBJECT_LITERAL_GROUP_RE}'s anchors, so it's never captured as a group in the first place.
+ *    Same for a destructured `for`-loop binding (`for (const { varName } of items)`).
+ *  - Destructured function parameter (`function f({ varName }: T)`) / a lone-argument hand-off
+ *    call shaped identically (`render({ varName })`, a documented, text-unresolvable residual —
+ *    see module doc): this group's own anchor is `(`.
+ */
+function isDestructuringBindingGroup(
+  index: number,
+  matchLength: number,
+  anchor: string,
+  window: string,
+): boolean {
+  const afterGroup = window.slice(index + matchLength);
+  if (/^\s*(?::\s*[\w.<>[\],\s]+)?=(?!=)/.test(afterGroup)) return true;
+  return anchor === '(';
+}
+
+/**
  * Does `varName` appear as a bare shorthand property inside an object literal (`{ event,
  * varName, context }`) within `window` — a VALUE-position hand-off, not a BINDING? A shorthand
  * property hands off the CURRENT value of `varName` wholesale to whatever consumes the new
@@ -886,25 +913,17 @@ function maskBracketsAndParens(text: string): string {
  * inside a property isn't visible to the final check. Step 3, against the masked content,
  * requires `varName` to sit directly between `{`/`,` and `,`/`}` with no colon after it (so an
  * ordinary `varName: something` key-value pair inside the SAME object, or a `.varName` access, is
- * not mistaken for a shorthand hand-off).
- *
- * Excludes the three shapes where `{ varName }` is a destructuring BINDING, not a value hand-off
- * (CodeRabbit's review on this PR's own #818, `const { o } = x;` false-firing as if `o: Options`
- * were spread): a destructuring assignment ({@link destructuringAssignmentPattern}, shared
- * verbatim with {@link buildFieldReadPatterns} so the two checks can never disagree on that
- * shape), a destructured function parameter ({@link destructuringFirstParamPattern} — its own,
- * stricter pattern; see that function's doc for why it is NOT the shared one), and a destructured
- * `for`-loop binding ({@link destructuringForLoopPattern}).
+ * not mistaken for a shorthand hand-off). Step 4 excludes the group if IT SPECIFICALLY (not the
+ * window) is a destructuring BINDING — see {@link isDestructuringBindingGroup}.
  */
 function hasShorthandHandoff(varName: string, window: string): boolean {
-  if (destructuringAssignmentPattern(varName).test(window)) return false;
-  if (destructuringFirstParamPattern(varName).test(window)) return false;
-  if (destructuringForLoopPattern(varName).test(window)) return false;
   const shorthandWithinBraces = new RegExp(`[{,]\\s*${escapeRegExp(varName)}\\s*[,}]`);
   // `matchAll` clones its regex internally, so reusing the shared global-flagged constant here
   // is safe and doesn't leak `lastIndex` state across calls.
   for (const m of window.matchAll(OBJECT_LITERAL_GROUP_RE)) {
-    if (shorthandWithinBraces.test(`{${maskBracketsAndParens(m[1])}}`)) return true;
+    if (!shorthandWithinBraces.test(`{${maskBracketsAndParens(m[2])}}`)) continue;
+    if (isDestructuringBindingGroup(m.index, m[0].length, m[1], window)) continue;
+    return true;
   }
   return false;
 }
@@ -1042,8 +1061,11 @@ function buildJsxAttrReadPattern(name: string): RegExp {
 
 /**
  * Destructuring-assignment shape for `name`: `const { name } = obj;` / `const { name }: T = obj;`
- * / `({ name } = obj)`. Shared with {@link hasShorthandHandoff}'s exclusion check — see that
- * function's doc for why.
+ * / `({ name } = obj)`. Used by {@link buildFieldReadPatterns} to recognize a destructured field
+ * READ. (Previously also reused as a window-wide exclusion in `hasShorthandHandoff`'s
+ * shorthand-hand-off check; that approach over-vetoed unrelated hand-offs elsewhere in the same
+ * window and was replaced by the narrower, per-group {@link isDestructuringBindingGroup} check —
+ * see that function's doc.)
  */
 function destructuringAssignmentPattern(name: string): RegExp {
   const esc = escapeRegExp(name);
@@ -1052,7 +1074,7 @@ function destructuringAssignmentPattern(name: string): RegExp {
 
 /**
  * Destructuring function-parameter shape for `name`: `function f({ name }: T)` / `({ name }) =>`.
- * Shared with {@link hasShorthandHandoff}'s exclusion check — see that function's doc for why.
+ * Used by {@link buildFieldReadPatterns} to recognize a destructured field READ.
  */
 function destructuringParamPattern(name: string): RegExp {
   const esc = escapeRegExp(name);
