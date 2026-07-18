@@ -72,6 +72,13 @@ export interface AgentConfig {
    * `incomplete-handling-pass.ts`.
    */
   incompleteHandlingPass?: boolean;
+  /**
+   * Run the removed-exports candidate loop (ADR-014's gating matrix —
+   * `structural-analysis` is hybrid; this covers only its removed-export
+   * sweep half). Default false — dark-launched; set true (or env
+   * LIEN_REMOVED_EXPORTS_PASS=on) to enable it. See `removed-exports-pass.ts`.
+   */
+  removedExportsPass?: boolean;
 }
 
 /** A single finding produced by the agent during review. */

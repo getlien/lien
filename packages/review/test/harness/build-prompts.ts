@@ -15,11 +15,13 @@
  * (`buildDocTruthPassPrompts`) from the main pass's `buildInitialMessage`.
  *
  * Same for the stale-duplicate candidate-loop PILOT (`staleDuplicatePass`,
- * per-rule-loops design doc §4) and the incomplete-handling candidate loop
- * (`incompleteHandlingPass`, design doc §7 item 5) — both dark by default,
- * so `fires` is false unless the fixture's captured config (or the
- * relevant env flag in the environment this script runs in) opts in AND
- * that loop's own eligibility gate is met.
+ * per-rule-loops design doc §4), the incomplete-handling candidate loop
+ * (`incompleteHandlingPass`, design doc §7 item 5), and the removed-exports
+ * candidate loop (`removedExportsPass`, ADR-014's gating matrix —
+ * structural-analysis is hybrid) — all dark by default, so `fires` is false
+ * unless the fixture's captured config (or the relevant env flag in the
+ * environment this script runs in) opts in AND that loop's own eligibility
+ * gate is met.
  *
  * Usage: tsx build-prompts.ts <fixture.json>
  */
@@ -42,6 +44,10 @@ import {
   buildIncompleteHandlingPassPrompts,
   applyIncompleteHandlingMainOverride,
 } from '../../src/plugins/agent/incomplete-handling-pass.js';
+import {
+  shouldRunRemovedExportsPass,
+  buildRemovedExportsPassPrompts,
+} from '../../src/plugins/agent/removed-exports-pass.js';
 import type { AgentConfig } from '../../src/plugins/agent/types.js';
 
 import { loadFixture } from './fixture-loader.js';
@@ -79,6 +85,11 @@ async function main(): Promise<void> {
     ? { fires: true as const, ...buildIncompleteHandlingPassPrompts(ctx) }
     : { fires: false as const };
 
+  const removedExportsFires = shouldRunRemovedExportsPass(ctx, config);
+  const removedExportsPass = removedExportsFires
+    ? { fires: true as const, ...buildRemovedExportsPassPrompts(ctx) }
+    : { fires: false as const };
+
   const output = {
     fixturePath,
     ruleIds: rules.active.map(r => r.id),
@@ -88,6 +99,7 @@ async function main(): Promise<void> {
     docTruthPass,
     staleDuplicatePass,
     incompleteHandlingPass,
+    removedExportsPass,
   };
 
   process.stdout.write(JSON.stringify(output, null, 2) + '\n');

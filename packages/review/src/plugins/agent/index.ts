@@ -33,6 +33,7 @@ import {
   INCOMPLETE_HANDLING_PASS_SPEC,
   applyIncompleteHandlingMainOverride,
 } from './incomplete-handling-pass.js';
+import { REMOVED_EXPORTS_PASS_SPEC } from './removed-exports-pass.js';
 import {
   runExtraPasses,
   type ReviewPassSpec,
@@ -59,8 +60,12 @@ import {
  * default behavior. The incomplete-handling candidate loop (design doc §7
  * item 5) is the second build, unifying the variant-sweep/sibling-surface/
  * unread-field signals into one dedicated pass — also dark by default, see
- * `incomplete-handling-pass.ts`. None of these three passes has a data
- * dependency on either of the others, so declaration order doesn't matter
+ * `incomplete-handling-pass.ts`. The removed-exports candidate loop
+ * (ADR-014's gating matrix — `structural-analysis` is hybrid; this covers
+ * only its removed-export sweep half, never the rule's broader caller-
+ * impact-of-changed-behavior job) is the fourth build — also dark by
+ * default, see `removed-exports-pass.ts`. None of these four passes has a
+ * data dependency on any of the others, so declaration order doesn't matter
  * for correctness (see review-pass.ts's "serial for v1" note) — doc-truth
  * stays first as the longer-proven pass.
  */
@@ -68,6 +73,7 @@ const EXTRA_PASSES: ReviewPassSpec[] = [
   DOC_TRUTH_PASS_SPEC,
   STALE_DUPLICATE_PASS_SPEC,
   INCOMPLETE_HANDLING_PASS_SPEC,
+  REMOVED_EXPORTS_PASS_SPEC,
 ];
 
 const configSchema = z.object({
@@ -120,6 +126,13 @@ const configSchema = z.object({
    * LIEN_INCOMPLETE_PASS=on) to enable. See `incomplete-handling-pass.ts`.
    */
   incompleteHandlingPass: z.boolean().default(false),
+  /**
+   * Run the removed-exports candidate loop (ADR-014's gating matrix —
+   * structural-analysis is hybrid). Default false — dark-launched opt-in;
+   * set true (or env LIEN_REMOVED_EXPORTS_PASS=on) to enable. See
+   * `removed-exports-pass.ts`.
+   */
+  removedExportsPass: z.boolean().default(false),
 });
 
 export interface AgentReviewPluginOptions {
