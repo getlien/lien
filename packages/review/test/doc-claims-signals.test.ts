@@ -475,10 +475,32 @@ describe('findClaimEvidence — ranking', () => {
     expect(ev?.file).toBe('packages/core/src/strategy.ts');
   });
 
-  it('never cites the claim’s own file as its evidence', () => {
+  it('never cites the claim’s own file as its evidence — WHEN the claim is a guidance/doc surface', () => {
     const claim = claimOf('`structural.db` exists', DOC);
     const chunks = [chunk(DOC, 2, 'the doc itself mentions structural.db here')];
     expect(findClaimEvidence(claim, chunks, new Set([DOC]))).toBeUndefined();
+  });
+
+  // Bug found during Finding A's re-certification (post-#814): the self-citation exclusion
+  // above is correct for a DOC file (quoting the same paragraph proves nothing) but was applied
+  // unconditionally, so a CODE-sourced claim (a comment scanned from a changed CODE file, see
+  // `addedCodeCommentLines`) could never match its OWN enclosing file either — even though that
+  // file is exactly where the comment's described field lives. pr658's actual failure: a stale
+  // comment in schema.ts was corroborated against an unrelated neighbor file that happened to
+  // carry the identical stale wording, instead of schema.ts's own declaration.
+  it('DOES cite the claim’s own file as evidence when the claim is CODE-sourced (not a guidance surface)', () => {
+    const SCHEMA = 'packages/core/src/config/schema.ts';
+    const NEIGHBOR = 'packages/core/src/config/null-embeddings.ts';
+    const claimText = 'keep working; search_code and find_similar report as disabled.';
+    const claim = claimOf(claimText, SCHEMA);
+    const chunks = [
+      // Listed FIRST and would win today's arbitrary first-wins tiebreak once schema.ts is
+      // (wrongly) excluded — the neighbor carries the exact same stale wording.
+      chunk(NEIGHBOR, 18, `// ${claimText}\nenabled: z.boolean().optional(),`),
+      chunk(SCHEMA, 40, `// ${claimText}\nenabled: z.boolean().optional(),`),
+    ];
+    const ev = findClaimEvidence(claim, chunks, new Set([SCHEMA, NEIGHBOR]));
+    expect(ev?.file).toBe(SCHEMA);
   });
 
   it('falls back to a case-insensitive match when nothing matches verbatim', () => {
@@ -806,6 +828,50 @@ describe('addedCodeCommentLines', () => {
     ].join('\n');
     expect(addedCodeCommentLines(patch)).toEqual(['The batch size defaults to 32.']);
   });
+
+  // Deferred finding from PR #814 (CodeRabbit, "Heavy lift"): addedCodeCommentLines parses
+  // line-by-line with no open/close state, so an INTERIOR line of a multi-line block comment
+  // that doesn't repeat the `*` continuation marker is silently dropped — even though it's
+  // unambiguously still inside the comment.
+  it('captures an UNMARKED continuation line inside a multi-line block comment (no leading `*`)', () => {
+    const patch = [
+      '@@ -1,1 +1,4 @@',
+      ' export function f() {',
+      '+  /**',
+      '+   This value defaults to 32 when omitted, no star on this line.',
+      '+   */',
+    ].join('\n');
+    expect(addedCodeCommentLines(patch)).toEqual([
+      'This value defaults to 32 when omitted, no star on this line.',
+    ]);
+  });
+
+  // Same gap, Python/Rust triple-quoted docstring shape: the body lines between the opening and
+  // closing `"""` carry no delimiter of their own at all.
+  it('captures INTERIOR lines of a multi-line triple-quoted docstring', () => {
+    const patch = [
+      '@@ -1,1 +1,4 @@',
+      ' def f():',
+      '+    """',
+      '+    This value defaults to 32 when omitted.',
+      '+    """',
+    ].join('\n');
+    expect(addedCodeCommentLines(patch)).toEqual(['This value defaults to 32 when omitted.']);
+  });
+
+  // The construct can OPEN on a context (unmodified) line — only an interior line is newly
+  // added — and the scan must still recognize it's inside the docstring using state carried
+  // across context lines, not just added ones.
+  it('captures an added interior line of a docstring whose OPENING line is unmodified context', () => {
+    const patch = [
+      '@@ -1,2 +1,3 @@',
+      ' def f():',
+      ' """',
+      '+    This value now defaults to 32 when omitted.',
+      ' """',
+    ].join('\n');
+    expect(addedCodeCommentLines(patch)).toEqual(['This value now defaults to 32 when omitted.']);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1036,6 +1102,36 @@ describe('findClaimEvidence — referenced-file diff prefetch', () => {
     const ev = findClaimEvidence(claim, undefined, new Set(), patches)!;
     expect(ev.excerpt).toContain('[diff truncated to respect the input budget]');
     expect(ev.excerpt.length).toBeLessThan(bigPatch.length);
+  });
+
+  // Deferred finding from PR #814 (CodeRabbit, "Heavy lift"): buildDiffEvidence truncated the
+  // RAW patch's first 800 chars rather than centering on the hunk relevant to the claim, so a
+  // multi-hunk file's relevant hunk could be missed entirely if it isn't first. Construct a
+  // patch whose FIRST hunk is large filler (>800 chars on its own) and whose SECOND hunk carries
+  // the claim's cited symbol — the naive head-slice never reaches the second hunk at all.
+  it('centers the diff-hunk excerpt on the hunk relevant to the cited symbol, not the patch head', () => {
+    const claim = claimWithCitedPath('see `resolveIndexStrategy` in packages/review/src/big.ts', {
+      path: 'packages/review/src/big.ts',
+      symbol: 'resolveIndexStrategy',
+    });
+    const filler = 'const fillerLine = "unrelated padding to blow the 800-char budget";';
+    const fillerHunk = [
+      '@@ -1,1 +1,12 @@',
+      ' export function unrelated() {',
+      ...Array.from({ length: 12 }, () => `+  ${filler}`),
+    ].join('\n');
+    const relevantHunk = [
+      '@@ -50,1 +62,2 @@',
+      ' export function resolveIndexStrategy() {',
+      '+  // resolveIndexStrategy now defaults to standalone when no index exists.',
+    ].join('\n');
+    const bigPatch = `${fillerHunk}\n${relevantHunk}`;
+    expect(bigPatch.length).toBeGreaterThan(800); // the filler hunk alone already exceeds the cap
+
+    const patches = new Map([['packages/review/src/big.ts', bigPatch]]);
+    const ev = findClaimEvidence(claim, undefined, new Set(), patches)!;
+    expect(ev.excerpt).toContain('resolveIndexStrategy');
+    expect(ev.excerpt).toContain('defaults to standalone');
   });
 
   it('renders the "evidence (PR diff)" label distinctly from sibling-doc/plain evidence', () => {

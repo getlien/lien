@@ -421,6 +421,26 @@ const ATTRIBUTION_RE = /^(?:copyright\b|co-authored-by|signed-off-by)/i;
 const TAG_LINE_RE = /^@\w+\b/;
 
 /**
+ * Apply the shared claim-candidate noise filter (TODO/attribution/doc-tag — see the constants
+ * above) to already-extracted comment/docstring prose, returning the trimmed text or undefined
+ * when it's empty or noise. Split out of `extractCommentProse` so the multi-line CONTINUATION
+ * path in `addedCodeCommentLines` (see `OpenComment` below) can apply the identical exclusion
+ * rules to a line that never goes through `extractCommentProse`'s own single-line matchers.
+ */
+function filterNoiseProse(text: string): string | undefined {
+  const trimmed = text.trim();
+  if (
+    !trimmed ||
+    NOISE_LINE_RE.test(trimmed) ||
+    ATTRIBUTION_RE.test(trimmed) ||
+    TAG_LINE_RE.test(trimmed)
+  ) {
+    return undefined;
+  }
+  return trimmed;
+}
+
+/**
  * Extract claim-candidate prose from one line of a code file's patch, or undefined when the line
  * is not a comment/docstring/description-literal shape (ordinary code) or is noise (see above). A
  * `.describe(...)`/`description: "..."` match is checked FIRST since those lines are otherwise
@@ -437,16 +457,62 @@ export function extractCommentProse(rawLine: string): string | undefined {
     : COMMENT_LINE_MATCHERS.map(re => re.exec(line)?.[1]).find(p => p !== undefined);
   if (prose === undefined) return undefined;
 
-  const trimmed = prose.trim();
-  if (
-    !trimmed ||
-    NOISE_LINE_RE.test(trimmed) ||
-    ATTRIBUTION_RE.test(trimmed) ||
-    TAG_LINE_RE.test(trimmed)
-  ) {
-    return undefined;
+  return filterNoiseProse(prose);
+}
+
+/**
+ * Which multi-line comment/docstring construct is still open after a line, carried forward to
+ * the NEXT line — `null` when not inside one. Tracking this (over `newFileLines`' full context +
+ * added view, mirroring `addedProseLines`' own `inFence` tracking) is what closes the deferred
+ * gap from PR #814 (CodeRabbit, "Heavy lift"): `extractCommentProse`'s per-line matchers require
+ * an interior line to repeat a marker (a leading `*` for a block comment, a `"""`/`'''` for a
+ * docstring) — so an UNMARKED continuation line, or a docstring's un-decorated body lines, match
+ * nothing and were silently dropped even though they're unambiguously still inside the comment.
+ */
+type OpenComment = { kind: 'block' } | { kind: 'docstring'; delim: '"""' | "'''" };
+
+/** A block-comment closer anywhere at the END of a (trimmed) line: one-or-more `*` then `/`,
+ *  optionally followed by trailing whitespace — the same shape `BLOCK_OPEN_RE`'s own optional
+ *  trailing group matches, reused here to detect a same-line close on a FRESH opener line and an
+ *  eventual close on a CONTINUATION line. */
+const BLOCK_CLOSE_AT_END_RE = /\*+\/\s*$/;
+
+/** Strip a conventional (optional) leading `*` continuation marker so a continuation line reads
+ *  the same whether or not it follows the JSDoc `* prose` convention — the fix must not REQUIRE
+ *  the marker, but a line that still carries it shouldn't leak a stray `*` into the prose. */
+function stripBlockMarker(text: string): string {
+  return text.replace(/^\*\s?/, '');
+}
+
+/**
+ * Does a FRESH (non-continuation) trimmed line OPEN a block-comment/docstring construct WITHOUT
+ * also closing it on the same line — i.e., is this the first line of a genuinely multi-line
+ * construct whose interior lines need continuation tracking? Returns the construct to carry
+ * forward, or null when the line isn't an opener at all, or opens and closes on one line (the
+ * pre-existing single-line-block/docstring shapes `extractCommentProse` already handles fully).
+ */
+function detectOpen(text: string): OpenComment | null {
+  if (BLOCK_OPEN_RE.test(text)) return BLOCK_CLOSE_AT_END_RE.test(text) ? null : { kind: 'block' };
+  for (const delim of ['"""', "'''"] as const) {
+    if (text.startsWith(delim)) {
+      return text.slice(delim.length).includes(delim) ? null : { kind: 'docstring', delim };
+    }
   }
-  return trimmed;
+  return null;
+}
+
+/**
+ * Does a CONTINUATION line (reached while `open` is already active) close its construct on this
+ * line, and if so, what's the prose BEFORE the closer? Returns undefined when the line does NOT
+ * close — the caller then treats the whole line as interior prose and keeps `open` active.
+ */
+function closingProse(text: string, open: OpenComment): string | undefined {
+  if (open.kind === 'block') {
+    const m = /^(.*?)\*+\/\s*$/.exec(text);
+    return m ? stripBlockMarker(m[1]).trim() : undefined;
+  }
+  const idx = text.indexOf(open.delim);
+  return idx === -1 ? undefined : text.slice(0, idx).trim();
 }
 
 /**
@@ -454,15 +520,36 @@ export function extractCommentProse(rawLine: string): string | undefined {
  * comment, docstring, or description-valued string literal (see `extractCommentProse`) — never
  * arbitrary code. This is the widened surface pr658's Finding A motivated: a JSDoc comment on a
  * `LienConfig` field in `packages/core/src/config/schema.ts`, an ordinary source file the
- * doc-surface-only scan could never see. Exposed for testing.
+ * doc-surface-only scan could never see.
+ *
+ * Tracks `OpenComment` state across the patch's full NEW-file view (context + added, like
+ * `addedProseLines`' fence tracking) so an interior CONTINUATION line — whether or not it repeats
+ * a `*`/triple-quote marker, and even when the construct's OPENING line was unmodified context —
+ * still contributes its prose (the multi-line gap this widening closes; see `OpenComment`).
+ * Exposed for testing.
  */
 export function addedCodeCommentLines(patch: string): string[] {
   const out: string[] = [];
+  let open: OpenComment | null = null;
+
   for (const { text, isAdded } of newFileLines(patch)) {
-    if (!isAdded) continue;
-    const prose = extractCommentProse(text);
-    if (prose) out.push(prose);
+    const trimmed = text.trim();
+    let prose: string | undefined;
+
+    if (open) {
+      const closed = closingProse(trimmed, open);
+      prose = filterNoiseProse(
+        closed ?? (open.kind === 'block' ? stripBlockMarker(trimmed) : trimmed),
+      );
+      if (closed !== undefined) open = null;
+    } else {
+      prose = extractCommentProse(text);
+      open = detectOpen(trimmed);
+    }
+
+    if (isAdded && prose) out.push(prose);
   }
+
   return out;
 }
 
@@ -689,6 +776,18 @@ const TEST_FILE_RE = /(\.test\.|\.spec\.|\/tests?\/|__tests__|\/spec\/)/;
  * match — that chunk is literally the named symbol. Test files always rank
  * last, even on a symbolName match: a same-named helper in a test fixture is a
  * collision, not the described behavior (see tierOf's early return).
+ *
+ * `SameFile` outranks everything (bar the Test demotion): for a CODE-sourced
+ * claim (a comment scanned from a changed code file — see
+ * `addedCodeCommentLines`), the file the comment itself lives in is the
+ * described field's own declaration, the strongest possible locate. Reachable
+ * only for a code claim file — `scanForEvidence` still excludes a GUIDANCE/doc
+ * surface's own chunks entirely (a doc citing its own paragraph proves
+ * nothing), so this tier never applies there. Bug found during Finding A's
+ * re-certification (post-#814): before this tier existed, `scanForEvidence`
+ * excluded the claim's own file unconditionally, so a schema.ts comment claim
+ * could be corroborated against an unrelated neighbor file that happened to
+ * share the same wording, instead of schema.ts's own field.
  */
 const enum EvidenceTier {
   Test = 0,
@@ -697,6 +796,7 @@ const enum EvidenceTier {
   ChangedDoc = 3,
   ChangedCode = 4,
   SymbolMatch = 5,
+  SameFile = 6,
 }
 
 /** The union of every path this PR changed (analyzable + non-code + patched). */
@@ -741,9 +841,17 @@ function matchChunk(
   return matched.length > 0 ? { matched, symbolMatched } : null;
 }
 
-/** Rank a matched chunk into an evidence tier (see EvidenceTier). */
-function tierOf(file: string, symbolMatched: boolean, changed: Set<string>): EvidenceTier {
+/** Rank a matched chunk into an evidence tier (see EvidenceTier). `claimFile` only ever equals
+ *  `file` here for a CODE-sourced claim — `scanForEvidence` excludes a guidance/doc surface's own
+ *  file before this is called, so `SameFile` never applies to a doc claim. */
+function tierOf(
+  file: string,
+  claimFile: string,
+  symbolMatched: boolean,
+  changed: Set<string>,
+): EvidenceTier {
   if (TEST_FILE_RE.test(file)) return EvidenceTier.Test;
+  if (file === claimFile) return EvidenceTier.SameFile;
   if (symbolMatched) return EvidenceTier.SymbolMatch;
   const isDoc = DOC_FILE_RE.test(file);
   const isChanged = changed.has(file);
@@ -763,7 +871,10 @@ interface EvidenceCandidate {
  * A single pass over `repoChunks` for the best evidence chunk: highest tier,
  * then most distinct anchors matched, keeping the FIRST such chunk in traversal
  * order (a stable, deterministic tiebreak). Chunks from `claimFile` are skipped
- * so a doc never cites itself as its own evidence.
+ * ONLY when `claimFile` is itself a guidance/doc surface, so a doc never cites
+ * itself as its own evidence — a CODE-sourced claim's own file stays eligible
+ * (and, per `tierOf`'s `SameFile` tier, wins outright) since that file is
+ * exactly where the comment's described code lives.
  */
 function scanForEvidence(
   anchors: string[],
@@ -772,12 +883,13 @@ function scanForEvidence(
   changed: Set<string>,
   compare: (s: string) => string,
 ): EvidenceCandidate | null {
+  const excludeSelf = isGuidanceSurface(claimFile);
   let best: EvidenceCandidate | null = null;
   for (const chunk of repoChunks) {
-    if (chunk.metadata.file === claimFile) continue;
+    if (excludeSelf && chunk.metadata.file === claimFile) continue;
     const m = matchChunk(chunk, anchors, compare);
     if (!m) continue;
-    const tier = tierOf(chunk.metadata.file, m.symbolMatched, changed);
+    const tier = tierOf(chunk.metadata.file, claimFile, m.symbolMatched, changed);
     const matchCount = m.matched.length;
     if (best && (tier < best.tier || (tier === best.tier && matchCount <= best.matchCount))) {
       continue; // strictly-better replaces only; ties keep the earlier chunk
@@ -896,18 +1008,85 @@ function firstHunkNewStartLine(patch: string): number {
   return m ? Number(m[1]) : 0;
 }
 
+/** One hunk of a unified-diff patch: its raw text (header + body, verbatim) and the NEW-file
+ *  starting line its header declares. */
+interface DiffHunk {
+  text: string;
+  newStartLine: number;
+}
+
+/** A unified-diff hunk header: `@@ -a,b +START,len @@`. */
+const HUNK_HEADER_RE = /^@@ -\d+(?:,\d+)? \+(\d+)/;
+
+/**
+ * Split a raw patch into its individual hunks, each starting at its own `@@ ... @@` header —
+ * needed so `buildDiffEvidence` can center the excerpt on the hunk relevant to the claim instead
+ * of always taking the patch's first `MAX_DIFF_EVIDENCE_CHARS` (the deferred PR #814 gap: a
+ * multi-hunk file's relevant hunk can sort anywhere, and the naive head-slice can miss it
+ * entirely). Falls back to treating the WHOLE patch as one hunk when no header is found
+ * (defensive — every real patch has at least one).
+ */
+function splitHunks(patch: string): DiffHunk[] {
+  const hunks: DiffHunk[] = [];
+  let current: string[] = [];
+  let currentStart = 0;
+
+  for (const line of patch.split('\n')) {
+    const m = HUNK_HEADER_RE.exec(line);
+    if (m) {
+      if (current.length > 0) hunks.push({ text: current.join('\n'), newStartLine: currentStart });
+      current = [line];
+      currentStart = Number(m[1]);
+    } else {
+      current.push(line);
+    }
+  }
+  if (current.length > 0) hunks.push({ text: current.join('\n'), newStartLine: currentStart });
+
+  return hunks.length > 0 ? hunks : [{ text: patch, newStartLine: firstHunkNewStartLine(patch) }];
+}
+
+/**
+ * Pick the hunk most relevant to `anchors` (the claim's cited symbol, or its extracted keyword
+ * anchors) — the hunk with the most anchor hits, ties keeping the FIRST/earliest hunk (a stable,
+ * deterministic tiebreak). Falls back to the first hunk when there are no anchors to rank by,
+ * preserving the pre-existing head-of-patch behavior for an anchor-less citation.
+ */
+function pickRelevantHunk(hunks: DiffHunk[], anchors: string[]): DiffHunk {
+  if (anchors.length === 0) return hunks[0];
+  let best = hunks[0];
+  let bestHits = -1;
+  for (const hunk of hunks) {
+    const hits = anchors.reduce((n, a) => n + (hunk.text.includes(a) ? 1 : 0), 0);
+    if (hits > bestHits) {
+      bestHits = hits;
+      best = hunk;
+    }
+  }
+  return best;
+}
+
 /** Build diff-hunk evidence for a cited file that's part of THIS PR (see
- *  `findCitedPathDiffEvidence`): the byte-capped raw patch, tagged `fromDiff` so the renderer
- *  frames it as a diff rather than a plain source excerpt. */
-function buildDiffEvidence(file: string, patch: string): DocClaimEvidence {
-  const capped =
-    patch.length > MAX_DIFF_EVIDENCE_CHARS
-      ? `${patch.slice(0, MAX_DIFF_EVIDENCE_CHARS)}\n[diff truncated to respect the input budget]`
-      : patch;
+ *  `findCitedPathDiffEvidence`): picks the hunk most relevant to `anchors` (the cited symbol, or
+ *  the claim's own keyword anchors — see `pickRelevantHunk`) rather than always the patch's
+ *  first bytes, then byte-caps that hunk centered on the anchor (`capCentered`, the same
+ *  centering primitive `buildExcerpt` uses for indexed-chunk evidence). Tagged `fromDiff` so the
+ *  renderer frames it as a diff rather than a plain source excerpt. */
+function buildDiffEvidence(file: string, patch: string, anchors: string[] = []): DocClaimEvidence {
+  const hunk = pickRelevantHunk(splitHunks(patch), anchors);
+  const needleIndex = anchors
+    .map(a => hunk.text.indexOf(a))
+    .filter(i => i >= 0)
+    .sort((a, b) => a - b)[0];
+  const capped = capCentered(hunk.text, needleIndex ?? 0, MAX_DIFF_EVIDENCE_CHARS);
+  const excerpt =
+    hunk.text.length > MAX_DIFF_EVIDENCE_CHARS
+      ? `${capped}\n[diff truncated to respect the input budget]`
+      : capped;
   return {
     file,
-    startLine: firstHunkNewStartLine(patch),
-    excerpt: capped.replace(/```/g, "'''"),
+    startLine: hunk.newStartLine,
+    excerpt: excerpt.replace(/```/g, "'''"),
     anchor: file,
     fromDoc: false,
     fromDiff: true,
@@ -944,12 +1123,14 @@ function resolveExactOrUniqueSuffix(
 
 function findCitedPathDiffEvidence(
   cited: DocClaimCitedPath,
+  claimText: string,
   patches: Map<string, string> | undefined,
 ): DocClaimEvidence | undefined {
   if (!patches) return undefined;
   const matchedFile = resolveExactOrUniqueSuffix([...patches.keys()], cited.path);
   if (!matchedFile) return undefined;
-  return buildDiffEvidence(matchedFile, patches.get(matchedFile) ?? '');
+  const anchors = cited.symbol ? [cited.symbol] : extractAnchors(claimText);
+  return buildDiffEvidence(matchedFile, patches.get(matchedFile) ?? '', anchors);
 }
 
 /**
@@ -969,7 +1150,7 @@ function findCitedPathEvidence(
   repoChunks: CodeChunk[] | undefined,
   patches: Map<string, string> | undefined,
 ): DocClaimEvidence {
-  const diffEvidence = findCitedPathDiffEvidence(cited, patches);
+  const diffEvidence = findCitedPathDiffEvidence(cited, claimText, patches);
   if (diffEvidence) return diffEvidence;
 
   const resolvedFile = repoChunks?.find(
