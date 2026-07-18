@@ -1,15 +1,18 @@
 # Agent-review pass architecture — `ReviewPassSpec` and the extra-pass executor
 
 Status: generalized executor + attestation v2 shipped (PR #799, merged).
-Three passes plug into it today — **doc-truth is production-on by default**
-(v1); the **stale-duplicate** and **incomplete-handling** candidate loops
-are built, merged, and dark (default-off) for `@liendev/review`/
-`@liendev/action` consumers, and doc-truth itself gained a dark, env-only
-v2 mode (PR #807) that backports the same per-candidate-verdict contract
-into its own pass — see "Which passes are live" below. As of 2026-07-17,
-this monorepo's own `.github/workflows/lien-review.yml` opts both loops in
-on itself (`LIEN_STALE_DUP_PASS=on` / `LIEN_INCOMPLETE_PASS=on`) to dogfood
-them on its own PRs; the package/action defaults are unchanged. See
+Four passes plug into it today — **doc-truth is production-on by default**
+(v1); the **stale-duplicate**, **incomplete-handling**, and
+**removed-exports** candidate loops are built, merged, and dark (default-off)
+for `@liendev/review`/`@liendev/action` consumers, and doc-truth itself
+gained a dark, env-only v2 mode (PR #807) that backports the same
+per-candidate-verdict contract into its own pass — see "Which passes are
+live" below. As of 2026-07-17, this monorepo's own
+`.github/workflows/lien-review.yml` opts the first two loops in on itself
+(`LIEN_STALE_DUP_PASS=on` / `LIEN_INCOMPLETE_PASS=on`) to dogfood them on its
+own PRs; removed-exports has not yet been opted into that workflow (a
+separate, later decision, same as the first two loops' own CI opt-in was) —
+the package/action defaults are unchanged for all three. See
 [ADR-014](decisions/0014-per-rule-candidate-loop-passes.md) for the
 decision this doc implements and its evidence/economics — the evidence
 behind this opt-in is session-local so far and will be written up there
@@ -72,6 +75,7 @@ const EXTRA_PASSES: ReviewPassSpec[] = [
   DOC_TRUTH_PASS_SPEC,
   STALE_DUPLICATE_PASS_SPEC,
   INCOMPLETE_HANDLING_PASS_SPEC,
+  REMOVED_EXPORTS_PASS_SPEC,
 ];
 ```
 
@@ -89,7 +93,7 @@ one starts. Two things are true regardless of how many passes exist:
   catches and reports (`context.reportSkip`) any thrown error from a pass's
   client run; the main pass's own output is untouched.
 
-None of the three passes has a data dependency on either of the *other two*
+None of the four passes has a data dependency on any of the *other three*
 (only doc-truth's original dependency on the *main* pass completing at all
 survives the generalization), so declaration order among them doesn't
 affect correctness — doc-truth stays first as the longest-proven pass.
@@ -99,15 +103,17 @@ machinery (trace-offset arithmetic that currently assumes the main trace is
 already complete; per-pass budget reporting that would need to interleave)
 ahead of a real latency complaint would be speculative (YAGNI per
 CLAUDE.md) — revisit once ≥3 dedicated passes are live and latency is
-measured as a problem.
+measured as a problem (now true — four passes are live — but no latency
+complaint has been measured yet).
 
-## The three passes
+## The four passes
 
 | Pass | File | Gate (opt-in AND eligibility) | Budget formula | Toolset | Verdict vocabulary | Production status |
 |---|---|---|---|---|---|---|
 | doc-truth | `doc-truth-pass.ts` | `docTruthPass !== false` AND `LIEN_REVIEW_DOC_PASS` not disabling AND ≥1 doc claim | `round(base × 0.4)` | full 6-tool set (same as main pass) | v1 (default): open findings list. v2 (`LIEN_DOC_TRUTH_V2=on`, dark): `accurate \| contradicted \| unverifiable` per claim id | **Production-on** (v1 default true; v2 dark, env-only) |
 | stale-duplicate loop | `stale-duplicate-pass.ts` | `config.staleDuplicatePass` or `LIEN_STALE_DUP_PASS=on` AND ≥1 high-confidence, same-file candidate | `clamp(2000 + 800×min(n,8), 4000, 30000)` | `read_file`, `grep_codebase` only | `stale \| intentional-reuse \| unverifiable` | **Dark** (default false) |
 | incomplete-handling loop | `incomplete-handling-pass.ts` | `config.incompleteHandlingPass` or `LIEN_INCOMPLETE_PASS=on` AND ≥1 candidate (any of 3 shapes) | `clamp(2500 + 900×min(n,20), 5000, 35000)` | `read_file`, `get_files_context`, `grep_codebase` | `incomplete \| handled \| intentional \| unverifiable` | **Dark** (default false) |
+| removed-exports loop | `removed-exports-pass.ts` | `config.removedExportsPass` or `LIEN_REMOVED_EXPORTS_PASS=on` AND ≥1 removed public export | `clamp(2000 + 800×min(n,15), 11000, 30000)` | `read_file`, `grep_codebase` only | `breaking \| intentional \| internal-only \| unverifiable` | **Dark** (default false) |
 
 Every pass keeps its rule's prompt fragment and signal block in the shared
 main pass regardless of the dedicated pass's on/off state — a second,
@@ -115,7 +121,11 @@ independent env flag per candidate loop (`LIEN_STALE_DUP_MAIN=off`,
 `LIEN_INCOMPLETE_MAIN=off`) exists to strip the rule from the main pass
 entirely for a *future* A/B arm, but that arm has not been run. Today,
 merging or enabling a candidate loop never removes its rule's shared-loop
-coverage.
+coverage. The removed-exports loop has NO such override — `structural-analysis`
+is ADR-014's one *hybrid* rule: only its removed-export-sweep half has a
+candidate shape, so its OTHER half (caller-impact-of-changed-behavior) must
+stay in the main pass unconditionally, forever, not just until a future A/B
+arm (see that pass's own module doc for the full reasoning).
 
 ### doc-truth
 
@@ -213,9 +223,61 @@ warns against verdicting test-double/mock/fixture omissions `incomplete`,
 baked in from the loop's first version rather than discovered post-hoc the
 way the stale-duplicate pilot's equivalent guard was.
 
+### removed-exports candidate loop
+
+Covers only the removed-export-sweep HALF of `structural-analysis`
+(ADR-014's gating matrix marks the rule **hybrid**: the other half — "check
+if callers handle new behavior correctly" for a CHANGED, not removed, export
+— is open investigation with no candidate shape and stays in the shared main
+pass, unconditionally, forever; see that pass's own module doc). Reuses
+`removed-export-signals.ts` (already computed for the main pass's
+`<removed_exports>` block and `boundary-change`'s changeset cross-check)
+rather than building a new signal: each candidate carries the removed
+symbol, its surviving cross-file reference(s) (a text-match corpus scan
+standing in for a live `get_dependents` call), and any `.changeset/*.md`
+mention. `computeRemovedExportsCandidates` (`removed-exports-pass.ts`) caps
+the shared signal's own sort order (breakage-first, then changeset-mentioned)
+at 15.
+
+A real-PR census (this repo's last 40 merged PRs, #776–#816, captured via
+`capture-pr.ts` + `build-prompts.ts` with the loop's opt-in flag on so
+`fires` reduces to pure candidate eligibility) measured this loop firing on
+only **1/40 (2.5%)** — PR #799 (the pass-executor generalization that
+renamed `runDocTruthPass`/`appendDocTruthTurns` away). This is markedly
+LOWER than the pilot's 35% or the second loop's 50%: an actual removed
+PUBLIC export is a genuinely rare event in this repo's real history compared
+to a stale duplicated literal or an unmirrored sibling file. Firing rate is
+not a constant property across rules (ADR-014's own Negative/Risks section
+already makes this point for the first two loops); this loop's number is
+lower still. PR #399 (the fixture behind
+`fixtures/structural-analysis/removed-export.assertions.ts`) is the
+dogfood/screen worklist cited below.
+
+Toolset is `read_file` + `grep_codebase` — the pilot's set, not the second
+loop's `get_files_context` superset — because judging a candidate here is
+"is this surviving reference real production usage" (a single-file
+question the pilot's tools already answer), not the second loop's "is this
+handled via a different mechanism entirely" cross-file question. The
+`<strategy>`/`<examples>` blocks are deliberately NOT `STRUCTURAL_ANALYSIS`'s
+rule text reused verbatim (unlike the other two loops reusing their own
+rule's full prompt/example) — that rule's full prompt names tools
+(`get_files_context`, `get_dependents`) this loop's hard-cut toolset doesn't
+provide, and its own example illustrates a CHANGED (not removed) export, the
+wrong shape for this loop's job. A `<verdict_guidance>` paragraph bakes in
+the two historical FP classes from day one (matching the second loop's
+"baked in, not discovered post-hoc" precedent): a changeset-documented
+removal verdicts `intentional`, and a surviving reference confined to
+test/fixture/internal-only code verdicts `internal-only` — only a
+production-code surviving reference with no changeset verdicts `breaking`.
+Merge: like the other two loops, **the loop wins** on a collision, scoped to
+main-pass findings whose own `ruleId` is also `structural-analysis` — but
+this loop ALSO matches on `symbolName` identity (not just line proximity),
+since a removed-export candidate carries a stable identity the pilot's
+literal-text candidates and the second loop's per-shape candidates don't.
+
 ## Per-candidate verdict contract and `incomplete_verdict` honesty semantics
 
-All three passes now use variants of the same contract: **one verdict
+All four passes now use variants of the same contract: **one verdict
 object required per candidate/claim id**, carried as extra fields
 (`candidateId`/`claimId`, `verdict`) inside the standard `findings` JSON
 array — so the shared client's existing parse/validate pipeline needs zero
@@ -311,6 +373,11 @@ fires exactly once per pass that ran.
   (8 vs. the pilot's 6) since every candidate here needs at least one
   `read_file`/`get_files_context` round trip before it can be judged (none
   of the three signals attach an inline snippet).
+- **removed-exports loop**: `clamp(2_000 + 800 × min(candidateCount, 15),
+  11_000, 30_000)` — same per-candidate shape as the pilot; the floor is
+  `EXTRA_PASS_MIN_BUDGET_TOKENS` (11,000, the shared #811 floor already
+  documented above), which dominates for every real-PR candidate count this
+  loop has measured so far (a 1-2 candidate run is the common case).
 
 ## Which passes are live today
 
@@ -329,12 +396,23 @@ fires exactly once per pass that ran.
 - **incomplete-handling loop** — merged (PR #804) but **dark**:
   `config.incompleteHandlingPass` defaults `false`; opt in via that config
   key or `LIEN_INCOMPLETE_PASS=on`. Same non-exposure via `action.yml`.
+- **removed-exports loop** — merged but **dark**: `config.removedExportsPass`
+  defaults `false`; opt in via that config key or
+  `LIEN_REMOVED_EXPORTS_PASS=on`. Same non-exposure via `action.yml`. Unlike
+  the other two, has no `*_MAIN=off` opt-out override (see its own table row
+  above) — `<removed_exports>` cannot be stripped from the main pass by
+  design, not just "not yet run."
 
-Both dark passes have proven mechanism (gate/prompt/budget/merge/attestation
-wiring, verified via unit tests and byte-diff-neutrality-when-off proofs)
-but **unproven lift** — no priced A/B has yet shown either dedicated loop
+All three dark passes have proven mechanism (gate/prompt/budget/merge/
+attestation wiring, verified via unit tests and byte-diff-neutrality-when-off
+proofs) but **unproven lift** — no priced A/B has yet shown a dedicated loop
 finds more true positives or fewer false negatives than the shared loop's
-own signal-augmented prompt on the same fixtures. See
+own signal-augmented prompt on the same fixtures. A 3-vote screen with
+removed-exports' flag ON against its own canary fixture
+(`structural-analysis/removed-export`, PR #399) held the fixture's
+already-documented 3/3 pass rate at $0.042 total — a regression smoke test,
+not a lift measurement (the main pass already covers this fixture on its
+own; the loop is an additive backstop, not yet isolated from it). See
 [ADR-014](decisions/0014-per-rule-candidate-loop-passes.md) for the full
 evidence state, the real-PR firing-rate census, and per-pass cost data.
 
