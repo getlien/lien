@@ -532,6 +532,37 @@ describe('computeUnreadFieldCandidates', () => {
     expect(candidates).toHaveLength(1);
   });
 
+  // Regression: flagged on this PR's own review (lien-stats summary for commit b5e3f88) — a bare
+  // `[{,]...[,}]` scan can't tell an object literal from an ARRAY literal or a plain call's
+  // argument list, since both have `,` immediately on either side of a middle element with no
+  // `{`/`}` in sight at all.
+  it('does NOT suppress via the variable appearing as a middle ARRAY-literal element (not an object)', () => {
+    const consumer = [
+      'function handle(o: Options): void {',
+      '  const a = 1;',
+      '  const b = 2;',
+      '  const arr = [a, o, b];',
+      '  console.log(arr);',
+      '}',
+    ].join('\n');
+    const repoChunks = [...optionsChunks(), makeChunk('src/consumer.ts', 1, consumer)];
+    const candidates = computeUnreadFieldCandidates(baseContext(repoChunks));
+    expect(candidates).toHaveLength(1);
+  });
+
+  it('does NOT suppress via the variable appearing as a middle CALL-argument (not an object literal)', () => {
+    const consumer = [
+      'function handle(o: Options): void {',
+      '  const a = 1;',
+      '  const b = 2;',
+      '  foo(a, o, b);',
+      '}',
+    ].join('\n');
+    const repoChunks = [...optionsChunks(), makeChunk('src/consumer.ts', 1, consumer)];
+    const candidates = computeUnreadFieldCandidates(baseContext(repoChunks));
+    expect(candidates).toHaveLength(1);
+  });
+
   // Regression for the fixture-mining sweep (zod's OG-image generator ground truth): Satori's
   // custom JSX renderer reads `HTMLAttributes.tw` exclusively via `<div tw="...">`-shaped call
   // sites — invisible to the dot/bracket/destructure read patterns, since a JSX attribute never

@@ -835,14 +835,35 @@ function destructuringForLoopPattern(name: string): RegExp {
 }
 
 /**
+ * Matches a `{...}` group that opens in an EXPRESSION/VALUE position — immediately (whitespace
+ * aside) after `=`, `(`, `,`, `[`, `:`, `=>`, or `return` — capturing its inner (single-level)
+ * content. This is what an object LITERAL's opening brace looks like, as opposed to a function/
+ * block body's opening brace, which instead typically follows `)` (a parameter list) or is a
+ * bare top-level statement — see {@link hasShorthandHandoff}'s doc for why this distinction
+ * matters.
+ */
+const OBJECT_LITERAL_GROUP_RE = /(?:=|\(|,|\[|:|=>|\breturn)\s*\{([^{}]*)\}/g;
+
+/**
  * Does `varName` appear as a bare shorthand property inside an object literal (`{ event,
  * varName, context }`) within `window` — a VALUE-position hand-off, not a BINDING? A shorthand
  * property hands off the CURRENT value of `varName` wholesale to whatever consumes the new
  * object — the same "can't prove the field isn't part of a whole-object pass-through" evidence a
  * spread or `JSON.stringify` gives, just via different syntax (mining sweep, hono #4451 ground
- * truth: `app.fetch(req, { event, requestContext, context })`). Requires `varName` to sit
- * directly between `{`/`,` and `,`/`}` (no colon after it) so an ordinary `varName: something`
- * key-value pair, or a `.varName` access, is not mistaken for a shorthand hand-off.
+ * truth: `app.fetch(req, { event, requestContext, context })`).
+ *
+ * Two-step check, not a single `[{,]\s*varName\s*[,}]` scan: flagged on this PR's own review
+ * (lien-stats summary for commit b5e3f88) that a bare adjacent-delimiter scan can't tell an
+ * OBJECT literal from an ARRAY literal, a plain call's argument list, OR — the review's own
+ * follow-up finding — the enclosing FUNCTION/BLOCK body itself (all of `[a, varName, b]`,
+ * `foo(a, varName, b)`, and a function whose body merely CONTAINS one of those two shapes have
+ * `,` immediately before AND after `varName`, and the function-body case still has a `{`/`}`
+ * pair — just not one belonging to an object literal at all). Step 1 requires `varName` to sit
+ * inside a `{...}` group that {@link OBJECT_LITERAL_GROUP_RE} confirms opens in an expression
+ * position, not a block/function body. Step 2, scoped to just that group's own captured content,
+ * requires `varName` to sit directly between `{`/`,` and `,`/`}` with no colon after it (so an
+ * ordinary `varName: something` key-value pair inside the SAME object, or a `.varName` access, is
+ * not mistaken for a shorthand hand-off).
  *
  * Excludes the three shapes where `{ varName }` is a destructuring BINDING, not a value hand-off
  * (CodeRabbit's review on this PR's own #818, `const { o } = x;` false-firing as if `o: Options`
@@ -856,7 +877,13 @@ function hasShorthandHandoff(varName: string, window: string): boolean {
   if (destructuringAssignmentPattern(varName).test(window)) return false;
   if (destructuringFirstParamPattern(varName).test(window)) return false;
   if (destructuringForLoopPattern(varName).test(window)) return false;
-  return new RegExp(`[{,]\\s*${escapeRegExp(varName)}\\s*[,}]`).test(window);
+  const shorthandWithinBraces = new RegExp(`[{,]\\s*${escapeRegExp(varName)}\\s*[,}]`);
+  // `matchAll` clones its regex internally, so reusing the shared global-flagged constant here
+  // is safe and doesn't leak `lastIndex` state across calls.
+  for (const m of window.matchAll(OBJECT_LITERAL_GROUP_RE)) {
+    if (shorthandWithinBraces.test(`{${m[1]}}`)) return true;
+  }
+  return false;
 }
 
 /**
