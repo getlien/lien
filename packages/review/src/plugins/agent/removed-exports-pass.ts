@@ -437,14 +437,15 @@ id in ${ids.join(', ')}, no more, no fewer — in a \`\`\`json code fence:
   }
 }
 
-EVERY entry requires candidateId, verdict, filepath, line, severity, and message —
-even for intentional/internal-only/unverifiable verdicts (fill filepath from the
-candidate's removal file, line from its first surviving reference or 1 if none,
-severity "warning", message explaining the disposition). ALWAYS set symbolName to
-the candidate's removed symbol on a breaking verdict — this pass's dedupe against
-the main pass's own structural-analysis findings matches on symbol identity, not
-just location.
-A missing candidateId for any worklist entry makes this pass's result incomplete.
+EVERY entry requires candidateId, verdict, filepath, line, severity, category, and
+message — even for intentional/internal-only/unverifiable verdicts (fill filepath
+from the candidate's removal file, line from its first surviving reference or 1 if
+none, severity "warning", category any short slug e.g. "breaking_change", message
+explaining the disposition). A missing category silently drops the ENTIRE entry,
+same as a missing candidateId — both make this pass's result incomplete. ALWAYS set
+symbolName to the candidate's removed symbol on a breaking verdict — this pass's
+dedupe against the main pass's own structural-analysis findings matches on symbol
+identity, not just location.
 </output_format>`;
 }
 
