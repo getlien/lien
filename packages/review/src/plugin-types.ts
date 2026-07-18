@@ -146,6 +146,8 @@ export interface ReviewContext {
     neverRan: boolean;
     allocatedTokens: number;
     spentTokens: number;
+    candidatesDeferred: number;
+    deferredCandidateIds?: string[];
   }) => void;
 }
 

@@ -95,6 +95,11 @@ import {
 import {
   renderPassPrHeader,
   EXTRA_PASS_MIN_BUDGET_TOKENS,
+  OBSERVED_TOKENS_PER_TURN,
+  affordableCandidateCeiling,
+  capCandidatesToCeiling,
+  deferredCandidateLabels,
+  renderDeferralNote,
   type ReviewPassSpec,
 } from './review-pass.js';
 
@@ -302,6 +307,39 @@ function candidateIds(candidates: IncompleteHandlingCandidate[]): string[] {
 }
 
 // ---------------------------------------------------------------------------
+// Candidate-overflow handling (rank-and-cap with attested deferral)
+// ---------------------------------------------------------------------------
+
+/** Best-effort short label for a candidate, shape-specific — for the delivery attestation's
+ *  `deferredCandidateIds`, not the pass's own `candidate-N` worklist ids. */
+function incompleteHandlingLabel(c: IncompleteHandlingCandidate): string {
+  if (c.shape === 'variant-sweep') return `${c.variant.typeName}.${c.variant.variant}`;
+  if (c.shape === 'sibling-surface') return c.sibling.display;
+  return `${c.unreadField.typeName}.${c.unreadField.field}`;
+}
+
+/** This run's actual worklist after rank-and-cap. Unlike the pilot's stale-literal candidates,
+ *  NONE of this rule's three shapes attach an inline code snippet (module doc: "you need the
+ *  actual site's code to judge it") — read_file/get_files_context is load-bearing for most
+ *  candidates, so the realistic per-candidate cost is `OBSERVED_TOKENS_PER_TURN`, not this pass's
+ *  own (prompt-sizing) PER_CANDIDATE_TOKENS constant. `budget` defaults to unlimited so every
+ *  existing call site that doesn't pass one is byte-identical to before this feature existed.
+ *  Exposed for testing. */
+export function computeIncompleteHandlingWorklist(
+  context: ReviewContext,
+  budget = Number.POSITIVE_INFINITY,
+): { candidates: IncompleteHandlingCandidate[]; deferredCount: number; deferredIds: string[] } {
+  const all = computeIncompleteHandlingCandidates(context);
+  const ceiling = affordableCandidateCeiling(budget, OBSERVED_TOKENS_PER_TURN);
+  const { kept, deferred } = capCandidatesToCeiling(all, ceiling);
+  return {
+    candidates: kept,
+    deferredCount: deferred.length,
+    deferredIds: deferredCandidateLabels(deferred, incompleteHandlingLabel),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Prompt construction — per-shape candidate rendering
 // ---------------------------------------------------------------------------
 
@@ -421,26 +459,39 @@ ${INCOMPLETE_HANDLING.example}
 ${buildOutputFormat(ids)}`;
 }
 
-/** Build the candidate-loop's initial message: PR header + worklist + a closing nudge. */
-export function buildIncompleteHandlingPassInitialMessage(context: ReviewContext): string {
-  const candidates = computeIncompleteHandlingCandidates(context);
+/** Build the candidate-loop's initial message: PR header + worklist + a closing nudge. `budget`
+ *  drives rank-and-cap overflow handling (see `computeIncompleteHandlingWorklist`) — defaults to
+ *  unlimited so existing callers that don't pass one are unaffected. */
+export function buildIncompleteHandlingPassInitialMessage(
+  context: ReviewContext,
+  budget = Number.POSITIVE_INFINITY,
+): string {
+  const { candidates, deferredCount } = computeIncompleteHandlingWorklist(context, budget);
   const sections: string[] = [];
   const header = renderPassPrHeader(context);
   if (header) sections.push(header);
   sections.push(renderWorklist(candidates));
+  const deferralNote = renderDeferralNote(deferredCount);
+  if (deferralNote) sections.push(deferralNote);
   sections.push('Judge every candidate above and output your verdicts as JSON.');
   return sections.join('\n\n');
 }
 
-/** The system + initial prompts for the incomplete-handling candidate loop. */
-export function buildIncompleteHandlingPassPrompts(context: ReviewContext): {
+/** The system + initial prompts for the incomplete-handling candidate loop. `budget` is this
+ *  pass's own final allocated budget (see `ReviewPassSpec.buildPrompts`'s doc comment) — defaults
+ *  to unlimited so existing callers unaware of overflow handling are byte-identical to before. */
+export function buildIncompleteHandlingPassPrompts(
+  context: ReviewContext,
+  budget = Number.POSITIVE_INFINITY,
+): {
   systemPrompt: string;
   initialMessage: string;
 } {
-  const ids = candidateIds(computeIncompleteHandlingCandidates(context));
+  const { candidates } = computeIncompleteHandlingWorklist(context, budget);
+  const ids = candidateIds(candidates);
   return {
     systemPrompt: buildSystemPrompt(ids),
-    initialMessage: buildIncompleteHandlingPassInitialMessage(context),
+    initialMessage: buildIncompleteHandlingPassInitialMessage(context, budget),
   };
 }
 
@@ -541,12 +592,26 @@ function hasCompleteVerdictCoverage(ids: string[], raw: RawVerdictFinding[]): bo
  * ALREADY incomplete for a real reason (budget/max_turns/error), that
  * reason is kept as-is; `incomplete_verdict` is only used when the model
  * otherwise returned a syntactically complete verdict.
+ *
+ * Coverage is checked against the RANK-AND-CAPPED worklist (from
+ * `computeIncompleteHandlingWorklist(context, budget)`), not the full pre-cap
+ * candidate set — a deferred candidate was never listed, so it is correctly
+ * exempt from the honesty contract (candidate-overflow handling's point 3:
+ * deferral is not incompleteness). `budget` must be the SAME value
+ * `buildIncompleteHandlingPassPrompts` used — `review-pass.ts`'s
+ * `runReviewPass` guarantees this by threading one computed budget through
+ * both calls.
  */
 export function postProcessIncompleteHandlingResult(
   result: AgentResult,
   context: ReviewContext,
+  budget = Number.POSITIVE_INFINITY,
 ): AgentResult {
-  const ids = candidateIds(computeIncompleteHandlingCandidates(context));
+  const { candidates, deferredCount, deferredIds } = computeIncompleteHandlingWorklist(
+    context,
+    budget,
+  );
+  const ids = candidateIds(candidates);
   const expected = new Set(ids);
   const raw = result.findings as RawVerdictFinding[];
   const coverageIncomplete = !hasCompleteVerdictCoverage(ids, raw);
@@ -565,6 +630,8 @@ export function postProcessIncompleteHandlingResult(
     incomplete: wasAlreadyIncomplete || coverageIncomplete,
     stopReason:
       !wasAlreadyIncomplete && coverageIncomplete ? 'incomplete_verdict' : result.stopReason,
+    candidatesDeferred: deferredCount,
+    deferredCandidateIds: deferredCount > 0 ? deferredIds : undefined,
   };
 }
 

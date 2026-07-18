@@ -74,6 +74,9 @@ import { envDisabled } from './agent-client-shared.js';
 import {
   renderPassPrHeader,
   EXTRA_PASS_MIN_BUDGET_TOKENS,
+  affordableCandidateCeiling,
+  MAX_DEFERRED_LABELS,
+  renderDeferralNote,
   type ReviewPassSpec,
 } from './review-pass.js';
 
@@ -228,8 +231,19 @@ export function buildDocTruthPassInitialMessage(context: ReviewContext): string 
  * ids attached (`buildDocTruthPassInitialMessageV2`). With the flag off this
  * function's return value is UNCHANGED from before v2 existed — same two
  * function calls, nothing appended.
+ *
+ * `budget` is this pass's own final allocated budget (see
+ * `ReviewPassSpec.buildPrompts`'s doc comment) — under v2, it drives
+ * rank-and-cap candidate-overflow handling (`capClaimWorklistToCeiling`):
+ * the Finding-A calibrate's ~51-claim worklist is the motivating case this
+ * closes. Defaults to unlimited so every existing call site that doesn't
+ * pass one (tests, and the v1 path, which has no id-based worklist to cap)
+ * is byte-identical to before this feature existed.
  */
-export function buildDocTruthPassPrompts(context: ReviewContext): {
+export function buildDocTruthPassPrompts(
+  context: ReviewContext,
+  budget = Number.POSITIVE_INFINITY,
+): {
   systemPrompt: string;
   initialMessage: string;
 } {
@@ -237,10 +251,12 @@ export function buildDocTruthPassPrompts(context: ReviewContext): {
   if (!isDocTruthV2Enabled()) {
     return { systemPrompt, initialMessage: buildDocTruthPassInitialMessage(context) };
   }
-  const worklist = buildClaimWorklist(context);
+  const full = buildClaimWorklist(context);
+  const ceiling = affordableCandidateCeiling(budget, DOC_TRUTH_TOKENS_PER_CLAIM);
+  const { worklist, deferredCount } = capClaimWorklistToCeiling(full, ceiling);
   return {
     systemPrompt: `${systemPrompt}\n\n${buildV2OutputContractOverride(allClaimIds(worklist))}`,
-    initialMessage: buildDocTruthPassInitialMessageV2(context, worklist),
+    initialMessage: buildDocTruthPassInitialMessageV2(context, worklist, deferredCount),
   };
 }
 
@@ -318,6 +334,141 @@ export function allClaimIds(worklist: ClaimWorklist): string[] {
     ...worklist.docClaimIds,
     ...worklist.renameSignals.flatMap(s => [...s.proseIds, ...s.survivorIds]),
   ];
+}
+
+// ---------------------------------------------------------------------------
+// Candidate-overflow handling (rank-and-cap with attested deferral)
+// ---------------------------------------------------------------------------
+
+/**
+ * Realistic per-claim cost for the ceiling formula (see
+ * `affordableCandidateCeiling`). A claim entry carries a pre-fetched evidence
+ * excerpt (or a short "no evidence located" note), so judging it is a
+ * COMPARISON, not an investigation — the rule's own budget-discipline
+ * instruction explicitly forbids re-reading via tools when evidence is
+ * attached (`DOC_PASS_INTRO`: "do NOT re-read that file with tools; spend
+ * tool calls ONLY on claims with no attached evidence"). Same order of
+ * magnitude as stale-duplicate's own evidence-inline PER_CANDIDATE_TOKENS
+ * (800) — a little lighter, since a doc claim's excerpt is typically shorter
+ * than stale-duplicate's full diff hunk plus multiple surviving-site
+ * snippets.
+ */
+export const DOC_TRUTH_TOKENS_PER_CLAIM = 500;
+
+/** A short, human-readable label for one dropped worklist item — for the delivery attestation's
+ *  `deferredCandidateIds`, not the pass's own `claim-N` ids. */
+function truncateForLabel(text: string): string {
+  const MAX_LABEL_CHARS = 80;
+  const trimmed = text.trim();
+  return trimmed.length > MAX_LABEL_CHARS ? `${trimmed.slice(0, MAX_LABEL_CHARS - 1)}…` : trimmed;
+}
+
+/** The result of rank-and-capping a `ClaimWorklist` to an affordable ceiling. */
+export interface ClaimWorklistOverflow {
+  /** The capped worklist — safe to render with the EXISTING v2 render functions unchanged. */
+  worklist: ClaimWorklist;
+  /** How many listed ids were excluded by the cap (0 when the full worklist fit). */
+  deferredCount: number;
+  /** Best-effort human-readable labels for the deferred items (capped short list). */
+  deferredIds: string[];
+}
+
+/** A running "how many more ids can we afford" counter plus the deferred-label collector both
+ *  `capDocClaims`/`capRenameSignal` share — extracted so `capClaimWorklistToCeiling` itself stays
+ *  a short orchestrator (lien delta: Halstead effort budget). */
+interface CapBudget {
+  remaining: number;
+  pushDeferred: (label: string) => void;
+}
+
+/** Cap `full.docClaims`/`docClaimIds` to what `budget.remaining` affords, decrementing it and
+ *  recording every dropped claim's text as a deferred label. */
+function capDocClaims(
+  full: ClaimWorklist,
+  budget: CapBudget,
+): Pick<ClaimWorklist, 'docClaims' | 'docClaimIds'> {
+  const keepCount = Math.min(full.docClaims.length, budget.remaining);
+  budget.remaining -= keepCount;
+  full.docClaims.slice(keepCount).forEach(c => budget.pushDeferred(c.claimText));
+  return {
+    docClaims: full.docClaims.slice(0, keepCount),
+    docClaimIds: full.docClaimIds.slice(0, keepCount),
+  };
+}
+
+/** Cap one rename-sweep signal's prose/survivor items to what `budget.remaining` affords
+ *  (prose before survivors, matching `allClaimIds`' own order), decrementing it and recording
+ *  every dropped item's text as a deferred label. Returns null when nothing of this signal
+ *  fits — the whole mapping is deferred, nothing to render. */
+function capRenameSignal(s: RenameSignalWithIds, budget: CapBudget): RenameSignalWithIds | null {
+  const proseKeep = Math.min(s.proseIds.length, budget.remaining);
+  budget.remaining -= proseKeep;
+  const survivorKeep = Math.min(s.survivorIds.length, budget.remaining);
+  budget.remaining -= survivorKeep;
+
+  s.signal.proseTouched.slice(proseKeep).forEach(p => budget.pushDeferred(p.sentence));
+  s.signal.survivors.slice(survivorKeep).forEach(v => budget.pushDeferred(v.snippet));
+
+  if (proseKeep === 0 && survivorKeep === 0) return null;
+  return {
+    signal: {
+      ...s.signal,
+      proseTouched: s.signal.proseTouched.slice(0, proseKeep),
+      survivors: s.signal.survivors.slice(0, survivorKeep),
+    },
+    proseIds: s.proseIds.slice(0, proseKeep),
+    survivorIds: s.survivorIds.slice(0, survivorKeep),
+  };
+}
+
+/**
+ * Trim a `ClaimWorklist` down to at most `ceiling` total ids, preserving the
+ * EXISTING order `allClaimIds` already walks (doc claims first in their own
+ * extraction order, then each rename mapping's prose-touched lines then
+ * survivors, mappings in `computeRenameSweepSignals`'s own most-repeated-first
+ * order) — nothing is re-ranked, only truncated, per candidate-overflow
+ * handling's "reuse each signal's own order; don't invent new scoring".
+ *
+ * Scoped to the ceiling this run's BUDGET affords — the pre-existing local
+ * caps each signal already applies (`DOC_TRUTH_V2_MAX_CLAIMS`, rename-sweep's
+ * own `MAX_PROSE_LINES`/`MAX_SURVIVORS`/`MAX_MAPPINGS`) are untouched and are
+ * a separate, already-silent truncation this function does not attempt to
+ * fix — see the PR body for that scoping call. Returns the ORIGINAL worklist
+ * object unchanged when `ceiling` already covers every id (the common case),
+ * so a well-resourced run is byte-identical to before this feature existed.
+ */
+export function capClaimWorklistToCeiling(
+  full: ClaimWorklist,
+  ceiling: number,
+): ClaimWorklistOverflow {
+  const totalIds = allClaimIds(full).length;
+  if (totalIds <= ceiling) {
+    return { worklist: full, deferredCount: 0, deferredIds: [] };
+  }
+
+  const deferredIds: string[] = [];
+  const budget: CapBudget = {
+    remaining: Math.max(0, ceiling),
+    pushDeferred: label => {
+      if (deferredIds.length < MAX_DEFERRED_LABELS) deferredIds.push(truncateForLabel(label));
+    },
+  };
+
+  const cappedDocClaims = capDocClaims(full, budget);
+  const keptSignals = full.renameSignals
+    .map(s => capRenameSignal(s, budget))
+    .filter((s): s is RenameSignalWithIds => s !== null);
+
+  return {
+    worklist: {
+      ...cappedDocClaims,
+      renameSignals: keptSignals,
+      overflowClaims:
+        full.overflowClaims + (full.docClaims.length - cappedDocClaims.docClaims.length),
+    },
+    deferredCount: totalIds - ceiling,
+    deferredIds,
+  };
 }
 
 /** Render one doc-claim entry with its id — same shape as doc-claims-signals.ts's
@@ -407,10 +558,14 @@ const DOC_TRUTH_V2_CONTRACT_NOTE =
   'not in the worklist — those need no id and are evaluated as ordinary findings.';
 
 /** Build the v2 initial message: same shape as `buildDocTruthPassInitialMessage`, but the
- *  doc-claims/rename-sweep blocks carry ids and a contract note is inserted after the intro. */
+ *  doc-claims/rename-sweep blocks carry ids and a contract note is inserted after the intro.
+ *  `deferredCount` (0 by default) renders a candidate-overflow note when `worklist` was
+ *  rank-and-capped (see `capClaimWorklistToCeiling`) — omitted when nothing was deferred, so
+ *  every existing call site is byte-identical to before this feature existed. */
 export function buildDocTruthPassInitialMessageV2(
   context: ReviewContext,
   worklist: ClaimWorklist,
+  deferredCount = 0,
 ): string {
   const sections: string[] = [];
   pushIfPresent(sections, renderPassPrHeader(context));
@@ -419,6 +574,7 @@ export function buildDocTruthPassInitialMessageV2(
   pushIfPresent(sections, renderDocClaimsV2(worklist));
   pushIfPresent(sections, renderRenameSweepV2(worklist));
   pushIfPresent(sections, renderGuidanceSurfaceSection(context));
+  pushIfPresent(sections, renderDeferralNote(deferredCount));
   sections.push(
     'Judge every listed id and emit its required verdict, then output findings as JSON. If ' +
       'every claim is accurate, every verdict is still required — just each with verdict ' +
@@ -647,14 +803,26 @@ function reduceDocTruthV2Findings(raw: RawDocClaimVerdict[]): AgentFinding[] {
  * unconditionally without touching v1 behavior. When the client result was ALREADY incomplete
  * for a real reason (budget/max_turns/error), that reason is kept as-is, same precedent as
  * `stale-duplicate-pass.ts`'s `postProcessStaleDuplicateResult`.
+ *
+ * Coverage is checked against the RANK-AND-CAPPED worklist
+ * (`capClaimWorklistToCeiling(buildClaimWorklist(context), ceiling)`), not the
+ * full pre-cap worklist — a deferred claim was never listed, so it is
+ * correctly exempt from the honesty contract (candidate-overflow handling's
+ * point 3: deferral is not incompleteness). `budget` must be the SAME value
+ * `buildDocTruthPassPrompts` used — `review-pass.ts`'s `runReviewPass`
+ * guarantees this by threading one computed budget through both calls.
  */
 export function postProcessDocTruthResult(
   result: AgentResult,
   context: ReviewContext,
+  budget = Number.POSITIVE_INFINITY,
 ): AgentResult {
   if (!isDocTruthV2Enabled()) return result;
 
-  const ids = allClaimIds(buildClaimWorklist(context));
+  const full = buildClaimWorklist(context);
+  const ceiling = affordableCandidateCeiling(budget, DOC_TRUTH_TOKENS_PER_CLAIM);
+  const { worklist, deferredCount, deferredIds } = capClaimWorklistToCeiling(full, ceiling);
+  const ids = allClaimIds(worklist);
   const raw = result.findings as RawDocClaimVerdict[];
   const coverageIncomplete = !hasCompleteVerdictCoverage(ids, raw);
   const wasAlreadyIncomplete = result.incomplete;
@@ -665,6 +833,8 @@ export function postProcessDocTruthResult(
     incomplete: wasAlreadyIncomplete || coverageIncomplete,
     stopReason:
       !wasAlreadyIncomplete && coverageIncomplete ? 'incomplete_verdict' : result.stopReason,
+    candidatesDeferred: deferredCount,
+    deferredCandidateIds: deferredCount > 0 ? deferredIds : undefined,
   };
 }
 

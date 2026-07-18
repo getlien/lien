@@ -66,7 +66,7 @@ describe('assembleAttestation', () => {
     const attestation = assembleAttestation(baseInput());
     expect(attestation.verdict).toBe('delivered');
     expect(attestation.provider.passes).toEqual([
-      { name: 'main', ran: true, stopReason: 'completed', neverRan: false },
+      { name: 'main', ran: true, stopReason: 'completed', neverRan: false, candidatesDeferred: 0 },
     ]);
     expect(attestation.budget).toEqual({
       allocatedTokens: 100_000,
@@ -86,6 +86,7 @@ describe('assembleAttestation', () => {
       ran: true,
       stopReason: 'error',
       neverRan: true,
+      candidatesDeferred: 0,
     });
   });
 
@@ -193,6 +194,7 @@ describe('assembleAttestation', () => {
         neverRan: false,
         allocatedTokens: 40_000,
         spentTokens: 8_000,
+        candidatesDeferred: 0,
         ...overrides,
       };
     }
@@ -200,8 +202,21 @@ describe('assembleAttestation', () => {
     it('reports a SEPARATE provider.passes[] entry for the extra pass, not just main', () => {
       const attestation = assembleAttestation(baseInput({ extraPasses: [docTruthPass()] }));
       expect(attestation.provider.passes).toEqual([
-        { name: 'main', ran: true, stopReason: 'completed', neverRan: false },
-        { name: 'doc-truth', ran: true, stopReason: 'completed', neverRan: false },
+        {
+          name: 'main',
+          ran: true,
+          stopReason: 'completed',
+          neverRan: false,
+          candidatesDeferred: 0,
+        },
+        {
+          name: 'doc-truth',
+          ran: true,
+          stopReason: 'completed',
+          neverRan: false,
+          candidatesDeferred: 0,
+          deferredCandidateIds: undefined,
+        },
       ]);
     });
 
@@ -237,8 +252,21 @@ describe('assembleAttestation', () => {
       );
       expect(attestation.verdict).toBe('degraded:budget_starved');
       expect(attestation.provider.passes).toEqual([
-        { name: 'main', ran: true, stopReason: 'completed', neverRan: false },
-        { name: 'doc-truth', ran: true, stopReason: 'budget', neverRan: false },
+        {
+          name: 'main',
+          ran: true,
+          stopReason: 'completed',
+          neverRan: false,
+          candidatesDeferred: 0,
+        },
+        {
+          name: 'doc-truth',
+          ran: true,
+          stopReason: 'budget',
+          neverRan: false,
+          candidatesDeferred: 0,
+          deferredCandidateIds: undefined,
+        },
       ]);
       // Aggregate flags starved...
       expect(attestation.budget.starved).toBe(true);
@@ -291,6 +319,7 @@ describe('deriveMainPassAttestation', () => {
       ran: false,
       stopReason: 'not_run',
       neverRan: false,
+      candidatesDeferred: 0,
     });
   });
 
@@ -309,6 +338,7 @@ describe('deriveMainPassAttestation', () => {
       ran: true,
       stopReason: 'error',
       neverRan: false,
+      candidatesDeferred: 0,
     });
   });
 });

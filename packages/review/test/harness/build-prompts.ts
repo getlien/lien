@@ -33,24 +33,38 @@ import { buildSystemPrompt, buildInitialMessage } from '../../src/plugins/agent/
 import {
   shouldRunDocTruthPass,
   buildDocTruthPassPrompts,
+  docTruthPassBudget,
 } from '../../src/plugins/agent/doc-truth-pass.js';
 import {
   shouldRunStaleDuplicatePass,
   buildStaleDuplicatePassPrompts,
+  staleDuplicatePassBudget,
   applyStaleDuplicateMainOverride,
 } from '../../src/plugins/agent/stale-duplicate-pass.js';
 import {
   shouldRunIncompleteHandlingPass,
   buildIncompleteHandlingPassPrompts,
+  incompleteHandlingPassBudget,
   applyIncompleteHandlingMainOverride,
 } from '../../src/plugins/agent/incomplete-handling-pass.js';
 import {
   shouldRunRemovedExportsPass,
   buildRemovedExportsPassPrompts,
+  removedExportsPassBudget,
 } from '../../src/plugins/agent/removed-exports-pass.js';
 import type { AgentConfig } from '../../src/plugins/agent/types.js';
 
 import { loadFixture } from './fixture-loader.js';
+
+/** One extra pass's `{fires, ...prompts}` output shape (see `main`'s output object). Extracted
+ *  so `main` itself stays a short orchestrator (lien delta: Halstead effort budget) instead of
+ *  repeating the same fires-ternary-plus-spread four times. */
+function passOutput(
+  fires: boolean,
+  build: () => { systemPrompt: string; initialMessage: string },
+): { fires: true; systemPrompt: string; initialMessage: string } | { fires: false } {
+  return fires ? { fires: true, ...build() } : { fires: false };
+}
 
 async function main(): Promise<void> {
   const fixtureArg = process.argv[2];
@@ -70,25 +84,24 @@ async function main(): Promise<void> {
   const systemPrompt = buildSystemPrompt(rules);
   const initialMessage = buildInitialMessage(ctx, { blastRadius: null, rules });
 
-  const docTruthFires = shouldRunDocTruthPass(ctx, config);
-  const docTruthPass = docTruthFires
-    ? { fires: true as const, ...buildDocTruthPassPrompts(ctx) }
-    : { fires: false as const };
+  // The main pass's own base budget — used to derive each extra pass's REAL
+  // allocated budget (mirroring review-pass.ts's runReviewPass) so this
+  // harness's prompt output reflects candidate-overflow rank-and-cap exactly
+  // as production would apply it, not an always-uncapped worklist.
+  const baseBudget = config?.maxTokenBudget ?? 100_000;
 
-  const staleDuplicateFires = shouldRunStaleDuplicatePass(ctx, config);
-  const staleDuplicatePass = staleDuplicateFires
-    ? { fires: true as const, ...buildStaleDuplicatePassPrompts(ctx) }
-    : { fires: false as const };
-
-  const incompleteHandlingFires = shouldRunIncompleteHandlingPass(ctx, config);
-  const incompleteHandlingPass = incompleteHandlingFires
-    ? { fires: true as const, ...buildIncompleteHandlingPassPrompts(ctx) }
-    : { fires: false as const };
-
-  const removedExportsFires = shouldRunRemovedExportsPass(ctx, config);
-  const removedExportsPass = removedExportsFires
-    ? { fires: true as const, ...buildRemovedExportsPassPrompts(ctx) }
-    : { fires: false as const };
+  const docTruthPass = passOutput(shouldRunDocTruthPass(ctx, config), () =>
+    buildDocTruthPassPrompts(ctx, docTruthPassBudget(baseBudget)),
+  );
+  const staleDuplicatePass = passOutput(shouldRunStaleDuplicatePass(ctx, config), () =>
+    buildStaleDuplicatePassPrompts(ctx, staleDuplicatePassBudget(baseBudget, ctx)),
+  );
+  const incompleteHandlingPass = passOutput(shouldRunIncompleteHandlingPass(ctx, config), () =>
+    buildIncompleteHandlingPassPrompts(ctx, incompleteHandlingPassBudget(baseBudget, ctx)),
+  );
+  const removedExportsPass = passOutput(shouldRunRemovedExportsPass(ctx, config), () =>
+    buildRemovedExportsPassPrompts(ctx, removedExportsPassBudget(baseBudget, ctx)),
+  );
 
   const output = {
     fixturePath,

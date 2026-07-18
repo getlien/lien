@@ -6,6 +6,7 @@ import {
   shouldRunRemovedExportsPass,
   isRemovedExportsPassEnabled,
   computeRemovedExportsCandidates,
+  computeRemovedExportsWorklist,
   buildRemovedExportsPassPrompts,
   buildRemovedExportsPassInitialMessage,
   removedExportsPassBudget,
@@ -18,6 +19,7 @@ import {
 } from '../src/plugins/agent/removed-exports-pass.js';
 import { BUILTIN_RULES, buildTriggerContext, selectRules } from '../src/plugins/agent/rules.js';
 import { buildInitialMessage } from '../src/plugins/agent/system-prompt.js';
+import { VERDICT_EMISSION_RESERVE_TOKENS } from '../src/plugins/agent/review-pass.js';
 import { createTestContext } from '../src/test-helpers.js';
 import type { ReviewContext } from '../src/plugin-types.js';
 import type { AgentConfig, AgentFinding, AgentResult } from '../src/plugins/agent/types.js';
@@ -274,6 +276,74 @@ describe('computeRemovedExportsCandidates', () => {
 });
 
 // ---------------------------------------------------------------------------
+// computeRemovedExportsWorklist — candidate-overflow rank-and-cap
+// ---------------------------------------------------------------------------
+
+describe('computeRemovedExportsWorklist', () => {
+  it('defaults to unlimited budget — defers nothing (byte-identical to before this feature existed)', () => {
+    const { candidates, deferredCount, deferredIds } =
+      computeRemovedExportsWorklist(manyRemovalsContext());
+    expect(candidates).toHaveLength(15);
+    expect(deferredCount).toBe(0);
+    expect(deferredIds).toEqual([]);
+  });
+
+  it("caps to the ceiling and defers the remainder, preserving the signal's own (alphabetical) order", () => {
+    const ctx = manyRemovalsContext();
+    const budget = VERDICT_EMISSION_RESERVE_TOKENS + 2 * 6_000; // affords 2
+    const { candidates, deferredCount, deferredIds } = computeRemovedExportsWorklist(ctx, budget);
+    expect(candidates.map(c => c.symbol)).toEqual(['sym00', 'sym01']);
+    expect(deferredCount).toBe(13);
+    expect(deferredIds).toEqual([
+      'sym02',
+      'sym03',
+      'sym04',
+      'sym05',
+      'sym06',
+      'sym07',
+      'sym08',
+      'sym09',
+      'sym10',
+      'sym11',
+    ]); // capped at MAX_DEFERRED_LABELS (10) even though 13 were deferred
+  });
+
+  it("reproduces the #813-shaped overflow: 15 candidates at this pass's own scaled budget still defer most of them", () => {
+    // 15 candidates: removedExportsPassBudget scales to 2,000 + 800*15 =
+    // 14,000 — a "correctly scaled" budget by the OLD prompt-sizing formula,
+    // yet confirming each surviving reference needs a real read_file
+    // round-trip (module doc: "no inline snippet is attached"), so the
+    // realistic ceiling is far smaller than 15.
+    const ctx = manyRemovalsContext();
+    const budget = removedExportsPassBudget(100_000, ctx);
+    expect(budget).toBe(14_000);
+    const { candidates, deferredCount } = computeRemovedExportsWorklist(ctx, budget);
+    expect(candidates.length).toBeLessThan(15);
+    expect(candidates.length + deferredCount).toBe(15);
+  });
+
+  it("a single-candidate context is never capped at this pass's own real (floor) budget", () => {
+    const ctx = breakingOnlyContext();
+    const budget = removedExportsPassBudget(100_000, ctx);
+    const { candidates, deferredCount } = computeRemovedExportsWorklist(ctx, budget);
+    expect(candidates).toHaveLength(1);
+    expect(deferredCount).toBe(0);
+  });
+
+  // Byte-diff census: a realistic (low-candidate) real-PR shape at its ACTUAL
+  // production budget must produce prompt output byte-identical to the
+  // pre-feature default call — overflow handling changes nothing on the
+  // common case.
+  it('byte-diff census: the ordinary single-candidate real-PR shape is unaffected at the real budget', () => {
+    const ctx = breakingOnlyContext();
+    const realBudget = removedExportsPassBudget(100_000, ctx);
+    expect(buildRemovedExportsPassPrompts(ctx, realBudget)).toEqual(
+      buildRemovedExportsPassPrompts(ctx),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Prompt construction
 // ---------------------------------------------------------------------------
 
@@ -361,6 +431,32 @@ describe('buildRemovedExportsPassPrompts', () => {
     expect(message).not.toContain('<doc_claims>');
     expect(message).not.toContain('<stale_literal_candidates>');
     expect(message).not.toContain('<incomplete_handling_candidates>');
+  });
+
+  // -------------------------------------------------------------------------
+  // Candidate-overflow: contract text differs ONLY when the worklist was capped
+  // -------------------------------------------------------------------------
+
+  it('is byte-identical to before this feature existed when the budget is not passed (default unlimited)', () => {
+    const ctx = manyRemovalsContext();
+    const withBudget = buildRemovedExportsPassPrompts(ctx, Number.POSITIVE_INFINITY);
+    const withoutBudget = buildRemovedExportsPassPrompts(ctx);
+    expect(withoutBudget).toEqual(withBudget);
+    expect(withoutBudget.initialMessage).not.toContain('CANDIDATE OVERFLOW');
+  });
+
+  it('lists only the affordable candidates and appends the overflow note when the budget caps the worklist', () => {
+    const ctx = manyRemovalsContext();
+    const budget = VERDICT_EMISSION_RESERVE_TOKENS + 2 * 6_000; // affords 2 of 15
+    const { systemPrompt, initialMessage } = buildRemovedExportsPassPrompts(ctx, budget);
+    expect(systemPrompt).toContain('candidate-1');
+    expect(systemPrompt).toContain('candidate-2');
+    expect(systemPrompt).not.toContain('candidate-3');
+    expect(initialMessage).toContain('sym00');
+    expect(initialMessage).toContain('sym01');
+    expect(initialMessage).not.toContain('sym02');
+    expect(initialMessage).toContain('CANDIDATE OVERFLOW');
+    expect(initialMessage).toContain('13 additional eligible candidate(s)');
   });
 });
 
@@ -500,6 +596,49 @@ describe('postProcessRemovedExportsResult', () => {
     expect(result.incomplete).toBe(true);
     expect(result.stopReason).toBe('incomplete_verdict');
     expect(result.findings).toHaveLength(0);
+  });
+
+  // -------------------------------------------------------------------------
+  // Candidate-overflow: deferral is attested, NOT incompleteness
+  // -------------------------------------------------------------------------
+
+  it('stamps candidatesDeferred/deferredCandidateIds when the budget capped the worklist', () => {
+    const ctx = manyRemovalsContext();
+    const budget = VERDICT_EMISSION_RESERVE_TOKENS + 2 * 6_000; // affords 2 of 15
+    const raw = fakeResult({
+      findings: [
+        finding({ candidateId: 'candidate-1', verdict: 'internal-only' }),
+        finding({ candidateId: 'candidate-2', verdict: 'internal-only' }),
+      ],
+    });
+    const result = postProcessRemovedExportsResult(raw, ctx, budget);
+    expect(result.candidatesDeferred).toBe(13);
+    expect(result.deferredCandidateIds).toHaveLength(10); // capped at MAX_DEFERRED_LABELS
+    expect(result.deferredCandidateIds![0]).toBe('sym02');
+  });
+
+  it('a capped-but-complete run (every LISTED candidate verdicted) stays incomplete:false — deferral is not incompleteness', () => {
+    const ctx = manyRemovalsContext();
+    const budget = VERDICT_EMISSION_RESERVE_TOKENS + 2 * 6_000; // affords 2 of 15
+    const raw = fakeResult({
+      findings: [
+        finding({ candidateId: 'candidate-1', verdict: 'internal-only' }),
+        finding({ candidateId: 'candidate-2', verdict: 'internal-only' }),
+      ],
+    });
+    const result = postProcessRemovedExportsResult(raw, ctx, budget);
+    expect(result.incomplete).toBe(false);
+    expect(result.stopReason).toBe('completed');
+    expect(result.candidatesDeferred).toBe(13);
+  });
+
+  it('reports candidatesDeferred: 0 and no deferredCandidateIds when nothing was capped (default budget)', () => {
+    const raw = fakeResult({
+      findings: [finding({ candidateId: 'candidate-1', verdict: 'internal-only' })],
+    });
+    const result = postProcessRemovedExportsResult(raw, breakingOnlyContext());
+    expect(result.candidatesDeferred).toBe(0);
+    expect(result.deferredCandidateIds).toBeUndefined();
   });
 });
 

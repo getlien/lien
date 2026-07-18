@@ -112,6 +112,11 @@ import {
 import {
   renderPassPrHeader,
   EXTRA_PASS_MIN_BUDGET_TOKENS,
+  OBSERVED_TOKENS_PER_TURN,
+  affordableCandidateCeiling,
+  capCandidatesToCeiling,
+  deferredCandidateLabels,
+  renderDeferralNote,
   type ReviewPassSpec,
 } from './review-pass.js';
 
@@ -307,6 +312,36 @@ function candidateIds(candidates: RemovedExportContext[]): string[] {
 }
 
 // ---------------------------------------------------------------------------
+// Candidate-overflow handling (rank-and-cap with attested deferral)
+// ---------------------------------------------------------------------------
+
+/** Best-effort short label for a candidate — for the delivery attestation's
+ *  `deferredCandidateIds`, not the pass's own `candidate-N` worklist ids. */
+function removedExportsLabel(c: RemovedExportContext): string {
+  return c.symbol;
+}
+
+/** This run's actual worklist after rank-and-cap. No candidate here carries an inline snippet
+ *  (module doc: "no inline snippet is attached, unlike the pilot's stale-literal candidates") —
+ *  confirming a surviving reference is real production usage requires read_file, so the
+ *  realistic per-candidate cost is `OBSERVED_TOKENS_PER_TURN`, not this pass's own (prompt-sizing)
+ *  PER_CANDIDATE_TOKENS constant. `budget` defaults to unlimited so every existing call site that
+ *  doesn't pass one is byte-identical to before this feature existed. Exposed for testing. */
+export function computeRemovedExportsWorklist(
+  context: ReviewContext,
+  budget = Number.POSITIVE_INFINITY,
+): { candidates: RemovedExportContext[]; deferredCount: number; deferredIds: string[] } {
+  const all = computeRemovedExportsCandidates(context);
+  const ceiling = affordableCandidateCeiling(budget, OBSERVED_TOKENS_PER_TURN);
+  const { kept, deferred } = capCandidatesToCeiling(all, ceiling);
+  return {
+    candidates: kept,
+    deferredCount: deferred.length,
+    deferredIds: deferredCandidateLabels(deferred, removedExportsLabel),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Prompt construction
 // ---------------------------------------------------------------------------
 
@@ -467,26 +502,39 @@ ${REMOVED_EXPORTS_EXAMPLE}
 ${buildOutputFormat(ids)}`;
 }
 
-/** Build the candidate-loop's initial message: PR header + worklist + a closing nudge. */
-export function buildRemovedExportsPassInitialMessage(context: ReviewContext): string {
-  const candidates = computeRemovedExportsCandidates(context);
+/** Build the candidate-loop's initial message: PR header + worklist + a closing nudge. `budget`
+ *  drives rank-and-cap overflow handling (see `computeRemovedExportsWorklist`) — defaults to
+ *  unlimited so existing callers that don't pass one are unaffected. */
+export function buildRemovedExportsPassInitialMessage(
+  context: ReviewContext,
+  budget = Number.POSITIVE_INFINITY,
+): string {
+  const { candidates, deferredCount } = computeRemovedExportsWorklist(context, budget);
   const sections: string[] = [];
   const header = renderPassPrHeader(context);
   if (header) sections.push(header);
   sections.push(renderWorklist(context, candidates));
+  const deferralNote = renderDeferralNote(deferredCount);
+  if (deferralNote) sections.push(deferralNote);
   sections.push('Judge every candidate above and output your verdicts as JSON.');
   return sections.join('\n\n');
 }
 
-/** The system + initial prompts for the removed-exports candidate loop. */
-export function buildRemovedExportsPassPrompts(context: ReviewContext): {
+/** The system + initial prompts for the removed-exports candidate loop. `budget` is this pass's
+ *  own final allocated budget (see `ReviewPassSpec.buildPrompts`'s doc comment) — defaults to
+ *  unlimited so existing callers unaware of overflow handling are byte-identical to before. */
+export function buildRemovedExportsPassPrompts(
+  context: ReviewContext,
+  budget = Number.POSITIVE_INFINITY,
+): {
   systemPrompt: string;
   initialMessage: string;
 } {
-  const ids = candidateIds(computeRemovedExportsCandidates(context));
+  const { candidates } = computeRemovedExportsWorklist(context, budget);
+  const ids = candidateIds(candidates);
   return {
     systemPrompt: buildSystemPrompt(ids),
-    initialMessage: buildRemovedExportsPassInitialMessage(context),
+    initialMessage: buildRemovedExportsPassInitialMessage(context, budget),
   };
 }
 
@@ -586,12 +634,22 @@ function hasCompleteVerdictCoverage(ids: string[], raw: RawVerdictFinding[]): bo
  * result was ALREADY incomplete for a real reason (budget/max_turns/error),
  * that reason is kept as-is; `incomplete_verdict` is only used when the
  * model otherwise returned a syntactically complete verdict.
+ *
+ * Coverage is checked against the RANK-AND-CAPPED worklist (from
+ * `computeRemovedExportsWorklist(context, budget)`), not the full pre-cap
+ * candidate set — a deferred candidate was never listed, so it is correctly
+ * exempt from the honesty contract (candidate-overflow handling's point 3:
+ * deferral is not incompleteness). `budget` must be the SAME value
+ * `buildRemovedExportsPassPrompts` used — `review-pass.ts`'s `runReviewPass`
+ * guarantees this by threading one computed budget through both calls.
  */
 export function postProcessRemovedExportsResult(
   result: AgentResult,
   context: ReviewContext,
+  budget = Number.POSITIVE_INFINITY,
 ): AgentResult {
-  const ids = candidateIds(computeRemovedExportsCandidates(context));
+  const { candidates, deferredCount, deferredIds } = computeRemovedExportsWorklist(context, budget);
+  const ids = candidateIds(candidates);
   const expected = new Set(ids);
   const raw = result.findings as RawVerdictFinding[];
   const coverageIncomplete = !hasCompleteVerdictCoverage(ids, raw);
@@ -610,6 +668,8 @@ export function postProcessRemovedExportsResult(
     incomplete: wasAlreadyIncomplete || coverageIncomplete,
     stopReason:
       !wasAlreadyIncomplete && coverageIncomplete ? 'incomplete_verdict' : result.stopReason,
+    candidatesDeferred: deferredCount,
+    deferredCandidateIds: deferredCount > 0 ? deferredIds : undefined,
   };
 }
 

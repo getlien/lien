@@ -48,6 +48,23 @@ export interface ProviderPassAttestation {
   stopReason: ProviderStopReason;
   /** Every provider request failed terminally — zero completed turns. */
   neverRan: boolean;
+  /**
+   * How many of this pass's eligible candidates were excluded from its
+   * worklist by this run's rank-and-cap ceiling (candidate-overflow
+   * handling — see `plugins/agent/review-pass.ts`'s
+   * `affordableCandidateCeiling`) — 0 for the main pass (no candidate loop)
+   * or any pass whose full candidate list fit. This is an ADDITIVE field on
+   * the existing v2 shape; `ATTESTATION_VERSION` is unchanged (see that
+   * constant's doc comment) — unlike the v1→v2 bump, which fixed a genuine
+   * cardinality assumption a consumer could silently get wrong
+   * (`passes.length <= 1`), no existing consumer reads this field at all
+   * yet, so there is no prior assumption for it to violate by not knowing
+   * about it. A future field that changes an EXISTING assumption would still
+   * warrant its own version bump; a new, previously-absent field does not.
+   */
+  candidatesDeferred: number;
+  /** Best-effort human-readable labels for the deferred candidates (capped short list). */
+  deferredCandidateIds?: string[];
 }
 
 /** A plugin (or a plugin's internal sub-pass) that didn't run this turn, and why. */
@@ -173,19 +190,31 @@ export function deriveMainPassAttestation(
   providerFailure: boolean,
 ): ProviderPassAttestation {
   if (!agentAttempted) {
-    return { name: 'main', ran: false, stopReason: 'not_run', neverRan: false };
+    return {
+      name: 'main',
+      ran: false,
+      stopReason: 'not_run',
+      neverRan: false,
+      candidatesDeferred: 0,
+    };
   }
   if (providerFailure) {
-    return { name: 'main', ran: true, stopReason: 'error', neverRan: true };
+    return { name: 'main', ran: true, stopReason: 'error', neverRan: true, candidatesDeferred: 0 };
   }
   const incompleteFinding = findings.find(
     f => (f.metadata as AgentSummaryMetadata | undefined)?.incomplete === true,
   );
   if (incompleteFinding) {
     const stopReason = (incompleteFinding.metadata as AgentSummaryMetadata).stopReason ?? 'error';
-    return { name: 'main', ran: true, stopReason, neverRan: false };
+    return { name: 'main', ran: true, stopReason, neverRan: false, candidatesDeferred: 0 };
   }
-  return { name: 'main', ran: true, stopReason: 'completed', neverRan: false };
+  return {
+    name: 'main',
+    ran: true,
+    stopReason: 'completed',
+    neverRan: false,
+    candidatesDeferred: 0,
+  };
 }
 
 /**
@@ -237,6 +266,10 @@ export interface ExtraPassAttestationInput {
   neverRan: boolean;
   allocatedTokens: number;
   spentTokens: number;
+  /** How many eligible candidates this pass excluded from its worklist via rank-and-cap. */
+  candidatesDeferred: number;
+  /** Best-effort human-readable labels for the deferred candidates (capped short list). */
+  deferredCandidateIds?: string[];
 }
 
 export interface AttestationInput {
@@ -304,6 +337,8 @@ function buildPassesAndBudget(
       ran: true,
       stopReason: p.stopReason,
       neverRan: p.neverRan,
+      candidatesDeferred: p.candidatesDeferred ?? 0,
+      deferredCandidateIds: p.deferredCandidateIds,
     })),
   ];
   const passBudgets: PassBudgetAttestation[] = [

@@ -285,6 +285,23 @@ export interface AgentResult {
    * adding another dedicated boolean.
    */
   incompleteFromPass?: string;
+  /**
+   * How many of this pass's eligible candidates were excluded from its
+   * worklist because they exceeded this run's affordable-candidate ceiling
+   * — rank-and-cap candidate-overflow handling (see `review-pass.ts`'s
+   * `affordableCandidateCeiling`). Set by a candidate-loop pass's
+   * `postProcessResult`; 0/absent for the main pass and for any pass whose
+   * full candidate list fit inside its budget (the common case). Deferral is
+   * NOT incompleteness: a capped-but-complete run (every LISTED candidate
+   * verdicted) keeps `incomplete: false` regardless of this value.
+   */
+  candidatesDeferred?: number;
+  /**
+   * Best-effort human-readable labels for the deferred candidates (capped
+   * short list) — omitted when `candidatesDeferred` is 0/absent, or the
+   * pass's candidate shape has no natural short label.
+   */
+  deferredCandidateIds?: string[];
   /** Per-turn trace data — only populated when the caller wires up trace capture. */
   trace?: AgentTrace;
 }

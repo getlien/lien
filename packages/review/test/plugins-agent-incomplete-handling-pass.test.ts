@@ -5,6 +5,7 @@ import {
   incompleteHandlingSkipReason,
   shouldRunIncompleteHandlingPass,
   computeIncompleteHandlingCandidates,
+  computeIncompleteHandlingWorklist,
   buildIncompleteHandlingPassPrompts,
   buildIncompleteHandlingPassInitialMessage,
   incompleteHandlingPassBudget,
@@ -18,6 +19,7 @@ import {
 } from '../src/plugins/agent/incomplete-handling-pass.js';
 import { BUILTIN_RULES, buildTriggerContext, selectRules } from '../src/plugins/agent/rules.js';
 import { buildInitialMessage } from '../src/plugins/agent/system-prompt.js';
+import { VERDICT_EMISSION_RESERVE_TOKENS } from '../src/plugins/agent/review-pass.js';
 import { createTestContext } from '../src/test-helpers.js';
 import type { ReviewContext } from '../src/plugin-types.js';
 import type { AgentConfig, AgentFinding, AgentResult } from '../src/plugins/agent/types.js';
@@ -196,6 +198,29 @@ function noCandidateContext(): ReviewContext {
     chunks: [],
     repoChunks: [],
     pr: { title: 'Trivial change', body: '', patches } as unknown as ReviewContext['pr'],
+  });
+}
+
+/** `n` independent unread-field candidates (one interface, `n` never-read fields) — the same
+ *  shape the "caps a single shape's own contribution" test above uses, parametrized for
+ *  rank-and-cap overflow testing. `n` should stay <= UNREAD_FIELD_CAP (10) so every requested
+ *  field actually becomes a candidate (this helper does not exercise that per-shape cap itself). */
+function manyUnreadFieldsContext(n: number): ReviewContext {
+  const fieldLines = Array.from({ length: n }, (_, i) => `  field${i}: number;`);
+  const content = ['export interface Big {', ...fieldLines, '}'].join('\n');
+  const patchLines = [
+    '@@ -0,0 +1,27 @@',
+    '+export interface Big {',
+    ...fieldLines.map(l => `+${l}`),
+    '+}',
+  ];
+  const patches = new Map([['src/big.ts', patchLines.join('\n')]]);
+  const chunks = [makeChunk('src/big.ts', 1, content)];
+  return createTestContext({
+    changedFiles: ['src/big.ts'],
+    chunks,
+    repoChunks: chunks,
+    pr: { title: 'Add many fields', body: '', patches } as unknown as ReviewContext['pr'],
   });
 }
 
@@ -444,6 +469,73 @@ describe('computeIncompleteHandlingCandidates', () => {
 });
 
 // ---------------------------------------------------------------------------
+// computeIncompleteHandlingWorklist — candidate-overflow rank-and-cap
+// ---------------------------------------------------------------------------
+
+describe('computeIncompleteHandlingWorklist', () => {
+  it('defaults to unlimited budget — defers nothing (byte-identical to before this feature existed)', () => {
+    const { candidates, deferredCount, deferredIds } = computeIncompleteHandlingWorklist(
+      manyUnreadFieldsContext(6),
+    );
+    expect(candidates).toHaveLength(6);
+    expect(deferredCount).toBe(0);
+    expect(deferredIds).toEqual([]);
+  });
+
+  it("caps to the ceiling and defers the remainder, preserving the signal's own (fixed-shape) order", () => {
+    const ctx = manyUnreadFieldsContext(6);
+    // reserve + 2*OBSERVED_TOKENS_PER_TURN(6000) leaves room for exactly 2 read-heavy candidates.
+    const budget = VERDICT_EMISSION_RESERVE_TOKENS + 2 * 6_000;
+    const { candidates, deferredCount, deferredIds } = computeIncompleteHandlingWorklist(
+      ctx,
+      budget,
+    );
+    expect(candidates).toHaveLength(2);
+    expect(candidates.map(c => (c.shape === 'unread-field' ? c.unreadField.field : null))).toEqual([
+      'field0',
+      'field1',
+    ]);
+    expect(deferredCount).toBe(4);
+    expect(deferredIds).toEqual(['Big.field2', 'Big.field3', 'Big.field4', 'Big.field5']);
+  });
+
+  it('reproduces the #813 shape: a 10-candidate run at its own scaled budget still defers most of them', () => {
+    // 10 unread-field candidates: incompleteHandlingPassBudget scales to
+    // 2,500 + 900*10 = 11,500 — a "correctly scaled" budget by the OLD
+    // prompt-sizing formula, yet each candidate needs a real read_file/
+    // get_files_context round-trip (module doc: "read_file is load-bearing,
+    // not optional"), so the realistic ceiling is far smaller than 10.
+    const ctx = manyUnreadFieldsContext(10);
+    const budget = incompleteHandlingPassBudget(100_000, ctx);
+    expect(budget).toBe(11_500);
+    const { candidates, deferredCount } = computeIncompleteHandlingWorklist(ctx, budget);
+    expect(candidates.length).toBeLessThan(10);
+    expect(candidates.length + deferredCount).toBe(10);
+    expect(deferredCount).toBeGreaterThan(0);
+  });
+
+  it("a small (1-2 candidate) run is never capped at this pass's own real (floor) budget", () => {
+    const ctx = variantOnlyContext();
+    const budget = incompleteHandlingPassBudget(100_000, ctx);
+    const { candidates, deferredCount } = computeIncompleteHandlingWorklist(ctx, budget);
+    expect(candidates).toHaveLength(1);
+    expect(deferredCount).toBe(0);
+  });
+
+  // Byte-diff census: a realistic (low-candidate) real-PR shape at its ACTUAL
+  // production budget must produce prompt output byte-identical to the
+  // pre-feature default call — overflow handling changes nothing on the
+  // common case.
+  it('byte-diff census: the ordinary single-candidate real-PR shape is unaffected at the real budget', () => {
+    const ctx = variantOnlyContext();
+    const realBudget = incompleteHandlingPassBudget(100_000, ctx);
+    expect(buildIncompleteHandlingPassPrompts(ctx, realBudget)).toEqual(
+      buildIncompleteHandlingPassPrompts(ctx),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Prompt construction
 // ---------------------------------------------------------------------------
 
@@ -510,6 +602,32 @@ describe('buildIncompleteHandlingPassPrompts', () => {
     expect(message).not.toContain('<doc_claims>');
     expect(message).not.toContain('<removed_exports>');
     expect(message).not.toContain('<stale_literal_candidates>');
+  });
+
+  // -------------------------------------------------------------------------
+  // Candidate-overflow: contract text differs ONLY when the worklist was capped
+  // -------------------------------------------------------------------------
+
+  it('is byte-identical to before this feature existed when the budget is not passed (default unlimited)', () => {
+    const ctx = manyUnreadFieldsContext(6);
+    const withBudget = buildIncompleteHandlingPassPrompts(ctx, Number.POSITIVE_INFINITY);
+    const withoutBudget = buildIncompleteHandlingPassPrompts(ctx);
+    expect(withoutBudget).toEqual(withBudget);
+    expect(withoutBudget.initialMessage).not.toContain('CANDIDATE OVERFLOW');
+  });
+
+  it('lists only the affordable candidates and appends the overflow note when the budget caps the worklist', () => {
+    const ctx = manyUnreadFieldsContext(6);
+    const budget = VERDICT_EMISSION_RESERVE_TOKENS + 2 * 6_000; // affords 2 of 6
+    const { systemPrompt, initialMessage } = buildIncompleteHandlingPassPrompts(ctx, budget);
+    expect(systemPrompt).toContain('candidate-1');
+    expect(systemPrompt).toContain('candidate-2');
+    expect(systemPrompt).not.toContain('candidate-3');
+    expect(initialMessage).toContain('field0');
+    expect(initialMessage).toContain('field1');
+    expect(initialMessage).not.toContain('field2');
+    expect(initialMessage).toContain('CANDIDATE OVERFLOW');
+    expect(initialMessage).toContain('4 additional eligible candidate(s)');
   });
 });
 
@@ -667,6 +785,53 @@ describe('postProcessIncompleteHandlingResult', () => {
     expect(result.stopReason).toBe('incomplete_verdict');
     // The one verdicted candidate still becomes a finding despite the honesty flag.
     expect(result.findings).toHaveLength(1);
+  });
+
+  // -------------------------------------------------------------------------
+  // Candidate-overflow: deferral is attested, NOT incompleteness
+  // -------------------------------------------------------------------------
+
+  it('stamps candidatesDeferred/deferredCandidateIds when the budget capped the worklist', () => {
+    const ctx = manyUnreadFieldsContext(6);
+    const budget = VERDICT_EMISSION_RESERVE_TOKENS + 2 * 6_000; // affords 2 of 6
+    const raw = fakeResult({
+      findings: [
+        finding({ candidateId: 'candidate-1', verdict: 'intentional' }),
+        finding({ candidateId: 'candidate-2', verdict: 'intentional' }),
+      ],
+    });
+    const result = postProcessIncompleteHandlingResult(raw, ctx, budget);
+    expect(result.candidatesDeferred).toBe(4);
+    expect(result.deferredCandidateIds).toEqual([
+      'Big.field2',
+      'Big.field3',
+      'Big.field4',
+      'Big.field5',
+    ]);
+  });
+
+  it('a capped-but-complete run (every LISTED candidate verdicted) stays incomplete:false — deferral is not incompleteness', () => {
+    const ctx = manyUnreadFieldsContext(6);
+    const budget = VERDICT_EMISSION_RESERVE_TOKENS + 2 * 6_000; // affords 2 of 6
+    const raw = fakeResult({
+      findings: [
+        finding({ candidateId: 'candidate-1', verdict: 'intentional' }),
+        finding({ candidateId: 'candidate-2', verdict: 'intentional' }),
+      ],
+    });
+    const result = postProcessIncompleteHandlingResult(raw, ctx, budget);
+    expect(result.incomplete).toBe(false);
+    expect(result.stopReason).toBe('completed');
+    expect(result.candidatesDeferred).toBe(4);
+  });
+
+  it('reports candidatesDeferred: 0 and no deferredCandidateIds when nothing was capped (default budget)', () => {
+    const raw = fakeResult({
+      findings: [finding({ candidateId: 'candidate-1', verdict: 'intentional' })],
+    });
+    const result = postProcessIncompleteHandlingResult(raw, variantOnlyContext());
+    expect(result.candidatesDeferred).toBe(0);
+    expect(result.deferredCandidateIds).toBeUndefined();
   });
 });
 
