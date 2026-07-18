@@ -831,34 +831,72 @@ function typedAnnotationRegex(typeName: string): RegExp {
 }
 
 /**
- * Matches a `{...}` group that opens in an EXPRESSION/VALUE position — immediately (whitespace
- * aside) after `=`, `(`, `,`, `[`, `:`, `=>`, or `return` — capturing the ANCHOR itself (group 1)
- * alongside its inner (single-level) content (group 2). This is what an object LITERAL's opening
- * brace looks like, as opposed to a function/block body's opening brace, which instead typically
- * follows `)` (a parameter list) or is a bare top-level statement — see {@link
- * hasShorthandHandoff}'s doc for why this distinction matters, and for why the captured anchor
- * matters too (a `(` anchor is ambiguous with a destructured parameter).
+ * Matches a `{` that opens in an EXPRESSION/VALUE position — immediately (whitespace aside)
+ * after `=`, `(`, `,`, `[`, `:`, `=>`, or `return` — capturing the ANCHOR itself. This is what an
+ * object LITERAL's opening brace looks like, as opposed to a function/block body's opening
+ * brace, which instead typically follows `)` (a parameter list) or is a bare top-level statement
+ * — see {@link hasShorthandHandoff}'s doc for why this distinction matters, and for why the
+ * captured anchor matters too (a `(` anchor is ambiguous with a destructured parameter). Only
+ * locates the OPENING brace; {@link findObjectLiteralGroups} pairs it with its true, nesting-
+ * aware closing brace via {@link findMatchingBraceFrom} rather than a non-nesting `[^{}]*`
+ * capture, so an object literal containing its OWN nested object value (`{ meta: { x: 1 }, o }`)
+ * is still captured as one whole group — flagged on this PR's own review (lien-stats summary for
+ * commit ebe342b): the previous `[^{}]*`-based capture stopped at the first nested `{`, so it
+ * never even recognized the OUTER object as a group at all, missing a genuine top-level `o`
+ * hand-off sitting right next to a nested object property.
  */
-const OBJECT_LITERAL_GROUP_RE = /(=|\(|,|\[|:|=>|\breturn)\s*\{([^{}]*)\}/g;
+const OBJECT_LITERAL_OPEN_RE = /(=|\(|,|\[|:|=>|\breturn)\s*\{/g;
+
+/** One object-literal group found by {@link findObjectLiteralGroups}. */
+interface ObjectLiteralGroup {
+  anchor: string;
+  index: number;
+  matchLength: number;
+  inner: string;
+}
 
 /**
- * Blank out every bracket/paren-delimited span — `[...]`/`(...)`, at any nesting depth — with
- * same-length whitespace (newlines kept). Used to hide an array element or call argument that is
- * merely a NESTED VALUE inside an object literal's property (`{ event, arr: [a, varName, b] }`)
- * from {@link hasShorthandHandoff}'s top-level shorthand-property scan — flagged on this PR's own
- * review (lien-stats summary for commit db8966d) as a variant of the array/call-argument gap
- * already fixed there, this time nested one level inside a genuine object literal instead of
- * standing alone.
+ * Every object-literal group in `window`, each paired with its TRUE closing brace (handling
+ * arbitrary nesting, via the same {@link findMatchingBraceFrom} the interface/type-literal/class
+ * parser already relies on) rather than a `[^{}]*` capture that would stop at the first nested
+ * `{`. `window` is already bounded to {@link WHOLESALE_PROXIMITY_CHARS} by the caller, so this
+ * balanced scan (linear in `window`'s length, not the whole file) stays cheap.
  */
-function maskBracketsAndParens(text: string): string {
+function findObjectLiteralGroups(window: string): ObjectLiteralGroup[] {
+  const groups: ObjectLiteralGroup[] = [];
+  for (const m of window.matchAll(OBJECT_LITERAL_OPEN_RE)) {
+    const openIdx = m.index + m[0].length - 1;
+    const closeIdx = findMatchingBraceFrom(window, openIdx);
+    if (closeIdx === -1) continue;
+    groups.push({
+      anchor: m[1],
+      index: m.index,
+      matchLength: closeIdx + 1 - m.index,
+      inner: window.slice(openIdx + 1, closeIdx),
+    });
+  }
+  return groups;
+}
+
+/**
+ * Blank out every bracket/paren/brace-delimited span — `[...]`/`(...)`/`{...}`, at any nesting
+ * depth — with same-length whitespace (newlines kept). Used to hide a value that is merely
+ * NESTED inside an object literal's own property (an array/call-argument, `{ event, arr: [a,
+ * varName, b] }`, or a nested object, `{ meta: { x: 1 }, varName }`) from {@link
+ * hasShorthandHandoff}'s top-level shorthand-property scan — flagged on this PR's own review
+ * (lien-stats summaries for commits db8966d and ebe342b) as two variants of the same shape: a
+ * value nested one level inside a genuine object literal must not be mistaken for a top-level
+ * shorthand property of the OUTER object.
+ */
+function maskNestedGroups(text: string): string {
   const blank = (span: string) => [...span].map(c => (c === '\n' ? '\n' : ' ')).join('');
   let out = text;
-  let next = out.replace(/\[[^[\]]*\]|\([^()]*\)/g, blank);
+  let next = out.replace(/\[[^[\]]*\]|\([^()]*\)|\{[^{}]*\}/g, blank);
   // Peel one nesting level per pass — an innermost, bracket-free span always matches first, so
   // repeating until nothing changes handles arbitrary nesting without depth-tracking branches.
   while (next !== out) {
     out = next;
-    next = out.replace(/\[[^[\]]*\]|\([^()]*\)/g, blank);
+    next = out.replace(/\[[^[\]]*\]|\([^()]*\)|\{[^{}]*\}/g, blank);
   }
   return out;
 }
@@ -876,7 +914,7 @@ function maskBracketsAndParens(text: string): string {
  *    immediately followed by `=` (not `==`), with an optional type annotation in between. A
  *    `const`/`let`/`var` DECLARATION form (`const { varName } = wrapper`) never reaches this
  *    check at all — its `{` follows a declaration keyword, not one of {@link
- *    OBJECT_LITERAL_GROUP_RE}'s anchors, so it's never captured as a group in the first place.
+ *    OBJECT_LITERAL_OPEN_RE}'s anchors, so it's never captured as a group in the first place.
  *    Same for a destructured `for`-loop binding (`for (const { varName } of items)`).
  *  - Destructured function parameter (`function f({ varName }: T)`) / a lone-argument hand-off
  *    call shaped identically (`render({ varName })`, a documented, text-unresolvable residual —
@@ -902,27 +940,28 @@ function isDestructuringBindingGroup(
  * truth: `app.fetch(req, { event, requestContext, context })`).
  *
  * Multi-step check, not a single `[{,]\s*varName\s*[,}]` scan: flagged on this PR's own review
- * (lien-stats summaries for commits b5e3f88 and db8966d) that a bare adjacent-delimiter scan
- * can't tell an OBJECT literal from an ARRAY literal, a plain call's argument list, the enclosing
- * FUNCTION/BLOCK body itself, or a NESTED array/call inside one of the object's own property
- * VALUES (`{ arr: [a, varName, b] }`) — all of these can put a `,` immediately on either side of
- * `varName` with no TOP-LEVEL object-literal shorthand actually present. Step 1 requires
- * `varName` to sit inside a `{...}` group that {@link OBJECT_LITERAL_GROUP_RE} confirms opens in
- * an expression position, not a block/function body. Step 2 blanks out any nested `[...]`/`(...)`
- * within that group's own captured content ({@link maskBracketsAndParens}), so a value nested
- * inside a property isn't visible to the final check. Step 3, against the masked content,
- * requires `varName` to sit directly between `{`/`,` and `,`/`}` with no colon after it (so an
- * ordinary `varName: something` key-value pair inside the SAME object, or a `.varName` access, is
- * not mistaken for a shorthand hand-off). Step 4 excludes the group if IT SPECIFICALLY (not the
- * window) is a destructuring BINDING — see {@link isDestructuringBindingGroup}.
+ * (lien-stats summaries for commits b5e3f88, db8966d, and ebe342b) that a bare adjacent-delimiter
+ * scan can't tell an OBJECT literal from an ARRAY literal, a plain call's argument list, the
+ * enclosing FUNCTION/BLOCK body itself, or a value NESTED inside one of the object's own
+ * properties (an array/call-argument, or another object literal, `{ meta: { x: 1 }, varName }`)
+ * — all of these can put a `,` immediately on either side of `varName` with no TOP-LEVEL
+ * object-literal shorthand actually present. Step 1 requires `varName` to sit inside a genuine,
+ * nesting-aware `{...}` group found by {@link findObjectLiteralGroups}. Step 2 blanks out any
+ * nested `[...]`/`(...)`/`{...}` within that group's own content ({@link maskNestedGroups}), so a
+ * value nested inside a property isn't visible to the final check. Step 3, against the masked
+ * content, requires `varName` to sit directly between `{`/`,` and `,`/`}` with no colon after it
+ * (so an ordinary `varName: something` key-value pair inside the SAME object, or a `.varName`
+ * access, is not mistaken for a shorthand hand-off). Step 4 excludes the group if IT
+ * SPECIFICALLY (not the window) is a destructuring BINDING — see
+ * {@link isDestructuringBindingGroup}.
  */
 function hasShorthandHandoff(varName: string, window: string): boolean {
   const shorthandWithinBraces = new RegExp(`[{,]\\s*${escapeRegExp(varName)}\\s*[,}]`);
-  // `matchAll` clones its regex internally, so reusing the shared global-flagged constant here
-  // is safe and doesn't leak `lastIndex` state across calls.
-  for (const m of window.matchAll(OBJECT_LITERAL_GROUP_RE)) {
-    if (!shorthandWithinBraces.test(`{${maskBracketsAndParens(m[2])}}`)) continue;
-    if (isDestructuringBindingGroup(m.index, m[0].length, m[1], window)) continue;
+  for (const group of findObjectLiteralGroups(window)) {
+    if (!shorthandWithinBraces.test(`{${maskNestedGroups(group.inner)}}`)) continue;
+    if (isDestructuringBindingGroup(group.index, group.matchLength, group.anchor, window)) {
+      continue;
+    }
     return true;
   }
   return false;

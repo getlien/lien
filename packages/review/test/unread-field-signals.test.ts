@@ -744,6 +744,21 @@ describe('computeUnreadFieldCandidates', () => {
     expect(computeUnreadFieldCandidates(baseContext(repoChunks))).toEqual([]);
   });
 
+  // Regression: flagged on this PR's own review (lien-stats summary for commit ebe342b) — the
+  // object-literal group finder used a non-nesting `[^{}]*` capture, so an object literal
+  // containing its OWN nested object VALUE (`{ meta: { x: 1 }, o }`) was never recognized as a
+  // group at all (the capture stopped at the first nested `{`), missing a genuine top-level `o`
+  // hand-off sitting right next to it.
+  it('still suppresses a real hand-off next to a NESTED object literal value in the same object', () => {
+    const consumer = [
+      'function handle(o: Options): void {',
+      '  dispatch(req, { meta: { x: 1 }, o });',
+      '}',
+    ].join('\n');
+    const repoChunks = [...optionsChunks(), makeChunk('src/consumer.ts', 1, consumer)];
+    expect(computeUnreadFieldCandidates(baseContext(repoChunks))).toEqual([]);
+  });
+
   it('does NOT suppress on a bare co-occurrence of the type name and an unrelated spread (regression, found via dogfooding)', () => {
     // A docstring mentioning the type by name, plus a wholly unrelated spread
     // later in the same chunk, must not be read as "this type is spread" —
