@@ -8,6 +8,7 @@ import {
   buildStaleDuplicatePassInitialMessage,
   staleDuplicatePassBudget,
   postProcessStaleDuplicateResult,
+  computeStaleDuplicateWorklist,
   mergeStaleDuplicateFindings,
   mergeStaleDuplicateResultState,
   isStaleDuplicateMainDisabled,
@@ -15,6 +16,7 @@ import {
   STALE_DUPLICATE_PASS_SPEC,
   STALE_DUP_PASS_MAX_TURNS,
 } from '../src/plugins/agent/stale-duplicate-pass.js';
+import { VERDICT_EMISSION_RESERVE_TOKENS } from '../src/plugins/agent/review-pass.js';
 import { BUILTIN_RULES, buildTriggerContext, selectRules } from '../src/plugins/agent/rules.js';
 import { buildInitialMessage } from '../src/plugins/agent/system-prompt.js';
 import { createTestContext } from '../src/test-helpers.js';
@@ -97,6 +99,49 @@ function differentFileOnlyContext(): ReviewContext {
     changedFiles: ['src/pr-review.ts'],
     chunks: [],
     pr: { title: 'Bump default model', body: '', patches } as unknown as ReviewContext['pr'],
+    repoChunks,
+  });
+}
+
+/** `n` independent same-file, high-confidence stale-duplicate candidates — each file mirrors
+ *  `eligibleContext`'s own CONDITIONALIZE_PATCH/PR_REVIEW_CONTENT shape with a distinct literal,
+ *  so the shared signal's own confidence/same-area scoring ties on everything except insertion
+ *  order (stable sort) — deterministic for rank-and-cap overflow testing. */
+function manyCandidatesContext(n: number): ReviewContext {
+  const patches = new Map<string, string>();
+  const repoChunks: CodeChunk[] = [];
+  for (let i = 0; i < n; i++) {
+    const literal = `token-${i}`;
+    const file = `src/pr-review-${i}.ts`;
+    patches.set(
+      file,
+      `@@ -10,3 +10,4 @@
+   const cfg = load();
+-  const model = '${literal}';
++  const model = cfg.openrouterApiKey
++    ? 'gemini-3-flash'
++    : '${literal}';
+   return model;`,
+    );
+    const content = [
+      'const cfg = load();', // 10
+      'const model = cfg.openrouterApiKey', // 11
+      "  ? 'gemini-3-flash'", // 12
+      `  : '${literal}';`, // 13
+      'return model;', // 14
+      '',
+      'function reportMeta() {',
+      '  // legacy attribution',
+      '  const ctx = {};',
+      '  ctx.provider = "openrouter";',
+      `  adapterContext.model = '${literal}';`, // 20
+    ].join('\n');
+    repoChunks.push(makeChunk(file, 10, content));
+  }
+  return createTestContext({
+    changedFiles: [...patches.keys()],
+    chunks: [],
+    pr: { title: 'Bump default models', body: '', patches } as unknown as ReviewContext['pr'],
     repoChunks,
   });
 }
@@ -243,6 +288,39 @@ describe('buildStaleDuplicatePassPrompts', () => {
     expect(message).not.toContain('<doc_claims>');
     expect(message).not.toContain('<removed_exports>');
   });
+
+  // -------------------------------------------------------------------------
+  // Candidate-overflow: contract text differs ONLY when the worklist was capped
+  // -------------------------------------------------------------------------
+
+  it('is byte-identical to before this feature existed when the budget is not passed (default unlimited)', () => {
+    const ctx = manyCandidatesContext(5);
+    const withBudget = buildStaleDuplicatePassPrompts(ctx, Number.POSITIVE_INFINITY);
+    const withoutBudget = buildStaleDuplicatePassPrompts(ctx);
+    expect(withoutBudget).toEqual(withBudget);
+    expect(withoutBudget.initialMessage).not.toContain('CANDIDATE OVERFLOW');
+  });
+
+  it('lists only the affordable candidates and appends the overflow note when the budget caps the worklist', () => {
+    const ctx = manyCandidatesContext(5);
+    const budget = VERDICT_EMISSION_RESERVE_TOKENS + 2 * 800; // affords 2 of 5
+    const { systemPrompt, initialMessage } = buildStaleDuplicatePassPrompts(ctx, budget);
+    expect(systemPrompt).toContain('candidate-1');
+    expect(systemPrompt).toContain('candidate-2');
+    expect(systemPrompt).not.toContain('candidate-3');
+    expect(initialMessage).toContain('candidate-1');
+    expect(initialMessage).toContain('candidate-2');
+    expect(initialMessage).not.toContain('candidate-3');
+    expect(initialMessage).toContain('CANDIDATE OVERFLOW');
+    expect(initialMessage).toContain('3 additional eligible candidate(s)');
+  });
+
+  it('does not append the overflow note when the full worklist fits inside the budget', () => {
+    const ctx = manyCandidatesContext(2);
+    const budget = staleDuplicatePassBudget(100_000, ctx);
+    const { initialMessage } = buildStaleDuplicatePassPrompts(ctx, budget);
+    expect(initialMessage).not.toContain('CANDIDATE OVERFLOW');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -261,6 +339,64 @@ describe('staleDuplicatePassBudget', () => {
     const low = staleDuplicatePassBudget(10_000, eligibleContext());
     const high = staleDuplicatePassBudget(500_000, eligibleContext());
     expect(low).toBe(high);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// computeStaleDuplicateWorklist — candidate-overflow rank-and-cap
+// ---------------------------------------------------------------------------
+
+describe('computeStaleDuplicateWorklist', () => {
+  it('sanity check: manyCandidatesContext(3) yields 3 candidates in insertion order', () => {
+    const { candidates } = computeStaleDuplicateWorklist(manyCandidatesContext(3));
+    expect(candidates.map(c => c.literal)).toEqual(["'token-0'", "'token-1'", "'token-2'"]);
+  });
+
+  it('defaults to unlimited budget — defers nothing (byte-identical to before this feature existed)', () => {
+    const { candidates, deferredCount, deferredIds } = computeStaleDuplicateWorklist(
+      manyCandidatesContext(5),
+    );
+    expect(candidates).toHaveLength(5);
+    expect(deferredCount).toBe(0);
+    expect(deferredIds).toEqual([]);
+  });
+
+  it("a single-candidate context is never capped at this pass's own real (floor) budget", () => {
+    const ctx = eligibleContext();
+    const realBudget = staleDuplicatePassBudget(100_000, ctx);
+    const { candidates, deferredCount } = computeStaleDuplicateWorklist(ctx, realBudget);
+    expect(candidates).toHaveLength(1);
+    expect(deferredCount).toBe(0);
+  });
+
+  // Byte-diff census: a realistic (low-candidate) real-PR shape at its ACTUAL
+  // production budget must produce prompt output byte-identical to the
+  // pre-feature default call — overflow handling changes nothing on the
+  // common case.
+  it('byte-diff census: the ordinary single-candidate real-PR shape is unaffected at the real budget', () => {
+    const ctx = eligibleContext();
+    const realBudget = staleDuplicatePassBudget(100_000, ctx);
+    expect(buildStaleDuplicatePassPrompts(ctx, realBudget)).toEqual(
+      buildStaleDuplicatePassPrompts(ctx),
+    );
+  });
+
+  it("caps to the ceiling and defers the REMAINDER, preserving the signal's own order", () => {
+    const ctx = manyCandidatesContext(5);
+    // reserve + 2*800 leaves room for exactly 2 candidates at this pass's own
+    // evidence-inline per-candidate cost (800).
+    const budget = VERDICT_EMISSION_RESERVE_TOKENS + 2 * 800;
+    const { candidates, deferredCount, deferredIds } = computeStaleDuplicateWorklist(ctx, budget);
+    expect(candidates.map(c => c.literal)).toEqual(["'token-0'", "'token-1'"]);
+    expect(deferredCount).toBe(3);
+    expect(deferredIds).toEqual(["'token-2'", "'token-3'", "'token-4'"]);
+  });
+
+  it('defers everything when the budget cannot even cover the verdict-emission reserve', () => {
+    const ctx = manyCandidatesContext(2);
+    const { candidates, deferredCount } = computeStaleDuplicateWorklist(ctx, 0);
+    expect(candidates).toEqual([]);
+    expect(deferredCount).toBe(2);
   });
 });
 
@@ -373,6 +509,59 @@ describe('postProcessStaleDuplicateResult', () => {
     const result = postProcessStaleDuplicateResult(raw, eligibleContext());
     expect(result.incomplete).toBe(true);
     expect(result.stopReason).toBe('incomplete_verdict');
+  });
+
+  // -------------------------------------------------------------------------
+  // Candidate-overflow: deferral is attested, NOT incompleteness
+  // -------------------------------------------------------------------------
+
+  it('stamps candidatesDeferred/deferredCandidateIds on the result when the budget capped the worklist', () => {
+    const ctx = manyCandidatesContext(5);
+    const budget = VERDICT_EMISSION_RESERVE_TOKENS + 2 * 800; // affords 2 of 5
+    const raw = fakeResult({
+      findings: [
+        finding({ candidateId: 'candidate-1', verdict: 'unverifiable' }),
+        finding({ candidateId: 'candidate-2', verdict: 'unverifiable' }),
+      ],
+    });
+    const result = postProcessStaleDuplicateResult(raw, ctx, budget);
+    expect(result.candidatesDeferred).toBe(3);
+    expect(result.deferredCandidateIds).toEqual(["'token-2'", "'token-3'", "'token-4'"]);
+  });
+
+  it('a capped-but-complete run (every LISTED candidate verdicted) stays incomplete:false — deferral is not incompleteness', () => {
+    const ctx = manyCandidatesContext(5);
+    const budget = VERDICT_EMISSION_RESERVE_TOKENS + 2 * 800; // affords 2 of 5
+    const raw = fakeResult({
+      findings: [
+        finding({ candidateId: 'candidate-1', verdict: 'unverifiable' }),
+        finding({ candidateId: 'candidate-2', verdict: 'unverifiable' }),
+      ],
+    });
+    const result = postProcessStaleDuplicateResult(raw, ctx, budget);
+    expect(result.incomplete).toBe(false);
+    expect(result.stopReason).toBe('completed');
+    expect(result.candidatesDeferred).toBe(3);
+  });
+
+  it('still requires coverage of every LISTED (kept) candidate — omitting one is incomplete_verdict, cap or not', () => {
+    const ctx = manyCandidatesContext(5);
+    const budget = VERDICT_EMISSION_RESERVE_TOKENS + 2 * 800; // lists candidate-1/candidate-2 only
+    const raw = fakeResult({
+      findings: [finding({ candidateId: 'candidate-1', verdict: 'unverifiable' })], // candidate-2 missing
+    });
+    const result = postProcessStaleDuplicateResult(raw, ctx, budget);
+    expect(result.incomplete).toBe(true);
+    expect(result.stopReason).toBe('incomplete_verdict');
+  });
+
+  it('reports candidatesDeferred: 0 and no deferredCandidateIds when nothing was capped (default budget)', () => {
+    const raw = fakeResult({
+      findings: [finding({ candidateId: 'candidate-1', verdict: 'unverifiable' })],
+    });
+    const result = postProcessStaleDuplicateResult(raw, eligibleContext());
+    expect(result.candidatesDeferred).toBe(0);
+    expect(result.deferredCandidateIds).toBeUndefined();
   });
 });
 

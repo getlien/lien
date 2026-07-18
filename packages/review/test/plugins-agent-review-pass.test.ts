@@ -5,6 +5,13 @@ import {
   appendPassTurns,
   runExtraPasses,
   EXTRA_PASS_MIN_BUDGET_TOKENS,
+  OBSERVED_TOKENS_PER_TURN,
+  VERDICT_EMISSION_RESERVE_TOKENS,
+  MAX_DEFERRED_LABELS,
+  affordableCandidateCeiling,
+  capCandidatesToCeiling,
+  deferredCandidateLabels,
+  renderDeferralNote,
   type ReviewPassSpec,
 } from '../src/plugins/agent/review-pass.js';
 import { createTestContext, silentLogger } from '../src/test-helpers.js';
@@ -89,6 +96,124 @@ describe('EXTRA_PASS_MIN_BUDGET_TOKENS', () => {
     // this outright, since those are both below the measured per-turn cost.
     expect(EXTRA_PASS_MIN_BUDGET_TOKENS).toBeGreaterThanOrEqual(10_000);
     expect(EXTRA_PASS_MIN_BUDGET_TOKENS).toBeLessThanOrEqual(12_000);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// affordableCandidateCeiling — candidate-overflow rank-and-cap ceiling
+// ---------------------------------------------------------------------------
+
+describe('affordableCandidateCeiling', () => {
+  it('derives the reserve as EXTRA_PASS_MIN_BUDGET_TOKENS minus one observed turn', () => {
+    expect(VERDICT_EMISSION_RESERVE_TOKENS).toBe(
+      EXTRA_PASS_MIN_BUDGET_TOKENS - OBSERVED_TOKENS_PER_TURN,
+    );
+  });
+
+  it('returns 0 when budget does not even cover the verdict-emission reserve', () => {
+    expect(affordableCandidateCeiling(VERDICT_EMISSION_RESERVE_TOKENS - 1, 800)).toBe(0);
+    expect(affordableCandidateCeiling(0, 800)).toBe(0);
+  });
+
+  it('returns 0 exactly AT the reserve boundary (nothing left to invest per-candidate)', () => {
+    expect(affordableCandidateCeiling(VERDICT_EMISSION_RESERVE_TOKENS, 800)).toBe(0);
+  });
+
+  it('floors a non-exact division rather than rounding up', () => {
+    // reserve + 1500 leaves exactly 1500 investigable at 800/candidate = 1.875 -> 1
+    const budget = VERDICT_EMISSION_RESERVE_TOKENS + 1_500;
+    expect(affordableCandidateCeiling(budget, 800)).toBe(1);
+  });
+
+  it('reproduces the #813 shape: a 15-candidate incomplete-handling run at its own scaled budget affords ~1', () => {
+    // BASE_OVERHEAD_TOKENS(2,500) + PER_CANDIDATE_TOKENS(900) * 15 = 16,000 —
+    // the "correctly scaled" budget #813 measured. Read-heavy candidates cost
+    // OBSERVED_TOKENS_PER_TURN each, not the pass's own 900 prompt-sizing constant.
+    const measuredBudget = 16_000;
+    expect(affordableCandidateCeiling(measuredBudget, OBSERVED_TOKENS_PER_TURN)).toBe(1);
+  });
+
+  it('never returns negative, however small the budget', () => {
+    expect(affordableCandidateCeiling(-5_000, 800)).toBe(0);
+  });
+
+  it('scales up with a larger budget for the same per-candidate cost', () => {
+    const small = affordableCandidateCeiling(EXTRA_PASS_MIN_BUDGET_TOKENS, 500);
+    const large = affordableCandidateCeiling(EXTRA_PASS_MIN_BUDGET_TOKENS * 4, 500);
+    expect(large).toBeGreaterThan(small);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// capCandidatesToCeiling — rank-and-cap, preserving the caller's own order
+// ---------------------------------------------------------------------------
+
+describe('capCandidatesToCeiling', () => {
+  it('keeps everything and defers nothing when the list already fits', () => {
+    const result = capCandidatesToCeiling(['a', 'b', 'c'], 5);
+    expect(result).toEqual({ kept: ['a', 'b', 'c'], deferred: [] });
+  });
+
+  it('keeps everything and defers nothing at the exact boundary (length === ceiling)', () => {
+    const result = capCandidatesToCeiling(['a', 'b', 'c'], 3);
+    expect(result).toEqual({ kept: ['a', 'b', 'c'], deferred: [] });
+  });
+
+  it('truncates to the first `ceiling` entries, preserving order — no re-ranking', () => {
+    const result = capCandidatesToCeiling(['a', 'b', 'c', 'd', 'e'], 2);
+    expect(result.kept).toEqual(['a', 'b']);
+    expect(result.deferred).toEqual(['c', 'd', 'e']);
+  });
+
+  it('defers everything when the ceiling is 0', () => {
+    const result = capCandidatesToCeiling(['a', 'b'], 0);
+    expect(result.kept).toEqual([]);
+    expect(result.deferred).toEqual(['a', 'b']);
+  });
+
+  it('is a pure function — does not mutate the input array', () => {
+    const input = ['a', 'b', 'c'];
+    capCandidatesToCeiling(input, 1);
+    expect(input).toEqual(['a', 'b', 'c']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// deferredCandidateLabels — attestation labels, capped short
+// ---------------------------------------------------------------------------
+
+describe('deferredCandidateLabels', () => {
+  it('maps every deferred item through labelFor', () => {
+    const labels = deferredCandidateLabels(['a', 'b'], s => s.toUpperCase());
+    expect(labels).toEqual(['A', 'B']);
+  });
+
+  it('caps at MAX_DEFERRED_LABELS even when more were deferred', () => {
+    const deferred = Array.from({ length: MAX_DEFERRED_LABELS + 5 }, (_, i) => `item-${i}`);
+    const labels = deferredCandidateLabels(deferred, s => s);
+    expect(labels).toHaveLength(MAX_DEFERRED_LABELS);
+    expect(labels).toEqual(deferred.slice(0, MAX_DEFERRED_LABELS));
+  });
+
+  it('returns [] for an empty deferred list', () => {
+    expect(deferredCandidateLabels([], s => s)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// renderDeferralNote — the honesty half of candidate-overflow handling
+// ---------------------------------------------------------------------------
+
+describe('renderDeferralNote', () => {
+  it('is empty when nothing was deferred', () => {
+    expect(renderDeferralNote(0)).toBe('');
+  });
+
+  it('names the count and instructs the model not to claim exhaustive coverage', () => {
+    const note = renderDeferralNote(7);
+    expect(note).toContain('7');
+    expect(note).toMatch(/deferred/i);
+    expect(note).toMatch(/not incompleteness/i);
   });
 });
 
@@ -218,6 +343,30 @@ describe('runReviewPass', () => {
     await runReviewPass(spec, ctx, cfg(), silentLogger, async () => fakeResult());
 
     expect(reportSkip).not.toHaveBeenCalled();
+  });
+
+  it('threads the SAME computed budget into both buildPrompts and postProcessResult (candidate-overflow consistency)', async () => {
+    // A capping pass must rank-and-cap its worklist identically at prompt-build
+    // time and at post-process time, or the verdict-coverage check would judge
+    // a DIFFERENT worklist than the one actually shown to the model. Both call
+    // sites must observe the exact same budget value — computed once.
+    const ctx = createTestContext();
+    const seenBudgets: number[] = [];
+    const spec = makeSpec({
+      budget: () => 12_345,
+      buildPrompts: (_context, budget) => {
+        seenBudgets.push(budget);
+        return { systemPrompt: 'sys', initialMessage: 'init' };
+      },
+      postProcessResult: (result, _context, budget) => {
+        seenBudgets.push(budget);
+        return result;
+      },
+    });
+
+    await runReviewPass(spec, ctx, cfg(), silentLogger, async () => fakeResult());
+
+    expect(seenBudgets).toEqual([12_345, 12_345]);
   });
 });
 
@@ -400,6 +549,8 @@ describe('runExtraPasses', () => {
         neverRan: false,
         allocatedTokens: 10_000,
         spentTokens: 9_000,
+        candidatesDeferred: 0,
+        deferredCandidateIds: undefined,
       },
       {
         name: 'pass-b',
@@ -407,8 +558,55 @@ describe('runExtraPasses', () => {
         neverRan: false,
         allocatedTokens: 5_000,
         spentTokens: 4_000,
+        candidatesDeferred: 0,
+        deferredCandidateIds: undefined,
       },
     ]);
+  });
+
+  it('reads candidatesDeferred/deferredCandidateIds straight off the pass result (candidate-overflow attestation)', async () => {
+    const spec = makeSpec({ name: 'capped-pass' });
+    const ctx = createTestContext();
+    const main = mainResult();
+    const runClientFor = () => async () =>
+      fakeResult({ candidatesDeferred: 3, deferredCandidateIds: ['x', 'y', 'z'] });
+
+    const { outcomes } = await runExtraPasses(
+      [spec],
+      ctx,
+      cfg(),
+      silentLogger,
+      main,
+      main.findings,
+      runClientFor,
+    );
+
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        name: 'capped-pass',
+        candidatesDeferred: 3,
+        deferredCandidateIds: ['x', 'y', 'z'],
+      }),
+    ]);
+  });
+
+  it('defaults candidatesDeferred to 0 when the pass result does not set it (no overflow handling)', async () => {
+    const spec = makeSpec();
+    const ctx = createTestContext();
+    const main = mainResult();
+
+    const { outcomes } = await runExtraPasses(
+      [spec],
+      ctx,
+      cfg(),
+      silentLogger,
+      main,
+      main.findings,
+      () => async () => fakeResult(),
+    );
+
+    expect(outcomes[0].candidatesDeferred).toBe(0);
+    expect(outcomes[0].deferredCandidateIds).toBeUndefined();
   });
 
   it('does not add an outcome for a pass whose client throws (failure-isolated)', async () => {

@@ -11,11 +11,15 @@ import {
   isDocTruthV2Enabled,
   buildClaimWorklist,
   allClaimIds,
+  capClaimWorklistToCeiling,
   postProcessDocTruthResult,
   DOC_TRUTH_PASS_SPEC,
   DOC_PASS_MAX_TURNS,
 } from '../src/plugins/agent/doc-truth-pass.js';
-import { EXTRA_PASS_MIN_BUDGET_TOKENS } from '../src/plugins/agent/review-pass.js';
+import {
+  EXTRA_PASS_MIN_BUDGET_TOKENS,
+  VERDICT_EMISSION_RESERVE_TOKENS,
+} from '../src/plugins/agent/review-pass.js';
 import { buildSystemPrompt } from '../src/plugins/agent/system-prompt.js';
 import { DOC_TRUTH } from '../src/plugins/agent/rules.js';
 import { createTestContext } from '../src/test-helpers.js';
@@ -524,6 +528,99 @@ describe('buildClaimWorklist / allClaimIds — id assignment stability', () => {
     expect(worklist.overflowClaims).toBe(5);
     expect(allClaimIds(worklist)).toHaveLength(20);
   });
+
+  // The Finding-A calibrate's own motivating shape: many more claims than one
+  // pass invocation could afford. 55 single-line claim patches (well past the
+  // 20-claim doc-claim cap AND the ~51 the calibrate hit).
+  it('sanity check: 55 distinct claim patches yield a 20-id worklist with 35 tracked as overflow', () => {
+    const entries: Array<[string, string]> = Array.from({ length: 55 }, (_, i) => [
+      `docs/architecture/doc${i}.md`,
+      `@@ -1,1 +1,2 @@\n # Title\n+This step ${i} requires a fresh checkout.`,
+    ]);
+    const worklist = buildClaimWorklist(contextWithPatches(entries));
+    expect(allClaimIds(worklist)).toHaveLength(20);
+    expect(worklist.overflowClaims).toBe(35);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// capClaimWorklistToCeiling — candidate-overflow rank-and-cap
+// ---------------------------------------------------------------------------
+
+describe('capClaimWorklistToCeiling', () => {
+  /** 1 doc claim (claim-1) + a 5-file rename-sweep mapping with 5 prose-touched
+   *  ids (claim-2..claim-6), no survivors — 6 ids total, spanning BOTH shapes
+   *  this pass's worklist mixes. */
+  function combinedCtx(): ReviewContext {
+    return contextWithPatches([
+      ['docs/architecture/worktree.md', DOC_CLAIM_PATCH],
+      ...RENAME_SWEEP_FILES,
+    ]);
+  }
+
+  it('returns the ORIGINAL worklist (same reference) and defers nothing when the ceiling covers every id', () => {
+    const full = buildClaimWorklist(combinedCtx());
+    const result = capClaimWorklistToCeiling(full, 6);
+    expect(result.worklist).toBe(full);
+    expect(result.deferredCount).toBe(0);
+    expect(result.deferredIds).toEqual([]);
+  });
+
+  it('also treats an INFINITE ceiling as "everything fits" — the default, unlimited-budget case', () => {
+    const full = buildClaimWorklist(combinedCtx());
+    const result = capClaimWorklistToCeiling(full, Number.POSITIVE_INFINITY);
+    expect(result.worklist).toBe(full);
+    expect(result.deferredCount).toBe(0);
+  });
+
+  it('truncates only the rename-sweep items when doc claims already fit within the ceiling', () => {
+    const full = buildClaimWorklist(combinedCtx());
+    const { worklist, deferredCount, deferredIds } = capClaimWorklistToCeiling(full, 3);
+    expect(worklist.docClaimIds).toEqual(['claim-1']); // untouched — doc claims fit
+    expect(worklist.renameSignals).toHaveLength(1);
+    expect(worklist.renameSignals[0].proseIds).toEqual(['claim-2', 'claim-3']);
+    expect(worklist.renameSignals[0].signal.proseTouched).toHaveLength(2); // parallel arrays stay in sync
+    expect(allClaimIds(worklist)).toEqual(['claim-1', 'claim-2', 'claim-3']);
+    expect(deferredCount).toBe(3);
+    expect(deferredIds).toHaveLength(3);
+  });
+
+  it('defers an ENTIRE rename-sweep mapping when no budget remains for it after doc claims', () => {
+    const full = buildClaimWorklist(combinedCtx());
+    const { worklist, deferredCount } = capClaimWorklistToCeiling(full, 1);
+    expect(worklist.docClaimIds).toEqual(['claim-1']);
+    expect(worklist.renameSignals).toEqual([]); // nothing of it fit — omitted, not an empty stub
+    expect(deferredCount).toBe(5);
+  });
+
+  it('truncates doc claims themselves when the ceiling is smaller than the doc-claim count alone', () => {
+    const full = buildClaimWorklist(combinedCtx());
+    const { worklist, deferredCount, deferredIds } = capClaimWorklistToCeiling(full, 0);
+    expect(worklist.docClaimIds).toEqual([]);
+    expect(worklist.renameSignals).toEqual([]);
+    expect(deferredCount).toBe(6);
+    expect(deferredIds).toHaveLength(6);
+    // overflowClaims folds in the newly-dropped doc claim on top of whatever
+    // buildClaimWorklist's own static 20-cap already tracked (0 here).
+    expect(worklist.overflowClaims).toBe(1);
+  });
+
+  it('preserves order exactly as allClaimIds already walks it — doc claims, then prose before survivors', () => {
+    const full = buildClaimWorklist(combinedCtx());
+    const { worklist } = capClaimWorklistToCeiling(full, 4);
+    expect(allClaimIds(worklist)).toEqual(['claim-1', 'claim-2', 'claim-3', 'claim-4']);
+  });
+
+  it('caps deferredIds at MAX_DEFERRED_LABELS even when more claims were dropped', () => {
+    const entries: Array<[string, string]> = Array.from({ length: 25 }, (_, i) => [
+      `docs/architecture/doc${i}.md`,
+      `@@ -1,1 +1,2 @@\n # Title\n+This step ${i} requires a fresh checkout.`,
+    ]);
+    const full = buildClaimWorklist(contextWithPatches(entries));
+    const { deferredCount, deferredIds } = capClaimWorklistToCeiling(full, 5);
+    expect(deferredCount).toBe(15); // 20 in the worklist - 5 kept
+    expect(deferredIds).toHaveLength(10); // MAX_DEFERRED_LABELS
+  });
 });
 
 describe('buildDocTruthPassPrompts / buildDocTruthPassInitialMessageV2 — v2 contract rendering', () => {
@@ -626,6 +723,74 @@ describe('buildDocTruthPassPrompts / buildDocTruthPassInitialMessageV2 — v2 co
     expect(message).not.toContain('</doc_claims>');
     expect(message).not.toContain('</rename_sweep>');
     expect(message).toContain('PER-CLAIM VERDICT CONTRACT');
+  });
+
+  // -------------------------------------------------------------------------
+  // Candidate-overflow: contract text differs ONLY when the worklist was capped
+  // -------------------------------------------------------------------------
+
+  function manyClaimsCtx(n: number): ReviewContext {
+    const entries: Array<[string, string]> = Array.from({ length: n }, (_, i) => [
+      `docs/architecture/doc${i}.md`,
+      `@@ -1,1 +1,2 @@\n # Title\n+This step ${i} requires a fresh checkout.`,
+    ]);
+    return contextWithPatches(entries);
+  }
+
+  it('is byte-identical to before this feature existed when the budget is not passed (default unlimited)', () => {
+    process.env.LIEN_DOC_TRUTH_V2 = 'on';
+    const ctx = manyClaimsCtx(6);
+    const withBudget = buildDocTruthPassPrompts(ctx, Number.POSITIVE_INFINITY);
+    const withoutBudget = buildDocTruthPassPrompts(ctx);
+    expect(withoutBudget).toEqual(withBudget);
+    expect(withoutBudget.initialMessage).not.toContain('CANDIDATE OVERFLOW');
+  });
+
+  it('lists only the affordable claims and appends the overflow note when the budget caps the worklist', () => {
+    process.env.LIEN_DOC_TRUTH_V2 = 'on';
+    const ctx = manyClaimsCtx(6);
+    const budget = VERDICT_EMISSION_RESERVE_TOKENS + 2 * 500; // affords 2 of 6 (500/claim)
+    const { systemPrompt, initialMessage } = buildDocTruthPassPrompts(ctx, budget);
+    expect(systemPrompt).toContain('claim-1');
+    expect(systemPrompt).toContain('claim-2');
+    expect(systemPrompt).not.toContain('claim-3');
+    expect(initialMessage).toContain('[claim-1]');
+    expect(initialMessage).toContain('[claim-2]');
+    expect(initialMessage).not.toContain('[claim-3]');
+    expect(initialMessage).toContain('CANDIDATE OVERFLOW');
+    expect(initialMessage).toContain('4 additional eligible candidate(s)');
+  });
+
+  it('reproduces the Finding-A shape: a ~51-claim worklist at the floor budget still defers most claims', () => {
+    process.env.LIEN_DOC_TRUTH_V2 = 'on';
+    // 55 distinct claim patches -> 20-id worklist (buildClaimWorklist's own
+    // static cap) at the shared floor budget (11,000 — the common real-PR
+    // case per every sibling pass's own budget-floor tests).
+    const ctx = manyClaimsCtx(55);
+    const budget = docTruthPassBudget(6_000); // summary-only-sized base -> floors to 11,000
+    expect(budget).toBe(EXTRA_PASS_MIN_BUDGET_TOKENS);
+    const { initialMessage } = buildDocTruthPassPrompts(ctx, budget);
+    expect(initialMessage).toContain('CANDIDATE OVERFLOW');
+    expect(initialMessage).toContain('[claim-1]');
+    expect(initialMessage).not.toContain('[claim-13]'); // ceiling well under 20
+  });
+
+  it('does not append the overflow note when the v1 (non-candidate-loop) path is used, even with a tiny budget', () => {
+    // v1 has no id-based worklist to cap — this feature is scoped to v2 only.
+    const ctx = manyClaimsCtx(6);
+    const { initialMessage } = buildDocTruthPassPrompts(ctx, 0);
+    expect(initialMessage).not.toContain('CANDIDATE OVERFLOW');
+  });
+
+  // Byte-diff census: a realistic (single-claim) real-PR shape at its ACTUAL
+  // production budget must produce prompt output byte-identical to the
+  // pre-feature default call — overflow handling changes nothing on the
+  // common case.
+  it('byte-diff census: the ordinary single-claim real-PR shape is unaffected at the real (100K-base) budget', () => {
+    process.env.LIEN_DOC_TRUTH_V2 = 'on';
+    const ctx = contextWithPatches([['docs/architecture/worktree.md', DOC_CLAIM_PATCH]]);
+    const realBudget = docTruthPassBudget(100_000);
+    expect(buildDocTruthPassPrompts(ctx, realBudget)).toEqual(buildDocTruthPassPrompts(ctx));
   });
 });
 
@@ -749,5 +914,69 @@ describe('postProcessDocTruthResult', () => {
     postProcessDocTruthResult(result, singleClaimCtx());
     expect(result.findings).toHaveLength(1);
     expect((result.findings[0] as Record<string, unknown>).claimId).toBe('claim-1');
+  });
+
+  // -------------------------------------------------------------------------
+  // Candidate-overflow: deferral is attested, NOT incompleteness
+  // -------------------------------------------------------------------------
+
+  function manyClaimsCtx(n: number): ReviewContext {
+    const entries: Array<[string, string]> = Array.from({ length: n }, (_, i) => [
+      `docs/architecture/doc${i}.md`,
+      `@@ -1,1 +1,2 @@\n # Title\n+This step ${i} requires a fresh checkout.`,
+    ]);
+    return contextWithPatches(entries);
+  }
+
+  it('stamps candidatesDeferred/deferredCandidateIds when the budget capped the worklist', () => {
+    process.env.LIEN_DOC_TRUTH_V2 = 'on';
+    const ctx = manyClaimsCtx(6);
+    const budget = VERDICT_EMISSION_RESERVE_TOKENS + 2 * 500; // affords 2 of 6
+    const result = fakeResult([
+      verdictFinding({ claimId: 'claim-1', verdict: 'accurate' }),
+      verdictFinding({ claimId: 'claim-2', verdict: 'accurate' }),
+    ]);
+    const processed = postProcessDocTruthResult(result, ctx, budget);
+    expect(processed.candidatesDeferred).toBe(4);
+    expect(processed.deferredCandidateIds).toHaveLength(4);
+  });
+
+  it('a capped-but-complete run (every LISTED claim verdicted) stays incomplete:false — deferral is not incompleteness', () => {
+    process.env.LIEN_DOC_TRUTH_V2 = 'on';
+    const ctx = manyClaimsCtx(6);
+    const budget = VERDICT_EMISSION_RESERVE_TOKENS + 2 * 500; // affords 2 of 6
+    const result = fakeResult([
+      verdictFinding({ claimId: 'claim-1', verdict: 'accurate' }),
+      verdictFinding({ claimId: 'claim-2', verdict: 'accurate' }),
+    ]);
+    const processed = postProcessDocTruthResult(result, ctx, budget);
+    expect(processed.incomplete).toBe(false);
+    expect(processed.stopReason).toBe('completed');
+    expect(processed.candidatesDeferred).toBe(4);
+  });
+
+  it('still requires coverage of every LISTED (kept) claim — omitting one is incomplete_verdict, cap or not', () => {
+    process.env.LIEN_DOC_TRUTH_V2 = 'on';
+    const ctx = manyClaimsCtx(6);
+    const budget = VERDICT_EMISSION_RESERVE_TOKENS + 2 * 500; // lists claim-1/claim-2 only
+    const result = fakeResult([verdictFinding({ claimId: 'claim-1', verdict: 'accurate' })]); // claim-2 missing
+    const processed = postProcessDocTruthResult(result, ctx, budget);
+    expect(processed.incomplete).toBe(true);
+    expect(processed.stopReason).toBe('incomplete_verdict');
+  });
+
+  it('reports candidatesDeferred: 0 and no deferredCandidateIds when nothing was capped (default budget)', () => {
+    process.env.LIEN_DOC_TRUTH_V2 = 'on';
+    const result = fakeResult([verdictFinding({ claimId: 'claim-1', verdict: 'accurate' })]);
+    const processed = postProcessDocTruthResult(result, singleClaimCtx());
+    expect(processed.candidatesDeferred).toBe(0);
+    expect(processed.deferredCandidateIds).toBeUndefined();
+  });
+
+  it('is identity (candidatesDeferred untouched) when the v1 flag is off, even with a tiny budget', () => {
+    const result = fakeResult([verdictFinding({ claimId: 'claim-1', verdict: 'accurate' })]);
+    const processed = postProcessDocTruthResult(result, manyClaimsCtx(6), 0);
+    expect(processed).toBe(result);
+    expect(processed.candidatesDeferred).toBeUndefined();
   });
 });

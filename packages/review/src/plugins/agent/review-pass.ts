@@ -51,8 +51,20 @@ export interface ReviewPassSpec {
   skipPlugin: string;
   /** Why this pass would not run right now, or null if it should run. */
   gateReason(context: ReviewContext, config: AgentConfig): string | null;
-  /** Build this pass's system + initial prompts. */
-  buildPrompts(context: ReviewContext): { systemPrompt: string; initialMessage: string };
+  /**
+   * Build this pass's system + initial prompts. `budget` is this pass's own
+   * FINAL allocated budget (already computed via this same spec's `budget()`
+   * below) — a candidate-loop pass uses it to rank-and-cap its worklist to
+   * what this invocation can actually afford (see `affordableCandidateCeiling`
+   * below); a pass with no overflow handling ignores the parameter (a
+   * function declaring fewer parameters than an interface's function type is
+   * still a valid implementation of that type — same precedent as `budget`'s
+   * own doc comment below).
+   */
+  buildPrompts(
+    context: ReviewContext,
+    budget: number,
+  ): { systemPrompt: string; initialMessage: string };
   /**
    * This pass's token budget, computed from the main pass's base budget.
    * `context` is available for a candidate-loop pass that scales its budget
@@ -81,9 +93,14 @@ export interface ReviewPassSpec {
    * when the model's output didn't cover every candidate — even though the
    * underlying client returned a syntactically complete verdict (has a
    * summary). Identity (no post-processing) when omitted; doc-truth's own
-   * open findings-list shape needs nothing here.
+   * open findings-list shape needs nothing here. `budget` is the SAME
+   * allocated-budget value `buildPrompts` received — a pass with overflow
+   * handling recomputes the identical rank-and-cap worklist from it here (to
+   * check verdict coverage against exactly what was LISTED, not the full
+   * pre-cap candidate set) and stamps `candidatesDeferred`/
+   * `deferredCandidateIds` on the returned result.
    */
-  postProcessResult?(result: AgentResult, context: ReviewContext): AgentResult;
+  postProcessResult?(result: AgentResult, context: ReviewContext, budget: number): AgentResult;
 }
 
 /**
@@ -105,6 +122,130 @@ export interface ReviewPassSpec {
  * fixes.
  */
 export const EXTRA_PASS_MIN_BUDGET_TOKENS = 11_000;
+
+// ---------------------------------------------------------------------------
+// Candidate-overflow handling (rank-and-cap with attested deferral)
+// ---------------------------------------------------------------------------
+
+/**
+ * Realistic cost (tokens) of ONE turn that dispatches a real tool call and
+ * receives its result — PR #811/#813's measured envelope (5,526-6,564
+ * tokens/turn on Kimi, the same measurement `EXTRA_PASS_MIN_BUDGET_TOKENS`
+ * above is derived from) rounded to a clean number. This is the REALISTIC
+ * per-candidate cost for a candidate-loop pass whose candidates carry no
+ * inline evidence and so need a fresh read_file/get_files_context round-trip
+ * to judge (incomplete-handling, removed-exports) — a much bigger number
+ * than either pass's own PER_CANDIDATE_TOKENS budget-SIZING constant
+ * (800-900), which only accounts for the candidate's rendered PROMPT text,
+ * not the tool round-trip needed to actually investigate it. PR #813 is the
+ * proof this gap matters: incomplete-handling's 15-candidate worklist got a
+ * budget "correctly" scaled to 16,000 tokens under that prompt-sizing
+ * formula and still ran out on turn 2, mid-investigation — the formula sized
+ * the PROMPT, not the INVESTIGATION. A pass whose candidates carry
+ * pre-fetched evidence (stale-duplicate's snippet, doc-truth's excerpt)
+ * doesn't pay this cost per candidate — those callers pass their own nominal
+ * per-candidate constant to `affordableCandidateCeiling` instead.
+ */
+export const OBSERVED_TOKENS_PER_TURN = 6_000;
+
+/**
+ * Tokens reserved off the top of a pass's budget for its own final
+ * verdict-emission turn — synthesizing and emitting the JSON verdict array
+ * once every listed candidate has been judged. Smaller than a full
+ * investigative round-trip (no new tool dispatch, just synthesis), which is
+ * exactly how `EXTRA_PASS_MIN_BUDGET_TOKENS` (11,000) was already derived:
+ * "one such [investigative] turn plus a SMALLER follow-up/verdict turn with
+ * margin" (see that constant's doc comment). This is that already-implied
+ * "smaller" number, made explicit: 11,000 total minus the one investigative
+ * turn `OBSERVED_TOKENS_PER_TURN` accounts for.
+ */
+export const VERDICT_EMISSION_RESERVE_TOKENS =
+  EXTRA_PASS_MIN_BUDGET_TOKENS - OBSERVED_TOKENS_PER_TURN;
+
+/**
+ * How many candidates THIS invocation's allocated budget can afford an
+ * EVIDENCE-BACKED verdict for — the rank-and-cap ceiling every candidate-loop
+ * pass inverts its own budget math against (per-rule-loops candidate-overflow
+ * handling; see PR #813's 15-candidate incomplete-handling run and the
+ * Finding-A calibrate's ~51-claim doc-truth worklist, both of which exceeded
+ * what their invocation could actually afford). `budget` is deliberately NOT
+ * reduced by each pass's own fixed prompt overhead (BASE_OVERHEAD_TOKENS-style
+ * constants) a second time here — that overhead is already what sized the
+ * budget number in the first place (each pass's own `budget()` formula), and
+ * PR #811's per-turn measurement that grounds `OBSERVED_TOKENS_PER_TURN`
+ * already reflects a real turn's total cost (system prompt + worklist +
+ * response), not just the tool-call delta. Only `VERDICT_EMISSION_RESERVE_TOKENS`
+ * is reserved on top, for the pass's own closing turn.
+ *
+ * `tokensPerCandidate` is the caller's judgment call on realistic per-candidate
+ * cost, not this function's: pass `OBSERVED_TOKENS_PER_TURN` itself for a loop
+ * whose candidates typically need a fresh tool round-trip to judge (no inline
+ * evidence attached), or the pass's own nominal PER_CANDIDATE_* budget-sizing
+ * constant for a loop whose candidates carry pre-fetched evidence (a
+ * comparison, not an investigation) — see each pass's own call site for which
+ * applies. Floored at 0; given every pass's budget floor
+ * (`EXTRA_PASS_MIN_BUDGET_TOKENS` = 11,000 > `VERDICT_EMISSION_RESERVE_TOKENS`
+ * + any tokensPerCandidate used today), the ceiling is always ≥1 in practice —
+ * a pass that passed its own eligibility gate (≥1 real candidate exists) never
+ * gets capped down to a vacuous, zero-candidate worklist.
+ */
+export function affordableCandidateCeiling(budget: number, tokensPerCandidate: number): number {
+  const investigable = budget - VERDICT_EMISSION_RESERVE_TOKENS;
+  return Math.max(0, Math.floor(investigable / tokensPerCandidate));
+}
+
+/** The result of capping a candidate array to an affordable ceiling. */
+export interface CandidateCap<T> {
+  /** Candidates that fit within the ceiling — this run's actual worklist. */
+  kept: T[];
+  /** Candidates beyond the ceiling — excluded from the worklist, attested as deferred. */
+  deferred: T[];
+}
+
+/**
+ * Cap a candidate array — already in its OWN signal's existing priority/score
+ * order (highest-confidence or most-repeated first; see each pass's own
+ * `compute*Candidates` doc comment) — to the first `ceiling` entries. No new
+ * ranking is invented: this only truncates an already-ordered list, per the
+ * per-rule-loops candidate-overflow design ("each signal already has an
+ * internal sort order — reuse; don't invent new scoring").
+ */
+export function capCandidatesToCeiling<T>(candidates: T[], ceiling: number): CandidateCap<T> {
+  if (candidates.length <= ceiling) return { kept: candidates, deferred: [] };
+  return { kept: candidates.slice(0, ceiling), deferred: candidates.slice(ceiling) };
+}
+
+/** Cap on how many deferred-candidate labels are attested (attestation stays short). */
+export const MAX_DEFERRED_LABELS = 10;
+
+/** Best-effort human-readable labels for a (possibly capped) deferred list — for the delivery
+ *  attestation's `deferredCandidateIds`, NOT the pass's own `candidate-N` worklist ids (those are
+ *  only ever assigned to KEPT/listed candidates — a deferred candidate never gets one). */
+export function deferredCandidateLabels<T>(deferred: T[], labelFor: (item: T) => string): string[] {
+  return deferred.slice(0, MAX_DEFERRED_LABELS).map(labelFor);
+}
+
+/**
+ * The prompt note telling the model its worklist was capped — the honesty
+ * half of candidate-overflow handling (per-rule-loops design point 2/3): the
+ * model must know deferral happened so its summary doesn't imply exhaustive
+ * coverage, while still being told every LISTED candidate is mandatory (a
+ * capped-but-complete run is a clean verdict, not incompleteness — see
+ * `incomplete_verdict`'s own doc comment on `AgentStopReason`). Returns ''
+ * when nothing was deferred (the common case), so callers can push it
+ * unconditionally alongside the worklist with `pushIfPresent`-style helpers.
+ */
+export function renderDeferralNote(deferredCount: number): string {
+  if (deferredCount <= 0) return '';
+  return (
+    `NOTE — CANDIDATE OVERFLOW: ${deferredCount} additional eligible candidate(s) exist beyond ` +
+    "this run's worklist below. They were DEFERRED — excluded, not silently investigated — " +
+    "because this invocation's budget cannot afford an evidence-backed verdict for all of them. " +
+    'This is a deliberate, attested cap, not incompleteness: you must still judge every ' +
+    'candidate actually LISTED below (per <output_format>), and your summary must not describe ' +
+    'or imply exhaustive coverage of every candidate that exists — only of the ones listed.'
+  );
+}
 
 /**
  * The PR title/body header, mirroring the main pass's `<pr_metadata>` block.
@@ -146,10 +287,12 @@ export async function runReviewPass(
     return null;
   }
   try {
-    const { systemPrompt, initialMessage } = spec.buildPrompts(context);
     const budget = spec.budget(config.maxTokenBudget, context);
+    const { systemPrompt, initialMessage } = spec.buildPrompts(context, budget);
     const rawResult = await runClient(systemPrompt, initialMessage, budget, spec.maxTurns);
-    const result = spec.postProcessResult ? spec.postProcessResult(rawResult, context) : rawResult;
+    const result = spec.postProcessResult
+      ? spec.postProcessResult(rawResult, context, budget)
+      : rawResult;
     logger.info(
       `[agent] ${spec.name} pass: ${result.findings.length} finding(s) in ${result.turns} turn(s) ($${result.usage.cost.toFixed(4)})`,
     );
@@ -193,6 +336,17 @@ export interface PassOutcome {
   neverRan: boolean;
   allocatedTokens: number;
   spentTokens: number;
+  /**
+   * How many of this pass's eligible candidates were excluded from its
+   * worklist by the rank-and-cap ceiling (see `affordableCandidateCeiling`) —
+   * 0 for a pass with no overflow handling, or one whose full candidate list
+   * fit inside this run's budget (the common case). Read straight off the
+   * pass's own `AgentResult.candidatesDeferred` (set by its
+   * `postProcessResult`).
+   */
+  candidatesDeferred: number;
+  /** Best-effort human-readable labels for the deferred candidates (capped short list). */
+  deferredCandidateIds?: string[];
 }
 
 /**
@@ -233,6 +387,8 @@ export async function runExtraPasses(
         neverRan: passResult.neverRan ?? false,
         allocatedTokens: spec.budget(config.maxTokenBudget, context),
         spentTokens: passResult.usage.totalTokens,
+        candidatesDeferred: passResult.candidatesDeferred ?? 0,
+        deferredCandidateIds: passResult.deferredCandidateIds,
       });
     }
     merged = spec.mergeFindings(merged, passResult?.findings ?? []);
