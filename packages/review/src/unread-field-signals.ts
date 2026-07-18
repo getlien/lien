@@ -845,6 +845,28 @@ function destructuringForLoopPattern(name: string): RegExp {
 const OBJECT_LITERAL_GROUP_RE = /(?:=|\(|,|\[|:|=>|\breturn)\s*\{([^{}]*)\}/g;
 
 /**
+ * Blank out every bracket/paren-delimited span — `[...]`/`(...)`, at any nesting depth — with
+ * same-length whitespace (newlines kept). Used to hide an array element or call argument that is
+ * merely a NESTED VALUE inside an object literal's property (`{ event, arr: [a, varName, b] }`)
+ * from {@link hasShorthandHandoff}'s top-level shorthand-property scan — flagged on this PR's own
+ * review (lien-stats summary for commit db8966d) as a variant of the array/call-argument gap
+ * already fixed there, this time nested one level inside a genuine object literal instead of
+ * standing alone.
+ */
+function maskBracketsAndParens(text: string): string {
+  const blank = (span: string) => [...span].map(c => (c === '\n' ? '\n' : ' ')).join('');
+  let out = text;
+  let next = out.replace(/\[[^[\]]*\]|\([^()]*\)/g, blank);
+  // Peel one nesting level per pass — an innermost, bracket-free span always matches first, so
+  // repeating until nothing changes handles arbitrary nesting without depth-tracking branches.
+  while (next !== out) {
+    out = next;
+    next = out.replace(/\[[^[\]]*\]|\([^()]*\)/g, blank);
+  }
+  return out;
+}
+
+/**
  * Does `varName` appear as a bare shorthand property inside an object literal (`{ event,
  * varName, context }`) within `window` — a VALUE-position hand-off, not a BINDING? A shorthand
  * property hands off the CURRENT value of `varName` wholesale to whatever consumes the new
@@ -852,15 +874,16 @@ const OBJECT_LITERAL_GROUP_RE = /(?:=|\(|,|\[|:|=>|\breturn)\s*\{([^{}]*)\}/g;
  * spread or `JSON.stringify` gives, just via different syntax (mining sweep, hono #4451 ground
  * truth: `app.fetch(req, { event, requestContext, context })`).
  *
- * Two-step check, not a single `[{,]\s*varName\s*[,}]` scan: flagged on this PR's own review
- * (lien-stats summary for commit b5e3f88) that a bare adjacent-delimiter scan can't tell an
- * OBJECT literal from an ARRAY literal, a plain call's argument list, OR — the review's own
- * follow-up finding — the enclosing FUNCTION/BLOCK body itself (all of `[a, varName, b]`,
- * `foo(a, varName, b)`, and a function whose body merely CONTAINS one of those two shapes have
- * `,` immediately before AND after `varName`, and the function-body case still has a `{`/`}`
- * pair — just not one belonging to an object literal at all). Step 1 requires `varName` to sit
- * inside a `{...}` group that {@link OBJECT_LITERAL_GROUP_RE} confirms opens in an expression
- * position, not a block/function body. Step 2, scoped to just that group's own captured content,
+ * Multi-step check, not a single `[{,]\s*varName\s*[,}]` scan: flagged on this PR's own review
+ * (lien-stats summaries for commits b5e3f88 and db8966d) that a bare adjacent-delimiter scan
+ * can't tell an OBJECT literal from an ARRAY literal, a plain call's argument list, the enclosing
+ * FUNCTION/BLOCK body itself, or a NESTED array/call inside one of the object's own property
+ * VALUES (`{ arr: [a, varName, b] }`) — all of these can put a `,` immediately on either side of
+ * `varName` with no TOP-LEVEL object-literal shorthand actually present. Step 1 requires
+ * `varName` to sit inside a `{...}` group that {@link OBJECT_LITERAL_GROUP_RE} confirms opens in
+ * an expression position, not a block/function body. Step 2 blanks out any nested `[...]`/`(...)`
+ * within that group's own captured content ({@link maskBracketsAndParens}), so a value nested
+ * inside a property isn't visible to the final check. Step 3, against the masked content,
  * requires `varName` to sit directly between `{`/`,` and `,`/`}` with no colon after it (so an
  * ordinary `varName: something` key-value pair inside the SAME object, or a `.varName` access, is
  * not mistaken for a shorthand hand-off).
@@ -881,7 +904,7 @@ function hasShorthandHandoff(varName: string, window: string): boolean {
   // `matchAll` clones its regex internally, so reusing the shared global-flagged constant here
   // is safe and doesn't leak `lastIndex` state across calls.
   for (const m of window.matchAll(OBJECT_LITERAL_GROUP_RE)) {
-    if (shorthandWithinBraces.test(`{${m[1]}}`)) return true;
+    if (shorthandWithinBraces.test(`{${maskBracketsAndParens(m[1])}}`)) return true;
   }
   return false;
 }

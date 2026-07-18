@@ -563,6 +563,27 @@ describe('computeUnreadFieldCandidates', () => {
     expect(candidates).toHaveLength(1);
   });
 
+  // Regression: flagged on this PR's own review (lien-stats summary for commit db8966d) — a
+  // variant of the array/call-argument gap above, this time NESTED one level inside a genuine
+  // object literal's own property value, e.g. `{ arr: [a, o, b] }`. Must not be mistaken for a
+  // top-level shorthand property of the outer object. Uses a MULTI-argument call (a preceding
+  // `req` argument, mirroring the hono ground truth) rather than a single object-literal
+  // argument, so `destructuringFirstParamPattern`'s own documented residual (a lone-argument call
+  // is textually indistinguishable from a destructured sole parameter) doesn't accidentally
+  // exclude this case before the nested-array masking logic is ever exercised.
+  it('does NOT suppress via the variable appearing inside an ARRAY nested in an object literal PROPERTY VALUE', () => {
+    const consumer = [
+      'function handle(o: Options): void {',
+      '  const a = 1;',
+      '  const b = 2;',
+      '  dispatch(req, { event, arr: [a, o, b], context });',
+      '}',
+    ].join('\n');
+    const repoChunks = [...optionsChunks(), makeChunk('src/consumer.ts', 1, consumer)];
+    const candidates = computeUnreadFieldCandidates(baseContext(repoChunks));
+    expect(candidates).toHaveLength(1);
+  });
+
   // Regression for the fixture-mining sweep (zod's OG-image generator ground truth): Satori's
   // custom JSX renderer reads `HTMLAttributes.tw` exclusively via `<div tw="...">`-shaped call
   // sites — invisible to the dot/bracket/destructure read patterns, since a JSX attribute never
