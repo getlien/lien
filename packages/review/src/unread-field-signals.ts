@@ -821,6 +821,20 @@ function destructuringFirstParamPattern(name: string): RegExp {
 }
 
 /**
+ * A destructured `for`-loop binding: `for (const { name } of items)` / `for (let { name } in
+ * obj)`. A third destructuring BINDING shape (alongside assignment and parameter) that a bare
+ * `[{,]\s*name\s*[,}]` scan can't distinguish from a value-position shorthand hand-off — flagged
+ * as a residual gap on this PR's own review (lien-stats summary for commit 15af218) after the
+ * assignment/parameter cases were fixed.
+ */
+function destructuringForLoopPattern(name: string): RegExp {
+  const esc = escapeRegExp(name);
+  return new RegExp(
+    `\\bfor\\s*\\(\\s*(?:const|let|var)\\s*\\{[^{}]*\\b${esc}\\b[^{}]*\\}\\s*(?:of|in)\\b`,
+  );
+}
+
+/**
  * Does `varName` appear as a bare shorthand property inside an object literal (`{ event,
  * varName, context }`) within `window` — a VALUE-position hand-off, not a BINDING? A shorthand
  * property hands off the CURRENT value of `varName` wholesale to whatever consumes the new
@@ -830,16 +844,18 @@ function destructuringFirstParamPattern(name: string): RegExp {
  * directly between `{`/`,` and `,`/`}` (no colon after it) so an ordinary `varName: something`
  * key-value pair, or a `.varName` access, is not mistaken for a shorthand hand-off.
  *
- * Excludes the two shapes where `{ varName }` is a destructuring BINDING, not a value hand-off
+ * Excludes the three shapes where `{ varName }` is a destructuring BINDING, not a value hand-off
  * (CodeRabbit's review on this PR's own #818, `const { o } = x;` false-firing as if `o: Options`
  * were spread): a destructuring assignment ({@link destructuringAssignmentPattern}, shared
  * verbatim with {@link buildFieldReadPatterns} so the two checks can never disagree on that
- * shape) and a destructured function parameter ({@link destructuringFirstParamPattern} — its own,
- * stricter pattern; see that function's doc for why it is NOT the shared one).
+ * shape), a destructured function parameter ({@link destructuringFirstParamPattern} — its own,
+ * stricter pattern; see that function's doc for why it is NOT the shared one), and a destructured
+ * `for`-loop binding ({@link destructuringForLoopPattern}).
  */
 function hasShorthandHandoff(varName: string, window: string): boolean {
   if (destructuringAssignmentPattern(varName).test(window)) return false;
   if (destructuringFirstParamPattern(varName).test(window)) return false;
+  if (destructuringForLoopPattern(varName).test(window)) return false;
   return new RegExp(`[{,]\\s*${escapeRegExp(varName)}\\s*[,}]`).test(window);
 }
 

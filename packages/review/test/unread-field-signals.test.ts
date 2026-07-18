@@ -501,6 +501,37 @@ describe('computeUnreadFieldCandidates', () => {
     expect(candidates).toHaveLength(1);
   });
 
+  // Regression: flagged as a residual gap on this PR's own review (lien-stats summary for commit
+  // 15af218) after the assignment/parameter destructuring cases above were fixed — a third
+  // destructuring BINDING shape, a for-of/for-in loop, wasn't excluded either.
+  it('does NOT suppress via a destructured for-of BINDING sharing the same variable name elsewhere', () => {
+    const consumer = [
+      'function handle(o: Options): void {}',
+      'function other(items: Wrapper[]): void {',
+      '  for (const { o } of items) {',
+      '    console.log(o);',
+      '  }',
+      '}',
+    ].join('\n');
+    const repoChunks = [...optionsChunks(), makeChunk('src/consumer.ts', 1, consumer)];
+    const candidates = computeUnreadFieldCandidates(baseContext(repoChunks));
+    expect(candidates).toHaveLength(1);
+  });
+
+  it('does NOT suppress via a destructured for-in BINDING sharing the same variable name elsewhere', () => {
+    const consumer = [
+      'function handle(o: Options): void {}',
+      'function other(items: Record<string, Wrapper>): void {',
+      '  for (const { o } in items) {',
+      '    console.log(o);',
+      '  }',
+      '}',
+    ].join('\n');
+    const repoChunks = [...optionsChunks(), makeChunk('src/consumer.ts', 1, consumer)];
+    const candidates = computeUnreadFieldCandidates(baseContext(repoChunks));
+    expect(candidates).toHaveLength(1);
+  });
+
   // Regression for the fixture-mining sweep (zod's OG-image generator ground truth): Satori's
   // custom JSX renderer reads `HTMLAttributes.tw` exclusively via `<div tw="...">`-shaped call
   // sites — invisible to the dot/bracket/destructure read patterns, since a JSX attribute never
