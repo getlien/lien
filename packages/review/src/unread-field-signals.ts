@@ -910,18 +910,28 @@ function hasShorthandHandoff(varName: string, window: string): boolean {
 }
 
 /**
- * Char-offset `[start, end)` ranges of every interface/type-literal/class BODY in `content`
- * (reusing the same header regexes and brace matcher {@link findTypeDeclarations} does, without
- * needing its member-extraction work). Used by {@link chunkHasWholesaleConsumption} to recognize
- * when a `name: TypeName`-shaped match is actually a PROPERTY declaration inside one of these
- * bodies, not a variable annotation — flagged on this PR's own review: an unrelated interface's
- * own property (`interface Wrapper { option: Options; }`) would otherwise be captured as if
- * `option` were a real variable, and a coincidental shorthand reference to that name elsewhere
- * could then wrongly count as a wholesale hand-off of `Options`.
+ * Char-offset `[start, end)` ranges of every interface/type-literal BODY in `content` (reusing
+ * the same header regexes and brace matcher {@link findTypeDeclarations} does, without needing
+ * its member-extraction work). Used by {@link chunkHasWholesaleConsumption} to recognize when a
+ * `name: TypeName`-shaped match is actually a PROPERTY declaration inside one of these bodies,
+ * not a variable annotation — flagged on this PR's own review: an unrelated interface's own
+ * property (`interface Wrapper { option: Options; }`) would otherwise be captured as if `option`
+ * were a real variable, and a coincidental shorthand reference to that name elsewhere could then
+ * wrongly count as a wholesale hand-off of `Options`.
+ *
+ * Deliberately does NOT include class bodies, unlike {@link findTypeDeclarations}'s own kind
+ * enumeration — flagged as a follow-up finding on this PR's own review (lien-stats summary for
+ * commit 8196028): an interface/type-literal body is ALWAYS pure property territory (no method
+ * BODIES, only signatures), but a class body also contains full method bodies with their own
+ * genuine parameters and local variables — treating the WHOLE class body as property territory
+ * would wrongly exclude those from the shorthand-handoff check too. A genuine class FIELD
+ * declaration (`class Foo { bar: SomeType; }`) keeps the same pre-existing, narrower imprecision
+ * this function targets for interfaces/type-literals specifically — accepted as a smaller,
+ * localized residual rather than reintroducing the broader class-method-body bug.
  */
 function declarationBodyRanges(content: string): Array<{ start: number; end: number }> {
   const ranges: Array<{ start: number; end: number }> = [];
-  for (const headerRe of [INTERFACE_HEADER_RE, TYPE_LITERAL_HEADER_RE, CLASS_HEADER_RE]) {
+  for (const headerRe of [INTERFACE_HEADER_RE, TYPE_LITERAL_HEADER_RE]) {
     for (const m of content.matchAll(new RegExp(headerRe.source, 'g'))) {
       const openIdx = m.index + m[0].length - 1;
       const closeIdx = findMatchingBraceFrom(content, openIdx);
@@ -951,8 +961,9 @@ function isWithinAnyRange(index: number, ranges: Array<{ start: number; end: num
  * still — it only fires for a shorthand reference to the SPECIFIC variable the annotation named,
  * not "any object literal with shorthand keys nearby" (see {@link hasShorthandHandoff}) — and
  * never treats a captured name as a variable at all when the match sits inside an interface/
- * type-literal/class BODY ({@link declarationBodyRanges}), where `name: TypeName` is a property
- * declaration, not a variable annotation.
+ * type-literal BODY ({@link declarationBodyRanges}), where `name: TypeName` is a property
+ * declaration, not a variable annotation (deliberately NOT class bodies — see that function's
+ * doc for why).
  */
 function chunkHasWholesaleConsumption(typeName: string, content: string): boolean {
   const masked = maskComments(content);

@@ -680,6 +680,24 @@ describe('computeUnreadFieldCandidates', () => {
     expect(candidates).toHaveLength(1);
   });
 
+  // Regression: flagged as a follow-up finding on this PR's own review (lien-stats summary for
+  // commit 8196028) — declarationBodyRanges must NOT include class bodies, since (unlike an
+  // interface/type-literal) a class body contains full METHOD bodies with their own genuine
+  // parameters and variables. A shorthand hand-off of a class method's OWN parameter must still
+  // be detected (i.e. still suppressed), not wrongly excluded as if the parameter were a
+  // property declaration.
+  it('still suppresses a shorthand hand-off of a class METHOD parameter (must not be treated as a property)', () => {
+    const consumer = [
+      'class Handler {',
+      '  handle(o: Options): void {',
+      '    app.fetch(req, { event, o, context });',
+      '  }',
+      '}',
+    ].join('\n');
+    const repoChunks = [...optionsChunks(), makeChunk('src/consumer.ts', 1, consumer)];
+    expect(computeUnreadFieldCandidates(baseContext(repoChunks))).toEqual([]);
+  });
+
   it('does NOT suppress on a bare co-occurrence of the type name and an unrelated spread (regression, found via dogfooding)', () => {
     // A docstring mentioning the type by name, plus a wholly unrelated spread
     // later in the same chunk, must not be read as "this type is spread" —
