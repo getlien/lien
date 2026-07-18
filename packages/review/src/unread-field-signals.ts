@@ -910,6 +910,33 @@ function hasShorthandHandoff(varName: string, window: string): boolean {
 }
 
 /**
+ * Char-offset `[start, end)` ranges of every interface/type-literal/class BODY in `content`
+ * (reusing the same header regexes and brace matcher {@link findTypeDeclarations} does, without
+ * needing its member-extraction work). Used by {@link chunkHasWholesaleConsumption} to recognize
+ * when a `name: TypeName`-shaped match is actually a PROPERTY declaration inside one of these
+ * bodies, not a variable annotation — flagged on this PR's own review: an unrelated interface's
+ * own property (`interface Wrapper { option: Options; }`) would otherwise be captured as if
+ * `option` were a real variable, and a coincidental shorthand reference to that name elsewhere
+ * could then wrongly count as a wholesale hand-off of `Options`.
+ */
+function declarationBodyRanges(content: string): Array<{ start: number; end: number }> {
+  const ranges: Array<{ start: number; end: number }> = [];
+  for (const headerRe of [INTERFACE_HEADER_RE, TYPE_LITERAL_HEADER_RE, CLASS_HEADER_RE]) {
+    for (const m of content.matchAll(new RegExp(headerRe.source, 'g'))) {
+      const openIdx = m.index + m[0].length - 1;
+      const closeIdx = findMatchingBraceFrom(content, openIdx);
+      if (closeIdx !== -1) ranges.push({ start: openIdx, end: closeIdx });
+    }
+  }
+  return ranges;
+}
+
+/** Does `index` fall inside any of `ranges`? */
+function isWithinAnyRange(index: number, ranges: Array<{ start: number; end: number }>): boolean {
+  return ranges.some(r => index >= r.start && index < r.end);
+}
+
+/**
  * Does a `: typeName` type annotation appear with a spread, `JSON.stringify(`, or a shorthand-
  * property hand-off of the SAME annotated variable, within {@link WHOLESALE_PROXIMITY_CHARS}
  * characters AFTER it, anywhere in this chunk? Requiring the annotation — not just the bare type
@@ -922,17 +949,22 @@ function hasShorthandHandoff(varName: string, window: string): boolean {
  * spread anywhere in the same file", which false-fired on this module's OWN doc comment
  * mentioning `RuleTriggers` during dogfooding. The shorthand-property check is scoped tighter
  * still — it only fires for a shorthand reference to the SPECIFIC variable the annotation named,
- * not "any object literal with shorthand keys nearby" (see {@link hasShorthandHandoff}).
+ * not "any object literal with shorthand keys nearby" (see {@link hasShorthandHandoff}) — and
+ * never treats a captured name as a variable at all when the match sits inside an interface/
+ * type-literal/class BODY ({@link declarationBodyRanges}), where `name: TypeName` is a property
+ * declaration, not a variable annotation.
  */
 function chunkHasWholesaleConsumption(typeName: string, content: string): boolean {
   const masked = maskComments(content);
+  const declRanges = declarationBodyRanges(masked);
   const typedRe = typedAnnotationRegex(typeName);
   for (const m of masked.matchAll(typedRe)) {
     const varName = m[1];
+    const isPropertyDeclaration = varName !== undefined && isWithinAnyRange(m.index, declRanges);
     const windowStart = m.index + m[0].length;
     const window = masked.slice(windowStart, windowStart + WHOLESALE_PROXIMITY_CHARS);
     if (WHOLESALE_RE.test(window)) return true;
-    if (varName && hasShorthandHandoff(varName, window)) return true;
+    if (varName && !isPropertyDeclaration && hasShorthandHandoff(varName, window)) return true;
   }
   return false;
 }

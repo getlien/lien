@@ -654,6 +654,32 @@ describe('computeUnreadFieldCandidates', () => {
     expect(computeUnreadFieldCandidates(baseContext(repoChunks))).toEqual([]);
   });
 
+  // Regression: flagged on this PR's own review (lien-stats summary for commit 0b06fe3) — a
+  // `name: TypeName` match inside an UNRELATED interface/class body is a PROPERTY declaration,
+  // not a variable, so a coincidental shorthand reference to that same name elsewhere must not
+  // count as a wholesale hand-off. Padding pushes the REAL parameter's own proximity window past
+  // the shorthand code, isolating the test to the property-declaration match specifically (the
+  // real parameter's own match would otherwise also reach the same shorthand text and mask
+  // whether the fix does anything).
+  it('does NOT suppress via a property declaration inside an unrelated interface being mistaken for a variable', () => {
+    const padding = '// ' + 'x'.repeat(450);
+    const consumer = [
+      'function handle(o: Options): void {}',
+      padding,
+      'interface Wrapper {',
+      '  o: Options;',
+      '}',
+      'function other(): void {',
+      '  const x = 1;',
+      '  const y = 2;',
+      '  const shape = { x, o, y };',
+      '}',
+    ].join('\n');
+    const repoChunks = [...optionsChunks(), makeChunk('src/consumer.ts', 1, consumer)];
+    const candidates = computeUnreadFieldCandidates(baseContext(repoChunks));
+    expect(candidates).toHaveLength(1);
+  });
+
   it('does NOT suppress on a bare co-occurrence of the type name and an unrelated spread (regression, found via dogfooding)', () => {
     // A docstring mentioning the type by name, plus a wholly unrelated spread
     // later in the same chunk, must not be read as "this type is spread" —
