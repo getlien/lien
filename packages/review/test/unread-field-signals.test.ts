@@ -471,6 +471,36 @@ describe('computeUnreadFieldCandidates', () => {
     expect(candidates).toHaveLength(1);
   });
 
+  // Regression: CodeRabbit's review on this PR's own #818 found `hasShorthandHandoff` couldn't
+  // tell a shorthand-property object literal (value position) from a destructuring pattern
+  // (binding position) sharing the same identifier — `const { o } = wrapper;` was false-matched
+  // as if `o: Options` were handed off wholesale, even though it's an unrelated destructuring
+  // binding in a different scope.
+  it('does NOT suppress via a destructuring ASSIGNMENT binding the same variable name elsewhere', () => {
+    const consumer = [
+      'function handle(o: Options): void {}',
+      'function other(): void {',
+      '  const { o } = wrapper;',
+      '  console.log(o);',
+      '}',
+    ].join('\n');
+    const repoChunks = [...optionsChunks(), makeChunk('src/consumer.ts', 1, consumer)];
+    const candidates = computeUnreadFieldCandidates(baseContext(repoChunks));
+    expect(candidates).toHaveLength(1);
+  });
+
+  it('does NOT suppress via a destructured FUNCTION PARAMETER sharing the same variable name elsewhere', () => {
+    const consumer = [
+      'function handle(o: Options): void {}',
+      'function other({ o }: Wrapper): void {',
+      '  console.log(o);',
+      '}',
+    ].join('\n');
+    const repoChunks = [...optionsChunks(), makeChunk('src/consumer.ts', 1, consumer)];
+    const candidates = computeUnreadFieldCandidates(baseContext(repoChunks));
+    expect(candidates).toHaveLength(1);
+  });
+
   // Regression for the fixture-mining sweep (zod's OG-image generator ground truth): Satori's
   // custom JSX renderer reads `HTMLAttributes.tw` exclusively via `<div tw="...">`-shaped call
   // sites — invisible to the dot/bracket/destructure read patterns, since a JSX attribute never
@@ -513,6 +543,32 @@ describe('computeUnreadFieldCandidates', () => {
     const repoChunks = [...optionsChunks(), makeChunk('src/card.tsx', 1, consumer)];
     const candidates = computeUnreadFieldCandidates(baseContext(repoChunks));
     expect(candidates).toHaveLength(1);
+  });
+
+  // Regression: CodeRabbit's review on this PR's own #818 found the JSX attribute pattern's
+  // `[^<>]*` gap could wander INSIDE an earlier attribute's `{...}` expression container and
+  // land on a local variable used as that attribute's VALUE, misreading it as if it were an
+  // attribute NAME. `<div className={ timeout } ...>` must not count `timeout` as read when it's
+  // only ever referenced as a local variable, never as an attribute name — the surrounding
+  // spaces (CodeRabbit's exact reported shape) are what let the naive prefix scan's `\s` land
+  // right before it.
+  it('does NOT false-match a field name used as a local variable INSIDE an earlier JSX brace-expression attribute', () => {
+    const consumer = [
+      'function Card(props: Options) {',
+      '  const timeout = 5;',
+      '  return <div className={ timeout } data-x="y">hi</div>;',
+      '}',
+    ].join('\n');
+    const repoChunks = [...optionsChunks(), makeChunk('src/card.tsx', 1, consumer)];
+    const candidates = computeUnreadFieldCandidates(baseContext(repoChunks));
+    expect(candidates).toHaveLength(1);
+  });
+
+  it('still matches the field name as an attribute AFTER an earlier brace-expression attribute (regression: the brace-skip must not lose recall)', () => {
+    const consumer =
+      'function Card(props: Options) {\n  const x = 1;\n  return <div data-x={x} timeout="5s">hi</div>;\n}';
+    const repoChunks = [...optionsChunks(), makeChunk('src/card.tsx', 1, consumer)];
+    expect(computeUnreadFieldCandidates(baseContext(repoChunks))).toEqual([]);
   });
 
   it('does NOT suppress on a bare co-occurrence of the type name and an unrelated spread (regression, found via dogfooding)', () => {

@@ -240,10 +240,13 @@ const WHOLESALE_RE = /\bJSON\.stringify\s*\(|\.\.\.\s*[A-Za-z_$]/;
 const WHOLESALE_PROXIMITY_CHARS = 400;
 
 /**
- * How many characters after a JSX tag's opening `<Tag` to scan for the field name used as an
- * attribute — see {@link buildJsxAttrReadPattern}. A BOUNDED window (not an unbounded `*`
- * repetition) so a minified file dense with `<`/`>` comparison operators can't make this
- * pattern's worst case anything other than linear (#810's ReDoS-hardening precedent).
+ * How many repetitions of {@link JSX_ATTR_GAP} to scan after a JSX tag's opening `<Tag` for the
+ * field name used as an attribute — see {@link buildJsxAttrReadPattern}. Each repetition is
+ * either one ordinary character or one whole balanced `{...}` expression container, so this
+ * bounds attribute COUNT more than raw character count — but it is still a fixed bound (not an
+ * unbounded `*` repetition), so a minified file dense with `<`/`>` comparison operators, or with
+ * many brace-expression attributes, can't make this pattern's worst case anything other than
+ * linear (#810's ReDoS-hardening precedent).
  */
 const JSX_ATTR_SCAN_CHARS = 240;
 
@@ -798,16 +801,45 @@ function typedAnnotationRegex(typeName: string): RegExp {
 }
 
 /**
+ * A destructured function PARAMETER where the `{...}` is the FIRST thing after the opening `(`
+ * (only whitespace between) — `function f({ name }: T)` / `({ name }) =>`. Deliberately
+ * STRICTER than {@link destructuringParamPattern} (which also matches `foo(a, { name })`, a
+ * call passing an object-literal argument AFTER another argument): requiring `{` to
+ * IMMEDIATELY follow `(` is what separates a lone/first destructured parameter from the hono
+ * #4451 hand-off shape this fix targets, `app.fetch(req, { event, name, context })` — there,
+ * `req, ` sits between `(` and `{`, so this pattern does NOT match it. `destructuringParamPattern`
+ * itself is deliberately NOT reused here (unlike the assignment exclusion below): it cannot tell
+ * `function f({ name })` from `foo(a, { name })` by text alone, and reusing it would exclude the
+ * exact wholesale hand-off shape this module is trying to detect. A single-argument hand-off call
+ * shaped exactly like a lone destructured parameter (`render({ name })`) remains a documented
+ * residual — genuinely ambiguous from pure text, and rare next to the multi-argument shape the
+ * real ground truth showed.
+ */
+function destructuringFirstParamPattern(name: string): RegExp {
+  const esc = escapeRegExp(name);
+  return new RegExp(`\\(\\s*\\{[^{}]*\\b${esc}\\b[^{}]*\\}`);
+}
+
+/**
  * Does `varName` appear as a bare shorthand property inside an object literal (`{ event,
- * varName, context }`) within `window`? A shorthand property hands off the CURRENT value of
- * `varName` wholesale to whatever consumes the new object — the same "can't prove the field
- * isn't part of a whole-object pass-through" evidence a spread or `JSON.stringify` gives, just
- * via different syntax (mining sweep, hono #4451 ground truth: `app.fetch(req, { event,
- * requestContext, context })`). Requires `varName` to sit directly between `{`/`,` and `,`/`}`
- * (no colon after it) so an ordinary `varName: something` key-value pair, or a `.varName`
- * access, is not mistaken for a shorthand hand-off.
+ * varName, context }`) within `window` — a VALUE-position hand-off, not a BINDING? A shorthand
+ * property hands off the CURRENT value of `varName` wholesale to whatever consumes the new
+ * object — the same "can't prove the field isn't part of a whole-object pass-through" evidence a
+ * spread or `JSON.stringify` gives, just via different syntax (mining sweep, hono #4451 ground
+ * truth: `app.fetch(req, { event, requestContext, context })`). Requires `varName` to sit
+ * directly between `{`/`,` and `,`/`}` (no colon after it) so an ordinary `varName: something`
+ * key-value pair, or a `.varName` access, is not mistaken for a shorthand hand-off.
+ *
+ * Excludes the two shapes where `{ varName }` is a destructuring BINDING, not a value hand-off
+ * (CodeRabbit's review on this PR's own #818, `const { o } = x;` false-firing as if `o: Options`
+ * were spread): a destructuring assignment ({@link destructuringAssignmentPattern}, shared
+ * verbatim with {@link buildFieldReadPatterns} so the two checks can never disagree on that
+ * shape) and a destructured function parameter ({@link destructuringFirstParamPattern} — its own,
+ * stricter pattern; see that function's doc for why it is NOT the shared one).
  */
 function hasShorthandHandoff(varName: string, window: string): boolean {
+  if (destructuringAssignmentPattern(varName).test(window)) return false;
+  if (destructuringFirstParamPattern(varName).test(window)) return false;
   return new RegExp(`[{,]\\s*${escapeRegExp(varName)}\\s*[,}]`).test(window);
 }
 
@@ -869,18 +901,53 @@ function isSuppressedType(
 // ---------------------------------------------------------------------------
 
 /**
+ * The "gap" between a JSX tag's opening `<Tag` and the attribute name this pattern is looking
+ * for: either an ordinary non-`<`/`>`/`{`/`}` character, OR one WHOLE single-level `{...}`
+ * expression container consumed as one unit. The latter is what stops a PRIOR attribute's brace
+ * expression from being scanned character-by-character — CodeRabbit's review on this PR's own
+ * #818 found `<div className={ timeout }>` false-matched field `timeout` as if it were an
+ * attribute NAME, because the naive `[^<>]*` gap could wander INSIDE that expression and land on
+ * the local variable `timeout` used as its VALUE. Consuming a `{...}` group in one bite means the
+ * scan can only ever test a candidate match at a position that is a genuine attribute-name slot,
+ * never partway through a value expression. No ambiguity between the two alternatives at any
+ * position (a `{` can only start the second branch, everything else can only match the first),
+ * so this doesn't reintroduce catastrophic-backtracking risk — see {@link JSX_ATTR_SCAN_CHARS}.
+ */
+const JSX_ATTR_GAP = `(?:[^<>{}]|\\{[^{}]*\\})`;
+
+/**
  * A JSX attribute usage of `name` on any element (`<div name="...">`, `<Foo name />`,
  * `<Foo name={expr}>`) — see module doc's "JSX attribute usage" note. Requires whitespace
  * directly before the name (so a longer identifier merely ENDING in `name`, e.g. `className`
  * for field `name`, can't match) and `=`/whitespace/a (self-)closing `>` directly after (so a
  * longer identifier STARTING with `name` can't match either). Bounded to
- * {@link JSX_ATTR_SCAN_CHARS} characters after the opening `<Tag` with a single bounded
- * quantifier (not an unbounded `*`), so this pattern's worst case stays linear regardless of
- * input size — see {@link JSX_ATTR_SCAN_CHARS}'s doc.
+ * {@link JSX_ATTR_SCAN_CHARS} REPETITIONS of {@link JSX_ATTR_GAP} (not an unbounded `*`), so
+ * this pattern's worst case stays linear regardless of input size.
  */
 function buildJsxAttrReadPattern(name: string): RegExp {
   const esc = escapeRegExp(name);
-  return new RegExp(`<[A-Za-z][^<>]{0,${JSX_ATTR_SCAN_CHARS}}\\s${esc}\\b(?:=|\\s|/?>)`);
+  return new RegExp(
+    `<[A-Za-z](?:${JSX_ATTR_GAP}){0,${JSX_ATTR_SCAN_CHARS}}\\s${esc}\\b(?:=|\\s|/?>)`,
+  );
+}
+
+/**
+ * Destructuring-assignment shape for `name`: `const { name } = obj;` / `const { name }: T = obj;`
+ * / `({ name } = obj)`. Shared with {@link hasShorthandHandoff}'s exclusion check — see that
+ * function's doc for why.
+ */
+function destructuringAssignmentPattern(name: string): RegExp {
+  const esc = escapeRegExp(name);
+  return new RegExp(`\\{[^{}]*\\b${esc}\\b[^{}]*\\}\\s*(?::\\s*[\\w.<>[\\],\\s]+)?=(?!=)`);
+}
+
+/**
+ * Destructuring function-parameter shape for `name`: `function f({ name }: T)` / `({ name }) =>`.
+ * Shared with {@link hasShorthandHandoff}'s exclusion check — see that function's doc for why.
+ */
+function destructuringParamPattern(name: string): RegExp {
+  const esc = escapeRegExp(name);
+  return new RegExp(`\\([^()]*\\{[^{}]*\\b${esc}\\b[^{}]*\\}`);
 }
 
 /**
@@ -898,9 +965,9 @@ function buildFieldReadPatterns(name: string): RegExp[] {
     // Bracket string-literal access read: `obj['field']`/`obj["field"]`, excluding `obj['field'] = value`.
     new RegExp(`\\[\\s*['"\`]${esc}['"\`]\\s*\\]${notPlainWrite}`),
     // Destructuring assignment: `const { field } = obj;` / `const { field }: T = obj;`.
-    new RegExp(`\\{[^{}]*\\b${esc}\\b[^{}]*\\}\\s*(?::\\s*[\\w.<>[\\],\\s]+)?=(?!=)`),
+    destructuringAssignmentPattern(name),
     // Destructuring function parameter: `function f({ field }: T)` / `({ field }) =>`.
-    new RegExp(`\\([^()]*\\{[^{}]*\\b${esc}\\b[^{}]*\\}`),
+    destructuringParamPattern(name),
     // JSX attribute usage: `<div field="...">` / `<Foo field />` / `<Foo field={expr}>`.
     buildJsxAttrReadPattern(name),
   ];
