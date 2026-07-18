@@ -479,6 +479,20 @@ describe('buildIncompleteHandlingPassPrompts', () => {
     expect(systemPrompt).toContain('candidate-1');
   });
 
+  // Regression for the #814 doc-truth-v2 screen: a real captured vote had the model omit
+  // `category` from every per-claim verdict entry, silently dropping them all at
+  // `isValidFinding` (which requires `category`) — because the contract's "EVERY entry
+  // requires ..." sentence didn't name it, even though the example JSON above it does. This
+  // pass's contract shares the identical sentence shape, so it carried the same latent gap.
+  it('names category among the required fields, not just in the illustrative example', () => {
+    const { systemPrompt } = buildIncompleteHandlingPassPrompts(mixedContext());
+    const requiredFieldsSentence = systemPrompt
+      .split('\n')
+      .find(line => line.startsWith('EVERY entry requires'));
+    expect(requiredFieldsSentence).toBeDefined();
+    expect(requiredFieldsSentence).toContain('category');
+  });
+
   it('builds an initial message with the worklist tagged by shape', () => {
     const message = buildIncompleteHandlingPassInitialMessage(mixedContext());
     expect(message).toContain('<pr_metadata>');

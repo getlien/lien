@@ -458,11 +458,12 @@ the mandatory per-claim verdicts AND any extra findings you spot beyond the work
 EXACTLY one verdict entry is REQUIRED per id in ${ids.length > 0 ? ids.join(', ') : '(none — no worklist ids this run)'} —
 no more, no fewer per id. An extra finding for a claim NOT in the worklist is legal and unlimited
 — omit \`claimId\`/\`verdict\` on those; they need no verdict and are evaluated as ordinary
-findings. EVERY verdict entry requires claimId, verdict, filepath, line, severity, and message —
-even for accurate/unverifiable (use the claim's own file for filepath; best-effort line; severity
-"warning" unless contradicted, where the usual bug-severity judgment applies). A missing,
-duplicated, or unrecognized claimId, or a missing/invalid verdict on a claimed entry, makes this
-pass's result incomplete.
+findings. EVERY verdict entry requires claimId, verdict, filepath, line, severity, category, and
+message — even for accurate/unverifiable (use the claim's own file for filepath; best-effort
+line; severity "warning" unless contradicted, where the usual bug-severity judgment applies;
+category any short slug, e.g. "bug"). A missing category silently drops the ENTIRE entry, same as
+a missing claimId/verdict. A missing, duplicated, or unrecognized claimId, or a missing/invalid
+verdict or category on a claimed entry, makes this pass's result incomplete.
 </output_format_v2_override>`;
 }
 

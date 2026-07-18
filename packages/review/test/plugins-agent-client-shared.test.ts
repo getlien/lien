@@ -133,6 +133,43 @@ describe('isValidFinding', () => {
     expect(isValidFinding({ ...finding, severity: 'info' })).toBe(false); // bad severity
     expect(isValidFinding({ ...finding, filepath: undefined })).toBe(false);
   });
+
+  /**
+   * Regression for the #814 doc-truth-v2 screen: a real captured vote (doc-truth v2, pr658
+   * fixture) had the model emit every one of its 48 per-claim verdict entries WITHOUT `category`
+   * — including the entry for the Finding B claim (`augment-explore-task.sh:64`,
+   * "meaning-based discovery") — while its two ad hoc findings beyond the worklist (not governed
+   * by the per-claim contract) both carried `category` normally. Root cause: the v2/stale-
+   * duplicate/incomplete-handling output contracts' "EVERY entry requires ..." sentence never
+   * named `category`, even though their own example JSON includes it — the model followed the
+   * explicit list literally and dropped exactly the one field missing from it. Since this
+   * validator silently filters any finding missing `category` (readVerdict's
+   * `.filter(isValidFinding)`), that vote lost every per-claim finding, including Finding B,
+   * before doc-truth's own verdict-coverage check ever saw them. Fixed by naming `category` in
+   * all three contracts' required-field sentences (doc-truth-pass.ts, stale-duplicate-pass.ts,
+   * incomplete-handling-pass.ts) rather than relaxing this validator — `category` is load-bearing
+   * for every OTHER consumer (engine.ts's dedupe key and rendering, sarif.ts's ruleId, index.ts's
+   * architectural/summary partitioning), so making it optional here would push `undefined`
+   * through call sites that assume it's always a string.
+   */
+  it('rejects a real captured per-claim verdict entry missing category (#814)', () => {
+    const capturedClaimFourFinding = {
+      claimId: 'claim-4',
+      verdict: 'contradicted',
+      filepath: 'plugins/claude/hooks/augment-explore-task.sh',
+      line: 64,
+      severity: 'warning',
+      // no `category` — this is the exact shape the model emitted for every claim in the
+      // affected vote, not a hypothetical.
+      message:
+        "The hook calls search_code 'REQUIRED for meaning-based discovery', but the tool is " +
+        "lexical full-text (BM25) keyword search with no embeddings; 'meaning-based' mislabels " +
+        'the mechanism.',
+    };
+    expect(isValidFinding(capturedClaimFourFinding)).toBe(false);
+    // Restoring the field the fixed prompt now explicitly requires is enough to pass.
+    expect(isValidFinding({ ...capturedClaimFourFinding, category: 'bug' })).toBe(true);
+  });
 });
 
 describe('isValidSummary', () => {

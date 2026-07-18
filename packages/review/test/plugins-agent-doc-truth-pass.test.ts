@@ -559,6 +559,23 @@ describe('buildDocTruthPassPrompts / buildDocTruthPassInitialMessageV2 — v2 co
     expect(systemPrompt).toContain('get_complexity');
   });
 
+  // Regression for the #814 doc-truth-v2 screen: a real captured vote had the model omit
+  // `category` from every one of its 48 per-claim verdict entries, silently dropping them all
+  // at `isValidFinding` (which requires `category`) — including the entry for the certified
+  // Finding B claim — because this sentence didn't name `category`, even though the example
+  // JSON above it does. The model followed the explicit required-field list literally.
+  it('names category among the required fields, not just in the illustrative example', () => {
+    process.env.LIEN_DOC_TRUTH_V2 = 'on';
+    const ctx = contextWithPatches([
+      ['docs/architecture/worktree.md', DOC_CLAIM_PATCH],
+      ...RENAME_SWEEP_FILES,
+    ]);
+    const { systemPrompt } = buildDocTruthPassPrompts(ctx);
+    const match = systemPrompt.replace(/\n/g, ' ').match(/EVERY verdict entry requires[^.]*\./);
+    expect(match).toBeTruthy();
+    expect(match?.[0]).toContain('category');
+  });
+
   it('renders <doc_claims> and <rename_sweep> with [claim-N] ids and the contract note', () => {
     process.env.LIEN_DOC_TRUTH_V2 = 'on';
     const ctx = contextWithPatches([
