@@ -29,6 +29,9 @@ export const ALWAYS_IGNORE_PATTERNS = [
   '**/*.min.js',
   '*.min.css',
   '**/*.min.css',
+  // Generated lockfile: huge, no search value.
+  'pnpm-lock.yaml',
+  '**/pnpm-lock.yaml',
 ];
 
 /** Directories to skip during .gitignore discovery (no useful .gitignore inside) */

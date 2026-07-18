@@ -6,6 +6,7 @@ import { NativeBindingLoadError } from './ast/parser.js';
 import { chunkLiquidFile } from './liquid-chunker.js';
 import { chunkJSONTemplate } from './json-template-chunker.js';
 import { chunkMarkdownFile } from './markdown-chunker.js';
+import { chunkYamlFile } from './yaml-chunker.js';
 
 export interface ChunkOptions {
   chunkSize?: number;
@@ -52,6 +53,13 @@ function chunkSpecialCase(
   // "Install") rather than an arbitrary slice.
   if (/\.(md|mdx|markdown)$/i.test(filepath)) {
     return chunkMarkdownFile(filepath, content, chunkSize, chunkOverlap);
+  }
+
+  // YAML — chunk by top-level mapping key instead of a fixed-size line
+  // window, so search_code retrieves a coherent config section (e.g. a
+  // GitHub Actions job) rather than an arbitrary slice.
+  if (/\.(ya?ml)$/i.test(filepath)) {
+    return chunkYamlFile(filepath, content, chunkSize, chunkOverlap);
   }
 
   return undefined;

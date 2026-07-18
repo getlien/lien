@@ -9,6 +9,7 @@ import { detectEcosystems, getEcosystemExcludePatterns } from './ecosystem-prese
 import {
   DEFAULT_CHUNK_SIZE,
   DEFAULT_CHUNK_OVERLAP,
+  DEFAULT_INDEX_INCLUDE_PATTERNS,
   getParseStageConcurrency,
 } from './constants.js';
 
@@ -41,12 +42,7 @@ async function scanFilesToIndex(rootDir: string): Promise<string[]> {
 
   return scanCodebase({
     rootDir,
-    includePatterns: [
-      '**/*.{ts,tsx,js,jsx,mjs,cjs,vue,py,php,go,rs,java,kt,swift,rb,cs,liquid,scala,c,cpp,cc,cxx,h,hpp}',
-      '**/*.md',
-      '**/*.mdx',
-      '**/*.markdown',
-    ],
+    includePatterns: DEFAULT_INDEX_INCLUDE_PATTERNS,
     excludePatterns: ecosystemExcludes,
   });
 }

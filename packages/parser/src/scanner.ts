@@ -29,11 +29,18 @@ export async function scanCodebase(options: ScanOptions): Promise<string[]> {
   const ig = await loadGitignore(rootDir);
   ig.add([...ALWAYS_IGNORE_PATTERNS, ...excludePatterns]);
 
-  // Determine patterns to search for
+  // Determine patterns to search for. The `.github/**` entry is required
+  // alongside the brace pattern because glob's default `dot:false` blocks
+  // `**` from descending into dot-directories -- a bare `**/*.{...,yml,yaml}`
+  // never matches `.github/workflows/*.yml` (see DEFAULT_INDEX_INCLUDE_PATTERNS
+  // in constants.ts for the fuller, non-fallback include list).
   const patterns =
     includePatterns.length > 0
       ? includePatterns
-      : ['**/*.{ts,tsx,js,jsx,py,php,go,rs,java,cpp,c,cs,h,md,mdx}'];
+      : [
+          '**/*.{ts,tsx,js,jsx,py,php,go,rs,java,cpp,c,cs,h,md,mdx,yml,yaml}',
+          '.github/**/*.{yml,yaml}',
+        ];
 
   // Combine always-ignored patterns with exclude patterns for glob
   const globIgnorePatterns = [...ALWAYS_IGNORE_PATTERNS, ...excludePatterns];

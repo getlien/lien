@@ -129,7 +129,7 @@ independent index for that worktree.
 
 ## Supported Languages
 
-TypeScript • JavaScript • Vue • Python • PHP • Liquid • Go • Rust • Java • C/C++ • Ruby • Swift • Kotlin • C# • Scala • Markdown
+TypeScript • JavaScript • Vue • Python • PHP • Liquid • Go • Rust • Java • C/C++ • Ruby • Swift • Kotlin • C# • Scala • Markdown • YAML
 
 **Ecosystem Presets:** 12 ecosystem presets including Node.js, Python, PHP, Laravel, Ruby, Rails, Rust, JVM, Swift, .NET, Django, and Astro (auto-detected)
 

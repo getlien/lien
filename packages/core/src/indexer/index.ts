@@ -36,6 +36,7 @@ import {
   getEcosystemExcludePatterns,
   chunkFile,
   computeContentHash,
+  DEFAULT_INDEX_INCLUDE_PATTERNS,
 } from '@liendev/parser';
 
 /**
@@ -101,12 +102,7 @@ export async function scanFilesToIndex(rootDir: string): Promise<string[]> {
 
   return scanCodebase({
     rootDir,
-    includePatterns: [
-      '**/*.{ts,tsx,js,jsx,mjs,cjs,vue,py,php,go,rs,java,kt,swift,rb,cs,liquid,scala,c,cpp,cc,cxx,h,hpp}',
-      '**/*.md',
-      '**/*.mdx',
-      '**/*.markdown',
-    ],
+    includePatterns: DEFAULT_INDEX_INCLUDE_PATTERNS,
     excludePatterns: ecosystemExcludes,
   });
 }

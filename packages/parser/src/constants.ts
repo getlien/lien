@@ -7,6 +7,30 @@
 export const DEFAULT_CHUNK_SIZE = 75;
 export const DEFAULT_CHUNK_OVERLAP = 10;
 
+/**
+ * Default glob include patterns for a full-repo index scan: source languages,
+ * prose docs, and YAML config. Shared by `@liendev/core`'s `scanFilesToIndex`
+ * (real CLI/MCP indexing path) and `@liendev/parser`'s `chunk-only-index.ts`
+ * (review's repoChunks path) so the two stay byte-identical.
+ *
+ * The scanner globs with glob's default `dot:false`, so a bare `**\/*.yml`
+ * never descends into a dot-directory like `.github/`. The explicit
+ * `.github/**` entries below are required for CI workflow YAML (e.g.
+ * `.github/workflows/*.yml`) to be indexed at all -- a literal path segment
+ * (unlike a `**` wildcard) matches under `dot:false`. Other dot-dir CI
+ * configs (`.circleci/`, root `.gitlab-ci.yml`) are a known, YAGNI'd gap.
+ */
+export const DEFAULT_INDEX_INCLUDE_PATTERNS = [
+  '**/*.{ts,tsx,js,jsx,mjs,cjs,vue,py,php,go,rs,java,kt,swift,rb,cs,liquid,scala,c,cpp,cc,cxx,h,hpp}',
+  '**/*.md',
+  '**/*.mdx',
+  '**/*.markdown',
+  '**/*.yml',
+  '**/*.yaml',
+  '.github/**/*.yml',
+  '.github/**/*.yaml',
+];
+
 // File query estimation
 // Maximum chunks expected per file when sizing scan queries.
 export const MAX_CHUNKS_PER_FILE = 100;

@@ -10,7 +10,7 @@ export interface FilterableRecord {
   content?: string;
   file?: string;
   language?: string;
-  /** Chunk kind ('function' | 'class' | 'block' | 'template' | 'doc'). */
+  /** Chunk kind ('function' | 'class' | 'block' | 'template' | 'doc' | 'config'). */
   type?: string;
   symbolName?: string;
   symbolType?: string;
@@ -137,10 +137,12 @@ export function matchesSymbolFilter(
   { language, pattern, symbolType }: SymbolQueryOptions,
 ): boolean {
   // Markdown 'doc' chunks carry a heading-breadcrumb symbolName but are prose,
-  // not code symbols -- never surface them via the symbol-lookup path
-  // (list_functions / querySymbols). They remain fully searchable via
-  // search_code / scanAll / scanWithFilter, which don't route through here.
-  if (r.type === 'doc') {
+  // not code symbols; YAML 'config' chunks carry a dotted key-path
+  // symbolName but are config keys, not code symbols either -- neither
+  // should surface via the symbol-lookup path (list_functions /
+  // querySymbols). They remain fully searchable via search_code / scanAll /
+  // scanWithFilter, which don't route through here.
+  if (r.type === 'doc' || r.type === 'config') {
     return false;
   }
 

@@ -207,6 +207,23 @@ describe('SqliteBackend.search (FTS5)', () => {
     expect(await db.search('uniquetoken', 5)).toEqual([]);
   });
 
+  it('indexes and retrieves a YAML config chunk (type:config, language:yaml)', async () => {
+    await insert(
+      db,
+      chunk('.github/workflows/ci.yml', 'jobs:\n  build:\n    zzzyamltoken: true\n', {
+        type: 'config',
+        language: 'yaml',
+        symbolName: 'jobs',
+      }),
+    );
+
+    const results = await db.search('zzzyamltoken', 5);
+    expect(results).toHaveLength(1);
+    expect(results[0].metadata.file).toBe('.github/workflows/ci.yml');
+    expect(results[0].metadata.type).toBe('config');
+    expect(results[0].metadata.language).toBe('yaml');
+  });
+
   it('attaches dependentCount to result metadata based on who imports the file', async () => {
     await insert(db, chunk('utils/logger.ts', 'export function zzzlogsearch() {}'));
     await insert(
