@@ -133,3 +133,147 @@
 .VPSwitch {
   pointer-events: auto;
 }
+
+/* ─── Blog ───────────────────────────────────────────────── */
+
+/* Draft banner — dev-only visual marker, deliberately amber (not the brand
+   purple) so it reads as a tooling affordance, never as production UI. */
+.lien-draft-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0 0 1.5rem;
+  padding: 0.65rem 1rem;
+  border: 1px solid rgba(217, 119, 6, 0.4);
+  border-radius: 8px;
+  background: rgba(217, 119, 6, 0.12);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--vp-c-text-1);
+}
+
+.lien-draft-banner-badge {
+  flex-shrink: 0;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  background: #d97706;
+  color: #1a1a1a;
+  font-weight: 500;
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+}
+
+.lien-draft-banner-text code {
+  font-size: 0.85em;
+}
+
+/* Post meta line — date · author · tags, shown above a blog post's title */
+.lien-post-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 0.75rem;
+  color: var(--vp-c-text-2);
+  font-size: 0.9rem;
+}
+
+.lien-post-meta-sep {
+  opacity: 0.6;
+}
+
+.lien-post-meta-tags {
+  display: inline-flex;
+  gap: 0.4rem;
+  margin-left: 0.25rem;
+}
+
+/* Tag chips — reused by the post meta line and the blog index list */
+.lien-tag-chip {
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  background: var(--vp-c-brand-soft);
+  color: var(--vp-c-brand-1);
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+.lien-draft-chip {
+  padding: 0.1rem 0.5rem;
+  border-radius: 4px;
+  background: #d97706;
+  color: #1a1a1a;
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+}
+
+/* Blog index list */
+.lien-blog-empty {
+  color: var(--vp-c-text-2);
+}
+
+.lien-blog-index {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  margin-top: 1.5rem;
+}
+
+.lien-blog-card {
+  display: block;
+  padding: 1.25rem 1.5rem;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 12px;
+  background: var(--vp-c-bg-soft);
+  text-decoration: none !important;
+  transition: border-color 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.lien-blog-card:hover {
+  border-color: var(--vp-c-brand-1);
+}
+
+.lien-blog-card.is-draft {
+  border-style: dashed;
+  border-color: rgba(217, 119, 6, 0.5);
+}
+
+.lien-blog-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.4rem;
+  color: var(--vp-c-text-2);
+  font-size: 0.85rem;
+}
+
+.lien-blog-card-title {
+  margin: 0 0 0.4rem;
+  padding: 0;
+  border-top: none;
+  color: var(--vp-c-text-1);
+  font-size: 1.15rem;
+  font-weight: 500;
+}
+
+.lien-blog-card-desc {
+  margin: 0 0 0.6rem;
+  color: var(--vp-c-text-2);
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.lien-blog-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lien-blog-card {
+    transition: none;
+  }
+}
