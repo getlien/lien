@@ -503,6 +503,31 @@ describe('findClaimEvidence — ranking', () => {
     expect(ev?.file).toBe(SCHEMA);
   });
 
+  // Fourth root-cause layer, post-#817: with the wrong-file bug fixed, same-file evidence still
+  // merely restates the claim rather than proving it — several pr658 re-cert votes verdicted
+  // `unverifiable` instead of chasing the implementing code because nothing marked the excerpt
+  // as self-referential. `sameFile` is the deterministic marker the v2 render layer anchors its
+  // "independent check required" instruction to (see doc-truth-pass.ts's DOC_CLAIMS_V2_HEADER).
+  it('marks evidence located in the claim’s OWN file with sameFile: true', () => {
+    const SCHEMA = 'packages/core/src/config/schema.ts';
+    const claimText = 'keep working; search_code and find_similar report as disabled.';
+    const claim = claimOf(claimText, SCHEMA);
+    const chunks = [chunk(SCHEMA, 40, `// ${claimText}\nenabled: z.boolean().optional(),`)];
+    const ev = findClaimEvidence(claim, chunks, new Set([SCHEMA]));
+    expect(ev?.sameFile).toBe(true);
+  });
+
+  it('does NOT mark cross-file evidence as sameFile', () => {
+    const SCHEMA = 'packages/core/src/config/schema.ts';
+    const HANDLER = 'packages/cli/src/mcp/handlers/search-code.ts';
+    const claimText = 'search_code and find_similar report as disabled.';
+    const claim = claimOf(claimText, SCHEMA);
+    const chunks = [chunk(HANDLER, 100, `// ${claimText}\nreturn new Float32Array(0);`)];
+    const ev = findClaimEvidence(claim, chunks, new Set([SCHEMA, HANDLER]));
+    expect(ev?.file).toBe(HANDLER);
+    expect(ev?.sameFile).toBeFalsy();
+  });
+
   it('falls back to a case-insensitive match when nothing matches verbatim', () => {
     const claim = claimOf('the `OverlayBackend` merges rows');
     const chunks = [chunk('packages/core/src/x.ts', 1, 'class overlaybackend {}')];

@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
+import type { CodeChunk } from '@liendev/parser';
 
 import {
   shouldRunDocTruthPass,
@@ -82,6 +83,21 @@ function contextWithPatches(
     } as unknown as ReviewContext['pr'],
     ...extra,
   });
+}
+
+/** Build a synthetic repo chunk for same-file-evidence rendering tests (mirrors
+ *  doc-claims-signals.test.ts's own `chunk` helper). */
+function chunk(file: string, startLine: number, content: string): CodeChunk {
+  return {
+    content,
+    metadata: {
+      file,
+      startLine,
+      endLine: startLine + content.split('\n').length - 1,
+      type: 'block',
+      language: 'typescript',
+    },
+  } as CodeChunk;
 }
 
 function cfg(overrides: Partial<AgentConfig> = {}): AgentConfig {
@@ -713,6 +729,61 @@ describe('buildDocTruthPassPrompts / buildDocTruthPassInitialMessageV2 — v2 co
 
     expect(initialMessage).toContain('evidence (PR diff)');
     expect(initialMessage).toContain("LIEN_STALE_DUP_PASS: 'on'");
+  });
+
+  // Fourth root-cause layer, post-#817 (pr658 Finding A re-certification, 6/10): same-file
+  // evidence restates the claim but doesn't prove it, and votes verdicted `unverifiable` instead
+  // of chasing the implementing code. The v2 worklist must label a same-file excerpt distinctly
+  // AND carry an instruction requiring the independent code check for entries so labeled.
+  it('v2 worklist labels same-file evidence "evidence (same file as claim)" and requires independent verification', () => {
+    process.env.LIEN_DOC_TRUTH_V2 = 'on';
+    const SCHEMA = 'packages/core/src/config/schema.ts';
+    const claimText = 'keep working; search_code and find_similar report as disabled.';
+    const patch = `@@ -1,2 +1,3 @@
+ export const schema = z.object({
++  /** ${claimText} */
+   enabled: z.boolean().optional(),
+ });`;
+    const ctx = contextWithPatches([[SCHEMA, patch]], {
+      repoChunks: [chunk(SCHEMA, 40, `// ${claimText}\nenabled: z.boolean().optional(),`)],
+    });
+    const { initialMessage } = buildDocTruthPassPrompts(ctx);
+
+    // The rendered ENTRY shape (`label — file:line:`), not bare substring containment — the
+    // header's own explanatory prose also mentions the label, so this pins it to the actual entry.
+    expect(initialMessage).toContain(`evidence (same file as claim) — ${SCHEMA}:`);
+    // The per-claim instruction anchored to that label — one paragraph, no rider pile.
+    expect(initialMessage).toContain(
+      "is drawn from the claim's OWN file — it establishes what the claim SAYS, not whether it is TRUE",
+    );
+    expect(initialMessage).toContain(
+      'REQUIRES you to also locate and check the code that IMPLEMENTS the described behavior',
+    );
+    expect(initialMessage).toContain(
+      'verdict `unverifiable` only when you attempted that independent check',
+    );
+  });
+
+  it('does NOT label cross-file evidence as "same file as claim"', () => {
+    process.env.LIEN_DOC_TRUTH_V2 = 'on';
+    const SCHEMA = 'packages/core/src/config/schema.ts';
+    const HANDLER = 'packages/cli/src/mcp/handlers/search-code.ts';
+    const claimText = 'search_code and find_similar report as disabled.';
+    const patch = `@@ -1,2 +1,3 @@
+ export const schema = z.object({
++  /** ${claimText} */
+   enabled: z.boolean().optional(),
+ });`;
+    const ctx = contextWithPatches([[SCHEMA, patch]], {
+      repoChunks: [chunk(HANDLER, 100, `// ${claimText}\nreturn new Float32Array(0);`)],
+    });
+    const { initialMessage } = buildDocTruthPassPrompts(ctx);
+
+    expect(initialMessage).toContain(`evidence — ${HANDLER}`);
+    // The instructional paragraph (in DOC_CLAIMS_V2_HEADER) always names the label by way of
+    // explanation — assert on the rendered ENTRY shape (`label — file:line:`), not bare substring
+    // containment, so this test can't pass merely because the header mentions the label.
+    expect(initialMessage).not.toContain('evidence (same file as claim) —');
   });
 
   it('buildDocTruthPassInitialMessageV2 omits <doc_claims>/<rename_sweep> entirely when the worklist is empty', () => {

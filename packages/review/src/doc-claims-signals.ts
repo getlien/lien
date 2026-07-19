@@ -132,6 +132,21 @@ export interface DocClaimEvidence {
    * (a diff hunk isn't chunk-sourced).
    */
   fromDiff?: boolean;
+  /**
+   * True when this excerpt was located in the CLAIM'S OWN file — the
+   * `EvidenceTier.SameFile` tier (see `tierOf`), reachable only for a
+   * CODE-sourced claim (a comment scanned from a changed code file, see
+   * `addedCodeCommentLines`). Flagged so the render layer can mark it
+   * distinctly: this excerpt is the same text the claim itself was drawn
+   * from, so it can only confirm what the claim SAYS, never whether it is
+   * TRUE — unlike every other tier, which is a genuinely independent
+   * location. Motivated by pr658 Finding A's post-#817 re-certification
+   * (6/10): with the wrong-file bug fixed, several votes still verdicted
+   * a same-file-evidence claim `unverifiable` instead of chasing the
+   * actual implementing code, because nothing distinguished "restates the
+   * claim" evidence from "proves the claim" evidence.
+   */
+  sameFile?: boolean;
 }
 
 /**
@@ -1222,6 +1237,7 @@ export function findClaimEvidence(
     excerpt: built.excerpt,
     anchor: built.anchor,
     fromDoc: DOC_FILE_RE.test(candidate.chunk.metadata.file),
+    sameFile: candidate.tier === EvidenceTier.SameFile,
   };
 }
 

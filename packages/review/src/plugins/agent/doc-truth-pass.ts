@@ -486,8 +486,14 @@ function renderDocClaimEntryWithId(id: string, claim: DocClaim): string {
       'index or PR diff — the citation itself may be stale)'
     );
   }
-  const { file, startLine, excerpt, fromDoc, fromDiff } = claim.evidence;
-  const label = fromDiff ? 'evidence (PR diff)' : fromDoc ? 'evidence (sibling doc)' : 'evidence';
+  const { file, startLine, excerpt, fromDoc, fromDiff, sameFile } = claim.evidence;
+  const label = fromDiff
+    ? 'evidence (PR diff)'
+    : fromDoc
+      ? 'evidence (sibling doc)'
+      : sameFile
+        ? 'evidence (same file as claim)'
+        : 'evidence';
   return `${header}\n  ${label} — ${file}:${startLine}:\n  \`\`\`\n${excerpt}\n  \`\`\``;
 }
 
@@ -499,7 +505,17 @@ const DOC_CLAIMS_V2_HEADER =
   'also skim the touched hunks for any claim not listed — report those as ordinary additional ' +
   'findings (no id needed). Most entries carry an `evidence` excerpt: COMPARE the claim against ' +
   'it (confirm the excerpt IS the described code first); for a no-evidence entry, locate the code ' +
-  'yourself via get_files_context on the named symbols.';
+  'yourself via get_files_context on the named symbols.\n\n' +
+  "An entry labeled `evidence (same file as claim)` is drawn from the claim's OWN file — it " +
+  'establishes what the claim SAYS, not whether it is TRUE, since it is the very text the claim ' +
+  'was mined from and so cannot independently corroborate itself. For those entries, verdicting ' +
+  '`accurate` or `contradicted` REQUIRES you to also locate and check the code that IMPLEMENTS ' +
+  'the described behavior (get_files_context / search_code on the described symbol) before ' +
+  'deciding; verdict `unverifiable` only when you attempted that independent check and the ' +
+  'implementing code was genuinely not locatable — not merely because the same-file text agrees ' +
+  'with itself. Every other evidence label (`evidence (PR diff)`, `evidence (sibling doc)`, or a ' +
+  'plain `evidence` excerpt from a DIFFERENT file) already IS that independent check — compare ' +
+  'against it directly as before.';
 
 /** Render the `<doc_claims>` block with ids — the v2 counterpart of
  *  `renderDocClaimsSection`. Returns '' when there are no doc claims at all. */
