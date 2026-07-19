@@ -61,10 +61,14 @@ whose declared type only accepts a resolved config object, not the function
 form. Only when `command === 'build'` does the function compute
 `srcExclude` from `docs/.vitepress/blogDrafts.ts`'s
 `getDraftPostExcludes()`, which scans `docs/blog/posts/*.md` for
-`draft: true` frontmatter with a small regex (no YAML-parsing dependency
-needed — VitePress bundles one internally but doesn't expose it for reuse).
-`docs:dev`/`docs:preview` never populate `srcExclude`, so drafts stay
-fully reachable locally.
+`draft: true` frontmatter, parsed with `js-yaml` (the same library
+VitePress's own bundled `gray-matter` uses internally, though it isn't
+exposed for reuse) rather than a regex — a regex match disagrees with a
+real YAML parser on cases like `draft: true  # note` or `draft: True`,
+which would let a real draft slip past `srcExclude` while the (accurately
+parsed) listing still hid it — a page built into `dist/` with no link
+pointing at it, but reachable by URL. `docs:dev`/`docs:preview` never
+populate `srcExclude`, so drafts stay fully reachable locally.
 
 ## Publishing a draft (owner-only)
 

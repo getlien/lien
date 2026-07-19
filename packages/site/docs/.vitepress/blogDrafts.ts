@@ -9,21 +9,29 @@
 // procedure (how a post goes from draft to published).
 //
 // This file is Node-only (imported from config.ts, which runs in Node, not
-// the browser) so it reads frontmatter with a small regex instead of adding
-// a YAML/frontmatter-parsing dependency — vitepress bundles `gray-matter`
-// internally for its own content loader, but doesn't expose it for reuse.
-import fs from 'node:fs';
-import path from 'node:path';
+// the browser). Frontmatter is parsed with `js-yaml` (the same library
+// VitePress's own bundled `gray-matter` uses internally, though it isn't
+// exposed for reuse) rather than a regex — a regex match on `draft:\s*true`
+// disagrees with a real YAML parser on cases like `draft: true  # note` or
+// `draft: True`, which would make srcExclude silently miss a real draft
+// while the (accurately YAML-parsed) content loader still hid it from the
+// listing — a page generated in `dist/` with no link pointing at it, but
+// reachable by URL. Parsing frontmatter the same way VitePress does closes
+// that gap.
+import fs from 'node:fs'
+import path from 'node:path'
+import yaml from 'js-yaml'
 
-const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---/;
-const DRAFT_TRUE_RE = /^draft:\s*true\s*$/m;
+const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---/
 
 /** Reads a markdown file's frontmatter block and reports whether `draft: true` is set. */
 export function isDraftFile(absPath: string): boolean {
-  const raw = fs.readFileSync(absPath, 'utf-8');
-  const match = raw.match(FRONTMATTER_RE);
-  if (!match) return false;
-  return DRAFT_TRUE_RE.test(match[1]);
+  const raw = fs.readFileSync(absPath, 'utf-8')
+  const match = raw.match(FRONTMATTER_RE)
+  if (!match) return false
+  const frontmatter = yaml.load(match[1])
+  if (!frontmatter || typeof frontmatter !== 'object') return false
+  return (frontmatter as Record<string, unknown>).draft === true
 }
 
 /**
@@ -34,11 +42,11 @@ export function isDraftFile(absPath: string): boolean {
  * the output rather than existing-but-hidden.
  */
 export function getDraftPostExcludes(srcDir: string): string[] {
-  const postsDir = path.join(srcDir, 'blog', 'posts');
-  if (!fs.existsSync(postsDir)) return [];
+  const postsDir = path.join(srcDir, 'blog', 'posts')
+  if (!fs.existsSync(postsDir)) return []
   return fs
     .readdirSync(postsDir)
     .filter((file) => file.endsWith('.md'))
     .filter((file) => isDraftFile(path.join(postsDir, file)))
-    .map((file) => `blog/posts/${file}`);
+    .map((file) => `blog/posts/${file}`)
 }
