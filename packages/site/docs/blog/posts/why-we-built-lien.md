@@ -17,17 +17,56 @@ touch this, what else moves" question, instead of just guessing at it? A
 smaller, more selfish itch sat right next to that one. I was tired of
 manually hunting through a codebase for something like "how is auth handled
 here," and I wanted a shortcut. That second itch is what got me building an
-index in the first place. The first version of Lien tried to search code by
-meaning, the same way a lot of "AI search" tools work.
+index in the first place.
 
-It didn't stay that way. Building that first version taught me something I
-didn't expect. The questions that helped an agent work well in a
-codebase weren't questions about what code *means*. They were questions
-about how it's *connected*. What depends on this file. How complicated is
-this function. What tests actually cover it. An agent doesn't need to guess
-what a piece of code is about. It needs to know what breaks if it changes.
-That's the story behind the next section: it's not a pivot I made on a
-whiteboard, it's a lesson the work itself taught me.
+The first version was built the way a lot of local code tools were built
+around then. Parsing ran through tree-sitter's JavaScript bindings, the
+same parsing library most code editors use under the hood. Search ran on a
+small local embedding model, something like 100MB, running through ONNX
+Runtime, a lightweight way to run that kind of model without a GPU or a
+network call, with the resulting vectors stored in LanceDB, a local vector
+database built for exactly that job. Local-first wasn't a marketing line
+even then. It was the actual constraint I designed around from day one:
+nothing about someone's code should ever have to leave the machine it
+lives on.
+
+Then the product itself changed underneath me, and that whole stack
+stopped making sense. I wasn't building search for a person typing a query
+anymore. I was building something an agent leans on in the middle of an
+edit, and that flips the requirements around. A person searching can wait
+a second and is fine with an answer that's roughly related. An agent
+asking what happens if it touches this file, while it's actively deciding
+whether to make that change, needs an answer inside its own thinking
+budget, close to instant, and it needs that answer to be exactly right,
+not approximately close. "Fourteen callers, three of them untested" beats
+a similarity score every time, when the thing reading the answer has to
+decide something right now. It needs to know what breaks if it changes,
+not what the code is roughly about.
+
+So the old stack came out, in full, not trimmed down. The embedding model
+and LanceDB were both removed entirely. In their place: better-sqlite3, a
+boring, extremely well-tested embedded database that can answer a keyword
+search in milliseconds with no model involved at all. [We wrote up that
+whole decision in more detail
+here.](https://github.com/getlien/lien/blob/main/docs/architecture/decisions/0011-sqlite-structural-store-fts5-lexical-search.md)
+The parser itself got rewritten too, as a native Rust module using
+napi-rs, a way to call Rust code directly from Node, instead of a
+JavaScript wrapper around a separately compiled binary. That wasn't only
+about raw speed, although it is faster. The old setup had to compile a
+native module on every fresh install, and that compile step was the
+single most common reason someone's install of Lien would fail. The Rust
+version ships pre-built for every platform, so a fresh install now takes
+seconds and compiles nothing at all.
+
+A few things about building it stuck with me. The fanciest part of the
+system wasn't the valuable part. A plain, boring database mattered more
+than the machine-learning model sitting next to it. When the thing using
+your tool is an agent in a loop rather than a person browsing, speed and
+an exact, repeatable answer aren't nice extras, they're the actual
+feature. Deleting an entire subsystem, not shrinking it, made the product
+better. And local-first is the one constraint that survived every
+rewrite, because it was never a feature bolted on top. It's the thing
+everything else got rebuilt around.
 
 Complexity metrics came next, for a specific reason. I had an idea to build
 a tool that would show how complicated code was getting across an entire
@@ -69,17 +108,7 @@ day, and it's finally in a shape worth writing about properly.
 
 ## No AI search, and that's a deliberate choice
 
-A lot of "AI-powered" code tools work by turning your code into a kind of
-numeric fingerprint, so the tool can find code that seems related in
-meaning even if the words don't match. Lien used to work that way too. We
-pulled that out entirely. Building it and living with it kept showing the
-same thing: the questions that make an agent better at its job are
-about structure, not meaning. "What depends on this file." "How complicated
-is this function." "What tests cover this." Meanwhile, that fingerprinting
-model was a roughly 100MB download and a heavy install for a capability
-that wasn't earning its keep.
-
-So indexing a codebase is just reading the code the way a compiler would,
+Indexing a codebase today is just reading the code the way a compiler would,
 then writing what it finds to a small local database. Ordinary keyword
 search runs on top of that. No AI model to download, no GPU needed, and it
 works completely offline. On a laptop with an Apple M3 Pro chip: a small
@@ -87,10 +116,8 @@ open-source project (79 files) indexes in 0.7 seconds, a mid-sized project
 (370 files) in 1.7 seconds, and Lien's own codebase (517 files, across six
 languages) in 1.8 seconds. That scales roughly in a straight line with file
 count, so a 10,000-file codebase would land around 25 to 30 seconds by
-extrapolation. The part of Lien that actually reads the code is a small,
-fast program that comes pre-built for every platform, so there's nothing to
-compile when you install it, and it's noticeably faster than the version it
-replaced.
+extrapolation. That's the same Rust rewrite described above doing the
+work, and it's a large part of why these numbers are as fast as they are.
 
 The honest tradeoff: plain keyword search can't bridge a real gap in
 vocabulary. Searching for "auth" won't surface a function called
