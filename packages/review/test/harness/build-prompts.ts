@@ -16,12 +16,13 @@
  *
  * Same for the stale-duplicate candidate-loop PILOT (`staleDuplicatePass`,
  * per-rule-loops design doc §4), the incomplete-handling candidate loop
- * (`incompleteHandlingPass`, design doc §7 item 5), and the removed-exports
+ * (`incompleteHandlingPass`, design doc §7 item 5), the removed-exports
  * candidate loop (`removedExportsPass`, ADR-014's gating matrix —
- * structural-analysis is hybrid) — all dark by default, so `fires` is false
- * unless the fixture's captured config (or the relevant env flag in the
- * environment this script runs in) opts in AND that loop's own eligibility
- * gate is met.
+ * structural-analysis is hybrid), and the docs-drift candidate loop
+ * (`docsDriftPass`, design doc §2/§3 — untouched-doc blast radius) — all dark
+ * by default, so `fires` is false unless the fixture's captured config (or
+ * the relevant env flag in the environment this script runs in) opts in AND
+ * that loop's own eligibility gate is met.
  *
  * Usage: tsx build-prompts.ts <fixture.json>
  */
@@ -52,6 +53,11 @@ import {
   buildRemovedExportsPassPrompts,
   removedExportsPassBudget,
 } from '../../src/plugins/agent/removed-exports-pass.js';
+import {
+  shouldRunDocsDriftPass,
+  buildDocsDriftPassPrompts,
+  docsDriftPassBudget,
+} from '../../src/plugins/agent/docs-drift-pass.js';
 import type { AgentConfig } from '../../src/plugins/agent/types.js';
 
 import { loadFixture } from './fixture-loader.js';
@@ -102,6 +108,9 @@ async function main(): Promise<void> {
   const removedExportsPass = passOutput(shouldRunRemovedExportsPass(ctx, config), () =>
     buildRemovedExportsPassPrompts(ctx, removedExportsPassBudget(baseBudget, ctx)),
   );
+  const docsDriftPass = passOutput(shouldRunDocsDriftPass(ctx, config), () =>
+    buildDocsDriftPassPrompts(ctx, docsDriftPassBudget(baseBudget, ctx)),
+  );
 
   const output = {
     fixturePath,
@@ -113,6 +122,7 @@ async function main(): Promise<void> {
     staleDuplicatePass,
     incompleteHandlingPass,
     removedExportsPass,
+    docsDriftPass,
   };
 
   process.stdout.write(JSON.stringify(output, null, 2) + '\n');

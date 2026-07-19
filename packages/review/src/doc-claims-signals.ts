@@ -187,9 +187,10 @@ const MAX_CODE_CLAIMS = 10;
 const MAX_CLAIM_CHARS = 200;
 /** Per-claim evidence excerpt cap — enough to carry the described code, not a hunk. */
 const MAX_EVIDENCE_CHARS = 400;
-/** Lines of context above / below the anchor line in an evidence excerpt (~6-line window). */
-const EVIDENCE_LINES_BEFORE = 2;
-const EVIDENCE_LINES_AFTER = 3;
+/** Lines of context above / below the anchor line in an evidence excerpt (~6-line window).
+ *  Exported for reuse by docs-drift-signals.ts's own excerpt/tier windowing. */
+export const EVIDENCE_LINES_BEFORE = 2;
+export const EVIDENCE_LINES_AFTER = 3;
 /**
  * Total budget for the whole `<doc_claims>` block. Evidence excerpts are
  * dropped (with an inline note) before any claim is dropped, so the worklist
@@ -198,8 +199,10 @@ const EVIDENCE_LINES_AFTER = 3;
 const MAX_DOC_CLAIMS_CHARS = 8_000;
 
 const HUNK_META_RE = /^(?:\+\+\+|---)/;
-/** A fenced code block opener/closer — claims are prose, not code samples. */
-const FENCE_RE = /^(?:```|~~~)/;
+/** A fenced code block opener/closer — claims are prose, not code samples. Exported for reuse
+ *  by docs-drift-signals.ts, which tracks fence state over a plain doc chunk the same way this
+ *  module tracks it over a diff's post-image lines. */
+export const FENCE_RE = /^(?:```|~~~)/;
 
 /**
  * Claim-shaped prose matchers, most-specific first (first match wins the
@@ -255,8 +258,9 @@ const CLAIM_SHAPES: ReadonlyArray<{ shape: DocClaimShape; re: RegExp; near?: Reg
 // Extraction
 // ---------------------------------------------------------------------------
 
-/** Return the first matching claim shape for a prose line, or null. */
-function classifyClaim(text: string): { shape: DocClaimShape; matchIndex: number } | null {
+/** Return the first matching claim shape for a prose line, or null. Exported (behavior-neutral)
+ *  for reuse as docs-drift-signals.ts's Tier-1 behavioral-claim detector — see that module. */
+export function classifyClaim(text: string): { shape: DocClaimShape; matchIndex: number } | null {
   for (const { shape, re, near } of CLAIM_SHAPES) {
     const m = re.exec(text);
     if (m && (!near || near.test(text))) return { shape, matchIndex: m.index };
