@@ -79,6 +79,14 @@ export interface AgentConfig {
    * LIEN_REMOVED_EXPORTS_PASS=on) to enable it. See `removed-exports-pass.ts`.
    */
   removedExportsPass?: boolean;
+  /**
+   * Run the docs-drift candidate loop (per-rule-loops design doc §2/§3,
+   * `.wip/docs-drift-design.md`) — untouched documentation that still
+   * references code this PR removed, renamed, or deleted. Default false —
+   * dark-launched; set true (or env LIEN_DOCS_DRIFT_PASS=on) to enable it.
+   * See `docs-drift-pass.ts`.
+   */
+  docsDriftPass?: boolean;
 }
 
 /** A single finding produced by the agent during review. */

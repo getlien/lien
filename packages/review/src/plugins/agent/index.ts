@@ -34,6 +34,7 @@ import {
   applyIncompleteHandlingMainOverride,
 } from './incomplete-handling-pass.js';
 import { REMOVED_EXPORTS_PASS_SPEC } from './removed-exports-pass.js';
+import { DOCS_DRIFT_PASS_SPEC } from './docs-drift-pass.js';
 import {
   runExtraPasses,
   type ReviewPassSpec,
@@ -64,16 +65,22 @@ import {
  * (ADR-014's gating matrix — `structural-analysis` is hybrid; this covers
  * only its removed-export sweep half, never the rule's broader caller-
  * impact-of-changed-behavior job) is the fourth build — also dark by
- * default, see `removed-exports-pass.ts`. None of these four passes has a
- * data dependency on any of the others, so declaration order doesn't matter
- * for correctness (see review-pass.ts's "serial for v1" note) — doc-truth
- * stays first as the longer-proven pass.
+ * default, see `removed-exports-pass.ts`. The docs-drift candidate loop
+ * (per-rule-loops design doc §2/§3, `.wip/docs-drift-design.md`) — untouched
+ * documentation that still references code this PR removed/renamed/deleted —
+ * is the fifth build and the first with NO shared-main-pass rule fragment to
+ * backstop (dedicated-pass-only); also dark by default, see
+ * `docs-drift-pass.ts`. None of these five passes has a data dependency on
+ * any of the others, so declaration order doesn't matter for correctness
+ * (see review-pass.ts's "serial for v1" note) — doc-truth stays first as the
+ * longer-proven pass.
  */
 const EXTRA_PASSES: ReviewPassSpec[] = [
   DOC_TRUTH_PASS_SPEC,
   STALE_DUPLICATE_PASS_SPEC,
   INCOMPLETE_HANDLING_PASS_SPEC,
   REMOVED_EXPORTS_PASS_SPEC,
+  DOCS_DRIFT_PASS_SPEC,
 ];
 
 const configSchema = z.object({
@@ -133,6 +140,13 @@ const configSchema = z.object({
    * `removed-exports-pass.ts`.
    */
   removedExportsPass: z.boolean().default(false),
+  /**
+   * Run the docs-drift candidate loop (per-rule-loops design doc §2/§3) —
+   * untouched documentation that still references code this PR removed,
+   * renamed, or deleted. Default false — dark-launched opt-in; set true (or
+   * env LIEN_DOCS_DRIFT_PASS=on) to enable. See `docs-drift-pass.ts`.
+   */
+  docsDriftPass: z.boolean().default(false),
 });
 
 export interface AgentReviewPluginOptions {
