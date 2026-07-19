@@ -16,7 +16,7 @@ export { data }
 // Draft posts are filtered here (not just via `srcExclude` in config.ts) so
 // that a draft's title/description never end up embedded in the production
 // client bundle at all. Content loaders run as plain Node ESM (not through
-// Vite's module graph), so `import.meta.env` isn't available here — use
+// Vite's module graph), so `import.meta.env` isn't available here. Use
 // `process.env.NODE_ENV`, which Vite's own config resolution sets to
 // `'production'` for `vitepress build` and `'development'` for
 // `vitepress dev`/`vitepress preview`. In dev, drafts pass through so the
@@ -35,8 +35,8 @@ export default createContentLoader('blog/posts/*.md', {
         // Array.isArray guard (not just `?? []`): a malformed `tags: foo`
         // (a bare string, not a YAML list) would otherwise reach the
         // template's `v-for="tag in post.tags"`, which iterates a string
-        // character-by-character in Vue — render garbage chips instead of
-        // silently no-op'ing.
+        // character by character in Vue and renders garbage chips instead
+        // of silently no-op'ing.
         tags: Array.isArray(page.frontmatter.tags) ? page.frontmatter.tags : [],
         draft: Boolean(page.frontmatter.draft),
         url: page.url,

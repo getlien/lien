@@ -1,6 +1,6 @@
 ---
-title: "Do Complexity Nudges Change What Agents Write? A Pre-Registered A/B"
-description: "A small, pre-registered experiment: does Lien's near-budget complexity warning measurably change the code a coding agent produces? 8 trials per condition, no significance theater, numbers as they landed."
+title: "Does Warning a Coding Agent Actually Change What It Writes?"
+description: "We warned an AI coding agent, right before it touched a function, that the function was already hard to follow. Then we tested whether that actually changed what it wrote, or whether the agent just ignored it."
 date: 2026-07-19
 author: Alf Henderson
 tags: [evidence, agents, complexity]
@@ -9,127 +9,103 @@ draft: true
 
 <!-- DRAFT: awaiting owner voice pass -->
 
-# Do Complexity Nudges Change What Agents Write? A Pre-Registered A/B
+# Does Warning a Coding Agent Actually Change What It Writes?
 
-Lien's write-side hook runs `lien delta` after every edit — a deterministic,
-~50ms check that speaks up only when *that specific edit* pushes a function's
-complexity over a threshold it wasn't over before. The plan-time nudge in
-[PR #772](https://github.com/getlien/lien/pull/772) goes a step further:
-before an agent even makes an edit, Lien can surface a near-budget warning
-for a function it's about to touch — "this is close to its complexity
-ceiling; prefer extraction" — while there's still time to act on it.
+If you tell an AI coding agent, right before it edits a piece of code, that
+the code is already hard to follow, does it actually write something
+simpler? Or does it read the warning, do the task anyway, and leave the
+mess exactly as bad?
 
-Both are cheap to build. Neither is worth anything if agents just ignore the
-warning and write the same code anyway. So before claiming this changes
-anything, we ran a small, pre-registered experiment to check.
+The obvious answer is "of course it listens, you told it to." But agents
+skim past a lot of things buried in their instructions, and a warning
+sitting next to an actual task is an easy thing to nod at and ignore. We
+didn't want to guess. We wanted to test it fairly and see what actually
+happened.
 
-## What we tested
+## What "hard to follow" means here
 
-**Hypothesis:** injecting Lien's real near-budget complexity warning into a
-coding-task prompt measurably reduces the rate at which a coding agent's
-generated edit pushes the target function's complexity over threshold,
-relative to an identical prompt with no warning.
+Software has a fairly standard way of scoring how tangled a function's
+logic is: essentially, how many different paths the code can take
+depending on its inputs. It's not a matter of taste. Once a function
+crosses a certain score, most engineering teams agree it's gotten to the
+point where it's risky to change safely, easy to introduce a bug in, and
+annoying to review. Lien tracks that score for every function in a
+codebase and can warn about it. The interesting question wasn't whether
+Lien could compute the score. It was whether telling an agent about it,
+right before an edit, would change anything.
 
-**Target function:** `formatDeltaText` in `packages/cli/src/cli/delta-cmd.ts`,
-sitting at cyclomatic 13/15 and cognitive 13/15 — two points of headroom on
-both metrics, the same headroom Lien's own `annotate` command would flag in
-real usage.
+## The test
 
-**The task:** add one feature (cap a long function list at 20 rows, append a
-summary line for the rest) to `formatDeltaText`. Both conditions received a
-byte-identical prompt, except for one inserted block: the real warning line,
-built from the actual PR #772 formatter, not reconstructed by hand —
+We picked one real function from Lien's own code that was already sitting
+right at that risky score, and gave an AI coding agent (Claude) one small,
+well-defined feature to add to it. Then we ran the exact same task 16
+times: 8 times with a short warning inserted first, and 8 times with
+nothing extra at all, no mention of complexity, no hint that anything was
+being measured.
+
+The warning was not a paraphrase we wrote up for the blog. It was the
+literal line Lien's own tooling produces when it flags a function like
+this:
 
 ```text
-⚠ Lien: formatDeltaText cyclomatic 13/15, deltaCommand cognitive 13/15 — avoid adding complexity here; prefer extraction.
+⚠ Lien: formatDeltaText cyclomatic 13/15, deltaCommand cognitive 13/15. Avoid adding complexity here; prefer extraction.
 ```
 
-Condition A (signal) got that block. Condition B (control) got nothing —
-no mention of complexity, thresholds, or Lien anywhere in the prompt. Every
-trial was a single, fresh, tool-less generation: no repo access, no memory of
-other trials, so nothing about the setup could leak between conditions.
+Every one of the 16 attempts was a single, isolated response: no back and
+forth, no access to the rest of the codebase, nothing carried over between
+attempts. That was deliberate. It meant nothing about the setup could leak
+between the warned group and the unwarned group. [The full write-up,
+including the exact instructions given to the agent and how we scored the
+results, is here](https://github.com/getlien/lien/blob/main/docs/development/nudge-behavioral-ab.md).
 
-**N = 8 trials per condition, 16 total.** Small by design — this is a
-pre-registered check on one nudge and one task, not a claim about nudges in
-general. The full protocol (exact prompt template, exclusion rules, analysis
-plan) was written and frozen *before* the first trial ran; it's preserved
-verbatim in [`docs/development/nudge-behavioral-ab.md`](https://github.com/getlien/lien/blob/main/docs/development/nudge-behavioral-ab.md).
+Every response was then dropped into a real copy of the file and scored
+with the same complexity check Lien runs automatically on every code
+change: did the function cross that risky line, yes or no. All 16
+responses were usable. Nothing had to be thrown out.
 
-Every trial's output was applied to a clean copy of the real file and scored
-with the same static-analysis primitive `lien delta` uses in CI: does
-`formatDeltaText` cross its complexity threshold, yes or no. 0 of 16 trials
-were excluded — every response was a clean, compiling code block, and every
-trial's own metadata confirmed zero tool calls, independently corroborating
-the "no tools" instruction was honored.
+## What happened
 
-## Results
-
-| Condition | Crossed threshold | Rate |
+| Group | Crossed the risky line | Rate |
 |---|---|---|
-| Control (no warning) | 8 / 8 | **100%** |
-| Signal (warning injected) | 3 / 8 | **37.5%** |
+| No warning | 8 out of 8 | **100%** |
+| Warned first | 3 out of 8 | **37.5%** |
 
-Every control trial produced the same shape of edit: an inline
-`if (functions.length > 20) { … }` block added directly to
-`formatDeltaText`'s existing loop. All 8 landed at cyclomatic 14, cognitive
-15 — crossed, every time.
+Without the warning, every single attempt made the function worse in
+exactly the same way: it added a new block of logic directly inside the
+function, which pushed the complexity score over the line every time.
 
-Five of the eight signal trials did something different: they extracted a
-small helper function (`pushFunctionRows`, `fmtFileFunctionRows`,
-`fmtFileFunctions` — naming varied, the shape didn't) and called it from
-`formatDeltaText`, exactly the "prefer extraction" the warning asked for.
-One of those (signal-5) extracted cleanly enough that `formatDeltaText`'s
-complexity didn't move at all — byte-for-byte unchanged. The other three
-signal trials matched control's inline pattern and crossed anyway — the
-warning didn't move every trial, just most of them.
+With the warning, five of the eight attempts did something different. They
+pulled part of the logic out into a small, separate helper function and
+called it instead, which is exactly what the warning suggested. One of
+those attempts was clean enough that the function's score didn't move at
+all. The other three warned attempts still made the same mistake as the
+unwarned group. The warning didn't work every time. It worked most of the
+time.
 
-Cognitive-complexity delta tells the same story from a different angle:
-control moved +2 in all 8 trials (into the crossing zone, every time);
-signal's mean was **−0.5**, pulled down by the five extraction trials.
+## Did the wording matter, or just the fact that something was said?
 
-Extraction and avoiding-the-crossing were perfectly correlated in this
-dataset: every trial that extracted a helper stayed under threshold (or, for
-signal-5, left it unchanged); every trial that didn't, crossed — control and
-signal alike.
+Four of the five successful attempts explained their own reasoning, in
+their own code comments, without being asked to. One wrote that it had
+pulled the logic into a separate function specifically "so the summary
+branch doesn't add to formatDeltaText's own complexity budget." Others used
+almost the same phrasing. That's a good sign the specific wording of the
+warning did real work, not just the fact that a warning was there at all.
 
-## Did the wording actually matter, or just the presence of a warning?
+## The honest limits of this test
 
-Four of the five extracting trials cited the warning directly in their own
-generated code comments, unprompted. Signal-1:
+This was small: 16 attempts, one task, one function, one AI model, each a
+single isolated response rather than a real editing session with full
+access to a codebase and its own judgment about what to even look at. A
+warning shown to an agent in the middle of real, multi-step work could
+plausibly land harder or softer than it did here. We're not claiming this
+proves anything about warnings in general. We're claiming that, for this
+one task, telling the agent up front that a function was already too
+complicated changed what it wrote, clearly and repeatably.
 
-> "Extracted so the summary branch doesn't add to `formatDeltaText`'s own
-> complexity budget (see the file-level complexity note above)."
+We also decided on how we'd score this before running a single attempt, so
+there was no chance to reinterpret an unhelpful result after the fact. If
+the warning had done nothing, that would have been the finding.
 
-Signal-6 and signal-8 used near-identical phrasing ("kept out of
-`formatDeltaText` to avoid adding to its complexity"). Signal-5 — the one
-with zero complexity change — extracted without an explicit comment tying it
-to the warning, but produced the cleanest result of all 16 trials anyway.
-So: the specific "prefer extraction" wording appears to have pulled real
-weight, not just the fact that *something* was flagged.
-
-## The honest read
-
-This is a small (N=8/condition), single-task, single-model,
-single-language, generation-only comparison. It is not a claim about
-complexity nudges in general — only about this one warning, on this one
-function, in this one task shape. Within those bounds, the result is about
-as clean as a 16-trial experiment gets: a 100%→37.5% crossing-rate swing, a
-mean cognitive-delta flip from +2.0 to −0.5, and a perfect correlation
-between the nudge condition's extraction behavior and avoiding the crossing.
-
-The biggest caveat is generalizability. Real Lien usage is multi-turn,
-tool-using, and the agent chooses what to read in the first place — these
-trials are pure single-turn generation with the full file pasted in and no
-tool access, which is a narrower thing than an agent editing a file mid-session
-with full repo context and its own judgment about whether to even open it. A
-real edit-time nudge could plausibly perform better or worse than this. We're
-stating the claim at the scope the data supports — "the warning changed what
-a Sonnet subagent wrote, for this task" — not generalizing further than that.
-
-We ran the analysis plan we pre-registered, on the numbers we got, without
-re-framing a null result as inconclusive-therefore-supportive — there wasn't
-a null result to reframe, but that commitment was made before we knew that.
-
-[OWNER: your call on whether to add a line here about what this means for
-the roadmap — e.g. whether the plan-time nudge graduates from PR #772 into
-something more prominent, or what the next experiment should test.]
+[OWNER: your call on whether to add a line here about what this means
+next, e.g. whether warning agents before they edit becomes a bigger part
+of how Lien works, or what the next test should look at.]

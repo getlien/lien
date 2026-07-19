@@ -1,6 +1,6 @@
 ---
 title: Blog
-description: Notes on building Lien — local-first code intelligence for AI agents.
+description: Notes on building Lien, a tool that helps AI coding agents understand real codebases.
 ---
 
 <script setup>
@@ -17,7 +17,7 @@ function formatDate(iso) {
 # Blog
 
 <p v-if="!posts.length" class="lien-blog-empty">
-  Nothing published yet — check back soon.
+  Nothing published yet. Check back soon.
 </p>
 
 <div v-else class="lien-blog-index">

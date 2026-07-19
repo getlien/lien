@@ -12,8 +12,8 @@ function formatDate(iso) {
 }
 
 // Array.isArray guard: a malformed `tags: foo` (a bare string, not a YAML
-// list) would otherwise reach `v-for`, which iterates a string
-// character-by-character in Vue — render garbage chips instead of that.
+// list) would otherwise reach `v-for`, which iterates a string character
+// by character in Vue and renders garbage chips instead of that.
 const tags = computed(() => (Array.isArray(frontmatter.value.tags) ? frontmatter.value.tags : []))
 </script>
 
