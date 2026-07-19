@@ -13,6 +13,28 @@
  */
 
 import type { FixtureAssertions } from './assertions.js';
+import {
+  isDocsDriftPassEnabled,
+  DOCS_DRIFT_RULE_ID,
+} from '../../src/plugins/agent/docs-drift-pass.js';
+import type { AgentConfig } from '../../src/plugins/agent/types.js';
+
+/**
+ * Extend `activeRuleIds` with `docs-drift` when the fixture's own captured config opted that
+ * loop in. `docs-drift` is dedicated-pass-only (design doc §2 — no `BUILTIN_RULES` entry), so
+ * `selectRules` alone never includes it in a fixture's active-rule set; without this, a
+ * docs-drift fixture would be flagged unpassable-by-construction (below) even when the pass is
+ * genuinely enabled for it. Scoped to this one dedicated-pass-only rule, not a general
+ * BUILTIN_RULES-bypass — every other rule this preflight checks genuinely lives in
+ * `BUILTIN_RULES`. Lives in this pure, side-effect-free module (not `run.ts`, a CLI entrypoint
+ * whose top-level `main()` call would fire on import) so it stays trivially unit-testable.
+ */
+export function withDocsDriftRuleId(
+  activeRuleIds: string[],
+  config: AgentConfig | undefined,
+): string[] {
+  return isDocsDriftPassEnabled(config) ? [...activeRuleIds, DOCS_DRIFT_RULE_ID] : activeRuleIds;
+}
 
 /**
  * Returns a human-actionable message when neither `assertions.rule` nor any

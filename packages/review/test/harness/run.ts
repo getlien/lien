@@ -29,6 +29,7 @@ import { dirname, basename, resolve, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { BUILTIN_RULES, buildTriggerContext, selectRules } from '../../src/plugins/agent/rules.js';
+import type { AgentConfig } from '../../src/plugins/agent/types.js';
 
 import type { FixtureAssertions } from './assertions.js';
 import { vote, calibrate } from './voting.js';
@@ -36,7 +37,7 @@ import type { AssertedRun } from './voting.js';
 import type { RunnerOptions } from './runner.js';
 import { reportVote, reportCalibrate } from './reporter.js';
 import { loadFixture } from './fixture-loader.js';
-import { checkRuleCoverage } from './rule-coverage.js';
+import { checkRuleCoverage, withDocsDriftRuleId } from './rule-coverage.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURES_ROOT = resolve(HERE, 'fixtures');
@@ -248,8 +249,9 @@ async function validateFixtureRuleCoverage(fixtures: FixturePair[]): Promise<str
         loadAssertions(f.assertionsPath),
         loadFixture(f.fixturePath),
       ]);
-      const activeRuleIds = selectRules(BUILTIN_RULES, buildTriggerContext(ctx)).active.map(
-        r => r.id,
+      const activeRuleIds = withDocsDriftRuleId(
+        selectRules(BUILTIN_RULES, buildTriggerContext(ctx)).active.map(r => r.id),
+        ctx.config as unknown as AgentConfig | undefined,
       );
       const violation = checkRuleCoverage(assertions, activeRuleIds);
       if (violation) violations.push(`${label}: ${violation}`);
