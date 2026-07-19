@@ -37,7 +37,16 @@ export function isDraftFile(absPath: string): boolean {
   const raw = fs.readFileSync(absPath, 'utf-8')
   const match = raw.match(FRONTMATTER_RE)
   if (!match) return false
-  const frontmatter = yaml.load(match[1])
+  let frontmatter: unknown
+  try {
+    frontmatter = yaml.load(match[1])
+  } catch (cause) {
+    // Fail loudly and specifically (CLAUDE.md's "Fail Fast") rather than
+    // let a raw YAMLException with no file context bubble out of the
+    // build — an author fixing a typo needs to know WHICH post broke.
+    const message = cause instanceof Error ? cause.message : String(cause)
+    throw new Error(`Invalid frontmatter YAML in ${absPath}: ${message}`)
+  }
   if (!frontmatter || typeof frontmatter !== 'object') return false
   return Boolean((frontmatter as Record<string, unknown>).draft)
 }
