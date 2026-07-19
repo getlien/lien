@@ -484,8 +484,9 @@ describe('computeIncompleteHandlingWorklist', () => {
 
   it("caps to the ceiling and defers the remainder, preserving the signal's own (fixed-shape) order", () => {
     const ctx = manyUnreadFieldsContext(6);
-    // reserve + 2*OBSERVED_TOKENS_PER_TURN(6000) leaves room for exactly 2 read-heavy candidates.
-    const budget = VERDICT_EMISSION_RESERVE_TOKENS + 2 * 6_000;
+    // reserve + 2*INCOMPLETE_HANDLING_TOKENS_PER_CANDIDATE(12000) leaves room for exactly 2
+    // read-heavy candidates.
+    const budget = VERDICT_EMISSION_RESERVE_TOKENS + 2 * 12_000;
     const { candidates, deferredCount, deferredIds } = computeIncompleteHandlingWorklist(
       ctx,
       budget,
@@ -499,19 +500,19 @@ describe('computeIncompleteHandlingWorklist', () => {
     expect(deferredIds).toEqual(['Big.field2', 'Big.field3', 'Big.field4', 'Big.field5']);
   });
 
-  it('reproduces the #813 shape: a 10-candidate run at its own scaled budget still defers most of them', () => {
-    // 10 unread-field candidates: incompleteHandlingPassBudget scales to
-    // 2,500 + 900*10 = 11,500 — a "correctly scaled" budget by the OLD
-    // prompt-sizing formula, yet each candidate needs a real read_file/
-    // get_files_context round-trip (module doc: "read_file is load-bearing,
-    // not optional"), so the realistic ceiling is far smaller than 10.
+  it('reproduces the #820 shape: a 10-candidate run still defers most of them, now at a bounded MAX_BUDGET', () => {
+    // 10 unread-field candidates — #820's real production shape (YAML chunking PR, 16 files
+    // touched): incompleteHandlingPassBudget scales to 5,000 + 12,000*10 = 125,000, clamped to
+    // MAX_BUDGET (65,000). Even at the new, empirically-derived per-candidate rate, funding all
+    // 10 outright would cost more than this pass is worth — rank-and-cap honestly defers the
+    // rest instead of silently starving (#820's real run: 89,120 spent against an old 11,500
+    // budget, never completing).
     const ctx = manyUnreadFieldsContext(10);
     const budget = incompleteHandlingPassBudget(100_000, ctx);
-    expect(budget).toBe(11_500);
+    expect(budget).toBe(65_000);
     const { candidates, deferredCount } = computeIncompleteHandlingWorklist(ctx, budget);
-    expect(candidates.length).toBeLessThan(10);
-    expect(candidates.length + deferredCount).toBe(10);
-    expect(deferredCount).toBeGreaterThan(0);
+    expect(candidates).toHaveLength(5);
+    expect(deferredCount).toBe(5);
   });
 
   it("a small (1-2 candidate) run is never capped at this pass's own real (floor) budget", () => {
@@ -618,7 +619,7 @@ describe('buildIncompleteHandlingPassPrompts', () => {
 
   it('lists only the affordable candidates and appends the overflow note when the budget caps the worklist', () => {
     const ctx = manyUnreadFieldsContext(6);
-    const budget = VERDICT_EMISSION_RESERVE_TOKENS + 2 * 6_000; // affords 2 of 6
+    const budget = VERDICT_EMISSION_RESERVE_TOKENS + 2 * 12_000; // affords 2 of 6
     const { systemPrompt, initialMessage } = buildIncompleteHandlingPassPrompts(ctx, budget);
     expect(systemPrompt).toContain('candidate-1');
     expect(systemPrompt).toContain('candidate-2');
@@ -636,11 +637,11 @@ describe('buildIncompleteHandlingPassPrompts', () => {
 // ---------------------------------------------------------------------------
 
 describe('incompleteHandlingPassBudget', () => {
-  it('scales with combined candidate count, clamped to the shared one-round-trip floor for a single candidate', () => {
+  it('scales with combined candidate count at its own empirically-derived per-candidate rate', () => {
     const budget = incompleteHandlingPassBudget(100_000, variantOnlyContext());
-    // 1 candidate: 2500 + 900*1 = 3400, clamped up to the 11,000 floor (#811 fix —
-    // was 5,000, smaller than a single Kimi turn's measured 5,526-6,564 tokens).
-    expect(budget).toBe(11_000);
+    // 1 candidate: VERDICT_EMISSION_RESERVE_TOKENS(5,000) + 12,000*1 = 17,000 — above the
+    // 11,000 shared floor, which no longer binds at this pass's own (higher) rate.
+    expect(budget).toBe(17_000);
   });
 
   it('is independent of the main pass base budget (candidate-count driven, not a fraction)', () => {
@@ -651,6 +652,101 @@ describe('incompleteHandlingPassBudget', () => {
 
   it('turn cap is exported and equals INCOMPLETE_PASS_MAX_TURNS', () => {
     expect(INCOMPLETE_HANDLING_PASS_SPEC.maxTurns).toBe(INCOMPLETE_PASS_MAX_TURNS);
+  });
+
+  // -------------------------------------------------------------------------
+  // The 6 production firings (PR #813/#814/#816/#819/#820/#822) — cap and
+  // budget now agree by construction (see INCOMPLETE_HANDLING_TOKENS_PER_CANDIDATE's
+  // and BASE_OVERHEAD_TOKENS's doc comments). See the PR body's sanity table
+  // for the full before/after per-firing accounting.
+  // -------------------------------------------------------------------------
+
+  describe('production firing shapes', () => {
+    it('#814/#816 shape (3 candidates): fully funded, nothing deferred', () => {
+      const ctx = manyUnreadFieldsContext(3);
+      const budget = incompleteHandlingPassBudget(100_000, ctx);
+      // 5,000 + 12,000*3 = 41,000 — comfortably above #814's real observed spend (35,191) for
+      // this exact candidate count, the one directly-validated data point in the PR body.
+      expect(budget).toBe(41_000);
+      const { candidates, deferredCount } = computeIncompleteHandlingWorklist(ctx, budget);
+      expect(candidates).toHaveLength(3);
+      expect(deferredCount).toBe(0);
+    });
+
+    it('#820 shape (10 candidates): clamped to MAX_BUDGET, half the worklist honestly deferred', () => {
+      const ctx = manyUnreadFieldsContext(10);
+      const budget = incompleteHandlingPassBudget(100_000, ctx);
+      expect(budget).toBe(65_000);
+      const { candidates, deferredCount } = computeIncompleteHandlingWorklist(ctx, budget);
+      expect(candidates).toHaveLength(5);
+      expect(deferredCount).toBe(5);
+    });
+
+    it('#813/#819/#822 shape (15 candidates): clamped to MAX_BUDGET, 10 honestly deferred', () => {
+      // 5 variant-sweep + 10 unread-field = 15, mirroring the combined-worklist test above.
+      const addedMembers = Array.from({ length: 5 }, (_, i) => `Add${i + 1}`);
+      const enumContent = [
+        'export enum Color {',
+        '  Legacy1,',
+        '  Legacy2,',
+        ...addedMembers.map(m => `  ${m},`),
+        '}',
+      ].join('\n');
+      const enumPatch = [
+        '@@ -1,4 +1,9 @@',
+        ' export enum Color {',
+        '   Legacy1,',
+        '   Legacy2,',
+        ...addedMembers.map(m => `+  ${m},`),
+        ' }',
+      ].join('\n');
+      const consumerContent = [
+        'function label(c: Color): string {',
+        '  switch (c) {',
+        '    case Color.Legacy1:',
+        "      return 'a';",
+        '    case Color.Legacy2:',
+        "      return 'b';",
+        '    default:',
+        "      return 'unknown';",
+        '  }',
+        '}',
+      ].join('\n');
+      const fieldLines = Array.from({ length: 10 }, (_, i) => `  field${i}: number;`);
+      const fieldContent = ['export interface Big {', ...fieldLines, '}'].join('\n');
+      const fieldPatch = [
+        '@@ -0,0 +1,12 @@',
+        '+export interface Big {',
+        ...fieldLines.map(l => `+${l}`),
+        '+}',
+      ].join('\n');
+      const patches = new Map([
+        ['src/color.ts', enumPatch],
+        ['src/big.ts', fieldPatch],
+      ]);
+      const chunks = [
+        makeChunk('src/color.ts', 1, enumContent),
+        makeChunk('src/big.ts', 1, fieldContent),
+      ];
+      const repoChunks = [...chunks, makeChunk('src/consumer.ts', 1, consumerContent)];
+      const ctx = createTestContext({
+        changedFiles: ['src/color.ts', 'src/big.ts'],
+        chunks,
+        repoChunks,
+        pr: {
+          title: 'Add many variants and fields',
+          body: '',
+          patches,
+        } as unknown as ReviewContext['pr'],
+      });
+      expect(computeIncompleteHandlingCandidates(ctx)).toHaveLength(15);
+
+      const budget = incompleteHandlingPassBudget(100_000, ctx);
+      expect(budget).toBe(65_000);
+      const { candidates, deferredCount } = computeIncompleteHandlingWorklist(ctx, budget);
+      expect(candidates).toHaveLength(5);
+      expect(deferredCount).toBe(10);
+    });
   });
 });
 
@@ -793,7 +889,7 @@ describe('postProcessIncompleteHandlingResult', () => {
 
   it('stamps candidatesDeferred/deferredCandidateIds when the budget capped the worklist', () => {
     const ctx = manyUnreadFieldsContext(6);
-    const budget = VERDICT_EMISSION_RESERVE_TOKENS + 2 * 6_000; // affords 2 of 6
+    const budget = VERDICT_EMISSION_RESERVE_TOKENS + 2 * 12_000; // affords 2 of 6
     const raw = fakeResult({
       findings: [
         finding({ candidateId: 'candidate-1', verdict: 'intentional' }),
@@ -812,7 +908,7 @@ describe('postProcessIncompleteHandlingResult', () => {
 
   it('a capped-but-complete run (every LISTED candidate verdicted) stays incomplete:false — deferral is not incompleteness', () => {
     const ctx = manyUnreadFieldsContext(6);
-    const budget = VERDICT_EMISSION_RESERVE_TOKENS + 2 * 6_000; // affords 2 of 6
+    const budget = VERDICT_EMISSION_RESERVE_TOKENS + 2 * 12_000; // affords 2 of 6
     const raw = fakeResult({
       findings: [
         finding({ candidateId: 'candidate-1', verdict: 'intentional' }),
