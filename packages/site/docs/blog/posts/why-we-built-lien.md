@@ -89,8 +89,8 @@ The last piece closed the loop in the other direction. If a tool already
 knows a function is getting too complicated, why wait until a pull request
 to say so? That's the idea behind warning an agent before it even makes an
 edit, not after it's already made a mess. I've now confirmed that idea
-actually changes what an agent writes. We tested it properly, and
-[the numbers held up](/blog/posts/complexity-nudges-ab-test).
+actually changes what an agent writes, and there's a lot more on that a
+bit further down.
 
 All of it is in service of the same bet: that agents can be trusted to
 write more of our code, without giving up quality or correctness for it, as
@@ -148,8 +148,8 @@ does two things on its own, without the agent needing to remember to ask:
 We didn't want to just assume this changes what an agent writes, so we
 tested it properly: the same coding task, given twice, once with a real
 warning inserted and once without, nothing else different. [We wrote the
-whole experiment up separately](/blog/posts/complexity-nudges-ab-test), but
-the short version: the agent that got the warning wrote meaningfully
+whole experiment up separately](https://github.com/getlien/lien/blob/main/docs/development/nudge-behavioral-ab.md),
+but the short version: the agent that got the warning wrote meaningfully
 simpler code far more often than the one that didn't.
 
 ## A reviewer that publishes its own misses
@@ -202,7 +202,7 @@ Most recently, that same habit of publishing our own misses led somewhere
 we didn't expect: proof that a fix to how the reviewer handles a busy pull
 request actually works, using a real, live bug we found in a popular
 open-source project along the way. [There's a whole story about
-that](/blog/posts/reviewer-that-cant-skip-candidate-loops).
+that](https://github.com/getlien/lien/blob/main/docs/architecture/decisions/0014-per-rule-candidate-loop-passes.md).
 
 We think that's a more useful thing to publish than another benchmark
 chart.
