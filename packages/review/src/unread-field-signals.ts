@@ -33,8 +33,10 @@
  * design brief: "when in doubt, suppress the candidate — the rule's LLM
  * judgment still exists without the signal."
  *
- *  - **Wholesale consumption (spread / `JSON.stringify` / serialization).**
- *    If a `: TypeName` annotation has a spread (`...x`) or `JSON.stringify(`
+ *  - **Wholesale consumption (spread / `JSON.stringify` / serialization /
+ *    shorthand-property hand-off).** If a `: TypeName` annotation has a
+ *    spread (`...x`), `JSON.stringify(`, or — see below — a shorthand-
+ *    property object-literal reference to the SAME annotated variable,
  *    within `WHOLESALE_PROXIMITY_CHARS` characters after it anywhere in the
  *    corpus, every field of that type is suppressed — we can't prove the
  *    field isn't consumed as part of a whole-object pass-through, so we
@@ -48,6 +50,31 @@
  *    specific false-suppression while keeping the check textual (not real
  *    data-flow: the nearby spread/stringify need not touch the same
  *    variable the annotation introduced).
+ *    The shorthand-property case is narrower and DOES tie back to the
+ *    annotated variable's own name (mining sweep, hono #4451 ground truth):
+ *    `app.fetch(req, { event, requestContext, context })` hands the whole
+ *    `requestContext` value (typed `LatticeRequestContextV2`, carrying the
+ *    PR's new `serviceNetworkArn` field) opaquely to another consumer via a
+ *    bare shorthand property — not a spread, not `JSON.stringify`, so the
+ *    original check missed it and flagged a real, actively-consumed field as
+ *    unread. `{ requestContext }` reads as "hand off the CURRENT value of
+ *    variable `requestContext`" the same way `...requestContext` would, so
+ *    it counts as the same wholesale evidence — scoped to the specific
+ *    variable name captured from the type annotation (`varName: TypeName`),
+ *    not "any object literal with 2+ shorthand keys anywhere nearby".
+ *  - **JSX attribute usage (`<div tw="...">`).** Read detection also
+ *    recognizes the field name appearing as a JSX attribute on any element —
+ *    invisible to the dot/bracket/destructure patterns above, since a JSX
+ *    attribute is compiled to a prop key, never a `.field`/`['field']`
+ *    access or a destructured binding in the SOURCE text. Motivating case
+ *    (mining sweep, zod's OG-image generator): Satori's custom JSX renderer
+ *    reads `HTMLAttributes.tw` (an inline-Tailwind escape hatch) exclusively
+ *    via `<div tw="...">`-shaped call sites. Bounded to a fixed character
+ *    window after the opening `<Tag` (mirrors the wholesale check's
+ *    proximity design, and — per #810's ReDoS-hardening precedent —
+ *    deliberately uses a BOUNDED quantifier rather than an unbounded `*`, so
+ *    a minified file dense with `<`/`>` comparison operators can't make this
+ *    pattern's worst case anything other than linear).
  *  - **Exported "public API" types.** A field on a type that's re-exported by
  *    an `index.ts`/`index.js` barrel is suppressed — its real consumers may
  *    live outside this indexed corpus (an external SDK consumer, or another
@@ -72,6 +99,19 @@
  *    convention (`*.test.ts`, `__tests__/`, etc.) is skipped entirely — test
  *    fixture objects routinely carry properties the test itself never reads
  *    back out, and that's not a production bug.
+ *  - **Generated `.d.ts` declaration files.** A field declared in a `.d.ts`
+ *    file whose name carries a codegen marker (`-bundle`, `-generated`/
+ *    `.generated.`, `.gen.`) or whose leading content carries a generator
+ *    marker comment (`@generated`, `DO NOT EDIT`, "automatically generated")
+ *    is skipped the same way a test-fixture file is. Motivating case (mining
+ *    sweep, drizzle-kit): `grammar.ohm-bundle.d.ts`, an Ohm.js-generated
+ *    grammar action-dictionary type listing EVERY grammar rule as an
+ *    optional handler property — the exact same "declared, most never
+ *    populated/read by any one consumer" shape as a test fixture, just for
+ *    generated parser code instead. Deliberately narrow: a HAND-WRITTEN
+ *    `.d.ts` (an ambient module declaration a person authored) carries
+ *    neither signal and is NOT suppressed — blindly suppressing every
+ *    `.d.ts` would hide real gaps in hand-authored type-only files.
  *  - **Dynamic/bracket access.** Read detection covers `obj.field`,
  *    `obj['field']`/`obj["field"]` (bracket string-literal key access), and
  *    both destructuring shapes (`const { field } = x`, `function f({ field })`)
@@ -153,6 +193,22 @@ const TEST_PATH_RE =
 /** An `index.ts`/`index.js` (or `.tsx`/`.jsx`) barrel file anywhere in the corpus. */
 const INDEX_BARREL_RE = /(^|\/)index\.[cm]?[jt]sx?$/;
 
+/** A TypeScript declaration file. */
+const DTS_FILE_RE = /\.d\.ts$/;
+
+/**
+ * A `.d.ts` filename stem carrying a common codegen marker: `-bundle`/`.bundle.` (this mining
+ * sweep's own drizzle-kit ground truth, `grammar.ohm-bundle.d.ts`), `-generated`/`.generated.`/
+ * `_generated`, or `.gen.`. Checked against the basename only — see {@link isGeneratedDeclarationFile}.
+ */
+const GENERATED_DTS_STEM_RE = /[.\-_](?:bundle|generated|gen)(?:[.\-_]|$)/i;
+
+/** A leading generator-marker comment (`@generated`, `DO NOT EDIT`, "automatically generated"). */
+const GENERATED_MARKER_RE = /@generated\b|\bDO NOT EDIT\b|\bautomatically generated\b/i;
+/** Only scan the file's own leading characters for a generator marker — a match deep inside a
+ *  large file is not reliable evidence the WHOLE file is generated. */
+const GENERATED_MARKER_SCAN_CHARS = 500;
+
 const HUNK_HEADER_RE = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
 
 const INTERFACE_HEADER_RE =
@@ -182,6 +238,17 @@ const CLASS_PROPERTY_LINE_RE =
 const WHOLESALE_RE = /\bJSON\.stringify\s*\(|\.\.\.\s*[A-Za-z_$]/;
 /** How close (chars) a spread/`JSON.stringify(` must be AFTER a `: typeName` annotation to count — see {@link chunkHasWholesaleConsumption}. */
 const WHOLESALE_PROXIMITY_CHARS = 400;
+
+/**
+ * How many repetitions of {@link JSX_ATTR_GAP} to scan after a JSX tag's opening `<Tag` for the
+ * field name used as an attribute — see {@link buildJsxAttrReadPattern}. Each repetition is
+ * either one ordinary character or one whole balanced `{...}` expression container, so this
+ * bounds attribute COUNT more than raw character count — but it is still a fixed bound (not an
+ * unbounded `*` repetition), so a minified file dense with `<`/`>` comparison operators, or with
+ * many brace-expression attributes, can't make this pattern's worst case anything other than
+ * linear (#810's ReDoS-hardening precedent).
+ */
+const JSX_ATTR_SCAN_CHARS = 240;
 
 // ---------------------------------------------------------------------------
 // Low-level text utilities (masking/brace-matching, mirrors variant-sweep-signals.ts)
@@ -255,6 +322,34 @@ function maskComments(text: string): string {
 
 function maskCommentsAndStrings(text: string): string {
   return maskSpans(text, () => true);
+}
+
+/**
+ * The INVERSE of {@link maskComments}: keeps only comment spans verbatim, blanking everything
+ * else — ordinary code AND string literals alike — with same-length whitespace (newlines kept).
+ * Used to require a generator marker (`isGeneratedDeclarationFile`) to appear inside an ACTUAL
+ * comment, not inside a string literal or ordinary code — flagged on this PR's own review: a
+ * hand-written declaration like `type Warning = "DO NOT EDIT";` must not be misread as a
+ * generator marker just because the literal TEXT "DO NOT EDIT" appears somewhere in the file.
+ */
+function commentsOnly(text: string): string {
+  let i = 0;
+  let out = '';
+  while (i < text.length) {
+    const span = classifySpan(text, i);
+    if (span === null) {
+      out += text[i] === '\n' ? '\n' : ' ';
+      i++;
+      continue;
+    }
+    if (span.kind === 'comment') {
+      out += text.slice(i, span.end);
+    } else {
+      for (let k = i; k < span.end; k++) out += text[k] === '\n' ? '\n' : ' ';
+    }
+    i = span.end;
+  }
+  return out;
 }
 
 function prevNonSpace(text: string, i: number): string {
@@ -603,6 +698,40 @@ function collectAddedFieldsForFile(
   }
 }
 
+// ---------------------------------------------------------------------------
+// File-level skip checks (test fixtures, generated declaration files)
+// ---------------------------------------------------------------------------
+
+/**
+ * The chunk most likely to hold `file`'s own leading lines (smallest `startLine`) — a generator
+ * marker comment near the top of the file wouldn't be visible from a later, non-head chunk if
+ * the file was split across several.
+ */
+function headChunkContent(file: string, chunks: CodeChunk[]): string {
+  let head: CodeChunk | undefined;
+  for (const chunk of chunks) {
+    if (chunk.metadata.file !== file) continue;
+    if (!head || chunk.metadata.startLine < head.metadata.startLine) head = chunk;
+  }
+  return head?.content ?? '';
+}
+
+/**
+ * Is `file` a GENERATED `.d.ts` declaration file — skipped the same way a test-fixture file is
+ * (module doc's "Generated `.d.ts` declaration files" note)? Deliberately narrow: a HAND-WRITTEN
+ * `.d.ts` carries neither a codegen filename marker nor a leading generator-marker COMMENT and is
+ * NOT skipped by this check — the marker text must appear inside an actual comment
+ * ({@link commentsOnly}), not inside a string literal or ordinary code (flagged on this PR's own
+ * review: `type Warning = "DO NOT EDIT";` must not count).
+ */
+function isGeneratedDeclarationFile(file: string, chunks: CodeChunk[]): boolean {
+  if (!DTS_FILE_RE.test(file)) return false;
+  const base = file.slice(file.lastIndexOf('/') + 1);
+  if (GENERATED_DTS_STEM_RE.test(base)) return true;
+  const head = headChunkContent(file, chunks).slice(0, GENERATED_MARKER_SCAN_CHARS);
+  return GENERATED_MARKER_RE.test(commentsOnly(head));
+}
+
 /**
  * Find every interface member / type-literal property / class field this PR
  * genuinely adds (unlike `variant-sweep-signals.ts`, the containing
@@ -621,6 +750,7 @@ export function computeAddedFields(context: ReviewContext): AddedField[] {
   for (const [file, patch] of patches) {
     if (!TS_JS_FILE_RE.test(file)) continue;
     if (TEST_PATH_RE.test(file)) continue; // FP trap: test-fixture files
+    if (isGeneratedDeclarationFile(file, chunks)) continue; // FP trap: generated .d.ts
     collectAddedFieldsForFile(file, patch, chunks, seen, entries);
   }
 
@@ -691,27 +821,219 @@ function isReachableFromIndexBarrel(
 }
 
 /**
- * Does a `: typeName` type annotation appear with a spread or
- * `JSON.stringify(` within {@link WHOLESALE_PROXIMITY_CHARS} characters
- * AFTER it, anywhere in this chunk? Requiring the annotation — not just the
- * bare type name — matters: a doc comment or an unrelated field merely
- * NAMING the type (`RuleTriggers.filePatterns` in a docstring, `triggers:
- * RuleTriggers` three unrelated fields away from someone else's spread) is
- * not evidence any VALUE of this type is ever spread/serialized. Comments
- * are masked first, so a prose mention can't itself count as the
- * annotation. Still coarse (proximity, not real data-flow — the nearby
- * spread/stringify need not touch the SAME variable the annotation
- * introduced), but far tighter than "the type name and a spread anywhere in
- * the same file", which false-fired on this module's OWN doc comment
- * mentioning `RuleTriggers` during dogfooding.
+ * Matches `varName: TypeName` / `varName?: TypeName` (capturing `varName` when present) or a
+ * bare `: TypeName` with no preceding identifier at all (a return-type annotation, a generic
+ * wrapper, etc.) — the capture group is OPTIONAL specifically so this still matches every shape
+ * the original bare `:\s*typeName\b` check did; see {@link chunkHasWholesaleConsumption}.
+ */
+function typedAnnotationRegex(typeName: string): RegExp {
+  return new RegExp(`([A-Za-z_$][\\w$]*)?\\??\\s*:\\s*${escapeRegExp(typeName)}\\b`, 'g');
+}
+
+/**
+ * Matches a `{` that opens in an EXPRESSION/VALUE position — immediately (whitespace aside)
+ * after `=`, `(`, `,`, `[`, `:`, `=>`, or `return` — capturing the ANCHOR itself. This is what an
+ * object LITERAL's opening brace looks like, as opposed to a function/block body's opening
+ * brace, which instead typically follows `)` (a parameter list) or is a bare top-level statement
+ * — see {@link hasShorthandHandoff}'s doc for why this distinction matters, and for why the
+ * captured anchor matters too (a `(` anchor is ambiguous with a destructured parameter). Only
+ * locates the OPENING brace; {@link findObjectLiteralGroups} pairs it with its true, nesting-
+ * aware closing brace via {@link findMatchingBraceFrom} rather than a non-nesting `[^{}]*`
+ * capture, so an object literal containing its OWN nested object value (`{ meta: { x: 1 }, o }`)
+ * is still captured as one whole group — flagged on this PR's own review (lien-stats summary for
+ * commit ebe342b): the previous `[^{}]*`-based capture stopped at the first nested `{`, so it
+ * never even recognized the OUTER object as a group at all, missing a genuine top-level `o`
+ * hand-off sitting right next to a nested object property.
+ */
+const OBJECT_LITERAL_OPEN_RE = /(=|\(|,|\[|:|=>|\breturn)\s*\{/g;
+
+/** One object-literal group found by {@link findObjectLiteralGroups}. */
+interface ObjectLiteralGroup {
+  anchor: string;
+  index: number;
+  matchLength: number;
+  inner: string;
+}
+
+/**
+ * Every object-literal group in `window`, each paired with its TRUE closing brace (handling
+ * arbitrary nesting, via the same {@link findMatchingBraceFrom} the interface/type-literal/class
+ * parser already relies on) rather than a `[^{}]*` capture that would stop at the first nested
+ * `{`. `window` is already bounded to {@link WHOLESALE_PROXIMITY_CHARS} by the caller, so this
+ * balanced scan (linear in `window`'s length, not the whole file) stays cheap.
+ */
+function findObjectLiteralGroups(window: string): ObjectLiteralGroup[] {
+  const groups: ObjectLiteralGroup[] = [];
+  for (const m of window.matchAll(OBJECT_LITERAL_OPEN_RE)) {
+    const openIdx = m.index + m[0].length - 1;
+    const closeIdx = findMatchingBraceFrom(window, openIdx);
+    if (closeIdx === -1) continue;
+    groups.push({
+      anchor: m[1],
+      index: m.index,
+      matchLength: closeIdx + 1 - m.index,
+      inner: window.slice(openIdx + 1, closeIdx),
+    });
+  }
+  return groups;
+}
+
+/**
+ * Blank out every bracket/paren/brace-delimited span — `[...]`/`(...)`/`{...}`, at any nesting
+ * depth — with same-length whitespace (newlines kept). Used to hide a value that is merely
+ * NESTED inside an object literal's own property (an array/call-argument, `{ event, arr: [a,
+ * varName, b] }`, or a nested object, `{ meta: { x: 1 }, varName }`) from {@link
+ * hasShorthandHandoff}'s top-level shorthand-property scan — flagged on this PR's own review
+ * (lien-stats summaries for commits db8966d and ebe342b) as two variants of the same shape: a
+ * value nested one level inside a genuine object literal must not be mistaken for a top-level
+ * shorthand property of the OUTER object.
+ */
+function maskNestedGroups(text: string): string {
+  const blank = (span: string) => [...span].map(c => (c === '\n' ? '\n' : ' ')).join('');
+  let out = text;
+  let next = out.replace(/\[[^[\]]*\]|\([^()]*\)|\{[^{}]*\}/g, blank);
+  // Peel one nesting level per pass — an innermost, bracket-free span always matches first, so
+  // repeating until nothing changes handles arbitrary nesting without depth-tracking branches.
+  while (next !== out) {
+    out = next;
+    next = out.replace(/\[[^[\]]*\]|\([^()]*\)|\{[^{}]*\}/g, blank);
+  }
+  return out;
+}
+
+/**
+ * Is THIS SPECIFIC matched group (not the whole surrounding window) a destructuring BINDING
+ * rather than a value-position hand-off? Two shapes, checked against just this group's own
+ * anchor/position — flagged on this PR's own review (lien-stats summary for commit 77d9424):
+ * an earlier version ran these checks against the WHOLE window, so ANY destructuring occurrence
+ * anywhere nearby (even for a wholly separate statement) vetoed every hand-off in that window,
+ * including a genuinely separate, valid one (`const { o: alias } = wrapper; app.fetch(req, { o
+ * });` incorrectly returned "not a hand-off" because of the FIRST statement, even though the
+ * SECOND is real).
+ *  - Reassignment-destructuring (`({ varName } = wrapper)`): this group's own closing `}` is
+ *    immediately followed by `=` (not `==`), with an optional type annotation in between. A
+ *    `const`/`let`/`var` DECLARATION form (`const { varName } = wrapper`) never reaches this
+ *    check at all — its `{` follows a declaration keyword, not one of {@link
+ *    OBJECT_LITERAL_OPEN_RE}'s anchors, so it's never captured as a group in the first place.
+ *    Same for a destructured `for`-loop binding (`for (const { varName } of items)`).
+ *  - Destructured function parameter (`function f({ varName }: T)`) / a lone-argument hand-off
+ *    call shaped identically (`render({ varName })`, a documented, text-unresolvable residual —
+ *    see module doc): this group's own anchor is `(`.
+ */
+function isDestructuringBindingGroup(
+  index: number,
+  matchLength: number,
+  anchor: string,
+  window: string,
+): boolean {
+  const afterGroup = window.slice(index + matchLength);
+  if (/^\s*(?::\s*[\w.<>[\],\s]+)?=(?!=)/.test(afterGroup)) return true;
+  return anchor === '(';
+}
+
+/**
+ * Does `varName` appear as a bare shorthand property inside an object literal (`{ event,
+ * varName, context }`) within `window` — a VALUE-position hand-off, not a BINDING? A shorthand
+ * property hands off the CURRENT value of `varName` wholesale to whatever consumes the new
+ * object — the same "can't prove the field isn't part of a whole-object pass-through" evidence a
+ * spread or `JSON.stringify` gives, just via different syntax (mining sweep, hono #4451 ground
+ * truth: `app.fetch(req, { event, requestContext, context })`).
+ *
+ * Multi-step check, not a single `[{,]\s*varName\s*[,}]` scan: flagged on this PR's own review
+ * (lien-stats summaries for commits b5e3f88, db8966d, and ebe342b) that a bare adjacent-delimiter
+ * scan can't tell an OBJECT literal from an ARRAY literal, a plain call's argument list, the
+ * enclosing FUNCTION/BLOCK body itself, or a value NESTED inside one of the object's own
+ * properties (an array/call-argument, or another object literal, `{ meta: { x: 1 }, varName }`)
+ * — all of these can put a `,` immediately on either side of `varName` with no TOP-LEVEL
+ * object-literal shorthand actually present. Step 1 requires `varName` to sit inside a genuine,
+ * nesting-aware `{...}` group found by {@link findObjectLiteralGroups}. Step 2 blanks out any
+ * nested `[...]`/`(...)`/`{...}` within that group's own content ({@link maskNestedGroups}), so a
+ * value nested inside a property isn't visible to the final check. Step 3, against the masked
+ * content, requires `varName` to sit directly between `{`/`,` and `,`/`}` with no colon after it
+ * (so an ordinary `varName: something` key-value pair inside the SAME object, or a `.varName`
+ * access, is not mistaken for a shorthand hand-off). Step 4 excludes the group if IT
+ * SPECIFICALLY (not the window) is a destructuring BINDING — see
+ * {@link isDestructuringBindingGroup}.
+ */
+function hasShorthandHandoff(varName: string, window: string): boolean {
+  const shorthandWithinBraces = new RegExp(`[{,]\\s*${escapeRegExp(varName)}\\s*[,}]`);
+  for (const group of findObjectLiteralGroups(window)) {
+    if (!shorthandWithinBraces.test(`{${maskNestedGroups(group.inner)}}`)) continue;
+    if (isDestructuringBindingGroup(group.index, group.matchLength, group.anchor, window)) {
+      continue;
+    }
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Char-offset `[start, end)` ranges of every interface/type-literal BODY in `content` (reusing
+ * the same header regexes and brace matcher {@link findTypeDeclarations} does, without needing
+ * its member-extraction work). Used by {@link chunkHasWholesaleConsumption} to recognize when a
+ * `name: TypeName`-shaped match is actually a PROPERTY declaration inside one of these bodies,
+ * not a variable annotation — flagged on this PR's own review: an unrelated interface's own
+ * property (`interface Wrapper { option: Options; }`) would otherwise be captured as if `option`
+ * were a real variable, and a coincidental shorthand reference to that name elsewhere could then
+ * wrongly count as a wholesale hand-off of `Options`.
+ *
+ * Deliberately does NOT include class bodies, unlike {@link findTypeDeclarations}'s own kind
+ * enumeration — flagged as a follow-up finding on this PR's own review (lien-stats summary for
+ * commit 8196028): an interface/type-literal body is ALWAYS pure property territory (no method
+ * BODIES, only signatures), but a class body also contains full method bodies with their own
+ * genuine parameters and local variables — treating the WHOLE class body as property territory
+ * would wrongly exclude those from the shorthand-handoff check too. A genuine class FIELD
+ * declaration (`class Foo { bar: SomeType; }`) keeps the same pre-existing, narrower imprecision
+ * this function targets for interfaces/type-literals specifically — accepted as a smaller,
+ * localized residual rather than reintroducing the broader class-method-body bug.
+ */
+function declarationBodyRanges(content: string): Array<{ start: number; end: number }> {
+  const ranges: Array<{ start: number; end: number }> = [];
+  for (const headerRe of [INTERFACE_HEADER_RE, TYPE_LITERAL_HEADER_RE]) {
+    for (const m of content.matchAll(new RegExp(headerRe.source, 'g'))) {
+      const openIdx = m.index + m[0].length - 1;
+      const closeIdx = findMatchingBraceFrom(content, openIdx);
+      if (closeIdx !== -1) ranges.push({ start: openIdx, end: closeIdx });
+    }
+  }
+  return ranges;
+}
+
+/** Does `index` fall inside any of `ranges`? */
+function isWithinAnyRange(index: number, ranges: Array<{ start: number; end: number }>): boolean {
+  return ranges.some(r => index >= r.start && index < r.end);
+}
+
+/**
+ * Does a `: typeName` type annotation appear with a spread, `JSON.stringify(`, or a shorthand-
+ * property hand-off of the SAME annotated variable, within {@link WHOLESALE_PROXIMITY_CHARS}
+ * characters AFTER it, anywhere in this chunk? Requiring the annotation — not just the bare type
+ * name — matters: a doc comment or an unrelated field merely NAMING the type
+ * (`RuleTriggers.filePatterns` in a docstring, `triggers: RuleTriggers` three unrelated fields
+ * away from someone else's spread) is not evidence any VALUE of this type is ever spread/
+ * serialized/handed off. Comments are masked first, so a prose mention can't itself count as the
+ * annotation. Still coarse (proximity, not real data-flow — the nearby spread/stringify need not
+ * touch the SAME variable the annotation introduced), but far tighter than "the type name and a
+ * spread anywhere in the same file", which false-fired on this module's OWN doc comment
+ * mentioning `RuleTriggers` during dogfooding. The shorthand-property check is scoped tighter
+ * still — it only fires for a shorthand reference to the SPECIFIC variable the annotation named,
+ * not "any object literal with shorthand keys nearby" (see {@link hasShorthandHandoff}) — and
+ * never treats a captured name as a variable at all when the match sits inside an interface/
+ * type-literal BODY ({@link declarationBodyRanges}), where `name: TypeName` is a property
+ * declaration, not a variable annotation (deliberately NOT class bodies — see that function's
+ * doc for why).
  */
 function chunkHasWholesaleConsumption(typeName: string, content: string): boolean {
   const masked = maskComments(content);
-  const typedRe = new RegExp(`:\\s*${escapeRegExp(typeName)}\\b`, 'g');
+  const declRanges = declarationBodyRanges(masked);
+  const typedRe = typedAnnotationRegex(typeName);
   for (const m of masked.matchAll(typedRe)) {
+    const varName = m[1];
+    const isPropertyDeclaration = varName !== undefined && isWithinAnyRange(m.index, declRanges);
     const windowStart = m.index + m[0].length;
     const window = masked.slice(windowStart, windowStart + WHOLESALE_PROXIMITY_CHARS);
     if (WHOLESALE_RE.test(window)) return true;
+    if (varName && !isPropertyDeclaration && hasShorthandHandoff(varName, window)) return true;
   }
   return false;
 }
@@ -746,6 +1068,63 @@ function isSuppressedType(
 // ---------------------------------------------------------------------------
 
 /**
+ * The "gap" between a JSX tag's opening `<Tag` and the attribute name this pattern is looking
+ * for: either an ordinary non-`<`/`>`/`{`/`}` character, OR one WHOLE `{...}` expression
+ * container consumed as one unit — up to ONE level of brace nesting inside it (`{{ ... }}`, the
+ * common "object literal passed as a JSX expression" shape, e.g. `style={{ color: 'red' }}`).
+ * Consuming a `{...}` group in one bite (rather than scanning through it character by character)
+ * is what stops a PRIOR attribute's brace expression from being read into: CodeRabbit's review on
+ * this PR's own #818 found `<div className={ timeout }>` false-matched field `timeout` as if it
+ * were an attribute NAME, because the naive `[^<>]*` gap could wander INSIDE that expression and
+ * land on the local variable `timeout` used as its VALUE. The one-level nesting allowance is a
+ * follow-up on the SAME PR's review: the original single-level-only version couldn't skip PAST
+ * `style={{ color: 'red' }}` at all (its own object-literal braces broke the naive `[^{}]*`
+ * capture), so a LATER attribute like `tw="..."` was never reached and read as unread. No
+ * ambiguity between the alternatives at any position (a `{` can only start the brace-group
+ * branch, everything else can only match the plain-character branch), so this doesn't
+ * reintroduce catastrophic-backtracking risk — see {@link JSX_ATTR_SCAN_CHARS}.
+ */
+const JSX_ATTR_GAP = `(?:[^<>{}]|\\{(?:[^{}]|\\{[^{}]*\\})*\\})`;
+
+/**
+ * A JSX attribute usage of `name` on any element (`<div name="...">`, `<Foo name />`,
+ * `<Foo name={expr}>`) — see module doc's "JSX attribute usage" note. Requires whitespace
+ * directly before the name (so a longer identifier merely ENDING in `name`, e.g. `className`
+ * for field `name`, can't match) and `=`/whitespace/a (self-)closing `>` directly after (so a
+ * longer identifier STARTING with `name` can't match either). Bounded to
+ * {@link JSX_ATTR_SCAN_CHARS} REPETITIONS of {@link JSX_ATTR_GAP} (not an unbounded `*`), so
+ * this pattern's worst case stays linear regardless of input size.
+ */
+function buildJsxAttrReadPattern(name: string): RegExp {
+  const esc = escapeRegExp(name);
+  return new RegExp(
+    `<[A-Za-z](?:${JSX_ATTR_GAP}){0,${JSX_ATTR_SCAN_CHARS}}\\s${esc}\\b(?:=|\\s|/?>)`,
+  );
+}
+
+/**
+ * Destructuring-assignment shape for `name`: `const { name } = obj;` / `const { name }: T = obj;`
+ * / `({ name } = obj)`. Used by {@link buildFieldReadPatterns} to recognize a destructured field
+ * READ. (Previously also reused as a window-wide exclusion in `hasShorthandHandoff`'s
+ * shorthand-hand-off check; that approach over-vetoed unrelated hand-offs elsewhere in the same
+ * window and was replaced by the narrower, per-group {@link isDestructuringBindingGroup} check —
+ * see that function's doc.)
+ */
+function destructuringAssignmentPattern(name: string): RegExp {
+  const esc = escapeRegExp(name);
+  return new RegExp(`\\{[^{}]*\\b${esc}\\b[^{}]*\\}\\s*(?::\\s*[\\w.<>[\\],\\s]+)?=(?!=)`);
+}
+
+/**
+ * Destructuring function-parameter shape for `name`: `function f({ name }: T)` / `({ name }) =>`.
+ * Used by {@link buildFieldReadPatterns} to recognize a destructured field READ.
+ */
+function destructuringParamPattern(name: string): RegExp {
+  const esc = escapeRegExp(name);
+  return new RegExp(`\\([^()]*\\{[^{}]*\\b${esc}\\b[^{}]*\\}`);
+}
+
+/**
  * Read patterns for one field name. Excludes only a PLAIN simple assignment
  * (`.field = value`, the pure-write/population shape) — compound assignment
  * (`+=`) and increment/decrement (`++`/`--`) read-then-write, so they count
@@ -760,9 +1139,11 @@ function buildFieldReadPatterns(name: string): RegExp[] {
     // Bracket string-literal access read: `obj['field']`/`obj["field"]`, excluding `obj['field'] = value`.
     new RegExp(`\\[\\s*['"\`]${esc}['"\`]\\s*\\]${notPlainWrite}`),
     // Destructuring assignment: `const { field } = obj;` / `const { field }: T = obj;`.
-    new RegExp(`\\{[^{}]*\\b${esc}\\b[^{}]*\\}\\s*(?::\\s*[\\w.<>[\\],\\s]+)?=(?!=)`),
+    destructuringAssignmentPattern(name),
     // Destructuring function parameter: `function f({ field }: T)` / `({ field }) =>`.
-    new RegExp(`\\([^()]*\\{[^{}]*\\b${esc}\\b[^{}]*\\}`),
+    destructuringParamPattern(name),
+    // JSX attribute usage: `<div field="...">` / `<Foo field />` / `<Foo field={expr}>`.
+    buildJsxAttrReadPattern(name),
   ];
 }
 
@@ -806,6 +1187,7 @@ function buildDeclarationIndex(context: ReviewContext): Map<string, TypeDeclarat
   const declByKey = new Map<string, TypeDeclaration>();
   for (const file of context.pr?.patches?.keys() ?? []) {
     if (!TS_JS_FILE_RE.test(file) || TEST_PATH_RE.test(file)) continue;
+    if (isGeneratedDeclarationFile(file, context.chunks)) continue; // FP trap: generated .d.ts
     for (const chunk of context.chunks) {
       if (chunk.metadata.file !== file) continue;
       for (const decl of findTypeDeclarations(chunk.content, chunk.metadata.startLine)) {
