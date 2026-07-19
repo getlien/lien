@@ -30,9 +30,47 @@
  * Tightened to compound phrases that state the disabled-vs-still-active
  * contradiction itself. Not a calibration gate (hand-authored CC-mode smoke
  * fixture, no paid votes to re-score) — untagged/non-canary either way.
+ *
+ * KEYWORD-INTEGRITY REPAIR (2026-07-19): the 2026-07-16 tightening traded one
+ * brittleness for another. Its compound phrases required an EXACT contiguous
+ * substring across a punctuation boundary — e.g. "reports as disabled, but"
+ * needs a comma immediately after "disabled" with nothing between. Real model
+ * output routinely wraps the quoted claim term in its own quote mark or
+ * backtick right before that comma ("...reports as disabled', but
+ * resolveSearchMode returns..." / "...reports as disabled\", but
+ * `resolveSearchMode`..."), which breaks every phrase in the old list — a
+ * correct, substantively-right finding false-FAILED on formatting alone
+ * (measured 0/3 under both `LIEN_DOC_TRUTH_V2=on` and `=off`, see this
+ * change's PR body; all 3 votes in each screen correctly identified the
+ * contradiction, just phrased with a quote mark the phrase list didn't
+ * anticipate).
+ *
+ * Repaired per the keyword-integrity discipline (see
+ * pr658-search-code-rename.assertions.ts's claim+correction split, "single
+ * finding must name both" pattern): instead of one contiguous phrase, require
+ * the SAME finding to (a) mention the claim term "disabled" (bare word — safe
+ * here because this fixture has exactly one claim, so "disabled" cannot
+ * collide with an unrelated claim the way it could on a multi-claim fixture
+ * like pr658), (b) name the specific function ("resolvesearchmode"), AND (c)
+ * state the actual returned value via a punctuation-tolerant regex
+ * (`/returns\s*[`'"]*lexical\b/i` — matches "returns 'lexical'", "returns
+ * `'lexical'`", "returns lexical", any quote/backtick noise in between,
+ * without caring which punctuation the model chose). All three together are
+ * substantially harder to satisfy by accident than any one bare noun: the
+ * 2026-07-16 sweep's distractor (discussing "config-level mode selection,"
+ * not the disabled/no-results claim) does not state that resolveSearchMode
+ * RETURNS lexical — it reasons about a different, invented override — so it
+ * still fails condition (c). Verified via a reconstructed version of that
+ * exact distractor in the offline smoke test below.
  */
 
+import { HarnessAssertionError } from '../../assertions.js';
 import type { FixtureAssertions } from '../../assertions.js';
+
+/** Matches "returns 'lexical'", "returns `'lexical'`", "returns lexical" — any
+ *  quote-mark/backtick punctuation between "returns" and "lexical", so the
+ *  check survives whichever way a model chooses to quote the return value. */
+const RETURNS_LEXICAL = /returns\s*[`'"]*\s*lexical\b/i;
 
 const assertions: FixtureAssertions = {
   description:
@@ -41,32 +79,29 @@ const assertions: FixtureAssertions = {
   rule: 'doc-truth',
   expect: (result, h) => {
     h.expectRuleFired('doc-truth', result);
-    // Kept to compound phrases that state the CONTRADICTION itself (the
-    // "disabled" claim vs. the code still returning results) — not bare
-    // 'lexical'/'bm25'/'fallback'/'disabled'/'still'/'outdated'/
-    // 'resolvesearchmode', each of which a distractor about a *different*
-    // stale claim on the same resolveSearchMode comment (e.g. a claim about
-    // config-level mode SELECTION, not about the disabled/no-results
-    // framing) also legitimately uses. Verified via assert-cli.ts: such a
-    // distractor false-passed the original list via lexical/fallback/
-    // resolvesearchmode/outdated/still and correctly fails against this one.
-    h.expectFindingMentions(
-      [
-        'reports as disabled, but',
-        'reports as disabled but',
-        'claims disabled but',
-        'disabled but returns',
-        'disabled but falls back',
-        'disabled but still',
-        'contradicts the disabled claim',
-        'the disabled claim is stale',
-        'is not actually disabled',
-        "isn't actually disabled",
-        'no longer disabled',
-        'search is not disabled',
-      ],
-      result,
-    );
+    // Require ONE finding to name the claim ("disabled"), the specific function
+    // ("resolvesearchmode"), AND the falsifying return value ("returns ...
+    // lexical", punctuation-tolerant) — all three, in the SAME finding, rather
+    // than an exact contiguous phrase. See header's KEYWORD-INTEGRITY REPAIR.
+    const hasCorrectlyFramedContradiction = result.findings.some(f => {
+      const haystack = [f.message, f.suggestion ?? '', f.evidence ?? ''].join('\n').toLowerCase();
+      return (
+        haystack.includes('disabled') &&
+        haystack.includes('resolvesearchmode') &&
+        RETURNS_LEXICAL.test(haystack)
+      );
+    });
+    if (!hasCorrectlyFramedContradiction) {
+      throw new HarnessAssertionError(
+        'Tier 2: expected a single finding to name the claim ("disabled"), the function ' +
+          '("resolveSearchMode"), and the falsifying return value (a "returns ... lexical" ' +
+          `pattern, quote/backtick-tolerant) — none did. Findings: ${result.findings.length}.` +
+          (result.findings.length > 0
+            ? ` First message: "${result.findings[0]?.message?.slice(0, 200) ?? ''}"`
+            : ''),
+        2,
+      );
+    }
   },
   votes: 3,
   passThreshold: 9,

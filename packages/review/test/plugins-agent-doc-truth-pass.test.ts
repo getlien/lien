@@ -826,14 +826,15 @@ describe('postProcessDocTruthResult', () => {
     expect(processed.incomplete).toBe(false);
   });
 
-  it('keeps an "unverifiable" verdict as a real (warning) finding', () => {
+  it('drops an "unverifiable" verdict entirely (thin evidence is not proof of a contradiction)', () => {
     process.env.LIEN_DOC_TRUTH_V2 = 'on';
     const result = fakeResult([
       verdictFinding({ claimId: 'claim-1', verdict: 'unverifiable', message: 'could not locate' }),
     ]);
     const processed = postProcessDocTruthResult(result, singleClaimCtx());
-    expect(processed.findings).toHaveLength(1);
-    expect(processed.findings[0].message).toBe('could not locate');
+    expect(processed.findings).toHaveLength(0);
+    // Coverage honesty is unaffected: a claim honestly verdicted "unverifiable" still counts
+    // as covered (not incomplete) even though it never becomes a finding.
     expect(processed.incomplete).toBe(false);
   });
 

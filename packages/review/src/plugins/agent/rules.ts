@@ -788,10 +788,15 @@ MANDATORY protocol when this rule is active:
    stale/false claim and state the actual behavior; the \`evidence\` must
    cite the code fact that falsifies it (file:line, signature, return value,
    or the specific diff hunk) — not "the comment looks wrong".
-4. Stay silent on a claim only after locating the code and confirming it
-   still matches. A claim you genuinely could not locate is reported as a
-   \`warning\` "unverifiable behavioral claim in touched prose" — do not
-   silently pass it.`,
+4. Stay silent on a claim after locating the code and confirming it still
+   matches, OR after making a genuine attempt to locate it and failing. An
+   unconfirmed claim is not the same as a false one: only step 3's PROOF-of-
+   contradiction bar earns a finding. Do NOT report "I could not verify this
+   claim" as a finding — that turns thin evidence into a deliverable and
+   trains readers to ignore doc-truth noise. Do the verification work (step
+   2) first; then, whether you confirm, contradict, or genuinely cannot
+   locate the code, silence is correct for every outcome except a confirmed
+   contradiction.`,
   example: `### Good finding — mechanical rename left a doc comment describing removed behavior:
 {
   "filepath": "packages/core/src/config/schema.ts",
