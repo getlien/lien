@@ -34,24 +34,52 @@ const RETRY_NUDGE =
   'You ran out of budget. Output ONLY the JSON block now with your findings and summary. No tool calls.';
 
 /**
- * Bound on the summary-retry's own completion request (`max_tokens`), scaled
- * to whatever budget headroom remains when the main loop bails. Mirrors
+ * Bound on a "just emit the decided JSON verdict, no tools" completion
+ * request's `max_tokens`, scaled to whatever budget headroom remains. Mirrors
  * `AnthropicAgentClient`'s `requestMaxTokens`, which already does this for
- * every request including its own retry — this client's retry previously
- * requested a flat 24,576 unconditionally (see `chatCompletion`'s old
- * default), regardless of how far over budget the loop already was. On
- * PR #811's starved run that "cheap safety net" call cost MORE than the
- * pass's entire original allocation in both starved passes (doc-truth:
- * +11,388 tokens on a 2,422 budget; stale-duplicate: +5,695 on 4,400) — a
- * real findings+summary verdict fits comfortably under
- * RETRY_MIN_MAX_TOKENS even for a several-finding review, so the floor never
- * starves the retry of room to complete; the ceiling matches the loop's
- * normal per-request size. Exported for unit testing.
+ * every request including its own retry.
+ *
+ * Two call sites share this, both added incrementally:
+ * 1. The post-loop summary-retry (`runSummaryRetry` / #813) — this client's
+ *    retry previously requested a flat 24,576 unconditionally (see
+ *    `chatCompletion`'s old default), regardless of how far over budget the
+ *    loop already was. On PR #811's starved run that "cheap safety net" call
+ *    cost MORE than the pass's entire original allocation in both starved
+ *    passes (doc-truth: +11,388 tokens on a 2,422 budget; stale-duplicate:
+ *    +5,695 on 4,400).
+ * 2. The in-loop forced-finish turn (`run()`'s `forceFinish` branch / #825
+ *    fast-follow) — structurally the same "no tools, decided verdict" shape
+ *    as the retry, but #813 didn't wire it up, so it kept the flat,
+ *    budget-blind 24,576 ceiling. PR #825's doc-truth pass hit exactly this
+ *    gap: its forced-finish turn requested the full flat ceiling with only a
+ *    few thousand tokens of budget left, then finished with
+ *    `finish_reason:'stop'` — which exits `run()`'s loop as `'completed'`
+ *    *before* the post-response budget check ever runs — so the pass spent
+ *    117,724/100,000 tokens (+18%) without ever being flagged `starved`
+ *    (that field is `stopReason === 'budget'`, not a spent-vs-allocated
+ *    comparison — see `attestation.ts`'s `passBudget`).
+ *
+ * A real findings+summary verdict fits comfortably under RETRY_MIN_MAX_TOKENS
+ * even for a several-finding review, so the floor never starves either call
+ * site of room to complete; the ceiling matches the loop's normal
+ * per-request size. Exported for unit testing.
  */
 const RETRY_MIN_MAX_TOKENS = 2_048;
 const RETRY_MAX_MAX_TOKENS = 24_576;
 export function retryMaxTokens(remainingBudget: number): number {
   return Math.min(RETRY_MAX_MAX_TOKENS, Math.max(remainingBudget, RETRY_MIN_MAX_TOKENS));
+}
+
+/**
+ * The `max_tokens` to request for one main-loop turn: budget-scaled (call
+ * site 2 above) on the forced-finish turn, or `undefined` (falls through to
+ * `chatCompletion`'s flat default) for an ordinary investigative turn, which
+ * needs the full headroom. Pulled out of `run()`'s loop body — a bare
+ * ternary inline would add a branch to a function already over its
+ * cognitive-complexity budget.
+ */
+function turnMaxTokens(forceFinish: boolean, remainingBudget: number): number | undefined {
+  return forceFinish ? retryMaxTokens(remainingBudget) : undefined;
 }
 
 /**
@@ -334,9 +362,14 @@ export class OpenAIAgentClient {
     while (turn < this.maxTurns) {
       turn++;
 
+      const maxTokens = turnMaxTokens(
+        forceFinish,
+        this.maxTokenBudget - (totalInputTokens + totalOutputTokens),
+      );
+
       let response: ChatResponse;
       try {
-        response = await this.chatCompletion(messages, tools, forceFinish);
+        response = await this.chatCompletion(messages, tools, forceFinish, maxTokens);
       } catch (err) {
         // Transient failures are already retried inside chatCompletion; a throw
         // here means it gave up. End the run gracefully (stopReason 'error' → no

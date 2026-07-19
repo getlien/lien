@@ -190,6 +190,46 @@ describe('OpenAIAgentClient budget handling', () => {
     expect(bodies[0].max_tokens).toBe(24_576);
   });
 
+  it('bounds the in-loop forced-finish turn to remaining budget (#825 overshoot fix)', async () => {
+    // Same shape as "forces a JSON verdict...once near budget" above, but
+    // this asserts the WIRE-LEVEL fix: before this fix, the forced-finish
+    // turn (bodies[1]) requested the flat 24,576 ceiling regardless of how
+    // little budget (10,000 - 7,000 = 3,000) remained. PR #825's doc-truth
+    // pass hit exactly this gap — its forced-finish turn's uncapped request
+    // pushed total spend to 117,724/100,000 (+18%), then finished with
+    // finish_reason:'stop' (stopReason 'completed' below), which exits the
+    // loop *before* the post-response budget check ever runs — a silent
+    // overshoot never flagged as budget-starved.
+    const { bodies } = mockFetch([toolCallTurn(7000), stopTurn(CLEAN_JSON, 1000)]);
+    const client = makeClient(10_000);
+    const tools = [
+      { type: 'function', function: { name: 'read_file', description: 'd', parameters: {} } },
+    ];
+
+    const result = await client.run('sys', 'init', tools as never, noopTool);
+
+    expect(result.stopReason).toBe('completed'); // matches #825: completed, not flagged starved
+    expect(bodies[0].max_tokens).toBe(24_576); // turn 1 (not forced): unaffected, normal ceiling
+    expect(bodies[1].max_tokens).toBe(3_000); // forced-finish turn: capped to remaining budget
+  });
+
+  it('floors the in-loop forced-finish turn at 2,048 when remaining budget is tiny (#825)', async () => {
+    // Turn 1 (6,800 tokens) crosses the 0.6 wrap-up threshold on a 7,000
+    // budget but stays under the hard cap, leaving only 200 tokens of
+    // budget for the forced-finish turn — below RETRY_MIN_MAX_TOKENS, so it
+    // must floor at 2,048 (parity with the retry's own floor, #811) rather
+    // than request a near-zero or negative max_tokens.
+    const { bodies } = mockFetch([toolCallTurn(6_800), stopTurn(CLEAN_JSON, 100)]);
+    const client = makeClient(7_000);
+    const tools = [
+      { type: 'function', function: { name: 'read_file', description: 'd', parameters: {} } },
+    ];
+
+    await client.run('sys', 'init', tools as never, noopTool);
+
+    expect(bodies[1].max_tokens).toBe(2_048);
+  });
+
   it('recovers a verdict via the json-forced summary-retry after a bail', async () => {
     // Loop bails on budget with no verdict; the retry returns raw JSON (as
     // response_format:json_object would) and must be parsed into a summary.
