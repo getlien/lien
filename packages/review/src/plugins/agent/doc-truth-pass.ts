@@ -40,12 +40,24 @@
  * an extra finding for a claim the model spotted itself (no `claimId`) is
  * still legal and passes straight through — the rule text's existing "also
  * skim the touched hunks for any [claim] not listed" allowance is unchanged.
- * `postProcessDocTruthResult` reduces `contradicted`/`unverifiable` verdicts
- * to real findings (dropping `accurate` ones, mirroring the "stay silent when
- * confirmed" v1 instruction) and marks the result honestly
+ * `postProcessDocTruthResult` reduces ONLY `contradicted` verdicts to real
+ * findings — `accurate` AND `unverifiable` are both dropped (mirroring v1's
+ * "stay silent unless you have proof" instruction, and matching every
+ * sibling candidate-loop pass: `stale-duplicate-pass.ts` keeps only `stale`,
+ * `removed-exports-pass.ts` keeps only `breaking`, `incomplete-handling-
+ * pass.ts` keeps only `incomplete` — none of them promote their own
+ * "couldn't verify" verdict either). A thin-evidence claim honestly verdicted
+ * `unverifiable` is real signal (see `hasCompleteVerdictCoverage` below) but
+ * is not a reader-facing finding: "I couldn't check" is not the same
+ * deliverable as "the code contradicts this," and treating them the same
+ * turned a precision-guard fixture with thin evidence into a false positive
+ * (accurate-doc, 3/3 — see this change's PR body). The result marks
  * `incomplete_verdict` when any listed id's verdict is missing, invalid,
  * duplicated, or unrecognized (CodeRabbit-hardened honesty rigor — see
- * `stale-duplicate-pass.ts`'s `hasCompleteVerdictCoverage` doc comment).
+ * `stale-duplicate-pass.ts`'s `hasCompleteVerdictCoverage` doc comment) —
+ * that check reads the RAW per-claim verdict list, so an `unverifiable`
+ * verdict still counts as honest coverage even though it never becomes a
+ * finding.
  *
  * When the flag is off, every v2 function is unreachable and
  * `buildDocTruthPassPrompts`/`postProcessDocTruthResult` return exactly what
@@ -780,18 +792,22 @@ function hasCompleteVerdictCoverage(ids: string[], raw: RawDocClaimVerdict[]): b
 
 /**
  * Reduce the raw v2 findings array to real findings: every ad hoc finding (no `claimId`) passes
- * through unchanged, and every claimed entry is kept ONLY when its verdict is `contradicted` or
- * `unverifiable` (cleaned of the v2-only fields) — mirroring v1's rule text ("a claim the code
- * confirms needs no finding" / "a claim you cannot locate is reported as a warning"). An
- * `accurate` verdict, or any claimed entry with an invalid/unrecognized verdict, is dropped
- * rather than guess-promoted — the inclusion-list mirror of `stale-duplicate-pass.ts`'s
- * `verdict === 'stale'` filter.
+ * through unchanged, and every claimed entry is kept ONLY when its verdict is `contradicted`
+ * (cleaned of the v2-only fields) — mirroring v1's rule text (stay silent unless you have proof
+ * of a contradiction) and the exact inclusion-list pattern every sibling candidate-loop pass
+ * uses: `stale-duplicate-pass.ts` keeps `verdict === 'stale'` only, `removed-exports-pass.ts`
+ * keeps `'breaking'` only, `incomplete-handling-pass.ts` keeps `'incomplete'` only. Both
+ * `accurate` and `unverifiable` are dropped rather than guess-promoted: `accurate` because the
+ * claim checked out, `unverifiable` because "I couldn't check" is not proof of a contradiction —
+ * promoting it made a thin-evidence claim look like a real finding (see the `accurate-doc`
+ * precision-guard fixture, which this reduction previously false-fired on 3/3). Coverage
+ * honesty is unaffected: `hasCompleteVerdictCoverage` (below) reads the RAW, pre-reduction list,
+ * so a claim honestly verdicted `unverifiable` still counts as covered even though it never
+ * surfaces here.
  */
 function reduceDocTruthV2Findings(raw: RawDocClaimVerdict[]): AgentFinding[] {
   return raw
-    .filter(
-      f => f.claimId === undefined || f.verdict === 'contradicted' || f.verdict === 'unverifiable',
-    )
+    .filter(f => f.claimId === undefined || f.verdict === 'contradicted')
     .map(f => (f.claimId !== undefined ? toCleanDocTruthFinding(f) : f));
 }
 

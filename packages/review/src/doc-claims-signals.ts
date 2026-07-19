@@ -1264,9 +1264,10 @@ const DOC_CLAIMS_HEADER =
   'with NO evidence, locate the code yourself using material already in your ' +
   'prompt (the diff hunks, <changed_functions>, and get_files_context on the ' +
   'described symbols — it reads indexed chunks, so it works even when ' +
-  'grep_codebase/read_file are blind); if it is a genuine behavioral claim you ' +
-  'still cannot locate, report a warning "unverifiable behavioral claim in ' +
-  'touched prose". An entry that is plainly descriptive prose (not a ' +
+  'grep_codebase/read_file are blind); if, after that genuine attempt, you ' +
+  'still cannot locate it, stay silent — an unconfirmed claim is not evidence ' +
+  'of a false one, and reporting "I could not verify this" as a finding is ' +
+  'noise, not a catch. An entry that is plainly descriptive prose (not a ' +
   'falsifiable claim about this code) needs no finding — do NOT report ' +
   'wording/style nits or manufacture a contradiction the code does not support.';
 
