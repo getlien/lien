@@ -95,7 +95,7 @@ import {
 import {
   renderPassPrHeader,
   EXTRA_PASS_MIN_BUDGET_TOKENS,
-  OBSERVED_TOKENS_PER_TURN,
+  VERDICT_EMISSION_RESERVE_TOKENS,
   affordableCandidateCeiling,
   capCandidatesToCeiling,
   deferredCandidateLabels,
@@ -115,9 +115,43 @@ import {
  */
 export const INCOMPLETE_PASS_MAX_TURNS = 8;
 
-const BASE_OVERHEAD_TOKENS = 2_500;
-const PER_CANDIDATE_TOKENS = 900;
-const MAX_BUDGET = 35_000;
+/**
+ * This pass's OWN per-candidate cost — no longer shared with `review-pass.ts`'s generic
+ * `OBSERVED_TOKENS_PER_TURN` (6,000), which the removed-exports-loop still uses. Derived from
+ * PR #813/#814/#819/#820/#822's five STARVED production firings: `spentTokens ÷ candidateCount`
+ * ranged 3,579-29,988/candidate (mean ≈11,586 — see the PR body's full arithmetic). The old
+ * `PER_CANDIDATE_TOKENS` (900, a prompt-SIZING estimate — just the rendered candidate text) and
+ * the borrowed `OBSERVED_TOKENS_PER_TURN` (6,000, one bare tool-dispatch turn) both undercounted
+ * this pass's REAL per-candidate cost: judging one candidate here needs a read_file +
+ * get_files_context round-trip (sometimes grep_codebase too — module doc), each turn re-sending
+ * accumulated conversation context. 12,000 rounds the empirical mean up for margin. This is a
+ * point-in-time estimate from 5 (truncated, hence lower-bound) production samples, not a proven
+ * ceiling — revisit if production firings keep starving at this rate.
+ */
+const INCOMPLETE_HANDLING_TOKENS_PER_CANDIDATE = 12_000;
+
+/**
+ * Base overhead for this pass's budget scaler — deliberately set equal to
+ * `VERDICT_EMISSION_RESERVE_TOKENS`, not an independent guess. Before this fix, the scaler's own
+ * base (2,500) and the overflow ceiling's reserve (5,000, in `affordableCandidateCeiling`) were
+ * two DIFFERENT numbers computed independently — so even a `budget()` "sized for n candidates"
+ * would only ever come out `affordableCandidateCeiling` as n-1 or worse, deferring one MORE
+ * candidate than the scaler itself claimed to fund (see PR #822's own dogfood: a 15-candidate,
+ * 16,000-token budget still only afforded 1). Reusing the reserve as the base makes the scaler
+ * the exact algebraic inverse of the ceiling: `budget(n) = RESERVE + RATE*n` <=>
+ * `affordableCandidateCeiling(budget(n), RATE) === n` (whenever budget isn't clamped) — cap and
+ * budget now agree by construction, per PR body's arithmetic.
+ */
+const BASE_OVERHEAD_TOKENS = VERDICT_EMISSION_RESERVE_TOKENS;
+/**
+ * Raised from 35,000 (see PR body): at the new 12,000/candidate rate, 35,000 only affords 2-3
+ * candidates before real cost overruns it (still below every observed starved-run spend). 65,000
+ * affords 5 fully-investigated candidates before rank-and-cap (#822) honestly defers the rest —
+ * a deliberate cost/completeness trade-off, not an attempt to fund every production firing's full
+ * worklist (some see 15; funding all 15 at this rate would cost ~185,000 tokens, disproportionate
+ * to a second-order single-rule loop).
+ */
+const MAX_BUDGET = 65_000;
 
 /** Mirrors variant-sweep-signals.ts's own MAX_ENTRIES cap — that module's compute()
  * function is itself uncapped (its cap is applied only by its own renderer, which
@@ -321,16 +355,17 @@ function incompleteHandlingLabel(c: IncompleteHandlingCandidate): string {
 /** This run's actual worklist after rank-and-cap. Unlike the pilot's stale-literal candidates,
  *  NONE of this rule's three shapes attach an inline code snippet (module doc: "you need the
  *  actual site's code to judge it") — read_file/get_files_context is load-bearing for most
- *  candidates, so the realistic per-candidate cost is `OBSERVED_TOKENS_PER_TURN`, not this pass's
- *  own (prompt-sizing) PER_CANDIDATE_TOKENS constant. `budget` defaults to unlimited so every
- *  existing call site that doesn't pass one is byte-identical to before this feature existed.
- *  Exposed for testing. */
+ *  candidates, so the realistic per-candidate cost is this pass's OWN
+ *  `INCOMPLETE_HANDLING_TOKENS_PER_CANDIDATE` (empirically derived — see that constant's doc
+ *  comment), the SAME rate `incompleteHandlingPassBudget` scales the allocation by, so the
+ *  ceiling and the budget agree. `budget` defaults to unlimited so every existing call site that
+ *  doesn't pass one is byte-identical to before this feature existed. Exposed for testing. */
 export function computeIncompleteHandlingWorklist(
   context: ReviewContext,
   budget = Number.POSITIVE_INFINITY,
 ): { candidates: IncompleteHandlingCandidate[]; deferredCount: number; deferredIds: string[] } {
   const all = computeIncompleteHandlingCandidates(context);
-  const ceiling = affordableCandidateCeiling(budget, OBSERVED_TOKENS_PER_TURN);
+  const ceiling = affordableCandidateCeiling(budget, INCOMPLETE_HANDLING_TOKENS_PER_CANDIDATE);
   const { kept, deferred } = capCandidatesToCeiling(all, ceiling);
   return {
     candidates: kept,
@@ -502,19 +537,20 @@ export function buildIncompleteHandlingPassPrompts(
 /**
  * Budget scaled by this pass's own combined candidate count (per the
  * per-rule-loops design doc §2), clamped floor/ceiling — mirrors the
- * pilot's `staleDuplicatePassBudget`. The floor is
- * `EXTRA_PASS_MIN_BUDGET_TOKENS` (shared across all three extra passes —
- * see that constant's doc comment / PR #811): unlike the stale-duplicate
- * pilot, this pass's scaling ceiling (2,500 + 900×20 = 20,500) still sits
- * above the floor, so real scaling shows through once combined candidate
- * count exceeds ~9-10, while a 1-2 candidate run (this repo's real-PR
- * census: sibling-surface firing on 9/40) gets the same one-real-round-trip
- * floor doc-truth/stale-duplicate get.
+ * pilot's `staleDuplicatePassBudget`, but with this pass's OWN empirically-derived rate (see
+ * `INCOMPLETE_HANDLING_TOKENS_PER_CANDIDATE`'s doc comment) instead of a flat
+ * prompt-sizing constant. The floor is `EXTRA_PASS_MIN_BUDGET_TOKENS` (shared across all three
+ * extra passes — see that constant's doc comment / PR #811); in practice it no longer binds here
+ * (even a single candidate scales to 17,000, above the 11,000 floor) but stays as a defensive
+ * lower bound. `MAX_BUDGET` (65,000) caps full funding at 5 candidates (see that constant's doc
+ * comment) — a real-PR firing with more than that gets the rest honestly deferred via
+ * `computeIncompleteHandlingWorklist`'s rank-and-cap, not silently starved.
  */
 export function incompleteHandlingPassBudget(_baseBudget: number, context: ReviewContext): number {
   const candidateCount = computeIncompleteHandlingCandidates(context).length;
   const scaled =
-    BASE_OVERHEAD_TOKENS + PER_CANDIDATE_TOKENS * Math.min(candidateCount, MAX_TOTAL_CANDIDATES);
+    BASE_OVERHEAD_TOKENS +
+    INCOMPLETE_HANDLING_TOKENS_PER_CANDIDATE * Math.min(candidateCount, MAX_TOTAL_CANDIDATES);
   return Math.min(Math.max(scaled, EXTRA_PASS_MIN_BUDGET_TOKENS), MAX_BUDGET);
 }
 
