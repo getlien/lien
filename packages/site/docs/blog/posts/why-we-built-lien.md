@@ -11,15 +11,47 @@ draft: true
 
 # Why We Built Lien
 
-[OWNER: this is the post that most needs your voice — the sections below are
-structured and fact-checked, but the personal "why I started this" framing
-is yours to write. I've left `[OWNER: ...]` markers where I think first-person
-narrative belongs. Everything outside those markers is sourced against this
-repo's own docs — see the review notes for the full claim-by-claim map.]
+I built Lien initially out of curiosity: could I get Claude's coding agents to
+actually understand a monorepo — the cross-package dependencies, the "if I
+touch this, what else moves" question — instead of guessing at it? A smaller,
+more selfish itch sat right next to that one: I was tired of manually hunting
+through a codebase for something like "how is auth handled here," and wanted
+a shortcut. That second itch is what got me building an index in the first
+place — the first version of Lien was semantic, embeddings and all.
 
-[OWNER: a paragraph or two here on how you started building this and why —
-what problem you kept hitting that made you want a tool that tells a coding
-agent what it's about to break, before it breaks it.]
+It didn't stay that way. Building that semantic search taught me something I
+didn't expect: the questions that actually made an agent better at working in
+a codebase weren't semantic-similarity questions at all — they were
+structural ones. What depends on this file. How complex is this function.
+What tests cover it. The embeddings were answering a question nobody was
+really asking. That's the story behind the "no embeddings" section below —
+it's not a pivot I made on a whiteboard, it's a lesson dogfooding taught me.
+
+Complexity metrics came next, for a specific reason: I had an idea to build a
+cloud app that would surface complexity across an entire GitHub org and nudge
+teams toward writing less of it — which, much later, became Lien Review, the
+PR review Action.
+
+Along the way I noticed something else: the same Tree-sitter AST parsing that
+helped an agent understand a codebase's structure could power a code review
+loop too. That became Lien Review — and it's where I felt like I was onto
+something real. Because those AST-derived signals are deterministic, not
+vibes, in my own head-to-head testing Lien Review caught real bugs that
+slipped past paid tools like CodeRabbit, running a noticeably cheaper model
+underneath — though not always; the section below has the one time it went
+the other way.
+
+The last piece closed the loop in the other direction: if Lien already knows
+a function's complexity, why wait for a PR to say so? That's the idea behind
+the runtime nudge — surfacing a complexity warning to an agent before it
+edits a function, not after. I've now confirmed that idea actually changes
+what an agent writes; see [the pre-registered A/B](/blog/posts/complexity-nudges-ab-test)
+for the numbers.
+
+All of it is in service of the same bet: that agents can be trusted to write
+more of our code, without giving up quality or correctness for it — as long
+as they have the same structural understanding of a codebase a careful human
+reviewer would insist on.
 
 Lien is a code-intelligence layer for AI coding assistants: structural
 analysis (dependencies, blast radius, complexity, test coverage) plus fast
