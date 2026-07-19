@@ -350,6 +350,92 @@ describe('computeDocsDriftCandidates — suppression negatives', () => {
 });
 
 // ---------------------------------------------------------------------------
+// computeDocsDriftCandidates — boundary precision (adversarial review finding: plain \b treats
+// `-`/`.` as boundaries even though they continue the same identifier/path in this codebase's
+// conventions, producing false matches inside a longer, unrelated token)
+// ---------------------------------------------------------------------------
+
+describe('computeDocsDriftCandidates — boundary precision (no substring false-matches)', () => {
+  it('does NOT match a deleted-path referand as a prefix of a hyphen-suffixed longer path', () => {
+    const patches = new Map([
+      ['packages/runner/src/index.ts', hunkOnlyDeletion('export function run() {}')],
+    ]);
+    const repoChunks = [
+      makeChunk(
+        'docs/guide.md',
+        1,
+        '- `packages/runner-hosted` — an unrelated package that merely shares a prefix.',
+      ),
+    ];
+    const ctx = makeContext({ patches, repoChunks });
+    expect(computeDocsDriftCandidates(ctx)).toEqual([]);
+  });
+
+  it('does NOT match a deleted-path referand as a suffix of a hyphen-prefixed longer path', () => {
+    const patches = new Map([
+      ['packages/runner/src/index.ts', hunkOnlyDeletion('export function run() {}')],
+    ]);
+    const repoChunks = [
+      makeChunk(
+        'docs/guide.md',
+        1,
+        '- `sub-packages/runner` — an unrelated package that merely shares a suffix.',
+      ),
+    ];
+    const ctx = makeContext({ patches, repoChunks });
+    expect(computeDocsDriftCandidates(ctx)).toEqual([]);
+  });
+
+  it('DOES match a deleted-path referand when followed by / (a legitimate sub-path reference)', () => {
+    const patches = new Map([
+      ['packages/runner/src/index.ts', hunkOnlyDeletion('export function run() {}')],
+    ]);
+    const repoChunks = [
+      makeChunk('docs/guide.md', 1, '- `packages/runner/README.md` — see this for details.'),
+    ];
+    const ctx = makeContext({ patches, repoChunks });
+    const candidates = computeDocsDriftCandidates(ctx);
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].referand).toBe('packages/runner');
+  });
+
+  it('does NOT match a removed-export referand adjacent to a hyphen (a different identifier)', () => {
+    const patches = new Map([
+      ['src/util.ts', patch('@@ -1,1 +0,0 @@', '-export function fetchUser() {}')],
+    ]);
+    const repoChunks = [
+      makeChunk('docs/guide.md', 1, 'The `my-fetchUser` helper requires a config object.'),
+    ];
+    const ctx = makeContext({ patches, repoChunks });
+    expect(computeDocsDriftCandidates(ctx)).toEqual([]);
+  });
+
+  it('does NOT match a removed-export referand adjacent to a period (a different identifier)', () => {
+    const patches = new Map([
+      ['src/util.ts', patch('@@ -1,1 +0,0 @@', '-export function fetchUser() {}')],
+    ]);
+    const repoChunks = [
+      makeChunk('docs/guide.md', 1, 'The `fetchUser.old` helper requires a config object.'),
+    ];
+    const ctx = makeContext({ patches, repoChunks });
+    expect(computeDocsDriftCandidates(ctx)).toEqual([]);
+  });
+
+  it('still matches the exact removed-export referand surrounded by plain prose/punctuation', () => {
+    const patches = new Map([
+      ['src/util.ts', patch('@@ -1,1 +0,0 @@', '-export function fetchUser() {}')],
+    ]);
+    const repoChunks = [
+      makeChunk('docs/guide.md', 1, 'The `fetchUser` helper requires a config object.'),
+    ];
+    const ctx = makeContext({ patches, repoChunks });
+    const candidates = computeDocsDriftCandidates(ctx);
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].referand).toBe('fetchUser');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // computeDocsDriftCandidates — determinism + cap
 // ---------------------------------------------------------------------------
 

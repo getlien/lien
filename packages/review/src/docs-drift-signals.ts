@@ -284,8 +284,24 @@ function escapeForRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function wordBoundaryRe(token: string): RegExp {
-  return new RegExp(`\\b${escapeForRegex(token)}\\b`);
+/**
+ * The characters that would extend a matched token into a DIFFERENT, longer identifier or path
+ * segment — used as a negative lookaround so a referand match doesn't spuriously fire inside a
+ * larger token it's merely a substring of (e.g. `packages/runner` inside `packages/runner-hosted`
+ * or `sub-packages/runner`; `fetchUser` inside `my-fetchUser` or `fetchUser.old`). Plain `\b` alone
+ * is insufficient: `-` and `.` are non-word characters, so `\b` treats them as legitimate
+ * boundaries even though this codebase's identifier/path conventions use them to continue the same
+ * token. `/` is deliberately NOT in this set — a leading/trailing `/` is a legitimate path
+ * continuation (`packages/runner/README.md` still names the same now-deleted directory), and this
+ * repo's own paths are `/`-delimited. (Adversarial review finding — packages/review/src/... #427.)
+ */
+const CONTINUATION_CHARS = '[A-Za-z0-9_.-]';
+
+/** A word/path-boundary regex for `token` — see `CONTINUATION_CHARS` for why this is stricter than
+ *  plain `\b`. Pass `flags: 'g'` for a reusable global-match regex (`matchAll`). */
+function wordBoundaryRe(token: string, flags = ''): RegExp {
+  const escaped = escapeForRegex(token);
+  return new RegExp(`(?<!${CONTINUATION_CHARS})${escaped}(?!${CONTINUATION_CHARS})`, flags);
 }
 
 /** Cheap pre-check before the per-line regex: does `chunk`'s raw content contain the referand's
@@ -376,7 +392,7 @@ function referandOnlyInsideLinkOrUrl(referand: Referand, line: string): boolean 
   const spans = linkOrUrlSpans(line);
   if (spans.length === 0) return false;
 
-  const re = new RegExp(`\\b${escapeForRegex(referand.token)}\\b`, 'g');
+  const re = wordBoundaryRe(referand.token, 'g');
   const positions = [...line.matchAll(re)]
     .map(m => m.index)
     .filter((i): i is number => i !== undefined);
