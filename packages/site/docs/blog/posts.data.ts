@@ -41,6 +41,11 @@ export default createContentLoader('blog/posts/*.md', {
         draft: Boolean(page.frontmatter.draft),
         url: page.url,
       }))
-      .sort((a, b) => (a.date < b.date ? 1 : -1))
+      // Must return 0 for equal dates -- `a.date < b.date ? 1 : -1` returns
+      // -1 for BOTH (a, b) and (b, a) when the dates tie, which breaks the
+      // total-order contract Array.prototype.sort's comparator relies on
+      // (all three seed posts currently share one date, so ties aren't a
+      // hypothetical edge case here).
+      .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
   },
 })
