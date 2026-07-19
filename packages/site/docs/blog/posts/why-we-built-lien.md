@@ -30,45 +30,84 @@ even then. It was the actual constraint I designed around from day one:
 nothing about someone's code should ever have to leave the machine it
 lives on.
 
-Then the product itself changed underneath me, and that whole stack
-stopped making sense. I wasn't building search for a person typing a query
-anymore. I was building something an agent leans on in the middle of an
-edit, and that flips the requirements around. A person searching can wait
-a second and is fine with an answer that's roughly related. An agent
-asking what happens if it touches this file, while it's actively deciding
-whether to make that change, needs an answer inside its own thinking
-budget, close to instant, and it needs that answer to be exactly right,
-not approximately close. "Fourteen callers, three of them untested" beats
-a similarity score every time, when the thing reading the answer has to
-decide something right now. It needs to know what breaks if it changes,
-not what the code is roughly about.
+From there, the real story splits into two separate threads that ran for
+months before they ever met.
 
-So the old stack came out, in full, not trimmed down. The embedding model
-and LanceDB were both removed entirely. In their place: better-sqlite3, a
+The first thread was about getting an agent to use the tools Lien gave
+it. The tools existed early on, back in November, and
+instructions telling an agent to use them followed within the hour. That
+pairing was always the plan, never an afterthought. By February, those
+instructions had hardened into hard requirements written directly into
+the rules an agent reads before touching a file: call this before
+editing, call that before renaming something exported.
+
+Then came an honest admission, in May: those requirements were, in
+practice, advisory. The model frequently went straight to editing a file
+without calling anything first. [We said so in
+public](https://github.com/getlien/lien/issues/560). The first fix was
+blunt, a gate that physically blocked an edit until the right tool had
+been called, and it shipped and then got pulled again within a day, too
+heavy-handed, the kind of friction that makes someone route around a tool
+instead of using it. What replaced it was smaller, and it actually
+worked: a hook that quietly hands the agent a short note about a file's
+impact right after it reads that file. No gate, no blocking, just the
+right fact arriving at the right moment. Watching real sessions is what
+showed that channel actually reaches the model, more reliably than a rule
+ever did. That's really where the idea of nudging was born, not enforcing
+compliance, but making sure the right context shows up exactly when it's
+useful.
+
+A second, separate thread started roughly seven weeks later and had
+nothing to do with any of that. The tool an agent was now required to
+call before every edit got measured under real traffic, and it came back
+slow, something like 40 milliseconds a call, sitting on top of an install
+that pulled in a heavy embedding model. What actually drove the next
+decision wasn't hook work at all. It was [a dedicated
+benchmark](https://github.com/getlien/lien/pull/645), a plain side-by-side
+test of a few different storage engines. The embedding model and the
+vector database both came out entirely. In their place: better-sqlite3, a
 boring, extremely well-tested embedded database that can answer a keyword
 search in milliseconds with no model involved at all. [We wrote up that
 whole decision in more detail
 here.](https://github.com/getlien/lien/blob/main/docs/architecture/decisions/0011-sqlite-structural-store-fts5-lexical-search.md)
-The parser itself got rewritten too, as a native Rust module using
+That one change dropped the same pre-edit call by roughly a thousand
+times, from about 40 milliseconds down to about 0.04. A few days later,
+the parser itself got rewritten too, as a native Rust module using
 napi-rs, a way to call Rust code directly from Node, instead of a
 JavaScript wrapper around a separately compiled binary. That wasn't only
-about raw speed, although it is faster. The old setup had to compile a
-native module on every fresh install, and that compile step was the
-single most common reason someone's install of Lien would fail. The Rust
-version ships pre-built for every platform, so a fresh install now takes
-seconds and compiles nothing at all.
+about speed, although it is faster. The old setup had to compile a native
+module on every fresh install, and that compile step was the single most
+common reason someone's install of Lien would fail. The Rust version
+ships pre-built for every platform, so a fresh install now takes seconds
+and compiles nothing at all.
 
-A few things about building it stuck with me. The fanciest part of the
-system wasn't the valuable part. A plain, boring database mattered more
-than the machine-learning model sitting next to it. When the thing using
-your tool is an agent in a loop rather than a person browsing, speed and
-an exact, repeatable answer aren't nice extras, they're the actual
-feature. Deleting an entire subsystem, not shrinking it, made the product
-better. And local-first is the one constraint that survived every
-rewrite, because it was never a feature bolted on top. It's the thing
-everything else got rebuilt around.
+The two threads met on one particular afternoon, the same day the faster
+storage landed. It enabled a check that genuinely couldn't have existed
+before: a complexity gate that runs at the moment of an edit and answers
+in about 30 milliseconds. It exists because of a real incident. [An agent
+had shipped a change](https://github.com/getlien/lien/pull/672) that
+passed every other gate in place at the time, while pushing one
+function's complexity to 29 against an agreed limit of 15. The later
+nudges, a warning before an edit even happens, a reminder about test
+coverage, all ride on that same fast storage layer underneath.
 
-Complexity metrics came next, for a specific reason. I had an idea to build
+Looking back, a few things stuck with me. Getting an agent to comply
+with the right process, and making the underlying answers fast
+enough to act on in real time, turned out to be two separate problems on
+two separate timelines, not one. Lien today is really just where those
+two problems finally met. The fanciest part of the original stack was
+never the valuable part either. A plain, boring database mattered more
+than the machine-learning model sitting next to it, and deleting that
+whole model and its vector store, not trimming them, is what made the
+product better. When the thing using your tool is an agent
+inside a loop rather than a person browsing, speed and an exact,
+repeatable answer aren't nice extras, they're the actual feature. And
+local-first survived every rewrite in both threads, because it was never
+a feature bolted on top. It's the thing everything else got rebuilt
+around.
+
+A related complexity idea was running on its own track the whole time,
+completely separate from the edit-time gate above. I had an idea to build
 a tool that would show how complicated code was getting across an entire
 team's projects, and nudge people toward writing less of that complexity.
 Much later, that idea became the automatic pull-request reviewer I'll
@@ -85,7 +124,7 @@ that slipped past paid competitors, using a noticeably cheaper model
 underneath. Not always, though. Further down there's the one time it went
 the other way, and we kept that one too.
 
-The last piece closed the loop in the other direction. If a tool already
+One of those later nudges deserves its own explanation. If a tool already
 knows a function is getting too complicated, why wait until a pull request
 to say so? That's the idea behind warning an agent before it even makes an
 edit, not after it's already made a mess. I've now confirmed that idea
