@@ -45,7 +45,7 @@ The last piece closed the loop in the other direction: if Lien already knows
 a function's complexity, why wait for a PR to say so? That's the idea behind
 the runtime nudge — surfacing a complexity warning to an agent before it
 edits a function, not after. I've now confirmed that idea actually changes
-what an agent writes; see [the pre-registered A/B](/blog/posts/complexity-nudges-ab-test)
+what an agent writes; see [the pre-registered A/B](https://github.com/getlien/lien/blob/main/docs/development/nudge-behavioral-ab.md)
 for the numbers.
 
 All of it is in service of the same bet: that agents can be trusted to write
@@ -154,7 +154,7 @@ commit. That miss is now a committed fixture in the corpus, not a footnote.
 Most recently, that same evidence discipline paid off somewhere we didn't
 expect: proving out a structural fix to how Lien Review handles crowded PRs,
 using a real, live bug we found in `drizzle-orm` along the way. [More on
-that here](/blog/posts/reviewer-that-cant-skip-candidate-loops).
+that here](https://github.com/getlien/lien/blob/main/docs/architecture/decisions/0014-per-rule-candidate-loop-passes.md).
 
 We think that's a more useful thing to publish than another benchmark
 chart.
@@ -167,7 +167,7 @@ way and make sure improvements come back to the project.
 
 Install for Claude Code is one command:
 
-```
+```text
 /plugin marketplace add getlien/lien
 /plugin install lien
 ```

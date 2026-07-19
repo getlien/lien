@@ -2,7 +2,7 @@
 
 The blog lives at `packages/site/docs/blog/`:
 
-```
+```text
 packages/site/docs/blog/
 ├── index.md          # listing page (always built, never gated)
 ├── posts.data.ts      # VitePress content loader for the listing
@@ -12,7 +12,8 @@ packages/site/docs/blog/
     └── reviewer-that-cant-skip-candidate-loops.md
 ```
 
-A new post is a markdown file under `docs/blog/posts/` with frontmatter:
+A new post is a markdown file under `packages/site/docs/blog/posts/` with
+frontmatter:
 
 ```yaml
 ---
@@ -40,21 +41,25 @@ run:
   card. This is how the owner reviews a draft locally before publishing it.
 - **`npm run docs:build`** (production) — draft posts are excluded from
   everything: the listing (`posts.data.ts` filters them out at load time,
-  via `import.meta.env.PROD`, so a draft's title/description never even
-  enter the built client bundle), the nav (the top-level "Blog" nav entry
-  just links to the always-built index page, not to individual posts), any
-  future sitemap (there's no sitemap generator in this VitePress site today;
-  since a draft's page is never part of VitePress's resolved page list, any
-  sitemap generator added later would exclude it automatically), and
-  rendering (the draft's `.md` file is added to VitePress's `srcExclude`
-  during a production build, so no HTML page is generated for it at all —
-  its URL 404s because the file genuinely doesn't exist in `dist/`, not
-  because of a runtime check).
+  via `process.env.NODE_ENV === 'production'` — content loaders run as
+  plain Node ESM, not through Vite's module graph, so `import.meta.env`
+  isn't available there; see the code comment in `posts.data.ts` — so a
+  draft's title/description never even enter the built client bundle), the
+  nav (the top-level "Blog" nav entry just links to the always-built index
+  page, not to individual posts), any future sitemap (there's no sitemap
+  generator in this VitePress site today; since a draft's page is never
+  part of VitePress's resolved page list, any sitemap generator added later
+  would exclude it automatically), and rendering (the draft's `.md` file is
+  added to VitePress's `srcExclude` during a production build, so no HTML
+  page is generated for it at all — its URL 404s because the file
+  genuinely doesn't exist in `dist/`, not because of a runtime check).
 
-The mechanism: `docs/.vitepress/config.ts` is a command-aware config
-function (`defineConfig(({ command }) => ...)` — VitePress/Vite pass
-`command: 'build' | 'serve'`). Only when `command === 'build'` does it
-compute `srcExclude` from `docs/.vitepress/blogDrafts.ts`'s
+The mechanism: `docs/.vitepress/config.ts` exports a command-aware
+`UserConfigExport` function (`({ command }) => ...` — VitePress/Vite pass
+`command: 'build' | 'serve'`) rather than wrapping it in `defineConfig(...)`,
+whose declared type only accepts a resolved config object, not the function
+form. Only when `command === 'build'` does the function compute
+`srcExclude` from `docs/.vitepress/blogDrafts.ts`'s
 `getDraftPostExcludes()`, which scans `docs/blog/posts/*.md` for
 `draft: true` frontmatter with a small regex (no YAML-parsing dependency
 needed — VitePress bundles one internally but doesn't expose it for reuse).

@@ -32,7 +32,7 @@ relative to an identical prompt with no warning.
 
 **Target function:** `formatDeltaText` in `packages/cli/src/cli/delta-cmd.ts`,
 sitting at cyclomatic 13/15 and cognitive 13/15 — two points of headroom on
-both metrics, the same headroom lien's own `annotate` command would flag in
+both metrics, the same headroom Lien's own `annotate` command would flag in
 real usage.
 
 **The task:** add one feature (cap a long function list at 20 rows, append a
@@ -40,7 +40,7 @@ summary line for the rest) to `formatDeltaText`. Both conditions received a
 byte-identical prompt, except for one inserted block: the real warning line,
 built from the actual PR #772 formatter, not reconstructed by hand —
 
-```
+```text
 ⚠ Lien: formatDeltaText cyclomatic 13/15, deltaCommand cognitive 13/15 — avoid adding complexity here; prefer extraction.
 ```
 
