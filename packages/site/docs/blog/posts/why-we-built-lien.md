@@ -210,9 +210,12 @@ chart.
 ## The rest of it
 
 It's licensed under the AGPL: self-hosted, bring-your-own-key, no vendor
-lock-in, and no telemetry anywhere. Free forever for local use. The license
-exists to keep it that way, and to make sure improvements come back to the
-project instead of disappearing into someone's private fork.
+lock-in, and no telemetry anywhere. Free forever for local use. The
+license exists to keep it that way: if someone builds on Lien and shares
+that publicly, as software they distribute or a service they run over a
+network, the AGPL means their improvements have to be shared back too. A
+private fork that's never distributed or offered as a service can stay
+private.
 
 Install for Claude Code is one command:
 

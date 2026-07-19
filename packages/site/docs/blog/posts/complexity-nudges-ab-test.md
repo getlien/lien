@@ -43,9 +43,10 @@ times: 8 times with a short warning inserted first, and 8 times with
 nothing extra at all, no mention of complexity, no hint that anything was
 being measured.
 
-The warning was not a paraphrase we wrote up for the blog. It was the
-literal line Lien's own tooling produces when it flags a function like
-this:
+The warning was not a paraphrase we wrote up for the blog. It carries the
+same function names and numbers Lien's own tooling actually produced when
+it flagged this function, lightly repunctuated here to match this post's
+style:
 
 ```text
 ⚠ Lien: formatDeltaText cyclomatic 13/15, deltaCommand cognitive 13/15. Avoid adding complexity here; prefer extraction.
