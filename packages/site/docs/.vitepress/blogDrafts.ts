@@ -18,20 +18,28 @@
 // listing — a page generated in `dist/` with no link pointing at it, but
 // reachable by URL. Parsing frontmatter the same way VitePress does closes
 // that gap.
+//
+// `Boolean(...)`, not `=== true`, matches `docs/blog/posts.data.ts`'s own
+// truthiness check on the SAME field. Both sides must agree on every value
+// an author might type, not just the canonical boolean `true` — a stray
+// `draft: "true"` (quoted, so YAML parses it as a string) or `draft: 1`
+// should still be treated as a draft everywhere, erring toward excluding
+// too much rather than leaking a page srcExclude didn't recognize as draft
+// but the listing did.
 import fs from 'node:fs'
 import path from 'node:path'
 import yaml from 'js-yaml'
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---/
 
-/** Reads a markdown file's frontmatter block and reports whether `draft: true` is set. */
+/** Reads a markdown file's frontmatter block and reports whether `draft` is truthy. */
 export function isDraftFile(absPath: string): boolean {
   const raw = fs.readFileSync(absPath, 'utf-8')
   const match = raw.match(FRONTMATTER_RE)
   if (!match) return false
   const frontmatter = yaml.load(match[1])
   if (!frontmatter || typeof frontmatter !== 'object') return false
-  return (frontmatter as Record<string, unknown>).draft === true
+  return Boolean((frontmatter as Record<string, unknown>).draft)
 }
 
 /**

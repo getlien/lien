@@ -32,7 +32,12 @@ export default createContentLoader('blog/posts/*.md', {
         description: page.frontmatter.description ?? '',
         date: page.frontmatter.date ?? '',
         author: page.frontmatter.author ?? 'Lien Team',
-        tags: page.frontmatter.tags ?? [],
+        // Array.isArray guard (not just `?? []`): a malformed `tags: foo`
+        // (a bare string, not a YAML list) would otherwise reach the
+        // template's `v-for="tag in post.tags"`, which iterates a string
+        // character-by-character in Vue — render garbage chips instead of
+        // silently no-op'ing.
+        tags: Array.isArray(page.frontmatter.tags) ? page.frontmatter.tags : [],
         draft: Boolean(page.frontmatter.draft),
         url: page.url,
       }))
