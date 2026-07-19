@@ -78,7 +78,7 @@ const assertions: FixtureAssertions = {
     'renamed runDocTruthPass/appendDocTruthTurns functions) — docs-drift correctly finds ZERO ' +
     'candidates (conceptual/architectural drift is the permanent scope ceiling, design §0.2/§5.B)',
   rule: 'docs-drift',
-  expect: (result, h) => {
+  expect: result => {
     const docsDriftFinding = result.findings.find(f => f.ruleId === 'docs-drift');
     if (docsDriftFinding) {
       throw new HarnessAssertionError(
