@@ -106,9 +106,9 @@ describe('extractDeletedPaths', () => {
       ['packages/runner/src/index.ts', hunkOnlyDeletion('export function run() {}')],
     ]);
     const referands = extractDeletedPaths(patches, []);
-    expect(referands).toEqual([
-      { token: 'packages/runner', kind: 'deleted-path', altToken: 'runner' },
-    ]);
+    // Full path only — no trailing-segment alt-token (dropped: a bare segment like "runner" is
+    // often a generic English word and produced false candidates on unrelated ambient prose).
+    expect(referands).toEqual([{ token: 'packages/runner', kind: 'deleted-path' }]);
   });
 
   it('falls back to the file itself when the directory is NOT fully gone', () => {
@@ -120,15 +120,11 @@ describe('extractDeletedPaths', () => {
     ];
     const referands = extractDeletedPaths(patches, stillThere);
     expect(referands).toEqual([
-      {
-        token: 'packages/review/src/old-helper.ts',
-        kind: 'deleted-path',
-        altToken: 'old-helper.ts',
-      },
+      { token: 'packages/review/src/old-helper.ts', kind: 'deleted-path' },
     ]);
   });
 
-  it('has no altToken when the referand IS its own trailing segment (a root-level file)', () => {
+  it('a root-level deleted file is its own referand (no path grouping possible)', () => {
     const patches = new Map([['README-old.md', hunkOnlyDeletion('# Old readme')]]);
     const referands = extractDeletedPaths(patches, []);
     expect(referands).toEqual([{ token: 'README-old.md', kind: 'deleted-path' }]);
@@ -194,6 +190,38 @@ describe('computeDocsDriftCandidates — positives', () => {
           positionTier: 'structural-mention',
         }),
       ]);
+    },
+  );
+
+  it(
+    'fires a deleted-path/structural-mention candidate on an untouched bullet that ALSO cites an ' +
+      'unrelated ADR link on the same line (regression: link suppression is narrow — only the ' +
+      "referand's own occurrence inside a link span suppresses, not merely a link ANYWHERE on the line)",
+    () => {
+      const patches = new Map([
+        ['packages/runner/src/index.ts', hunkOnlyDeletion('export function run() {}')],
+      ]);
+      const repoChunks = [
+        makeChunk(
+          'CLAUDE.md',
+          40,
+          '- `platform/` and `packages/runner` — hosted-platform remnants (see ' +
+            '[ADR-012](docs/architecture/decisions/0012-self-hostable-review-action.md)); safe to ignore.',
+        ),
+      ];
+      const ctx = makeContext({ patches, repoChunks });
+
+      const candidates = computeDocsDriftCandidates(ctx);
+      const runnerCandidate = candidates.find(c => c.referand === 'packages/runner');
+      expect(runnerCandidate).toEqual(
+        expect.objectContaining({
+          referand: 'packages/runner',
+          referandKind: 'deleted-path',
+          docFile: 'CLAUDE.md',
+          docLine: 40,
+          positionTier: 'structural-mention',
+        }),
+      );
     },
   );
 
@@ -280,6 +308,21 @@ describe('computeDocsDriftCandidates — suppression negatives', () => {
       ),
     ];
     const ctx = makeContext({ patches, repoChunks });
+    expect(computeDocsDriftCandidates(ctx)).toEqual([]);
+  });
+
+  it('suppresses a deleted-path referand that sits ONLY inside a link target (narrow suppression, not blanket)', () => {
+    const deletedPathPatches = new Map([
+      ['packages/runner/src/index.ts', hunkOnlyDeletion('export function run() {}')],
+    ]);
+    const repoChunks = [
+      makeChunk(
+        'docs/guide.md',
+        1,
+        'See [the runner package](./packages/runner/README.md) for details.',
+      ),
+    ];
+    const ctx = makeContext({ patches: deletedPathPatches, repoChunks });
     expect(computeDocsDriftCandidates(ctx)).toEqual([]);
   });
 

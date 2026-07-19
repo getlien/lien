@@ -24,13 +24,31 @@
  * add and modify but don't remove public surface; (2) each surviving reference is tiered by WHERE
  * in the doc it sits (a falsifiable behavioral claim, or a structural heading/bullet naming a now-
  * gone symbol/path) and, when in doubt, SUPPRESSED (fenced code samples, changelog/changeset
- * entries, link targets, and past-tense/historical prose are never candidates — that is the
- * single biggest false-positive class for this shape of signal).
+ * entries, a referand that sits ONLY inside a link/URL span, and past-tense/historical prose are
+ * never candidates — that is the single biggest false-positive class for this shape of signal).
+ * The link/URL suppression is deliberately NARROW — it fires only when the referand's own
+ * occurrence sits inside the link markup, not merely because the line contains a link ANYWHERE
+ * (this repo's dominant doc idiom cites an ADR link — `(see [ADR-012](docs/.../0012-...md))` —
+ * right next to a genuine structural bullet; a blanket "line has a link" suppression silently ate
+ * real deletion-drift candidates until this was narrowed).
  *
- * This module only computes candidates; it injects no `<...>` prompt block and has no pass wired
- * to it yet (see the docs-drift design doc, `.wip/docs-drift-design.md`, §3-6) — that is later
- * work. `classifyRawDocReferences` exists purely so the zero-LLM census (design doc §4) can show
- * how much this tiering collapses the raw ~100%-of-PRs signal down to a selective candidate rate.
+ * Referand tokens are deliberately the FULL path/identifier only — no generic shorter alternate
+ * spelling is swept (a prior "trailing path segment" alt-token for deleted directories, e.g.
+ * `packages/runner` -> `runner`, was tried and removed: a bare segment is often a common English
+ * word — this repo's own packages include `core`/`cli`/`site`/`action`/`runner` — and produced
+ * false candidates on unrelated ambient prose, e.g. a CI workflow comment about the GitHub Actions
+ * "hosted runner" machine). Residual known limit, not fixed here: a bare TOP-LEVEL-directory
+ * referand (e.g. `platform`) is itself already a single common word, so it carries the same
+ * generic-word false-positive risk the removed alt-token had — a future distinctiveness/stopword
+ * filter (minimum length, excluding common English words, requiring a directory-listing context)
+ * is the natural fast-follow; precision-first v1 accepts this narrow residual risk rather than
+ * building that filter now.
+ *
+ * This module only computes candidates; the dedicated pass that judges them
+ * (`plugins/agent/docs-drift-pass.ts`, dark by default) lives separately (see the docs-drift
+ * design doc, `.wip/docs-drift-design.md`, §2-3). `classifyRawDocReferences` exists purely so the
+ * zero-LLM census (design doc §4) can show how much this tiering collapses the raw ~100%-of-PRs
+ * signal down to a selective candidate rate.
  */
 
 import type { CodeChunk } from '@liendev/parser';
@@ -73,13 +91,12 @@ export interface DocsDriftCandidate {
   excerpt: string;
 }
 
-/** One referand to sweep the untouched-doc corpus for. `altToken` is a shorter alternate spelling
- *  (currently only a deleted directory's trailing segment, e.g. `packages/runner` -> `runner`)
- *  that a doc might use instead of the full token. */
+/** One referand to sweep the untouched-doc corpus for — the FULL path/identifier only, no shorter
+ *  alternate spelling (see module header for why a generic trailing-segment alt-token was tried
+ *  and removed). */
 interface Referand {
   token: string;
   kind: ReferandKind;
-  altToken?: string;
 }
 
 /** One raw word-boundary match of a referand inside an untouched doc/config chunk. */
@@ -100,16 +117,17 @@ const MAX_REFS_PER_REFERAND = 5;
 /** Wall-clock backstop for the untouched-doc sweep, mirroring stale-literal-signals.ts's own
  *  budget — this runs unconditionally on every PR, before any LLM call. */
 const DOCS_DRIFT_TIME_BUDGET_MS = 5_000;
-/** Shortest deleted-path trailing segment worth treating as an alternate search token. */
-const MIN_TRAILING_SEGMENT_CHARS = 4;
 /** Cap on a rendered excerpt window. */
 const MAX_EXCERPT_CHARS = 400;
 
 const DOC_CHUNK_TYPES = new Set(['doc', 'config']);
 /** A changelog or changeset entry — a correct historical record, never a drift candidate. */
 const CHANGELOG_OR_CHANGESET_RE = /(?:^|\/)CHANGELOG[^/]*(?:\.md)?$|(?:^|\/)\.changeset\//i;
-/** A markdown link target or bare URL on the line — link targets, not prose claims. */
-const LINK_OR_URL_RE = /\]\(|https?:\/\//;
+/** A markdown link's full `[display](target)` markup — used to find link SPANS (see
+ *  `linkOrUrlSpans`), not to blanket-suppress a whole line merely for containing one. */
+const MARKDOWN_LINK_RE = /\[[^\]]*\]\([^)]*\)/g;
+/** A bare `http(s)://` URL — same span-based use as `MARKDOWN_LINK_RE`. */
+const BARE_URL_RE = /https?:\/\/\S+/g;
 /** Past-tense / historical / retirement note — the primary false-positive class (module header). */
 const HISTORICAL_GUARD_RE =
   /\b(?:was|were)\s+(?:removed|renamed|deleted|retired|dropped)\b|\b(?:retired|formerly|deprecated|previously|prior to|no longer|used to)\b/i;
@@ -186,18 +204,12 @@ function directoryIsGone(dir: string, repoChunks: CodeChunk[] | undefined): bool
   return !repoChunks.some(c => c.metadata.file.startsWith(prefix));
 }
 
-/** The referand's shorter alternate token — its last path segment — when distinctive enough and
- *  different from the referand itself (e.g. `packages/runner` -> `runner`). */
-function trailingSegment(path: string): string | undefined {
-  const seg = path.split('/').filter(Boolean).pop();
-  return seg && seg !== path && seg.length >= MIN_TRAILING_SEGMENT_CHARS ? seg : undefined;
-}
-
 /**
  * Deleted-path referands: every fully-deleted file, grouped up to its containing package/top-level
  * directory when that whole directory is confirmed gone (see `directoryIsGone`) — the shape a
  * removed CLAUDE.md structure bullet describes (a directory, not one of its files) — else left as
- * the individual file's own path. Deduped. Exposed for testing.
+ * the individual file's own path. Deduped. Full path only — no trailing-segment alt-token (see
+ * module header). Exposed for testing.
  */
 export function extractDeletedPaths(
   patches: Map<string, string>,
@@ -214,10 +226,7 @@ export function extractDeletedPaths(
     paths.add(dir && directoryIsGone(dir, repoChunks) ? dir : file);
   }
 
-  return [...paths].map(path => {
-    const alt = trailingSegment(path);
-    return { token: path, kind: 'deleted-path' as const, ...(alt && { altToken: alt }) };
-  });
+  return [...paths].map(path => ({ token: path, kind: 'deleted-path' as const }));
 }
 
 // ---------------------------------------------------------------------------
@@ -280,37 +289,32 @@ function wordBoundaryRe(token: string): RegExp {
 }
 
 /** Cheap pre-check before the per-line regex: does `chunk`'s raw content contain the referand's
- *  token or alternate token at all? (fast reject, mirrors `removed-export-signals.ts`'s own). */
+ *  token at all? (fast reject, mirrors `removed-export-signals.ts`'s own). */
 function chunkMayContainReferand(chunk: CodeChunk, referand: Referand): boolean {
-  if (chunk.content.includes(referand.token)) return true;
-  return !!referand.altToken && chunk.content.includes(referand.altToken);
+  return chunk.content.includes(referand.token);
 }
 
-/** Collect word-boundary matches of `referand` within one already-fast-rejected chunk into
- *  `sites`, stopping once the shared `cap` is reached. Split out of `sweepReferand` to keep that
- *  function's own branching shallow. */
+/** Collect word-boundary matches of `re` within one already-fast-rejected chunk into `sites`,
+ *  stopping once the shared `cap` is reached. Split out of `sweepReferand` to keep that function's
+ *  own branching shallow. */
 function collectMatchesInChunk(
   chunk: CodeChunk,
-  referand: Referand,
   re: RegExp,
-  altRe: RegExp | null,
   cap: number,
   sites: MatchSite[],
 ): void {
   const lines = chunk.content.split('\n');
   for (let i = 0; i < lines.length && sites.length < cap; i++) {
-    if (re.test(lines[i]) || (altRe && altRe.test(lines[i]))) {
-      sites.push({ chunk, lines, lineIndex: i });
-    }
+    if (re.test(lines[i])) sites.push({ chunk, lines, lineIndex: i });
   }
 }
 
 /**
- * Sweep `chunks` for word-boundary occurrences of `referand` (its primary token, or its alternate
- * token when present), fast-rejecting each chunk via a plain `includes` check before the per-line
- * regex (mirrors `removed-export-signals.ts`'s `collectRefsFromChunk`). Stops early once `cap`
- * sites are found or the shared `deadline` passes. Pass `cap: Infinity` for an uncapped count (used
- * only by the census helper, `classifyRawDocReferences`).
+ * Sweep `chunks` for word-boundary occurrences of `referand`'s full token, fast-rejecting each
+ * chunk via a plain `includes` check before the per-line regex (mirrors
+ * `removed-export-signals.ts`'s `collectRefsFromChunk`). Stops early once `cap` sites are found or
+ * the shared `deadline` passes. Pass `cap: Infinity` for an uncapped count (used only by the census
+ * helper, `classifyRawDocReferences`).
  */
 function sweepReferand(
   referand: Referand,
@@ -320,12 +324,11 @@ function sweepReferand(
 ): MatchSite[] {
   const sites: MatchSite[] = [];
   const re = wordBoundaryRe(referand.token);
-  const altRe = referand.altToken ? wordBoundaryRe(referand.altToken) : null;
 
   for (const chunk of chunks) {
     if (sites.length >= cap || Date.now() > deadline) break;
     if (!chunkMayContainReferand(chunk, referand)) continue;
-    collectMatchesInChunk(chunk, referand, re, altRe, cap, sites);
+    collectMatchesInChunk(chunk, re, cap, sites);
   }
 
   return sites;
@@ -345,16 +348,59 @@ function isInsideFence(lines: string[], lineIndex: number): boolean {
   return inFence;
 }
 
+/** Character spans on `line` that are link/URL markup, not literal prose: a markdown link's full
+ *  `[display](target)` markup, or a bare `http(s)://` URL. Used to narrow the link/URL suppression
+ *  to "the referand's own occurrence sits inside one of these", not "the line merely contains a
+ *  link ANYWHERE" — see module header for the bug this fixes (an ADR-citing structural bullet was
+ *  blanket-suppressed even though the referand itself sat in plain prose, not the link). */
+function linkOrUrlSpans(line: string): Array<[number, number]> {
+  const spans: Array<[number, number]> = [];
+  for (const m of line.matchAll(MARKDOWN_LINK_RE)) {
+    if (m.index !== undefined) spans.push([m.index, m.index + m[0].length]);
+  }
+  for (const m of line.matchAll(BARE_URL_RE)) {
+    if (m.index !== undefined) spans.push([m.index, m.index + m[0].length]);
+  }
+  return spans;
+}
+
+/**
+ * True iff EVERY word-boundary occurrence of `referand.token` on `line` falls inside a link/URL
+ * span (see `linkOrUrlSpans`) — the narrow "the referand only appears as a link target" case (e.g.
+ * `[helper](./packages/oldFunc/README.md)`, where `oldFunc` names the file the link points AT).
+ * False when the referand also appears in plain prose on the same line, even alongside an
+ * unrelated link/ADR citation elsewhere on that line — that occurrence is a real claim, not a link
+ * artifact, and must not be suppressed just because a link happens to share the line.
+ */
+function referandOnlyInsideLinkOrUrl(referand: Referand, line: string): boolean {
+  const spans = linkOrUrlSpans(line);
+  if (spans.length === 0) return false;
+
+  const re = new RegExp(`\\b${escapeForRegex(referand.token)}\\b`, 'g');
+  const positions = [...line.matchAll(re)]
+    .map(m => m.index)
+    .filter((i): i is number => i !== undefined);
+  if (positions.length === 0) return false;
+
+  return positions.every(pos => spans.some(([start, end]) => pos >= start && pos < end));
+}
+
 /**
  * When in doubt, suppress (module header): a changelog/changeset entry, a fenced code sample, a
- * link/URL line, or a past-tense/historical note are never candidates — the primary false-positive
- * class for this signal shape.
+ * referand that sits ONLY inside a link/URL span, or a past-tense/historical note are never
+ * candidates — the primary false-positive class for this signal shape.
  */
-function isSuppressed(file: string, lines: string[], lineIndex: number): boolean {
+function isSuppressed(
+  referand: Referand,
+  file: string,
+  lines: string[],
+  lineIndex: number,
+): boolean {
   if (CHANGELOG_OR_CHANGESET_RE.test(file)) return true;
   if (isInsideFence(lines, lineIndex)) return true;
   const line = lines[lineIndex];
-  return LINK_OR_URL_RE.test(line) || HISTORICAL_GUARD_RE.test(line);
+  if (HISTORICAL_GUARD_RE.test(line)) return true;
+  return referandOnlyInsideLinkOrUrl(referand, line);
 }
 
 /** Does the reference line, or a line in its evidence window, read as a falsifiable behavioral
@@ -390,7 +436,7 @@ function buildExcerpt(lines: string[], lineIndex: number): string {
 
 function buildCandidate(referand: Referand, match: MatchSite): DocsDriftCandidate | null {
   const { chunk, lines, lineIndex } = match;
-  if (isSuppressed(chunk.metadata.file, lines, lineIndex)) return null;
+  if (isSuppressed(referand, chunk.metadata.file, lines, lineIndex)) return null;
   const tier = classifyPositionTier(lines, lineIndex);
   if (!tier) return null;
 
@@ -477,9 +523,9 @@ export interface RawDocReferenceTally {
 
 /** Tally one raw match into `tally` (suppressed, tier-1, tier-2, or neither). Split out of
  *  `classifyRawDocReferences` to keep that function's own nesting shallow. */
-function tallyRawMatch(match: MatchSite, tally: RawDocReferenceTally): void {
+function tallyRawMatch(referand: Referand, match: MatchSite, tally: RawDocReferenceTally): void {
   tally.total++;
-  if (isSuppressed(match.chunk.metadata.file, match.lines, match.lineIndex)) {
+  if (isSuppressed(referand, match.chunk.metadata.file, match.lines, match.lineIndex)) {
     tally.suppressed++;
     return;
   }
@@ -505,7 +551,7 @@ export function classifyRawDocReferences(context: ReviewContext): RawDocReferenc
   for (const referand of setup.referands) {
     if (Date.now() > deadline) break;
     const matches = sweepReferand(referand, setup.docChunks, deadline, Infinity);
-    for (const match of matches) tallyRawMatch(match, tally);
+    for (const match of matches) tallyRawMatch(referand, match, tally);
   }
 
   return tally;

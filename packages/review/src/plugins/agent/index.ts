@@ -70,10 +70,19 @@ import {
  * documentation that still references code this PR removed/renamed/deleted —
  * is the fifth build and the first with NO shared-main-pass rule fragment to
  * backstop (dedicated-pass-only); also dark by default, see
- * `docs-drift-pass.ts`. None of these five passes has a data dependency on
- * any of the others, so declaration order doesn't matter for correctness
- * (see review-pass.ts's "serial for v1" note) — doc-truth stays first as the
- * longer-proven pass.
+ * `docs-drift-pass.ts`.
+ *
+ * ORDER MATTERS for docs-drift, unlike the other four: its
+ * `mergeDocsDriftFindings` cross-dedup (`collidesWithDocTruth`) drops a
+ * docs-drift finding that collides in location with an EXISTING
+ * `doc-truth`-ruleId finding — doc-truth wins, since it saw the touched hunk
+ * directly (design §2's "both-fire case" backstop). `runExtraPasses`
+ * (`review-pass.ts`) folds each pass's findings into the running merged list
+ * SERIALLY, in array order, so `DOC_TRUTH_PASS_SPEC` must appear BEFORE
+ * `DOCS_DRIFT_PASS_SPEC` below — otherwise doc-truth's findings wouldn't be
+ * in the merged list yet when docs-drift's own merge step runs, and the
+ * cross-dedup would silently never fire. The other four passes have no such
+ * ordering dependency on each other or on docs-drift.
  */
 const EXTRA_PASSES: ReviewPassSpec[] = [
   DOC_TRUTH_PASS_SPEC,

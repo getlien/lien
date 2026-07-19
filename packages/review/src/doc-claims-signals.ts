@@ -229,7 +229,7 @@ export const FENCE_RE = /^(?:```|~~~)/;
  *    almost always a developer imperative ("never run npm install", "must echo
  *    back"), not a falsifiable claim about the code the diff touches.
  */
-export const CLAIM_SHAPES: ReadonlyArray<{ shape: DocClaimShape; re: RegExp; near?: RegExp }> = [
+const CLAIM_SHAPES: ReadonlyArray<{ shape: DocClaimShape; re: RegExp; near?: RegExp }> = [
   {
     shape: 'mechanism',
     re: /\b(?:meaning-based|semantic(?:ally)?|lexical|keyword-based|embedding-based|bm25|full-text|substring)\b/i,
