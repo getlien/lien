@@ -205,11 +205,72 @@ function directoryIsGone(dir: string, repoChunks: CodeChunk[] | undefined): bool
 }
 
 /**
+ * A neighbor character that marks a `token` occurrence as PATH-context (a directory/file listing)
+ * rather than ordinary prose: a path separator, or the backtick this repo's own docs use to mark a
+ * bare directory/file token (e.g. CLAUDE.md's own `` `packages/` `` / `` `platform/` `` bullets).
+ */
+const PATH_CONTEXT_NEIGHBOR_RE = /[/`]/;
+
+/** True iff the `token`-length occurrence starting at `index` in `line` sits directly against a
+ *  `/` or a backtick on either side — i.e. reads as a path/identifier, not a word in a sentence. */
+function isPathContextOccurrence(line: string, index: number, tokenLength: number): boolean {
+  const before = index > 0 ? line[index - 1] : '';
+  const after = line[index + tokenLength] ?? '';
+  return PATH_CONTEXT_NEIGHBOR_RE.test(before) || PATH_CONTEXT_NEIGHBOR_RE.test(after);
+}
+
+/**
+ * True iff EVERY word-boundary occurrence of a BARE top-level directory referand (e.g. `platform`,
+ * no `packages/` prefix) across the repo's doc/config corpus reads as a path/identifier — never as
+ * ordinary prose describing something unrelated (e.g. "supports every platform", "the existing
+ * platform .env"). A single prose hit disqualifies the referand: when in doubt, suppress (the same
+ * precision-first posture as `isSuppressed`).
+ *
+ * This is the fast-follow the module header flags as a residual risk: a bare single-word directory
+ * name is, by construction, generic-word risk that a `packages/<name>` grouped referand or an
+ * individual file path never carries (both always contain a `/`, so neither can spuriously match a
+ * plain English word in the middle of a sentence).
+ *
+ * Corpus-driven rather than a hardcoded stopword list: a fixed word list needs constant upkeep and
+ * still misses whatever wasn't anticipated — this repo's own `platform`/`runner` (see #593's real
+ * deletion, the motivating case) are generic SOFTWARE nouns, not classic linguistic stopwords, so an
+ * off-the-shelf English stopword list would miss them entirely. Checking what THIS repo's own docs
+ * actually do with the word is self-maintaining and needs no list to keep up to date — verified
+ * against this repo's own corpus, `platform` reads as ordinary prose in both `STYLE_GUIDE.md`
+ * ("...documentation site, platform app...") and this package's own harness `README.md` ("...the
+ * existing platform .env...") — exactly the false-positive risk this gate exists to close. Exposed
+ * for testing.
+ */
+export function isDistinctiveBareDirectory(token: string, docChunks: CodeChunk[]): boolean {
+  const re = wordBoundaryRe(token, 'g');
+  return docChunks.every(
+    chunk => !chunk.content.includes(token) || everyLineIsPathContextOnly(chunk, re, token.length),
+  );
+}
+
+/** True iff every occurrence of `re` across `chunk`'s lines sits in path-context (see
+ *  `isPathContextOccurrence`). Split out of `isDistinctiveBareDirectory` to keep that function's
+ *  own nesting shallow (mirrors `collectMatchesInChunk`'s split out of `sweepReferand`). */
+function everyLineIsPathContextOnly(chunk: CodeChunk, re: RegExp, tokenLength: number): boolean {
+  return chunk.content
+    .split('\n')
+    .every(line =>
+      [...line.matchAll(re)].every(
+        m => m.index === undefined || isPathContextOccurrence(line, m.index, tokenLength),
+      ),
+    );
+}
+
+/**
  * Deleted-path referands: every fully-deleted file, grouped up to its containing package/top-level
  * directory when that whole directory is confirmed gone (see `directoryIsGone`) — the shape a
  * removed CLAUDE.md structure bullet describes (a directory, not one of its files) — else left as
- * the individual file's own path. Deduped. Full path only — no trailing-segment alt-token (see
- * module header). Exposed for testing.
+ * the individual file's own path. A BARE top-level directory (grouped outside `packages/`, so its
+ * token carries no `/`) additionally must pass `isDistinctiveBareDirectory` against the repo's own
+ * doc/config corpus — failing that, this falls back to the individual file's own path (still full
+ * recall for that file, just not the risky generic grouping). A `packages/<name>` grouping is never
+ * gated: it always carries a `/`, so it never risks matching incidental prose. Deduped. Full path
+ * only — no trailing-segment alt-token (see module header). Exposed for testing.
  */
 export function extractDeletedPaths(
   patches: Map<string, string>,
@@ -220,10 +281,14 @@ export function extractDeletedPaths(
     .map(([file]) => file);
   if (deletedFiles.length === 0) return [];
 
+  const docChunks = (repoChunks ?? []).filter(isDocOrConfigChunk);
   const paths = new Set<string>();
   for (const file of deletedFiles) {
     const dir = candidateDirectoryReferand(file);
-    paths.add(dir && directoryIsGone(dir, repoChunks) ? dir : file);
+    const dirGone = dir !== null && directoryIsGone(dir, repoChunks);
+    const useGroupedDir =
+      dirGone && (dir!.includes('/') || isDistinctiveBareDirectory(dir!, docChunks));
+    paths.add(useGroupedDir ? dir! : file);
   }
 
   return [...paths].map(path => ({ token: path, kind: 'deleted-path' as const }));

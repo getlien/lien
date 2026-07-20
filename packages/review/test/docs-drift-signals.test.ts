@@ -6,6 +6,7 @@ import {
   classifyRawDocReferences,
   isFullFileDeletion,
   extractDeletedPaths,
+  isDistinctiveBareDirectory,
 } from '../src/docs-drift-signals.js';
 
 // ---------------------------------------------------------------------------
@@ -136,6 +137,99 @@ describe('extractDeletedPaths', () => {
     ]);
     expect(extractDeletedPaths(patches, [])).toEqual([]);
   });
+
+  it(
+    'falls back to the individual file when a BARE top-level directory referand (no `packages/` ' +
+      'prefix, e.g. `platform`) fails distinctiveness — the same word reads as ordinary prose ' +
+      'elsewhere in the doc/config corpus (#593 real deletion history)',
+    () => {
+      const patches = new Map([
+        ['platform/src/index.ts', hunkOnlyDeletion('export function boot() {}')],
+      ]);
+      const docCorpus = [
+        makeChunk(
+          'STYLE_GUIDE.md',
+          1,
+          'Design identity for all Lien properties (documentation site, platform app).',
+        ),
+      ];
+      const referands = extractDeletedPaths(patches, docCorpus);
+      expect(referands).toEqual([{ token: 'platform/src/index.ts', kind: 'deleted-path' }]);
+    },
+  );
+
+  it(
+    'still groups a BARE top-level directory referand when it IS distinctive — nothing in the ' +
+      'doc/config corpus uses the word as ordinary prose',
+    () => {
+      const patches = new Map([
+        ['zznovelplatform/src/index.ts', hunkOnlyDeletion('export function boot() {}')],
+      ]);
+      const referands = extractDeletedPaths(patches, []);
+      expect(referands).toEqual([{ token: 'zznovelplatform', kind: 'deleted-path' }]);
+    },
+  );
+
+  it(
+    'a `packages/<name>` grouped referand is never gated on distinctiveness (it always carries a ' +
+      '`/`, so it can never spuriously match a plain word in prose) — fires even though the ' +
+      'directory basename alone is a common English word',
+    () => {
+      const patches = new Map([
+        ['packages/core/src/index.ts', hunkOnlyDeletion('export function boot() {}')],
+      ]);
+      const docCorpus = [makeChunk('README.md', 1, 'This is the very core of the whole design.')];
+      const referands = extractDeletedPaths(patches, docCorpus);
+      expect(referands).toEqual([{ token: 'packages/core', kind: 'deleted-path' }]);
+    },
+  );
+});
+
+// ---------------------------------------------------------------------------
+// isDistinctiveBareDirectory
+// ---------------------------------------------------------------------------
+
+describe('isDistinctiveBareDirectory', () => {
+  it('is false when the token also reads as ordinary prose elsewhere in the corpus (#593 platform case)', () => {
+    const docChunks = [
+      makeChunk(
+        'CLAUDE.md',
+        14,
+        '- `platform/` and `packages/runner` — hosted-platform remnants (see ' +
+          '[ADR-012](docs/architecture/decisions/0012-self-hostable-review-action.md)); safe to ignore.',
+      ),
+      makeChunk(
+        'STYLE_GUIDE.md',
+        1,
+        'Design identity for all Lien properties (documentation site, platform app).',
+      ),
+    ];
+    expect(isDistinctiveBareDirectory('platform', docChunks)).toBe(false);
+  });
+
+  it('is false on a single prose hit even when every OTHER occurrence is path-context', () => {
+    const docChunks = [
+      makeChunk('CLAUDE.md', 14, '- `platform/` — hosted-platform remnants; safe to ignore.'),
+      makeChunk(
+        'packages/review/test/harness/README.md',
+        1,
+        '# One-time setup (or use the existing platform .env)',
+      ),
+    ];
+    expect(isDistinctiveBareDirectory('platform', docChunks)).toBe(false);
+  });
+
+  it('is true (distinctive counter-example) when every occurrence sits in path context', () => {
+    const docChunks = [
+      makeChunk('CLAUDE.md', 20, '- `zznovelplatform/` — internal tooling, safe to ignore.'),
+      makeChunk('docs/guide.md', 5, 'See `zznovelplatform/README.md` for the deprecation notice.'),
+    ];
+    expect(isDistinctiveBareDirectory('zznovelplatform', docChunks)).toBe(true);
+  });
+
+  it('is true (vacuously) when the token never appears in the corpus at all', () => {
+    expect(isDistinctiveBareDirectory('somewordneverpresent', [])).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -252,6 +346,71 @@ describe('computeDocsDriftCandidates — positives', () => {
       }),
     ]);
   });
+});
+
+// ---------------------------------------------------------------------------
+// computeDocsDriftCandidates — bare-directory distinctiveness gate
+// ---------------------------------------------------------------------------
+
+describe('computeDocsDriftCandidates — bare-directory distinctiveness gate', () => {
+  it(
+    'suppresses a BARE top-level directory referand (`platform`, no `packages/` prefix) when the ' +
+      'same word ALSO reads as ordinary prose elsewhere in the doc/config corpus (#593 real ' +
+      'deletion history — "retire packages/runner and the platform/ Laravel app") — the ' +
+      '`packages/runner` referand, which always carries a `/`, is unaffected and still fires',
+    () => {
+      const patches = new Map([
+        ['packages/runner/src/index.ts', hunkOnlyDeletion('export function run() {}')],
+        ['platform/src/index.ts', hunkOnlyDeletion('export function boot() {}')],
+      ]);
+      const repoChunks = [
+        makeChunk(
+          'CLAUDE.md',
+          14,
+          '**Monorepo Structure:**\n' +
+            '- `platform/` and `packages/runner` — hosted-platform remnants (see ' +
+            '[ADR-012](docs/architecture/decisions/0012-self-hostable-review-action.md)); safe to ignore.',
+        ),
+        // Ambient, unrelated prose elsewhere in the corpus using the SAME word for something else
+        // — the real shape found in this very repo's own STYLE_GUIDE.md.
+        makeChunk(
+          'STYLE_GUIDE.md',
+          1,
+          'Design identity for all Lien properties (documentation site, platform app).',
+        ),
+      ];
+      const ctx = makeContext({ patches, repoChunks });
+
+      const candidates = computeDocsDriftCandidates(ctx);
+      const referands = candidates.map(c => c.referand);
+      expect(referands).toContain('packages/runner');
+      expect(referands).not.toContain('platform');
+    },
+  );
+
+  it(
+    'still fires a BARE top-level directory referand (distinctive counter-example) when nothing ' +
+      'in the doc/config corpus uses the word as ordinary prose',
+    () => {
+      const patches = new Map([
+        ['zznovelplatform/src/index.ts', hunkOnlyDeletion('export function boot() {}')],
+      ]);
+      const repoChunks = [
+        makeChunk('CLAUDE.md', 20, '- `zznovelplatform/` — internal tooling, safe to ignore.'),
+      ];
+      const ctx = makeContext({ patches, repoChunks });
+
+      const candidates = computeDocsDriftCandidates(ctx);
+      expect(candidates).toEqual([
+        expect.objectContaining({
+          referand: 'zznovelplatform',
+          referandKind: 'deleted-path',
+          docFile: 'CLAUDE.md',
+          docLine: 20,
+        }),
+      ]);
+    },
+  );
 });
 
 // ---------------------------------------------------------------------------
