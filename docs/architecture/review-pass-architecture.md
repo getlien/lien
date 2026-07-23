@@ -1,21 +1,26 @@
 # Agent-review pass architecture — `ReviewPassSpec` and the extra-pass executor
 
 Status: generalized executor + attestation v2 shipped (PR #799, merged).
-Four passes plug into it today — **doc-truth is production-on by default**
-(v1); the **stale-duplicate**, **incomplete-handling**, and
-**removed-exports** candidate loops are built, merged, and dark (default-off)
+Five passes plug into it today — **doc-truth is production-on by default**
+(v1); the **stale-duplicate**, **incomplete-handling**, **removed-exports**,
+and **docs-drift** candidate loops are built, merged, and dark (default-off)
 for `@liendev/review`/`@liendev/action` consumers, and doc-truth itself
 gained a dark, env-only v2 mode (PR #807) that backports the same
 per-candidate-verdict contract into its own pass — see "Which passes are
 live" below. As of 2026-07-17, this monorepo's own
 `.github/workflows/lien-review.yml` opts the first two loops in on itself
 (`LIEN_STALE_DUP_PASS=on` / `LIEN_INCOMPLETE_PASS=on`) to dogfood them on its
-own PRs; removed-exports has not yet been opted into that workflow (a
-separate, later decision, same as the first two loops' own CI opt-in was) —
-the package/action defaults are unchanged for all three. See
+own PRs; as of 2026-07-23, this repo ALSO opts docs-drift in
+(`LIEN_DOCS_DRIFT_PASS=on`) — dark for every other consumer (see the fixture
+calibration record in
+`packages/review/test/harness/fixtures/docs-drift/pr766-deleted-path-shape.assertions.ts`
+for the honest synthetic-shape score behind this opt-in). removed-exports
+has not yet been opted into that workflow (a separate, later decision, same
+as the other loops' own CI opt-in was) — the package/action defaults are
+unchanged for all four dark loops. See
 [ADR-014](decisions/0014-per-rule-candidate-loop-passes.md) for the
 decision this doc implements and its evidence/economics — the evidence
-behind this opt-in is session-local so far and will be written up there
+behind these opt-ins is session-local so far and will be written up there
 once promoted into a durable fixture.
 
 ## Motivation
@@ -76,6 +81,7 @@ const EXTRA_PASSES: ReviewPassSpec[] = [
   STALE_DUPLICATE_PASS_SPEC,
   INCOMPLETE_HANDLING_PASS_SPEC,
   REMOVED_EXPORTS_PASS_SPEC,
+  DOCS_DRIFT_PASS_SPEC,
 ];
 ```
 
@@ -93,7 +99,7 @@ one starts. Two things are true regardless of how many passes exist:
   catches and reports (`context.reportSkip`) any thrown error from a pass's
   client run; the main pass's own output is untouched.
 
-None of the four passes has a data dependency on any of the *other three*
+None of the five passes has a data dependency on any of the *other four*
 (only doc-truth's original dependency on the *main* pass completing at all
 survives the generalization), so declaration order among them doesn't
 affect correctness — doc-truth stays first as the longest-proven pass.
@@ -103,10 +109,10 @@ machinery (trace-offset arithmetic that currently assumes the main trace is
 already complete; per-pass budget reporting that would need to interleave)
 ahead of a real latency complaint would be speculative (YAGNI per
 CLAUDE.md) — revisit once ≥3 dedicated passes are live and latency is
-measured as a problem (now true — four passes are live — but no latency
+measured as a problem (now true — five passes are live — but no latency
 complaint has been measured yet).
 
-## The four passes
+## The five passes
 
 | Pass | File | Gate (opt-in AND eligibility) | Budget formula | Toolset | Verdict vocabulary | Production status |
 |---|---|---|---|---|---|---|
@@ -114,6 +120,7 @@ complaint has been measured yet).
 | stale-duplicate loop | `stale-duplicate-pass.ts` | `config.staleDuplicatePass` or `LIEN_STALE_DUP_PASS=on` AND ≥1 high-confidence, same-file candidate | `clamp(2000 + 800×min(n,8), 4000, 30000)` | `read_file`, `grep_codebase` only | `stale \| intentional-reuse \| unverifiable` | **Dark** (default false) |
 | incomplete-handling loop | `incomplete-handling-pass.ts` | `config.incompleteHandlingPass` or `LIEN_INCOMPLETE_PASS=on` AND ≥1 candidate (any of 3 shapes) | `clamp(2500 + 900×min(n,20), 5000, 35000)` | `read_file`, `get_files_context`, `grep_codebase` | `incomplete \| handled \| intentional \| unverifiable` | **Dark** (default false) |
 | removed-exports loop | `removed-exports-pass.ts` | `config.removedExportsPass` or `LIEN_REMOVED_EXPORTS_PASS=on` AND ≥1 removed public export | `clamp(2000 + 800×min(n,15), 11000, 30000)` | `read_file`, `grep_codebase` only | `breaking \| intentional \| internal-only \| unverifiable` | **Dark** (default false) |
+| docs-drift loop | `docs-drift-pass.ts` | `config.docsDriftPass` or `LIEN_DOCS_DRIFT_PASS=on` AND ≥1 untouched-doc reference to a removed/renamed/deleted referand | `clamp(2000 + 800×min(n,15), 11000, 30000)` | `read_file`, `grep_codebase` only | `drifted \| historical \| intentional \| unverifiable` | **Dark for consumers; this repo opts in as of 2026-07-23** |
 
 Every pass keeps its rule's prompt fragment and signal block in the shared
 main pass regardless of the dedicated pass's on/off state — a second,
@@ -275,9 +282,58 @@ this loop ALSO matches on `symbolName` identity (not just line proximity),
 since a removed-export candidate carries a stable identity the pilot's
 literal-text candidates and the second loop's per-shape candidates don't.
 
+### docs-drift candidate loop
+
+The fifth loop, and the first with **no `BUILTIN_RULES` entry / no shared
+main-pass rule fragment to backstop** (`docs-drift-pass.ts`'s own module
+doc): doc-truth already covers a TOUCHED doc's prose going stale in the same
+diff; docs-drift covers the inverse — an UNTOUCHED doc that silently rots
+after this PR removes, renames, or deletes the thing it describes. Reviewing
+every untouched doc on every PR is exactly the output-list competition the
+pass architecture exists to kill, so this rule ships as the pass and only
+the pass. Reuses `docs-drift-signals.ts`'s `computeDocsDriftCandidates`
+(itself layered on `removed-export-signals.ts`/`rename-sweep-signals.ts`/
+`isFullFileDeletion`) rather than computing a new signal — candidates are
+already tiered (behavioral-claim vs. structural-mention) and suppressed on
+fenced code, changelog/changeset entries, link targets, and prose matching
+`HISTORICAL_GUARD_RE`'s past-tense/historical trigger words before this loop
+ever sees them — a regex match, not a semantic judgment, so it only catches
+phrasing that hits its specific trigger-word list (see "Calibration" below
+for a documented case that reads as past-tense to a model without matching
+the regex).
+
+Verdict vocabulary is `drifted | historical | intentional | unverifiable` —
+only `drifted` becomes a finding; `historical` is the primary FP class the
+deterministic suppression already filters hard on (a model call still sees
+prose the regex guard didn't quite match); `intentional` covers a referand
+whose definition survives (only its export/shape changed); `unverifiable`
+is an inconclusive investigation. Toolset is `read_file` + `grep_codebase` —
+the removed-exports set — since both sides of a candidate (doc excerpt +
+position tier, and the removal/rename/deletion hunk when re-derivable from
+the diff) are already inline, making this a comparison, not an open
+investigation. Dedupe is location-only against its own ruleId (no symbol
+identity the way removed-exports has), PLUS a cross-pass rule: a candidate
+finding that collides in location with an EXISTING `doc-truth` finding is
+dropped — doc-truth wins, since it saw the touched hunk directly.
+
+Calibration: a synthetic hand-staged fixture
+(`fixtures/docs-drift/pr766-deleted-path-shape`, real PR #593's
+`packages/runner`/`platform/` deletion with an injected untouched CLAUDE.md
+bullet) scored 1/10 on a `--calibrate 10` run against the prod default model
+(2026-07-23, $0.4870) — well below the 9/10 bar. Recorded as a
+characterization, not a certification, per that fixture's own assertions
+header (per-vote taxonomy: a ground-truth mismatch between the hand-staged
+excerpt and this repo's real, evolved `CLAUDE.md` when the model calls
+`read_file` to verify, plus a genuine judgment-frontier gap around
+historical-sounding phrasing that carries none of `HISTORICAL_GUARD_RE`'s
+trigger words). Deterministic mechanism (candidate computation, budget,
+merge, gate) is separately unit-tested and proven independent of that paid
+score. This repo opts the pass into its own CI regardless (see status line
+above) to dogfood the mechanism and gather real-PR evidence going forward.
+
 ## Per-candidate verdict contract and `incomplete_verdict` honesty semantics
 
-All four passes now use variants of the same contract: **one verdict
+All five passes now use variants of the same contract: **one verdict
 object required per candidate/claim id**, carried as extra fields
 (`candidateId`/`claimId`, `verdict`) inside the standard `findings` JSON
 array — so the shared client's existing parse/validate pipeline needs zero
@@ -286,7 +342,8 @@ entirely; doc-truth's v2 mode (above) keeps it open to ad hoc findings
 beyond the worklist, a deliberate difference reflecting that rule's own
 "also skim for anything not listed" allowance. Each pass's own
 `postProcessResult` hook (`postProcessStaleDuplicateResult`,
-`postProcessIncompleteHandlingResult`, `postProcessDocTruthResult`):
+`postProcessIncompleteHandlingResult`, `postProcessDocTruthResult`,
+`postProcessRemovedExportsResult`, `postProcessDocsDriftResult`):
 
 1. Checks `hasCompleteVerdictCoverage`: every expected candidate id appears
    **exactly once**, each with a recognized verdict value. A duplicate id,
@@ -402,8 +459,17 @@ fires exactly once per pass that ran.
   the other two, has no `*_MAIN=off` opt-out override (see its own table row
   above) — `<removed_exports>` cannot be stripped from the main pass by
   design, not just "not yet run."
+- **docs-drift loop** — merged but **dark for `@liendev/review`/
+  `@liendev/action` consumers**: `config.docsDriftPass` defaults `false`;
+  opt in via that config key or `LIEN_DOCS_DRIFT_PASS=on`. Same non-exposure
+  via `action.yml`. As of 2026-07-23 this monorepo's own
+  `.github/workflows/lien-review.yml` sets `LIEN_DOCS_DRIFT_PASS: 'on'`, so
+  this repo's own PR reviews run it — the only one of the four dark loops
+  currently opted into this repo's own CI alongside the first two. No
+  `*_MAIN=off` override exists (docs-drift has no main-pass presence to
+  strip in the first place — see its own subsection above).
 
-All three dark passes have proven mechanism (gate/prompt/budget/merge/
+All four dark passes have proven mechanism (gate/prompt/budget/merge/
 attestation wiring, verified via unit tests and byte-diff-neutrality-when-off
 proofs) but **unproven lift** — no priced A/B has yet shown a dedicated loop
 finds more true positives or fewer false negatives than the shared loop's
@@ -412,7 +478,10 @@ removed-exports' flag ON against its own canary fixture
 (`structural-analysis/removed-export`, PR #399) held the fixture's
 already-documented 3/3 pass rate at $0.042 total — a regression smoke test,
 not a lift measurement (the main pass already covers this fixture on its
-own; the loop is an additive backstop, not yet isolated from it). See
+own; the loop is an additive backstop, not yet isolated from it). docs-drift
+has no such canary yet (its only fixture is the synthetic, sub-bar
+`pr766-deleted-path-shape` shape above) — this repo's CI opt-in is itself
+the evidence-gathering step, not a claim of proven lift. See
 [ADR-014](decisions/0014-per-rule-candidate-loop-passes.md) for the full
 evidence state, the real-PR firing-rate census, and per-pass cost data.
 
