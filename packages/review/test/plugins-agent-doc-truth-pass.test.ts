@@ -457,18 +457,35 @@ describe('DOC_TRUTH_PASS_SPEC', () => {
 // ---------------------------------------------------------------------------
 
 describe('isDocTruthV2Enabled', () => {
-  it('is false by default (env unset)', () => {
-    expect(isDocTruthV2Enabled()).toBe(false);
-  });
-
-  it.each(['on', '1', 'true', 'ON', 'TRUE'])('is true for LIEN_DOC_TRUTH_V2=%s', value => {
-    process.env.LIEN_DOC_TRUTH_V2 = value;
+  it('is true by default (env unset, no config)', () => {
     expect(isDocTruthV2Enabled()).toBe(true);
   });
 
-  it.each(['off', '0', 'false', 'nonsense'])('is false for LIEN_DOC_TRUTH_V2=%s', value => {
+  it.each(['on', '1', 'true', 'ON', 'TRUE', 'nonsense'])(
+    'stays true for LIEN_DOC_TRUTH_V2=%s (only an explicit disable value opts out)',
+    value => {
+      process.env.LIEN_DOC_TRUTH_V2 = value;
+      expect(isDocTruthV2Enabled()).toBe(true);
+    },
+  );
+
+  it.each(['off', '0', 'false', 'OFF', 'FALSE'])('is false for LIEN_DOC_TRUTH_V2=%s', value => {
     process.env.LIEN_DOC_TRUTH_V2 = value;
     expect(isDocTruthV2Enabled()).toBe(false);
+  });
+
+  it('is false when config.docTruthV2 is false, even with no env var set', () => {
+    expect(isDocTruthV2Enabled({ docTruthV2: false } as AgentConfig)).toBe(false);
+  });
+
+  it('config.docTruthV2: false wins even when the env var would otherwise enable it', () => {
+    process.env.LIEN_DOC_TRUTH_V2 = 'on';
+    expect(isDocTruthV2Enabled({ docTruthV2: false } as AgentConfig)).toBe(false);
+  });
+
+  it('is true when config.docTruthV2 is true (explicit) or undefined (unset)', () => {
+    expect(isDocTruthV2Enabled({ docTruthV2: true } as AgentConfig)).toBe(true);
+    expect(isDocTruthV2Enabled({} as AgentConfig)).toBe(true);
   });
 });
 
@@ -625,6 +642,7 @@ describe('capClaimWorklistToCeiling', () => {
 
 describe('buildDocTruthPassPrompts / buildDocTruthPassInitialMessageV2 — v2 contract rendering', () => {
   it('is byte-identical to the pre-v2 prompts when the flag is off', () => {
+    process.env.LIEN_DOC_TRUTH_V2 = 'off';
     const ctx = contextWithPatches([
       ['docs/architecture/worktree.md', DOC_CLAIM_PATCH],
       ...RENAME_SWEEP_FILES,
@@ -635,6 +653,25 @@ describe('buildDocTruthPassPrompts / buildDocTruthPassInitialMessageV2 — v2 co
     expect(systemPrompt).not.toContain('output_format_v2_override');
     expect(initialMessage).not.toContain('PER-CLAIM VERDICT CONTRACT');
     expect(initialMessage).not.toContain('[claim-1]');
+  });
+
+  it('uses the v2 contract with no env var and no config at all (the new default)', () => {
+    const ctx = contextWithPatches([
+      ['docs/architecture/worktree.md', DOC_CLAIM_PATCH],
+      ...RENAME_SWEEP_FILES,
+    ]);
+    const { systemPrompt } = buildDocTruthPassPrompts(ctx);
+    expect(systemPrompt).toContain('<output_format_v2_override>');
+  });
+
+  it('config.docTruthV2: false (via context.config) opts back into the v1 prompt shape', () => {
+    const ctx = contextWithPatches(
+      [['docs/architecture/worktree.md', DOC_CLAIM_PATCH], ...RENAME_SWEEP_FILES],
+      { config: cfg({ docTruthV2: false }) as unknown as Record<string, unknown> },
+    );
+    const { systemPrompt, initialMessage } = buildDocTruthPassPrompts(ctx);
+    expect(systemPrompt).not.toContain('output_format_v2_override');
+    expect(initialMessage).toBe(buildDocTruthPassInitialMessage(ctx));
   });
 
   it('appends the v2 output-contract override to the system prompt, enumerating every claim id', () => {
@@ -777,6 +814,7 @@ describe('buildDocTruthPassPrompts / buildDocTruthPassInitialMessageV2 — v2 co
 
   it('does not append the overflow note when the v1 (non-candidate-loop) path is used, even with a tiny budget', () => {
     // v1 has no id-based worklist to cap — this feature is scoped to v2 only.
+    process.env.LIEN_DOC_TRUTH_V2 = 'off';
     const ctx = manyClaimsCtx(6);
     const { initialMessage } = buildDocTruthPassPrompts(ctx, 0);
     expect(initialMessage).not.toContain('CANDIDATE OVERFLOW');
@@ -799,8 +837,23 @@ describe('postProcessDocTruthResult', () => {
     contextWithPatches([['docs/architecture/worktree.md', DOC_CLAIM_PATCH]]);
 
   it('is the identity (same reference) when the flag is off', () => {
+    process.env.LIEN_DOC_TRUTH_V2 = 'off';
     const result = fakeResult([verdictFinding({ claimId: 'claim-1', verdict: 'contradicted' })]);
     expect(postProcessDocTruthResult(result, singleClaimCtx())).toBe(result);
+  });
+
+  it('reduces verdicts with no env var and no config at all (the new default)', () => {
+    const result = fakeResult([verdictFinding({ claimId: 'claim-1', verdict: 'contradicted' })]);
+    const processed = postProcessDocTruthResult(result, singleClaimCtx());
+    expect(processed.findings).toHaveLength(1);
+  });
+
+  it('is the identity when context.config.docTruthV2 is false, no env var needed', () => {
+    const ctx = contextWithPatches([['docs/architecture/worktree.md', DOC_CLAIM_PATCH]], {
+      config: cfg({ docTruthV2: false }) as unknown as Record<string, unknown>,
+    });
+    const result = fakeResult([verdictFinding({ claimId: 'claim-1', verdict: 'contradicted' })]);
+    expect(postProcessDocTruthResult(result, ctx)).toBe(result);
   });
 
   it('drops an "accurate" verdict entirely (stays silent when confirmed)', () => {
@@ -975,6 +1028,7 @@ describe('postProcessDocTruthResult', () => {
   });
 
   it('is identity (candidatesDeferred untouched) when the v1 flag is off, even with a tiny budget', () => {
+    process.env.LIEN_DOC_TRUTH_V2 = 'off';
     const result = fakeResult([verdictFinding({ claimId: 'claim-1', verdict: 'accurate' })]);
     const processed = postProcessDocTruthResult(result, manyClaimsCtx(6), 0);
     expect(processed).toBe(result);

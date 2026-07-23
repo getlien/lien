@@ -129,6 +129,7 @@ variable on the action step, not a formal input:
 - uses: getlien/lien-review@v1
   env:
     LIEN_REVIEW_DOC_PASS: '0' # disable the doc-truth second pass
+    LIEN_DOC_TRUTH_V2: 'off' # opt back into the pass's older open-findings-list behavior
   with:
     openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
 ```
@@ -137,6 +138,13 @@ variable on the action step, not a formal input:
   doc-truth second pass, a claims-only re-review that runs only on PRs
   touching documentation/guidance surfaces and checks their prose against the
   code. On by default.
+- **`LIEN_DOC_TRUTH_V2=off`** (or `0`/`false`) — opts the doc-truth pass back
+  into its v1 open-findings-list behavior. On by default: v2 requires exactly
+  one verdict (`accurate | contradicted | unverifiable`) per detected doc
+  claim instead of leaving each one free to be silently omitted from an open
+  list — see [Agent-Review Pass Architecture](https://github.com/getlien/lien/blob/main/docs/architecture/review-pass-architecture.md).
+  Only takes effect when the doc-truth pass itself is enabled (i.e., not
+  overridden by `LIEN_REVIEW_DOC_PASS` above).
 
 There is currently no `model` input — the OpenRouter path pins the calibrated
 default deliberately, since the calibration evidence backing this review

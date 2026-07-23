@@ -133,12 +133,14 @@ pass) becomes a machine-checkable completeness failure instead of a semantic
 judgment call the harness's assertions would otherwise have to infer. Both
 ship dark (default-off config/env flags) —
 mechanism proven, lift not yet calibrated. The same contract has since been
-backported into doc-truth's own pass as an opt-in v2 mode
-(`LIEN_DOC_TRUTH_V2=on`, PR #807, also dark) — early paid screening there
-(3 votes) held the certified doc-truth canary and hit zero verdict-coverage
-gaps across a 48-id worklist, but per this guide's own golden rule 4, a
-screen is not a calibration; `--calibrate 10` on it is still the owner's
-call. If you add a rule that keeps
+backported into doc-truth's own pass as a v2 mode (PR #807) — early paid
+screening there (3 votes) held the certified doc-truth canary and hit zero
+verdict-coverage gaps across a 48-id worklist. Unlike the two dark loops
+above, v2 did NOT stay dark: it shipped opt-in (`LIEN_DOC_TRUTH_V2=on`), held
+while the negative baseline (`accurate-doc`) wasn't yet trustworthy under it,
+and — once #828 closed that gap (3/3 clean under both configs) — was
+promoted to the DEFAULT by owner order (2026-07-23; opt out via
+`config.docTruthV2: false` or `LIEN_DOC_TRUTH_V2=off`). If you add a rule that keeps
 losing the findings competition and its candidates are enumerable with a
 closed verdict set, a dedicated pass is the precedent to reach for — but
 only after proving competition is the bottleneck, and only for a rule that

@@ -193,17 +193,24 @@ in the same PR.
   wrong for the *already-shipping* two-pass case (main + doc-truth) before
   this generalization, not just a hypothetical future problem.
 - **The per-candidate-verdict contract generalized a third time, back onto
-  the pass that inspired it.** PR #807 (merged the same night, after this
-  ADR's initial evidence was gathered) backports the identical contract —
-  a stable id per worklist entry, an appended output-format override, the
-  same `postProcessResult`/`incomplete_verdict` honesty mechanism — into
-  doc-truth's own pass as a dark, env-only v2 mode (`LIEN_DOC_TRUTH_V2=on`,
-  no config field), entirely inside `doc-truth-pass.ts` with zero changes
-  to this ADR's executor/attestation plumbing. That it ported cleanly onto
-  the ORIGINAL pass the two new loops were modeled on, without touching
+  the pass that inspired it — and this one didn't stay dark.** PR #807
+  (merged the same night, after this ADR's initial evidence was gathered)
+  backports the identical contract — a stable id per worklist entry, an
+  appended output-format override, the same `postProcessResult`/
+  `incomplete_verdict` honesty mechanism — into doc-truth's own pass as a
+  v2 mode, entirely inside `doc-truth-pass.ts` with zero changes to this
+  ADR's executor/attestation plumbing. That it ported cleanly onto the
+  ORIGINAL pass the two new loops were modeled on, without touching
   `review-pass.ts` or `attestation.ts`, is independent evidence the
   contract is a property of the *pass*, not an artifact specific to either
-  loop's build.
+  loop's build. Unlike `stale-duplicate`/`incomplete-handling` (still dark
+  as of this writing), v2 shipped opt-in, HELD once its mechanism was proven
+  (48/48 verdict coverage) but its negative baseline (`accurate-doc`) wasn't
+  yet trustworthy, then — once #828 fixed that baseline (3/3 clean under
+  both configs) — was promoted to the DEFAULT by owner order (2026-07-23):
+  `isDocTruthV2Enabled` now defaults true, opt-out via `config.docTruthV2:
+  false` or `LIEN_DOC_TRUTH_V2=off`/`0`/`false`. This is the first of the
+  candidate-loop-pattern passes to graduate from dark to production-on.
 
 ### Negative / Risks
 

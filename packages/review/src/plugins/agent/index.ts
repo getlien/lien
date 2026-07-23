@@ -126,6 +126,13 @@ const configSchema = z.object({
    */
   docTruthPass: z.boolean().default(true),
   /**
+   * Whether doc-truth's per-claim verdict contract (v2) is active. Default
+   * true as of the v2 default-on flip; set false (or env
+   * LIEN_DOC_TRUTH_V2=off/0/false) to opt back into v1's open-findings-list
+   * behavior. See `doc-truth-pass.ts`'s `isDocTruthV2Enabled`.
+   */
+  docTruthV2: z.boolean().default(true),
+  /**
    * Whether the `summary` review type is enabled (issue #572). Gates the
    * diff-only summary-only mode — see `summary-only-pass.ts`.
    */

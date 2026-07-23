@@ -52,6 +52,17 @@ export interface AgentConfig {
    */
   docTruthPass?: boolean;
   /**
+   * Whether doc-truth's per-claim verdict contract (v2) is active (issue
+   * #732 follow-up). Default true as of the v2 default-on flip — every
+   * `<doc_claims>`/`<rename_sweep>` entry requires exactly one verdict,
+   * closing the open-findings-list competition v1 lost Finding A to. Set
+   * false (or env LIEN_DOC_TRUTH_V2=off/0/false) to opt back into v1's
+   * open-findings-list behavior. Only consulted when `docTruthPass` itself
+   * is enabled — this doesn't gate the pass, only which contract it uses.
+   * See `doc-truth-pass.ts`'s `isDocTruthV2Enabled`.
+   */
+  docTruthV2?: boolean;
+  /**
    * Whether the `summary` review type is enabled for this run (issue #572).
    * Gates the diff-only summary-only mode: with zero analyzable chunks, the
    * plugin only activates when this is true AND the PR's patches are
