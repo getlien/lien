@@ -295,8 +295,12 @@ the pass. Reuses `docs-drift-signals.ts`'s `computeDocsDriftCandidates`
 (itself layered on `removed-export-signals.ts`/`rename-sweep-signals.ts`/
 `isFullFileDeletion`) rather than computing a new signal — candidates are
 already tiered (behavioral-claim vs. structural-mention) and suppressed on
-fenced code, changelog/changeset entries, link targets, and past-tense/
-historical prose before this loop ever sees them.
+fenced code, changelog/changeset entries, link targets, and prose matching
+`HISTORICAL_GUARD_RE`'s past-tense/historical trigger words before this loop
+ever sees them — a regex match, not a semantic judgment, so it only catches
+phrasing that hits its specific trigger-word list (see "Calibration" below
+for a documented case that reads as past-tense to a model without matching
+the regex).
 
 Verdict vocabulary is `drifted | historical | intentional | unverifiable` —
 only `drifted` becomes a finding; `historical` is the primary FP class the
@@ -338,7 +342,8 @@ entirely; doc-truth's v2 mode (above) keeps it open to ad hoc findings
 beyond the worklist, a deliberate difference reflecting that rule's own
 "also skim for anything not listed" allowance. Each pass's own
 `postProcessResult` hook (`postProcessStaleDuplicateResult`,
-`postProcessIncompleteHandlingResult`, `postProcessDocTruthResult`):
+`postProcessIncompleteHandlingResult`, `postProcessDocTruthResult`,
+`postProcessRemovedExportsResult`, `postProcessDocsDriftResult`):
 
 1. Checks `hasCompleteVerdictCoverage`: every expected candidate id appears
    **exactly once**, each with a recognized verdict value. A duplicate id,
