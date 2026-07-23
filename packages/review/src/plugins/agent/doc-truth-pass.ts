@@ -19,7 +19,7 @@
  * this module used to own itself (`runDocTruthPass`, `appendDocTruthTurns`),
  * so every piece here stays unit-testable with zero LLM spend.
  *
- * ## v2 — per-claim verdict contract (flag-gated, default OFF)
+ * ## v2 — per-claim verdict contract (DEFAULT ON as of the owner-ordered flip)
  *
  * pr658's Finding A (the `schema.ts` `embeddings.enabled` doc comment) is the
  * motivating case: doc-truth's open findings list lets a real contradiction
@@ -29,8 +29,13 @@
  * loop proved the fix for a narrower shape: require one verdict per worklist
  * id instead of an open list an entry can silently be omitted from.
  *
- * Set `LIEN_DOC_TRUTH_V2=on` (see `isDocTruthV2Enabled`) to require exactly
- * that here: every `<doc_claims>` entry and every `<rename_sweep>` item gets
+ * v2 shipped dark (PR #807) and stayed dark through a HOLD: the mechanism was
+ * proven (48/48 verdict coverage across the calibration corpus) but the
+ * negative baseline (`accurate-doc`, the precision-guard fixture proving v2
+ * doesn't fire on a claim with nothing wrong) was not yet trustworthy. #828
+ * closed that gap (`accurate-doc` now 3/3 clean under both v1 and v2). With
+ * both sides proven, the owner ordered v2 promoted to the default here —
+ * every `<doc_claims>` entry and every `<rename_sweep>` item gets
  * a stable `claim-N` id (`buildClaimWorklist`), and the model MUST emit one
  * verdict (`accurate` | `contradicted` | `unverifiable`) per id, carried
  * inside the standard `findings` array tagged with `claimId`/`verdict` — the
@@ -59,10 +64,11 @@
  * verdict still counts as honest coverage even though it never becomes a
  * finding.
  *
- * When the flag is off, every v2 function is unreachable and
- * `buildDocTruthPassPrompts`/`postProcessDocTruthResult` return exactly what
- * they always did — this is an ADDITIVE contract, not a rewrite (see the
- * byte-diff proof in this change's PR body).
+ * Opt back into v1's open-findings-list behavior via `config.docTruthV2: false`
+ * or `LIEN_DOC_TRUTH_V2=off`/`0`/`false` (see `isDocTruthV2Enabled`) — with v2
+ * off, `buildDocTruthPassPrompts`/`postProcessDocTruthResult` return exactly
+ * what they always did pre-flip (the byte-diff-neutrality-when-off proof from
+ * PR #807 still holds; only the DEFAULT changed, not the off-path behavior).
  */
 
 import type { ReviewContext } from '../../plugin-types.js';
@@ -236,13 +242,14 @@ export function buildDocTruthPassInitialMessage(context: ReviewContext): string 
  * format enumerates just `doc-truth` and no competing investigation strategies
  * appear).
  *
- * When `isDocTruthV2Enabled()` is true, the per-claim verdict contract (see
- * this module's doc comment) is layered on top: the system prompt gets an
- * appended override section requiring one verdict per worklist id, and the
- * initial message's `<doc_claims>`/`<rename_sweep>` blocks are rebuilt with
- * ids attached (`buildDocTruthPassInitialMessageV2`). With the flag off this
- * function's return value is UNCHANGED from before v2 existed — same two
- * function calls, nothing appended.
+ * When `isDocTruthV2Enabled(config)` is true (the default), the per-claim
+ * verdict contract (see this module's doc comment) is layered on top: the
+ * system prompt gets an appended override section requiring one verdict per
+ * worklist id, and the initial message's `<doc_claims>`/`<rename_sweep>`
+ * blocks are rebuilt with ids attached (`buildDocTruthPassInitialMessageV2`).
+ * With the flag explicitly disabled, this function's return value is
+ * UNCHANGED from before v2 existed — same two function calls, nothing
+ * appended (the byte-diff-neutrality-when-off proof from PR #807).
  *
  * `budget` is this pass's own final allocated budget (see
  * `ReviewPassSpec.buildPrompts`'s doc comment) — under v2, it drives
@@ -260,7 +267,7 @@ export function buildDocTruthPassPrompts(
   initialMessage: string;
 } {
   const systemPrompt = buildSystemPrompt(DOC_TRUTH_ONLY_RULES);
-  if (!isDocTruthV2Enabled()) {
+  if (!isDocTruthV2Enabled(context.config as unknown as AgentConfig)) {
     return { systemPrompt, initialMessage: buildDocTruthPassInitialMessage(context) };
   }
   const full = buildClaimWorklist(context);
@@ -276,18 +283,24 @@ export function buildDocTruthPassPrompts(
 // v2 — per-claim verdict contract (flag-gated; see module doc comment)
 // ---------------------------------------------------------------------------
 
-/** Env opt-in for the v2 per-claim-verdict contract. Default OFF (unset/anything else). */
+/** Env opt-OUT for the v2 per-claim-verdict contract, now the DEFAULT (owner-ordered flip — v2's
+ *  mechanism was proven at 48/48 verdict coverage, and the earlier HOLD was a negative-baseline
+ *  trust gap #828 closed). Default ON (unset/anything else); '0'/'false'/'off' (case-insensitive)
+ *  opts back into v1's open-findings-list behavior. */
 const DOC_TRUTH_V2_ENV = 'LIEN_DOC_TRUTH_V2';
 
-function envEnabled(value: string | undefined): boolean {
+function envDisablesDocTruthV2(value: string | undefined): boolean {
   const v = value?.trim().toLowerCase();
-  return v === '1' || v === 'true' || v === 'on';
+  return v === '0' || v === 'false' || v === 'off';
 }
 
-/** Whether the v2 per-claim-verdict contract is active. Env-only opt-in (no config field — a
- *  pilot flag, mirroring stale-duplicate-pass.ts's env-first pattern before it grew a config field). */
-export function isDocTruthV2Enabled(): boolean {
-  return envEnabled(process.env[DOC_TRUTH_V2_ENV]);
+/** Whether the v2 per-claim-verdict contract is active. `config.docTruthV2: false` takes
+ *  precedence; otherwise ON unless `LIEN_DOC_TRUTH_V2` explicitly disables it. `config` is
+ *  optional (defaults to fully on) so every existing call site that predates the config field
+ *  (tests, the harness) keeps its current behavior unless it starts passing one. */
+export function isDocTruthV2Enabled(config?: AgentConfig): boolean {
+  if (config?.docTruthV2 === false) return false;
+  return !envDisablesDocTruthV2(process.env[DOC_TRUTH_V2_ENV]);
 }
 
 /** Cap on doc claims assigned an id — mirrors doc-claims-signals.ts's own MAX_CLAIMS render cap. */
@@ -833,7 +846,7 @@ export function postProcessDocTruthResult(
   context: ReviewContext,
   budget = Number.POSITIVE_INFINITY,
 ): AgentResult {
-  if (!isDocTruthV2Enabled()) return result;
+  if (!isDocTruthV2Enabled(context.config as unknown as AgentConfig)) return result;
 
   const full = buildClaimWorklist(context);
   const ceiling = affordableCandidateCeiling(budget, DOC_TRUTH_TOKENS_PER_CLAIM);
@@ -864,9 +877,11 @@ export function postProcessDocTruthResult(
  * list. Every field here is one of this module's own pure functions; the
  * generic executor supplies the gate-check/run/failure-isolation/reporting
  * plumbing that used to be doc-truth-specific (`runDocTruthPass`,
- * `appendDocTruthTurns`). `postProcessResult` is always wired in — it's an
- * identity no-op when `LIEN_DOC_TRUTH_V2` is off (see
- * `postProcessDocTruthResult`), so this addition doesn't change v1 behavior.
+ * `appendDocTruthTurns`). `postProcessResult` is always wired in — it applies
+ * the v2 per-claim reduction by default now, and is an identity no-op only
+ * when v2 is explicitly disabled (`config.docTruthV2: false` or
+ * `LIEN_DOC_TRUTH_V2=off`/`0`/`false` — see `postProcessDocTruthResult`),
+ * which preserves exact v1 behavior on that opt-out path.
  */
 export const DOC_TRUTH_PASS_SPEC: ReviewPassSpec = {
   name: 'doc-truth',
