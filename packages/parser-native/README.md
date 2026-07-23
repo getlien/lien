@@ -2,7 +2,7 @@
 
 Prebuilt native tree-sitter parser bindings for Lien, via a hand-rolled
 napi-rs crate (no `@napi-rs/cli`). One export, `parseTree(lang, source)`,
-returns a JSON-serialized tree -- see
+returns a JSON-serialized tree. See
 [`docs/architecture/native-parser.md`](../../docs/architecture/native-parser.md)
 for the full wire format and compat contract, and
 [ADR-013](../../docs/architecture/decisions/0013-prebuilt-native-parser-napi-rs.md)
@@ -31,7 +31,7 @@ build for this package).
 3. A clear error naming the platform triple and the remedy.
 
 **No `optionalDependencies` committed.** `package.json` as checked into git
-carries none -- they're generated and injected at publish time by
+carries none: they're generated and injected at publish time by
 `scripts/publish-platform-packages.mjs`, run from `release.yml` against an
 ephemeral CI checkout, never committed back. This mirrors what
 `@napi-rs/cli`'s "napi prepublish" does for other native-addon projects,
@@ -46,7 +46,7 @@ hand-rolled per ADR-013's "no `@napi-rs/cli`" decision.
 - `scripts/publish-platform-packages.mjs` turns those artifacts into
   `@liendev/parser-native-<platform>` package directories, `npm publish`es
   each, and injects the resulting `optionalDependencies` into this package's
-  `package.json` before `changeset publish` packs it -- see `release.yml`'s
+  `package.json` before `changeset publish` packs it. See `release.yml`'s
   `check-parser-native` / `build-native` / `release` jobs for the exact
   ordering.
 - The same script's `--pack-only` mode is reused by `ci.yml`'s

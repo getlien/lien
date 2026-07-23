@@ -1,6 +1,6 @@
 # @liendev/core
 
-Core indexing and analysis engine for Lien. This package provides the low-level APIs for structural code intelligence — dependency analysis, complexity metrics, and test associations — plus fast lexical (FTS5/BM25) code search over a local SQLite store. No embeddings, no model download.
+Core indexing and analysis engine for Lien. This package provides the low-level APIs for structural code intelligence (dependency analysis, complexity metrics, and test associations), plus fast lexical (FTS5/BM25) code search over a local SQLite store. No embeddings, no model download.
 
 ## Installation
 
@@ -36,7 +36,7 @@ const report = await analyzer.analyze();
 console.log(`Found ${report.summary.totalViolations} complexity violations`);
 ```
 
-## API Reference
+## API reference
 
 ### Indexing
 
@@ -44,7 +44,7 @@ console.log(`Found ${report.summary.totalViolations} complexity violations`);
 
 Index a codebase for lexical (FTS5) search and structural analysis. Chunks are
 parsed from the AST, enriched with complexity metrics and dependency metadata,
-and written to a local SQLite database — there is no embedding step.
+and written to a local SQLite database. There is no embedding step.
 
 ```typescript
 interface IndexingOptions {
@@ -75,7 +75,7 @@ const result = await indexCodebase({
 console.log(`Indexed ${result.filesIndexed} files in ${result.timeMs}ms`);
 ```
 
-### Storage Backend
+### Storage backend
 
 Lien stores chunks in a local SQLite database behind the `VectorDBInterface`
 seam. `createVectorDB()` constructs the backend (currently always the SQLite
@@ -101,7 +101,7 @@ defaults to 5.
 const results = await db.search('error handling retry backoff', 10);
 ```
 
-### Complexity Analysis
+### Complexity analysis
 
 #### `new ComplexityAnalyzer(db: VectorDBInterface)`
 
@@ -126,7 +126,7 @@ console.log(`${report.summary.totalViolations} violations found`);
 console.log(`Average complexity: ${report.summary.avgComplexity}`);
 ```
 
-#### Complexity Report Structure
+#### Complexity report structure
 
 ```typescript
 interface ComplexityReport {
@@ -180,7 +180,7 @@ Create a default configuration.
 const config = createDefaultConfig();
 ```
 
-### Git Utilities
+### Git utilities
 
 ```typescript
 import {
@@ -196,9 +196,9 @@ const commit = await getCurrentCommit('./my-project');
 const changed = await getChangedFiles('./my-project');
 ```
 
-## Advanced Usage
+## Advanced usage
 
-### Progress Tracking
+### Progress tracking
 
 Monitor indexing progress in real-time:
 
@@ -212,7 +212,7 @@ await indexCodebase({
 });
 ```
 
-## Supported Languages
+## Supported languages
 
 TypeScript / JavaScript, Python, PHP, Rust, Go, Java, C#, Ruby, Kotlin, Swift,
 and more. See the [main README](https://github.com/getlien/lien#supported-languages)
@@ -220,7 +220,7 @@ for the full list.
 
 ## Performance
 
-- **Storage**: SQLite (`better-sqlite3`, synchronous C binding) — ~1.8MB native install
+- **Storage**: SQLite (`better-sqlite3`, synchronous C binding), ~1.8MB native install
 - **Search**: SQLite FTS5 with BM25 ranking (porter + unicode61 tokenizer)
 - **Chunking**: AST-based with fallback to line-based
 - **File context lookup**: sub-millisecond (indexed `WHERE file IN (...)`)
@@ -237,10 +237,9 @@ for the full list.
 └── git/             # Git utilities
 ```
 
-## Who Uses This?
+## Who uses this?
 
-- **@liendev/lien** — CLI and MCP server
-- **Third-party integrations** — Your custom tools!
+Currently, **@liendev/lien** (the Lien CLI and MCP server).
 
 ## Links
 

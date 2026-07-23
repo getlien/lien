@@ -2,9 +2,9 @@
 
 This document details the indexing workflows for both full and incremental indexing operations.
 
-## Full Indexing Flow
+## Full indexing flow
 
-Full indexing is triggered by `lien index` command and indexes the entire codebase from scratch.
+Full indexing is triggered by the `lien index` command and indexes the entire codebase from scratch.
 
 ```mermaid
 sequenceDiagram
@@ -99,7 +99,7 @@ sequenceDiagram
     CLI-->>User: ✓ Indexed 1000 files (2500 chunks) in 30s
 ```
 
-## Incremental Indexing Flow
+## Incremental indexing flow
 
 Incremental indexing handles individual file changes without reindexing the entire codebase.
 
@@ -167,11 +167,11 @@ sequenceDiagram
     MCP-->>Client: Return results
 ```
 
-## Chunking Strategy
+## Chunking strategy
 
 Lien uses **AST-based semantic chunking** for supported languages (TypeScript, JavaScript, Python, PHP, Rust) and falls back to line-based chunking for others.
 
-### AST-Based Semantic Chunking (v0.13.0+)
+### AST-based semantic chunking (v0.13.0+)
 
 ```mermaid
 graph TD
@@ -216,9 +216,9 @@ graph TD
     style CHUNK4 fill:#e8f5e9
 ```
 
-### Key Advantages of AST Chunking
+### Key advantages of AST chunking
 
-**❌ Old (Line-Based):**
+**Old (line-based):**
 ```typescript
 // Chunk 1 (lines 1-75) - Function split!
 class Calculator {
@@ -234,7 +234,7 @@ class Calculator {
 }
 ```
 
-**✅ New (AST-Based):**
+**New (AST-based):**
 ```typescript
 // Chunk: multiply method (complete semantic unit)
 multiply(a: number, b: number): number {
@@ -256,7 +256,7 @@ multiply(a: number, b: number): number {
 }
 ```
 
-### Language Traverser (Strategy Pattern)
+### Language traverser (Strategy Pattern)
 
 Each language has a dedicated traverser implementing the `LanguageTraverser` interface:
 
@@ -292,7 +292,7 @@ graph LR
 
 See [ADR-002: Strategy Pattern for AST Traversal](decisions/0002-strategy-pattern-ast-traversal.md) for details.
 
-### Fallback to Line-Based Chunking
+### Fallback to line-based chunking
 
 AST chunking automatically falls back to line-based for:
 - **Unsupported languages** (languages without a `LanguageDefinition` in the registry)
@@ -305,33 +305,9 @@ AST chunking automatically falls back to line-based for:
 - No semantic awareness
 - Still works, just less optimal
 
-## Performance Characteristics
+## Incremental indexing performance
 
-### Full Indexing
-
-Typical performance on a medium-sized project:
-
-```
-Project Size: 1,000 files, 100,000 lines of code
-Defaults:
-  - concurrency: 4
-  - chunkSize: 75
-
-Timeline:
-  Configuration:        ~0.5s
-  File Discovery:       ~2s
-  Test Associations:    ~3s (Pass 1) + ~2s (Pass 2)
-  Store Open:           ~0s (no model to load)
-  File Processing:      ~25s (4 concurrent workers, AST parsing)
-  SQLite Storage:       ~2s
-  Total:                ~35s
-
-Chunks Created: ~2,000
-```
-
-### Incremental Indexing
-
-Typical performance for file changes:
+Typical performance for a single file change:
 
 ```
 Single File Change (100 lines):
@@ -343,9 +319,9 @@ Single File Change (100 lines):
 Note: Runs in background, doesn't block MCP server
 ```
 
-## Error Handling Strategies
+## Error handling strategies
 
-### File Processing Errors
+### File processing errors
 
 ```mermaid
 flowchart TD
@@ -378,7 +354,7 @@ flowchart TD
     style WARN fill:#ffe0b2
 ```
 
-### Recovery Strategies
+### Recovery strategies
 
 1. **Non-critical errors** (binary files, parse errors):
    - Log warning
@@ -391,112 +367,13 @@ flowchart TD
    - Throw error to user
    - Abort indexing
 
-## Optimization Techniques
+## Concurrency and batching
 
-### 1. Concurrency Control
+File processing runs concurrently via `p-limit(concurrency)` (default 4); the parse/chunk stage is additionally capped at `PARSE_STAGE_MAX_CONCURRENCY` (4) regardless of caller-requested concurrency, see [ADR-013](decisions/0013-prebuilt-native-parser-napi-rs.md#negative--risks). Chunks are inserted in batches (`store.insertBatch(metadatas, contents)`) rather than one `INSERT` per chunk, so SQLite indices and FTS5 triggers only run once per batch instead of once per chunk.
 
-```typescript
-// Use p-limit to control parallelism
-const limit = pLimit(concurrency); // e.g., 4
+## Index version management
 
-const promises = files.map(file =>
-  limit(async () => {
-    // Process file
-  })
-);
-
-await Promise.all(promises);
-```
-
-**Benefits:**
-- Prevents overwhelming the system
-- Balances CPU and I/O
-- The parse/chunk stage is capped at `PARSE_STAGE_MAX_CONCURRENCY` (4) regardless of caller-requested concurrency — see [ADR-013](decisions/0013-prebuilt-native-parser-napi-rs.md#negative--risks)
-
-### 2. Batched Writes
-
-```typescript
-// Instead of one INSERT per chunk:
-for (const chunk of chunks) {
-  store.insertOne(chunk); // ❌ more transaction overhead
-}
-
-// Insert chunks as a batch (one transaction):
-store.insertBatch(metadatas, contents); // ✅ single transaction
-```
-
-**Benefits:**
-- Fewer transactions, less overhead
-- Indices are maintained by SQLite; FTS5 rows are added by triggers
-
-### 3. Accumulator Pattern
-
-```typescript
-// Accumulate chunks from multiple files
-const accumulator = [];
-
-for (const file of files) {
-  const chunks = await processFile(file);
-  accumulator.push(...chunks);
-  
-  // Process when batch is full
-  if (accumulator.length >= batchSize) {
-    await processBatch(accumulator.splice(0, batchSize));
-  }
-}
-
-// Process remaining
-if (accumulator.length > 0) {
-  await processBatch(accumulator);
-}
-```
-
-**Benefits:**
-- Maximizes batch sizes
-- Reduces number of DB writes
-- More efficient resource usage
-
-## Monitoring & Progress
-
-### User-Visible Progress
-
-```
-Starting indexing process...
-✓ Configuration loaded
-✓ Found 1,000 files
-✓ Analyzed test associations (250 tests → 400 sources)
-✓ Opened SQLite store
-⏳ Processing files... [==============    ] 650/1000 (65%)
-✓ Indexed 1,000 files
-✓ Generated 2,500 chunks
-✓ Written to SQLite store
-✓ Completed in 35.1s
-
-Statistics:
-  Files processed: 1,000
-  Chunks created: 2,500
-  Average chunk size: 40 lines
-```
-
-### Verbose Mode
-
-```bash
-lien index --verbose
-
-# Additional output:
-[Lien] Reading file: src/app.ts
-[Lien] Detected language: typescript
-[Lien] Chunked into 3 chunks
-[Lien] Extracted 5 functions, 2 classes
-[Lien] ✓ Indexed src/app.ts (3 chunks)
-[Lien] Batch insert: 50 chunks → SQLite
-[Lien] ⚠️ Skipping src/image.png: Binary file
-[Lien] ⚠️ Skipping src/broken.ts: Parse error
-```
-
-## Index Version Management
-
-### Version File Structure
+### Version file structure
 
 ```json
 {
@@ -513,7 +390,7 @@ lien index --verbose
 }
 ```
 
-### Version Check Flow
+### Version check flow
 
 ```
 MCP Server starts → Read version file → Store in memory

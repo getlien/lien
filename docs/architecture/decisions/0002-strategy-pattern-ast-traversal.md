@@ -206,25 +206,25 @@ const registry = {
 
 ### Positive
 
-* ✅ **Scalable architecture** - Adding Python now takes 2-3 hours instead of 2 days
-* ✅ **Zero risk to existing languages** - Python changes can't break TypeScript/JavaScript
-* ✅ **Easy to test** - Each traverser can be unit tested independently
-* ✅ **Clean code** - Chunker reduced from 407 to 366 lines (-10%)
-* ✅ **No if/else branches** - Language selection via registry lookup
-* ✅ **SOLID compliance** - Follows Open/Closed Principle
-* ✅ **Clear path forward** - Pattern established for 10+ languages
-* ✅ **Better developer experience** - New contributors can add languages without understanding entire codebase
+* **Scalable architecture** - Adding Python now takes 2-3 hours instead of 2 days
+* **Zero risk to existing languages** - Python changes can't break TypeScript/JavaScript
+* **Easy to test** - Each traverser can be unit tested independently
+* **Clean code** - Chunker reduced from 407 to 366 lines (-10%)
+* **No if/else branches** - Language selection via registry lookup
+* **SOLID compliance** - Follows Open/Closed Principle
+* **Clear path forward** - Pattern established for 10+ languages
+* **Better developer experience** - New contributors can add languages without understanding entire codebase
 
 ### Negative
 
-* ⚠️ **More files** - 3 files per language instead of inline code (acceptable for isolation)
-* ⚠️ **Interface maintenance** - Changes to interface require updating all traversers (rare, and discoverable via TypeScript)
+* **More files** - 3 files per language instead of inline code (acceptable for isolation)
+* **Interface maintenance** - Changes to interface require updating all traversers (rare, and discoverable via TypeScript)
 
 ### Neutral
 
-* 🔄 **No breaking changes** - Existing TS/JS chunking works identically
-* 🔄 **Same test coverage** - All 553 tests still passing
-* 🔄 **Performance unchanged** - Registry lookup is negligible overhead
+* **No breaking changes** - Existing TS/JS chunking works identically
+* **Same test coverage** - All 553 tests still passing
+* **Performance unchanged** - Registry lookup is negligible overhead
 
 ## Implementation Details
 
@@ -272,21 +272,21 @@ No migration needed - 100% backward compatible. TypeScript and JavaScript use th
 
 ### Before Strategy Pattern
 ```
-❌ chunker.ts: 407 lines with hardcoded TS/JS logic
-❌ Adding Python requires modifying core file
-❌ Risk of breaking existing languages
-❌ if/else branches for language checks
-❌ Estimated time to add Python: 2 days
+chunker.ts: 407 lines with hardcoded TS/JS logic
+Adding Python requires modifying core file
+Risk of breaking existing languages
+if/else branches for language checks
+Estimated time to add Python: 2 days
 ```
 
 ### After Strategy Pattern
 ```
-✅ chunker.ts: 366 lines, language-agnostic
-✅ TypeScriptTraverser: 102 lines, fully isolated
-✅ Adding Python: Create python.ts + 1 line registry entry
-✅ Zero if/else branches in core logic
-✅ All 553 tests passing
-✅ Estimated time to add Python: 2-3 hours
+chunker.ts: 366 lines, language-agnostic
+TypeScriptTraverser: 102 lines, fully isolated
+Adding Python: Create python.ts + 1 line registry entry
+Zero if/else branches in core logic
+All 553 tests passing
+Estimated time to add Python: 2-3 hours
 ```
 
 ### Time to Add a New Language
@@ -327,15 +327,4 @@ No migration needed - 100% backward compatible. TypeScript and JavaScript use th
 This ADR's strategy pattern was further refined by [ADR-005](0005-per-language-definition-pattern.md), which consolidated all language-specific data (grammar, traverser, extractor, complexity constants, symbol types) into single per-language definition files. The traverser classes established here remain as the AST traversal logic, but are now referenced from a central `LanguageDefinition` rather than a standalone registry.
 
 [ADR-006](0006-consolidated-language-files-with-import-extractors.md) further consolidated the architecture by merging traverser and extractor classes directly into the language definition files, reducing the number of files per language from 4 to 2. It also added Rust support and introduced `LanguageImportExtractor` for language-specific import extraction.
-
-## Notes
-
-This refactoring demonstrates the power of **good architecture**:
-
-**Before**: "How can we add Python support?"  
-**After**: "Which language should we add first?"
-
-The shift from "if" to "which" represents a fundamental change in scalability. The Strategy Pattern transformed a **problem** (how to support multiple languages) into a **process** (follow the pattern for each language).
-
-**Lesson**: Invest in architecture early when you know requirements will scale. The 1-day refactoring cost enables 10+ languages at 2-3 hours each. 🚀
 

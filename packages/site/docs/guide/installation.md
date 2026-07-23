@@ -3,22 +3,22 @@
 ## Prerequisites
 
 - **Node.js 22.21.0 or higher** (check with `node --version`)
-- No compiler or build toolchain required on supported platforms — Lien's parser ships as prebuilt native binaries for macOS (arm64/x64), Linux (x64/arm64, glibc or musl, including Alpine), and Windows (x64), so there's no `node-gyp`, no Python/make/g++, no Xcode Command Line Tools step. Any other platform needs a one-time local build of the parser crate with the Rust toolchain
+- No compiler or build toolchain required on supported platforms: Lien's parser ships as prebuilt native binaries for macOS (arm64/x64), Linux (x64/arm64, glibc or musl, including Alpine), and Windows (x64), so there's no `node-gyp`, no Python/make/g++, no Xcode Command Line Tools step. Any other platform needs a one-time local build of the parser crate with the Rust toolchain
 - 8GB+ RAM recommended for large codebases
 
 ## Claude Code Plugin (Recommended)
 
-For Claude Code users, the simplest path is the one-time plugin install — no `npm install`, no per-project `lien init`. Lien's MCP tools and the Explore agent become available in every Claude Code session, in every repo.
+For Claude Code users, the simplest path is the one-time plugin install: no `npm install`, no per-project `lien init`. Lien's MCP tools and the Explore agent become available in every Claude Code session, in every repo.
 
 ```text
 /plugin marketplace add getlien/lien
 /plugin install lien
 ```
 
-The plugin spawns Lien on demand via `npx -y @liendev/lien@latest`, which resolves against the npm registry on every launch, so it always runs the latest published release — even if you have a local `npm link` or workspace copy of `@liendev/lien` on your machine. To upgrade, restart Claude Code — the next spawn fetches the newest version automatically.
+The plugin spawns Lien on demand via `npx -y @liendev/lien@latest`, which resolves against the npm registry on every launch, so it always runs the latest published release, even if you have a local `npm link` or workspace copy of `@liendev/lien` on your machine. To upgrade, restart Claude Code: the next spawn fetches the newest version automatically.
 
 ::: tip Working on Lien itself?
-Contributors should NOT install the plugin in their dev environment — that points the MCP server at the npm-published binary, bypassing your local changes. See [CONTRIBUTING.md](https://github.com/getlien/lien/blob/main/CONTRIBUTING.md) for the dogfooding setup that points at your local build instead.
+Contributors should NOT install the plugin in their dev environment: that points the MCP server at the npm-published binary, bypassing your local changes. See [CONTRIBUTING.md](https://github.com/getlien/lien/blob/main/CONTRIBUTING.md) for the dogfooding setup that points at your local build instead.
 :::
 
 ## Global Installation (for Cursor, Windsurf, OpenCode, Kilo Code, Antigravity)
@@ -41,7 +41,7 @@ Then in each project:
 lien init
 ```
 
-`lien init` writes the correct MCP config for your editor — `.cursor/mcp.json` for Cursor, `opencode.json` for OpenCode, and so on. See the [Quick Start guide](/guide/getting-started) for the full per-editor flow.
+`lien init` writes the correct MCP config for your editor: `.cursor/mcp.json` for Cursor, `opencode.json` for OpenCode, and so on. See the [Quick Start guide](/guide/getting-started) for the full per-editor flow.
 
 ## Using npx (no global install)
 

@@ -10,10 +10,10 @@
 
 [ADR-005](0005-per-language-definition-pattern.md) consolidated language-specific *data* into per-language definition files, but the traverser and extractor *classes* remained in separate directories (`traversers/{lang}.ts`, `extractors/{lang}.ts`). This meant adding a new language still required **4 files**:
 
-1. `languages/{lang}.ts` — definition data
-2. `traversers/{lang}.ts` — traverser class
-3. `extractors/{lang}.ts` — export extractor class
-4. `languages/registry.ts` — registration
+1. `languages/{lang}.ts`: definition data
+2. `traversers/{lang}.ts`: traverser class
+3. `extractors/{lang}.ts`: export extractor class
+4. `languages/registry.ts`: registration
 
 Additionally, import extraction logic was hardcoded in `symbols.ts` with language-specific handlers, making it difficult to add import support for new languages (like Rust).
 
@@ -21,10 +21,10 @@ Additionally, import extraction logic was hardcoded in `symbols.ts` with languag
 
 ## Decision Drivers
 
-* **Rust dependency tracking** — `get_dependents` must work for Rust files
-* **Fewer files per language** — 4 files is still too many touch points
-* **Single source of truth** — All language-specific code should live in one place
-* **Import extraction consistency** — Import handling should follow the same pattern as export extraction
+* **Rust dependency tracking**: `get_dependents` must work for Rust files
+* **Fewer files per language**: 4 files is still too many touch points
+* **Single source of truth**: All language-specific code should live in one place
+* **Import extraction consistency**: Import handling should follow the same pattern as export extraction
 
 ## Decision Outcome
 
@@ -35,8 +35,8 @@ Additionally, import extraction logic was hardcoded in `symbols.ts` with languag
 - Language definition
 
 **Adding a new language now requires exactly 2 files:**
-1. `languages/{lang}.ts` — all classes + definition
-2. `languages/registry.ts` — add to definitions array
+1. `languages/{lang}.ts`: all classes + definition
+2. `languages/registry.ts`: add to definitions array
 
 ### Architecture (After)
 
@@ -120,7 +120,7 @@ Path conversion: `crate::auth::middleware` → `auth/middleware`, `self::config`
 * Adding a new language now requires **2 files** instead of 4
 * All language-specific code is visible in one file per language
 * `get_dependents` now works for Rust files
-* Dynamic extension normalization — adding a language automatically extends path matching
+* Dynamic extension normalization: adding a language automatically extends path matching
 * Import extraction follows same pattern as export extraction
 
 ### Negative
@@ -153,5 +153,5 @@ After:
 
 ## Related Decisions
 
-* [ADR-002: Strategy Pattern for AST Traversal](0002-strategy-pattern-ast-traversal.md) — Established the traverser pattern
-* [ADR-005: Per-Language Definition Pattern](0005-per-language-definition-pattern.md) — Previous consolidation (now superseded for file structure)
+* [ADR-002: Strategy Pattern for AST Traversal](0002-strategy-pattern-ast-traversal.md): Established the traverser pattern
+* [ADR-005: Per-Language Definition Pattern](0005-per-language-definition-pattern.md): Previous consolidation (now superseded for file structure)

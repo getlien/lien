@@ -4,9 +4,9 @@ This document describes Lien's two-pass test detection system that links test fi
 
 ## Overview
 
-Test association helps AI assistants understand which tests cover which source code, enabling better code comprehension and test-aware refactoring suggestions.
+Test association links each source file to the tests that cover it, so an AI assistant (or a developer) knows which tests to run after changing a given file.
 
-## Two-Pass Detection Strategy
+## Two-pass detection strategy
 
 ```mermaid
 graph LR
@@ -20,12 +20,12 @@ graph LR
     style FINAL fill:#e1f5ff,stroke:#01579b,stroke-width:3px
 ```
 
-**Why Two Passes?**
+**Why two passes?**
 
 1. **Pass 1 (Convention)**: Fast, language-agnostic, covers 12 languages
 2. **Pass 2 (Import)**: Slower, language-specific, more accurate for Tier 1 languages
 
-## Pass 1: Convention-Based Detection
+## Pass 1: convention-based detection
 
 ```mermaid
 flowchart TB
@@ -82,7 +82,7 @@ flowchart TB
     style CREATE_ASSOC fill:#c8e6c9
 ```
 
-### Pattern Examples
+### Pattern examples
 
 **Extension Patterns:**
 ```
@@ -111,7 +111,7 @@ test/integration/api.js   ✓ (directory: "test/")
 spec/models/user_spec.rb  ✓ (directory: "spec/")
 ```
 
-### Source File Resolution
+### Source file resolution
 
 ```typescript
 // Example: user.test.ts → user.ts
@@ -133,7 +133,7 @@ spec/models/user_spec.rb  ✓ (directory: "spec/")
    source: "src/user.ts"
 ```
 
-## Pass 2: Import Analysis
+## Pass 2: import analysis
 
 Only runs for Tier 1 languages (TypeScript, JavaScript, Python)
 
@@ -192,7 +192,7 @@ sequenceDiagram
     Manager->>Manager: Build final association map
 ```
 
-### Import Pattern Recognition
+### Import pattern recognition
 
 **TypeScript/JavaScript:**
 ```typescript
@@ -228,7 +228,7 @@ import pytest                                ✗
 from unittest import TestCase                ✗
 ```
 
-### Path Resolution Algorithm
+### Path resolution algorithm
 
 ```typescript
 function resolvePath(testFilePath: string, importPath: string): string | null {
@@ -259,7 +259,7 @@ function resolvePath(testFilePath: string, importPath: string): string | null {
 }
 ```
 
-## Merging Results
+## Merging results
 
 ```mermaid
 flowchart LR
@@ -288,7 +288,7 @@ flowchart LR
     style FINAL_MAP fill:#e1f5ff,stroke:#01579b,stroke-width:3px
 ```
 
-### Merge Example
+### Merge example
 
 ```typescript
 // Pass 1 (Convention):
@@ -326,7 +326,7 @@ flowchart LR
 }
 ```
 
-## Framework Detection
+## Framework detection
 
 Test frameworks are detected from file content:
 
@@ -377,7 +377,7 @@ flowchart TD
     style SET_FRAMEWORK fill:#c8e6c9
 ```
 
-## Metadata Enrichment
+## Metadata enrichment
 
 Once associations are built, metadata is added to each code chunk:
 
@@ -403,9 +403,9 @@ interface ChunkMetadata {
 }
 ```
 
-## Performance Characteristics
+## Performance characteristics
 
-### Pass 1 (Convention-Based)
+### Pass 1 (convention-based)
 
 ```
 1,000 files, mixed languages
@@ -414,7 +414,7 @@ Coverage: ~80% accuracy
 Memory: Minimal (Map<string, TestAssociation>)
 ```
 
-### Pass 2 (Import Analysis)
+### Pass 2 (import analysis)
 
 ```
 250 test files (TypeScript/JavaScript/Python only)
@@ -432,7 +432,7 @@ Overall coverage: 85-90% accuracy
 Supported languages: 12 (Pass 1), 3 (Pass 2)
 ```
 
-## Language Support Matrix
+## Language support matrix
 
 | Language | Pass 1 (Convention) | Pass 2 (Import) | Test Frameworks Detected |
 |----------|:-------------------:|:---------------:|-------------------------|
@@ -449,9 +449,9 @@ Supported languages: 12 (Pass 1), 3 (Pass 2)
 | Scala | ✅ | ❌ | ScalaTest |
 | Kotlin | ✅ | ❌ | JUnit, Kotest |
 
-## Real-World Example
+## Real-world example
 
-### Input Files
+### Input files
 
 ```
 project/
@@ -477,7 +477,7 @@ describe('User', () => {
 });
 ```
 
-### Pass 1 Results
+### Pass 1 results
 
 ```typescript
 {
@@ -494,7 +494,7 @@ describe('User', () => {
 }
 ```
 
-### Pass 2 Discovers More
+### Pass 2 discovers more
 
 ```typescript
 {
@@ -515,22 +515,9 @@ describe('User', () => {
 }
 ```
 
-### User Benefit
+## Error handling
 
-When AI assistant asks about `src/auth.ts`:
-
-```
-> "What tests cover this authentication module?"
-
-Lien response:
-- tests/unit/user.test.ts (imports hashPassword function)
-- Detection method: Import analysis
-- Framework: Vitest
-```
-
-## Error Handling
-
-### Graceful Degradation
+### Graceful degradation
 
 ```typescript
 try {
@@ -551,7 +538,7 @@ try {
 }
 ```
 
-### File-Level Errors
+### File-level errors
 
 ```typescript
 // Skip problematic files, continue with others
@@ -565,21 +552,4 @@ for (const testFile of testFiles) {
   }
 }
 ```
-
-## Future Enhancements
-
-### Planned Improvements
-
-1. **Tree-sitter parsing**: More accurate import extraction
-2. **Caching**: Save associations between runs
-3. **Confidence scores**: Rate association quality
-4. **User overrides**: Manual association configuration
-5. **More languages**: Expand Pass 2 to Go, Java, etc.
-
-### Requested Features
-
-- Association visualization
-- Orphaned test detection
-- Coverage gap reporting
-- Test impact analysis (which tests to run for a change)
 

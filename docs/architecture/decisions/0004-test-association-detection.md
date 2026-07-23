@@ -178,26 +178,26 @@ const TEST_PATTERNS = [
 
 ### Positive
 
-* ✅ **Automatic detection** - No manual work required
-* ✅ **95% accuracy** - Catches most test associations
-* ✅ **Multi-framework** - Works for 12+ test frameworks
-* ✅ **Multi-language** - TypeScript, JavaScript, Python, Go, PHP, Ruby, Rust, Java
-* ✅ **Fast** - Simple pattern matching (~1ms per file)
-* ✅ **Visible in search** - Test files shown in metadata
-* ✅ **CI integration ready** - Export test list for targeted CI runs
-* ✅ **Hybrid approach** - Convention + imports catches more than either alone
+* **Automatic detection** - No manual work required
+* **95% accuracy** - Catches most test associations
+* **Multi-framework** - Works for 12+ test frameworks
+* **Multi-language** - TypeScript, JavaScript, Python, Go, PHP, Ruby, Rust, Java
+* **Fast** - Simple pattern matching (~1ms per file)
+* **Visible in search** - Test files shown in metadata
+* **CI integration ready** - Export test list for targeted CI runs
+* **Hybrid approach** - Convention + imports catches more than either alone
 
 ### Negative
 
-* ⚠️ **Not 100% accurate** - Edge cases with non-conventional names missed
-* ⚠️ **Pattern maintenance** - Must update patterns when new frameworks emerge
-* ⚠️ **No explicit tagging** - Can't manually override associations (yet)
+* **Not 100% accurate** - Edge cases with non-conventional names missed
+* **Pattern maintenance** - Must update patterns when new frameworks emerge
+* **No explicit tagging** - Can't manually override associations (yet)
 
 ### Neutral
 
-* 🔄 **Graceful degradation** - Missing associations don't break search
-* 🔄 **No performance impact** - Detection happens during indexing (one-time cost)
-* 🔄 **No configuration needed** - Works out of the box
+* **Graceful degradation** - Missing associations don't break search
+* **No performance impact** - Detection happens during indexing (one-time cost)
+* **No configuration needed** - Works out of the box
 
 ## Implementation Details
 
@@ -366,31 +366,6 @@ $ npm test calculator.test.ts math-api.test.ts  # 30 seconds
 * [PHPUnit Documentation](https://phpunit.de/)
 * Research: "Test Discovery Patterns in Modern Frameworks" (internal)
 
-## Future Enhancements
-
-### Potential Improvements (Not Yet Implemented)
-
-1. **Manual override** - Allow users to explicitly tag associations
-2. **Coverage metrics** - Show % of code covered by tests
-3. **Orphan detection** - Highlight code with no tests
-4. **Reverse search** - "Show me all code tested by this test file"
-5. **CI integration** - Automatically run relevant tests in CI based on changed files
-6. **Test quality scores** - Rank tests by coverage and complexity
-
-### Adding New Frameworks
-
-To add support for a new framework:
-
-1. Add pattern to `TEST_PATTERNS` array
-2. Add framework to language mapping
-3. Test with real projects
-4. Update documentation
-
-**Example** (adding Ava test framework):
-```typescript
-TEST_PATTERNS.push('{name}.ava.{ext}');  // calculator.ava.js
-```
-
 ## Notes
 
 Test association detection was surprisingly impactful. During dogfooding, we found:
@@ -400,7 +375,5 @@ Test association detection was surprisingly impactful. During dogfooding, we fou
 3. **Simplicity wins** - Complex AST analysis only marginally improved accuracy while significantly increasing complexity
 4. **Framework coverage matters** - Supporting 10+ frameworks means 95%+ of users work out of the box
 
-**Lesson**: "Good enough" is often better than "perfect". The 95% solution with zero manual work beats a 100% solution that requires maintenance. 🎯
-
-**Impact**: Developers report **90% reduction in test run time** when working on specific files, leading to faster feedback loops and more confidence when making changes.
+Developers report a 90% reduction in test run time when working on specific files.
 
