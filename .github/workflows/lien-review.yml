@@ -83,3 +83,13 @@ jobs:
           # input plumbing needed.
           LIEN_STALE_DUP_PASS: 'on'
           LIEN_INCOMPLETE_PASS: 'on'
+          # docs-drift-pass.ts — same dark/opt-in mechanism as the two above;
+          # this repo opts in as of 2026-07-23 to dogfood it on its own PRs.
+          # Still dark/off for every other @liendev/review / @liendev/action
+          # consumer. A synthetic calibration run scored 1/10 against the
+          # prod default model (see the status line + docs-drift subsection
+          # in docs/architecture/review-pass-architecture.md, and the
+          # fixture's own assertions header) — dark mechanism proven via
+          # unit tests independent of that score; this opt-in is itself the
+          # real-PR evidence-gathering step, not a claim of a passed bar.
+          LIEN_DOCS_DRIFT_PASS: 'on'

@@ -98,11 +98,43 @@
  *
  * SHIPPED THIS SESSION: the candidate-FIRES proof above (deterministic, zero-LLM), PLUS a durable
  * unit-test regression (`docs-drift-signals.test.ts`) covering the same ADR-cited-bullet shape with
- * inline synthetic input — independent of this gitignored fixture JSON. NOT shipped: any real
- * `drifted` verdict — no paid calibration ran this session (cost discipline; per the overseer's
- * explicit scope). The Tier-1/Tier-2 assertions below are written as the FUTURE calibration target
- * (a `--calibrate 10` run, pending owner greenlight) — a real vote against this fixture has not yet
- * been observed to pass or fail them.
+ * inline synthetic input — independent of this gitignored fixture JSON.
+ *
+ * CALIBRATION RECORD (owner-ordered, 2026-07-23): `npm run test:harness -w @liendev/review -- --fixture
+ * test/harness/fixtures/docs-drift/pr766-deleted-path-shape.fixture.json --calibrate 10` (prod default
+ * model, `moonshotai/kimi-k2.7-code`) scored **1/10 (10%)** for **$0.4870** — well below the 9/10 bar.
+ * NOT certified; recorded here as a characterization, per cost discipline (no prompt iteration; a
+ * second calibration run was NOT spent chasing the bar — see per-vote taxonomy below). Scope: this
+ * result characterizes the synthetic hand-staged shape only, not production behavior on real captured
+ * PRs (the fixture is tagged `synthetic`, not `canary`).
+ *
+ * PER-VOTE TAXONOMY (from `.wip/traces/2026-07-23T10-22-28Z-pr766-deleted-path-shape/`, 10 votes):
+ *   - PASS (1/10, vote 6) — verdict "drifted", correctly reasoned from the candidate excerpt +
+ *     `grep_codebase` confirmation that `packages/runner`/`platform/` are genuinely gone; did not
+ *     second-guess the excerpt against the live file.
+ *   - FAIL bucket A — "ground-truth contradiction via read_file" (6/10: votes 1, 3, 4, 5, 8, 10,
+ *     verdicts "intentional" x5 + "unverifiable" x1) — the model calls `read_file` on CLAUDE.md,
+ *     which (being a HAND-STAGED synthetic excerpt, not a real repoRootDir capture) returns THIS
+ *     repo's actual real-world CLAUDE.md — which has evolved past both the pre-PR and the
+ *     injected-bullet state and contains neither the `packages/runner` bullet nor the ADR-012
+ *     citation. The model treats that mismatch as proof the doc was "already updated" (verdict
+ *     "intentional") or flags it as internally inconsistent (verdict "unverifiable"), rather than
+ *     trusting the candidate's stated doc excerpt as the fixture's ground truth. This is a
+ *     synthetic-fixture authenticity gap, not a production reasoning bug: a real captured PR's
+ *     `read_file` would return the doc content as it stood at capture time, matching the candidate;
+ *     only a hand-staged injection can diverge from the live repo like this.
+ *   - FAIL bucket B — "historical mis-classification despite no guard keywords" (3/10: votes 2, 7, 9,
+ *     verdict "historical") — the fixture's design (§3.a above) deliberately avoids every
+ *     `HISTORICAL_GUARD_RE` trigger word specifically to test whether the deterministic regex's
+ *     narrow scope leaves a gap the LLM should still catch. Instead, the model's own semantic
+ *     judgment independently pattern-matches "hosted-platform remnants ... safe to ignore" as
+ *     self-evidently past-tense/historical framing and downgrades to "historical" — the opposite of
+ *     the fixture's intent (this phrasing should read as a plausible-looking CURRENT maintenance
+ *     note, not an obvious retirement notice). This is a genuine judgment-frontier gap worth tracking
+ *     if docs-drift calibration is revisited, not a fixture defect.
+ *
+ * The Tier-1/Tier-2 assertions below remain the calibration target for a future prompt-tuning pass;
+ * per owner instruction this session does NOT iterate the prompt in response to the score above.
  */
 
 import type { FixtureAssertions } from '../../assertions.js';
