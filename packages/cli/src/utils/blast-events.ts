@@ -37,6 +37,14 @@ export interface BlastEventChange {
   dependentCount: number | null;
   untestedDependentCount: number | null;
   riskLevel: string | null;
+  /**
+   * Distinct doc chunks referencing this symbol (see
+   * docs/architecture/blast-radius-nudge.md's docRefs section) — only
+   * meaningful for a `removed` change. `undefined` on any event recorded
+   * before this field existed; readers must treat that the same as `null`
+   * (unknown/not computed), never as "zero references".
+   */
+  docRefCount?: number | null;
 }
 
 export interface BlastEvent {
@@ -98,16 +106,26 @@ async function trimIfOversized(filePath: string): Promise<void> {
   await fs.writeFile(filePath, `${kept.join('\n')}\n`, 'utf-8');
 }
 
+/** A recorded count field: a real number, or `null` for "checked, unknown/degraded". */
+function isValidNumberOrNull(value: unknown): boolean {
+  return typeof value === 'number' || value === null;
+}
+
+/** Same as `isValidNumberOrNull`, plus `undefined` — for a field added after some
+ *  events were already on disk, where an older line simply won't have the key. */
+function isValidOptionalNumber(value: unknown): boolean {
+  return value === undefined || isValidNumberOrNull(value);
+}
+
 function isValidBlastEventChange(value: unknown): value is BlastEventChange {
   if (typeof value !== 'object' || value === null) return false;
   const c = value as Record<string, unknown>;
   if (typeof c.symbol !== 'string') return false;
   if (c.kind !== 'signature-changed' && c.kind !== 'removed') return false;
-  if (typeof c.dependentCount !== 'number' && c.dependentCount !== null) return false;
-  if (typeof c.untestedDependentCount !== 'number' && c.untestedDependentCount !== null) {
-    return false;
-  }
+  if (!isValidNumberOrNull(c.dependentCount)) return false;
+  if (!isValidNumberOrNull(c.untestedDependentCount)) return false;
   if (typeof c.riskLevel !== 'string' && c.riskLevel !== null) return false;
+  if (!isValidOptionalNumber(c.docRefCount)) return false;
   return true;
 }
 

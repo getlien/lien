@@ -46,6 +46,8 @@ describe('formatApiDeltaText', () => {
                 untestedDependentCount: 1,
                 riskLevel: 'medium',
                 enriched: true,
+                docRefCount: null,
+                docRefPaths: [],
               },
             ],
           },
@@ -57,6 +59,7 @@ describe('formatApiDeltaText', () => {
     expect(text).toContain('formatUser');
     expect(text).toContain('4 dependents, 1 untested, risk medium');
     expect(text).toContain('get_dependents');
+    expect(text).not.toContain('docs reference');
   });
 
   it('renders a degraded row without counts', () => {
@@ -74,6 +77,8 @@ describe('formatApiDeltaText', () => {
                 untestedDependentCount: null,
                 riskLevel: null,
                 enriched: false,
+                docRefCount: null,
+                docRefPaths: [],
               },
             ],
           },
@@ -82,6 +87,62 @@ describe('formatApiDeltaText', () => {
       ),
     );
     expect(text).toContain('index unavailable for counts');
+  });
+
+  it('renders a removed row with docRefs, showing the capped path list and a "+N more" tail', () => {
+    const text = stripAnsi(
+      formatApiDeltaText(
+        [
+          {
+            filepath: 'src/factory.ts',
+            changes: [
+              {
+                symbol: 'createVectorDB',
+                symbolName: 'createVectorDB',
+                kind: 'removed',
+                dependentCount: 26,
+                untestedDependentCount: 2,
+                riskLevel: 'critical',
+                enriched: true,
+                docRefCount: 5,
+                docRefPaths: ['CLAUDE.md', 'docs/architecture/README.md', 'docs/guide.md'],
+              },
+            ],
+          },
+        ],
+        'HEAD',
+      ),
+    );
+    expect(text).toContain(
+      '5 docs reference createVectorDB: CLAUDE.md, docs/architecture/README.md, docs/guide.md (+2 more)',
+    );
+  });
+
+  it('omits the docRefs clause when docRefCount is zero', () => {
+    const text = stripAnsi(
+      formatApiDeltaText(
+        [
+          {
+            filepath: 'src/foo.ts',
+            changes: [
+              {
+                symbol: 'unusedHelper',
+                symbolName: 'unusedHelper',
+                kind: 'removed',
+                dependentCount: 0,
+                untestedDependentCount: 0,
+                riskLevel: 'low',
+                enriched: true,
+                docRefCount: 0,
+                docRefPaths: [],
+              },
+            ],
+          },
+        ],
+        'HEAD',
+      ),
+    );
+    expect(text).not.toContain('docs reference');
   });
 });
 
@@ -391,5 +452,77 @@ describe('apiDeltaCommand — enrichment when an index is present', () => {
       untestedDependentCount: 1,
     });
     expect(errSpy).not.toHaveBeenCalled();
+  });
+
+  it('reports docRefCount/docRefPaths for a REMOVED symbol referenced by doc chunks in the stub index', async () => {
+    await write('a.ts', 'export function oldHelper() { return 1; }');
+    await git('add', '-A');
+    await git('-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'init');
+    await write('a.ts', '// oldHelper removed\n');
+
+    const { getIndexDir } = await import('@liendev/parser');
+    const realIndexDir = getIndexDir(dir);
+    await fs.mkdir(realIndexDir, { recursive: true });
+    await fs.writeFile(path.join(realIndexDir, 'structural.db'), '', 'utf-8');
+
+    const docChunk = {
+      content: 'The `oldHelper` function is documented here.',
+      metadata: { file: 'CLAUDE.md', startLine: 1, endLine: 1, type: 'doc', language: 'markdown' },
+      score: 0,
+      relevance: 'not_relevant',
+    };
+    vi.mocked(coreModule.createVectorDB).mockResolvedValueOnce({
+      initialize: vi.fn().mockResolvedValue(undefined),
+      getCurrentVersion: vi.fn().mockReturnValue(1),
+      scanAll: vi.fn().mockResolvedValue([docChunk]),
+    } as unknown as Awaited<ReturnType<typeof coreModule.createVectorDB>>);
+
+    await expect(apiDeltaCommand({ format: 'json', file: 'a.ts' })).rejects.toThrow('__exit__:0');
+
+    const result = lastJsonLog() as {
+      changes: Array<{
+        kind: string;
+        docRefCount: number | null;
+        docRefPaths: string[];
+      }>;
+    };
+    expect(result.changes[0]).toMatchObject({
+      kind: 'removed',
+      docRefCount: 1,
+      docRefPaths: ['CLAUDE.md'],
+    });
+
+    const events = await readBlastEvents(dir);
+    expect(events).toHaveLength(1);
+    expect(events[0].changes[0]).toMatchObject({ symbol: 'oldHelper', docRefCount: 1 });
+  });
+
+  it('leaves docRefCount null for a signature-changed symbol (docRefs only applies to removals)', async () => {
+    await write('a.ts', 'export function formatUser(user) { return user.name; }');
+    await git('add', '-A');
+    await git('-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'init');
+    await write('a.ts', 'export function formatUser(user, opts) { return user.name; }');
+
+    const { getIndexDir } = await import('@liendev/parser');
+    const realIndexDir = getIndexDir(dir);
+    await fs.mkdir(realIndexDir, { recursive: true });
+    await fs.writeFile(path.join(realIndexDir, 'structural.db'), '', 'utf-8');
+
+    vi.mocked(coreModule.createVectorDB).mockResolvedValueOnce({
+      initialize: vi.fn().mockResolvedValue(undefined),
+      getCurrentVersion: vi.fn().mockReturnValue(1),
+      scanAll: vi.fn().mockResolvedValue([]),
+    } as unknown as Awaited<ReturnType<typeof coreModule.createVectorDB>>);
+
+    await expect(apiDeltaCommand({ format: 'json', file: 'a.ts' })).rejects.toThrow('__exit__:0');
+
+    const result = lastJsonLog() as {
+      changes: Array<{ kind: string; docRefCount: number | null; docRefPaths: string[] }>;
+    };
+    expect(result.changes[0]).toMatchObject({
+      kind: 'signature-changed',
+      docRefCount: null,
+      docRefPaths: [],
+    });
   });
 });

@@ -167,6 +167,96 @@ describe('recordBlastEvent + readBlastEvents', () => {
     expect(events[0]).toEqual(good);
   });
 
+  it('round-trips a removed event carrying a populated docRefCount', async () => {
+    const event = sampleEvent({
+      changes: [
+        {
+          symbol: 'oldHelper',
+          kind: 'removed',
+          dependentCount: 3,
+          untestedDependentCount: 1,
+          riskLevel: 'high',
+          docRefCount: 2,
+        },
+      ],
+    });
+    await recordBlastEvent(rootDir, event);
+
+    expect(await readBlastEvents(rootDir)).toEqual([event]);
+  });
+
+  it('round-trips docRefCount: null (checked, no index / lookup failed) distinctly from absent', async () => {
+    const event = sampleEvent({
+      changes: [
+        {
+          symbol: 'oldHelper',
+          kind: 'removed',
+          dependentCount: null,
+          untestedDependentCount: null,
+          riskLevel: null,
+          docRefCount: null,
+        },
+      ],
+    });
+    await recordBlastEvent(rootDir, event);
+
+    const [read] = await readBlastEvents(rootDir);
+    expect(read).toEqual(event);
+    expect(read.changes[0].docRefCount).toBeNull();
+  });
+
+  it('accepts an older event recorded before docRefCount existed (field absent, not just null)', async () => {
+    const filePath = blastEventsFilePath(rootDir);
+    const preExisting = {
+      timestamp: new Date().toISOString(),
+      filepath: 'src/legacy.ts',
+      changes: [
+        {
+          symbol: 'legacyFn',
+          kind: 'removed',
+          dependentCount: 1,
+          untestedDependentCount: 0,
+          riskLevel: 'low',
+        },
+      ],
+      enriched: true,
+    };
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.appendFile(filePath, `${JSON.stringify(preExisting)}\n`, 'utf-8');
+
+    const events = await readBlastEvents(rootDir);
+    expect(events).toHaveLength(1);
+    expect(events[0].changes[0].docRefCount).toBeUndefined();
+  });
+
+  it('skips a line whose docRefCount is the wrong type', async () => {
+    const good = sampleEvent();
+    await recordBlastEvent(rootDir, good);
+
+    const filePath = blastEventsFilePath(rootDir);
+    const malformed = {
+      timestamp: new Date().toISOString(),
+      filepath: 'x.ts',
+      changes: [
+        {
+          symbol: 'foo',
+          kind: 'removed',
+          dependentCount: 1,
+          untestedDependentCount: 0,
+          riskLevel: 'low',
+          docRefCount: 'two', // wrong type — must be number | null | undefined
+        },
+      ],
+      enriched: true,
+    };
+    await fs.appendFile(filePath, `${JSON.stringify(malformed)}\n`, 'utf-8');
+    await recordBlastEvent(rootDir, sampleEvent({ filepath: 'src/bar.ts' }));
+
+    const events = await readBlastEvents(rootDir);
+    expect(events).toHaveLength(2);
+    expect(events[0]).toEqual(good);
+  });
+
   it('LIEN_BLAST_EVENTS=off disables recording entirely (kill switch)', async () => {
     process.env.LIEN_BLAST_EVENTS = 'off';
     await recordBlastEvent(rootDir, sampleEvent());

@@ -265,6 +265,205 @@ the existing complexity-delta windows. JSON output nests the new data under a
 `blastRadius` key — additive; the pre-existing top-level `totalEvents`/`windows`
 shape is unchanged for any existing caller.
 
+## E. docRefs: shifting docs-drift left onto a REMOVED change
+
+The PR-review engine's docs-drift pass (`packages/review/src/docs-drift-signals.ts`,
+dark by default) already catches "an untouched doc still names a symbol this PR
+removed" — but only at PR time. This extends the same fact one step earlier: when
+`enrichOneChange` classifies a change as `kind: 'removed'`, it also looks up which
+indexed documentation chunks still reference that symbol, and appends the count
+and up to 3 paths to the same warning. No LLM anywhere — the agent reading the
+warning is the judge of what to do about it.
+
+### Precondition, verified empirically before any of this was built
+
+Markdown gets heading-chunked (`type: 'doc'`) and indexed by default — no flag,
+no opt-in. Confirmed two ways: reading the code path (`DEFAULT_INDEX_INCLUDE_PATTERNS`
+in `packages/parser/src/constants.ts` includes `**/*.md`/`**/*.mdx`/`**/*.markdown`
+unconditionally; `chunkFile` in `packages/parser/src/chunker.ts` routes any such
+path to `chunkMarkdownFile` with no feature flag), and by querying this repo's own
+live index directly: `sqlite3 <indexDir>/structural.db "SELECT COUNT(*) FROM chunks
+WHERE type='doc'"` returned 1,078 real doc chunks, including CLAUDE.md broken into
+per-heading sections. Had this been flag-gated or unbuilt, this feature would not
+have been buildable as scoped — see the original brief's step-zero gate.
+
+### Matching primitives: lifted, not duplicated — then genuinely improved, twice, both disclosed
+
+The review pass's word-boundary regex (negative-lookaround `wordBoundaryRe`,
+guarding against matching a token as a substring of a longer identifier/path) and
+its corpus-driven distinctiveness gate (originally `isDistinctiveBareDirectory`,
+scoped to bare top-level directory names) are the exact precision machinery this
+feature needs too — a removed symbol named `index` or `config` must not spam the
+warning with incidental prose hits. Both moved into `@liendev/parser`'s new
+`doc-reference-matching.ts` (generalized from "bare directory" to "any token"),
+and `docs-drift-signals.ts` now imports them instead of defining its own copies —
+`isDistinctiveBareDirectory` survives as a one-line delegating export (its own
+test suite imports it by that name). **The code-motion step itself was proven
+behavior-identical** before anything else changed: review's full 39-test
+`docs-drift-signals.test.ts` suite, and its full 1581-test package suite, passed
+unchanged immediately after the pure lift, with no logic altered yet.
+
+Two real behavior changes followed, both found by dogfooding this feature (not
+assumed away), both disclosed here rather than folded silently into "the lift":
+
+**1. Fence-awareness (a fix).** The distinctiveness gate's original
+neighbor-character check (a `/` or backtick directly adjacent to the match) only
+recognized *inline* code spans. It did not recognize a multi-line fenced code
+block — and `createVectorDB`, used as the first real-world dogfood symbol, is
+genuinely referenced in CLAUDE.md's own fenced package-structure tree and in
+`packages/core/README.md`'s fenced usage examples, neither of which have a
+backtick or `/` touching the token itself. The gate mis-classified all of those
+as "not distinctive" and suppressed a real, correct doc reference down to zero.
+Fixed by tracking per-line fence state (mirrors `docs-drift-signals.ts`'s own
+`isInsideFence`) and treating any line inside a fence as code context outright,
+regardless of neighbor characters.
+
+**This is a genuine behavior change for `isDistinctiveBareDirectory`, not an
+identical refactor** — a bare directory name referenced ONLY inside a fenced
+code block previously read as "not distinctive" (silently suppressed) and now
+reads as "distinctive" (correctly flagged). No pre-existing review fixture
+exercised that shape, so no existing test result changed, but the *logic* now
+answers a question it didn't used to get right. This is a deliberate,
+disclosed improvement that aligns the shared gate with `docs-drift-signals.ts`'s
+own `isInsideFence` sweep path — not a "no behavior changed" claim. A new
+review-side regression fixture pins the new behavior explicitly (see
+`docs-drift-signals.test.ts`'s "fenced bare-directory reference" case).
+
+**2. Identifier-shape exemption (a fix, found because the flagship claim
+stopped reproducing).** The distinctiveness gate's rule is "a single prose hit
+ANYWHERE in the corpus suppresses the whole token" — and once this very
+architecture-doc section was written and indexed, it itself contained plain,
+un-backticked prose mentions of `createVectorDB` (e.g. "9 docs reference
+createVectorDB:" in the dogfood-evidence prose below). Under the pre-fix gate,
+that alone made `createVectorDB` "not distinctive," suppressing the flagship
+9-file claim back down to zero — a real over-suppression bug, not a fencing
+edge case. The fix: a token containing an uppercase letter or an underscore
+anywhere (`createVectorDB`, `authToken`, `MyClass`, a single Capitalized class
+name like `Widget`) is exempt from the corpus-wide prose gate entirely — no
+ordinary lowercase English word has that shape, so no amount of plain-prose
+surrounding text can make it ambiguous. A bare all-lowercase token (`index`,
+`config`, `platform`) is unaffected and still goes through the exact same
+strict, corpus-driven check as before.
+
+**This exemption cannot change `isDistinctiveBareDirectory`'s existing
+behavior** — review's bare-top-level-directory referands are always lowercase
+by this repo's own directory-naming convention (verified: every existing
+fixture and this repo's real directories), so the exemption never engages for
+that call site. Proven, not just argued: review's full suite (1581 tests)
+passes unchanged, plus the same new fenced-bare-directory fixture above also
+covers a lowercase token, so it exercises the fence fix without ever touching
+the exemption path.
+
+### Query path
+
+`packages/cli/src/utils/doc-references.ts`'s `findDocReferences(vectorDB,
+symbolName)`: `vectorDB.scanAll()` (the full unscoped read — no `type` filter
+exists on `VectorDBInterface`, and this already matches the cost class
+`findDependents` pays for the same event), filtered to `metadata.type === 'doc'`,
+then to genuine `wordBoundaryRe` matches, then gated by `isDistinctiveToken`. The
+surviving distinct file paths are sorted and capped at
+`MAX_DOC_REF_PATHS` (3), with the true total count preserved separately so the
+warning can say "(+N more)". Runs *only* when a removal was already classified —
+never on the common edit, and never for a `signature-changed` row (the symbol
+still exists, so "docs reference it" isn't a drift signal there).
+
+Fail-open throughout: `findDocReferences` catches internally and returns `null`
+on any error (closed db, corrupt store), which the caller treats identically to
+"zero references" — omit the line, never block, never throw.
+
+### Surface
+
+Additive fields only:
+
+- `EnrichedExportedSymbolChange` gains `docRefCount: number | null` and
+  `docRefPaths: string[]` — `null`/`[]` for every `signature-changed` row and for
+  a degraded `removed` row (no index, or the lookup failed).
+- `api-delta-write.sh`'s warning gains one sentence for the single-change
+  `removed` case: `" N docs reference X: path1, path2, path3 (+K more)."` The
+  2-3-change fallback branch stays terse — just `", N docs"` per removed item,
+  to avoid ballooning an already-combined line.
+- `BlastEventChange` gains `docRefCount?: number | null` — optional (not just
+  nullable) because events recorded before this field existed have no such key
+  at all; `isValidBlastEventChange`'s reader treats absent, `null`, and a real
+  number as the three legitimate states, and rejects anything else (e.g. a
+  string). `lien stats` is untouched — no natural aggregation was worth adding
+  for this pass.
+
+```jsonc
+// single 'removed' change, enriched, with doc references
+{
+  "symbol": "createVectorDB",
+  "kind": "removed",
+  "dependentCount": 7,
+  "riskLevel": "low",
+  "enriched": true,
+  "docRefCount": 9,
+  "docRefPaths": ["CLAUDE.md", "docs/architecture/blast-radius-nudge.md", "docs/architecture/decisions/0010-retire-qdrant-backend.md"]
+}
+```
+
+### Dogfood evidence (real PostToolUse stdin shape, this repo's own index)
+
+All cases piped through the real hook script with the genuine `{session_id,
+transcript_path, cwd, hook_event_name, tool_name, tool_input, tool_response}`
+payload shape, against this repo's own live overlay index (not a synthetic
+fixture) — **re-captured after the identifier-shape exemption and fence fixes**,
+against the rebuilt CLI, so every claim below reproduces against this PR's own
+final code, not an earlier draft of it:
+
+**Removed symbol with real doc references** (`createVectorDB`, temporarily
+de-exported in the working tree only, reverted immediately after capture):
+
+```
+⚠ lien: exported symbol removed — createVectorDB (7 dependents, risk low). Callers will break — check get_dependents. 9 docs reference createVectorDB: CLAUDE.md, docs/architecture/blast-radius-nudge.md, docs/architecture/decisions/0010-retire-qdrant-backend.md (+6 more).
+```
+
+Unchanged from the pre-fix capture (still 9 files) — expected: this doc's own
+prose additions landed inside a file (`blast-radius-nudge.md`) that was already
+one of the 9, so the *distinct-file* count didn't move, only the exemption's
+correctness did (see the two fixes above for what actually changed and why).
+
+**Removed symbol with zero doc references.** Deliberately NOT `detectFileType`
+— an earlier draft of this doc used that as the example and named it directly
+in this same prose, which itself became a doc reference the moment this file
+was indexed, silently invalidating a "zero references" claim about to be
+committed. Demonstrated instead with a synthetic, disposable exported symbol
+(`zzzUnreferencedNudgeDemoHelper`, added and removed via a temporary commit,
+squashed away immediately after capture — never part of this PR's real history)
+specifically so naming it here can never turn it into a real reference:
+
+```
+⚠ lien: exported symbol removed — zzzUnreferencedNudgeDemoHelper (0 dependents, risk low). Callers will break — check get_dependents.
+```
+
+The docRefs sentence is correctly absent — not "0 docs reference…".
+
+**Degraded (no index)**, a fresh scratch repo:
+
+```
+⚠ lien: exported symbol removed — greet. Check get_dependents (index unavailable for counts).
+```
+
+Confirmed only `blast-events.jsonl` was created on disk (`docRefCount: null` in
+the ledger), never `structural.db`.
+
+**Fail-open**: malformed (non-JSON, and valid-JSON-missing-fields) stdin, and a
+non-git directory — all exit 0 with no `additionalContext` emitted.
+
+**Robustness: a hostile/malformed enrichment (`docRefCount: 5, docRefPaths:
+null`).** Before the null-guard fix, piping this shape into the hook script's
+`docRefsClause` crashed jq outright (`Cannot iterate over null (null)`, exit
+5) — silently dropping the ENTIRE warning, including the base "symbol removed"
+sentence that has nothing to do with docRefs. After the fix
+(`(.docRefPaths // [])`), the same input degrades gracefully instead:
+
+```
+⚠ lien: exported symbol removed — x (1 dependents, risk low). Callers will break — check get_dependents. 5 docs reference x:  (+5 more).
+```
+
+The path list renders empty but the count and the base warning both survive —
+never a silent total loss over one malformed field.
+
 ## Known limitations
 
 All of these are silent misses (safe direction — the nudge under-fires, it
@@ -302,6 +501,33 @@ never fires on something that isn't real), not false positives:
   identifier text is never touched by normalization, and a parameter rename is
   a real API-surface change in keyword-argument languages (e.g. Python), not
   noise.
+- **docRefs (section E) only fires for `removed`, never `signature-changed`** —
+  a symbol that merely changed shape still exists, so "docs reference it" isn't
+  a drift signal by itself.
+- **docRefs has no suppression tiers.** Unlike the review pass it borrows its
+  matching primitives from, this feature does not exclude changelog/changeset
+  entries, fenced-code samples that are stale on purpose, or past-tense
+  ("formerly", "was removed") prose — a CHANGELOG.md mention counts exactly the
+  same as a live guide. This is a deliberate scope cut (the agent reading the
+  warning is the judge), not an oversight; the review pass's dedicated
+  `isSuppressed`/`classifyPositionTier` machinery was left there rather than
+  duplicated here.
+- **An extra, uncached full `scanAll()` per removed symbol.** `findDocReferences`
+  does not share `findDependents`'s internal scan cache (a private module-level
+  cache in `dependency-analyzer.ts`) — accepted because this only runs on the
+  rare already-detected-removal event, the same event `findDependents` itself
+  already pays a full scan for.
+- **Recall is capped at `MAX_DOC_REF_PATHS` (3) displayed paths**, though the
+  true count is preserved and shown via "(+N more)" — never silently truncated
+  to a smaller number without saying so.
+- **Fence detection covers ` ``` `/`~~~` only, not a 4-space-indented code
+  block** (the other Markdown convention for a literal code sample). This is
+  consistent with the chunker's own `FENCE_RE` (`markdown-chunker.ts`), which
+  has the same gap — an indented block was never a first-class construct here.
+  A token referenced only inside an indented block, with no other doc mention,
+  still reads as ordinary prose and can be wrongly suppressed by the
+  distinctiveness gate unless it also happens to have an unambiguous
+  identifier shape (section E's exemption).
 
 ## Why advisory, not a gate
 

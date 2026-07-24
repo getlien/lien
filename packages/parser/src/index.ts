@@ -191,3 +191,10 @@ export type { ChunkOnlyOptions, ChunkOnlyResult } from './chunk-only-index.js';
 
 export { computeBlastRadiusRisk } from './risk/blast-radius-risk.js';
 export type { BlastRadiusRiskInput, BlastRadiusRisk } from './risk/blast-radius-risk.js';
+
+// =============================================================================
+// DOC REFERENCE MATCHING (shared by the review docs-drift pass and the CLI's
+// edit-time docRefs lookup — see doc-reference-matching.ts's own docstring)
+// =============================================================================
+
+export { wordBoundaryRe, isDistinctiveToken } from './doc-reference-matching.js';

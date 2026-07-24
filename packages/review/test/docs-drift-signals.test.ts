@@ -230,6 +230,45 @@ describe('isDistinctiveBareDirectory', () => {
   it('is true (vacuously) when the token never appears in the corpus at all', () => {
     expect(isDistinctiveBareDirectory('somewordneverpresent', [])).toBe(true);
   });
+
+  it(
+    'is true when every occurrence sits inside a fenced code block, even without an adjacent ' +
+      'backtick/slash touching the token itself (pins a deliberate behavior CHANGE from the ' +
+      'shared @liendev/parser fix: previously this shape read as "not distinctive" — a fence was ' +
+      'never recognized as code context, only an inline backtick/slash was — and got silently ' +
+      'suppressed). The fenced line deliberately has NO `/` or backtick adjacent to the token ' +
+      '(no trailing slash, no directory-listing punctuation) — otherwise the PRE-EXISTING ' +
+      'neighbor-character check alone would satisfy this fixture regardless of whether the fence ' +
+      'fix exists at all, making it pass even with the fence fix reverted (verified: it does).',
+    () => {
+      const docChunks = [
+        makeChunk(
+          'docs/guide.md',
+          20,
+          ['## Directory layout', '', '```', 'the zznovelfencedir module lives here', '```'].join(
+            '\n',
+          ),
+        ),
+      ];
+      expect(isDistinctiveBareDirectory('zznovelfencedir', docChunks)).toBe(true);
+    },
+  );
+
+  it('still suppresses a bare-directory prose hit OUTSIDE any fence, even alongside fenced code elsewhere', () => {
+    const docChunks = [
+      makeChunk(
+        'docs/guide.md',
+        1,
+        [
+          'The zznovelfencedir helper is handy.',
+          '```',
+          'the zznovelfencedir module lives here',
+          '```',
+        ].join('\n'),
+      ),
+    ];
+    expect(isDistinctiveBareDirectory('zznovelfencedir', docChunks)).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------

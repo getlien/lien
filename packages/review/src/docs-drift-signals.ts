@@ -52,6 +52,7 @@
  */
 
 import type { CodeChunk } from '@liendev/parser';
+import { wordBoundaryRe, isDistinctiveToken } from '@liendev/parser';
 import type { ReviewContext } from './plugin-types.js';
 import { extractRemovedExports } from './removed-export-signals.js';
 import { detectRenameSweeps } from './rename-sweep-signals.js';
@@ -205,21 +206,6 @@ function directoryIsGone(dir: string, repoChunks: CodeChunk[] | undefined): bool
 }
 
 /**
- * A neighbor character that marks a `token` occurrence as PATH-context (a directory/file listing)
- * rather than ordinary prose: a path separator, or the backtick this repo's own docs use to mark a
- * bare directory/file token (e.g. CLAUDE.md's own `` `packages/` `` / `` `platform/` `` bullets).
- */
-const PATH_CONTEXT_NEIGHBOR_RE = /[/`]/;
-
-/** True iff the `token`-length occurrence starting at `index` in `line` sits directly against a
- *  `/` or a backtick on either side — i.e. reads as a path/identifier, not a word in a sentence. */
-function isPathContextOccurrence(line: string, index: number, tokenLength: number): boolean {
-  const before = index > 0 ? line[index - 1] : '';
-  const after = line[index + tokenLength] ?? '';
-  return PATH_CONTEXT_NEIGHBOR_RE.test(before) || PATH_CONTEXT_NEIGHBOR_RE.test(after);
-}
-
-/**
  * True iff EVERY word-boundary occurrence of a BARE top-level directory referand (e.g. `platform`,
  * no `packages/` prefix) across the repo's doc/config corpus reads as a path/identifier — never as
  * ordinary prose describing something unrelated (e.g. "supports every platform", "the existing
@@ -231,34 +217,17 @@ function isPathContextOccurrence(line: string, index: number, tokenLength: numbe
  * individual file path never carries (both always contain a `/`, so neither can spuriously match a
  * plain English word in the middle of a sentence).
  *
- * Corpus-driven rather than a hardcoded stopword list: a fixed word list needs constant upkeep and
- * still misses whatever wasn't anticipated — this repo's own `platform`/`runner` (see #593's real
- * deletion, the motivating case) are generic SOFTWARE nouns, not classic linguistic stopwords, so an
- * off-the-shelf English stopword list would miss them entirely. Checking what THIS repo's own docs
- * actually do with the word is self-maintaining and needs no list to keep up to date — verified
- * against this repo's own corpus, `platform` reads as ordinary prose in both `STYLE_GUIDE.md`
- * ("...documentation site, platform app...") and this package's own harness `README.md` ("...the
- * existing platform .env...") — exactly the false-positive risk this gate exists to close. Exposed
- * for testing.
+ * Delegates to `@liendev/parser`'s `isDistinctiveToken` — the exact same corpus-driven "does every
+ * occurrence read as code/path context" check, shared with the CLI's edit-time docRefs lookup (see
+ * `doc-reference-matching.ts`'s docstring). Kept as a named export here, rather than inlining the
+ * import at call sites, because this module's own test suite exercises it directly under this name.
+ * Verified against this repo's own corpus, `platform` reads as ordinary prose in both
+ * `STYLE_GUIDE.md` ("...documentation site, platform app...") and this package's own harness
+ * `README.md` ("...the existing platform .env...") — exactly the false-positive risk this gate
+ * exists to close. Exposed for testing.
  */
 export function isDistinctiveBareDirectory(token: string, docChunks: CodeChunk[]): boolean {
-  const re = wordBoundaryRe(token, 'g');
-  return docChunks.every(
-    chunk => !chunk.content.includes(token) || everyLineIsPathContextOnly(chunk, re, token.length),
-  );
-}
-
-/** True iff every occurrence of `re` across `chunk`'s lines sits in path-context (see
- *  `isPathContextOccurrence`). Split out of `isDistinctiveBareDirectory` to keep that function's
- *  own nesting shallow (mirrors `collectMatchesInChunk`'s split out of `sweepReferand`). */
-function everyLineIsPathContextOnly(chunk: CodeChunk, re: RegExp, tokenLength: number): boolean {
-  return chunk.content
-    .split('\n')
-    .every(line =>
-      [...line.matchAll(re)].every(
-        m => m.index === undefined || isPathContextOccurrence(line, m.index, tokenLength),
-      ),
-    );
+  return isDistinctiveToken(token, docChunks);
 }
 
 /**
@@ -344,30 +313,10 @@ function collectUntouchedDocChunks(chunks: CodeChunk[], changed: Set<string>): C
 // ---------------------------------------------------------------------------
 // Word-boundary sweep
 // ---------------------------------------------------------------------------
-
-function escapeForRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-/**
- * The characters that would extend a matched token into a DIFFERENT, longer identifier or path
- * segment — used as a negative lookaround so a referand match doesn't spuriously fire inside a
- * larger token it's merely a substring of (e.g. `packages/runner` inside `packages/runner-hosted`
- * or `sub-packages/runner`; `fetchUser` inside `my-fetchUser` or `fetchUser.old`). Plain `\b` alone
- * is insufficient: `-` and `.` are non-word characters, so `\b` treats them as legitimate
- * boundaries even though this codebase's identifier/path conventions use them to continue the same
- * token. `/` is deliberately NOT in this set — a leading/trailing `/` is a legitimate path
- * continuation (`packages/runner/README.md` still names the same now-deleted directory), and this
- * repo's own paths are `/`-delimited. (Adversarial review finding — packages/review/src/... #427.)
- */
-const CONTINUATION_CHARS = '[A-Za-z0-9_.-]';
-
-/** A word/path-boundary regex for `token` — see `CONTINUATION_CHARS` for why this is stricter than
- *  plain `\b`. Pass `flags: 'g'` for a reusable global-match regex (`matchAll`). */
-function wordBoundaryRe(token: string, flags = ''): RegExp {
-  const escaped = escapeForRegex(token);
-  return new RegExp(`(?<!${CONTINUATION_CHARS})${escaped}(?!${CONTINUATION_CHARS})`, flags);
-}
+//
+// `wordBoundaryRe` is imported from `@liendev/parser` (`doc-reference-matching.ts`) — shared with
+// the CLI's edit-time docRefs lookup so the two matching behaviors can never drift apart. See that
+// module's docstring for the full "why a negative lookaround, not plain `\b`" rationale.
 
 /** Cheap pre-check before the per-line regex: does `chunk`'s raw content contain the referand's
  *  token at all? (fast reject, mirrors `removed-export-signals.ts`'s own). */
