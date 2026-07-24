@@ -22,6 +22,7 @@ import {
   type ExportedSymbolChange,
 } from '../utils/signature-delta.js';
 import { recordBlastEvent, type BlastEvent } from '../utils/blast-events.js';
+import { findDocReferences } from '../utils/doc-references.js';
 
 export interface ApiDeltaOptions {
   format: 'text' | 'json';
@@ -42,6 +43,16 @@ export interface EnrichedExportedSymbolChange extends ExportedSymbolChange {
   untestedDependentCount: number | null;
   riskLevel: string | null;
   enriched: boolean;
+  /**
+   * Distinct doc chunks that reference this symbol (see
+   * docs/architecture/blast-radius-nudge.md's docRefs section). Only
+   * computed for `kind === 'removed'` changes — null for `signature-changed`
+   * (not applicable: the symbol still exists, so "docs reference it" isn't a
+   * drift signal) and for a degraded (no index / lookup failed) change.
+   */
+  docRefCount: number | null;
+  /** Up to `MAX_DOC_REF_PATHS` file paths backing `docRefCount`. Empty when `docRefCount` is null or 0. */
+  docRefPaths: string[];
 }
 
 export interface EnrichedSignatureDelta {
@@ -70,6 +81,8 @@ function degradedChange(change: ExportedSymbolChange): EnrichedExportedSymbolCha
     untestedDependentCount: null,
     riskLevel: null,
     enriched: false,
+    docRefCount: null,
+    docRefPaths: [],
   };
 }
 
@@ -101,6 +114,24 @@ async function hasStructuralIndex(rootDir: string): Promise<boolean> {
   }
 }
 
+/**
+ * Doc-chunk references for a REMOVED symbol only — a `signature-changed`
+ * symbol still exists, so "docs reference it" isn't a drift signal. Fails
+ * open to `{ docRefCount: null, docRefPaths: [] }`, matching
+ * `findDocReferences`'s own fail-open contract (see doc-references.ts).
+ */
+async function resolveDocRefs(
+  vectorDB: Awaited<ReturnType<typeof createVectorDB>>,
+  change: ExportedSymbolChange,
+): Promise<Pick<EnrichedExportedSymbolChange, 'docRefCount' | 'docRefPaths'>> {
+  if (change.kind !== 'removed') return { docRefCount: null, docRefPaths: [] };
+
+  const docRefs = await findDocReferences(vectorDB, change.symbolName);
+  return docRefs
+    ? { docRefCount: docRefs.count, docRefPaths: docRefs.paths }
+    : { docRefCount: null, docRefPaths: [] };
+}
+
 async function enrichOneChange(
   vectorDB: Awaited<ReturnType<typeof createVectorDB>>,
   filepath: string,
@@ -110,12 +141,14 @@ async function enrichOneChange(
   try {
     const log = (): void => undefined;
     const analysis = await findDependents(vectorDB, filepath, log, change.symbolName, indexVersion);
+    const docRefs = await resolveDocRefs(vectorDB, change);
     return {
       ...change,
       dependentCount: analysis.dependents.length,
       untestedDependentCount: analysis.uncoveredProductionDependents,
       riskLevel: computeRisk(analysis),
       enriched: true,
+      ...docRefs,
     };
   } catch {
     return degradedChange(change);
@@ -172,9 +205,19 @@ function buildBlastEvent(delta: EnrichedSignatureDelta, now: Date): BlastEvent {
       dependentCount: c.dependentCount,
       untestedDependentCount: c.untestedDependentCount,
       riskLevel: c.riskLevel,
+      docRefCount: c.docRefCount,
     })),
     enriched: delta.changes.some(c => c.enriched),
   };
+}
+
+/** " — N docs reference X: path1, path2 (+K more)" when the removed symbol has doc references, else "". */
+function fmtDocRefs(c: EnrichedExportedSymbolChange): string {
+  if (!c.docRefCount) return '';
+  const shown = c.docRefPaths.join(', ');
+  const more =
+    c.docRefCount > c.docRefPaths.length ? ` (+${c.docRefCount - c.docRefPaths.length} more)` : '';
+  return chalk.dim(` — ${c.docRefCount} docs reference ${c.symbol}: ${shown}${more}`);
 }
 
 function fmtChange(c: EnrichedExportedSymbolChange): string {
@@ -182,7 +225,7 @@ function fmtChange(c: EnrichedExportedSymbolChange): string {
   const detail = c.enriched
     ? ` — ${c.dependentCount} dependents, ${c.untestedDependentCount} untested, risk ${c.riskLevel}`
     : chalk.dim(' — index unavailable for counts');
-  return `    ${label}${c.symbol}${detail}`;
+  return `    ${label}${c.symbol}${detail}${fmtDocRefs(c)}`;
 }
 
 /** Render the human-readable report. Pure — no I/O, no process state. */

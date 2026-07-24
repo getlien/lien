@@ -53,21 +53,34 @@ fi
 # (by far the common one) renders a full, self-contained sentence per kind/
 # enrichment state; 2-3 changes fall back to a terser combined line. Empty
 # array -> jq emits nothing -> stay silent.
+#
+# docRefsClause (single-change only; docRefCount is always null/absent for a
+# signature-changed row, so this is a no-op there) appends the docs-drift-
+# shifted-left signal: which indexed doc chunks still name a symbol this edit
+# just removed. See docs/architecture/blast-radius-nudge.md's docRefs section.
 msg="$(printf '%s' "$json" | jq -r '
+  def docRefsClause:
+    if (.docRefCount // 0) > 0 then
+      " " + (.docRefCount|tostring) + " docs reference " + .symbol + ": "
+        + (.docRefPaths[0:3] | join(", "))
+        + (if .docRefCount > (.docRefPaths|length)
+           then " (+\(.docRefCount - (.docRefPaths|length)) more)" else "" end)
+        + "."
+    else "" end;
   (.changes // []) as $c
   | ($c | length) as $n
   | if $n == 0 then empty
     elif $n == 1 then
       ($c[0]) as $x
       | if $x.kind == "removed" then
-          if $x.enriched then
+          (if $x.enriched then
             "⚠ lien: exported symbol removed — " + $x.symbol
               + " (" + ($x.dependentCount|tostring) + " dependents, risk " + $x.riskLevel + ")."
               + " Callers will break — check get_dependents."
           else
             "⚠ lien: exported symbol removed — " + $x.symbol + "."
               + " Check get_dependents (index unavailable for counts)."
-          end
+          end) + ($x | docRefsClause)
         else
           if $x.enriched then
             "⚠ lien: exported signature changed — " + $x.symbol
@@ -84,6 +97,7 @@ msg="$(printf '%s' "$json" | jq -r '
           | if .kind == "removed" then
               "removed " + .symbol
                 + (if .enriched then " (" + (.dependentCount|tostring) + " dependents, risk " + .riskLevel + ")" else " (index unavailable for counts)" end)
+                + (if (.docRefCount // 0) > 0 then ", " + (.docRefCount|tostring) + " docs" else "" end)
             else
               .symbol
                 + (if .enriched then " (" + (.dependentCount|tostring) + " dependents, " + (.untestedDependentCount|tostring) + " untested, risk " + .riskLevel + ")" else " (index unavailable for counts)" end)
