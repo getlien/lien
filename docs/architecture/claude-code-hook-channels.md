@@ -21,7 +21,7 @@ version.
   (`augment-explore-task.sh`).
 - `{"decision":"block","reason":"..."}` (Stop): stops the turn from
   completing and forces one more turn with `reason` as context (same effect
-  as `exit 2` + stderr for this event). `test-verify-stop.sh` uses this. See
+  as `exit 2` + stderr for this event). `recap-stop.sh` (formerly `test-verify-stop.sh`) uses this. See
   "Stop event: two channels, not one" below — `additionalContext` reaches
   the model here too, but with different (non-blocking) semantics.
 
@@ -52,7 +52,7 @@ is exactly why this file says "re-verify if the hook protocol changes":
 | `hookSpecificOutput.additionalContext` (with `hookEventName: "Stop"`) | **Does NOT block.** Injects context the model can act on while still allowing the turn to end normally — the one event where `additionalContext` differs from its `PostToolUse` behavior (there, it always attaches non-blocking context; for `Stop` specifically, this is documented as continuing the conversation rather than ending it). |
 | Exit 0, no JSON | Allows the stop to proceed with no comment. |
 
-`test-verify-stop.sh` uses `decision:block` deliberately — the nudge is a
+`recap-stop.sh` (formerly `test-verify-stop.sh`) uses `decision:block` deliberately — the nudge is a
 one-shot "take one more look before you finish" interruption, not passive
 context to scroll past — and that choice holds up under the corrected
 understanding just as well as it did under the (wrong) "only channel"

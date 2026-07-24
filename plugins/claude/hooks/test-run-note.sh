@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # PostToolUse hook on Bash: FEATURE 2 (did-you-run-the-tests verification) —
 # record a Bash command as a test run when it looks like one, so
-# `test-verify-stop.sh` can later tell whether an edited file's associated
+# the session recap (`recap-stop.sh`) can later tell whether an edited file's associated
 # tests were ever exercised this session. See
 # docs/architecture/test-verification-nudge.md.
 #

@@ -140,10 +140,21 @@ A session-scoped ledger that advises, at session Stop, on edited files whose ass
 
 Explains the write-time/session-scoped test-verification nudge:
 - `lien verify-tests <note-edit|note-run|report>` CLI: a session ledger of edited files with associated tests and observed Bash test runs
-- `plugins/claude/hooks/test-reminder.sh` (rewired), `test-run-note.sh`, and `test-verify-stop.sh` — the three hooks that record and, at Stop, advise
+- `plugins/claude/hooks/test-reminder.sh` (rewired), `test-run-note.sh`, and `recap-stop.sh` (the Stop surface, now the consolidated [session risk-ledger recap](session-risk-recap.md)) — the hooks that record and, at Stop, advise
 - The pure `classifyTestCommand`/`computeUnverifiedFiles` matcher (broad vs scoped runs, generous coverage matching)
 
 Read this to understand the sibling nudge to `lien delta` and the blast-radius nudge, and why it fires at Stop rather than as a `lien delta` gate extension.
+
+---
+
+### [Session Risk-Ledger Recap](./session-risk-recap.md)
+The single Stop-time advisory that re-raises UNRESOLVED risk from the current session — unrun tests, live complexity crossings, and unacted `get_dependents` warnings — as one block. Replaces `test-verify-stop.sh`.
+
+Explains the consolidated finish-line surface:
+- `lien recap <--session>` CLI + the pure `session-recap.ts` join (all three sources are unresolved-only)
+- `plugins/claude/hooks/recap-stop.sh` — one `decision:block` per stop episode, both #843 loop-prevention layers kept
+- The delta-source decision: a LIVE working-tree recompute (not mining `delta-events.jsonl`, which has no session_id or before/after values)
+- Why the PreCompact half was dropped (no documented model-visible channel)
 
 ---
 
@@ -196,6 +207,7 @@ For the history behind these designs, see the [Architectural Decision Records in
 | Pre-commit complexity gate (`lien delta`) | [lien delta](./lien-delta.md) |
 | Exported-signature nudge (`lien api-delta`) | [Blast-Radius Nudge](./blast-radius-nudge.md) |
 | Did-you-run-the-tests nudge (`lien verify-tests`) | [Did-You-Run-The-Tests Verification Nudge](./test-verification-nudge.md) |
+| Session risk-ledger recap (`lien recap`) | [Session Risk-Ledger Recap](./session-risk-recap.md) |
 | Plugin hook design (what reaches the model) | [Claude Code Hook Output Channels](./claude-code-hook-channels.md) |
 | Lien Review's extra LLM passes (doc-truth, candidate loops) | [Agent-Review Pass Architecture](./review-pass-architecture.md) |
 

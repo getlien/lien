@@ -9,6 +9,16 @@ verification: CLAUDE.md's "Verification Before Done" section has always
 been honor-system, and nothing previously noticed whether the reminder was
 ever acted on.
 
+> **Consolidated into the session risk-ledger recap (2026-07).** The Stop
+> surface described here — `test-verify-stop.sh` — has been replaced by
+> `recap-stop.sh` / `lien recap`, which folds this unrun-tests advisory in
+> **verbatim** (byte-identical when it is the only unresolved source)
+> alongside two more sources (live complexity crossings, unacted blast-radius
+> warnings). The ledger, classifier, and `verify-tests note-edit`/`note-run`
+> recording paths below are unchanged and still populate the recap. See
+> [session-risk-recap.md](session-risk-recap.md). Sections C/D below describe
+> the original single-source hook, now superseded by that consolidated surface.
+
 ## Motivation
 
 `test-reminder.sh` (see [Test Association](test-association.md)) fires
@@ -256,7 +266,7 @@ recognizes, so it never silently drops a real test run. On a match, calls
 "$command_str"`. Emits **nothing** to the model on any path — recording
 only, never a warning. Kill switch: `LIEN_TEST_VERIFY=off`.
 
-### 3. `test-verify-stop.sh` (new — the model-visible surface)
+### 3. `test-verify-stop.sh` (SUPERSEDED by `recap-stop.sh` — was the model-visible surface)
 
 `Stop`. Reads `stop_hook_active` from stdin first: `true` means this is a
 re-entrant Stop after this hook already blocked once this episode, so it
