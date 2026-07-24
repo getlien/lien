@@ -92,8 +92,10 @@ filesystem path. An invalid ID makes every ledger operation a silent
 no-op, never a thrown error.
 
 `recordEdit`/`recordRun`/`readSession`/`clearSession` are all best-effort:
-any I/O failure is swallowed. `LIEN_TEST_VERIFY=off` disables recording
-only — `readSession` is never gated by the kill switch, so a report
+any I/O failure is swallowed. `LIEN_TEST_VERIFY=off` disables edit/run
+recording only — the recap's loop-prevention `blocked` marker
+(`recordBlocked`) is written regardless, governed by `LIEN_RECAP` instead;
+`readSession` is never gated by the kill switch, so a report
 requested after the switch was flipped mid-session still sees whatever was
 recorded before.
 

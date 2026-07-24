@@ -14,8 +14,10 @@
  * rather than accumulated indefinitely — there is no cross-session history to
  * report on.
  *
- * Kill switch: `LIEN_TEST_VERIFY=off` disables recording only; reading
- * (`readSession`) is never gated by it, so a report requested after the
+ * Kill switch: `LIEN_TEST_VERIFY=off` disables edit/run recording only; the
+ * recap's loop-prevention `blocked` marker (`recordBlocked`) is written
+ * regardless, governed by `LIEN_RECAP` at the call site instead. Reading
+ * (`readSession`) is never gated by either, so a report requested after the
  * switch was flipped mid-session still sees whatever was recorded before.
  */
 
@@ -36,7 +38,7 @@ export type TestLedgerEvent =
 // *[!A-Za-z0-9_-]*)` guard.
 const SESSION_ID_RE = /^[A-Za-z0-9_-]+$/;
 
-/** `LIEN_TEST_VERIFY=off` disables recording only. Reading is never gated by this. */
+/** `LIEN_TEST_VERIFY=off` disables edit/run recording only (recordBlocked is exempt — see its note). Reading is never gated by this. */
 export function testVerifyEnabled(): boolean {
   return process.env.LIEN_TEST_VERIFY !== 'off';
 }

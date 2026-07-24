@@ -99,6 +99,10 @@ pre-edit `get_files_context` call means an edited file is almost always in
 here). A crossing is surfaced only when its file is in that set, so a crossing
 in a file this session never worked on is not attributed to it. If the set is
 empty (a session that recorded nothing), the delta source contributes nothing.
+A file edited ONLY via Bash (a `sed`/codegen script) with no Read/Edit tool
+event is not in the set, so its crossing is a **missed** recap item (the safe
+direction — a miss, never a false one); a read-only file that lands in the set
+costs one wasted-but-correct recompute that finds nothing.
 
 **Honest limitation.** Scoping rests on `git diff HEAD` (working tree) intersected
 with session-touched files. It cannot separate this session's uncommitted change
