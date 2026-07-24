@@ -71,15 +71,58 @@ export function retryMaxTokens(remainingBudget: number): number {
 }
 
 /**
- * The `max_tokens` to request for one main-loop turn: budget-scaled (call
- * site 2 above) on the forced-finish turn, or `undefined` (falls through to
- * `chatCompletion`'s flat default) for an ordinary investigative turn, which
- * needs the full headroom. Pulled out of `run()`'s loop body — a bare
- * ternary inline would add a branch to a function already over its
- * cognitive-complexity budget.
+ * Floor for an ORDINARY (non-forced-finish) turn's max_tokens once budget
+ * scaling (below) pulls it under the flat ceiling — higher than
+ * `RETRY_MIN_MAX_TOKENS` (2,048, the forced-finish floor) because an
+ * investigative turn still needs room to reason (`effort:'high'`) and
+ * dispatch a tool call, not just emit a short JSON verdict. 8,192 is roughly
+ * 4x the forced-finish floor: enough for a real reasoning burst plus a
+ * tool_calls response, while still meaningfully bounding the worst case for
+ * a SMALL pass budget (the extra-pass floor, 11,000) — see `turnMaxTokens`'s
+ * own doc comment for the gap this closes.
  */
-function turnMaxTokens(forceFinish: boolean, remainingBudget: number): number | undefined {
-  return forceFinish ? retryMaxTokens(remainingBudget) : undefined;
+const ORDINARY_TURN_MIN_MAX_TOKENS = 8_192;
+
+/**
+ * The `max_tokens` to request for one main-loop turn, scaled to the budget
+ * remaining — for BOTH the forced-finish turn (unchanged, `retryMaxTokens`)
+ * and an ordinary investigative turn (issue #836 fix, below). Pulled out of
+ * `run()`'s loop body — a bare branch inline would add complexity to a
+ * function already over its cognitive-complexity budget; this function's own
+ * body absorbs that instead, with zero change to the call site.
+ *
+ * GAP THIS CLOSES (issue #836's overspend investigation): before this fix,
+ * only the forced-finish branch scaled its ceiling to `remainingBudget` (via
+ * `retryMaxTokens`, #825) — an ORDINARY (non-forced) turn fell through to
+ * `chatCompletion`'s flat, budget-BLIND default (24,576), unconditionally,
+ * even when the pass's ENTIRE allocation was much smaller (the extra-pass
+ * floor, 11,000). `AnthropicAgentClient.run()` never had this asymmetry: its
+ * own `requestMaxTokens(remainingBudget)` (anthropic-client.ts) is called for
+ * EVERY turn unconditionally, not gated on a forced-finish flag. On issue
+ * #836's PR #835, doc-truth's (11,000-allocated) v2 per-claim contract gives
+ * its ordinary FIRST turn up to a 24,576-token completion ceiling to fill —
+ * over TWICE the pass's entire budget in output tokens alone, before its own
+ * (separately-uncapped) input tokens from the rendered claim worklist are even
+ * counted — and the post-response `totalTokens >= maxTokenBudget` check only
+ * fires BETWEEN turns, never mid-turn. This is the concrete mechanism behind
+ * the observed 37,106/11,000 (3.4x) overspend: a REAL gap in the cap, not
+ * merely expected between-turn lumpiness.
+ *
+ * Scaling every turn's ceiling to remaining budget bounds that failure mode
+ * substantially; it does NOT fully eliminate overshoot, since input tokens
+ * (the worklist + growing tool-result history, re-sent every turn) are not
+ * bounded by `max_tokens` at all — a residual, BOUNDED overshoot remains
+ * possible on a large-worklist pass's very first turn. See
+ * `EXTRA_PASS_MIN_BUDGET_TOKENS`'s doc comment and `docTruthPassBudget`'s own
+ * claim-count scaling (also issue #836) for the complementary fix: sizing the
+ * ALLOCATION itself to the real workload so this ceiling rarely needs to bind.
+ * A large main-pass budget (60K+) is unaffected either way — `remainingBudget`
+ * there always exceeds the flat ceiling until near the very end of the run,
+ * same as before this fix.
+ */
+function turnMaxTokens(forceFinish: boolean, remainingBudget: number): number {
+  if (forceFinish) return retryMaxTokens(remainingBudget);
+  return Math.min(RETRY_MAX_MAX_TOKENS, Math.max(remainingBudget, ORDINARY_TURN_MIN_MAX_TOKENS));
 }
 
 /**

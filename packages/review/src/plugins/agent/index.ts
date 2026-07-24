@@ -37,6 +37,7 @@ import { REMOVED_EXPORTS_PASS_SPEC } from './removed-exports-pass.js';
 import { DOCS_DRIFT_PASS_SPEC } from './docs-drift-pass.js';
 import {
   runExtraPasses,
+  unspentMainBudget,
   type ReviewPassSpec,
   type PassClientRunner,
   type PassOutcome,
@@ -296,6 +297,12 @@ export class AgentReviewPlugin implements ReviewPlugin {
     // second request would only fire more doomed calls, and a failure-
     // isolated pass's own incomplete state must not overwrite the never-ran
     // marker.
+    //
+    // The main pass's own unspent allocation (issue #836) rolls into every
+    // extra pass's own budget — a docs-heavy PR's main pass often has
+    // nothing to analyze and barely spends, while doc-truth (the pass that
+    // matters most for that PR shape) starves under its own budget alone.
+    const rolledOverBudget = unspentMainBudget(maxTokenBudget, result.usage.totalTokens);
     const { findings: agentFindings, outcomes } = await runExtraPasses(
       EXTRA_PASSES,
       context,
@@ -304,6 +311,7 @@ export class AgentReviewPlugin implements ReviewPlugin {
       result,
       result.findings,
       this.extraPassClientRunner(provider, config, apiKey, logger, toolExecutor),
+      rolledOverBudget,
     );
 
     reportAgentRun(this.id, context, logger, result);
@@ -365,6 +373,10 @@ export class AgentReviewPlugin implements ReviewPlugin {
       maxTokenBudget,
     );
 
+    // See analyze()'s own comment: the main pass's unspent allocation
+    // (issue #836) rolls into every extra pass's own budget — this mode is
+    // the motivating case (a summary-only main pass typically barely spends).
+    const rolledOverBudget = unspentMainBudget(maxTokenBudget, result.usage.totalTokens);
     const { findings: agentFindings, outcomes } = await runExtraPasses(
       EXTRA_PASSES,
       context,
@@ -373,6 +385,7 @@ export class AgentReviewPlugin implements ReviewPlugin {
       result,
       result.findings,
       this.extraPassClientRunner(provider, config, apiKey, logger, toolExecutor),
+      rolledOverBudget,
     );
 
     reportAgentRun(this.id, context, logger, result);

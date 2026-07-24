@@ -175,6 +175,18 @@ interface AgentSummaryMetadata {
   incomplete?: boolean;
   neverRan?: boolean;
   stopReason?: AgentStopReason;
+  /**
+   * Set by `appendIncompleteNotice` (plugins/agent/index.ts) ONLY when the
+   * MAIN pass itself stopped short of a verdict — absent when the incomplete
+   * notice was caused SOLELY by an extra pass (doc-truth via
+   * `incompleteFromDocPass`, or any named candidate loop via
+   * `incompleteFromPass`). This is the SSOT signal `deriveMainPassAttestation`
+   * keys off below (mirrors `hasIncompleteMainPass`, `plugins/agent/index.ts`),
+   * deliberately narrower than a bare `incomplete === true` check — see that
+   * function's own doc comment for the misattribution bug this field closes
+   * (issue #836).
+   */
+  mainPassIncomplete?: boolean;
 }
 
 /**
@@ -183,6 +195,24 @@ interface AgentSummaryMetadata {
  * exhaustive: a neverRan or incomplete run always leaves a marked summary
  * finding, and a run that completed cleanly leaves neither — so their
  * absence IS the "completed" signal, not just a default.
+ *
+ * Keys on `mainPassIncomplete === true`, NOT a bare `incomplete === true`
+ * (issue #836's starved-field reporting fix). Before this fix, ANY incomplete
+ * finding in the merged findings list — including one caused SOLELY by an
+ * extra pass (e.g. doc-truth budget-starving while the main pass itself
+ * completed cleanly within budget) — had its `stopReason` misattributed to
+ * the MAIN pass's own `ProviderPassAttestation`. Every extra pass's own
+ * `mergeResultState` (`mergeDocPassIntoResult` and its four siblings)
+ * borrows `main.stopReason` from the extra pass when the extra pass is
+ * incomplete and main wasn't already (`main.stopReason = passResult.
+ * stopReason`), so PR #835's main pass — 7,771/20,000 tokens spent, well
+ * within budget — inherited doc-truth's OWN `stopReason: 'budget'` this way,
+ * and `passBudget`'s `starved: stopReason === 'budget'` check then falsely
+ * reported the MAIN pass's own budget entry as starved. `mainPassIncomplete`
+ * is only ever set when the incompleteness is genuinely the main pass's own
+ * (see `appendIncompleteNotice`'s `isExtraPassOnly` check), so a finding
+ * caused only by an extra pass no longer matches here — main correctly falls
+ * through to the `stopReason: 'completed'` branch below instead.
  */
 export function deriveMainPassAttestation(
   findings: ReviewFinding[],
@@ -202,7 +232,7 @@ export function deriveMainPassAttestation(
     return { name: 'main', ran: true, stopReason: 'error', neverRan: true, candidatesDeferred: 0 };
   }
   const incompleteFinding = findings.find(
-    f => (f.metadata as AgentSummaryMetadata | undefined)?.incomplete === true,
+    f => (f.metadata as AgentSummaryMetadata | undefined)?.mainPassIncomplete === true,
   );
   if (incompleteFinding) {
     const stopReason = (incompleteFinding.metadata as AgentSummaryMetadata).stopReason ?? 'error';

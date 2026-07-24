@@ -44,6 +44,8 @@ function neverRanFinding(): ReviewFinding {
   };
 }
 
+/** Represents the MAIN pass's own incompleteness (mainPassIncomplete:true) — distinct from an
+ *  extra-pass-only incomplete notice, which omits that flag (see the #836 tests below). */
 function incompleteFinding(stopReason: 'budget' | 'max_turns'): ReviewFinding {
   return {
     pluginId: 'agent-review',
@@ -52,7 +54,7 @@ function incompleteFinding(stopReason: 'budget' | 'max_turns'): ReviewFinding {
     severity: 'warning',
     category: 'summary',
     message: 'Lien Review did not finish.',
-    metadata: { incomplete: true, stopReason },
+    metadata: { incomplete: true, stopReason, mainPassIncomplete: true },
   };
 }
 
@@ -324,6 +326,9 @@ describe('deriveMainPassAttestation', () => {
   });
 
   it('defaults an unlabeled incomplete finding to stopReason "error" rather than throwing', () => {
+    // mainPassIncomplete:true marks this as genuinely the MAIN pass's own
+    // incompleteness (see that field's doc comment) — the malformed part
+    // being guarded here is the MISSING stopReason, not the attribution.
     const malformed: ReviewFinding = {
       pluginId: 'agent-review',
       filepath: '',
@@ -331,7 +336,7 @@ describe('deriveMainPassAttestation', () => {
       severity: 'warning',
       category: 'summary',
       message: 'incomplete, no stopReason',
-      metadata: { incomplete: true },
+      metadata: { incomplete: true, mainPassIncomplete: true },
     };
     expect(deriveMainPassAttestation([malformed], true, false)).toEqual({
       name: 'main',
@@ -340,6 +345,109 @@ describe('deriveMainPassAttestation', () => {
       neverRan: false,
       candidatesDeferred: 0,
     });
+  });
+
+  // Regression coverage for issue #836's starved-field reporting blind spot:
+  // an incomplete finding caused SOLELY by an extra pass (doc-truth here)
+  // must NOT have its stopReason misattributed to the main pass, even though
+  // it is the only "incomplete: true" finding in the merged list.
+  it('reports the main pass as completed when only an extra pass caused the incomplete notice (#836)', () => {
+    const docTruthOnlyIncomplete: ReviewFinding = {
+      pluginId: 'agent-review',
+      filepath: '',
+      line: 0,
+      severity: 'warning',
+      category: 'summary',
+      message:
+        'The documentation-truthfulness pass did not finish — it hit the token budget limit.',
+      // incompleteFromDocPass is true, so appendIncompleteNotice omits
+      // mainPassIncomplete — main's own stopReason is 'budget' here (borrowed
+      // from doc-truth by mergeDocPassIntoResult), exactly PR #835's shape.
+      metadata: { incomplete: true, stopReason: 'budget' },
+    };
+    expect(deriveMainPassAttestation([docTruthOnlyIncomplete], true, false)).toEqual({
+      name: 'main',
+      ran: true,
+      stopReason: 'completed',
+      neverRan: false,
+      candidatesDeferred: 0,
+    });
+  });
+
+  it('still attributes stopReason to main when mainPassIncomplete is genuinely set', () => {
+    const mainIncomplete: ReviewFinding = {
+      pluginId: 'agent-review',
+      filepath: '',
+      line: 0,
+      severity: 'warning',
+      category: 'summary',
+      message: 'Lien Review did not finish.',
+      metadata: { incomplete: true, stopReason: 'max_turns', mainPassIncomplete: true },
+    };
+    expect(deriveMainPassAttestation([mainIncomplete], true, false)).toEqual({
+      name: 'main',
+      ran: true,
+      stopReason: 'max_turns',
+      neverRan: false,
+      candidatesDeferred: 0,
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PR #835's exact receipt shape end-to-end: main 7,771/20,000 (well within
+// budget) must report starved:false even though doc-truth (an extra pass)
+// starved on its own 11,000-token allocation — the run-level aggregate
+// still reports starved:true (doc-truth's own entry), just correctly
+// attributed. See issue #836's "starved-field reporting blind spot".
+// ---------------------------------------------------------------------------
+describe('assembleAttestation — PR #835 receipt shape (issue #836)', () => {
+  it('main reports starved:false while the run-level budget.starved stays true', () => {
+    const docTruthIncompleteFinding: ReviewFinding = {
+      pluginId: 'agent-review',
+      filepath: '',
+      line: 0,
+      severity: 'warning',
+      category: 'summary',
+      message:
+        'The documentation-truthfulness pass did not finish — it hit the token budget limit.',
+      metadata: { incomplete: true, stopReason: 'budget' },
+    };
+    const attestation = assembleAttestation(
+      baseInput({
+        conclusion: 'neutral',
+        findings: [docTruthIncompleteFinding],
+        allocatedTokens: 20_000,
+        spentTokens: 7_771,
+        extraPasses: [
+          {
+            name: 'doc-truth',
+            stopReason: 'budget',
+            neverRan: false,
+            allocatedTokens: 11_000,
+            spentTokens: 37_106,
+            candidatesDeferred: 8,
+          },
+        ],
+      }),
+    );
+
+    const [mainBudget, docTruthBudget] = attestation.budget.passes;
+    expect(mainBudget).toEqual({
+      name: 'main',
+      allocatedTokens: 20_000,
+      spentTokens: 7_771,
+      starved: false,
+    });
+    expect(docTruthBudget).toEqual({
+      name: 'doc-truth',
+      allocatedTokens: 11_000,
+      spentTokens: 37_106,
+      starved: true,
+    });
+    // Run-level aggregate is still true — doc-truth genuinely starved.
+    expect(attestation.budget.starved).toBe(true);
+    expect(attestation.verdict).toBe('degraded:budget_starved');
   });
 });
 

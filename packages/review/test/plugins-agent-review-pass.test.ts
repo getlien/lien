@@ -4,6 +4,7 @@ import {
   runReviewPass,
   appendPassTurns,
   runExtraPasses,
+  unspentMainBudget,
   EXTRA_PASS_MIN_BUDGET_TOKENS,
   OBSERVED_TOKENS_PER_TURN,
   VERDICT_EMISSION_RESERVE_TOKENS,
@@ -96,6 +97,26 @@ describe('EXTRA_PASS_MIN_BUDGET_TOKENS', () => {
     // this outright, since those are both below the measured per-turn cost.
     expect(EXTRA_PASS_MIN_BUDGET_TOKENS).toBeGreaterThanOrEqual(10_000);
     expect(EXTRA_PASS_MIN_BUDGET_TOKENS).toBeLessThanOrEqual(12_000);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// unspentMainBudget — rolling unspent main-pass budget into extra passes
+// (issue #836)
+// ---------------------------------------------------------------------------
+
+describe('unspentMainBudget', () => {
+  it('reproduces PR #835 receipt shape: main allocated 20,000/spent 7,771 -> +12,229', () => {
+    expect(unspentMainBudget(20_000, 7_771)).toBe(12_229);
+  });
+
+  it('floors at 0 when the main pass spent at or beyond its own allocation', () => {
+    expect(unspentMainBudget(10_000, 10_000)).toBe(0);
+    expect(unspentMainBudget(10_000, 15_000)).toBe(0);
+  });
+
+  it('returns the full allocation when the main pass spent nothing', () => {
+    expect(unspentMainBudget(20_000, 0)).toBe(20_000);
   });
 });
 
@@ -268,6 +289,46 @@ describe('runReviewPass', () => {
     expect(result).not.toBeNull();
     expect(result!.findings).toHaveLength(1);
     expect(captured).toEqual({ sys: 'sys', init: 'init', budget: 20_000, maxTurns: 7 });
+  });
+
+  it('adds rolledOverBudget on top of the pass own computed budget (issue #836)', async () => {
+    const ctx = createTestContext();
+    const spec = makeSpec({ budget: base => base * 0.25 });
+    const captured: { budget?: number } = {};
+
+    await runReviewPass(
+      spec,
+      ctx,
+      cfg({ maxTokenBudget: 80_000 }),
+      silentLogger,
+      async (_sys, _init, budget) => {
+        captured.budget = budget;
+        return fakeResult();
+      },
+      12_229, // PR #835's exact receipt shape: 20,000 allocated - 7,771 spent
+    );
+
+    // base 80,000 * 0.25 = 20,000, PLUS the rolled-over surplus.
+    expect(captured.budget).toBe(20_000 + 12_229);
+  });
+
+  it('defaults rolledOverBudget to 0 when omitted (no regression)', async () => {
+    const ctx = createTestContext();
+    const spec = makeSpec({ budget: base => base * 0.25 });
+    const captured: { budget?: number } = {};
+
+    await runReviewPass(
+      spec,
+      ctx,
+      cfg({ maxTokenBudget: 80_000 }),
+      silentLogger,
+      async (_sys, _init, budget) => {
+        captured.budget = budget;
+        return fakeResult();
+      },
+    );
+
+    expect(captured.budget).toBe(20_000);
   });
 
   it('passes context through to budget() so a candidate-count-scaled pass can size itself', async () => {
@@ -562,6 +623,56 @@ describe('runExtraPasses', () => {
         deferredCandidateIds: undefined,
       },
     ]);
+  });
+
+  it('threads rolledOverBudget into every pass own budget AND its reported allocatedTokens (issue #836)', async () => {
+    // PR #835's exact receipt shape: main allocated 20,000, spent 7,771 ->
+    // +12,229 rolled into every extra pass's own budget.
+    const specA = makeSpec({ name: 'pass-a', budget: () => 10_000 });
+    const specB = makeSpec({ name: 'pass-b', budget: () => 5_000 });
+    const ctx = createTestContext();
+    const main = mainResult();
+    const seenBudgets: number[] = [];
+    const runClientFor = () => async (_sys: string, _init: string, budget: number) => {
+      seenBudgets.push(budget);
+      return fakeResult();
+    };
+
+    const { outcomes } = await runExtraPasses(
+      [specA, specB],
+      ctx,
+      cfg(),
+      silentLogger,
+      main,
+      main.findings,
+      runClientFor,
+      12_229,
+    );
+
+    // Every pass's own client call actually ran with the bumped budget...
+    expect(seenBudgets).toEqual([10_000 + 12_229, 5_000 + 12_229]);
+    // ...and the attestation-facing allocatedTokens matches that reality,
+    // not the pre-rollover figure (which would understate the real spend
+    // ceiling a pass ran with).
+    expect(outcomes.map(o => o.allocatedTokens)).toEqual([10_000 + 12_229, 5_000 + 12_229]);
+  });
+
+  it('defaults rolledOverBudget to 0 when omitted (no regression)', async () => {
+    const spec = makeSpec({ name: 'pass-a', budget: () => 10_000 });
+    const ctx = createTestContext();
+    const main = mainResult();
+
+    const { outcomes } = await runExtraPasses(
+      [spec],
+      ctx,
+      cfg(),
+      silentLogger,
+      main,
+      main.findings,
+      () => async () => fakeResult(),
+    );
+
+    expect(outcomes[0].allocatedTokens).toBe(10_000);
   });
 
   it('reads candidatesDeferred/deferredCandidateIds straight off the pass result (candidate-overflow attestation)', async () => {

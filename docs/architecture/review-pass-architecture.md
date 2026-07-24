@@ -110,6 +110,26 @@ latency is measured as a problem: that pass count is true today, but no
 latency complaint has been measured yet. See ADR-014 for the rejected
 concurrent-execution alternative.
 
+**Rolling unspent main-pass budget into the pool (issue #836).** After the
+main pass completes, `analyze()`/`analyzeSummaryOnly()`
+(`plugins/agent/index.ts`) compute `unspentMainBudget(mainAllocatedTokens,
+mainSpentTokens)` (`review-pass.ts` — allocated minus spent, floored at 0)
+and pass it to `runExtraPasses` as `rolledOverBudget`. `runReviewPass` adds
+it on top of whatever `spec.budget()` computes for each pass, and
+`runExtraPasses` reflects the same bumped figure in the reported
+`allocatedTokens` (so the delivery attestation shows the real ceiling a pass
+ran with). A docs-heavy PR's main pass often has nothing to analyze and
+barely spends — PR #835's receipt: 20,000 allocated, 7,771 spent, +12,229
+rolled over. Honest caveat: every pass's `budget()` today is candidate/claim-
+count-scaled and ignores its `baseBudget` parameter (doc-truth's own formula
+switched to this shape in the same change — see "Budget scaling" below), so
+this rollover has no LIVE effect on any of the five passes right now; #835's
+own starvation is fixed by doc-truth's claim-scaled budget directly, not by
+this mechanism. The rollover stays wired in as a general, independently
+unit-tested executor capability for a future pass (or re-tuning) whose
+formula wants the extra headroom, not dead code — see `review-pass.ts`'s
+`unspentMainBudget` doc comment.
+
 ## The five passes
 
 | Pass | File | Gate (opt-in AND eligibility) | Budget formula | Toolset | Verdict vocabulary | Production status |
@@ -406,6 +426,24 @@ non-silent, but misattributed), and `budget.allocatedTokens` only ever
 reported the main pass's own ceiling even though `spentTokens` already
 summed every pass.
 
+**Residual misattribution, fixed by issue #836.** v2 gave doc-truth (and
+every later candidate loop) its OWN `provider.passes[]`/`budget.passes[]`
+entry, but `deriveMainPassAttestation`'s own predicate for the MAIN pass's
+entry stayed too broad: it matched ANY `metadata.incomplete === true`
+finding in the merged list, including one caused solely by an extra pass
+(every extra pass's `mergeResultState` borrows `main.stopReason` from the
+extra pass when the extra pass is incomplete and main wasn't already — see
+"Per-candidate verdict contract" above). PR #835's main pass (7,771/20,000
+spent, well within budget) inherited doc-truth's own `stopReason: 'budget'`
+this way and reported `starved: true` on its OWN `PassBudgetAttestation`
+entry. The fix keys the predicate on `mainPassIncomplete === true` — the
+same SSOT flag `appendIncompleteNotice` (`index.ts`) already sets ONLY when
+the incompleteness is genuinely the main pass's own (mirroring
+`hasIncompleteMainPass`) — so an extra-pass-only incomplete notice no
+longer misattributes to main; main correctly reports `stopReason:
+'completed'` (hence `starved: false`) while the run-level aggregate and the
+starved pass's own entry stay `starved: true`.
+
 - **`ProviderPassAttestation`**: `{ name, ran, stopReason, neverRan }`, one
   entry per pass that was gated on (main always present; each extra pass
   present iff it ran; a gated-off or failed pass is covered by
@@ -436,10 +474,19 @@ fires exactly once per pass that ran.
 
 ## Budget scaling
 
-- **doc-truth**: flat fraction of the main pass's base budget:
-  `docTruthPassBudget = round(baseBudget × 0.4)`. Adequate because the
-  claims-only pass's input (pre-fetched evidence) rarely needs the tool
-  loop.
+- **doc-truth**: scaled by this pass's OWN claim count (issue #836), like
+  every other loop below, not a flat fraction of the main pass's base
+  budget: `clamp(VERDICT_EMISSION_RESERVE_TOKENS + 3_500 × claimCount,
+  EXTRA_PASS_MIN_BUDGET_TOKENS, 65_000)` (`docTruthPassBudget`,
+  `doc-truth-pass.ts`). The flat `round(baseBudget × 0.4)` formula this
+  replaced floored out at `EXTRA_PASS_MIN_BUDGET_TOKENS` for any
+  summary-only-sized base regardless of claim count — exactly what starved
+  PR #835's 20-claim worklist to 11,000 tokens and, worse, sized its own
+  rank-and-cap ceiling off a 500-tokens/claim PROMPT-sizing estimate instead
+  of the ~3,092 tokens/claim a real claim investigation costs (see
+  `DOC_TRUTH_TOKENS_PER_CLAIM`'s own doc comment for the full derivation and
+  its single-receipt caveat). The 65,000 ceiling still bounds a 100-file
+  docs PR from running away.
 - **stale-duplicate loop**: `clamp(2_000 + 800 × min(candidateCount, 8),
   4_000, 30_000)`, scaled by this pass's own candidate count (mirroring
   `summary-only-pass.ts`'s clamp pattern), not a flat fraction, so a
