@@ -4,7 +4,7 @@ description: "A tool that gives AI coding assistants a real, structural understa
 date: 2026-07-22
 author: Alf Henderson
 tags: [product, local-first]
-draft: true
+draft: false
 ---
 
 <!-- DRAFT: awaiting owner voice pass -->

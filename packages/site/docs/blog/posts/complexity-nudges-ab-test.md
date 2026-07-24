@@ -4,7 +4,7 @@ description: "We warned an AI coding agent, right before it touched a function, 
 date: 2026-07-23
 author: Alf Henderson
 tags: [evidence, agents, complexity]
-draft: true
+draft: false
 ---
 
 <!-- DRAFT: awaiting owner voice pass -->
