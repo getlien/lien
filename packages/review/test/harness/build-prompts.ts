@@ -59,18 +59,68 @@ import {
   docsDriftPassBudget,
 } from '../../src/plugins/agent/docs-drift-pass.js';
 import type { AgentConfig } from '../../src/plugins/agent/types.js';
+import type { ReviewContext } from '../../src/plugin-types.js';
 
 import { loadFixture } from './fixture-loader.js';
 
 /** One extra pass's `{fires, ...prompts}` output shape (see `main`'s output object). Extracted
  *  so `main` itself stays a short orchestrator (lien delta: Halstead effort budget) instead of
- *  repeating the same fires-ternary-plus-spread four times. */
+ *  repeating the same fires-ternary-plus-spread per pass. */
 function passOutput(
   fires: boolean,
   build: () => { systemPrompt: string; initialMessage: string },
 ): { fires: true; systemPrompt: string; initialMessage: string } | { fires: false } {
   return fires ? { fires: true, ...build() } : { fires: false };
 }
+
+/** Descriptor for one extra pass — `{ shouldRun, buildPrompts, budget }` from
+ *  the pass's own module, keyed by the output field name `main` emits it
+ *  under. Iterating this array (instead of repeating a `passOutput(...)`
+ *  block per pass) is what keeps adding a 6th pass a one-line data change;
+ *  see #831. All 5 passes share this exact shape today — if a future pass
+ *  doesn't, give it its own inline block instead of forcing the shape. */
+interface PassDescriptor {
+  key: string;
+  shouldRun: (context: ReviewContext, config?: AgentConfig) => boolean;
+  buildPrompts: (
+    context: ReviewContext,
+    budget?: number,
+  ) => { systemPrompt: string; initialMessage: string };
+  budget: (baseBudget: number, context: ReviewContext) => number;
+}
+
+const PASS_DESCRIPTORS: PassDescriptor[] = [
+  {
+    key: 'docTruthPass',
+    shouldRun: shouldRunDocTruthPass,
+    buildPrompts: buildDocTruthPassPrompts,
+    budget: docTruthPassBudget,
+  },
+  {
+    key: 'staleDuplicatePass',
+    shouldRun: shouldRunStaleDuplicatePass,
+    buildPrompts: buildStaleDuplicatePassPrompts,
+    budget: staleDuplicatePassBudget,
+  },
+  {
+    key: 'incompleteHandlingPass',
+    shouldRun: shouldRunIncompleteHandlingPass,
+    buildPrompts: buildIncompleteHandlingPassPrompts,
+    budget: incompleteHandlingPassBudget,
+  },
+  {
+    key: 'removedExportsPass',
+    shouldRun: shouldRunRemovedExportsPass,
+    buildPrompts: buildRemovedExportsPassPrompts,
+    budget: removedExportsPassBudget,
+  },
+  {
+    key: 'docsDriftPass',
+    shouldRun: shouldRunDocsDriftPass,
+    buildPrompts: buildDocsDriftPassPrompts,
+    budget: docsDriftPassBudget,
+  },
+];
 
 async function main(): Promise<void> {
   const fixtureArg = process.argv[2];
@@ -96,20 +146,13 @@ async function main(): Promise<void> {
   // as production would apply it, not an always-uncapped worklist.
   const baseBudget = config?.maxTokenBudget ?? 100_000;
 
-  const docTruthPass = passOutput(shouldRunDocTruthPass(ctx, config), () =>
-    buildDocTruthPassPrompts(ctx, docTruthPassBudget(baseBudget, ctx)),
-  );
-  const staleDuplicatePass = passOutput(shouldRunStaleDuplicatePass(ctx, config), () =>
-    buildStaleDuplicatePassPrompts(ctx, staleDuplicatePassBudget(baseBudget, ctx)),
-  );
-  const incompleteHandlingPass = passOutput(shouldRunIncompleteHandlingPass(ctx, config), () =>
-    buildIncompleteHandlingPassPrompts(ctx, incompleteHandlingPassBudget(baseBudget, ctx)),
-  );
-  const removedExportsPass = passOutput(shouldRunRemovedExportsPass(ctx, config), () =>
-    buildRemovedExportsPassPrompts(ctx, removedExportsPassBudget(baseBudget, ctx)),
-  );
-  const docsDriftPass = passOutput(shouldRunDocsDriftPass(ctx, config), () =>
-    buildDocsDriftPassPrompts(ctx, docsDriftPassBudget(baseBudget, ctx)),
+  const extraPasses = Object.fromEntries(
+    PASS_DESCRIPTORS.map(pass => [
+      pass.key,
+      passOutput(pass.shouldRun(ctx, config), () =>
+        pass.buildPrompts(ctx, pass.budget(baseBudget, ctx)),
+      ),
+    ]),
   );
 
   const output = {
@@ -118,11 +161,7 @@ async function main(): Promise<void> {
     skippedRules: rules.skipped,
     systemPrompt,
     initialMessage,
-    docTruthPass,
-    staleDuplicatePass,
-    incompleteHandlingPass,
-    removedExportsPass,
-    docsDriftPass,
+    ...extraPasses,
   };
 
   process.stdout.write(JSON.stringify(output, null, 2) + '\n');
