@@ -4,6 +4,7 @@ import { createVectorDB, ComplexityAnalyzer } from '@liendev/core';
 import {
   findTestAssociationsFromChunks,
   computeBlastRadiusRisk,
+  type BlastRadiusRisk,
   type CodeChunk,
 } from '@liendev/parser';
 import { findDependents, type DependentInfo } from '../mcp/handlers/dependency-analyzer.js';
@@ -31,6 +32,37 @@ export interface AnnotateOptions {
    * see `runTestsOnly`.
    */
   testsOnly?: boolean;
+  /**
+   * Habituation-guard risk floor (`low` | `medium` | `high` | `critical`). When
+   * set, a below-floor annotation is suppressed UNLESS it carries a complexity
+   * or headroom concern (those always fire). Unset / unknown / `low` never
+   * suppresses — the current always-on behavior. The read hook passes the
+   * `LIEN_ANNOTATE_MIN_RISK` env value here. See `belowRiskFloor`.
+   */
+  minRisk?: string;
+}
+
+/** Ordinal rank of each blast-radius risk level, for the guard's floor comparison. */
+const RISK_RANK: Record<string, number> = { low: 0, medium: 1, high: 2, critical: 3 };
+
+/**
+ * Habituation guard: is this annotation below the configured risk floor and
+ * therefore suppressible? A complexity or headroom concern always clears the
+ * floor (those are the high-value plan-time nudges — never suppressed). An
+ * unset or unrecognized floor never suppresses anything (fail-open: default =
+ * current always-on behavior). Pure and exported for direct unit testing.
+ */
+export function belowRiskFloor(
+  riskLevel: string,
+  complexityWarnings: number,
+  headroomCount: number,
+  minRisk?: string,
+): boolean {
+  if (!minRisk) return false;
+  const floor = RISK_RANK[minRisk];
+  if (floor === undefined) return false; // unknown floor → no suppression
+  if (complexityWarnings > 0 || headroomCount > 0) return false; // always emit high-value
+  return (RISK_RANK[riskLevel] ?? 0) < floor;
 }
 
 /**
@@ -205,17 +237,22 @@ async function run(file: string, options?: AnnotateOptions): Promise<void> {
       return;
     }
 
-    emitAnnotation(
-      filepath,
-      result.dependents,
-      tests,
-      complexity,
+    const risk = computeBlastRadiusRisk({
       dependentCount,
-      uncovered,
+      uncoveredDependents: uncovered,
       maxDependentComplexity,
       hasHighComplexityUncovered,
-      headroom,
-    );
+    });
+
+    // Habituation guard's risk floor (opt-in via --min-risk; the read hook
+    // passes LIEN_ANNOTATE_MIN_RISK). No floor → current always-on behavior.
+    if (
+      belowRiskFloor(risk.level, complexity.warningCount, headroom.entries.length, options?.minRisk)
+    ) {
+      return;
+    }
+
+    emitAnnotation(filepath, result.dependents, tests, complexity, risk, headroom);
   } finally {
     if (needsChdir) process.chdir(originalCwd);
   }
@@ -307,21 +344,11 @@ function emitAnnotation(
   dependents: DependentInfo[],
   tests: string[],
   complexity: ComplexitySummary,
-  dependentCount: number,
-  uncovered: number,
-  maxDependentComplexity: number,
-  hasHighComplexityUncovered: boolean,
+  risk: BlastRadiusRisk,
   headroom: ComplexityHeadroom,
 ): void {
-  const risk = computeBlastRadiusRisk({
-    dependentCount,
-    uncoveredDependents: uncovered,
-    maxDependentComplexity,
-    hasHighComplexityUncovered,
-  });
-
   const lines: string[] = [`Lien impact for ${filepath}:`];
-  if (dependentCount > 0) {
+  if (dependents.length > 0) {
     lines.push(`  • ${formatDependents(dependents, risk.level, risk.reasoning)}`);
   }
   lines.push(`  • ${formatTests(tests)}`);

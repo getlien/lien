@@ -6,6 +6,7 @@ import * as dependencyAnalyzerModule from '../mcp/handlers/dependency-analyzer.j
 import {
   annotateCommand,
   isTrivial,
+  belowRiskFloor,
   formatDependents,
   formatTests,
   formatTestReminder,
@@ -68,6 +69,37 @@ describe('isTrivial', () => {
 
   it('is trivial when headroomCount is explicitly 0', () => {
     expect(isTrivial(0, 0, 1, 0)).toBe(true);
+  });
+});
+
+describe('belowRiskFloor (habituation guard)', () => {
+  it('never suppresses when no floor is set (default always-on behavior)', () => {
+    expect(belowRiskFloor('low', 0, 0, undefined)).toBe(false);
+    expect(belowRiskFloor('low', 0, 0, '')).toBe(false);
+  });
+
+  it('suppresses a below-floor risk level', () => {
+    expect(belowRiskFloor('low', 0, 0, 'medium')).toBe(true);
+    expect(belowRiskFloor('medium', 0, 0, 'high')).toBe(true);
+  });
+
+  it('does not suppress at or above the floor', () => {
+    expect(belowRiskFloor('medium', 0, 0, 'medium')).toBe(false);
+    expect(belowRiskFloor('high', 0, 0, 'medium')).toBe(false);
+    expect(belowRiskFloor('critical', 0, 0, 'medium')).toBe(false);
+  });
+
+  it('always emits (never suppresses) when a complexity or headroom concern is present', () => {
+    expect(belowRiskFloor('low', 1, 0, 'critical')).toBe(false); // complexity warning
+    expect(belowRiskFloor('low', 0, 1, 'critical')).toBe(false); // headroom concern
+  });
+
+  it('treats an unknown floor as no floor (fail-open)', () => {
+    expect(belowRiskFloor('low', 0, 0, 'bogus')).toBe(false);
+  });
+
+  it('treats an unknown risk level as the lowest rank', () => {
+    expect(belowRiskFloor('mystery', 0, 0, 'medium')).toBe(true);
   });
 });
 

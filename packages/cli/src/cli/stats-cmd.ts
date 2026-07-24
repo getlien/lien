@@ -16,6 +16,8 @@ import { readDeltaEvents, type DeltaEvent } from '../utils/delta-events.js';
 import { computeDeltaWindowStats, type DeltaWindowStats } from '../utils/delta-stats.js';
 import { readBlastEvents, type BlastEvent } from '../utils/blast-events.js';
 import { computeBlastWindowStats, type BlastWindowStats } from '../utils/blast-stats.js';
+import { readNudgeEvents, type NudgeEvent } from '../utils/nudge-events.js';
+import { computeNudgeFunnels, type NudgeFunnel } from '../utils/nudge-stats.js';
 
 const VALID_FORMATS = ['text', 'json'];
 const WINDOW_DAYS = [7, 30] as const;
@@ -56,9 +58,31 @@ interface StatsData {
   windows: DeltaWindowStats[];
   blastEvents: BlastEvent[];
   blastWindows: BlastWindowStats[];
+  nudgeEvents: NudgeEvent[];
+  /** One funnel array per window in WINDOW_DAYS order (each array is delta, annotate, blast, test-verify). */
+  nudgeFunnels: NudgeFunnel[][];
 }
 
-/** Additive: FEATURE 1's own local history nests under `blastRadius`, so the pre-existing top-level shape (totalEvents/windows) never changes for callers. */
+/** Display labels for the funnel rows, in the order `computeNudgeFunnels` emits them. */
+const NUDGE_LABELS: Record<NudgeFunnel['nudge'], string> = {
+  delta: 'complexity delta',
+  annotate: 'read-time impact',
+  blast: 'exported-signature',
+  'test-verify': 'did-you-run-tests',
+};
+
+function formatFunnelRow(f: NudgeFunnel): string {
+  const label = `${NUDGE_LABELS[f.nudge]}:`.padEnd(20);
+  return `    ${label} shown ${f.shown}, acted-on ${f.acted} ${chalk.dim(`(${formatShare(f.actedShare)})`)}`;
+}
+
+function formatFunnelWindow(windowDays: number, funnels: NudgeFunnel[]): string {
+  return [chalk.bold(`  Last ${windowDays} days`), ...funnels.map(formatFunnelRow)].join('\n');
+}
+
+/** Additive: FEATURE 1's own local history nests under `blastRadius`, and the
+ *  telemetry-v2 funnels nest under `nudgeFunnels`, so the pre-existing top-level
+ *  shape (totalEvents/windows) never changes for callers. */
 function printJsonStats(data: StatsData): void {
   console.log(
     JSON.stringify(
@@ -66,6 +90,7 @@ function printJsonStats(data: StatsData): void {
         totalEvents: data.events.length,
         windows: data.windows,
         blastRadius: { totalEvents: data.blastEvents.length, windows: data.blastWindows },
+        nudgeFunnels: { totalEvents: data.nudgeEvents.length, windows: data.nudgeFunnels },
       },
       null,
       2,
@@ -103,9 +128,28 @@ function printBlastTextSection(data: StatsData): void {
   );
 }
 
+function printFunnelTextSection(data: StatsData): void {
+  console.log('');
+  console.log(chalk.bold('Nudge funnels (shown → acted-on)\n'));
+  WINDOW_DAYS.forEach((days, i) => {
+    console.log(formatFunnelWindow(days, data.nudgeFunnels[i]));
+    console.log('');
+  });
+  console.log(
+    chalk.dim(
+      '"Acted-on" is a same-session follow-up AFTER the nudge that names the same file/symbol — for\n' +
+        'the complexity delta nudge, a flagged function later seen clean; for the others, a later\n' +
+        'get_dependents / get_files_context on the flagged file/symbol (test-verify: any later test\n' +
+        'run). It biases toward undercounting, and is co-occurrence over time,\n' +
+        'NOT proof the nudge caused the action. Local-only (nudge-events.jsonl next to the local\n' +
+        'index); disable recording with LIEN_NUDGE_EVENTS=off.',
+    ),
+  );
+}
+
 function printTextStats(data: StatsData): void {
   console.log(chalk.bold('lien delta — nudge-loop stats\n'));
-  if (data.events.length === 0 && data.blastEvents.length === 0) {
+  if (data.events.length === 0 && data.blastEvents.length === 0 && data.nudgeEvents.length === 0) {
     console.log(
       chalk.dim(
         'No lien delta runs recorded yet. Run `lien delta`, or edit with the plugin hooks\n' +
@@ -116,6 +160,7 @@ function printTextStats(data: StatsData): void {
   }
   printDeltaTextSection(data);
   printBlastTextSection(data);
+  printFunnelTextSection(data);
 }
 
 /** Analyze the local `lien delta` event log and report 7/30-day nudge-loop metrics. */
@@ -138,7 +183,16 @@ export async function statsCommand(options: StatsOptions = {}): Promise<void> {
   const windows = WINDOW_DAYS.map(days => computeDeltaWindowStats(events, days));
   const blastEvents = await readBlastEvents(rootDir);
   const blastWindows = WINDOW_DAYS.map(days => computeBlastWindowStats(blastEvents, days));
-  const data: StatsData = { events, windows, blastEvents, blastWindows };
+  const nudgeEvents = await readNudgeEvents(rootDir);
+  const nudgeFunnels = WINDOW_DAYS.map(days => computeNudgeFunnels(nudgeEvents, events, days));
+  const data: StatsData = {
+    events,
+    windows,
+    blastEvents,
+    blastWindows,
+    nudgeEvents,
+    nudgeFunnels,
+  };
 
   if (format === 'json') {
     printJsonStats(data);

@@ -18,6 +18,7 @@ import {
   testSessionFilePath,
   type TestLedgerEvent,
 } from '../utils/test-ledger.js';
+import { readNudgeEvents } from '../utils/nudge-events.js';
 
 // Only `createVectorDB` is mocked, mirroring annotate-cmd.test.ts's
 // `--tests-only` integration style — `note-edit` drives the exact same
@@ -234,6 +235,23 @@ describe('verify-tests-cmd — integration', () => {
 
       const rootDir = String((await import('./project-root.js')).resolveProjectRoot());
       expect(await readSession(rootDir, session)).toEqual([]);
+    });
+
+    it('also fans a durable test_run nudge signal for the stats funnels (reusing one classification)', async () => {
+      await noteRunCommand({ session, command: 'npm test' });
+
+      const rootDir = String((await import('./project-root.js')).resolveProjectRoot());
+      const nudgeEvents = await readNudgeEvents(rootDir);
+      expect(nudgeEvents).toEqual([
+        expect.objectContaining({ kind: 'signal', signal: 'test_run', sessionId: session }),
+      ]);
+    });
+
+    it('does not fan a nudge signal when the command is not a test run', async () => {
+      await noteRunCommand({ session, command: 'git status' });
+
+      const rootDir = String((await import('./project-root.js')).resolveProjectRoot());
+      expect(await readNudgeEvents(rootDir)).toEqual([]);
     });
 
     it('is a fail-open no-op when --session is missing', async () => {

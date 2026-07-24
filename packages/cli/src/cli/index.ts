@@ -16,6 +16,7 @@ import { pathCommand } from './path-cmd.js';
 import { annotateCommand } from './annotate-cmd.js';
 import { gcCommand } from './gc.js';
 import { noteEditCommand, noteRunCommand, reportCommand } from './verify-tests-cmd.js';
+import { noteShownCommand, noteSignalCommand } from './nudge-cmd.js';
 
 // Get version from package.json dynamically
 const __filename = fileURLToPath(import.meta.url);
@@ -159,6 +160,12 @@ program
     '--tests-only',
     'Print only the post-edit test-association reminder line (for the write hook)',
   )
+  .option(
+    '--min-risk <level>',
+    'Habituation-guard risk floor: only annotate when blast-radius risk is >= this ' +
+      'level (low|medium|high|critical), unless there is a complexity/headroom concern. ' +
+      'Default: no floor (low).',
+  )
   .action(annotateCommand);
 
 const verifyTestsCmd = program
@@ -198,6 +205,33 @@ verifyTestsCmd
   .option('--session <id>', 'Session ID to report on')
   .option('--format <type>', 'Output format: text, json', 'text')
   .action(reportCommand);
+
+const nudgeCmd = program
+  .command('nudge')
+  .description(
+    'Record nudge-outcome events for the shown → acted-on funnels in `lien stats` (for the plugin hooks)',
+  );
+
+// Like `verify-tests`, these are hook-driven plumbing: options are plain (not
+// required) so a missing argument is a fail-open no-op (see nudge-cmd.ts), not a
+// hard commander usage error that would contradict the fail-open contract.
+nudgeCmd
+  .command('note-shown')
+  .description('Record that a nudge surfaced to the model this session')
+  .option('--session <id>', 'Session ID to record under')
+  .option('--nudge <name>', 'Which nudge fired: annotate, blast, test-verify')
+  .option('--file <path>', 'File the nudge was about, when it has one')
+  .option('--symbol <name>', 'Symbol the nudge was about, when known')
+  .action(noteShownCommand);
+
+nudgeCmd
+  .command('note-signal')
+  .description('Record a follow-up tool call a nudge funnel joins against')
+  .option('--session <id>', 'Session ID to record under')
+  .option('--signal <name>', 'Which signal: get_dependents, get_files_context, test_run')
+  .option('--file <path>', 'File the call named, when present')
+  .option('--symbol <name>', 'Symbol the call named, when present')
+  .action(noteSignalCommand);
 
 program
   .command('gc')

@@ -6,6 +6,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { recordDeltaEvent, type DeltaEvent } from '../utils/delta-events.js';
 import { recordBlastEvent, type BlastEvent } from '../utils/blast-events.js';
+import { recordNudgeShown, recordNudgeSignal } from '../utils/nudge-events.js';
 import { statsCommand } from './stats-cmd.js';
 
 const execFileAsync = promisify(execFile);
@@ -318,5 +319,108 @@ describe('statsCommand — exported-signature nudge (blast-radius) section', () 
     expect(text).not.toContain('No lien delta runs recorded yet');
     expect(text).toContain('lien delta — nudge-loop stats');
     expect(text).toContain('Exported-signature nudge');
+  });
+});
+
+describe('statsCommand — nudge funnels (telemetry v2) section', () => {
+  let dir: string;
+  let home: string;
+  let originalCwd: string;
+  let originalHome: string | undefined;
+  let logSpy: ReturnType<typeof vi.spyOn>;
+
+  async function git(...args: string[]): Promise<void> {
+    await execFileAsync('git', args, { cwd: dir });
+  }
+
+  async function initRepo(): Promise<void> {
+    await git('init', '-q');
+    await git('config', 'user.email', 'test@example.com');
+    await git('config', 'user.name', 'Test');
+    await git('config', 'commit.gpgsign', 'false');
+    await fs.writeFile(path.join(dir, 'README.md'), 'x', 'utf-8');
+    await git('add', '-A');
+    await git('-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'init');
+  }
+
+  function lastJsonLog(): Record<string, unknown> {
+    return JSON.parse(String(logSpy.mock.calls.at(-1)?.[0]));
+  }
+
+  function loggedText(): string {
+    return stripAnsi(logSpy.mock.calls.map((c: unknown[]) => c.join(' ')).join('\n'));
+  }
+
+  beforeEach(async () => {
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-stats-funnel-cmd-'));
+    dir = await fs.realpath(dir);
+    originalCwd = process.cwd();
+    process.chdir(dir);
+
+    originalHome = process.env.LIEN_HOME;
+    home = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-stats-funnel-home-'));
+    process.env.LIEN_HOME = home;
+
+    logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+  });
+
+  afterEach(async () => {
+    process.chdir(originalCwd);
+    if (originalHome === undefined) delete process.env.LIEN_HOME;
+    else process.env.LIEN_HOME = originalHome;
+    vi.restoreAllMocks();
+    await fs.rm(dir, { recursive: true, force: true });
+    await fs.rm(home, { recursive: true, force: true });
+  });
+
+  it('JSON output nests funnels under `nudgeFunnels`, additive to the pre-existing shape', async () => {
+    await initRepo();
+    // A shown → acted pair in one session (matched join: signal names the same file).
+    await recordNudgeShown(dir, { sessionId: 's1', nudge: 'blast', file: 'a.ts' });
+    await recordNudgeSignal(dir, { sessionId: 's1', signal: 'get_dependents', file: 'a.ts' });
+
+    await statsCommand({ format: 'json' });
+
+    const result = lastJsonLog() as {
+      totalEvents: number;
+      blastRadius: unknown;
+      nudgeFunnels: {
+        totalEvents: number;
+        windows: Array<Array<{ nudge: string; shown: number; acted: number }>>;
+      };
+    };
+    // Pre-existing shape untouched.
+    expect(result.totalEvents).toBe(0);
+    expect(result.blastRadius).toBeDefined();
+    // New additive section.
+    expect(result.nudgeFunnels.totalEvents).toBe(2);
+    const blast7 = result.nudgeFunnels.windows[0].find(f => f.nudge === 'blast')!;
+    expect(blast7).toMatchObject({ shown: 1, acted: 1 });
+  });
+
+  it('text output prints the funnel section with a correlation-not-causation disclaimer', async () => {
+    await initRepo();
+    await recordNudgeShown(dir, { sessionId: 's1', nudge: 'test-verify' });
+    await recordNudgeSignal(dir, { sessionId: 's1', signal: 'test_run' });
+
+    await statsCommand({ format: 'text' });
+
+    const text = loggedText();
+    expect(text).toContain('Nudge funnels (shown → acted-on)');
+    expect(text).toContain('did-you-run-tests');
+    expect(text).toContain('NOT proof the nudge caused');
+    expect(text).toContain('LIEN_NUDGE_EVENTS=off');
+  });
+
+  it('prints the funnel section even when only nudge events exist (delta/blast logs empty)', async () => {
+    await initRepo();
+    await recordNudgeShown(dir, { sessionId: 's1', nudge: 'annotate', file: 'a.ts' });
+
+    await statsCommand({ format: 'text' });
+    const text = loggedText();
+    expect(text).not.toContain('No lien delta runs recorded yet');
+    expect(text).toContain('Nudge funnels (shown → acted-on)');
   });
 });
