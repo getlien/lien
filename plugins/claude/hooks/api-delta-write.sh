@@ -63,7 +63,7 @@ msg="$(printf '%s' "$json" | jq -r '
     if (.docRefCount // 0) > 0 then
       (.docRefPaths // []) as $paths
       | " " + (.docRefCount|tostring) + " docs reference " + .symbol + ": "
-        + ($paths[0:3] | join(", "))
+        + ($paths | join(", "))
         + (if .docRefCount > ($paths|length)
            then " (+\(.docRefCount - ($paths|length)) more)" else "" end)
         + "."
