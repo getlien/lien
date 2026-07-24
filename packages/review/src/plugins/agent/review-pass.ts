@@ -283,17 +283,18 @@ export type PassClientRunner = (
  * doc-truth, the single most relevant pass for that PR shape, starves under
  * its own independently-sized budget. Rather than let that surplus simply
  * evaporate, it becomes additional headroom every extra pass can draw on.
- * Deliberately a PLAIN top-up, not folded into any one pass's own formula: a
- * pass whose `budget()` ignores its `baseBudget` parameter entirely is
- * unaffected by construction. Honest note: as of this same change, that is
- * ALL FIVE passes — doc-truth's own `docTruthPassBudget` was ALSO switched to
- * a claim-count-scaled formula that ignores `baseBudget` (issue #836's other
- * fix; see review-pass-architecture.md's "Budget scaling"), so this rollover
- * has no LIVE effect on any pass today. It stays wired in as a general,
- * independently-tested executor capability (not doc-truth-specific plumbing)
- * for a future pass whose formula wants the extra headroom, or a future
- * re-tuning of an existing one — see this module's own unit tests for the
- * mechanism proof independent of any current pass's formula choices.
+ *
+ * This is an UNCONDITIONAL additive top-up, not folded into any one pass's
+ * own `budget()` formula: `runReviewPass` computes `spec.budget(baseBudget,
+ * context) + rolledOverBudget` — the addition happens AFTER `spec.budget()`
+ * returns, so it changes every gated-on pass's final allocation whenever
+ * `rolledOverBudget` is nonzero, REGARDLESS of whether that pass's own
+ * formula reads its `baseBudget` parameter (a separate, independent
+ * question — see review-pass-architecture.md's "Budget scaling" for which
+ * passes do). It can push a pass's final allocation past its own documented
+ * ceiling (e.g. `docTruthPassBudget`'s `DOC_TRUTH_MAX_BUDGET`) — that's the
+ * point: these are tokens the main pass never spent, not tokens taken from
+ * anywhere else (see `runReviewPass`'s own comment on the same rationale).
  */
 export function unspentMainBudget(mainAllocatedTokens: number, mainSpentTokens: number): number {
   return Math.max(0, mainAllocatedTokens - mainSpentTokens);

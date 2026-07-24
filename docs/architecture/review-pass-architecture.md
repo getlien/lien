@@ -114,27 +114,28 @@ concurrent-execution alternative.
 main pass completes, `analyze()`/`analyzeSummaryOnly()`
 (`plugins/agent/index.ts`) compute `unspentMainBudget(mainAllocatedTokens,
 mainSpentTokens)` (`review-pass.ts` — allocated minus spent, floored at 0)
-and pass it to `runExtraPasses` as `rolledOverBudget`. `runReviewPass` adds
-it on top of whatever `spec.budget()` computes for each pass, and
-`runExtraPasses` reflects the same bumped figure in the reported
-`allocatedTokens` (so the delivery attestation shows the real ceiling a pass
-ran with). A docs-heavy PR's main pass often has nothing to analyze and
-barely spends — PR #835's receipt: 20,000 allocated, 7,771 spent, +12,229
-rolled over. Honest caveat: every pass's `budget()` today is candidate/claim-
-count-scaled and ignores its `baseBudget` parameter (doc-truth's own formula
-switched to this shape in the same change — see "Budget scaling" below), so
-this rollover has no LIVE effect on any of the five passes right now; #835's
-own starvation is fixed by doc-truth's claim-scaled budget directly, not by
-this mechanism. The rollover stays wired in as a general, independently
-unit-tested executor capability for a future pass (or re-tuning) whose
-formula wants the extra headroom, not dead code — see `review-pass.ts`'s
-`unspentMainBudget` doc comment.
+and pass it to `runExtraPasses` as `rolledOverBudget`. `runReviewPass`
+computes `spec.budget(baseBudget, context) + rolledOverBudget` — an
+UNCONDITIONAL addition applied AFTER `spec.budget()` returns, so it changes
+every gated-on pass's final allocation whenever `rolledOverBudget` is
+nonzero, regardless of whether that pass's own formula reads its
+`baseBudget` parameter (every candidate/claim-count-scaled loop today,
+including doc-truth's own post-#836 formula, ignores that parameter — see
+"Budget scaling" below — but that is independent of this separate, always-
+applied top-up). `runExtraPasses` reflects the same bumped figure in the
+reported `allocatedTokens` (so the delivery attestation shows the real
+ceiling a pass ran with). A docs-heavy PR's main pass often has nothing to
+analyze and barely spends — PR #835's receipt: 20,000 allocated, 7,771
+spent, +12,229 rolled over onto EVERY gated-on extra pass's own budget,
+including doc-truth's, which can push it past its own `DOC_TRUTH_MAX_BUDGET`
+ceiling (65,000) — deliberately: these are tokens the main pass never spent,
+not tokens taken from anywhere else.
 
 ## The five passes
 
 | Pass | File | Gate (opt-in AND eligibility) | Budget formula | Toolset | Verdict vocabulary | Production status |
 |---|---|---|---|---|---|---|
-| doc-truth | `doc-truth-pass.ts` | `docTruthPass !== false` AND `LIEN_REVIEW_DOC_PASS` not disabling AND ≥1 doc claim | `round(base × 0.4)` | full 6-tool set (same as main pass) | v2 (default as of 2026-07-23): `accurate \| contradicted \| unverifiable` per claim id. v1 (opt-out via `config.docTruthV2: false` or `LIEN_DOC_TRUTH_V2=off`): open findings list | **Production-on** (both the pass and its v2 contract default true) |
+| doc-truth | `doc-truth-pass.ts` | `docTruthPass !== false` AND `LIEN_REVIEW_DOC_PASS` not disabling AND ≥1 doc claim | `clamp(RESERVE + 3_500×claimCount, 11_000, 65_000)` | full 6-tool set (same as main pass) | v2 (default as of 2026-07-23): `accurate \| contradicted \| unverifiable` per claim id. v1 (opt-out via `config.docTruthV2: false` or `LIEN_DOC_TRUTH_V2=off`): open findings list | **Production-on** (both the pass and its v2 contract default true) |
 | stale-duplicate loop | `stale-duplicate-pass.ts` | `config.staleDuplicatePass` or `LIEN_STALE_DUP_PASS=on` AND ≥1 high-confidence, same-file candidate | `clamp(2000 + 800×min(n,8), 4000, 30000)` | `read_file`, `grep_codebase` only | `stale \| intentional-reuse \| unverifiable` | **Dark** (default false) |
 | incomplete-handling loop | `incomplete-handling-pass.ts` | `config.incompleteHandlingPass` or `LIEN_INCOMPLETE_PASS=on` AND ≥1 candidate (any of 3 shapes) | `clamp(2500 + 900×min(n,20), 5000, 35000)` | `read_file`, `get_files_context`, `grep_codebase` | `incomplete \| handled \| intentional \| unverifiable` | **Dark** (default false) |
 | removed-exports loop | `removed-exports-pass.ts` | `config.removedExportsPass` or `LIEN_REMOVED_EXPORTS_PASS=on` AND ≥1 removed public export | `clamp(2000 + 800×min(n,15), 11000, 30000)` | `read_file`, `grep_codebase` only | `breaking \| intentional \| internal-only \| unverifiable` | **Dark** (default false) |
