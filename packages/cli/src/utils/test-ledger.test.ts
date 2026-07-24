@@ -126,16 +126,19 @@ describe('recordEdit + recordRun + readSession', () => {
     await expect(readSession(rootDir, '../evil')).resolves.toEqual([]);
   });
 
-  it('LIEN_TEST_VERIFY=off disables recording entirely (kill switch), but reading still works', async () => {
+  it('LIEN_TEST_VERIFY=off disables edit/run recording, but recordBlocked is exempt and reading always works', async () => {
     await recordEdit(rootDir, sessionId, 'src/foo.ts', ['src/foo.test.ts']);
     process.env.LIEN_TEST_VERIFY = 'off';
     await recordRun(rootDir, sessionId, 'npm test');
     await recordBlocked(rootDir, sessionId);
 
-    // The run/blocked events recorded while the switch was off never landed.
+    // recordRun (a test-verify recording) never lands while the switch is off.
+    // recordBlocked is DELIBERATELY exempt: the `blocked` event is the Stop-recap
+    // loop-prevention marker, gated by LIEN_RECAP at the call site (recap-cmd.ts),
+    // not by this switch — so it must survive LIEN_TEST_VERIFY=off. A delta/blast-only
+    // recap (no test-verify recording at all) still needs to suppress its own re-nag.
     const events = await readSession(rootDir, sessionId);
-    expect(events).toHaveLength(1);
-    expect(events[0].kind).toBe('edit');
+    expect(events.map(e => e.kind)).toEqual(['edit', 'blocked']);
   });
 
   it('skips a torn/corrupted line rather than failing the whole read', async () => {
