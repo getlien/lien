@@ -123,6 +123,18 @@ Read this to understand CLAUDE.md's sixth pre-commit gate.
 
 ---
 
+### [Blast-Radius Nudge](./blast-radius-nudge.md)
+`get_dependents` before an exported-signature edit.
+
+Explains the write-time nudge for CLAUDE.md's other honor-system rule:
+- `lien api-delta` CLI: content-based detection of a changed/removed exported function or method signature, best-effort enriched with dependent counts and risk
+- `plugins/claude/hooks/api-delta-write.sh`: the same check as a PostToolUse edit-hook warning
+- `blast-events.jsonl` + `lien stats`'s "Exported-signature nudge" section
+
+Read this to understand the sibling nudge to `lien delta`, and why it's advisory rather than a gate.
+
+---
+
 ### [Claude Code Hook Output Channels](./claude-code-hook-channels.md)
 Which hook output actually reaches the model.
 
@@ -170,6 +182,7 @@ For the history behind these designs, see the [Architectural Decision Records in
 | Complexity analysis (`get_complexity`) | [MCP Server Flow](./mcp-server-flow.md) → Available MCP Tools |
 | Worktree-shared indexing | [Worktree-Aware Indexing](./worktree-aware-indexing.md) |
 | Pre-commit complexity gate (`lien delta`) | [lien delta](./lien-delta.md) |
+| Exported-signature nudge (`lien api-delta`) | [Blast-Radius Nudge](./blast-radius-nudge.md) |
 | Plugin hook design (what reaches the model) | [Claude Code Hook Output Channels](./claude-code-hook-channels.md) |
 | Lien Review's extra LLM passes (doc-truth, candidate loops) | [Agent-Review Pass Architecture](./review-pass-architecture.md) |
 

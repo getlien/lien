@@ -1,0 +1,298 @@
+/**
+ * `lien api-delta` — flag exported-symbol signature changes/removals in the
+ * working tree (FEATURE 1 / the blast-radius nudge). Advisory only: there is
+ * no gate here, unlike `lien delta` — CLAUDE.md's "run get_dependents before
+ * changing an exported symbol" rule has no pass/fail notion, only a nudge to
+ * check impact before relying on callers.
+ */
+
+import chalk from 'chalk';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { createVectorDB } from '@liendev/core';
+import { getIndexDir, computeBlastRadiusRisk, type FileContentChange } from '@liendev/parser';
+import { getRepoRoot, collectFileChanges, collectFileChange } from './delta-git.js';
+import {
+  findDependents,
+  type DependencyAnalysisResult,
+} from '../mcp/handlers/dependency-analyzer.js';
+import {
+  computeExportedSignatureDelta,
+  type ExportedSignatureDelta,
+  type ExportedSymbolChange,
+} from '../utils/signature-delta.js';
+import { recordBlastEvent, type BlastEvent } from '../utils/blast-events.js';
+
+export interface ApiDeltaOptions {
+  format: 'text' | 'json';
+  /** Restrict analysis to a single file — the fast path the PostToolUse edit hook uses. */
+  file?: string;
+  /** Compare the working tree against this ref instead of HEAD (e.g. origin/main in CI). */
+  base?: string;
+}
+
+const VALID_FORMATS = ['text', 'json'];
+
+/** Matches get-dependents.ts's local threshold (also duplicated in review's blast-radius.ts) — accepted duplication until a shared helper is worth extracting. */
+const HIGH_COMPLEXITY_THRESHOLD = 15;
+
+export interface EnrichedExportedSymbolChange extends ExportedSymbolChange {
+  /** null when the index was unavailable or enrichment failed (degraded — still fires, just without counts). */
+  dependentCount: number | null;
+  untestedDependentCount: number | null;
+  riskLevel: string | null;
+  enriched: boolean;
+}
+
+export interface EnrichedSignatureDelta {
+  filepath: string;
+  changes: EnrichedExportedSymbolChange[];
+}
+
+function usageFlagError(options: ApiDeltaOptions): string | undefined {
+  if (!VALID_FORMATS.includes(options.format)) {
+    return `Invalid --format "${options.format}". Must be text or json.`;
+  }
+  if (options.file !== undefined && options.file.trim() === '') {
+    return '--file requires a non-empty path.';
+  }
+  if (options.base !== undefined && options.base.trim() === '') {
+    return '--base requires a non-empty ref.';
+  }
+  return undefined;
+}
+
+/** Degraded row: no index, or enrichment failed for this change. Still fires — just without counts. */
+function degradedChange(change: ExportedSymbolChange): EnrichedExportedSymbolChange {
+  return {
+    ...change,
+    dependentCount: null,
+    untestedDependentCount: null,
+    riskLevel: null,
+    enriched: false,
+  };
+}
+
+/**
+ * Mirrors get-dependents.ts's `computeRisk`: production-dependent breadth +
+ * untested-production-dependent count + a high-complexity-and-uncovered
+ * escalation, composed via the shared parser primitive.
+ */
+function computeRisk(analysis: DependencyAnalysisResult): string {
+  const { productionDependentCount, uncoveredProductionDependents, complexityMetrics } = analysis;
+  const maxComplexity = complexityMetrics.maxComplexity;
+  const hasHighComplexityUncovered =
+    uncoveredProductionDependents > 0 && maxComplexity >= HIGH_COMPLEXITY_THRESHOLD;
+  return computeBlastRadiusRisk({
+    dependentCount: productionDependentCount,
+    uncoveredDependents: uncoveredProductionDependents,
+    maxDependentComplexity: maxComplexity > 0 ? maxComplexity : undefined,
+    hasHighComplexityUncovered,
+  }).level;
+}
+
+/** Cheap existence check — avoids `createVectorDB().initialize()`'s side effect of creating an empty structural.db where none exists yet. */
+async function hasStructuralIndex(rootDir: string): Promise<boolean> {
+  try {
+    await fs.access(path.join(getIndexDir(rootDir), 'structural.db'));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function enrichOneChange(
+  vectorDB: Awaited<ReturnType<typeof createVectorDB>>,
+  filepath: string,
+  change: ExportedSymbolChange,
+  indexVersion: number,
+): Promise<EnrichedExportedSymbolChange> {
+  try {
+    const log = (): void => undefined;
+    const analysis = await findDependents(vectorDB, filepath, log, change.symbolName, indexVersion);
+    return {
+      ...change,
+      dependentCount: analysis.dependents.length,
+      untestedDependentCount: analysis.uncoveredProductionDependents,
+      riskLevel: computeRisk(analysis),
+      enriched: true,
+    };
+  } catch {
+    return degradedChange(change);
+  }
+}
+
+/**
+ * Enrich every change with dependent counts + risk, best-effort. Only runs
+ * index-touching work when there is at least one change (the rare event) —
+ * the common edit pays only the cheap content-based detection. Degrades to
+ * signature-only (whole batch) when no index exists or the vectorDB itself
+ * fails to open; degrades per-change when `findDependents` throws for that
+ * one symbol. Never throws.
+ */
+async function enrichDeltas(
+  rootDir: string,
+  deltas: ExportedSignatureDelta[],
+): Promise<EnrichedSignatureDelta[]> {
+  if (deltas.length === 0) return [];
+
+  if (!(await hasStructuralIndex(rootDir))) {
+    return deltas.map(d => ({ filepath: d.filepath, changes: d.changes.map(degradedChange) }));
+  }
+
+  try {
+    const vectorDB = await createVectorDB(rootDir);
+    await vectorDB.initialize();
+    // Captured once so every symbol in this run shares the scan cache inside
+    // findDependents — only the first symbol in the batch pays the scanAll.
+    const indexVersion = vectorDB.getCurrentVersion();
+
+    const results: EnrichedSignatureDelta[] = [];
+    for (const delta of deltas) {
+      const changes = await Promise.all(
+        delta.changes.map(c => enrichOneChange(vectorDB, delta.filepath, c, indexVersion)),
+      );
+      results.push({ filepath: delta.filepath, changes });
+    }
+    return results;
+  } catch {
+    // The vectorDB itself failed to open (corrupt store, etc.) — degrade the
+    // whole batch rather than partially enrich and partially throw.
+    return deltas.map(d => ({ filepath: d.filepath, changes: d.changes.map(degradedChange) }));
+  }
+}
+
+function buildBlastEvent(delta: EnrichedSignatureDelta, now: Date): BlastEvent {
+  return {
+    timestamp: now.toISOString(),
+    filepath: delta.filepath,
+    changes: delta.changes.map(c => ({
+      symbol: c.symbol,
+      kind: c.kind,
+      dependentCount: c.dependentCount,
+      untestedDependentCount: c.untestedDependentCount,
+      riskLevel: c.riskLevel,
+    })),
+    enriched: delta.changes.some(c => c.enriched),
+  };
+}
+
+function fmtChange(c: EnrichedExportedSymbolChange): string {
+  const label = c.kind === 'removed' ? chalk.red('✗ removed  ') : chalk.yellow('⚠ changed  ');
+  const detail = c.enriched
+    ? ` — ${c.dependentCount} dependents, ${c.untestedDependentCount} untested, risk ${c.riskLevel}`
+    : chalk.dim(' — index unavailable for counts');
+  return `    ${label}${c.symbol}${detail}`;
+}
+
+/** Render the human-readable report. Pure — no I/O, no process state. */
+export function formatApiDeltaText(deltas: EnrichedSignatureDelta[], baseLabel = 'HEAD'): string {
+  const withChanges = deltas.filter(d => d.changes.length > 0);
+  if (withChanges.length === 0) {
+    return chalk.dim(`lien api-delta — no exported-signature changes vs ${baseLabel}`);
+  }
+
+  const lines: string[] = [
+    chalk.bold(`lien api-delta — exported-signature changes vs ${baseLabel}`),
+    '',
+  ];
+  for (const delta of withChanges) {
+    lines.push(`  ${chalk.cyan(delta.filepath)}`);
+    for (const change of delta.changes) lines.push(fmtChange(change));
+    lines.push('');
+  }
+  lines.push(
+    chalk.dim('  → run get_dependents on any changed/removed symbol before relying on callers.'),
+  );
+  return lines.join('\n');
+}
+
+async function collectChanges(
+  rootDir: string,
+  options: ApiDeltaOptions,
+): Promise<FileContentChange[]> {
+  if (options.file !== undefined) {
+    const single = await collectFileChange(rootDir, options.file, options.base);
+    return single ? [single] : [];
+  }
+  return collectFileChanges(rootDir, options.base);
+}
+
+/**
+ * Resolve the repo root and collect the changed-file content pairs, exiting 2
+ * on any operational failure (not a git repo, a git error). Split out of
+ * `apiDeltaCommand` purely to keep that function short and readable.
+ */
+async function resolveChanges(options: ApiDeltaOptions): Promise<{
+  rootDir: string;
+  changes: FileContentChange[];
+}> {
+  const rootDir = await getRepoRoot(process.cwd());
+  if (!rootDir) {
+    console.error(chalk.red('lien api-delta: not a git repository (or git is not installed)'));
+    process.exit(2);
+  }
+
+  try {
+    return { rootDir, changes: await collectChanges(rootDir, options) };
+  } catch (error) {
+    console.error(
+      chalk.red(
+        `lien api-delta: failed to read git changes: ${error instanceof Error ? error.message : String(error)}`,
+      ),
+    );
+    process.exit(2);
+  }
+}
+
+/** Record one ledger event per changed file — never for a clean run (see blast-events.ts). */
+async function recordAllBlastEvents(
+  rootDir: string,
+  enriched: EnrichedSignatureDelta[],
+): Promise<void> {
+  const now = new Date();
+  for (const delta of enriched) {
+    await recordBlastEvent(rootDir, buildBlastEvent(delta, now));
+  }
+}
+
+/** Print the result in the requested format. `--file` mode prints a single flat object (what the hook parses). */
+function printResult(
+  options: ApiDeltaOptions,
+  changes: FileContentChange[],
+  enriched: EnrichedSignatureDelta[],
+): void {
+  if (options.format !== 'json') {
+    console.log(formatApiDeltaText(enriched, options.base ?? 'HEAD'));
+    return;
+  }
+  if (options.file === undefined) {
+    console.log(JSON.stringify(enriched));
+    return;
+  }
+  const fallbackFilepath = changes[0]?.filepath ?? options.file;
+  const primary = enriched.find(d => d.filepath === fallbackFilepath) ?? {
+    filepath: fallbackFilepath,
+    changes: [],
+  };
+  console.log(JSON.stringify(primary));
+}
+
+/** Analyze the working tree's exported-signature delta vs HEAD (or `--base <ref>`). */
+export async function apiDeltaCommand(options: ApiDeltaOptions): Promise<void> {
+  const usageError = usageFlagError(options);
+  if (usageError) {
+    console.error(chalk.red(`lien api-delta: ${usageError}`));
+    process.exit(2);
+  }
+
+  const { rootDir, changes } = await resolveChanges(options);
+
+  const deltas = changes.map(computeExportedSignatureDelta).filter(d => d.changes.length > 0);
+  const enriched = await enrichDeltas(rootDir, deltas);
+  await recordAllBlastEvents(rootDir, enriched);
+  printResult(options, changes, enriched);
+
+  // Advisory only — this is never a gate, so it always exits 0 once it ran.
+  process.exit(0);
+}

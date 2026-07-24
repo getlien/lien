@@ -9,6 +9,7 @@ import { indexCommand } from './index-cmd.js';
 import { serveCommand } from './serve.js';
 import { complexityCommand } from './complexity.js';
 import { deltaCommand } from './delta-cmd.js';
+import { apiDeltaCommand } from './api-delta-cmd.js';
 import { statsCommand } from './stats-cmd.js';
 import { configSetCommand, configGetCommand, configListCommand } from './config.js';
 import { pathCommand } from './path-cmd.js';
@@ -103,6 +104,19 @@ program
     'Compare the working tree against this ref instead of HEAD (e.g. origin/main in CI)',
   )
   .action(deltaCommand);
+
+program
+  .command('api-delta')
+  .description(
+    'Flag exported-symbol signature changes/removals in the working tree (vs HEAD) — advisory, not a gate',
+  )
+  .option('--format <type>', 'Output format: text, json', 'text')
+  .option('--file <path>', 'Analyze only this file vs HEAD (fast path for edit hooks)')
+  .option(
+    '--base <ref>',
+    'Compare the working tree against this ref instead of HEAD (e.g. origin/main in CI)',
+  )
+  .action(apiDeltaCommand);
 
 program
   .command('stats')
