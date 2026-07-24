@@ -214,10 +214,12 @@ jobs:
 ```
 
 It doesn't need any special access beyond what that one line already
-grants, and by default it only leaves comments. It won't block anything
-unless you turn that on yourself. A typical review costs a few cents to
-about fifteen cents in AI usage (real bills tend to run a bit higher than
-that estimate, so budget accordingly).
+grants, and by default it only leaves comments on what it finds. It won't
+block anything over those comments unless you turn that on yourself. The
+one exception: if the review can't run at all, say the AI provider is
+down, it fails the check outright instead of looking clean. A typical
+review costs a few cents to about fifteen cents in AI usage (real bills
+tend to run a bit higher than that estimate, so budget accordingly).
 
 What we actually want to talk about is how we know it works. Every check
 this tool makes has to prove itself against real bugs that actually shipped
