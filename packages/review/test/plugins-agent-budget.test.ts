@@ -187,7 +187,13 @@ describe('OpenAIAgentClient budget handling', () => {
     // effort (findings already decided) so it emits the JSON without rambling.
     expect(bodies[0].reasoning).toEqual({ effort: 'high' });
     expect(bodies[1].reasoning).toEqual({ effort: 'low' });
-    expect(bodies[0].max_tokens).toBe(24_576);
+    // Turn 1 (not forced) is ALSO budget-scaled as of #836: remaining budget
+    // at turn 1 (10,000, nothing spent yet) exceeds the flat 24,576 ceiling's
+    // ORDINARY_TURN_MIN_MAX_TOKENS floor (8,192), so the remaining-budget
+    // value itself wins — 10,000, not the flat ceiling. See
+    // `turnMaxTokens`'s own doc comment for why (a gap that let a single
+    // ordinary turn overspend a small extra-pass budget several times over).
+    expect(bodies[0].max_tokens).toBe(10_000);
   });
 
   it('bounds the in-loop forced-finish turn to remaining budget (#825 overshoot fix)', async () => {
@@ -209,7 +215,9 @@ describe('OpenAIAgentClient budget handling', () => {
     const result = await client.run('sys', 'init', tools as never, noopTool);
 
     expect(result.stopReason).toBe('completed'); // matches #825: completed, not flagged starved
-    expect(bodies[0].max_tokens).toBe(24_576); // turn 1 (not forced): unaffected, normal ceiling
+    // Turn 1 (not forced) is ALSO budget-scaled as of #836 (see the test
+    // above) — 10,000, not the pre-#836 flat 24,576 ceiling.
+    expect(bodies[0].max_tokens).toBe(10_000);
     expect(bodies[1].max_tokens).toBe(3_000); // forced-finish turn: capped to remaining budget
   });
 
@@ -227,6 +235,11 @@ describe('OpenAIAgentClient budget handling', () => {
 
     await client.run('sys', 'init', tools as never, noopTool);
 
+    // Turn 1 (not forced) is ALSO scaled down here (#836): remaining budget
+    // (7,000) is itself below ORDINARY_TURN_MIN_MAX_TOKENS (8,192), so the
+    // floor wins — a small-extra-pass-budget case where the ordinary-turn
+    // ceiling binds even before any forced-finish turn is ever reached.
+    expect(bodies[0].max_tokens).toBe(8_192);
     expect(bodies[1].max_tokens).toBe(2_048);
   });
 
@@ -261,7 +274,10 @@ describe('OpenAIAgentClient budget handling', () => {
 
     await client.run('sys', 'init', [], noopTool);
 
-    expect(bodies[0].max_tokens).toBe(24_576); // turn 1: unaffected, normal ceiling
+    // Turn 1 (not forced) is ALSO scaled down here (#836): remaining budget
+    // (1,000) is below ORDINARY_TURN_MIN_MAX_TOKENS (8,192), so the floor
+    // wins — not the pre-#836 flat 24,576 ceiling.
+    expect(bodies[0].max_tokens).toBe(8_192);
     expect(bodies[1].max_tokens).toBe(2_048); // the retry: capped to the floor
   }, 15000);
 
@@ -477,6 +493,49 @@ describe('OpenAIAgentClient budget handling', () => {
     expect(result.neverRan).toBe(false);
     expect(result.turns).toBeGreaterThanOrEqual(1);
   }, 20000);
+});
+
+// ---------------------------------------------------------------------------
+// Ordinary (non-forced-finish) turn max_tokens scaling — issue #836's
+// overspend investigation. Before this fix, only the forced-finish branch
+// scaled max_tokens to remaining budget; an ordinary turn always requested
+// the flat 24,576 ceiling, uncoupled from a SMALL pass's own (much smaller)
+// allocation — the concrete mechanism behind doc-truth's 37,106/11,000 (3.4x)
+// overspend on PR #835. These tests assert the wire-level fix directly,
+// beyond the budget-handling suite's existing bodies[0] assertions above.
+// ---------------------------------------------------------------------------
+describe('OpenAIAgentClient — ordinary-turn max_tokens scaling (#836 overspend fix)', () => {
+  it('scales turn 1 down to the extra-pass-sized allocation itself (11,000), not the flat ceiling', async () => {
+    // The exact shape this fix targets: a small, extra-pass-sized budget
+    // (EXTRA_PASS_MIN_BUDGET_TOKENS) where the OLD flat 24,576 ceiling alone
+    // was already more than double the entire allocation.
+    const { bodies } = mockFetch([toolCallTurn(3_000), stopTurn(CLEAN_JSON, 500)]);
+    const client = makeClient(11_000);
+
+    await client.run('sys', 'init', [], noopTool);
+
+    expect(bodies[0].max_tokens).toBe(11_000);
+  });
+
+  it('leaves a large, main-pass-sized budget unaffected (no regression)', async () => {
+    // remainingBudget (100,000) comfortably exceeds the flat 24,576 ceiling,
+    // so the ceiling itself wins — identical to pre-#836 behavior.
+    const { bodies } = mockFetch([stopTurn(CLEAN_JSON)]);
+    const client = makeClient(100_000);
+
+    await client.run('sys', 'init', [], noopTool);
+
+    expect(bodies[0].max_tokens).toBe(24_576);
+  });
+
+  it('floors an ordinary turn at 8,192 when remaining budget is smaller still', async () => {
+    const { bodies } = mockFetch([stopTurn(CLEAN_JSON)]);
+    const client = makeClient(3_000);
+
+    await client.run('sys', 'init', [], noopTool);
+
+    expect(bodies[0].max_tokens).toBe(8_192);
+  });
 });
 
 // ---------------------------------------------------------------------------

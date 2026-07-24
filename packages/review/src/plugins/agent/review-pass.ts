@@ -268,11 +268,49 @@ export type PassClientRunner = (
   maxTurns: number,
 ) => Promise<AgentResult>;
 
+// ---------------------------------------------------------------------------
+// Rolling unspent main-pass budget into the extra-pass pool (issue #836)
+// ---------------------------------------------------------------------------
+
+/**
+ * The main pass's own unspent allocation (allocated minus spent, floored at
+ * 0) — the surplus `runReviewPass`/`runExtraPasses` roll into every extra
+ * pass's own computed budget (see their `rolledOverBudget` parameter below).
+ *
+ * Motivation (issue #836, PR #835's receipt): on a docs-heavy PR the main
+ * pass often has almost nothing to analyze and barely spends (that receipt's
+ * main pass: 20,000 allocated, 7,771 spent — 12,229 left on the table), while
+ * doc-truth, the single most relevant pass for that PR shape, starves under
+ * its own independently-sized budget. Rather than let that surplus simply
+ * evaporate, it becomes additional headroom every extra pass can draw on.
+ *
+ * This is an UNCONDITIONAL additive top-up, not folded into any one pass's
+ * own `budget()` formula: `runReviewPass` computes `spec.budget(baseBudget,
+ * context) + rolledOverBudget` — the addition happens AFTER `spec.budget()`
+ * returns, so it changes every gated-on pass's final allocation whenever
+ * `rolledOverBudget` is nonzero, REGARDLESS of whether that pass's own
+ * formula reads its `baseBudget` parameter (a separate, independent
+ * question — see review-pass-architecture.md's "Budget scaling" for which
+ * passes do). It can push a pass's final allocation past its own documented
+ * ceiling (e.g. `docTruthPassBudget`'s `DOC_TRUTH_MAX_BUDGET`) — that's the
+ * point: these are tokens the main pass never spent, not tokens taken from
+ * anywhere else (see `runReviewPass`'s own comment on the same rationale).
+ */
+export function unspentMainBudget(mainAllocatedTokens: number, mainSpentTokens: number): number {
+  return Math.max(0, mainAllocatedTokens - mainSpentTokens);
+}
+
 /**
  * Run one extra pass's client loop when it's gated on. Mirrors the shape
  * `doc-truth-pass.ts`'s original `runDocTruthPass` had: gate check first
  * (reporting the precise skip reason), then build+run, catching and
  * swallowing any failure — a pass-2+ error must never fail the whole review.
+ *
+ * `rolledOverBudget` (default 0, additive, issue #836) is added ON TOP of
+ * whatever `spec.budget()` computes — after, not instead of, so it never
+ * fights that formula's own floor/ceiling clamp; it can push the final
+ * allocation past a pass's normal ceiling, which is the point: these are
+ * tokens the main pass never spent, not tokens taken from anywhere else.
  */
 export async function runReviewPass(
   spec: ReviewPassSpec,
@@ -280,6 +318,7 @@ export async function runReviewPass(
   config: AgentConfig,
   logger: Logger,
   runClient: PassClientRunner,
+  rolledOverBudget = 0,
 ): Promise<AgentResult | null> {
   const skipReason = spec.gateReason(context, config);
   if (skipReason) {
@@ -287,7 +326,7 @@ export async function runReviewPass(
     return null;
   }
   try {
-    const budget = spec.budget(config.maxTokenBudget, context);
+    const budget = spec.budget(config.maxTokenBudget, context) + rolledOverBudget;
     const { systemPrompt, initialMessage } = spec.buildPrompts(context, budget);
     const rawResult = await runClient(systemPrompt, initialMessage, budget, spec.maxTurns);
     const result = spec.postProcessResult
@@ -357,6 +396,12 @@ export interface PassOutcome {
  * evaluating its own gate — running one anyway would only fire a second
  * doomed request, and a failure-isolated extra pass's own incomplete state
  * must never overwrite the main pass's `neverRan` marker.
+ *
+ * `rolledOverBudget` (default 0, issue #836 — see `unspentMainBudget`) is the
+ * main pass's own unspent allocation, threaded through to every pass's own
+ * budget computation AND reflected in its reported `allocatedTokens` (so the
+ * delivery attestation shows the REAL allocation a pass ran with, not an
+ * understated pre-rollover figure).
  */
 export async function runExtraPasses(
   specs: ReviewPassSpec[],
@@ -366,6 +411,7 @@ export async function runExtraPasses(
   main: AgentResult,
   findings: AgentFinding[],
   runClientFor: (spec: ReviewPassSpec) => PassClientRunner,
+  rolledOverBudget = 0,
 ): Promise<{ findings: AgentFinding[]; outcomes: PassOutcome[] }> {
   const outcomes: PassOutcome[] = [];
   let merged = findings;
@@ -377,7 +423,14 @@ export async function runExtraPasses(
       });
       continue;
     }
-    const passResult = await runReviewPass(spec, context, config, logger, runClientFor(spec));
+    const passResult = await runReviewPass(
+      spec,
+      context,
+      config,
+      logger,
+      runClientFor(spec),
+      rolledOverBudget,
+    );
     if (passResult) {
       appendPassTurns(main.trace, passResult.trace, spec.name);
       context.reportUsage?.(passResult.usage);
@@ -385,7 +438,7 @@ export async function runExtraPasses(
         name: spec.name,
         stopReason: passResult.stopReason,
         neverRan: passResult.neverRan ?? false,
-        allocatedTokens: spec.budget(config.maxTokenBudget, context),
+        allocatedTokens: spec.budget(config.maxTokenBudget, context) + rolledOverBudget,
         spentTokens: passResult.usage.totalTokens,
         candidatesDeferred: passResult.candidatesDeferred ?? 0,
         deferredCandidateIds: passResult.deferredCandidateIds,

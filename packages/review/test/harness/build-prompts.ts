@@ -97,7 +97,7 @@ async function main(): Promise<void> {
   const baseBudget = config?.maxTokenBudget ?? 100_000;
 
   const docTruthPass = passOutput(shouldRunDocTruthPass(ctx, config), () =>
-    buildDocTruthPassPrompts(ctx, docTruthPassBudget(baseBudget)),
+    buildDocTruthPassPrompts(ctx, docTruthPassBudget(baseBudget, ctx)),
   );
   const staleDuplicatePass = passOutput(shouldRunStaleDuplicatePass(ctx, config), () =>
     buildStaleDuplicatePassPrompts(ctx, staleDuplicatePassBudget(baseBudget, ctx)),

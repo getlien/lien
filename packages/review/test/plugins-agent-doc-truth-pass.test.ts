@@ -8,6 +8,7 @@ import {
   mergeDocTruthFindings,
   mergeDocPassIntoResult,
   docTruthPassBudget,
+  DOC_TRUTH_TOKENS_PER_CLAIM,
   isDocTruthV2Enabled,
   buildClaimWorklist,
   allClaimIds,
@@ -250,31 +251,50 @@ describe('buildDocTruthPassPrompts', () => {
 // ---------------------------------------------------------------------------
 
 describe('docTruthPassBudget', () => {
-  it('is ~40% of the base budget, rounded to an integer, when that clears the floor', () => {
-    expect(docTruthPassBudget(100_000)).toBe(40_000);
-    expect(docTruthPassBudget(50_001)).toBe(20_000); // round(20000.4)
+  /** A context carrying `n` distinct doc claims (mirrors the file's other manyClaimsCtx helpers). */
+  function manyClaimsCtx(n: number): ReviewContext {
+    const entries: Array<[string, string]> = Array.from({ length: n }, (_, i) => [
+      `docs/architecture/doc${i}.md`,
+      `@@ -1,1 +1,2 @@\n # Title\n+This step ${i} requires a fresh checkout.`,
+    ]);
+    return contextWithPatches(entries);
+  }
+
+  it('ignores baseBudget entirely — scaled by this pass own claim count instead (matches every sibling candidate loop)', () => {
+    const ctx = manyClaimsCtx(5);
+    expect(docTruthPassBudget(100_000, ctx)).toBe(docTruthPassBudget(6_000, ctx));
   });
 
-  it('clamps to EXTRA_PASS_MIN_BUDGET_TOKENS for the exact #811 summary-only base (regression)', () => {
-    // PR #811's measured main-pass (summary-only mode) allocation was 6,054 —
-    // 40% of that is 2,422, smaller than a single Kimi turn (5,526-6,564
-    // measured), which is exactly what starved doc-truth on that run.
-    expect(docTruthPassBudget(6_054)).toBe(EXTRA_PASS_MIN_BUDGET_TOKENS);
-    expect(docTruthPassBudget(6_054)).toBeGreaterThanOrEqual(EXTRA_PASS_MIN_BUDGET_TOKENS);
+  it('clamps to EXTRA_PASS_MIN_BUDGET_TOKENS when there are 0 or 1 claims (no claims to scale from)', () => {
+    expect(docTruthPassBudget(100_000, createTestContext())).toBe(EXTRA_PASS_MIN_BUDGET_TOKENS);
+    expect(docTruthPassBudget(100_000, manyClaimsCtx(1))).toBe(EXTRA_PASS_MIN_BUDGET_TOKENS);
   });
 
-  it("clamps to the floor across summary-only mode's whole 6,000-20,000 base range", () => {
-    // scaleSummaryOnlyBudget's own clamp range (#572) — 40% of the top of
-    // that range (20,000 → 8,000) still sits under the floor.
-    expect(docTruthPassBudget(6_000)).toBe(EXTRA_PASS_MIN_BUDGET_TOKENS);
-    expect(docTruthPassBudget(20_000)).toBe(EXTRA_PASS_MIN_BUDGET_TOKENS);
+  it('scales linearly with claim count once above the floor (BASE_OVERHEAD + RATE * n)', () => {
+    // DOC_TRUTH_BASE_OVERHEAD_TOKENS is VERDICT_EMISSION_RESERVE_TOKENS (5,000).
+    expect(docTruthPassBudget(100_000, manyClaimsCtx(2))).toBe(
+      VERDICT_EMISSION_RESERVE_TOKENS + DOC_TRUTH_TOKENS_PER_CLAIM * 2,
+    );
+    expect(docTruthPassBudget(100_000, manyClaimsCtx(5))).toBe(
+      VERDICT_EMISSION_RESERVE_TOKENS + DOC_TRUTH_TOKENS_PER_CLAIM * 5,
+    );
   });
 
-  it('the fraction takes over exactly where it first clears the floor', () => {
-    // 0.4 * 27,500 = 11,000 == the floor exactly; one base-unit higher, the
-    // fraction (rounded) exceeds it.
-    expect(docTruthPassBudget(27_500)).toBe(EXTRA_PASS_MIN_BUDGET_TOKENS);
-    expect(docTruthPassBudget(27_510)).toBe(11_004); // round(27510 * 0.4)
+  it("reproduces issue #836's PR #835 shape: a full 20-claim worklist gets far more than the old flat floor", () => {
+    // buildClaimWorklist's own static 20-cap (DOC_TRUTH_V2_MAX_CLAIMS) means
+    // claimCount tops out at 20 here — clamped to DOC_TRUTH_MAX_BUDGET
+    // (65,000), nearly 6x the old flat EXTRA_PASS_MIN_BUDGET_TOKENS (11,000)
+    // this exact PR shape used to floor out at regardless of claim count.
+    const budget = docTruthPassBudget(20_000, manyClaimsCtx(55));
+    expect(budget).toBe(65_000);
+    expect(budget).toBeGreaterThan(EXTRA_PASS_MIN_BUDGET_TOKENS * 5);
+  });
+
+  it('clamps to DOC_TRUTH_MAX_BUDGET so a 100-file docs PR cannot run away', () => {
+    // Even far beyond the 20-claim render cap, the result never exceeds the
+    // hard ceiling — capped by buildClaimWorklist's own static cap in
+    // practice, but this asserts the clamp itself, not just that cap.
+    expect(docTruthPassBudget(100_000, manyClaimsCtx(20))).toBe(65_000);
   });
 });
 
@@ -427,7 +447,8 @@ describe('DOC_TRUTH_PASS_SPEC', () => {
     expect(DOC_TRUTH_PASS_SPEC.name).toBe('doc-truth');
     expect(DOC_TRUTH_PASS_SPEC.skipPlugin).toBe('agent-review:doc-truth');
     expect(DOC_TRUTH_PASS_SPEC.maxTurns).toBe(DOC_PASS_MAX_TURNS);
-    expect(DOC_TRUTH_PASS_SPEC.budget(100_000)).toBe(docTruthPassBudget(100_000));
+    const ctx = contextWithPatches([['docs/architecture/worktree.md', DOC_CLAIM_PATCH]]);
+    expect(DOC_TRUTH_PASS_SPEC.budget(100_000, ctx)).toBe(docTruthPassBudget(100_000, ctx));
     expect(DOC_TRUTH_PASS_SPEC.mergeFindings).toBe(mergeDocTruthFindings);
     expect(DOC_TRUTH_PASS_SPEC.mergeResultState).toBe(mergeDocPassIntoResult);
   });
@@ -786,7 +807,7 @@ describe('buildDocTruthPassPrompts / buildDocTruthPassInitialMessageV2 — v2 co
   it('lists only the affordable claims and appends the overflow note when the budget caps the worklist', () => {
     process.env.LIEN_DOC_TRUTH_V2 = 'on';
     const ctx = manyClaimsCtx(6);
-    const budget = VERDICT_EMISSION_RESERVE_TOKENS + 2 * 500; // affords 2 of 6 (500/claim)
+    const budget = VERDICT_EMISSION_RESERVE_TOKENS + 2 * DOC_TRUTH_TOKENS_PER_CLAIM; // affords 2 of 6 (500/claim)
     const { systemPrompt, initialMessage } = buildDocTruthPassPrompts(ctx, budget);
     expect(systemPrompt).toContain('claim-1');
     expect(systemPrompt).toContain('claim-2');
@@ -798,18 +819,23 @@ describe('buildDocTruthPassPrompts / buildDocTruthPassInitialMessageV2 — v2 co
     expect(initialMessage).toContain('4 additional eligible candidate(s)');
   });
 
-  it('reproduces the Finding-A shape: a ~51-claim worklist at the floor budget still defers most claims', () => {
+  it("reproduces issue #836's PR #835 shape: a full 20-claim worklist now affords most claims, deferring only a few", () => {
     process.env.LIEN_DOC_TRUTH_V2 = 'on';
     // 55 distinct claim patches -> 20-id worklist (buildClaimWorklist's own
-    // static cap) at the shared floor budget (11,000 — the common real-PR
-    // case per every sibling pass's own budget-floor tests).
+    // static cap). Post-#836, docTruthPassBudget scales with THIS pass's own
+    // claim count (ignoring baseBudget) rather than flooring at the shared
+    // EXTRA_PASS_MIN_BUDGET_TOKENS regardless of workload — 20 claims clamps
+    // to DOC_TRUTH_MAX_BUDGET (65,000), affording 17 of the 20 (only 3
+    // deferred), a large improvement over the pre-#836 12-of-20 (8 deferred).
     const ctx = manyClaimsCtx(55);
-    const budget = docTruthPassBudget(6_000); // summary-only-sized base -> floors to 11,000
-    expect(budget).toBe(EXTRA_PASS_MIN_BUDGET_TOKENS);
+    const budget = docTruthPassBudget(20_000, ctx);
+    expect(budget).toBe(65_000);
     const { initialMessage } = buildDocTruthPassPrompts(ctx, budget);
     expect(initialMessage).toContain('CANDIDATE OVERFLOW');
+    expect(initialMessage).toContain('3 additional eligible candidate(s)');
     expect(initialMessage).toContain('[claim-1]');
-    expect(initialMessage).not.toContain('[claim-13]'); // ceiling well under 20
+    expect(initialMessage).toContain('[claim-17]'); // ceiling now affords 17
+    expect(initialMessage).not.toContain('[claim-18]'); // beyond the ceiling -> deferred
   });
 
   it('does not append the overflow note when the v1 (non-candidate-loop) path is used, even with a tiny budget', () => {
@@ -827,7 +853,7 @@ describe('buildDocTruthPassPrompts / buildDocTruthPassInitialMessageV2 — v2 co
   it('byte-diff census: the ordinary single-claim real-PR shape is unaffected at the real (100K-base) budget', () => {
     process.env.LIEN_DOC_TRUTH_V2 = 'on';
     const ctx = contextWithPatches([['docs/architecture/worktree.md', DOC_CLAIM_PATCH]]);
-    const realBudget = docTruthPassBudget(100_000);
+    const realBudget = docTruthPassBudget(100_000, ctx);
     expect(buildDocTruthPassPrompts(ctx, realBudget)).toEqual(buildDocTruthPassPrompts(ctx));
   });
 });
@@ -985,7 +1011,7 @@ describe('postProcessDocTruthResult', () => {
   it('stamps candidatesDeferred/deferredCandidateIds when the budget capped the worklist', () => {
     process.env.LIEN_DOC_TRUTH_V2 = 'on';
     const ctx = manyClaimsCtx(6);
-    const budget = VERDICT_EMISSION_RESERVE_TOKENS + 2 * 500; // affords 2 of 6
+    const budget = VERDICT_EMISSION_RESERVE_TOKENS + 2 * DOC_TRUTH_TOKENS_PER_CLAIM; // affords 2 of 6
     const result = fakeResult([
       verdictFinding({ claimId: 'claim-1', verdict: 'accurate' }),
       verdictFinding({ claimId: 'claim-2', verdict: 'accurate' }),
@@ -998,7 +1024,7 @@ describe('postProcessDocTruthResult', () => {
   it('a capped-but-complete run (every LISTED claim verdicted) stays incomplete:false — deferral is not incompleteness', () => {
     process.env.LIEN_DOC_TRUTH_V2 = 'on';
     const ctx = manyClaimsCtx(6);
-    const budget = VERDICT_EMISSION_RESERVE_TOKENS + 2 * 500; // affords 2 of 6
+    const budget = VERDICT_EMISSION_RESERVE_TOKENS + 2 * DOC_TRUTH_TOKENS_PER_CLAIM; // affords 2 of 6
     const result = fakeResult([
       verdictFinding({ claimId: 'claim-1', verdict: 'accurate' }),
       verdictFinding({ claimId: 'claim-2', verdict: 'accurate' }),
@@ -1012,7 +1038,7 @@ describe('postProcessDocTruthResult', () => {
   it('still requires coverage of every LISTED (kept) claim — omitting one is incomplete_verdict, cap or not', () => {
     process.env.LIEN_DOC_TRUTH_V2 = 'on';
     const ctx = manyClaimsCtx(6);
-    const budget = VERDICT_EMISSION_RESERVE_TOKENS + 2 * 500; // lists claim-1/claim-2 only
+    const budget = VERDICT_EMISSION_RESERVE_TOKENS + 2 * DOC_TRUTH_TOKENS_PER_CLAIM; // lists claim-1/claim-2 only
     const result = fakeResult([verdictFinding({ claimId: 'claim-1', verdict: 'accurate' })]); // claim-2 missing
     const processed = postProcessDocTruthResult(result, ctx, budget);
     expect(processed.incomplete).toBe(true);

@@ -92,6 +92,7 @@ import { envDisabled } from './agent-client-shared.js';
 import {
   renderPassPrHeader,
   EXTRA_PASS_MIN_BUDGET_TOKENS,
+  VERDICT_EMISSION_RESERVE_TOKENS,
   affordableCandidateCeiling,
   MAX_DEFERRED_LABELS,
   renderDeferralNote,
@@ -109,21 +110,6 @@ import {
  * keeps a doc-heavy PR from spending main-pass-sized budget on the second call.
  */
 export const DOC_PASS_MAX_TURNS = 6;
-
-/**
- * The doc pass's token budget as a fraction of the main pass's base budget.
- * ~40% is ample for a claims-only pass whose input is the (already compact)
- * doc-claim signals rather than the full diff + all signals — PROVIDED the
- * base itself is normal-mode-sized (`scaleAgentBudget`'s ≥60K floor, where
- * 40% is ≥24K). This fraction was never re-validated against summary-only
- * mode's deliberately tiny 6,000-20,000 base (added by #572): 40% of a
- * 6,054 base is 2,422 tokens — smaller than a single Kimi reasoning+tool
- * turn (PR #811 measured 5,526-6,564/turn), so the pass hard-stopped before
- * its first tool call ever dispatched. `docTruthPassBudget` now clamps this
- * fraction to `EXTRA_PASS_MIN_BUDGET_TOKENS` so a tiny base can no longer
- * starve it below one real round-trip.
- */
-export const DOC_PASS_BUDGET_FRACTION = 0.4;
 
 /** Env kill-switch (parity with the client's LIEN_REVIEW_LOG_AGENT style). */
 const DOC_PASS_ENV = 'LIEN_REVIEW_DOC_PASS';
@@ -366,19 +352,37 @@ export function allClaimIds(worklist: ClaimWorklist): string[] {
 // ---------------------------------------------------------------------------
 
 /**
- * Realistic per-claim cost for the ceiling formula (see
- * `affordableCandidateCeiling`). A claim entry carries a pre-fetched evidence
- * excerpt (or a short "no evidence located" note), so judging it is a
- * COMPARISON, not an investigation — the rule's own budget-discipline
- * instruction explicitly forbids re-reading via tools when evidence is
- * attached (`DOC_PASS_INTRO`: "do NOT re-read that file with tools; spend
- * tool calls ONLY on claims with no attached evidence"). Same order of
- * magnitude as stale-duplicate's own evidence-inline PER_CANDIDATE_TOKENS
- * (800) — a little lighter, since a doc claim's excerpt is typically shorter
- * than stale-duplicate's full diff hunk plus multiple surviving-site
- * snippets.
+ * This pass's OWN per-claim cost, used both for the rank-and-cap ceiling
+ * (`affordableCandidateCeiling`, via `buildDocTruthPassPrompts`/
+ * `postProcessDocTruthResult` below) and for `docTruthPassBudget`'s own
+ * per-claim scaling — mirrors `INCOMPLETE_HANDLING_TOKENS_PER_CANDIDATE`'s
+ * "one real empirical rate, used everywhere per-claim cost matters" shape
+ * (incomplete-handling-pass.ts), rather than keeping a separate prompt-
+ * sizing estimate.
+ *
+ * Previously 500 — a PROMPT-sizing estimate (just the rendered claim +
+ * evidence text) — which is exactly why issue #836's PR #835 (55-file
+ * docs-only PR) overspent 3.4x: the ceiling used that 500 figure to decide
+ * 12 claims were "affordable" under an 11,000-token budget
+ * (`EXTRA_PASS_MIN_BUDGET_TOKENS`), but the pass actually spent 37,106
+ * tokens investigating those same 12 claims — i.e. the ceiling sized the
+ * PROMPT, not the real judging cost (the same class of gap
+ * `OBSERVED_TOKENS_PER_TURN`'s own doc comment names for the two candidate
+ * loops). 37,106 ÷ 12 kept claims ≈ 3,092 tokens/claim — this repo's only
+ * real production doc-truth receipt with both `spentTokens` and
+ * `candidatesDeferred` (a SINGLE data point, unlike
+ * `INCOMPLETE_HANDLING_TOKENS_PER_CANDIDATE`'s 5-PR mean — see that
+ * constant's own doc comment for the precedent this mirrors). Rounded up to
+ * 3,500 for margin given the n=1 sample size. Still well below incomplete-
+ * handling's 12,000: doc-truth's claims carry pre-fetched evidence (a
+ * COMPARISON, per `DOC_PASS_INTRO`'s explicit "do NOT re-read that file with
+ * tools" instruction), unlike incomplete-handling's candidates, which always
+ * need a fresh read_file/get_files_context round-trip (an INVESTIGATION) —
+ * so a materially lower per-claim rate is the expected direction, not just
+ * an artifact of the single sample. Revisit if more production receipts
+ * carrying both figures become available.
  */
-export const DOC_TRUTH_TOKENS_PER_CLAIM = 500;
+export const DOC_TRUTH_TOKENS_PER_CLAIM = 3_500;
 
 /** A short, human-readable label for one dropped worklist item — for the delivery attestation's
  *  `deferredCandidateIds`, not the pass's own `claim-N` ids. */
@@ -653,13 +657,55 @@ verdict or category on a claimed entry, makes this pass's result incomplete.
 // ---------------------------------------------------------------------------
 
 /**
- * The doc pass's token budget: a fraction of the main pass's base budget,
- * floored at `EXTRA_PASS_MIN_BUDGET_TOKENS` so a tiny base (summary-only
- * mode) can't shrink it below one real tool round-trip (see PR #811 /
- * `DOC_PASS_BUDGET_FRACTION`'s doc comment).
+ * Base overhead for this pass's budget scaler — deliberately set equal to
+ * `VERDICT_EMISSION_RESERVE_TOKENS`, not an independent guess (mirrors
+ * `incompleteHandlingPassBudget`'s own `BASE_OVERHEAD_TOKENS`, see that
+ * constant's doc comment): it makes `docTruthPassBudget(n)` the exact
+ * algebraic inverse of `affordableCandidateCeiling` — `budget(n) = RESERVE +
+ * RATE*n` <=> `affordableCandidateCeiling(budget(n), RATE) === n` (whenever
+ * budget isn't clamped) — so the ceiling and the allocation agree by
+ * construction instead of two independently-tuned numbers drifting apart.
  */
-export function docTruthPassBudget(baseBudget: number): number {
-  return Math.max(Math.round(baseBudget * DOC_PASS_BUDGET_FRACTION), EXTRA_PASS_MIN_BUDGET_TOKENS);
+const DOC_TRUTH_BASE_OVERHEAD_TOKENS = VERDICT_EMISSION_RESERVE_TOKENS;
+
+/**
+ * Hard ceiling on doc-truth's own budget, so a 100-file docs PR (a huge
+ * claim count) can't run away. 65,000 mirrors `incompleteHandlingPassBudget`'s
+ * own `MAX_BUDGET` (same number, same shape of trade-off — see that
+ * constant's doc comment): at `DOC_TRUTH_TOKENS_PER_CLAIM` (3,500), it fully
+ * funds `(65,000 - 5,000) / 3,500 ≈ 17` claims before rank-and-cap
+ * (`affordableCandidateCeiling`) honestly defers the rest — a deliberate
+ * cost/completeness trade-off, not an attempt to fund every real worklist in
+ * full (issue #836's PR #835 worklist alone was 20 claims; funding all 20 at
+ * this rate would cost ~75,000, disproportionate to a single extra pass).
+ */
+const DOC_TRUTH_MAX_BUDGET = 65_000;
+
+/**
+ * The doc pass's token budget, scaled by this pass's OWN claim count (per
+ * the per-rule-loops design doc §2, mirroring every candidate-count-scaled
+ * loop — `incompleteHandlingPassBudget`, `staleDuplicatePassBudget`,
+ * `removedExportsPassBudget` — rather than a flat fraction of the main
+ * pass's base budget). `baseBudget` is intentionally unused (same precedent
+ * as those three siblings): the flat-fraction formula this replaces was
+ * never a good predictor of doc-truth's real workload — a summary-only
+ * mode's tiny base (`scaleSummaryOnlyBudget`'s 6,000-20,000 range) floored
+ * out at `EXTRA_PASS_MIN_BUDGET_TOKENS` regardless of how many claims a
+ * docs-heavy PR actually carried, which is exactly the shape that starved
+ * PR #835's 20-claim worklist (issue #836). Clamped floor/ceiling: never
+ * below `EXTRA_PASS_MIN_BUDGET_TOKENS` (one real round-trip, PR #811), never
+ * above `DOC_TRUTH_MAX_BUDGET` (this pass's own runaway guard).
+ *
+ * `buildClaimWorklist`/`allClaimIds` are pure and flag-independent (they
+ * just compute doc claims + rename-sweep signals and assign ids), so this
+ * counts the real claim count identically whether v2 is on or off — v1 has
+ * no id-based worklist to RENDER, but "how many claims exist" is still a
+ * well-defined, useful budget-sizing question under v1 too.
+ */
+export function docTruthPassBudget(_baseBudget: number, context: ReviewContext): number {
+  const claimCount = allClaimIds(buildClaimWorklist(context)).length;
+  const scaled = DOC_TRUTH_BASE_OVERHEAD_TOKENS + DOC_TRUTH_TOKENS_PER_CLAIM * claimCount;
+  return Math.min(Math.max(scaled, EXTRA_PASS_MIN_BUDGET_TOKENS), DOC_TRUTH_MAX_BUDGET);
 }
 
 /** Plugin name the doc-truth pass reports itself under in the delivery attestation. */
