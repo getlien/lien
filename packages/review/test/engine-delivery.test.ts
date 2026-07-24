@@ -117,6 +117,7 @@ describe('ReviewEngine.present() delivery truth', () => {
       posted: 1,
       dropped: 1,
       deduped: 0,
+      citationGated: 0,
     });
   });
 
@@ -169,7 +170,14 @@ describe('ReviewEngine.present() delivery truth', () => {
     // No out-of-diff findings and no dedup in this scenario, so `skipped`
     // (benign-only) must be 0 — NOT 1, which is what folding the real
     // `dropped` rejection in would have produced.
-    expect(rawOutcome).toEqual({ posted: 1, skipped: 0, attempted: 2, dropped: 1, deduped: 0 });
+    expect(rawOutcome).toEqual({
+      posted: 1,
+      skipped: 0,
+      attempted: 2,
+      dropped: 1,
+      deduped: 0,
+      citationGated: 0,
+    });
   });
 
   it('postInlineComments keeps a benign out-of-diff skip separate from a real dropped post', async () => {
@@ -213,7 +221,14 @@ describe('ReviewEngine.present() delivery truth', () => {
 
     await engine.present([], createAdapterContext({ octokit, pr: mockPR }));
 
-    expect(rawOutcome).toEqual({ posted: 1, skipped: 1, attempted: 3, dropped: 2, deduped: 0 });
+    expect(rawOutcome).toEqual({
+      posted: 1,
+      skipped: 1,
+      attempted: 3,
+      dropped: 2,
+      deduped: 0,
+      citationGated: 0,
+    });
   });
 
   it('outOfDiffReviewPosted is true on a successful out-of-diff review comment', async () => {

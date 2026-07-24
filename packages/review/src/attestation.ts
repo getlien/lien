@@ -107,6 +107,17 @@ export interface InlineCommentsAttestation {
   dropped: number;
   /** Skipped because an equivalent comment already existed from a prior run. */
   deduped: number;
+  /**
+   * Rejected by the issue #846 citation gate before ever becoming a
+   * comment: the finding quoted a code fragment demonstrably absent from
+   * the current file (see `citation-gate.ts`). This is a DELIBERATE,
+   * fail-open noise reduction, not a failure — it must never move
+   * `computeVerdict` off `'delivered'` the way `dropped > 0` does. This is
+   * an ADDITIVE field on the existing v2 shape (`ATTESTATION_VERSION`
+   * unchanged — see that constant's own doc comment for when a bump is,
+   * and isn't, warranted).
+   */
+  citationGated: number;
 }
 
 export interface DeliveryAttestation {
@@ -435,7 +446,7 @@ export function emptyAttestation(
     spentTokens: 0,
     passesSkipped: [],
     annotationsEmitted: 0,
-    inlineComments: { attempted: 0, posted: 0, dropped: 0, deduped: 0 },
+    inlineComments: { attempted: 0, posted: 0, dropped: 0, deduped: 0, citationGated: 0 },
     descriptionBadgeUpdated: null,
     outOfDiffReviewPosted: null,
     pipelineFailed,

@@ -33,9 +33,11 @@ import {
   getExistingPluginCommentKeys,
   updatePRDescription,
   minimizeOutdatedComments,
+  getFullFileContent,
 } from './github-api.js';
 import type { LineComment, PRContext } from './types.js';
 import { performChunkOnlyIndex } from '@liendev/parser';
+import { shouldGateFinding } from './citation-gate.js';
 
 export interface EngineOptions {
   /** Enable verbose debug logging of activation decisions and timing */
@@ -50,7 +52,22 @@ export interface EngineOptions {
  */
 export interface PresentDelivery {
   annotationsEmitted: number;
-  inlineComments: { attempted: number; posted: number; dropped: number; deduped: number };
+  inlineComments: {
+    attempted: number;
+    posted: number;
+    dropped: number;
+    deduped: number;
+    /**
+     * Gated by the issue #846 citation check: the finding quoted a code
+     * fragment demonstrably absent from the current file, so it was never
+     * posted. Deliberately excluded from `dropped` (a real delivery
+     * failure) and from `deduped` (an existing comment already covered
+     * it) — this is neither; it's a finding the engine chose not to
+     * deliver because its own premise contradicted the current code. See
+     * `citation-gate.ts` for the full rationale and fail-open guarantees.
+     */
+    citationGated: number;
+  };
   /** null when no plugin contributed a description section this run (nothing to update). */
   descriptionBadgeUpdated: boolean | null;
   /** null when no plugin attempted an out-of-diff review comment this run. */
@@ -67,20 +84,20 @@ export interface PresentDelivery {
  */
 export const EMPTY_DELIVERY: PresentDelivery = {
   annotationsEmitted: 0,
-  inlineComments: { attempted: 0, posted: 0, dropped: 0, deduped: 0 },
+  inlineComments: { attempted: 0, posted: 0, dropped: 0, deduped: 0, citationGated: 0 },
   descriptionBadgeUpdated: false,
   outOfDiffReviewPosted: false,
 };
 
 /** Mutable accumulator threaded through a single `present()` call. */
 interface DeliveryTracker {
-  inlineComments: { attempted: number; posted: number; dropped: number; deduped: number };
+  inlineComments: PresentDelivery['inlineComments'];
   outOfDiffReviewPosted: boolean | null;
 }
 
 function createDeliveryTracker(): DeliveryTracker {
   return {
-    inlineComments: { attempted: 0, posted: 0, dropped: 0, deduped: 0 },
+    inlineComments: { attempted: 0, posted: 0, dropped: 0, deduped: 0, citationGated: 0 },
     outOfDiffReviewPosted: null,
   };
 }
@@ -620,6 +637,7 @@ function createPostInlineComments(
     deliveryTracker.inlineComments.posted += result.posted;
     deliveryTracker.inlineComments.dropped += result.dropped;
     deliveryTracker.inlineComments.deduped += result.deduped;
+    deliveryTracker.inlineComments.citationGated += result.citationGated;
     return result;
   };
 }
@@ -692,18 +710,20 @@ function buildPresentContext(
 /**
  * Ground truth for one `postInlineComments` call, feeding both the
  * plugin-facing `{posted, skipped, dropped}` contract and the delivery
- * attestation. Invariant: `attempted === posted + dropped + deduped`.
+ * attestation. Invariant: `attempted === posted + dropped + deduped +
+ * citationGated`.
  *
  * `skipped` and `dropped` answer different questions and must not be
  * collapsed into one count: `skipped` is "was there a REASON not to post
- * this, unrelated to whether posting would have worked?" (out of diff, or an
- * equivalent comment already exists from a prior run — see `dedupSkipped`).
- * `dropped` is "did GitHub actually reject an attempted post?" — a real
- * delivery failure from `postPRReview`'s per-comment salvage path (#752).
- * `dropped` also folds in the out-of-diff count for attestation purposes
- * (nothing landed inline either way — see `InlineCommentsAttestation.dropped`'s
- * own doc comment), but `skipped` must stay benign-only: it used to also
- * have `dropped.length` folded in (the only way a `{posted, skipped}`-only
+ * this, unrelated to whether posting would have worked?" (out of diff, an
+ * equivalent comment already exists from a prior run — see `dedupSkipped`
+ * — or the citation gate rejected it — see `citationGated`). `dropped` is
+ * "did GitHub actually reject an attempted post?" — a real delivery
+ * failure from `postPRReview`'s per-comment salvage path (#752). `dropped`
+ * also folds in the out-of-diff count for attestation purposes (nothing
+ * landed inline either way — see `InlineCommentsAttestation.dropped`'s own
+ * doc comment), but `skipped` must stay benign-only: it used to also have
+ * `dropped.length` folded in (the only way a `{posted, skipped}`-only
  * contract, before `dropped` existed as its own field, could account for a
  * real failure at all) — that silently re-merged "nothing to worry about"
  * and "this actually failed" into the same number for any plugin reading
@@ -712,12 +732,19 @@ function buildPresentContext(
  */
 interface InlinePostOutcome {
   posted: number;
-  /** Benign: out of diff, or already commented (deduped). Never a delivery failure. */
+  /** Benign: out of diff, already commented (deduped), or citation-gated. Never a delivery failure. */
   skipped: number;
   attempted: number;
   /** A real delivery failure (GitHub rejected the post) — see the class comment above. */
   dropped: number;
   deduped: number;
+  /**
+   * Rejected by the issue #846 citation gate (`citation-gate.ts`): the
+   * finding quoted a code fragment demonstrably absent from the current
+   * file, so it was never built into a comment or considered for dedup.
+   * Fail-open by construction — see that module's own doc comment.
+   */
+  citationGated: number;
 }
 
 async function postPluginInlineComments(
@@ -728,14 +755,23 @@ async function postPluginInlineComments(
   logger: Logger,
 ): Promise<InlinePostOutcome> {
   const attempted = findings.length;
-  if (attempted === 0) return { posted: 0, skipped: 0, attempted: 0, dropped: 0, deduped: 0 };
+  if (attempted === 0) {
+    return { posted: 0, skipped: 0, attempted: 0, dropped: 0, deduped: 0, citationGated: 0 };
+  }
 
   const pluginId = findings[0].pluginId;
   if (findings.some(f => f.pluginId !== pluginId)) {
     logger.warning(
       `postInlineComments: mixed pluginIds in findings, skipping to avoid mis-attribution`,
     );
-    return { posted: 0, skipped: attempted, attempted, dropped: attempted, deduped: 0 };
+    return {
+      posted: 0,
+      skipped: attempted,
+      attempted,
+      dropped: attempted,
+      deduped: 0,
+      citationGated: 0,
+    };
   }
 
   const markerPrefix = `${PLUGIN_MARKER_PREFIX}${pluginId}:`;
@@ -746,15 +782,24 @@ async function postPluginInlineComments(
       `postInlineComments(${pluginId}): posting 0 of ${attempted} finding(s) ` +
         `(diff fetch failed — see warning above)`,
     );
-    return { posted: 0, skipped: attempted, attempted, dropped: attempted, deduped: 0 };
+    return {
+      posted: 0,
+      skipped: attempted,
+      attempted,
+      dropped: attempted,
+      deduped: 0,
+      citationGated: 0,
+    };
   }
 
   const { inDiff, outOfDiffCount } = diffResult;
 
+  const { survivors, gated: citationGated } = await gateStaleCitations(octokit, pr, inDiff, logger);
+
   let toPost: LineComment[] = [];
   let dedupSkipped = 0;
-  if (inDiff.length > 0) {
-    const comments: LineComment[] = inDiff.map(f => ({
+  if (survivors.length > 0) {
+    const comments: LineComment[] = survivors.map(f => ({
       path: f.filepath,
       line: f.line,
       body: buildPluginCommentBody(f, markerPrefix),
@@ -770,13 +815,21 @@ async function postPluginInlineComments(
     ));
   }
 
-  const skipped = outOfDiffCount + dedupSkipped;
+  const skipped = outOfDiffCount + dedupSkipped + citationGated;
   logger.info(
     `postInlineComments(${pluginId}): posting ${toPost.length} of ${attempted} finding(s) ` +
-      `(${outOfDiffCount} outside diff, ${dedupSkipped} already commented)`,
+      `(${outOfDiffCount} outside diff, ${dedupSkipped} already commented, ` +
+      `${citationGated} stale-citation gated)`,
   );
   if (toPost.length === 0) {
-    return { posted: 0, skipped, attempted, dropped: outOfDiffCount, deduped: dedupSkipped };
+    return {
+      posted: 0,
+      skipped,
+      attempted,
+      dropped: outOfDiffCount,
+      deduped: dedupSkipped,
+      citationGated,
+    };
   }
 
   const { posted, dropped } = await postPRReview(
@@ -796,7 +849,54 @@ async function postPluginInlineComments(
     attempted,
     dropped: outOfDiffCount + dropped.length,
     deduped: dedupSkipped,
+    citationGated,
   };
+}
+
+/**
+ * Delivery-time defense against issue #846: drop a finding whose quoted
+ * `message`/`evidence` citation is demonstrably absent from the CURRENT
+ * file content, before it's ever built into a GitHub comment or considered
+ * for dedup. Fetches every distinct filepath's current content ONCE, in
+ * parallel — a batch of findings across many files would otherwise
+ * serialize one network round trip per file on this delivery hot path.
+ *
+ * Fail-open: a file-content fetch failure (network error, deleted file,
+ * private-repo auth hiccup) makes every finding in that file `unverifiable`,
+ * which `shouldGateFinding` treats as "let it through" — see
+ * `citation-gate.ts`'s module doc for the full asymmetry rationale. This
+ * function never throws; a fetch problem degrades to "gate nothing", not
+ * to gating everything (`getFullFileContent` itself already never throws).
+ */
+async function gateStaleCitations(
+  octokit: Octokit,
+  pr: PRContext,
+  findings: ReviewFinding[],
+  logger: Logger,
+): Promise<{ survivors: ReviewFinding[]; gated: number }> {
+  const filepaths = [...new Set(findings.map(f => f.filepath))];
+  const contents = await Promise.all(
+    filepaths.map(filepath => getFullFileContent(octokit, pr, filepath, logger)),
+  );
+  const contentByFile = new Map(filepaths.map((filepath, i) => [filepath, contents[i]]));
+
+  const survivors: ReviewFinding[] = [];
+  let gated = 0;
+
+  for (const finding of findings) {
+    if (shouldGateFinding(finding, contentByFile.get(finding.filepath) ?? null)) {
+      gated++;
+      logger.info(
+        `postInlineComments: gated stale-citation finding at ${finding.filepath}:${finding.line} ` +
+          `— quoted citation not found in the current file (issue #846)`,
+      );
+      continue;
+    }
+
+    survivors.push(finding);
+  }
+
+  return { survivors, gated };
 }
 
 /** Fetch diff lines and filter findings to those within the diff. Returns null on API failure. */
