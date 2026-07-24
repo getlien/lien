@@ -4,6 +4,7 @@ import {
   parsePatchLines,
   updatePRDescription,
   removePRDescriptionSection,
+  getFullFileContent,
 } from '../src/github-api.js';
 import type { Octokit } from '../src/github-api.js';
 import type { LineComment, PRContext } from '../src/types.js';
@@ -365,5 +366,36 @@ describe('parsePatchLines', () => {
     );
 
     expect(parsePatchLines(patch)).toEqual(new Set([1, 2]));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getFullFileContent
+// ---------------------------------------------------------------------------
+
+describe('getFullFileContent', () => {
+  it('returns the full decoded file content at the PR head SHA', async () => {
+    const octokit = {
+      repos: {
+        getContent: vi.fn().mockResolvedValue({
+          data: { content: Buffer.from('line1\nline2\nline3').toString('base64') },
+        }),
+      },
+    } as unknown as Octokit;
+
+    const content = await getFullFileContent(octokit, pr, 'src/a.ts', createMockLogger());
+    expect(content).toBe('line1\nline2\nline3');
+    expect(octokit.repos.getContent).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'src/a.ts', ref: pr.headSha }),
+    );
+  });
+
+  it('returns null (fail open) when the fetch fails, rather than throwing', async () => {
+    const octokit = {
+      repos: { getContent: vi.fn().mockRejectedValue(new Error('network error')) },
+    } as unknown as Octokit;
+
+    const content = await getFullFileContent(octokit, pr, 'src/missing.ts', createMockLogger());
+    expect(content).toBeNull();
   });
 });

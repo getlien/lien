@@ -213,6 +213,22 @@ export async function getFileContent(
 }
 
 /**
+ * Fetch the full current content of a file at the PR's head commit.
+ * Thin wrapper over {@link getFileContent} spanning the whole file — used
+ * by the citation gate (`citation-gate.ts`) to check a finding's quoted
+ * premise against the actual current code. Returns `null` on any fetch
+ * error, same as `getFileContent`, so callers can fail open.
+ */
+export async function getFullFileContent(
+  octokit: Octokit,
+  prContext: PRContext,
+  filepath: string,
+  logger: Logger,
+): Promise<string | null> {
+  return getFileContent(octokit, prContext, filepath, 1, Number.MAX_SAFE_INTEGER, logger);
+}
+
+/**
  * Result of {@link postPRReview}: how many line comments actually landed,
  * which ones were dropped (with why), and whether the summary body itself
  * made it through — so callers can surface the degradation instead of

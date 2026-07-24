@@ -25,7 +25,7 @@ function baseInput(overrides?: Partial<AttestationInput>): AttestationInput {
     spentTokens: 12_000,
     passesSkipped: [],
     annotationsEmitted: 0,
-    inlineComments: { attempted: 0, posted: 0, dropped: 0, deduped: 0 },
+    inlineComments: { attempted: 0, posted: 0, dropped: 0, deduped: 0, citationGated: 0 },
     descriptionBadgeUpdated: true,
     outOfDiffReviewPosted: null,
     ...overrides,
@@ -116,7 +116,7 @@ describe('assembleAttestation', () => {
   it('produces verdict "degraded:comments_dropped" when comments were dropped on an otherwise clean run', () => {
     const attestation = assembleAttestation(
       baseInput({
-        inlineComments: { attempted: 4, posted: 2, dropped: 2, deduped: 0 },
+        inlineComments: { attempted: 4, posted: 2, dropped: 2, deduped: 0, citationGated: 0 },
       }),
     );
     expect(attestation.verdict).toBe('degraded:comments_dropped');
@@ -160,7 +160,7 @@ describe('assembleAttestation', () => {
         conclusion: 'failure',
         findings: [neverRanFinding()],
         providerFailure: true,
-        inlineComments: { attempted: 4, posted: 0, dropped: 4, deduped: 0 },
+        inlineComments: { attempted: 4, posted: 0, dropped: 4, deduped: 0, citationGated: 0 },
       }),
     );
     expect(attestation.verdict).toBe('failed:provider_never_ran');
@@ -457,7 +457,7 @@ describe('computeVerdict', () => {
       pipelineFailed: true,
       providerFailure: true,
       passes: [{ name: 'main', ran: true, stopReason: 'budget', neverRan: false }],
-      inlineComments: { attempted: 1, posted: 0, dropped: 1, deduped: 0 },
+      inlineComments: { attempted: 1, posted: 0, dropped: 1, deduped: 0, citationGated: 0 },
     });
     expect(verdict).toBe('failed:analysis_error');
   });
@@ -473,7 +473,7 @@ describe('computeVerdict', () => {
         { name: 'main', ran: true, stopReason: 'completed', neverRan: false },
         { name: 'doc-truth', ran: true, stopReason: 'budget', neverRan: false },
       ],
-      inlineComments: { attempted: 0, posted: 0, dropped: 0, deduped: 0 },
+      inlineComments: { attempted: 0, posted: 0, dropped: 0, deduped: 0, citationGated: 0 },
     });
     expect(verdict).toBe('degraded:budget_starved');
   });
@@ -483,7 +483,7 @@ describe('formatAttestationBadgeLine', () => {
   it('renders verdict, comment counts, and token usage in one compact line', () => {
     const attestation = assembleAttestation(
       baseInput({
-        inlineComments: { attempted: 6, posted: 4, dropped: 2, deduped: 0 },
+        inlineComments: { attempted: 6, posted: 4, dropped: 2, deduped: 0, citationGated: 0 },
         allocatedTokens: 250_000,
         spentTokens: 238_000,
       }),
