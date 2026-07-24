@@ -229,5 +229,43 @@ describe('citation gate wiring (issue #846)', () => {
       deduped: 0,
       citationGated: 1,
     });
+    // Both findings share one file — content is fetched once, not once per finding.
+    expect(octokit.repos.getContent).toHaveBeenCalledTimes(1);
+  });
+
+  it('fetches each distinct file exactly once, in parallel, not once per finding', async () => {
+    const octokit = mockOctokit({ fileContent: 'shared content across files' });
+    const engine = new ReviewEngine();
+    engine.register(
+      createTestPlugin({
+        present: async (_findings, ctx: PresentContext) => {
+          await ctx.postInlineComments!(
+            [
+              finding({ filepath: 'src/a.ts', line: 5 }),
+              finding({ filepath: 'src/a.ts', line: 6 }),
+              finding({ filepath: 'src/b.ts', line: 5 }),
+            ],
+            'summary body',
+          );
+        },
+      }),
+    );
+
+    // The diff must cover both files for filterToDiffLines to keep them all.
+    const patch = '@@ -1,2 +5,3 @@\n+line5\n+line6\n+line7';
+    octokit.paginate.iterator = vi.fn((fn: unknown) => {
+      if (fn === octokit.pulls.listFiles) {
+        return onePage([
+          { filename: 'src/a.ts', patch },
+          { filename: 'src/b.ts', patch },
+        ]);
+      }
+      return onePage([]);
+    });
+
+    await engine.present([], createAdapterContext({ octokit, pr: mockPR }));
+
+    // Two distinct filepaths across three findings — exactly two fetches.
+    expect(octokit.repos.getContent).toHaveBeenCalledTimes(2);
   });
 });

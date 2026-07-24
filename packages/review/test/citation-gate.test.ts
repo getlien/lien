@@ -23,6 +23,13 @@ describe('extractCitedSpans', () => {
     expect(extractCitedSpans('`--votes foo` produces NaN')).toEqual([]);
   });
 
+  it('drops a dash-prefixed span even with leading whitespace inside the backticks', () => {
+    // The dash check runs on the TRIMMED span, so leading whitespace can't
+    // smuggle a dash-prefixed illustrative value past the guard: trimming
+    // only removes whitespace, it can never remove the leading `-` itself.
+    expect(extractCitedSpans('`  --flag` was passed')).toEqual([]);
+  });
+
   it('ignores undefined text arguments', () => {
     expect(extractCitedSpans(undefined, '`realSpan`', undefined)).toEqual(['realSpan']);
   });

@@ -51,6 +51,15 @@ const MIN_CITATION_LENGTH = 4;
  * Extract backtick-quoted spans from finding free text that read as real
  * code citations rather than illustrative examples.
  *
+ * Scoped to single-line, single-backtick spans (`` `like this` ``) —
+ * matching the rule-prompt convention this repo actually uses for code
+ * citations (see `plugins/agent/rules.ts`'s `.findings.length`,
+ * `paths[0:3]`-style examples): short inline expressions, never a
+ * triple-backtick multi-line block. A finding that only ever quotes a
+ * multi-line block is simply `no-citation` here — fail-open, not a bug —
+ * rather than this module reaching into fenced-block parsing for a shape
+ * the prompts don't produce.
+ *
  * A span beginning with `-` is deliberately excluded: rule prompts
  * legitimately quote hypothetical malformed INPUT VALUES in `message`
  * alongside real code citations (e.g. the untrusted-input rule's own
@@ -58,7 +67,10 @@ const MIN_CITATION_LENGTH = 4;
  * CLI arg, never expected to appear verbatim in the file). Treating an
  * illustrative value as a citation would gate true findings on that
  * illustration alone — exactly the false-positive this module exists to
- * avoid.
+ * avoid. The dash check runs AFTER trimming (on the trimmed span), so
+ * leading whitespace inside the backticks (`` `  --flag` ``) can't smuggle
+ * a dash-prefixed span past the guard — trimming only removes whitespace,
+ * it can't remove the leading `-` itself.
  */
 export function extractCitedSpans(...texts: Array<string | undefined>): string[] {
   const spans: string[] = [];

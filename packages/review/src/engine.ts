@@ -857,15 +857,16 @@ async function postPluginInlineComments(
  * Delivery-time defense against issue #846: drop a finding whose quoted
  * `message`/`evidence` citation is demonstrably absent from the CURRENT
  * file content, before it's ever built into a GitHub comment or considered
- * for dedup. Fetches each distinct filepath's current content at most
- * once, caching by path across the whole call.
+ * for dedup. Fetches every distinct filepath's current content ONCE, in
+ * parallel — a batch of findings across many files would otherwise
+ * serialize one network round trip per file on this delivery hot path.
  *
  * Fail-open: a file-content fetch failure (network error, deleted file,
  * private-repo auth hiccup) makes every finding in that file `unverifiable`,
  * which `shouldGateFinding` treats as "let it through" — see
  * `citation-gate.ts`'s module doc for the full asymmetry rationale. This
  * function never throws; a fetch problem degrades to "gate nothing", not
- * to gating everything.
+ * to gating everything (`getFullFileContent` itself already never throws).
  */
 async function gateStaleCitations(
   octokit: Octokit,
@@ -873,18 +874,16 @@ async function gateStaleCitations(
   findings: ReviewFinding[],
   logger: Logger,
 ): Promise<{ survivors: ReviewFinding[]; gated: number }> {
-  const contentByFile = new Map<string, string | null>();
+  const filepaths = [...new Set(findings.map(f => f.filepath))];
+  const contents = await Promise.all(
+    filepaths.map(filepath => getFullFileContent(octokit, pr, filepath, logger)),
+  );
+  const contentByFile = new Map(filepaths.map((filepath, i) => [filepath, contents[i]]));
+
   const survivors: ReviewFinding[] = [];
   let gated = 0;
 
   for (const finding of findings) {
-    if (!contentByFile.has(finding.filepath)) {
-      contentByFile.set(
-        finding.filepath,
-        await getFullFileContent(octokit, pr, finding.filepath, logger),
-      );
-    }
-
     if (shouldGateFinding(finding, contentByFile.get(finding.filepath) ?? null)) {
       gated++;
       logger.info(

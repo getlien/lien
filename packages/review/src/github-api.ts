@@ -180,14 +180,16 @@ async function findExistingComment(
 }
 
 /**
- * Get code snippet from a file at a specific commit
+ * Shared fetch + base64-decode step behind {@link getFileContent} and
+ * {@link getFullFileContent}. Returns `null` (never throws) on any fetch
+ * error, or when the path resolves to something other than a file (e.g. a
+ * directory, which has no `content` field) — both callers fail open the
+ * same way.
  */
-export async function getFileContent(
+async function fetchDecodedFileContent(
   octokit: Octokit,
   prContext: PRContext,
   filepath: string,
-  startLine: number,
-  endLine: number,
   logger: Logger,
 ): Promise<string | null> {
   try {
@@ -199,11 +201,7 @@ export async function getFileContent(
     });
 
     if ('content' in response.data) {
-      const content = Buffer.from(response.data.content as string, 'base64').toString('utf-8');
-      const lines = content.split('\n');
-      // Line numbers are 1-based, array is 0-based
-      const snippet = lines.slice(startLine - 1, endLine).join('\n');
-      return snippet;
+      return Buffer.from(response.data.content as string, 'base64').toString('utf-8');
     }
   } catch (error) {
     logger.warning(`Failed to get content for ${filepath}: ${error}`);
@@ -213,11 +211,30 @@ export async function getFileContent(
 }
 
 /**
- * Fetch the full current content of a file at the PR's head commit.
- * Thin wrapper over {@link getFileContent} spanning the whole file — used
+ * Get code snippet from a file at a specific commit
+ */
+export async function getFileContent(
+  octokit: Octokit,
+  prContext: PRContext,
+  filepath: string,
+  startLine: number,
+  endLine: number,
+  logger: Logger,
+): Promise<string | null> {
+  const content = await fetchDecodedFileContent(octokit, prContext, filepath, logger);
+  if (content === null) return null;
+  const lines = content.split('\n');
+  // Line numbers are 1-based, array is 0-based
+  return lines.slice(startLine - 1, endLine).join('\n');
+}
+
+/**
+ * Fetch the full current content of a file at the PR's head commit. Used
  * by the citation gate (`citation-gate.ts`) to check a finding's quoted
  * premise against the actual current code. Returns `null` on any fetch
- * error, same as `getFileContent`, so callers can fail open.
+ * error, same as `getFileContent`, so callers can fail open. Unlike
+ * `getFileContent`, this returns the decoded content directly rather than
+ * slicing a line range — no `Number.MAX_SAFE_INTEGER` end-line stand-in.
  */
 export async function getFullFileContent(
   octokit: Octokit,
@@ -225,7 +242,7 @@ export async function getFullFileContent(
   filepath: string,
   logger: Logger,
 ): Promise<string | null> {
-  return getFileContent(octokit, prContext, filepath, 1, Number.MAX_SAFE_INTEGER, logger);
+  return fetchDecodedFileContent(octokit, prContext, filepath, logger);
 }
 
 /**
