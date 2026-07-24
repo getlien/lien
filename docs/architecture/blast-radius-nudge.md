@@ -308,7 +308,7 @@ assumed away), both disclosed here rather than folded silently into "the lift":
 
 **1. Fence-awareness (a fix).** The distinctiveness gate's original
 neighbor-character check (a `/` or backtick directly adjacent to the match) only
-recognizes *inline* code spans. It does not recognize a multi-line fenced code
+recognized *inline* code spans. It did not recognize a multi-line fenced code
 block — and `createVectorDB`, used as the first real-world dogfood symbol, is
 genuinely referenced in CLAUDE.md's own fenced package-structure tree and in
 `packages/core/README.md`'s fenced usage examples, neither of which have a
