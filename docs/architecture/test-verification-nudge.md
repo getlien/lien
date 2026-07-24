@@ -348,6 +348,23 @@ running concurrently). The Stop hook is the correct session-scoped surface
 for this signal; a manual `lien verify-tests report --session <id>` remains
 available for scripting or debugging outside the hook pipeline.
 
+## Known limitations
+
+**Coverage matching is directory-blind.** `isCoveredByScope` compares
+basenames (and stems), not full paths, so when two edited files in the same
+session happen to share an associated-test basename — the common case
+being a per-module `index.ts` → `index.test.ts` naming convention repeated
+across several packages — a scoped run that covers one silently covers the
+other too, even if the other's test was never actually run. This is a
+missed advisory, the safe direction this feature is biased toward
+throughout, not a false nag; and in practice it's largely masked by the
+any-broad-run silence rule, since a session that touched multiple files
+under the same test-file naming convention typically ends in a broad run
+anyway (see "Conservative by construction" above). If this ever proves to
+matter in practice, the fix is to fall back to directory-qualified path
+comparison specifically when two or more pending files' basenames collide,
+rather than widening the match further.
+
 ## Failure modes (all fail-open)
 
 | Failure | Behavior |
