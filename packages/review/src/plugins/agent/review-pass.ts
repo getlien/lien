@@ -463,6 +463,29 @@ function buildPassOutcome(
   };
 }
 
+/**
+ * Name stamped on the primary investigation's own findings by `runExtraPasses`
+ * below — matches the literal `'main'` `attestation.ts` already uses for the
+ * main pass's own `ProviderPassAttestation`/`PassBudgetAttestation` entries
+ * (no shared constant there either; same convention, applied here to finding
+ * provenance instead of attestation naming).
+ */
+const MAIN_PASS_NAME = 'main';
+
+/**
+ * Stamp every finding in `findings` with `sourcePass` (issue #839 census
+ * follow-up: per-pass finding attribution wasn't machine-recoverable from the
+ * merged findings list or the GitHub inline-comment dedup marker). Returns a
+ * new array; inputs are not mutated. Every `ReviewPassSpec.mergeFindings`
+ * implementation already spreads its input findings (`{ ...f, ruleId: ... }`)
+ * rather than reconstructing them field-by-field, so a tag applied here
+ * survives every pass's own merge step for free — no changes needed to any
+ * of the five `mergeFindings` functions themselves.
+ */
+export function tagSourcePass(findings: AgentFinding[], pass: string): AgentFinding[] {
+  return findings.map(f => ({ ...f, sourcePass: pass }));
+}
+
 export async function runExtraPasses(
   specs: ReviewPassSpec[],
   context: ReviewContext,
@@ -474,7 +497,11 @@ export async function runExtraPasses(
   rolledOverBudget = 0,
 ): Promise<{ findings: AgentFinding[]; outcomes: PassOutcome[] }> {
   const outcomes: PassOutcome[] = [];
-  let merged = findings;
+  // `findings` is always the main pass's own output at every real call site
+  // (`index.ts`'s `analyze()`/`analyzeSummaryOnly()` both pass `result.findings`
+  // straight through) — tag it here, once, rather than at each call site, so
+  // this module stays the single place pass provenance is stamped.
+  let merged = tagSourcePass(findings, MAIN_PASS_NAME);
   let remainingRollover = rolledOverBudget;
   for (const spec of specs) {
     if (main.neverRan) {
@@ -503,7 +530,7 @@ export async function runExtraPasses(
         remainingRollover,
       );
     }
-    merged = spec.mergeFindings(merged, passResult?.findings ?? []);
+    merged = spec.mergeFindings(merged, tagSourcePass(passResult?.findings ?? [], spec.name));
     spec.mergeResultState(main, passResult, merged);
   }
   return { findings: merged, outcomes };

@@ -1156,9 +1156,23 @@ export function createDefaultEngine(opts?: EngineOptions): ReviewEngine {
 /**
  * Build a generic inline comment body for a finding.
  * Embeds a dedup marker so re-runs don't re-post the same comment.
+ *
+ * The marker's dedup key is `filepath::line::category`, plus an ADDITIVE 4th
+ * segment (`::pass`) when the finding carries `metadata.sourcePass` (issue
+ * #839 census follow-up — agent-review findings only; see
+ * `plugins/agent/review-pass.ts`'s `tagSourcePass`). A finding with no
+ * `sourcePass` (every non-agent-review plugin, e.g. `complexity`) keeps the
+ * exact pre-existing 3-segment format — this is a strictly additive format
+ * change scoped to the one plugin that has pass identity to report.
+ * `parsePluginCommentKey` below parses both formats, and back-compat with
+ * OLD-format markers already posted on an existing PR thread is the reason
+ * that function exists at all — see its own doc comment.
  */
-function buildPluginCommentBody(f: ReviewFinding, markerPrefix: string): string {
-  const key = `${f.filepath}::${f.line}::${f.category}`;
+export function buildPluginCommentBody(f: ReviewFinding, markerPrefix: string): string {
+  const pass = (f.metadata as { sourcePass?: string } | undefined)?.sourcePass;
+  const key = pass
+    ? `${f.filepath}::${f.line}::${f.category}::${pass}`
+    : `${f.filepath}::${f.line}::${f.category}`;
   const marker = `${markerPrefix}${key} -->`;
   const severityEmoji = f.severity === 'error' ? '🔴' : f.severity === 'warning' ? '🟡' : 'ℹ️';
   const symbolRef = f.symbolName ? ` in \`${f.symbolName}\`` : '';
@@ -1195,17 +1209,62 @@ interface PluginCommentKey {
   filepath: string;
   line: number;
   category: string;
+  /**
+   * Which pass produced the finding (issue #839 census follow-up), absent for
+   * an OLD-format (pre-provenance) 3-segment key. Deliberately NOT read by
+   * `isDuplicateOfExistingComment`'s equality check below — matching stays
+   * scoped to filepath/category/line so an old-format existing marker and a
+   * new-format candidate (or vice versa) still dedup against each other; see
+   * that function's own doc comment.
+   */
+  pass?: string;
 }
 
-/** Parse a `filepath::line::category` dedup key. Null if malformed. */
+/**
+ * Parse a plugin comment dedup key, accepting BOTH the original 3-segment
+ * `filepath::line::category` format and the newer 4-segment
+ * `filepath::line::category::pass` format (issue #839 census follow-up).
+ * Format is detected positionally, not by total segment count, because a
+ * filepath may itself contain `::` (rare, but the original 3-segment parser
+ * already had to handle it via the same `slice(0, -N)` reassembly used here):
+ *
+ * - Try OLD format first: is the second-to-last segment a valid integer? If
+ *   so, treat it as `line` and the last segment as `category`.
+ * - Otherwise try NEW format: is the THIRD-to-last segment a valid integer?
+ *   If so, treat it as `line`, second-to-last as `category`, and last as
+ *   `pass`.
+ *
+ * Checking OLD format first is deliberate and safe, not merely convenient: by
+ * construction, every key this codebase has ever produced has a `category`
+ * value that is never a bare integer (a fixed, enum-like rule/category
+ * string — `'complexity'`, `'error_handling'`, etc.) and a `line` that always
+ * is one (`String(f.line)`). So the OLD-format check — "is the second-to-last
+ * segment numeric" — is true for every genuine OLD-format key and false for
+ * every genuine NEW-format key's analogous position (which holds `category`,
+ * never numeric), with no realistic ambiguity between the two.
+ *
+ * Returns null for a key that matches neither shape (e.g. too few segments,
+ * a non-integer line, or an empty filepath/category/pass).
+ */
 export function parsePluginCommentKey(key: string): PluginCommentKey | null {
   const parts = key.split('::');
   if (parts.length < 3) return null;
-  const category = parts[parts.length - 1];
-  const line = Number(parts[parts.length - 2]);
-  const filepath = parts.slice(0, -2).join('::');
-  if (!filepath || !category || !Number.isInteger(line)) return null;
-  return { filepath, line, category };
+
+  const oldLine = Number(parts[parts.length - 2]);
+  if (Number.isInteger(oldLine)) {
+    const category = parts[parts.length - 1];
+    const filepath = parts.slice(0, -2).join('::');
+    if (!filepath || !category) return null;
+    return { filepath, line: oldLine, category };
+  }
+
+  if (parts.length < 4) return null;
+  const line = Number(parts[parts.length - 3]);
+  const category = parts[parts.length - 2];
+  const pass = parts[parts.length - 1];
+  const filepath = parts.slice(0, -3).join('::');
+  if (!filepath || !category || !pass || !Number.isInteger(line)) return null;
+  return { filepath, line, category, pass };
 }
 
 /**

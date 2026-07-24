@@ -113,6 +113,19 @@ export interface AgentFinding {
   evidence?: string;
   /** Rule that triggered this finding, if identifiable. */
   ruleId?: string;
+  /**
+   * Which pass produced this finding: `'main'` for the primary investigation,
+   * or a `ReviewPassSpec.name` (e.g. `'doc-truth'`, `'stale-duplicate-loop'`)
+   * for an extra pass (see `review-pass.ts`). Set by `runExtraPasses` right
+   * before each pass's own findings fold into the merged list — never by a
+   * pass itself — so every `mergeFindings` implementation's existing spread
+   * (`{ ...f, ruleId: ... }`) carries it through for free. Threaded into the
+   * GitHub inline-comment dedup marker's 4th segment (issue #839 census
+   * follow-up: per-pass attribution wasn't machine-recoverable) via
+   * `mapToReviewFinding` → `ReviewFinding.metadata.sourcePass` →
+   * `buildPluginCommentBody` (`engine.ts`).
+   */
+  sourcePass?: string;
 }
 
 // ---------------------------------------------------------------------------

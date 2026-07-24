@@ -5,6 +5,7 @@ import {
   appendPassTurns,
   runExtraPasses,
   unspentMainBudget,
+  tagSourcePass,
   EXTRA_PASS_MIN_BUDGET_TOKENS,
   OBSERVED_TOKENS_PER_TURN,
   VERDICT_EMISSION_RESERVE_TOKENS,
@@ -104,6 +105,37 @@ describe('EXTRA_PASS_MIN_BUDGET_TOKENS', () => {
 // unspentMainBudget — rolling unspent main-pass budget into extra passes
 // (issue #836)
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// tagSourcePass — finding-marker pass provenance (issue #839 census follow-up)
+// ---------------------------------------------------------------------------
+
+describe('tagSourcePass', () => {
+  it('stamps sourcePass onto every finding', () => {
+    const findings = [finding({ message: 'a' }), finding({ message: 'b' })];
+    expect(tagSourcePass(findings, 'doc-truth')).toEqual([
+      { ...findings[0], sourcePass: 'doc-truth' },
+      { ...findings[1], sourcePass: 'doc-truth' },
+    ]);
+  });
+
+  it('overwrites any pre-existing sourcePass rather than leaving a stale value', () => {
+    const findings = [finding({ sourcePass: 'stale' })];
+    expect(tagSourcePass(findings, 'fresh')[0].sourcePass).toBe('fresh');
+  });
+
+  it('is a pure function — does not mutate the input array or its elements', () => {
+    const findings = [finding()];
+    const result = tagSourcePass(findings, 'main');
+    expect(result).not.toBe(findings);
+    expect(result[0]).not.toBe(findings[0]);
+    expect(findings[0].sourcePass).toBeUndefined();
+  });
+
+  it('returns [] for an empty input', () => {
+    expect(tagSourcePass([], 'main')).toEqual([]);
+  });
+});
 
 describe('unspentMainBudget', () => {
   it('reproduces PR #835 receipt shape: main allocated 20,000/spent 7,771 -> +12,229', () => {
@@ -520,6 +552,69 @@ describe('runExtraPasses', () => {
     expect(findings.map(f => f.message)).toEqual(['main finding', 'finding-1', 'finding-2']);
   });
 
+  it('tags every finding with its originating pass — main vs each extra pass (issue #839 census follow-up)', async () => {
+    const specA = makeSpec({ name: 'stale-duplicate-loop' });
+    const specB = makeSpec({ name: 'incomplete-handling-loop' });
+    const ctx = createTestContext();
+    const main = mainResult();
+    let call = 0;
+    const runClientFor = (spec: ReviewPassSpec) => async () => {
+      call += 1;
+      return fakeResult({ findings: [finding({ message: `${spec.name}-finding-${call}` })] });
+    };
+
+    const { findings } = await runExtraPasses(
+      [specA, specB],
+      ctx,
+      cfg(),
+      silentLogger,
+      main,
+      main.findings,
+      runClientFor,
+    );
+
+    expect(findings.map(f => ({ message: f.message, sourcePass: f.sourcePass }))).toEqual([
+      { message: 'main finding', sourcePass: 'main' },
+      { message: 'stale-duplicate-loop-finding-1', sourcePass: 'stale-duplicate-loop' },
+      { message: 'incomplete-handling-loop-finding-2', sourcePass: 'incomplete-handling-loop' },
+    ]);
+  });
+
+  it('preserves sourcePass through a real mergeFindings shape that overrides ruleId via spread (the pattern all five real passes use)', async () => {
+    // Mirrors mergeStaleDuplicateFindings/mergeIncompleteHandlingFindings/etc:
+    // `loopFindings.map(f => ({ ...f, ruleId: SOME_RULE_ID }))`. Proves
+    // tagSourcePass's stamp survives that spread, so no change was needed to
+    // any of the five real merge functions themselves.
+    const spec = makeSpec({
+      name: 'stale-duplicate-loop',
+      mergeFindings: (merged, passFindings) => [
+        ...merged,
+        ...passFindings.map(f => ({ ...f, ruleId: 'stale-duplicate' })),
+      ],
+    });
+    const ctx = createTestContext();
+    const main = mainResult({ findings: [] });
+    const runClientFor = () => async () => fakeResult({ findings: [finding({ message: 'loop' })] });
+
+    const { findings } = await runExtraPasses(
+      [spec],
+      ctx,
+      cfg(),
+      silentLogger,
+      main,
+      [],
+      runClientFor,
+    );
+
+    expect(findings).toEqual([
+      expect.objectContaining({
+        message: 'loop',
+        ruleId: 'stale-duplicate',
+        sourcePass: 'stale-duplicate-loop',
+      }),
+    ]);
+  });
+
   it('skips a pass that declines eligibility, recording the reason via reportSkip (feeds passesSkipped)', async () => {
     const reportSkip = vi.fn();
     const ctx = { ...createTestContext(), reportSkip };
@@ -816,7 +911,9 @@ describe('runExtraPasses', () => {
     );
 
     expect(outcomes).toEqual([]);
-    // The main-pass findings survive untouched — a pass-2+ error never fails the review.
-    expect(findings).toEqual(main.findings);
+    // The main-pass findings survive untouched (content-wise) — a pass-2+
+    // error never fails the review. They're still tagged sourcePass:'main'
+    // (every finding runExtraPasses returns is, regardless of outcome).
+    expect(findings).toEqual(tagSourcePass(main.findings, 'main'));
   });
 });
