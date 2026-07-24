@@ -243,6 +243,60 @@ describe('OpenAIAgentClient budget handling', () => {
     expect(bodies[1].max_tokens).toBe(2_048);
   });
 
+  it('stops with stopReason=budget (not completed) when a naturally-finishing turn already meets the allocation (issue #839 between-turn check)', async () => {
+    // Before this fix, `finish_reason:'stop'` was checked BEFORE the
+    // cumulative-budget check, so a turn that both finished naturally AND
+    // blew the budget was misreported as a clean 'completed' — a silent
+    // overshoot never flagged as budget-starved (the same gap #825's own PR
+    // body diagnosed but only partially closed, since it only bounded that
+    // turn's OUTPUT, not this classification bug). One turn alone (6,000
+    // tokens, all input — e.g. a large pre-fetched worklist) already exceeds
+    // the 5,000-token budget; the between-turn check must catch this at this
+    // turn's own boundary, not let the natural 'stop' branch hide it.
+    mockFetch([stopTurn(CLEAN_JSON, 6_000)]);
+    const client = makeClient(5_000);
+
+    const result = await client.run('sys', 'init', [], noopTool);
+
+    expect(result.stopReason).toBe('budget');
+    // Accounting for whether a verdict was actually produced stays
+    // independent of stopReason: the turn's JSON parsed cleanly, so this
+    // run is NOT incomplete even though it's flagged budget-starved for
+    // attestation purposes — the same coexistence already covered by
+    // "recovers a verdict via the json-forced summary-retry" below.
+    expect(result.incomplete).toBe(false);
+    expect(result.summary).toBeDefined();
+    expect(result.turns).toBe(1);
+  });
+
+  it('bounds a multi-turn context-accumulation overshoot to the turn that crossed the line — no further turn is attempted (issue #839)', async () => {
+    // Mirrors the real doc-truth receipt from issue #839's census (20,869
+    // allocated / 56,430 spent, ~2.7x): two ordinary tool-calling turns stay
+    // comfortably under budget, crossing the 0.6 wrap-up threshold on turn 2
+    // (forcing turn 3 to drop tools and emit its verdict) — then the forced
+    // turn's OWN input cost (the now much larger accumulated conversation
+    // history, unbounded by max_tokens) is what actually blows the budget,
+    // ending the run in a single, naturally-completing turn.
+    const { bodies } = mockFetch([
+      toolCallTurn(9_000),
+      toolCallTurn(4_000), // cumulative 13,000 >= 0.6*20,000 — forces turn 3
+      stopTurn(CLEAN_JSON, 40_000), // cumulative 53,000 — 2.65x the 20,000 budget
+    ]);
+    const client = makeClient(20_000);
+    const tools = [
+      { type: 'function', function: { name: 'read_file', description: 'd', parameters: {} } },
+    ];
+
+    const result = await client.run('sys', 'init', tools as never, noopTool);
+
+    expect(result.stopReason).toBe('budget');
+    expect(result.incomplete).toBe(false); // the forced turn's verdict still parsed cleanly
+    expect(result.turns).toBe(3);
+    // The overshoot is bounded to what the THIRD turn alone cost — no fourth
+    // request is ever attempted once that turn's own boundary check fires.
+    expect(bodies).toHaveLength(3);
+  });
+
   it('recovers a verdict via the json-forced summary-retry after a bail', async () => {
     // Loop bails on budget with no verdict; the retry returns raw JSON (as
     // response_format:json_object would) and must be parsed into a summary.

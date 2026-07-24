@@ -450,18 +450,32 @@ export class OpenAIAgentClient {
       turnTraces.push(turnTrace);
       if (this.logAgentTurns) logTurn(this.logger, turnTrace);
 
-      // Done: model finished naturally
-      if (choice.finish_reason === 'stop') {
-        stopReason = 'completed';
-        break;
-      }
-
-      // Budget exceeded
+      // Budget exceeded — checked at THIS turn boundary BEFORE the natural-
+      // stop check below (issue #839). Multi-turn conversation history grows
+      // every turn and is never bounded by max_tokens (only a turn's OUTPUT
+      // is), so any turn — not only a forced-finish one — can push cumulative
+      // spend past the allocation on its own INPUT cost alone. Checking budget
+      // first means a turn that both finishes naturally (finish_reason:'stop')
+      // AND blows the budget is never misreported as a clean 'completed': the
+      // between-turn check now fires at every turn boundary unconditionally,
+      // bounding overshoot to at most that one turn's own spend by
+      // construction, regardless of what caused the context to grow. This is
+      // a reporting/classification fix (a turn already happened by the time
+      // its cost is known) — it does not, and is not intended to, change what
+      // any turn actually costs; see `turnMaxTokens` for the complementary
+      // output-side bound and this pass's own `budget()` formula for sizing
+      // the allocation itself.
       if (totalTokens >= this.maxTokenBudget) {
         this.logger.warning(
           `[agent] Token budget exceeded (${totalTokens}/${this.maxTokenBudget}), stopping`,
         );
         stopReason = 'budget';
+        break;
+      }
+
+      // Done: model finished naturally, within budget
+      if (choice.finish_reason === 'stop') {
+        stopReason = 'completed';
         break;
       }
 
