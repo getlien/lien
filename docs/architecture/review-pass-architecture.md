@@ -5,9 +5,9 @@ in PR #799. Five passes plug into it: doc-truth (production-on by default,
 including its v2 per-claim-verdict contract) and four candidate loops,
 stale-duplicate, incomplete-handling, removed-exports, and docs-drift, all
 dark (default off) for `@liendev/review`/`@liendev/action` consumers. This
-repo's own `.github/workflows/lien-review.yml` opts three of the four dark
-loops into its own PR reviews (stale-duplicate, incomplete-handling,
-docs-drift); removed-exports is not yet opted in. See "Which passes are
+repo's own `.github/workflows/lien-review.yml` opts all four dark loops
+into its own PR reviews (stale-duplicate, incomplete-handling, docs-drift,
+and, as of 2026-07-25, removed-exports). See "Which passes are
 live today" below for exact flags and per-pass status, and
 [ADR-014](decisions/0014-per-rule-candidate-loop-passes.md) for the
 decision this doc implements, its rejected alternatives, and its evidence
@@ -138,7 +138,7 @@ not tokens taken from anywhere else.
 | doc-truth | `doc-truth-pass.ts` | `docTruthPass !== false` AND `LIEN_REVIEW_DOC_PASS` not disabling AND ≥1 doc claim | `clamp(RESERVE + 3_500×claimCount, 11_000, 65_000)` | full 6-tool set (same as main pass) | v2 (default as of 2026-07-23): `accurate \| contradicted \| unverifiable` per claim id. v1 (opt-out via `config.docTruthV2: false` or `LIEN_DOC_TRUTH_V2=off`): open findings list | **Production-on** (both the pass and its v2 contract default true) |
 | stale-duplicate loop | `stale-duplicate-pass.ts` | `config.staleDuplicatePass` or `LIEN_STALE_DUP_PASS=on` AND ≥1 high-confidence, same-file candidate | `clamp(2000 + 800×min(n,8), 4000, 30000)` | `read_file`, `grep_codebase` only | `stale \| intentional-reuse \| unverifiable` | **Dark** (default false) |
 | incomplete-handling loop | `incomplete-handling-pass.ts` | `config.incompleteHandlingPass` or `LIEN_INCOMPLETE_PASS=on` AND ≥1 candidate (any of 3 shapes) | `clamp(2500 + 900×min(n,20), 5000, 35000)` | `read_file`, `get_files_context`, `grep_codebase` | `incomplete \| handled \| intentional \| unverifiable` | **Dark** (default false) |
-| removed-exports loop | `removed-exports-pass.ts` | `config.removedExportsPass` or `LIEN_REMOVED_EXPORTS_PASS=on` AND ≥1 removed public export | `clamp(2000 + 800×min(n,15), 11000, 30000)` | `read_file`, `grep_codebase` only | `breaking \| intentional \| internal-only \| unverifiable` | **Dark** (default false) |
+| removed-exports loop | `removed-exports-pass.ts` | `config.removedExportsPass` or `LIEN_REMOVED_EXPORTS_PASS=on` AND ≥1 removed public export | `clamp(2000 + 800×min(n,15), 11000, 30000)` | `read_file`, `grep_codebase` only | `breaking \| intentional \| internal-only \| unverifiable` | **Dark for consumers; this repo opts in as of 2026-07-25** |
 | docs-drift loop | `docs-drift-pass.ts` | `config.docsDriftPass` or `LIEN_DOCS_DRIFT_PASS=on` AND ≥1 untouched-doc reference to a removed/renamed/deleted referand | `clamp(2000 + 800×min(n,15), 11000, 30000)` | `read_file`, `grep_codebase` only | `drifted \| historical \| intentional \| unverifiable` | **Dark for consumers; this repo opts in as of 2026-07-23** |
 
 Every pass keeps its rule's prompt fragment and signal block in the shared
@@ -525,23 +525,27 @@ fires exactly once per pass that ran.
   config key or `LIEN_INCOMPLETE_PASS=on`. Same non-exposure via
   `action.yml`. This repo's own CI has opted in since 2026-07-17
   (`LIEN_INCOMPLETE_PASS=on`).
-- **removed-exports loop**: merged but dark: `config.removedExportsPass`
-  defaults `false`; opt in via that config key or
-  `LIEN_REMOVED_EXPORTS_PASS=on`. Same non-exposure via `action.yml`.
-  Unlike the other two, has no `*_MAIN=off` opt-out override (see its
-  own table row above): `<removed_exports>` cannot be stripped from the
-  main pass by design, not just "not yet run." This repo has not opted
-  it into its own CI, unlike the other three loops.
+- **removed-exports loop**: merged but dark for `@liendev/review`/
+  `@liendev/action` consumers: `config.removedExportsPass` defaults
+  `false`; opt in via that config key or `LIEN_REMOVED_EXPORTS_PASS=on`.
+  Same non-exposure via `action.yml`. Unlike the other two candidate-loop
+  siblings, has no `*_MAIN=off` opt-out override (see its own table row
+  above): `<removed_exports>` cannot be stripped from the main pass by
+  design, not just "not yet run." This repo's own
+  `.github/workflows/lien-review.yml` sets `LIEN_REMOVED_EXPORTS_PASS: 'on'`
+  as of 2026-07-25, so this repo's own PR reviews run it — this loop has
+  zero real-PR firing data anywhere, and this opt-in exists to start
+  accumulating that data ahead of any consumer default-on decision (held).
 - **docs-drift loop**: merged but dark for `@liendev/review`/
   `@liendev/action` consumers: `config.docsDriftPass` defaults `false`;
   opt in via that config key or `LIEN_DOCS_DRIFT_PASS=on`. Same
   non-exposure via `action.yml`. This repo's own
   `.github/workflows/lien-review.yml` sets `LIEN_DOCS_DRIFT_PASS: 'on'`
   as of 2026-07-23, so this repo's own PR reviews run it; together with
-  stale-duplicate and incomplete-handling, three of the four dark loops
-  are opted into this repo's own CI. No `*_MAIN=off` override exists
-  (docs-drift has no main-pass presence to strip in the first place; see
-  its own subsection above).
+  stale-duplicate, incomplete-handling, and (as of 2026-07-25)
+  removed-exports, all four dark loops are now opted into this repo's own
+  CI. No `*_MAIN=off` override exists (docs-drift has no main-pass
+  presence to strip in the first place; see its own subsection above).
 
 All four dark passes have proven mechanism (gate/prompt/budget/merge/
 attestation wiring, verified via unit tests and byte-diff-neutrality-when-off
