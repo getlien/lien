@@ -4,7 +4,7 @@ description: "A popular open-source database toolkit added six new column types.
 date: 2026-07-24
 author: Alf Henderson
 tags: [evidence, review, architecture]
-draft: true
+draft: false
 ---
 
 <!-- DRAFT: awaiting owner voice pass -->
