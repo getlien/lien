@@ -1,5 +1,33 @@
 # @liendev/lien
 
+## 0.68.0
+
+### Minor Changes
+
+- 6063324: Add the blast-radius nudge — closing the honor-system gap in CLAUDE.md's "run `get_dependents` before changing an exported symbol's signature" rule, the same way `lien delta` already automates the complexity rule.
+  - New `lien api-delta` command: detects, content-only (`chunkFile`'s existing exported-name and signature metadata, zero index), when a working-tree edit changed or removed the signature of an exported function or class method. `--file <path>` mirrors `lien delta`'s fast path for the edit hook; `--base <ref>` mirrors CI parity. Advisory only — there is no gate, so it always exits 0; the JSON `changes[]` array is what a caller reads.
+  - Best-effort enrichment against the structural index (`findDependents` + the shared blast-radius-risk primitive) adds dependent counts and a risk level when an index is available; degrades gracefully (signature-only, no counts) when it isn't, or if the lookup fails for a given symbol — never blocks, never throws.
+  - The Claude Code plugin gains an `api-delta-write.sh` hook on `PostToolUse:Edit|Write|MultiEdit` (a sibling of `delta-write.sh` and `test-reminder.sh`) that surfaces a one-line warning via `additionalContext` after an edit that changed/removed an exported signature. Kill switch: `LIEN_BLAST_HOOK=off`.
+  - A local, append-only `blast-events.jsonl` ledger (kill switch `LIEN_BLAST_EVENTS=off`) records every edit that changed an exported signature; `lien stats` gains a second "exported-signature nudge" section (7/30-day runs, distinct symbols changed, risk-level breakdown) alongside the existing complexity-delta stats, additive to the existing JSON shape.
+
+- 8c87642: Shift docs-drift detection left onto the blast-radius nudge: when `lien api-delta` detects a REMOVED exported symbol, it now also reports how many indexed documentation chunks still reference it.
+  - `@liendev/parser` gains `wordBoundaryRe` and `isDistinctiveToken`, lifted out of the review engine's docs-drift pass (`packages/review/src/docs-drift-signals.ts`, now a thin consumer of these instead of duplicating them) so the CLI can reuse the exact same word-boundary + distinctiveness matching precision.
+  - `lien api-delta`'s enrichment gains `docRefCount`/`docRefPaths` on every `removed` change (`null`/`[]` for `signature-changed`, or when the index is unavailable): a zero-LLM, fail-open lookup over the indexed `type: 'doc'` chunks for the removed symbol's name.
+  - The `api-delta-write.sh` PostToolUse hook appends a short sentence to its existing warning — `"N docs reference X: path1, path2, path3 (+K more)."` — when a removed symbol still has doc references; silent otherwise.
+  - The `blast-events.jsonl` ledger gains an additive, optional `docRefCount` field per change.
+
+- 2833f1c: Add the did-you-run-the-tests verification nudge — a session-scoped ledger that advises, at session Stop, on edited files whose associated tests were never observed running in a Bash command. Closes the honor-system gap in CLAUDE.md's "Verification Before Done" rule the same way `lien delta` and the blast-radius nudge already automate the complexity and `get_dependents` rules.
+  - New `lien verify-tests <note-edit|note-run|report>` command group: `note-edit` records an edited file's test associations (replacing `annotate --tests-only` in the edit hook, byte-identical reminder text) and prints the same reminder; `note-run` records a Bash command as a test run when `classifyTestCommand` recognizes it; `report` reads the session ledger and prints an advisory naming edited files whose associated tests were never observed running, or nothing when everything's covered.
+  - Pure `classifyTestCommand`/`computeUnverifiedFiles` (`packages/cli/src/utils/test-run-matcher.ts`): a conservative test-runner allow-list (npm/yarn/pnpm/bun/vitest/jest/mocha/pytest/go/cargo/rspec/phpunit/dotnet/deno/gradle/mvn, plus workspace-scoped forms) classifies a command as broad (whole-suite) or scoped (specific files); any observed broad run silences the report entirely, and scoped-run coverage matching is deliberately generous to bias toward silence over a false "you didn't test" nag.
+  - Session-scoped, append-only ledger (`packages/cli/src/utils/test-ledger.ts`, `<indexDir>/test-sessions/<sessionId>.jsonl`), cleaned up at SessionEnd and by SessionStart's 24h GC alongside the existing `annotated-sessions/` cleanup. Kill switch: `LIEN_TEST_VERIFY=off`.
+  - The Claude Code plugin gains two new hooks: `test-run-note.sh` (`PostToolUse:Bash`, silent recording only, with a coarse shell pre-filter so a non-test command never spawns a `lien` process) and `test-verify-stop.sh` (`Stop`, the model-visible surface — blocks the stop once with an advisory `reason` when unverified tests exist, with `stop_hook_active` loop prevention). `test-reminder.sh` is rewired to call `verify-tests note-edit` instead of `annotate --tests-only`, so one process now both reminds and records.
+
+### Patch Changes
+
+- Updated dependencies [8c87642]
+  - @liendev/parser@0.68.0
+  - @liendev/core@0.68.0
+
 ## 0.67.0
 
 ### Minor Changes
