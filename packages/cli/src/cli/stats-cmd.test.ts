@@ -377,9 +377,9 @@ describe('statsCommand — nudge funnels (telemetry v2) section', () => {
 
   it('JSON output nests funnels under `nudgeFunnels`, additive to the pre-existing shape', async () => {
     await initRepo();
-    // A shown → acted pair in one session.
+    // A shown → acted pair in one session (matched join: signal names the same file).
     await recordNudgeShown(dir, { sessionId: 's1', nudge: 'blast', file: 'a.ts' });
-    await recordNudgeSignal(dir, { sessionId: 's1', signal: 'get_dependents' });
+    await recordNudgeSignal(dir, { sessionId: 's1', signal: 'get_dependents', file: 'a.ts' });
 
     await statsCommand({ format: 'json' });
 

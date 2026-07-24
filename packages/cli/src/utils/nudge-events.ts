@@ -114,32 +114,50 @@ export async function recordNudgeEvent(rootDir: string, event: NudgeEvent): Prom
   }
 }
 
-/** Stamp `now` and record a nudge-shown event. `file`/`symbol` omitted when empty. */
+/**
+ * Normalize a recorded file path to the project-relative form the
+ * `NudgeShownEvent.file` / `NudgeSignalEvent.file` contract promises — the SAME
+ * form Lien's MCP tool args use, so `nudge-stats.ts`'s matched join can compare
+ * a `shown.file` (from the absolute Read/Edit tool path) against a `signal.file`
+ * (from a repo-relative MCP arg) by plain string equality. Absolute paths are
+ * relativized against `rootDir`; an already-relative path is only slash-
+ * normalized (relativizing it again would resolve it against cwd and corrupt
+ * it). An empty/undefined path passes through as undefined.
+ */
+function toRepoRelativeFile(rootDir: string, file?: string): string | undefined {
+  if (!file) return undefined;
+  if (!path.isAbsolute(file)) return file.replace(/\\/g, '/');
+  return path.relative(rootDir, file).replace(/\\/g, '/');
+}
+
+/** Stamp `now` and record a nudge-shown event. `file` is normalized to project-relative; `file`/`symbol` omitted when empty. */
 export async function recordNudgeShown(
   rootDir: string,
   fields: { sessionId: string; nudge: NudgeName; file?: string; symbol?: string },
 ): Promise<void> {
+  const file = toRepoRelativeFile(rootDir, fields.file);
   await recordNudgeEvent(rootDir, {
     kind: 'shown',
     timestamp: new Date().toISOString(),
     sessionId: fields.sessionId,
     nudge: fields.nudge,
-    ...(fields.file ? { file: fields.file } : {}),
+    ...(file ? { file } : {}),
     ...(fields.symbol ? { symbol: fields.symbol } : {}),
   });
 }
 
-/** Stamp `now` and record a follow-up signal event. `file`/`symbol` omitted when empty. */
+/** Stamp `now` and record a follow-up signal event. `file` is normalized to project-relative; `file`/`symbol` omitted when empty. */
 export async function recordNudgeSignal(
   rootDir: string,
   fields: { sessionId: string; signal: NudgeSignalName; file?: string; symbol?: string },
 ): Promise<void> {
+  const file = toRepoRelativeFile(rootDir, fields.file);
   await recordNudgeEvent(rootDir, {
     kind: 'signal',
     timestamp: new Date().toISOString(),
     sessionId: fields.sessionId,
     signal: fields.signal,
-    ...(fields.file ? { file: fields.file } : {}),
+    ...(file ? { file } : {}),
     ...(fields.symbol ? { symbol: fields.symbol } : {}),
   });
 }

@@ -149,6 +149,26 @@ describe('recordNudgeShown / recordNudgeSignal helpers', () => {
       symbol: 'x',
     });
   });
+
+  it('normalizes an absolute file to project-relative at record time (the matched-join contract)', async () => {
+    await recordNudgeShown(rootDir, {
+      sessionId: 's',
+      nudge: 'annotate',
+      file: `${rootDir}/packages/cli/src/foo.ts`,
+    });
+    const [e] = await readNudgeEvents(rootDir);
+    expect(e).toMatchObject({ file: 'packages/cli/src/foo.ts' });
+  });
+
+  it('leaves an already-relative file untouched (never re-relativizes against cwd)', async () => {
+    await recordNudgeSignal(rootDir, {
+      sessionId: 's',
+      signal: 'get_files_context',
+      file: 'packages/cli/src/foo.ts',
+    });
+    const [e] = await readNudgeEvents(rootDir);
+    expect(e).toMatchObject({ file: 'packages/cli/src/foo.ts' });
+  });
 });
 
 describe('validation on read', () => {

@@ -63,9 +63,9 @@ and the byte cap keeps it bounded without needing session GC.
 | Funnel (`lien stats` label) | Nudge | "shown" is… | "acted-on" is a later same-session… |
 | --- | --- | --- | --- |
 | complexity delta | `lien delta` | a distinct function flagged over threshold | that function seen clean again (`resolvedAfterFlag`) |
-| read-time impact | read annotation | an annotation emitted on Read | `get_files_context` **or** `get_dependents` call |
-| exported-signature | blast-radius | an exported-signature warning fired | `get_dependents` call |
-| did-you-run-tests | test-verification | the Stop advisory fired | a recognized `test_run` |
+| read-time impact | read annotation | an annotation emitted on Read | `get_files_context`/`get_dependents` **on the flagged file** |
+| exported-signature | blast-radius | an exported-signature warning fired | `get_dependents` **on the flagged file or symbol** |
+| did-you-run-tests | test-verification | the Stop advisory fired | a recognized `test_run` (session-scoped) |
 
 **Integration, not duplication.** Two funnels reuse existing substrate rather
 than re-recording:
@@ -83,33 +83,45 @@ than re-recording:
   session test-ledger is untouched — we just give the funnel the durable history
   the GC'd ledger cannot.
 
-### The join (cheap, at report time)
+### The join (cheap, at report time — and matched)
 
-`computeNudgeFunnels` groups in-window events by session and, per session,
-remembers the **latest timestamp of each signal type**. A `shown` counts as
-acted-on when some signal its nudge cares about has a latest timestamp ≥ the
-shown timestamp. That's an O(n) pass — no per-pair comparison, no live
-correlation (the brief's "cheap joins at report time"). Both the shown and the
-signal must fall inside the window; since a signal after an in-window shown is
-necessarily also in-window (the window ends at "now"), no join is lost at the
-edge.
+`computeNudgeFunnels` groups in-window events by session and, per session, builds
+three latest-timestamp indices: by signal **type**, by **(type, file)**, and by
+**(type, symbol)**. A `shown` counts as acted-on only when a signal its nudge
+cares about occurred at or after the shown timestamp **and names the same thing**:
 
-**Why the join is session+time, not file-matched.** The `shown` event records
-the file path the Read tool gave it (typically **absolute**), while a
-`get_dependents`/`get_files_context` signal records the path the MCP tool arg
-gave it (typically **repo-relative**). Those don't string-match, so v1 joins on
-`sessionId` + time only — exactly the brief's baseline ("a subsequent
-get_dependents call (any)"). The raw file/symbol are still recorded on both
-sides, so a future revision can normalize and tighten to a file-matched count;
-v1 does not, and the disclaimer says the join is a same-session co-occurrence,
-nothing stronger.
+- **annotate** — a later `get_files_context`/`get_dependents` on the **same file**.
+- **blast** — a later `get_dependents` on the **same file OR the same symbol**.
+- **test-verify** — any later `test_run` (session-scoped: a test run carries no
+  file, and unlike `get_files_context` it isn't mandated before every edit, so a
+  bare same-session join doesn't inflate here).
+
+Still an O(n) build + a few map lookups per shown — no per-pair scan, no live
+correlation. Both the shown and the signal must fall inside the window; since a
+signal after an in-window shown is necessarily also in-window (the window ends at
+"now"), no join is lost at the edge.
+
+**Why matched, not any-signal.** The first cut joined on session + time only. That
+was **mechanically inflated**: CLAUDE.md mandates `get_files_context` before every
+edit, so almost any session contains one, and "any get_files_context after the
+annotation" trended ~100% regardless of engagement — the metric defeated its own
+purpose (a reviewer reproduced 100% from three annotate-shown + one *unrelated*
+`get_files_context`). Matching on file/symbol fixes it. For the comparison to work,
+`shown.file` and `signal.file` must be the **same string form**: the ledger
+normalizes both to project-relative at record time (`toRepoRelativeFile` in
+`nudge-events.ts`), honoring the `NudgeShownEvent.file` "project-relative" contract
+— the `shown` path arrives absolute (Read/Edit tool), the `signal` path arrives
+repo-relative (MCP arg), and both come out repo-relative. The match biases toward
+**undercounting** (an agent may act via a different file's query, or a batched
+`get_files_context` whose first — and only recorded — path isn't the flagged one),
+which is the honest direction for this metric; inflation is not.
 
 ### Where each event is recorded
 
 | Event | Recorded by |
 | --- | --- |
 | `shown{annotate}` | `annotate-read.sh`, after it emits a (non-empty) annotation |
-| `shown{blast}` | `api-delta-write.sh`, after it emits a warning |
+| `shown{blast}` | `api-delta-write.sh`, after it emits a warning (records the edited file + the primary changed symbol) |
 | `shown{test-verify}` | `test-verify-stop.sh`, after the advisory fires |
 | `signal{get_dependents/get_files_context}` | `nudge-signal.sh` (PostToolUse on the Lien MCP tools) |
 | `signal{test_run}` | `lien verify-tests note-run` (reusing its one classification) |
@@ -199,14 +211,33 @@ are left alone.
   "acted-on" is a same-session, later-in-time co-occurrence. It cannot tell "the
   agent ran `get_dependents` *because* of the blast warning" from "the agent was
   going to anyway." No lift claim is made or implied anywhere.
-- **The join is loose by design.** v1 counts *any* qualifying same-session signal
-  after the shown, not one provably about the flagged file/symbol (see the
-  path-form mismatch above). It can over-count. The raw file/symbol are recorded
-  so this can be tightened later without a schema change.
+- **The matched join undercounts, on purpose.** A signal must name the same file
+  (or, for blast, the same symbol) as the shown. A genuine action expressed via a
+  different file's query, or a batched `get_files_context` whose first — and only
+  recorded — path isn't the flagged one, is not credited. Undercounting is the
+  honest bias for this metric; the earlier any-signal join over-counted (it read
+  ~100% off a single mandated `get_files_context`). Recording all of a batch's
+  paths is a possible future tightening, not done here.
+- **Ledger back-compat: legacy absolute-path events won't match.** `shown.file`
+  is now normalized to project-relative at record time; any `shown` recorded
+  before this change stored the raw absolute Read/Edit path and simply won't
+  match a relative `signal.file`, so it reads as un-acted. There is no migration
+  — a few hours of pre-change local data ages out of the windows on its own.
 - **The complexity-delta funnel is cross-run, not same-session.** Its "acted" is
   `resolvedAfterFlag` — a function flagged then later seen clean, across runs and
   possibly across sessions. That is the honest v1 definition it already had; it
   is presented in the same table for continuity, with the difference noted.
+- **High-volume repos see less than a full 30 days of coverage.** The log is
+  bounded by the same 2 MB / ~2000-line front-trim as its siblings; a repo that
+  emits enough nudge events to hit the cap inside 30 days will have its oldest
+  events trimmed, so the 30-day *window* silently covers fewer than 30 days. The
+  reported **rate** (`acted/shown`) stays unbiased on whatever survives — trimming
+  removes the oldest lines first, and a signal is always newer than the shown it
+  acts, so any shown that survives still has its signals (a surviving shown is
+  never stranded; at worst an orphaned signal outlives a trimmed shown, and
+  signals are never counted on their own) — but the **coverage** (how far back
+  "30 days" really reaches) is truncated. Raise the cap or shorten the window if
+  this bites.
 - **Volume is not usage of the funnels themselves.** `shown` counts an emission,
   not whether the model read it. The hook channels doc
   ([claude-code-hook-channels.md](claude-code-hook-channels.md)) is the authority

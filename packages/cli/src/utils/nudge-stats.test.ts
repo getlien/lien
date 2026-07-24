@@ -13,17 +13,32 @@ function shown(
   nudge: 'annotate' | 'blast' | 'test-verify',
   sessionId: string,
   ts: string,
-  file?: string,
+  opts: { file?: string; symbol?: string } = {},
 ): NudgeEvent {
-  return { kind: 'shown', timestamp: ts, sessionId, nudge, ...(file ? { file } : {}) };
+  return {
+    kind: 'shown',
+    timestamp: ts,
+    sessionId,
+    nudge,
+    ...(opts.file ? { file: opts.file } : {}),
+    ...(opts.symbol ? { symbol: opts.symbol } : {}),
+  };
 }
 
 function signal(
   sig: 'get_dependents' | 'get_files_context' | 'test_run',
   sessionId: string,
   ts: string,
+  opts: { file?: string; symbol?: string } = {},
 ): NudgeEvent {
-  return { kind: 'signal', timestamp: ts, sessionId, signal: sig };
+  return {
+    kind: 'signal',
+    timestamp: ts,
+    sessionId,
+    signal: sig,
+    ...(opts.file ? { file: opts.file } : {}),
+    ...(opts.symbol ? { symbol: opts.symbol } : {}),
+  };
 }
 
 /** Pull one funnel out of the computed set for a window. */
@@ -45,75 +60,153 @@ describe('computeNudgeFunnels — shape', () => {
   });
 });
 
-describe('shown → acted join', () => {
-  it('counts a shown as acted when a qualifying signal follows it in the same session', () => {
+describe('matched shown → acted join', () => {
+  it('counts a shown as acted when a same-file signal follows it in the same session', () => {
     const events = [
-      shown('blast', 's1', at(5), 'a.ts'),
-      signal('get_dependents', 's1', at(4)), // 1h later
+      shown('blast', 's1', at(5), { file: 'a.ts' }),
+      signal('get_dependents', 's1', at(4), { file: 'a.ts' }), // same file, 1h later
     ];
-    const f = funnel(computeNudgeFunnels(events, [], 7, NOW), 'blast');
-    expect(f).toMatchObject({ shown: 1, acted: 1, actedShare: 1 });
+    expect(funnel(computeNudgeFunnels(events, [], 7, NOW), 'blast')).toMatchObject({
+      shown: 1,
+      acted: 1,
+      actedShare: 1,
+    });
   });
 
-  it('does NOT count a signal that occurred BEFORE the shown event', () => {
+  it('does NOT count a same-file signal that occurred BEFORE the shown', () => {
     const events = [
-      signal('get_dependents', 's1', at(6)), // before
-      shown('blast', 's1', at(5)),
+      signal('get_dependents', 's1', at(6), { file: 'a.ts' }), // before
+      shown('blast', 's1', at(5), { file: 'a.ts' }),
     ];
-    const f = funnel(computeNudgeFunnels(events, [], 7, NOW), 'blast');
-    expect(f).toMatchObject({ shown: 1, acted: 0, actedShare: 0 });
+    expect(funnel(computeNudgeFunnels(events, [], 7, NOW), 'blast')).toMatchObject({
+      shown: 1,
+      acted: 0,
+    });
   });
 
   it('does NOT count a signal from a different session', () => {
-    const events = [shown('blast', 's1', at(5)), signal('get_dependents', 's2', at(4))];
-    const f = funnel(computeNudgeFunnels(events, [], 7, NOW), 'blast');
-    expect(f).toMatchObject({ shown: 1, acted: 0 });
+    const events = [
+      shown('blast', 's1', at(5), { file: 'a.ts' }),
+      signal('get_dependents', 's2', at(4), { file: 'a.ts' }),
+    ];
+    expect(funnel(computeNudgeFunnels(events, [], 7, NOW), 'blast')).toMatchObject({ acted: 0 });
   });
 
   it('requires the signal type the nudge cares about (a test_run does not act a blast nudge)', () => {
-    const events = [shown('blast', 's1', at(5)), signal('test_run', 's1', at(4))];
-    const f = funnel(computeNudgeFunnels(events, [], 7, NOW), 'blast');
-    expect(f).toMatchObject({ shown: 1, acted: 0 });
+    const events = [shown('blast', 's1', at(5), { file: 'a.ts' }), signal('test_run', 's1', at(4))];
+    expect(funnel(computeNudgeFunnels(events, [], 7, NOW), 'blast')).toMatchObject({ acted: 0 });
+  });
+});
+
+describe('matched join defeats the mandated-get_files_context inflation', () => {
+  it('3 annotate shown + one UNRELATED-file get_files_context → acted 0 (the reviewer repro)', () => {
+    // Regression: CLAUDE.md mandates get_files_context before every edit, so a bare
+    // any-signal join reported 100% here. A different-file signal must not count.
+    const events = [
+      shown('annotate', 's1', at(6), { file: 'a.ts' }),
+      shown('annotate', 's1', at(5), { file: 'a.ts' }),
+      shown('annotate', 's1', at(4), { file: 'a.ts' }),
+      signal('get_files_context', 's1', at(3), { file: 'unrelated/z.ts' }),
+    ];
+    expect(funnel(computeNudgeFunnels(events, [], 7, NOW), 'annotate')).toMatchObject({
+      shown: 3,
+      acted: 0,
+      actedShare: 0,
+    });
   });
 
-  it('annotate is acted by get_files_context OR get_dependents', () => {
-    const ctx = [shown('annotate', 's1', at(5)), signal('get_files_context', 's1', at(4))];
+  it('a genuine same-file annotate sequence IS acted', () => {
+    const events = [
+      shown('annotate', 's1', at(5), { file: 'a.ts' }),
+      signal('get_files_context', 's1', at(4), { file: 'a.ts' }),
+    ];
+    expect(funnel(computeNudgeFunnels(events, [], 7, NOW), 'annotate').acted).toBe(1);
+  });
+
+  it('annotate is acted by get_files_context OR get_dependents naming the same file', () => {
+    const ctx = [
+      shown('annotate', 's1', at(5), { file: 'a.ts' }),
+      signal('get_files_context', 's1', at(4), { file: 'a.ts' }),
+    ];
     expect(funnel(computeNudgeFunnels(ctx, [], 7, NOW), 'annotate').acted).toBe(1);
-    const deps = [shown('annotate', 's2', at(5)), signal('get_dependents', 's2', at(4))];
+    const deps = [
+      shown('annotate', 's2', at(5), { file: 'b.ts' }),
+      signal('get_dependents', 's2', at(4), { file: 'b.ts' }),
+    ];
     expect(funnel(computeNudgeFunnels(deps, [], 7, NOW), 'annotate').acted).toBe(1);
   });
+});
 
-  it('test-verify is acted by a subsequent test_run', () => {
+describe('blast symbol match', () => {
+  it('is acted by a get_dependents naming the same SYMBOL even on a different path', () => {
+    const events = [
+      shown('blast', 's1', at(5), { file: 'b.ts', symbol: 'Foo' }),
+      signal('get_dependents', 's1', at(4), { file: 'other/c.ts', symbol: 'Foo' }), // different path, same symbol
+    ];
+    expect(funnel(computeNudgeFunnels(events, [], 7, NOW), 'blast').acted).toBe(1);
+  });
+
+  it('is acted by a get_dependents naming the same FILE regardless of symbol', () => {
+    const events = [
+      shown('blast', 's1', at(5), { file: 'b.ts', symbol: 'Foo' }),
+      signal('get_dependents', 's1', at(4), { file: 'b.ts' }),
+    ];
+    expect(funnel(computeNudgeFunnels(events, [], 7, NOW), 'blast').acted).toBe(1);
+  });
+
+  it('is NOT acted when neither file nor symbol match', () => {
+    const events = [
+      shown('blast', 's1', at(5), { file: 'b.ts', symbol: 'Foo' }),
+      signal('get_dependents', 's1', at(4), { file: 'x.ts', symbol: 'Bar' }),
+    ];
+    expect(funnel(computeNudgeFunnels(events, [], 7, NOW), 'blast').acted).toBe(0);
+  });
+});
+
+describe('test-verify is session-scoped (test_run has no file)', () => {
+  it('is acted by any subsequent test_run in the same session', () => {
     const events = [shown('test-verify', 's1', at(5)), signal('test_run', 's1', at(4))];
     expect(funnel(computeNudgeFunnels(events, [], 7, NOW), 'test-verify').acted).toBe(1);
   });
 
+  it('is not acted by a test_run before the advisory', () => {
+    const events = [signal('test_run', 's1', at(6)), shown('test-verify', 's1', at(5))];
+    expect(funnel(computeNudgeFunnels(events, [], 7, NOW), 'test-verify').acted).toBe(0);
+  });
+});
+
+describe('aggregation', () => {
   it('counts each shown independently and aggregates the share', () => {
     const events = [
-      shown('annotate', 's1', at(5)),
-      signal('get_files_context', 's1', at(4)), // acts the s1 shown
-      shown('annotate', 's2', at(5)), // no follow-up
+      shown('annotate', 's1', at(5), { file: 'a.ts' }),
+      signal('get_files_context', 's1', at(4), { file: 'a.ts' }), // acts the s1 shown
+      shown('annotate', 's2', at(5), { file: 'a.ts' }), // no follow-up in s2
     ];
-    const f = funnel(computeNudgeFunnels(events, [], 7, NOW), 'annotate');
-    expect(f).toMatchObject({ shown: 2, acted: 1, actedShare: 0.5 });
+    expect(funnel(computeNudgeFunnels(events, [], 7, NOW), 'annotate')).toMatchObject({
+      shown: 2,
+      acted: 1,
+      actedShare: 0.5,
+    });
   });
 
-  it('a single later signal acts every earlier shown of the same nudge in the session', () => {
+  it('a single later same-file signal acts every earlier shown of the same nudge in the session', () => {
     const events = [
-      shown('annotate', 's1', at(6)),
-      shown('annotate', 's1', at(5)),
-      signal('get_dependents', 's1', at(4)),
+      shown('annotate', 's1', at(6), { file: 'a.ts' }),
+      shown('annotate', 's1', at(5), { file: 'a.ts' }),
+      signal('get_dependents', 's1', at(4), { file: 'a.ts' }),
     ];
-    const f = funnel(computeNudgeFunnels(events, [], 7, NOW), 'annotate');
-    expect(f).toMatchObject({ shown: 2, acted: 2 });
+    expect(funnel(computeNudgeFunnels(events, [], 7, NOW), 'annotate')).toMatchObject({
+      shown: 2,
+      acted: 2,
+    });
   });
 });
 
 describe('window filtering', () => {
   it('excludes shown events older than the window', () => {
     const events = [
-      shown('blast', 's1', at(24 * 40)), // 40 days ago — outside 7 and 30
-      signal('get_dependents', 's1', at(24 * 40 - 1)),
+      shown('blast', 's1', at(24 * 40), { file: 'a.ts' }), // 40 days ago
+      signal('get_dependents', 's1', at(24 * 40 - 1), { file: 'a.ts' }),
     ];
     expect(funnel(computeNudgeFunnels(events, [], 7, NOW), 'blast').shown).toBe(0);
     expect(funnel(computeNudgeFunnels(events, [], 30, NOW), 'blast').shown).toBe(0);
@@ -121,8 +214,8 @@ describe('window filtering', () => {
 
   it('includes shown events inside the window', () => {
     const events = [
-      shown('blast', 's1', at(24 * 10)),
-      signal('get_dependents', 's1', at(24 * 10 - 1)),
+      shown('blast', 's1', at(24 * 10), { file: 'a.ts' }),
+      signal('get_dependents', 's1', at(24 * 10 - 1), { file: 'a.ts' }),
     ];
     // 10 days ago: outside 7-day, inside 30-day.
     expect(funnel(computeNudgeFunnels(events, [], 7, NOW), 'blast').shown).toBe(0);
@@ -149,11 +242,14 @@ describe('delta funnel (sourced from delta-events, not nudge-events)', () => {
 
   it('maps distinctFunctionsFlagged → shown and resolvedAfterFlag → acted', () => {
     const deltaEvents = [
-      deltaEvent(at(5), [{ filepath: 'a.ts', symbol: 'foo' }]), // flagged
+      deltaEvent(at(5), [{ filepath: 'a.ts', symbol: 'foo' }]),
       deltaEvent(at(4), []), // foo now clean → resolved
     ];
-    const f = funnel(computeNudgeFunnels([], deltaEvents, 7, NOW), 'delta');
-    expect(f).toMatchObject({ shown: 1, acted: 1, actedShare: 1 });
+    expect(funnel(computeNudgeFunnels([], deltaEvents, 7, NOW), 'delta')).toMatchObject({
+      shown: 1,
+      acted: 1,
+      actedShare: 1,
+    });
   });
 
   it('a still-flagged function counts as shown but not acted', () => {
@@ -161,19 +257,23 @@ describe('delta funnel (sourced from delta-events, not nudge-events)', () => {
       deltaEvent(at(5), [{ filepath: 'a.ts', symbol: 'foo' }]),
       deltaEvent(at(4), [{ filepath: 'a.ts', symbol: 'foo' }]),
     ];
-    const f = funnel(computeNudgeFunnels([], deltaEvents, 7, NOW), 'delta');
-    expect(f).toMatchObject({ shown: 1, acted: 0 });
+    expect(funnel(computeNudgeFunnels([], deltaEvents, 7, NOW), 'delta')).toMatchObject({
+      shown: 1,
+      acted: 0,
+    });
   });
 });
 
 describe('unparsable timestamps', () => {
   it('drops events with an unparsable timestamp rather than crashing', () => {
     const events: NudgeEvent[] = [
-      { kind: 'shown', timestamp: 'not-a-date', sessionId: 's1', nudge: 'blast' },
-      shown('blast', 's1', at(5)),
-      signal('get_dependents', 's1', at(4)),
+      { kind: 'shown', timestamp: 'not-a-date', sessionId: 's1', nudge: 'blast', file: 'a.ts' },
+      shown('blast', 's1', at(5), { file: 'a.ts' }),
+      signal('get_dependents', 's1', at(4), { file: 'a.ts' }),
     ];
-    const f = funnel(computeNudgeFunnels(events, [], 7, NOW), 'blast');
-    expect(f).toMatchObject({ shown: 1, acted: 1 });
+    expect(funnel(computeNudgeFunnels(events, [], 7, NOW), 'blast')).toMatchObject({
+      shown: 1,
+      acted: 1,
+    });
   });
 });

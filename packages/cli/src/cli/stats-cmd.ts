@@ -137,11 +137,12 @@ function printFunnelTextSection(data: StatsData): void {
   });
   console.log(
     chalk.dim(
-      '"Acted-on" is a same-session follow-up that occurred AFTER the nudge — for the complexity\n' +
-        'delta nudge, a flagged function later seen clean; for the others, a later tool call the\n' +
-        'nudge asks for (get_dependents / get_files_context / a test run). It is co-occurrence over\n' +
-        'time, NOT proof the nudge caused the action. Local-only (nudge-events.jsonl next to the\n' +
-        'local index); disable recording with LIEN_NUDGE_EVENTS=off.',
+      '"Acted-on" is a same-session follow-up AFTER the nudge that names the same file/symbol — for\n' +
+        'the complexity delta nudge, a flagged function later seen clean; for the others, a later\n' +
+        'get_dependents / get_files_context on the flagged file/symbol (test-verify: any later test\n' +
+        'run). It biases toward undercounting, and is co-occurrence over time,\n' +
+        'NOT proof the nudge caused the action. Local-only (nudge-events.jsonl next to the local\n' +
+        'index); disable recording with LIEN_NUDGE_EVENTS=off.',
     ),
   );
 }
