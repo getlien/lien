@@ -61,10 +61,11 @@ fi
 msg="$(printf '%s' "$json" | jq -r '
   def docRefsClause:
     if (.docRefCount // 0) > 0 then
-      " " + (.docRefCount|tostring) + " docs reference " + .symbol + ": "
-        + (.docRefPaths[0:3] | join(", "))
-        + (if .docRefCount > (.docRefPaths|length)
-           then " (+\(.docRefCount - (.docRefPaths|length)) more)" else "" end)
+      (.docRefPaths // []) as $paths
+      | " " + (.docRefCount|tostring) + " docs reference " + .symbol + ": "
+        + ($paths[0:3] | join(", "))
+        + (if .docRefCount > ($paths|length)
+           then " (+\(.docRefCount - ($paths|length)) more)" else "" end)
         + "."
     else "" end;
   (.changes // []) as $c

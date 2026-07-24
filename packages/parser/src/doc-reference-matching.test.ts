@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import type { CodeChunk } from './types.js';
-import { wordBoundaryRe, isDistinctiveToken } from './doc-reference-matching.js';
+import {
+  wordBoundaryRe,
+  isDistinctiveToken,
+  isUnambiguousIdentifierShape,
+} from './doc-reference-matching.js';
 
 function makeChunk(file: string, content: string): CodeChunk {
   return {
@@ -105,7 +109,7 @@ describe('isDistinctiveToken', () => {
     expect(isDistinctiveToken('createVectorDB', docChunks)).toBe(true);
   });
 
-  it('treats an occurrence inside a fenced code block as code context even without an adjacent backtick/slash (real false negative found dogfooding: createVectorDB in a README usage example)', () => {
+  it('treats an occurrence inside a fenced code block as code context even without an adjacent backtick/slash (real false negative found dogfooding: a bare lowercase token in a README usage example)', () => {
     const docChunks = [
       makeChunk(
         'packages/core/README.md',
@@ -113,29 +117,33 @@ describe('isDistinctiveToken', () => {
           '## Usage',
           '',
           '```typescript',
-          "import { createVectorDB } from '@liendev/core';",
+          "import { zznovelfence } from '@liendev/core';",
           '',
-          "const db = await createVectorDB('./my-project');",
+          "const db = await zznovelfence('./my-project');",
           '```',
         ].join('\n'),
       ),
     ];
-    expect(isDistinctiveToken('createVectorDB', docChunks)).toBe(true);
+    // A bare lowercase token (no uppercase/underscore) still goes through the
+    // strict corpus-driven gate — this isolates the FENCE fix specifically,
+    // independent of the identifier-shape exemption tested below.
+    expect(isUnambiguousIdentifierShape('zznovelfence')).toBe(false);
+    expect(isDistinctiveToken('zznovelfence', docChunks)).toBe(true);
   });
 
-  it('still suppresses a prose hit that sits OUTSIDE any fence, even alongside fenced code elsewhere', () => {
+  it('still suppresses a bare lowercase token on a prose hit OUTSIDE any fence, even alongside fenced code elsewhere', () => {
     const docChunks = [
       makeChunk(
         'docs/guide.md',
         [
-          'The createVectorDB helper is handy.',
+          'The zznovelfence helper is handy.',
           '```typescript',
-          "const db = await createVectorDB('./my-project');",
+          "const db = await zznovelfence('./my-project');",
           '```',
         ].join('\n'),
       ),
     ];
-    expect(isDistinctiveToken('createVectorDB', docChunks)).toBe(false);
+    expect(isDistinctiveToken('zznovelfence', docChunks)).toBe(false);
   });
 
   it('is true (vacuously) when the token never appears in the corpus at all', () => {
@@ -153,5 +161,85 @@ describe('isDistinctiveToken', () => {
     expect(isDistinctiveToken('zznovelplatform', onlyMatching)).toBe(
       isDistinctiveToken('zznovelplatform', withUnrelatedChunk),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isUnambiguousIdentifierShape + the exemption it grants in isDistinctiveToken
+// ---------------------------------------------------------------------------
+
+describe('isUnambiguousIdentifierShape', () => {
+  it('is true for camelCase (internal capital)', () => {
+    expect(isUnambiguousIdentifierShape('createVectorDB')).toBe(true);
+    expect(isUnambiguousIdentifierShape('authToken')).toBe(true);
+  });
+
+  it('is true for PascalCase', () => {
+    expect(isUnambiguousIdentifierShape('MyClass')).toBe(true);
+  });
+
+  it('is true for a single Capitalized word (a proper-noun-style class/type name)', () => {
+    expect(isUnambiguousIdentifierShape('Widget')).toBe(true);
+  });
+
+  it('is true for a token containing an underscore', () => {
+    expect(isUnambiguousIdentifierShape('my_helper')).toBe(true);
+  });
+
+  it('is false for a bare all-lowercase word', () => {
+    expect(isUnambiguousIdentifierShape('index')).toBe(false);
+    expect(isUnambiguousIdentifierShape('config')).toBe(false);
+    expect(isUnambiguousIdentifierShape('platform')).toBe(false);
+  });
+});
+
+describe('isDistinctiveToken — identifier-shape exemption (reviewer repros)', () => {
+  it('createVectorDB fires even with plain, un-backticked prose mentions present (the flagship dogfood case)', () => {
+    const docChunks = [
+      makeChunk(
+        'docs/architecture/blast-radius-nudge.md',
+        'Callers will break — check get_dependents. 9 docs reference createVectorDB: CLAUDE.md, docs/guide.md.',
+      ),
+      makeChunk(
+        'CLAUDE.md',
+        'This module also mentions createVectorDB in passing, with no backticks at all.',
+      ),
+    ];
+    expect(isDistinctiveToken('createVectorDB', docChunks)).toBe(true);
+  });
+
+  it("Widget's possessive in plain prose still fires (a Capitalized class name, not a common English word)", () => {
+    const docChunks = [
+      makeChunk('docs/guide.md', "The Widget's constructor accepts an options object."),
+    ];
+    expect(isDistinctiveToken('Widget', docChunks)).toBe(true);
+  });
+
+  it('authToken in YAML front-matter prose still fires', () => {
+    const docChunks = [
+      makeChunk(
+        'docs/guide.md',
+        ['---', 'summary: explains how authToken is issued and rotated', '---', '# Auth'].join(
+          '\n',
+        ),
+      ),
+    ];
+    expect(isDistinctiveToken('authToken', docChunks)).toBe(true);
+  });
+
+  it('MyClass named in a heading (not backticked) still fires', () => {
+    const docChunks = [makeChunk('docs/guide.md', '## MyClass overview')];
+    expect(isDistinctiveToken('MyClass', docChunks)).toBe(true);
+  });
+
+  it('a bare lowercase common word (index/config/platform) in prose is still suppressed', () => {
+    const indexDocs = [makeChunk('docs/guide.md', 'See the index below for a full list.')];
+    const configDocs = [makeChunk('docs/guide.md', 'Edit the config to change defaults.')];
+    const platformDocs = [
+      makeChunk('docs/guide.md', 'Design identity for all Lien properties (platform app).'),
+    ];
+    expect(isDistinctiveToken('index', indexDocs)).toBe(false);
+    expect(isDistinctiveToken('config', configDocs)).toBe(false);
+    expect(isDistinctiveToken('platform', platformDocs)).toBe(false);
   });
 });

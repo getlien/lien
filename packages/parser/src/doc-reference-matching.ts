@@ -104,12 +104,39 @@ function everyLineIsCodeContextOnly(chunk: CodeChunk, re: RegExp, tokenLength: n
 }
 
 /**
+ * True iff `token` contains an uppercase letter or an underscore anywhere —
+ * the shape no ordinary lowercase English word has (`index`, `config`,
+ * `platform`), so it CANNOT be mistaken for one no matter how many plain-
+ * prose occurrences turn up in the corpus. Deliberately not restricted to a
+ * "camelCase/PascalCase boundary strictly after position 0": a single
+ * Capitalized proper-noun-style token (a class name referenced in prose
+ * without markdown code-formatting, e.g. "the Widget's constructor") is
+ * exactly as unambiguous as `createVectorDB` or `authToken` — English
+ * common nouns are lowercase mid-sentence, so any capital letter, anywhere,
+ * is already a strong enough signal. Exposed for testing.
+ */
+export function isUnambiguousIdentifierShape(token: string): boolean {
+  return /[A-Z_]/.test(token);
+}
+
+/**
  * True iff EVERY word-boundary occurrence of `token` across `docChunks` reads
  * as code/path context — never as ordinary prose describing something
  * unrelated (e.g. a bare directory named `platform` inside "supports every
  * platform", or a bare symbol named `index`/`config` inside "the index is
  * built here"). A single prose hit disqualifies the token: when in doubt,
  * suppress.
+ *
+ * Skipped entirely for a token with `isUnambiguousIdentifierShape` — a
+ * camelCase/PascalCase identifier or an underscored name reads as code no
+ * matter what surrounds it in prose, so gating it the same way a bare
+ * lowercase word needs to be gated would only produce false suppressions
+ * (found dogfooding: this feature's own architecture-doc writeup mentions
+ * `createVectorDB` inline, un-backticked, in running prose — a real doc
+ * reference that must not be thrown away). The strict corpus-driven check
+ * below remains exactly as it was for a bare lowercase word (the review
+ * pass's bare-top-level-directory case, `platform`/`runner`, is unaffected
+ * by construction: directory names here are always lowercase).
  *
  * Corpus-driven rather than a hardcoded stopword list: a fixed word list
  * needs constant upkeep across languages/domains and still misses whatever
@@ -120,6 +147,8 @@ function everyLineIsCodeContextOnly(chunk: CodeChunk, re: RegExp, tokenLength: n
  * same result.
  */
 export function isDistinctiveToken(token: string, docChunks: CodeChunk[]): boolean {
+  if (isUnambiguousIdentifierShape(token)) return true;
+
   const re = wordBoundaryRe(token, 'g');
   return docChunks.every(
     chunk => !chunk.content.includes(token) || everyLineIsCodeContextOnly(chunk, re, token.length),
