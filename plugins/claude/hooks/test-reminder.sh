@@ -10,16 +10,25 @@
 # association. Both are separate hook entries on the same
 # `Edit|Write|MultiEdit` matcher in hooks.json and run independently.
 #
-# Uses `lien annotate <file> --tests-only`, the cheap test-association-only
-# path (a single `vectorDB.scanAll()`, no dependency-graph BFS) — see
-# `runTestsOnly` in annotate-cmd.ts. Silent when the file has no associated
-# tests. TTL-suppressed per file per session (same touchfile pattern and
-# `annotated-sessions/` directory as `annotate-read.sh`, so the existing
-# SessionStart/SessionEnd GC covers this too) so an edit burst on one file
-# only reminds once per window.
+# Uses `lien verify-tests note-edit`, the cheap test-association-only path (a
+# single `vectorDB.scanAll()`, no dependency-graph BFS) — see
+# `lookupTestAssociations`/`scanTestAssociations` in annotate-cmd.ts. Prints
+# byte-identical text to the old `lien annotate <file> --tests-only` (both
+# call `formatTestReminder`); the difference is a side effect, not a text
+# change: it ALSO records the edit into FEATURE 2's session-scoped test ledger
+# (`test-sessions/<sessionId>.jsonl`), read back by `test-verify-stop.sh` at
+# session Stop — see docs/architecture/test-verification-nudge.md. Silent
+# when the file has no associated tests. TTL-suppressed per file per session
+# (same touchfile pattern and `annotated-sessions/` directory as
+# `annotate-read.sh`, so the existing SessionStart/SessionEnd GC covers this
+# too) so an edit burst on one file only reminds once per window — the ledger
+# recording only happens on that same first-in-window call, but a file's
+# first edit in a session always passes the per-file TTL gate (no touchfile
+# yet), so recording is never skipped for a file that was actually edited.
 #
 # Best-effort throughout — never fails the user's edit. Disable via
-# LIEN_TEST_REMINDER=off.
+# LIEN_TEST_REMINDER=off (this hook) or LIEN_TEST_VERIFY=off (ledger
+# recording specifically, leaving the reminder text itself unaffected).
 
 set -u
 
@@ -90,12 +99,12 @@ fi
 
 # Invoke from cwd so resolveProjectRoot works under subdirectory cwds.
 if [ -n "$cwd" ] && [ -d "$cwd" ]; then
-  reminder="$(cd "$cwd" && "${LIEN_CMD[@]}" annotate "$file_path" --tests-only 2>/dev/null)"
+  reminder="$(cd "$cwd" && "${LIEN_CMD[@]}" verify-tests note-edit --session "$session_id" --file "$file_path" 2>/dev/null)"
 else
-  reminder="$("${LIEN_CMD[@]}" annotate "$file_path" --tests-only 2>/dev/null)"
+  reminder="$("${LIEN_CMD[@]}" verify-tests note-edit --session "$session_id" --file "$file_path" 2>/dev/null)"
 fi
 
-# No associated tests → `lien annotate --tests-only` prints nothing → stay
+# No associated tests → `lien verify-tests note-edit` prints nothing → stay
 # silent (and don't mark the touchfile — nothing to suppress next time).
 [ -n "$reminder" ] || exit 0
 

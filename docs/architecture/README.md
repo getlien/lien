@@ -135,6 +135,18 @@ Read this to understand the sibling nudge to `lien delta`, and why it's advisory
 
 ---
 
+### [Did-You-Run-The-Tests Verification Nudge](./test-verification-nudge.md)
+A session-scoped ledger that advises, at session Stop, on edited files whose associated tests were never observed running.
+
+Explains the write-time/session-scoped test-verification nudge:
+- `lien verify-tests <note-edit|note-run|report>` CLI: a session ledger of edited files with associated tests and observed Bash test runs
+- `plugins/claude/hooks/test-reminder.sh` (rewired), `test-run-note.sh`, and `test-verify-stop.sh` — the three hooks that record and, at Stop, advise
+- The pure `classifyTestCommand`/`computeUnverifiedFiles` matcher (broad vs scoped runs, generous coverage matching)
+
+Read this to understand the sibling nudge to `lien delta` and the blast-radius nudge, and why it fires at Stop rather than as a `lien delta` gate extension.
+
+---
+
 ### [Claude Code Hook Output Channels](./claude-code-hook-channels.md)
 Which hook output actually reaches the model.
 
@@ -183,6 +195,7 @@ For the history behind these designs, see the [Architectural Decision Records in
 | Worktree-shared indexing | [Worktree-Aware Indexing](./worktree-aware-indexing.md) |
 | Pre-commit complexity gate (`lien delta`) | [lien delta](./lien-delta.md) |
 | Exported-signature nudge (`lien api-delta`) | [Blast-Radius Nudge](./blast-radius-nudge.md) |
+| Did-you-run-the-tests nudge (`lien verify-tests`) | [Did-You-Run-The-Tests Verification Nudge](./test-verification-nudge.md) |
 | Plugin hook design (what reaches the model) | [Claude Code Hook Output Channels](./claude-code-hook-channels.md) |
 | Lien Review's extra LLM passes (doc-truth, candidate loops) | [Agent-Review Pass Architecture](./review-pass-architecture.md) |
 

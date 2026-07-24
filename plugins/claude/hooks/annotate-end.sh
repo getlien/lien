@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# SessionEnd hook: clean up the current session's annotated-sessions dir
-# on graceful exit. Belt-and-braces — SessionStart's 24h-idle GC remains
-# the load-bearing cleanup mechanism (covers crashes / force-quits).
+# SessionEnd hook: clean up the current session's annotated-sessions dir,
+# and FEATURE 2's test-sessions/<sessionId>.jsonl ledger, on graceful exit.
+# Belt-and-braces — SessionStart's 24h-idle GC remains the load-bearing
+# cleanup mechanism (covers crashes / force-quits).
 
 set -u
 
@@ -29,5 +30,8 @@ fi
 
 session_dir="$store/annotated-sessions/$session_id"
 [ -d "$session_dir" ] && rm -rf "$session_dir" 2>/dev/null
+
+test_session_file="$store/test-sessions/$session_id.jsonl"
+[ -f "$test_session_file" ] && rm -f "$test_session_file" 2>/dev/null
 
 exit 0
