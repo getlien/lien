@@ -60,6 +60,17 @@ fi
 # stay silent, allow the stop.
 [ -n "$reason" ] || exit 0
 
+# Record a nudge-shown event for the `lien stats` funnels (best-effort; its own
+# kill switch is LIEN_NUDGE_EVENTS=off). Only reached when the advisory fires.
+# No file/symbol — this nudge is session-scoped, not file-scoped.
+if [ -n "$cwd" ] && [ -d "$cwd" ]; then
+  (cd "$cwd" && "${LIEN_CMD[@]}" nudge note-shown \
+    --session "$session_id" --nudge test-verify >/dev/null 2>&1) || true
+else
+  "${LIEN_CMD[@]}" nudge note-shown \
+    --session "$session_id" --nudge test-verify >/dev/null 2>&1 || true
+fi
+
 printf '{"decision":"block","reason":%s}\n' "$(printf '%s' "$reason" | jq -Rs .)"
 
 exit 0

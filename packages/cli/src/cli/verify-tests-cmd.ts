@@ -25,6 +25,7 @@ import {
   computeUnverifiedFiles,
   type TestRunClassification,
 } from '../utils/test-run-matcher.js';
+import { recordNudgeSignal } from '../utils/nudge-events.js';
 
 export interface NoteEditOptions {
   session?: string;
@@ -83,7 +84,14 @@ async function runNoteRun(options: NoteRunOptions): Promise<void> {
   if (!options.session || !options.command) return;
   const classification = classifyTestCommand(options.command);
   if (!classification.isTestRun) return;
-  await recordRun(resolveRootDir(), options.session, options.command);
+  const rootDir = resolveRootDir();
+  await recordRun(rootDir, options.session, options.command);
+  // Durable funnel signal for the test-verification nudge: reuse the single
+  // classifyTestCommand detection above (no second detector) and fan a compact
+  // `test_run` signal to nudge-events.jsonl, so the shown→acted funnel has the
+  // cross-session history the session-scoped test-ledger cannot provide (it's
+  // GC'd at SessionEnd). Independent kill switch: LIEN_NUDGE_EVENTS=off.
+  await recordNudgeSignal(rootDir, { sessionId: options.session, signal: 'test_run' });
 }
 
 /** `note-run --session <id> --command <cmd>`: silent recording only — never emits to stdout. */

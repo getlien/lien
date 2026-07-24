@@ -35,7 +35,15 @@ esac
 
 file_path="$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty')"
 cwd="$(printf '%s' "$input" | jq -r '.cwd // empty')"
+session_id="$(printf '%s' "$input" | jq -r '.session_id // empty')"
 [ -n "$file_path" ] || exit 0
+
+# session_id (when present) is used only for the nudge-shown funnel record
+# below; harden it the same way as the rest of the bundle. Empty is fine — the
+# warning still fires, we just skip the funnel record.
+case "$session_id" in
+  *[!A-Za-z0-9_-]*) session_id="";;
+esac
 
 # Run the single-file check as JSON, from the session's cwd so the git root
 # and project root resolve against the right repo (multi-repo safe). Any
@@ -110,6 +118,18 @@ msg="$(printf '%s' "$json" | jq -r '
     end
 ')"
 [ -n "$msg" ] || exit 0
+
+# Record a nudge-shown event for the `lien stats` funnels (best-effort; its own
+# kill switch is LIEN_NUDGE_EVENTS=off). Only reached when a warning fires.
+if [ -n "$session_id" ]; then
+  if [ -n "$cwd" ] && [ -d "$cwd" ]; then
+    (cd "$cwd" && "${LIEN_CMD[@]}" nudge note-shown \
+      --session "$session_id" --nudge blast --file "$file_path" >/dev/null 2>&1) || true
+  else
+    "${LIEN_CMD[@]}" nudge note-shown \
+      --session "$session_id" --nudge blast --file "$file_path" >/dev/null 2>&1 || true
+  fi
+fi
 
 # additionalContext is the only field that reaches the model on the next turn
 # (verified in CC 2.1.142; matches delta-write.sh / test-reminder.sh).

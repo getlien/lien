@@ -1,5 +1,5 @@
 {
-  "description": "Lien Read-time impact annotator: surfaces dependents/coverage/complexity as a system reminder when the model reads an indexed file. Plus write-time hooks: a delta warning (a function whose complexity newly crossed a threshold), a blast-radius warning (an exported symbol's signature changed or was removed), and a test-association reminder (which tests to run) that also records the edit for the did-you-run-the-tests verification nudge. A Bash hook records observed test runs, and a Stop hook advises on any edited file whose associated tests were never observed running. Suppresses repeats per session for 5 minutes.",
+  "description": "Lien Read-time impact annotator: surfaces dependents/coverage/complexity as a system reminder when the model reads an indexed file. A habituation guard (default on) annotates each file at most once per session and only above a blast-radius risk floor (LIEN_ANNOTATE_GUARD/LIEN_ANNOTATE_MIN_RISK). Plus write-time hooks: a delta warning (a function whose complexity newly crossed a threshold), a blast-radius warning (an exported symbol's signature changed or was removed), and a test-association reminder (which tests to run) that also records the edit for the did-you-run-the-tests verification nudge. A Bash hook records observed test runs, and a Stop hook advises on any edited file whose associated tests were never observed running. Each nudge records shown/acted-on events for the `lien stats` funnels (LIEN_NUDGE_EVENTS).",
   "hooks": {
     "PreToolUse": [
       {
@@ -60,6 +60,16 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/test-run-note.sh",
+            "timeout": 5000
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__.*__get_dependents|mcp__.*__get_files_context",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/nudge-signal.sh",
             "timeout": 5000
           }
         ]
