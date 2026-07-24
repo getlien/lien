@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ReviewEngine } from '../src/engine.js';
-import { createTestContext, createTestReport, silentLogger } from '../src/test-helpers.js';
+import { createTestReport, silentLogger } from '../src/test-helpers.js';
 import type {
   ReviewPlugin,
   ReviewFinding,
