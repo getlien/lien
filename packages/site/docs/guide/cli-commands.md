@@ -64,7 +64,7 @@ lien index [options]
 
 1. **Checks for changes** (if manifest exists from previous index)
    - mtime-based detection (simple and reliable)
-2. **Only indexes changed files** (about 17x faster than a full rescan)
+2. **Only indexes changed files**, avoiding unchanged-file parsing and writes
 3. Chunks code into semantic units (Tree-sitter AST)
 4. Computes complexity metrics and dependency metadata
 5. Stores in the SQLite index at `~/.lien/indices/[project-hash]/`

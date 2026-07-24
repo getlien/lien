@@ -232,32 +232,47 @@ from unittest import TestCase                ✗
 
 ```typescript
 function resolvePath(testFilePath: string, importPath: string): string | null {
-  // 1. Get test file directory
-  const testDir = path.dirname(testFilePath);
-  
+  // 1. Only relative imports are candidates; a bare specifier ("react",
+  //    "pytest") is external and was already excluded upstream (see above)
+  if (!importPath.startsWith('.')) {
+    return null;
+  }
+
   // 2. Resolve relative to test file
-  let resolved = path.resolve(testDir, importPath);
-  
-  // 3. Try common extensions
+  const testDir = path.dirname(testFilePath);
+  const resolved = path.resolve(testDir, importPath);
+
+  // 3. Exact path first, so an already-extensioned import (e.g. "./user.ts")
+  //    doesn't get a second extension appended ("user.ts.ts")
+  if (fs.existsSync(resolved)) {
+    return resolved;
+  }
+
+  // 4. Try common extensions
   for (const ext of ['.ts', '.tsx', '.js', '.jsx', '.py']) {
     const withExt = resolved + ext;
     if (fs.existsSync(withExt)) {
       return withExt;
     }
   }
-  
-  // 4. Try index files
-  for (const index of ['/index.ts', '/index.js']) {
+
+  // 5. Try index files
+  for (const index of ['/index.ts', '/index.tsx', '/index.js', '/index.jsx']) {
     const indexPath = resolved + index;
     if (fs.existsSync(indexPath)) {
       return indexPath;
     }
   }
-  
-  // 5. Not found
+
+  // 6. Not found
   return null;
 }
 ```
+
+This is a simplified illustration of the resolution concept; the actual
+implementation (`packages/parser/src/utils/path-matching.ts`,
+`test-associations.ts`) uses boundary-aware string matching rather than
+filesystem existence checks.
 
 ## Merging results
 

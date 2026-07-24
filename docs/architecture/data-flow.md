@@ -374,7 +374,7 @@ If any step fails → Rollback → File remains in its previous state
 
 ## Performance optimizations
 
-- **Indexed file lookup**: `get_files_context` uses `idx_chunks_file` for a sub-millisecond `WHERE file IN (...)` scan: the most frequent (mandatory pre-edit) query.
+- **Indexed file lookup**: `get_files_context` uses `idx_chunks_file` for a sub-millisecond `WHERE file IN (...)` scan: the most frequent (mandatory pre-edit) query. Measured at 0.04ms against a 44,430-chunk replicated corpus, down from 40.49ms on the prior LanceDB backend; see [ADR-011](decisions/0011-sqlite-structural-store-fts5-lexical-search.md) for the benchmark.
 - **Concurrent file processing**: `p-limit(concurrency)` parses files in parallel; the SQLite write is a fast synchronous step.
 - **WAL journaling**: `journal_mode=WAL`, `synchronous=NORMAL`, and a `busy_timeout` let the MCP watcher and a concurrent CLI index share handles without immediate `SQLITE_BUSY` failures.
 - **No model load**: there is no embedding model to download or keep resident.

@@ -32,7 +32,7 @@ features:
   
   - icon: 🔒
     title: 100% Local & Private
-    details: Code never leaves your machine. All analysis happens locally with no external API calls, and nothing to download on first run.
+    details: Code never leaves your machine for indexing or search, with no external API calls or telemetry. (Fetching the published package itself, via npm or npx, is the one network step.)
   
   - icon: 🎯
     title: MCP Integration
@@ -80,7 +80,7 @@ Impact analysis before a refactor, tech-debt hotspots, test coverage lookups, an
 
 ## Privacy First
 
-Your code stays on your machine, with no external API calls, no telemetry, and nothing to download before first use. See [How It Works](/how-it-works#privacy-first) for details.
+Your code stays on your machine during indexing and search: no external API calls, no telemetry. The one network step is fetching the published npm package itself (via `npm install` or the Claude Code plugin's `npx`) on first setup. See [How It Works](/how-it-works#privacy-first) for details.
 
 ## Free & Open Source
 

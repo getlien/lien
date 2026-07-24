@@ -127,6 +127,10 @@ npx tsx <lien>/packages/review/test/harness/capture-pr.ts 2334 \
 | pallets/werkzeug | #2017 | `crossrepo/pr2017-multipart-boundary-regex` | unescaped client boundary in regex | characterization (measured 8/10; below bar, see header) |
 | drizzle-team/drizzle-orm | #4172 | `crossrepo/pr4172-columndatatype-gel-gap` | 6 new Gel `ColumnDataType` variants unhandled by 4 downstream packages | **canary** (certified 10/10, 2026-07-17; first TypeScript entry in this corpus, also the loop-vs-shared A/B fixture, see header) |
 
+Each rate above is a dated snapshot, not a continuously re-verified
+guarantee: re-run `--calibrate 10` against the named fixture (see "The 9/10
+reliability bar" below) to reproduce it.
+
 The two `characterization`-tagged starlette/werkzeug entries are both below
 the ≥9/10 bar, for different reasons: `pr2334-etag-weak-indicator-strip` has
 3/3 Kimi vote evidence but scores 5/10 on `--calibrate 10` (borderline

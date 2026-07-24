@@ -9,6 +9,10 @@
 > now largely obsolete: the ~100MB embedding/vector-DB stack this ADR cited
 > was removed in [ADR-011](0011-sqlite-structural-store-fts5-lexical-search.md).
 > The parser/core split now stands on its clean-boundaries rationale alone.
+> The tables below ("What Stays in `@liendev/core`", "Target dependency
+> chain") describe core's composition as of this ADR, before ADR-011: core
+> no longer has an `embeddings/` directory, and `vectordb/` now means the
+> SQLite/FTS5 backend, not LanceDB or Qdrant.
 
 ## Context and Problem Statement
 

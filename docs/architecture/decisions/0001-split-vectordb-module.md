@@ -151,7 +151,7 @@ Test coverage: 76.84%
 ```
 
 ### After Split
-```
+```text
 lancedb.ts: 267 lines (orchestrator)
 query.ts: 571 lines (queries)
 batch-insert.ts: 161 lines (inserts)

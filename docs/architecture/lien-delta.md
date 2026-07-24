@@ -390,8 +390,13 @@ callers.
 
 A Claude Code plugin hook, `plugins/claude/hooks/delta-write.sh`
 (registered in `plugins/claude/hooks/hooks.json`), fires after every
-`Edit`, `Write`, and `MultiEdit` tool call and warns, once and concisely,
-only when that edit introduced a new complexity threshold crossing. It
+`Edit` and `Write` tool call and warns, once and concisely, only when that
+edit introduced a new complexity threshold crossing. The matcher also
+lists `MultiEdit`, kept only as a harmless legacy alias: `MultiEdit` was
+removed from Claude Code with no replacement tool name (its batch-edit use
+case folded into `Edit`'s `replace_all`), so `Edit`/`Write` alone already
+fire the hook on every current edit; see
+[claude-code-hook-channels.md](claude-code-hook-channels.md). It
 reuses the primitive and CLI above unchanged: the hook shells out to
 `lien delta` itself, so hook and CLI verdicts can never diverge.
 

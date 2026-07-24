@@ -280,7 +280,7 @@ Estimated time to add Python: 2 days
 ```
 
 ### After Strategy Pattern
-```
+```text
 chunker.ts: 366 lines, language-agnostic
 TypeScriptTraverser: 102 lines, fully isolated
 Adding Python: Create python.ts + 1 line registry entry

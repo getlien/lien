@@ -173,11 +173,15 @@ clean-looking review.
 This is treated as an **operational failure, not an advisory finding**: a
 review that never ran isn't something `fail-on` gates on, because there's
 nothing to be advisory *about* (no code was analyzed). **The check fails
-regardless of `fail-on`, including the advisory default `never`.** A partial
-run (some turns completed before it bailed on a budget/turn limit) is
-different: that's a genuine advisory finding and still obeys `fail-on` as
-before. Either way, the step summary, PR description, and `conclusion` output
-make the failure impossible to mistake for "no issues found."
+regardless of `fail-on`, including the advisory default `never`.** An
+incomplete **main** pass (it bailed on a budget/turn limit, or hit an
+unrecoverable corrupted stop-turn) gets the identical treatment, since the
+agent couldn't vouch for full coverage of the PR either way. Only an
+incomplete **extra** pass (doc-truth, or one of the candidate-loop passes)
+is a genuine advisory finding and still obeys `fail-on` as before, since
+the main pass's own coverage is intact in that case. Either way, the step
+summary, PR description, and `conclusion` output make the failure
+impossible to mistake for "no issues found."
 
 ## Fork PRs
 

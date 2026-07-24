@@ -191,7 +191,7 @@ graph TB
 
 ### Optional services
 - **Git State Tracker**: Monitors repository changes for incremental indexing
-- **File Watcher**: Real-time file change detection (opt-in)
+- **File Watcher**: Real-time file change detection (enabled by default; disable with `--no-watch`)
 - **Ecosystem Presets**: Auto-detects project type (Node.js, PHP/Laravel, Python, Rust, …) and applies include/exclude patterns (replaces the former Framework Detector, see [ADR-007](decisions/0007-replace-framework-detection-with-ecosystem-presets.md))
 
 ### External dependencies

@@ -4,7 +4,7 @@
 
 **A code-intelligence layer for AI agents: structural analysis + fast lexical search. 100% local, 100% private.**
 
-Lien connects AI coding assistants like Cursor and Claude Code to your codebase through the Model Context Protocol (MCP). Its core value is **structural**: reverse dependencies and blast radius, complexity hotspots, and test associations, the questions an agent needs answered before it edits your code. Alongside that, it offers **fast lexical code search** (FTS5/BM25 over code, docstrings, and identifier-split symbol names). Everything runs locally, with **no embedding model to download**: it installs in seconds and indexes offline.
+Lien connects AI coding assistants like Cursor and Claude Code to your codebase through the Model Context Protocol (MCP). Its core value is **structural**: reverse dependencies and blast radius, complexity hotspots, and test associations, the questions an agent needs to answer before it edits your code. Alongside that, it offers **fast lexical code search** (FTS5/BM25 over code, docstrings, and identifier-split symbol names). Everything runs locally, with **no embedding model to download**: it installs in seconds and indexes offline.
 
 **[Full Documentation](https://lien.dev)** | **[Getting Started](https://lien.dev/guide/getting-started)** | **[How It Works](https://lien.dev/how-it-works)**
 

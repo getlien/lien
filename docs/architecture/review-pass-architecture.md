@@ -38,12 +38,12 @@ export interface ReviewPassSpec {
   name: string;
   skipPlugin: string;
   gateReason(context: ReviewContext, config: AgentConfig): string | null;
-  buildPrompts(context: ReviewContext): { systemPrompt: string; initialMessage: string };
+  buildPrompts(context: ReviewContext, budget: number): { systemPrompt: string; initialMessage: string };
   budget(baseBudget: number, context: ReviewContext): number;
   maxTurns: number;
   mergeFindings(mergedFindings: AgentFinding[], passFindings: AgentFinding[]): AgentFinding[];
   mergeResultState(main: AgentResult, passResult: AgentResult | null, mergedFindings: AgentFinding[]): void;
-  postProcessResult?(result: AgentResult, context: ReviewContext): AgentResult;
+  postProcessResult?(result: AgentResult, context: ReviewContext, budget: number): AgentResult;
 }
 ```
 
@@ -91,8 +91,15 @@ next one starts. Two things are true regardless of how many passes exist:
 
 None of the five passes has a data dependency on any of the other four
 (only doc-truth's original dependency on the main pass completing at all
-survives the generalization), so declaration order among them doesn't
-affect correctness; doc-truth stays first as the longest-proven pass.
+survives the generalization), so the passes are otherwise independent of
+one another. One ordering requirement does affect correctness, though:
+doc-truth must run before docs-drift, since docs-drift's dedupe drops a
+candidate finding that collides in location with an existing doc-truth
+finding (doc-truth wins, see "Dedupe" below) — that only works if
+doc-truth's findings are already merged by the time docs-drift's own
+`mergeFindings` runs. `EXTRA_PASSES`' declared order already satisfies
+this; doc-truth stays first as the longest-proven pass, which also happens
+to be the ordering this rule requires.
 Concurrent (parallel) execution was deliberately not built: no second pass
 existed when the executor was designed, and building the concurrency-safe
 machinery (trace-offset arithmetic that currently assumes the main trace
@@ -305,7 +312,7 @@ Verdict vocabulary is `drifted | historical | intentional | unverifiable`:
 only `drifted` becomes a finding; `historical` is the primary FP class the
 deterministic suppression already filters hard on (a model call still
 sees prose the regex guard didn't quite match); `intentional` covers a
-referand whose definition survives (only its export/shape changed);
+referent whose definition survives (only its export/shape changed);
 `unverifiable` is an inconclusive investigation. Toolset is `read_file` +
 `grep_codebase`, the removed-exports set, since both sides of a candidate
 (doc excerpt and position tier, and the removal/rename/deletion hunk when
@@ -314,7 +321,9 @@ not an open investigation. Dedupe is location-only against its own ruleId
 (no symbol identity the way removed-exports has), plus a cross-pass rule:
 a candidate finding that collides in location with an existing
 `doc-truth` finding is dropped; doc-truth wins, since it saw the touched
-hunk directly.
+hunk directly. (This is the ordering requirement noted above: it only
+works because doc-truth runs, and its findings are merged, before
+docs-drift's own `mergeFindings`.)
 
 Calibration: a synthetic hand-staged fixture
 (`fixtures/docs-drift/pr766-deleted-path-shape`, real PR #593's
@@ -376,9 +385,11 @@ machine-checkable completeness assertion instead of a semantic judgment
 call the test harness would otherwise have to infer from prose.
 
 An incomplete extra pass (any reason) sets `AgentResult.incompleteFromPass`
-to the pass's own name (`'stale-duplicate'` / `'incomplete-handling'`).
-doc-truth keeps its own dedicated `incompleteFromDocPass` boolean rather
-than using the generic field, since it predates it. `appendIncompleteNotice`
+to the pass's own name (`'stale-duplicate'` / `'incomplete-handling'` /
+`'removed-exports'` / `'docs-drift'`; non-exhaustive if a future candidate
+loop adds its own). doc-truth keeps its own dedicated
+`incompleteFromDocPass` boolean rather than using the generic field, since
+it predates it. `appendIncompleteNotice`
 (`index.ts`) reads whichever field is set to render a notice naming the
 specific pass that didn't finish, rather than implying the whole review
 is partial when only an extra pass was cut short.
@@ -411,10 +422,13 @@ summed every pass.
 
 Wiring: `plugins/agent/index.ts`'s `reportPassOutcomes` forwards each
 extra pass's `PassOutcome` (`{ name, stopReason, neverRan,
-allocatedTokens, spentTokens }`, computed by `runExtraPasses`) through
-`context.reportPassResult`, which `review-pr.ts`'s `runEngineForReview`
-collects into `RunTelemetry.extraPasses`. `buildRunAttestation` passes
-that array straight into `assembleAttestation`'s `extraPasses` input; the
+allocatedTokens, spentTokens, candidatesDeferred, deferredCandidateIds }`,
+computed by `runExtraPasses`) through `context.reportPassResult`, which
+`review-pr.ts`'s `runEngineForReview` collects into
+`RunTelemetry.extraPasses`. `buildRunAttestation` passes that array
+straight into `assembleAttestation`'s `extraPasses` input, which carries
+`candidatesDeferred`/`deferredCandidateIds` through into each pass's
+`ProviderPassAttestation` unchanged, not dropped; the
 main pass's own spent tokens are derived by subtracting every extra
 pass's reported spend from the aggregate (`deriveMainSpentTokens`,
 `review-pr.ts:418`) rather than tracked separately, since `reportUsage`

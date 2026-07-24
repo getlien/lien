@@ -63,10 +63,12 @@ proceeding. Before committing, run `lien delta`; treat any new
 complexity-threshold crossing it reports as must-fix, not advisory.
 ```
 
-If you already have an `AGENTS.md`, Copilot reads that natively too, but
-`.github/copilot-instructions.md` is the file Copilot's docs commit to
-including in every chat request, so committing both removes any ambiguity
-about which surfaces pick which file up.
+`AGENTS.md` is not read by Copilot Chat at all: GitHub scopes native
+`AGENTS.md` support to Copilot's cloud coding agent, code review, and CLI
+surfaces, not Chat on any platform. `.github/copilot-instructions.md` is
+the file Copilot's docs commit to including in every chat request, so it
+is the one to commit for this mandate to reach Copilot Chat; committing
+both covers every surface.
 
 ## Windsurf / Cascade: one real caveat
 
@@ -91,10 +93,11 @@ Until then, the `AGENTS.md` block above is Codex's nudge floor.
 ## Cursor
 
 Cursor also reads `AGENTS.md` natively, so the universal block covers it
-without any extra setup. Cursor's hooks (introduced in Cursor 1.7,
+without any extra setup. Cursor's own hooks (introduced in Cursor 1.7,
 [October 2025](https://www.infoq.com/news/2025/10/cursor-hooks/), GA as of
-mid-2026) and its `.cursor/rules/*.mdc` targeting system are both richer than
-a flat `AGENTS.md`, tracked as follow-up work, not shipped today.
+mid-2026) and its `.cursor/rules/*.mdc` targeting system are both richer
+than a flat `AGENTS.md`; porting Lien's own hook nudges to use them is
+tracked as follow-up work, not done today.
 
 ## Roadmap: what's tracked next
 

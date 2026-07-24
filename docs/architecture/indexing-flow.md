@@ -307,7 +307,7 @@ AST chunking automatically falls back to line-based for:
 
 ## Incremental indexing performance
 
-Typical performance for a single file change:
+Illustrative, order-of-magnitude performance for a single file change (not a re-benchmarked figure):
 
 ```
 Single File Change (100 lines):
@@ -369,7 +369,7 @@ flowchart TD
 
 ## Concurrency and batching
 
-File processing runs concurrently via `p-limit(concurrency)` (default 4); the parse/chunk stage is additionally capped at `PARSE_STAGE_MAX_CONCURRENCY` (4) regardless of caller-requested concurrency, see [ADR-013](decisions/0013-prebuilt-native-parser-napi-rs.md#negative--risks). Chunks are inserted in batches (`store.insertBatch(metadatas, contents)`) rather than one `INSERT` per chunk, so SQLite indices and FTS5 triggers only run once per batch instead of once per chunk.
+File processing runs concurrently via `p-limit(concurrency)` (default 4); the parse/chunk stage is additionally capped at `PARSE_STAGE_MAX_CONCURRENCY` (4) regardless of caller-requested concurrency, see [ADR-013](decisions/0013-prebuilt-native-parser-napi-rs.md#negative--risks). Chunks are inserted in batches (`store.insertBatch(metadatas, contents)`) rather than one `INSERT` per chunk: SQLite's row-level triggers still fire once per inserted row either way, but batching groups every row into a single transaction instead of one commit per chunk, cutting per-insert write overhead.
 
 ## Index version management
 
