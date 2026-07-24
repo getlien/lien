@@ -774,6 +774,15 @@ export function clampText(text: string | undefined): string | undefined {
 }
 
 function mapToReviewFinding(f: AgentFinding, pluginId: string): ReviewFinding {
+  // Fold both optional provenance fields into one `metadata` object (rather
+  // than two independent conditional spreads) so a finding carrying only one
+  // of the two doesn't end up with a spurious `undefined` key for the other.
+  const metadata: Record<string, unknown> = {};
+  if (f.ruleId) metadata.ruleId = f.ruleId;
+  // sourcePass (issue #839 census follow-up): which pass produced this
+  // finding — threaded through to the GitHub inline-comment dedup marker's
+  // 4th segment via `buildPluginCommentBody` (engine.ts).
+  if (f.sourcePass) metadata.sourcePass = f.sourcePass;
   return {
     pluginId,
     filepath: f.filepath,
@@ -785,7 +794,7 @@ function mapToReviewFinding(f: AgentFinding, pluginId: string): ReviewFinding {
     message: clampText(f.message) ?? f.message,
     suggestion: clampText(f.suggestion),
     evidence: clampText(f.evidence),
-    ...(f.ruleId ? { metadata: { ruleId: f.ruleId } } : {}),
+    ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
   };
 }
 

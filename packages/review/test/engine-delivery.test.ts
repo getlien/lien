@@ -231,6 +231,71 @@ describe('ReviewEngine.present() delivery truth', () => {
     });
   });
 
+  // Issue #839 census follow-up: the inline-comment dedup marker gained a 4th
+  // `::pass` segment for provenance. The critical back-compat requirement is
+  // that a PR thread with an OLD-format marker from a run BEFORE this change
+  // never gets double-posted once a run AFTER this change starts emitting
+  // NEW-format markers for the same finding — exercised here through the
+  // real `postInlineComments` → dedup → GitHub-post pipeline, not just the
+  // pure `parsePluginCommentKey`/`isDuplicateOfExistingComment` unit tests in
+  // `engine-comment-dedup.test.ts`.
+  it('does not double-post a finding whose OLD-format marker already exists on the PR thread', async () => {
+    const patch = '@@ -1,2 +5,3 @@\n+line5\n+line6\n+line7';
+    // A prior run posted this exact finding under the pre-#839 3-segment
+    // marker format, on the CURRENT head commit (so it's dedup-eligible).
+    const existingComment = {
+      body: '<!-- lien-plugin:test:src/a.ts::5::logic_error -->\nOld finding body',
+      commit_id: mockPR.headSha,
+      html_url: 'https://github.com/x/y/pull/1#comment-1',
+    };
+    const octokit = {
+      paginate: {
+        iterator: vi.fn((fn: unknown) => {
+          if (fn === octokit.pulls.listFiles) return onePage([{ filename: 'src/a.ts', patch }]);
+          return onePage([existingComment]); // listReviewComments
+        }),
+      },
+      pulls: {
+        listFiles: vi.fn(),
+        listReviewComments: vi.fn(),
+        createReview: vi.fn(),
+        createReviewComment: vi.fn(),
+      },
+    };
+
+    let rawOutcome:
+      | { posted: number; skipped: number; attempted: number; dropped: number; deduped: number }
+      | undefined;
+    const engine = new ReviewEngine();
+    engine.register(
+      createTestPlugin({
+        present: async (_findings, ctx: PresentContext) => {
+          // This run's own finding carries pass provenance — its own marker
+          // would be the NEW 4-segment format if actually posted.
+          rawOutcome = await ctx.postInlineComments!(
+            [finding({ line: 5, metadata: { sourcePass: 'stale-duplicate-loop' } })],
+            'summary body',
+          );
+        },
+      }),
+    );
+
+    await engine.present([], createAdapterContext({ octokit, pr: mockPR }));
+
+    expect(rawOutcome).toEqual({
+      posted: 0,
+      skipped: 1,
+      attempted: 1,
+      dropped: 0,
+      deduped: 1,
+      citationGated: 0,
+    });
+    // Never actually attempted a post — the format change alone must not
+    // cause a double-post of an already-delivered finding.
+    expect(octokit.pulls.createReview).not.toHaveBeenCalled();
+    expect(octokit.pulls.createReviewComment).not.toHaveBeenCalled();
+  });
+
   it('outOfDiffReviewPosted is true on a successful out-of-diff review comment', async () => {
     const octokit = {
       pulls: { createReview: vi.fn().mockResolvedValue({}) },
