@@ -435,7 +435,7 @@ describe('E2E: Real Open Source Projects', () => {
               encoding: 'utf-8',
             });
             console.error(`   Python files found:\n${findPyFiles}`);
-          } catch (e) {
+          } catch (_e) {
             console.error(`   Could not find Python files`);
           }
         }
