@@ -310,10 +310,11 @@ npm test              # All tests must pass
 lien delta            # No NEW complexity threshold crossings vs HEAD (exit 0)
 ```
 
-**No exceptions.** This prevents broken builds. Gates 1-5 are CI-backstopped
-(`.github/workflows/ci.yml`) on every PR; gate 6 (`lien delta`) is **not** —
-there is no CI step for it, so it's agent-honor-only. Don't skip it just
-because CI would still go green without it.
+**No exceptions.** This prevents broken builds. All six gates are CI-backstopped
+(`.github/workflows/ci.yml`) on every PR, including gate 6 (`lien delta`),
+which runs as its own job comparing the working tree against the PR's base
+branch (`lien delta --base`), not against `HEAD`. Don't skip it locally just
+because CI would catch a crossing anyway.
 
 `npm run build` doesn't cover `packages/site`; for docs/site changes also run
 `npm run docs:build`. `npm test` excludes `packages/cli`'s E2E suite

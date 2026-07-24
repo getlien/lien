@@ -1,7 +1,7 @@
 # Agent-Rule Test Harness
 
 Replay code-review fixtures through the agent plugin's prompts to validate
-prompt changes offline. Two modes — pick the right one for the task:
+prompt changes offline. Two modes exist; pick the right one for the task:
 
 | Mode               | Entry                                            | Model                              | Cost             | Use when                                |
 | ------------------ | ------------------------------------------------ | ----------------------------------- | ---------------- | --------------------------------------- |
@@ -11,19 +11,20 @@ prompt changes offline. Two modes — pick the right one for the task:
 
 **The 9/10 reliability bar is measured in OpenRouter mode only, against the
 prod default model** (`moonshotai/kimi-k2.7-code`, from
-`packages/review/src/defaults.ts` — the harness resolves to it whenever
+`packages/review/src/defaults.ts`; the harness resolves to it whenever
 `--model` is omitted). Claude is materially smarter than Kimi, so a passing
 CC run does not certify production behavior. Always re-calibrate against
-OpenRouter before merging a prompt change. (Issue #538.)
+OpenRouter before merging a prompt change (Issue #538; the full calibration
+procedure is under "The 9/10 reliability bar" below).
 
 Pass `--model <slug>` to calibrate against a different model (e.g. for an
 A/B comparison, or to reproduce the historical Gemini baseline some older
-canaries were tuned against — see "Known-red reconciliation" below).
+canaries were tuned against; see "Known-red reconciliation" below).
 
 ## Quick start
 
 The harness auto-loads `OPENROUTER_API_KEY` from `.env` at the repo root via
-`process.loadEnvFile()` — set it once, run anywhere:
+`process.loadEnvFile()`; set it once, run anywhere:
 
 ```bash
 # One-time setup (or use the existing platform .env)
@@ -46,19 +47,19 @@ to override per-invocation (e.g., to test against a different account's quota).
 ## Rule-coverage preflight (#742)
 
 Since #724, the agent's output format enumerates `ruleId` to the fixture's
-ACTIVE rule set only (see `buildOutputFormat` in `system-prompt.ts`) — a
+ACTIVE rule set only (see `buildOutputFormat` in `system-prompt.ts`). A
 fixture whose assertion targets a trigger-skipped rule is unpassable by
 construction, and every paid vote against it is wasted money. Before `run.ts`
 casts any vote, it preflights the WHOLE discovered batch: for each fixture it
 computes the active rule set (the same `selectRules`/`buildTriggerContext`
 call `build-prompts.ts` uses) and checks it against the `.assertions.ts`'s
 `rule`. Any violation aborts the run with `exit 2` and prints every offending
-fixture — before fixture 1 has spent a cent.
+fixture, before fixture 1 has spent a cent.
 
 If a fixture's bug could plausibly be surfaced by more than one rule (e.g. an
 off-by-one caught by either `edge-case-sweep` or `boundary-change`, depending
 on trigger context), declare the extra rule ids in `ruleCandidates` alongside
-`rule` — the preflight passes if `rule` OR any `ruleCandidates` entry is
+`rule`: the preflight passes if `rule` OR any `ruleCandidates` entry is
 active. See the `crossrepo/` fixtures for the pattern; pair with
 `expectAnyRuleFired` in a new `expect` closure rather than hand-rolling the
 OR check.
@@ -67,7 +68,9 @@ OR check.
 
 One captured fixture per `BUILTIN_RULES` rule, all from closed planted-regression
 test PRs in this repo. Each fixture is gitignored (regenerate with
-`capture-pr.ts`), but the `.assertions.ts` is committed and tagged `canary`:
+`capture-pr.ts`), but the `.assertions.ts` is committed and tagged `canary`
+(see "Fixture tags: canary vs characterization" below for what the tag
+gates):
 
 | Rule                  | PR    | Fixture                                                      |
 | --------------------- | :---: | ------------------------------------------------------------ |
@@ -99,12 +102,12 @@ npx tsx packages/review/test/harness/capture-pr.ts 658 "$ROOT/doc-truth/pr658-se
 ## Cross-repo corpus (`fixtures/crossrepo/`)
 
 Fixtures mined from real regression history of EXTERNAL open-source repos
-during the 2026-07 cross-repo validation study — real bugs that shipped
+during the 2026-07 cross-repo validation study: real bugs that shipped
 past those projects' own maintainers, with a later fix commit as ground
 truth. They exercise the whole pipeline on codebases and languages the
 rules were never tuned on, so they're the drift signal for "still works
 beyond our own repo". Fixture JSONs are gitignored like the rest of the
-corpus, but regeneration needs the external clone first — each
+corpus, but regeneration needs the external clone first; each
 `.assertions.ts` header carries its exact recipe, e.g.:
 
 ```bash
@@ -114,15 +117,19 @@ npx tsx <lien>/packages/review/test/harness/capture-pr.ts 2334 \
   <lien>/packages/review/test/harness/fixtures/crossrepo/pr2334-etag-weak-indicator-strip.fixture.json
 ```
 
-(`capture-pr.ts` retargets to whatever repo the cwd is in — no flags needed.)
+(`capture-pr.ts` retargets to whatever repo the cwd is in; no flags needed.)
 
 | Source | PR | Fixture | Bug shape | Status |
 | --- | :---: | --- | --- | --- |
-| encode/starlette | #2334 | `crossrepo/pr2334-etag-weak-indicator-strip` | `.strip(" W/")` char-set gotcha | characterization (measured 5/10 — borderline-judgment, see header) |
+| encode/starlette | #2334 | `crossrepo/pr2334-etag-weak-indicator-strip` | `.strip(" W/")` char-set gotcha | characterization (measured 5/10; borderline judgment, see header) |
 | encode/starlette | #2191 | `crossrepo/pr2191-templateresponse-offbyone` | positional-args index collision | **canary** (certified 10/10, 2026-07-12) |
 | pallets/werkzeug | #2678 | `crossrepo/pr2678-multipart-index-offset` | slice-relative index used as absolute | **canary** (certified 10/10, 2026-07-16) |
-| pallets/werkzeug | #2017 | `crossrepo/pr2017-multipart-boundary-regex` | unescaped client boundary in regex | characterization (measured 8/10 — below bar, see header) |
-| drizzle-team/drizzle-orm | #4172 | `crossrepo/pr4172-columndatatype-gel-gap` | 6 new Gel `ColumnDataType` variants unhandled by 4 downstream packages | **canary** (certified 10/10, 2026-07-17 — first TypeScript entry in this corpus; also the loop-vs-shared A/B fixture, see header) |
+| pallets/werkzeug | #2017 | `crossrepo/pr2017-multipart-boundary-regex` | unescaped client boundary in regex | characterization (measured 8/10; below bar, see header) |
+| drizzle-team/drizzle-orm | #4172 | `crossrepo/pr4172-columndatatype-gel-gap` | 6 new Gel `ColumnDataType` variants unhandled by 4 downstream packages | **canary** (certified 10/10, 2026-07-17; first TypeScript entry in this corpus, also the loop-vs-shared A/B fixture, see header) |
+
+Each rate above is a dated snapshot, not a continuously re-verified
+guarantee: re-run `--calibrate 10` against the named fixture (see "The 9/10
+reliability bar" below) to reproduce it.
 
 The two `characterization`-tagged starlette/werkzeug entries are both below
 the ≥9/10 bar, for different reasons: `pr2334-etag-weak-indicator-strip` has
@@ -137,14 +144,14 @@ calibration budget or re-promoting.
 
 `pr4172-columndatatype-gel-gap` pins its fixture's `config` to
 `{ incompleteHandlingPass: true }` (baked into the captured `ReviewContext`,
-not an external env var) — see its header for why that needs zero harness
+not an external env var). See its header for why that needs zero harness
 plumbing changes, and for the same-fixture A/B evidence (shared main pass
 1/3 vs the dedicated loop 3/3 screen, 10/10 calibrated) that promoted it.
 
 ## Negative-regression fixtures
 
 These capture real-world false positives the rule produced on a non-bug
-PR. The assertion is `expectEmpty` — the rule must stay quiet on this
+PR. The assertion is `expectEmpty`: the rule must stay quiet on this
 diff. Bundled with the canary so calibration covers both directions
 (must-fire on planted regressions, must-stay-silent on these).
 
@@ -164,18 +171,18 @@ npx tsx packages/review/test/harness/capture-pr.ts 575 "$ROOT/error-swallowing/h
 ## Documented-miss fixtures (real bugs, not yet reliably caught)
 
 These capture a real bug from a merged PR that another reviewer (CodeRabbit)
-caught but Lien Review missed — filed under the existing rule whose mandate
+caught but Lien Review missed, filed under the existing rule whose mandate
 is the closest match, so the fixture is ready the moment someone iterates on
 that rule's prompt. Unlike the canary corpus, these are **not** claimed to
 pass `--calibrate 10` today; that's the point of capturing them. Not tagged
-`canary` (no green baseline to protect from drift yet) — see each fixture's
+`canary` (no green baseline to protect from drift yet); see each fixture's
 own doc comment for exactly which mechanism (deterministic-scan gap,
 diff-render truncation, missing parser support, etc.) keeps the current
 prompt/pipeline from reaching it.
 
 | Rule | PR | Fixture | Why |
 |---|---|---|---|
-| `error-swallowing` | #752 @ `295cc7e` | `error-swallowing/pr752-undiscriminated-catch-salvage` | `postPRReview`'s catch block salvages EVERY `createReview` error (auth, rate-limit, 5xx, network) the same way it salvages a 422 anchor-validation failure, silently degrading an infra outage into `{posted:0, dropped:<all>}` instead of throwing. CodeRabbit caught it same-SHA on 2026-07-15; Lien Review's live review of the same commit missed it (4 unrelated findings instead). 3-vote baseline on the sanitized fixture: 0/3 — reproduces the live miss. See the fixture's header for the capture-bug (stale `lien-stats` badge leak) found and fixed while building it. |
+| `error-swallowing` | #752 @ `295cc7e` | `error-swallowing/pr752-undiscriminated-catch-salvage` | `postPRReview`'s catch block salvages EVERY `createReview` error (auth, rate-limit, 5xx, network) the same way it salvages a 422 anchor-validation failure, silently degrading an infra outage into `{posted:0, dropped:<all>}` instead of throwing. CodeRabbit caught it same-SHA on 2026-07-15; Lien Review's live review of the same commit missed it (4 unrelated findings instead). 3-vote baseline on the sanitized fixture: 0/3 (reproduces the live miss). See the fixture's header for the capture-bug (stale `lien-stats` badge leak) found and fixed while building it. |
 
 Run the full multi-model sweep:
 
@@ -188,7 +195,7 @@ OPENROUTER_API_KEY=… ./packages/review/test/harness/sweep.sh anthropic/claude-
 ## Captured fixtures aren't committed (size)
 
 Snapshot-captured fixtures are typically 10MB+ (a full repo's `repoChunks`).
-They're gitignored — regenerate locally via `capture-pr.ts`:
+They're gitignored; regenerate locally via `capture-pr.ts`:
 
 ```bash
 npx tsx packages/review/test/harness/capture-pr.ts 520 \
@@ -201,7 +208,7 @@ so the fixture is reproducible. A leftover git worktree at
 `git worktree remove --force <path>` when done).
 
 **Prerequisite: the native parser must be built** in the checkout you capture
-from (`npm run build:native -w @liendev/parser-native` — the binding is
+from (`npm run build:native -w @liendev/parser-native`; the binding is
 gitignored and per-worktree). Without it, every AST-language file silently
 chunks to zero and the fixture's corpus ends up markdown/Vue-only (~800
 chunks instead of ~5300). `capture-pr.ts` now fails loudly on that signature
@@ -284,19 +291,19 @@ $EDITOR packages/review/test/harness/fixtures/<rule>/<scenario>.assertions.ts
 
 Once captured, you can edit `repoRootDir` to a path that exists on the
 machine running the harness (so `read_file`-style tools can resolve), or
-leave it pointing at the original checkout — the harness will surface read
+leave it pointing at the original checkout. The harness will surface read
 errors but not crash.
 
-## Assertions — tiers
+## Assertions: tiers
 
 | Tier | Stable at T=0? | Helper                                    | Use for                            |
-| ---- | -------------- | ----------------------------------------- | ---------------------------------- |
+| ---- | -------------- | ------------------------------------------ | ---------------------------------- |
 | 1    | Yes            | `expectRuleFired`, `expectEmpty`,         | "rule fires", "no findings",       |
 |      |                | `expectFindingsCount`, `expectToolCalled` | "tool was called"                  |
 | 2    | Mostly         | `expectFindingMentions(['kw1','kw2',…])`  | Prompt-tweak wording verification  |
-| 3    | No             | (intentionally not exposed)               | —                                  |
+| 3    | No             | (intentionally not exposed)               | -                                   |
 
-Tier 2 takes a list of accepted phrasings, not one exact string. Pick 2–4
+Tier 2 takes a list of accepted phrasings, not one exact string. Pick 2-4
 keywords that any correct rendering would use (e.g.,
 `['test pair', 'both sides', 'divergence']`).
 
@@ -321,23 +328,23 @@ const assertions: FixtureAssertions = {
 export default assertions;
 ```
 
-### Smoke-test new assertions with THREE verdicts — including a distractor
+### Smoke-test new assertions with THREE verdicts, including a distractor
 
 Before a new `.assertions.ts` is trusted, run it through `assert-cli.ts`
 against three hand-written verdict JSONs (zero LLM spend):
 
-1. **Perfect** — a finding stating the ground truth (right rule, right
+1. **Perfect**: a finding stating the ground truth (right rule, right
    file, the bug's mechanism in its message) → must **exit 0**.
-2. **Empty** — `{"findings":[],"toolCalls":[],"turns":1}` → must exit
+2. **Empty**: `{"findings":[],"toolCalls":[],"turns":1}` → must exit
    non-zero.
-3. **Distractor** — a *plausible but wrong* finding about the same
+3. **Distractor**: a *plausible but wrong* finding about the same
    file/function: a different real-looking issue, a test-quality nit, or
    an adjacent hazard that is NOT the fixture's bug → must **exit
    non-zero**.
 
 The distractor is the step that earns its keep. Keyword lists built from
 bare domain nouns (`'etag'`, `'netloc'`, the changed function's name)
-false-pass any finding that merely *talks about* the changed code — in
+false-pass any finding that merely *talks about* the changed code. In
 the 2026-07 cross-repo Python round, **all three first-draft keyword
 lists false-passed their distractors** and had to be rewritten around
 compound phrases naming the bug's specific shape (`'weak etag'` +
@@ -349,21 +356,22 @@ measure "mentioned the neighborhood", not "found the bug".
 
 Keep the discrimination without going brittle: the keyword list should
 still accept sibling manifestations of the same root cause (a correct
-finding about the same defect in a second file must pass — use synonyms
+finding about the same defect in a second file must pass; use synonyms
 and the sibling's name), while the distractor pins that *different*
 defects in the same neighborhood fail. Delete the three scratch verdict
 JSONs afterwards; they must never live where blind-review verdicts are
 collected.
 
-### Fixture tags — canary vs characterization
+### Fixture tags: canary vs characterization
 
 `tags` classify what a fixture's pass/fail *means*:
 
-- **`['canary']`** — a drift signal, certified ≥9/10 on the prod model. When
-  multiple canaries flip simultaneously after a model update, the harness
-  should be re-baselined under human review, not silently re-pinned. Canaries
-  gate: a red canary fails the run.
-- **`['characterization']`** — measures a known frontier (a shape the prod
+- **`['canary']`**: a drift signal, certified ≥9/10 on the prod model (see
+  "The 9/10 reliability bar" below for the calibration procedure). When
+  multiple canaries flip simultaneously after a model update, re-baseline
+  under human review rather than silently re-pinning. Canaries gate: a red
+  canary fails the run.
+- **`['characterization']`**: measures a known frontier (a shape the prod
   model handles unreliably or declines defensibly) and does **not** gate. The
   harness renders it as a neutral `~ <label> — measured N/M (non-gating, see
   fixture header)` line instead of a red `✗`, and its result never contributes
@@ -371,7 +379,7 @@ collected.
   why iteration stopped; don't spend calibration budget pushing it green. The
   four doc-truth frontier fixtures (`pr667-*`, `pr687-*`, `pr711-*`, `pr716-*`)
   carry this tag.
-- **untagged** — an ordinary fixture; it gates like a canary but isn't a
+- **untagged**: an ordinary fixture; it gates like a canary but isn't a
   drift-signal alarm.
 
 ## The 9/10 reliability bar (#538)
@@ -380,7 +388,7 @@ Before declaring the harness "trusted" for any rule:
 
 1. Run `--calibrate 10` against the unmodified rule prompt. Pass rate must
    be ≥ 9/10. If lower, the assertion is too tight or the fixture is too
-   ambiguous — iterate.
+   ambiguous. Iterate.
 2. After making a prompt change, run `--calibrate 10` against the new prompt
    with the new assertion. Same ≥ 9/10 bar.
 3. If either is below the bar, do **not** ship the prompt change. Document
@@ -398,22 +406,22 @@ The corpus previously carried two canaries flagged "known-red on Kimi"
 Kimi cutover (#592). A dedicated reconciliation found neither was a model
 capability gap:
 
-- **untrusted-input-validation** — the assertion demanded
+- **untrusted-input-validation**: the assertion demanded
   `get_files_context` while the rule prompt offers "get_files_context (or
   read_file)"; correct Kimi runs failed Tier 1 purely on tool choice
   (7/10, all misses `read_file`-only with Tier-2-passing findings). Fixed by
   `expectAnyToolCalled(['get_files_context', 'read_file'])`. **10/10 on Kimi**
   (2026-07-10, healthy fixture).
-- **stale-duplicate** — red only when replayed against a *broken capture*: a
-  fixture whose corpus was markdown/Vue-only because the native parser wasn't
-  built at capture time, so `<stale_literal_candidates>` rendered "None" and
-  suppressed the finding. With a healthy capture the deterministic scan finds
-  the candidate and the rule is **10/10 on Kimi** (2026-07-10). `capture-pr.ts`
-  now fails loudly on partial-index captures (`assertIndexComplete`).
+- **stale-duplicate**: red only when replayed against a broken capture, one
+  taken before the native parser was built (see "Captured fixtures aren't
+  committed" above for why that leaves the corpus markdown/Vue-only and
+  suppresses `<stale_literal_candidates>`). With a healthy capture the
+  deterministic scan finds the candidate and the rule is **10/10 on Kimi**
+  (2026-07-10).
 
 Also reconciled the same day: `error-swallowing/scanall-null-guard-fp`'s
-header claimed it "will fail on the current prompt" — that was true on
-Gemini (2026-05-16) but the gap is closed on Kimi: **10/10 empty**, no prompt
+header claimed it "will fail on the current prompt"; that was true on
+Gemini (2026-05-16), but the gap is closed on Kimi: **10/10 empty**, no prompt
 change needed. `payment-error-swallowed` **10/10**,
 `harness-gitignore-convention-fp` **9/10** (single miss was a stray
 `incomplete-handling`-labeled finding).
@@ -430,22 +438,22 @@ capture (the capture guard now enforces this at capture time).
 
 The motivating example for #538. To execute:
 
-1. **Snapshot fixture** — capture PR #520 ctx via the steps above. Save
+1. **Snapshot fixture**: capture PR #520 ctx via the steps above. Save
    under `fixtures/boundary-change/ge-5-threshold-shift.fixture.json` and
    author `ge-5-threshold-shift.assertions.ts` with Tier 1 assertions only
    (`expectRuleFired`, `expectToolCalled('get_files_context')`).
-2. **Baseline calibration** — `npm run test:harness -w @liendev/review --
+2. **Baseline calibration**: `npm run test:harness -w @liendev/review --
    --rule boundary-change --calibrate 10`. Confirm ≥ 9/10. If not, tighten
    assertions.
-3. **Apply §4.3 prompt change** — edit `BOUNDARY_CHANGE.prompt` in
+3. **Apply §4.3 prompt change**: edit `BOUNDARY_CHANGE.prompt` in
    `packages/review/src/plugins/agent/rules.ts`: add a sentence requiring
    tests for **both sides** of the divergence, and update the worked
    example accordingly.
-4. **Add Tier 2 assertion** — extend the `.assertions.ts` `expect` to
+4. **Add Tier 2 assertion**: extend the `.assertions.ts` `expect` to
    `h.expectFindingMentions(['test pair', 'both sides', 'divergence'], result)`.
-5. **Re-calibrate** — `--calibrate 10` again. Confirm ≥ 9/10 on the new
+5. **Re-calibrate**: `--calibrate 10` again. Confirm ≥ 9/10 on the new
    assertion.
-6. **Land the PR** — paste the calibrate output into the PR description as
+6. **Land the PR**: paste the calibrate output into the PR description as
    evidence. Bundle the rule change, the new fixture, and the new assertion
    in one commit.
 
@@ -458,10 +466,10 @@ harness lets you do it autonomously once `OPENROUTER_API_KEY` is in `.env`.
    exhibits the pattern the rule should catch. The repo has a tradition
    of these (#519, #520, #399, #509, #437, #411, #511 are all "test:" or
    small synthetic-bug PRs). `gh pr list --state closed --search "test:"`
-   is a good starting query. Pick one with <500 changed lines if possible
-   — the agent's investigation is faster on smaller diffs. No real PR fits?
+   is a good starting query. Pick one with <500 changed lines if possible;
+   the agent's investigation is faster on smaller diffs. No real PR fits?
    `lien-review-testbed/` at the repo root is a tracked multi-language sample
-   app kept as fixture material — not wired into any existing fixture, but
+   app kept as fixture material: not wired into any existing fixture, but
    available to plant a synthetic regression in and capture against.
 
 2. **Capture the fixture.** From the repo root:
@@ -480,23 +488,23 @@ harness lets you do it autonomously once `OPENROUTER_API_KEY` is in `.env`.
    `<scenario>.assertions.ts`. Start with just `expectRuleFired` and
    `expectToolCalled` for whatever tool the rule's prompt mandates.
    Don't add Tier 2 keyword checks until after baseline calibration is
-   green — they're what proves the prompt produces the *right* finding,
+   green: they're what proves the prompt produces the *right* finding,
    and you need a reliable Tier 1 first. When you do add Tier 2, run the
-   three-verdict smoke test (perfect / empty / **distractor** — see
+   three-verdict smoke test (perfect, empty, **distractor**; see
    "Smoke-test new assertions" above) before spending any calibration
    money against them.
 
 4. **Add the rule to `BUILTIN_RULES`** in
    `packages/review/src/plugins/agent/rules.ts`. Mirror the existing
    shape: `id`, `name`, `prompt`, optional `example`, `triggers`. The
-   prompt is the lever — start by copying a similar existing rule's
+   prompt is the lever. Start by copying a similar existing rule's
    structure.
 
 5. **Iterate via CC mode (free).** Open a Claude Code session, run
    `/test-harness <rule-id>`. The Skill spawns a Claude subagent per
    fixture and reports pass/fail. Cycle through prompt edits in `rules.ts`
    until CC reliably produces the expected finding. **CC mode is *not*
-   sufficient for shipping** — Claude is much smarter than Kimi (the prod
+   sufficient for shipping**: Claude is much smarter than Kimi (the prod
    default), so passing here doesn't certify production behavior. Treat it
    as smoke-testing.
 
@@ -510,7 +518,7 @@ harness lets you do it autonomously once `OPENROUTER_API_KEY` is in `.env`.
    The fixture's `passThreshold` (default 9 from `assertions.passThreshold`)
    gates the run. If pass-rate < 9/10, iterate: widen Tier 2 keywords,
    tighten the prompt, or capture a more realistic fixture. Don't ship
-   sub-9/10 prompts — that's the discipline that prevents silently flaky
+   sub-9/10 prompts; that's the discipline that prevents silently flaky
    rules.
 
 7. **Open a PR** with the rule, the new fixture's `.assertions.ts`, and
@@ -519,25 +527,25 @@ harness lets you do it autonomously once `OPENROUTER_API_KEY` is in `.env`.
 The whole loop, end-to-end, is ~30 minutes once you have the fixture
 captured.
 
-## Failure modes — what each error means
+## Failure modes: what each error means
 
 | Error in `failureMessage` | Cause | Action |
 |---|---|---|
 | `LLM error: API error (403): Key limit exceeded` | Daily-spend cap on the OpenRouter key (set in their dashboard) | Raise the limit, switch keys, or wait until midnight UTC |
-| `LLM error: terminated` | OpenRouter killed the request mid-stream — usually upstream (provider) capacity issue, occasionally rate-limit at high concurrency | Retry; if it persists for one specific model, that model is having problems — try another |
+| `LLM error: terminated` | OpenRouter killed the request mid-stream (usually an upstream provider capacity issue, occasionally a rate limit at high concurrency) | Retry; if it persists for one specific model, that model is having problems: try another |
 | `LLM error: fetch failed` | Network blip between us and OpenRouter | Retry |
 | `Tier 1: expected rule 'X' to fire. Got: (no findings)` | Model bailed without producing a finding (silence-mode bias) | Tighten the rule prompt to mandate emission; check `.wip/retro-blast-radius.md` §2.3 |
 | `Tier 2: expected at least one finding to mention any of […]` | Rule fired but the suggestion uses different vocabulary | Widen the keyword set, or the prompt is producing wrong-shaped findings |
 | `0/10 passed cost $0.0000` | Every call failed silently | Re-run with `--votes 3 --json` and inspect `failureMessage` per vote |
 
-If you can't tell what's happening, `--json` is your friend — pipe through
+If you can't tell what's happening, `--json` is your friend: pipe through
 `jq` and look at each vote's `failureMessage`.
 
 ## Debugging a failing vote with `--trace`
 
-When the `failureMessage` alone doesn't tell you why a vote bailed —
-typically `Tier 1: ... (no findings)` where the model investigated but
-decided silence — read the per-vote traces and compare a passing vote to
+When the `failureMessage` alone doesn't tell you why a vote bailed
+(typically `Tier 1: ... (no findings)` where the model investigated but
+decided silence), read the per-vote traces and compare a passing vote to
 a failing one.
 
 **Traces persist by default.** Every run writes them, even without `--trace`,
@@ -554,7 +562,7 @@ npm run test:harness -w @liendev/review -- \
 Each vote produces `<trace-dir>/<rule>/<scenario>/vote-<N>.json`
 containing the rendered system prompt, the rendered initial message, the
 full per-turn assistant response (including reasoning prose outside the
-JSON fence — normally stripped), and tool-call inputs + outputs.
+JSON fence, normally stripped), and tool-call inputs + outputs.
 
 To compare a passing vote (say vote 3) with a failing one (vote 7):
 
@@ -573,72 +581,72 @@ across fixtures), those diffs print first.
 Typical reads:
 
 - Both votes call the same tools but the failing one's last-turn prose
-  says "I could not identify a race condition" — silence-mode bias the
+  says "I could not identify a race condition": silence-mode bias the
   rule's MUST-emit language didn't overcome.
 - The failing vote made fewer tool calls and never opened the file
-  containing the bug — the rule's protocol step "MUST call
+  containing the bug. The rule's protocol step "MUST call
   get_files_context" needs strengthening.
 - Tool output for `read_file` was truncated to 4 KB, missing the lines
-  with the bug — investigate whether the fixture's `repoRootDir` is
+  with the bug. Investigate whether the fixture's `repoRootDir` is
   correct or the file is huge.
 
 Trace files are typically 10-50 KB per vote (5-15 turns × ~2 KB each
 including 4 KB-capped tool outputs). A `--calibrate 10` run on one
 fixture writes ~100-500 KB to disk.
 
-## Modes — when to use which
+## Modes: when to use which
 
-- **`/test-harness <rule>` (CC)** — fast inner loop. Free. Use while
+- **`/test-harness <rule>` (CC)**: fast inner loop. Free. Use while
   drafting a prompt change. Catches "the prompt is broken" but not "Kimi
   will misbehave."
-- **`npm run test:harness -w @liendev/review -- --votes 3`** — sanity check
+- **`npm run test:harness -w @liendev/review -- --votes 3`**: sanity check
   after iterating in CC. ~$0.18 per fixture. Tells you Kimi (the prod
   default) agrees with the assertion at K=3.
-- **`npm run test:harness -w @liendev/review -- --calibrate 10`** — the
-  9/10 bar. ~$0.50 per
-  fixture. **The only mode that gates merging a prompt change.**
-- **GitHub workflow ("Agent-Rule Test Harness (LLM)")** — same as
+- **`npm run test:harness -w @liendev/review -- --calibrate 10`**: the
+  calibration gate (~$0.50 per fixture; see "The 9/10 reliability bar"
+  above). The only mode that gates merging a prompt change.
+- **GitHub workflow ("Agent-Rule Test Harness (LLM)")**: same as
   `--calibrate`, in CI, with the result attached to the workflow run for
   audit. Triggered manually via the Actions UI.
 
 ### Cost discipline
 
-`--calibrate 10` runs the real model ~10x per fixture against OpenRouter —
+`--calibrate 10` runs the real model ~10x per fixture against OpenRouter:
 real money, not a free inner loop (~$0.05-0.50/fixture, ~$5-8 for a full
 corpus sweep). Before spending another round:
 
-- **Diagnose from existing traces first** (free) — every run now persists
-  per-vote traces (see "Debugging a failing vote" below), so a trace of the
+- **Diagnose from existing traces first** (free). Every run now persists
+  per-vote traces (see "Debugging a failing vote" above), so a trace of the
   last run is *always* on disk. Most "why did this fail" questions are
   answerable from it without another network call; the run prints the exact
   trace directory (`Traces: …`) so it's a copy-paste away.
 - **Stop after one non-converging iteration.** If a prompt/tool-fallback
   change doesn't move the pass rate, don't chain another calibration sweep on
-  the same hypothesis — reassess and report the cost spent so far before the
+  the same hypothesis. Reassess and report the cost spent so far before the
   next round.
 - **Prefer a zero-LLM deterministic-signal fix** (see `stale-literal-signals.ts`
   for the pattern) over an LLM-calibration-gated prompt tweak where the
-  failure mode is structural, not a reasoning gap — no spend, no flakiness.
+  failure mode is structural, not a reasoning gap: no spend, no flakiness.
 
 ## Common failure modes
 
-- `OPENROUTER_API_KEY missing` — the Node CLI requires it. For free
+- `OPENROUTER_API_KEY missing`: the Node CLI requires it. For free
   iteration, use the CC Skill instead.
-- Fixture fails schema validation — `fixture-loader.ts` reports which field
+- Fixture fails schema validation: `fixture-loader.ts` reports which field
   is missing or wrong. Captured fixtures from `LIEN_REVIEW_CAPTURE_CTX`
   should always validate.
-- `read_file` errors during a run — the fixture's `repoRootDir` doesn't
+- `read_file` errors during a run: the fixture's `repoRootDir` doesn't
   exist on this machine. Either point it at a real checkout or accept that
   read-side tool calls will fail (the model usually proceeds anyway).
-- `harness-meta` block missing in CC mode — the subagent didn't follow the
+- `harness-meta` block missing in CC mode: the subagent didn't follow the
   wrapper template. Re-run; if persistent, simplify the wrapper.
-- Calibration <9/10 with Tier 2 keyword check — widen the keyword set to
+- Calibration <9/10 with Tier 2 keyword check: widen the keyword set to
   include the phrasings the model actually produces. If you have to widen
   to >5 keywords, the prompt itself probably needs work.
 - `capture-pr.ts --sha <sha>` fails with `could not resolve sha "…": unknown
-  revision` — the pinned SHA belongs to a squash-merged PR branch, so a
+  revision`: the pinned SHA belongs to a squash-merged PR branch, so a
   fresh clone/worktree never has the commit object (only the single-parent
-  squash commit lands on the base branch's history). Not crossrepo-only —
+  squash commit lands on the base branch's history). Not crossrepo-only:
   this repo's own historical PRs hit it too (see
   `doc-truth/pr711-changeset-export-claim.assertions.ts`'s header). Fix:
   fetch the PR's own ref before capturing, `git fetch origin

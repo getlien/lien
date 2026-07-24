@@ -11,23 +11,23 @@
 
 After implementing four AST-supported languages (TypeScript, JavaScript, PHP, Python), language-specific data was scattered across **12-16 files**:
 
-- `parser.ts` — grammar imports, extension-to-language mapping
-- `traversers/index.ts` — traverser registry
-- `extractors/index.ts` — extractor registry
-- `complexity/cyclomatic.ts` — decision point node types
-- `complexity/cognitive.ts` — nesting types, non-nesting types, lambda types
-- `complexity/halstead.ts` — operator symbols, operator keywords (per-language records)
-- `symbols.ts` — call expression types
-- `types.ts` — `SupportedLanguage` type
+- `parser.ts`: grammar imports, extension-to-language mapping
+- `traversers/index.ts`: traverser registry
+- `extractors/index.ts`: extractor registry
+- `complexity/cyclomatic.ts`: decision point node types
+- `complexity/cognitive.ts`: nesting types, non-nesting types, lambda types
+- `complexity/halstead.ts`: operator symbols, operator keywords (per-language records)
+- `symbols.ts`: call expression types
+- `types.ts`: `SupportedLanguage` type
 
 Adding a new language required touching all of these files, each with its own format for storing language-specific data. This made it easy to miss a file and hard to verify completeness.
 
 ## Decision Drivers
 
-* **Onboarding cost** — New contributors shouldn't need to modify 12+ files to add a language
-* **Single source of truth** — Language data should live in one place, not be duplicated
-* **Discoverability** — Opening one file should show everything about a language
-* **Correctness** — Harder to forget a file when there's only one to create
+* **Onboarding cost**: New contributors shouldn't need to modify 12+ files to add a language
+* **Single source of truth**: Language data should live in one place, not be duplicated
+* **Discoverability**: Opening one file should show everything about a language
+* **Correctness**: Harder to forget a file when there's only one to create
 
 ## Considered Options
 
@@ -94,13 +94,13 @@ interface LanguageDefinition {
 
 Modules that previously maintained their own language-specific data now read from the registry:
 
-- **`parser.ts`** — `getLanguage(lang).grammar` instead of local `languageConfig` record
-- **`traversers/index.ts`** — `getLanguage(lang).traverser` instead of local registry
-- **`extractors/index.ts`** — `getLanguage(lang).exportExtractor` instead of local registry
-- **`complexity/cyclomatic.ts`** — Union of all `decisionPoints` built from `getAllLanguages()`
-- **`complexity/cognitive.ts`** — Union of all nesting/lambda types from `getAllLanguages()`
-- **`complexity/halstead.ts`** — `getLanguage(lang).complexity.operatorSymbols/Keywords`
-- **`symbols.ts`** — Union of all `callExpressionTypes` from `getAllLanguages()`
+- **`parser.ts`**: `getLanguage(lang).grammar` instead of local `languageConfig` record
+- **`traversers/index.ts`**: `getLanguage(lang).traverser` instead of local registry
+- **`extractors/index.ts`**: `getLanguage(lang).exportExtractor` instead of local registry
+- **`complexity/cyclomatic.ts`**: Union of all `decisionPoints` built from `getAllLanguages()`
+- **`complexity/cognitive.ts`**: Union of all nesting/lambda types from `getAllLanguages()`
+- **`complexity/halstead.ts`**: `getLanguage(lang).complexity.operatorSymbols/Keywords`
+- **`symbols.ts`**: Union of all `callExpressionTypes` from `getAllLanguages()`
 
 Complexity functions that don't receive a language parameter (cyclomatic, cognitive) build a union of all language node types lazily. This is correct because tree-sitter only produces node types valid for the language being parsed.
 
@@ -132,11 +132,11 @@ Complexity functions that don't receive a language parameter (cyclomatic, cognit
 
 ### Re-export / barrel file support
 
-The dependency analyzer tracks transitive dependents through barrel/re-export files (e.g., `index.ts`, Python `__init__.py`, Rust `pub use`). This works at the metadata level — the analyzer reads `imports`, `importedSymbols`, and `exports` from chunk metadata and is fully language-agnostic. No analyzer changes are needed per language.
+The dependency analyzer tracks transitive dependents through barrel/re-export files (e.g., `index.ts`, Python `__init__.py`, Rust `pub use`). This works at the metadata level: the analyzer reads `imports`, `importedSymbols`, and `exports` from chunk metadata and is fully language-agnostic. No analyzer changes are needed per language.
 
 If the new language has a re-export pattern, the **export extractor** (`extractors/{lang}.ts`) must include re-exported symbols in the `exports` array. For example, Python's `__init__.py` with `from .auth import AuthService` should list `AuthService` as an export. Once `exports` and `importedSymbols` are both populated correctly, the re-export chain resolution works automatically.
 
 ## Related Decisions
 
-* [ADR-002: Strategy Pattern for AST Traversal](0002-strategy-pattern-ast-traversal.md) — Established the traverser pattern this builds on
-* [ADR-003: AST-Based Semantic Chunking](0003-ast-based-chunking.md) — The feature this supports
+* [ADR-002: Strategy Pattern for AST Traversal](0002-strategy-pattern-ast-traversal.md): Established the traverser pattern this builds on
+* [ADR-003: AST-Based Semantic Chunking](0003-ast-based-chunking.md): The feature this supports

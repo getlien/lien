@@ -8,7 +8,7 @@
 > **Superseded (2026-07-04):** Lien no longer computes embeddings at all.
 > [ADR-011](0011-sqlite-structural-store-fts5-lexical-search.md) removed the
 > transformers.js embedding stack and LanceDB in favor of a SQLite structural
-> store with FTS5/BM25 lexical search. This ADR is retained for history — it
+> store with FTS5/BM25 lexical search. This ADR is retained for history: it
 > explains why transformers.js was the right embedding backend *while Lien had
 > embeddings*.
 
@@ -18,16 +18,16 @@ Lien uses local embeddings (all-MiniLM-L6-v2, 384-dim) for semantic code search.
 
 Three alternatives were explored:
 
-1. **Rust native addon** (`napi-rs` + `ort` crate) — a new `@liendev/embeddings` package
-2. **Direct onnxruntime-node** — calling Microsoft's ONNX Runtime from TypeScript without transformers.js
-3. **Worker-threaded onnxruntime-node** — same as (2) but offloaded to a worker thread
+1. **Rust native addon** (`napi-rs` + `ort` crate): a new `@liendev/embeddings` package
+2. **Direct onnxruntime-node**: calling Microsoft's ONNX Runtime from TypeScript without transformers.js
+3. **Worker-threaded onnxruntime-node**: same as (2) but offloaded to a worker thread
 
 ## Decision Drivers
 
-* **Performance** — Embedding generation is the bottleneck during indexing
-* **Simplicity** — Fewer moving parts, fewer dependencies, easier to maintain
-* **Correctness** — Embeddings must be semantically identical across backends
-* **Cold start** — MCP server and CLI should initialize quickly
+* **Performance**: Embedding generation is the bottleneck during indexing
+* **Simplicity**: Fewer moving parts, fewer dependencies, easier to maintain
+* **Correctness**: Embeddings must be semantically identical across backends
+* **Cold start**: MCP server and CLI should initialize quickly
 
 ## Considered Options
 
@@ -46,12 +46,12 @@ A new `packages/embeddings/` package using `napi-rs` + `ort` crate v2 + HuggingF
 Call `onnxruntime-node` directly from TypeScript with a hand-rolled WordPiece tokenizer, bypassing transformers.js.
 
 **Findings:**
-- Per-embedding speed: ~2.3ms (vs ~3.2ms for transformers.js) — **30% faster per-call**
+- Per-embedding speed: ~2.3ms (vs ~3.2ms for transformers.js), **30% faster per-call**
 - Cosine similarity = 1.000000 (bit-identical output)
 - But runs on main thread, blocking file scanning and AST parsing
 - Full pipeline `lien index --force`: **19.9s** (vs 8.1s for WorkerEmbeddings)
-- Even when moved to a worker thread: **19.5s** — still 2x slower end-to-end
-- CPU time: 93.5s vs 41.6s — our tokenizer + inference call pattern is less efficient than transformers.js internals
+- Even when moved to a worker thread: **19.5s**, still 2x slower end-to-end
+- CPU time: 93.5s vs 41.6s. Our tokenizer + inference call pattern is less efficient than transformers.js internals
 
 ### Option 3: Keep WorkerEmbeddings (chosen)
 
@@ -62,7 +62,7 @@ Keep the existing `WorkerEmbeddings` using `@huggingface/transformers` v3 in a w
 - Ships Microsoft's official optimized ARM64 binary
 - Handles tokenization via compiled WASM tokenizer (faster than our TypeScript WordPiece)
 - Worker thread enables concurrent file processing during embedding generation
-- Full pipeline `lien index --force`: **8.1s** — fastest option
+- Full pipeline `lien index --force`: **8.1s**, the fastest option
 
 ## Decision Outcome
 
@@ -70,21 +70,21 @@ In the context of optimizing embedding generation for local semantic search, fac
 
 ### Key insight
 
-transformers.js v3 already uses `onnxruntime-node` (native C++) in Node.js — it's not running WASM. The performance advantage comes from its optimized tokenizer and the worker thread enabling concurrent file I/O + AST parsing on the main thread.
+transformers.js v3 already uses `onnxruntime-node` (native C++) in Node.js; it's not running WASM. The performance advantage comes from its optimized tokenizer and the worker thread enabling concurrent file I/O + AST parsing on the main thread.
 
 ## Consequences
 
 ### Positive
 
-- **Zero new dependencies** — no Rust toolchain, no platform-specific binaries, no CI matrix
-- **Simplest architecture** — one embedding backend, no factory pattern, no fallback logic
-- **Fastest end-to-end** — 8.1s for full reindex (82 files) vs 19.5s for native alternatives
-- **Removed dead code** — `embeddings.device` config, `LIEN_EMBEDDING_DEVICE` env var, `resolveEmbeddingDevice()`, WebGPU try/catch blocks
+- **Zero new dependencies**: no Rust toolchain, no platform-specific binaries, no CI matrix
+- **Simplest architecture**: one embedding backend, no factory pattern, no fallback logic
+- **Fastest end-to-end**: 8.1s for full reindex (82 files) vs 19.5s for native alternatives
+- **Removed dead code**: `embeddings.device` config, `LIEN_EMBEDDING_DEVICE` env var, `resolveEmbeddingDevice()`, WebGPU try/catch blocks
 
 ### Negative
 
-- **No GPU acceleration path** — WebGPU doesn't work in Node.js; CoreML/CUDA would require a native addon
-- **Single point of failure** — if transformers.js breaks, there's no fallback (mitigated: it's a well-maintained library with 10k+ GitHub stars)
+- **No GPU acceleration path**: WebGPU doesn't work in Node.js; CoreML/CUDA would require a native addon
+- **Single point of failure**: if transformers.js breaks, there's no fallback (mitigated: it's a well-maintained library with 10k+ GitHub stars)
 
 ### Neutral
 
@@ -110,12 +110,12 @@ transformers.js v3 already uses `onnxruntime-node` (native C++) in Node.js — i
 | WorkerEmbeddings (transformers.js) | 3.2ms | 315 emb/s |
 | Rust addon (ort crate, pyke binary) | 9.7ms | 103 emb/s |
 
-Per-call, onnxruntime-node direct is fastest — but the end-to-end pipeline performance is what matters, and transformers.js wins there due to internal optimizations.
+Per-call, onnxruntime-node direct is fastest, but the end-to-end pipeline performance is what matters, and transformers.js wins there due to internal optimizations.
 
 ## References
 
-- [transformers.js v3](https://huggingface.co/docs/transformers.js) — uses onnxruntime-node in Node.js
-- [ort crate](https://docs.rs/ort/latest/ort/) — Rust ONNX Runtime bindings (pyke CDN binaries)
-- [onnxruntime-node](https://www.npmjs.com/package/onnxruntime-node) — Microsoft's official Node.js addon
-- PR #160 — transformers v3 upgrade + device config (now removed)
-- PR #161 — remove dead embeddings.device config
+- [transformers.js v3](https://huggingface.co/docs/transformers.js): uses onnxruntime-node in Node.js
+- [ort crate](https://docs.rs/ort/latest/ort/): Rust ONNX Runtime bindings (pyke CDN binaries)
+- [onnxruntime-node](https://www.npmjs.com/package/onnxruntime-node): Microsoft's official Node.js addon
+- PR #160: transformers v3 upgrade + device config (now removed)
+- PR #161: remove dead embeddings.device config

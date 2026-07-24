@@ -6,7 +6,7 @@ This guide walks you through setting up Lien with your editor in under 2 minutes
 
 ### Claude Code (recommended path)
 
-Install the plugin once and you're done — no per-project setup:
+Install the plugin once and you're done, with no per-project setup:
 
 ```text
 /plugin marketplace add getlien/lien
@@ -16,7 +16,7 @@ Install the plugin once and you're done — no per-project setup:
 Lien's MCP tools and the Explore agent become available in every Claude Code session, in every repo.
 
 ::: tip
-If you previously used `lien init --editor claude-code` per project, you can leave those `.mcp.json` files in place or remove them — the plugin's MCP server replaces them. `lien init --editor claude-code --legacy` is still available if you need the old per-project flow for any reason.
+If you previously used `lien init --editor claude-code` per project, you can leave those `.mcp.json` files in place or remove them; the plugin's MCP server replaces them. `lien init --editor claude-code --legacy` is still available if you need the old per-project flow for any reason.
 :::
 
 ### Other editors (Cursor, Windsurf, OpenCode, Kilo Code, Antigravity)
@@ -40,7 +40,7 @@ lien init --editor antigravity
 This writes the correct MCP config for your editor. Once the MCP tools are
 wired up, see [Cross-Editor Agent Setup](/guide/cross-editor-setup) for a
 copy-paste `AGENTS.md` block that tells your agent to actually use them
-before editing — most non-Claude-Code editors read that file natively.
+before editing. Most non-Claude-Code editors read that file natively.
 
 ::: details What does `lien init` create?
 
@@ -66,7 +66,7 @@ After restarting, your AI assistant will automatically:
 - Make Lien tools available
 
 ::: info First-Time Indexing
-On first run, Lien indexes your codebase. There's no model to download — indexing starts immediately and runs offline. This may take a few minutes depending on project size.
+On first run, Lien indexes your codebase. There's no model to download: indexing starts immediately and runs offline. This may take a few minutes depending on project size.
 :::
 
 ## Step 3: Test It Out!
@@ -91,7 +91,7 @@ List all API endpoints
 
 ## Monorepo Support
 
-Lien automatically detects and indexes multiple frameworks:
+Lien automatically detects and indexes multiple ecosystems:
 
 ```bash
 # Example monorepo structure
@@ -101,7 +101,7 @@ my-app/
   └── .cursor/mcp.json      # Created by `lien init`
 ```
 
-Lien scans your project structure and applies appropriate patterns for each detected framework—no configuration needed.
+Lien scans your project structure and applies appropriate patterns for each detected ecosystem, no configuration needed.
 
 ## Troubleshooting
 
@@ -113,7 +113,7 @@ Lien scans your project structure and applies appropriate patterns for each dete
 4. For Windsurf: ensure the `--root` path in `~/.codeium/windsurf/mcp_config.json` is correct
 
 ::: tip Manual Server Start
-You don't need to manually run `lien serve`—it starts automatically. You can run it manually for debugging:
+You don't need to manually run `lien serve`; it starts automatically. You can run it manually for debugging:
 
 ```bash
 # Test server manually
@@ -125,7 +125,7 @@ lien serve --root /path/to/your/project
 
 - Lien automatically excludes `node_modules`, `dist`, and build artifacts
 - Close other resource-intensive applications during first index
-- Large codebases (50k+ files) may take 30-60 minutes initially
+- Very large codebases (50k+ files) may take a few minutes on the first index
 
 ### Results not relevant
 

@@ -93,24 +93,24 @@ vectordb/
 
 ### Positive
 
-* ✅ **AST parsing works** - All files are now under 600 lines and parse successfully
-* ✅ **Better testability** - Each module can be tested independently (added 28 new tests)
-* ✅ **Clearer organization** - Developers can find functionality faster
-* ✅ **Single Responsibility** - Each module has one clear purpose
-* ✅ **Easier to extend** - New operations can be added to appropriate module
-* ✅ **Better code metrics** - Complexity analysis works on all files
-* ✅ **Dogfooding success** - Lien can now analyze its own codebase
+* **AST parsing works** - All files are now under 600 lines and parse successfully
+* **Better testability** - Each module can be tested independently (added 28 new tests)
+* **Clearer organization** - Developers can find functionality faster
+* **Single Responsibility** - Each module has one clear purpose
+* **Easier to extend** - New operations can be added to appropriate module
+* **Better code metrics** - Complexity analysis works on all files
+* **Dogfooding success** - Lien can now analyze its own codebase
 
 ### Negative
 
-* ⚠️ **More files to navigate** - 4 files instead of 1 (mitigated by clear naming)
-* ⚠️ **Import overhead** - Internal functions need to import from multiple modules (minimal impact)
+* **More files to navigate** - 4 files instead of 1 (mitigated by clear naming)
+* **Import overhead** - Internal functions need to import from multiple modules (minimal impact)
 
 ### Neutral
 
-* 🔄 **No breaking changes** - Public API (`VectorDB` class) remains identical
-* 🔄 **Type safety maintained** - All operations properly typed
-* 🔄 **Performance unchanged** - No runtime overhead from split
+* **No breaking changes** - Public API (`VectorDB` class) remains identical
+* **Type safety maintained** - All operations properly typed
+* **Performance unchanged** - No runtime overhead from split
 
 ## Implementation Details
 
@@ -144,22 +144,22 @@ No migration needed - 100% backward compatible. The `VectorDB` class maintains t
 
 ### Before Split
 ```
-❌ lancedb.ts: 1,119 lines
-❌ Exceeds AST parsing limits
-❌ Mixed concerns (query + insert + maintenance)
-❌ Test coverage: 76.84%
+lancedb.ts: 1,119 lines
+Exceeds AST parsing limits
+Mixed concerns (query + insert + maintenance)
+Test coverage: 76.84%
 ```
 
 ### After Split
-```
-✅ lancedb.ts: 267 lines (orchestrator)
-✅ query.ts: 571 lines (queries)
-✅ batch-insert.ts: 161 lines (inserts)
-✅ maintenance.ts: 89 lines (maintenance)
-✅ All files parse successfully with AST
-✅ Test coverage: 80.09% (+3.25%)
-✅ 28 new unit tests added
-✅ 553 tests passing
+```text
+lancedb.ts: 267 lines (orchestrator)
+query.ts: 571 lines (queries)
+batch-insert.ts: 161 lines (inserts)
+maintenance.ts: 89 lines (maintenance)
+All files parse successfully with AST
+Test coverage: 80.09% (+3.25%)
+28 new unit tests added
+553 tests passing
 ```
 
 ## Related Decisions
@@ -173,10 +173,4 @@ No migration needed - 100% backward compatible. The `VectorDB` class maintains t
 * [Thin Controller Pattern](https://martinfowler.com/eaaCatalog/frontController.html)
 * [PR #6: Refactor/v0.14.0 Architecture Improvements](https://github.com/getlien/lien)
 * Internal: `.wip/post-refactor-verification-2025-11-24.md`
-
-## Notes
-
-This refactoring was identified through **dogfooding** - running Lien's semantic search on its own codebase revealed that the `lancedb.ts` file couldn't be parsed by our AST chunker. This is a perfect example of how building tools for developers forces you to maintain high code quality standards.
-
-**Lesson**: If your code analysis tool can't analyze your own code, it's time to refactor! 🔄
 

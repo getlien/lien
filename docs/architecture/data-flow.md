@@ -2,7 +2,7 @@
 
 This document illustrates how data flows through Lien during indexing and searching operations. Storage is a local SQLite database; there are no embeddings or vectors (see [ADR-011](decisions/0011-sqlite-structural-store-fts5-lexical-search.md)).
 
-## Indexing Data Flow
+## Indexing data flow
 
 Indexing parses source files into chunks, enriches them with complexity and dependency metadata, and writes them to the SQLite `chunks` table. FTS5 index rows are maintained automatically by triggers on `chunks`.
 
@@ -90,9 +90,9 @@ flowchart TB
     class SERIALIZE,INSERT,FTS_SYNC,UPDATE_VERSION storageClass
 ```
 
-## Search Data Flow
+## Search data flow
 
-The `search_code` / `find_similar` tools run FTS5/BM25 lexical search. The query text is turned into an FTS5 MATCH expression, matched against the FTS index, ranked by BM25, and mapped back to results — no embedding step.
+The `search_code` / `find_similar` tools run FTS5/BM25 lexical search. The query text is turned into an FTS5 MATCH expression, matched against the FTS index, ranked by BM25, and mapped back to results, with no embedding step.
 
 ```mermaid
 flowchart TB
@@ -157,11 +157,11 @@ flowchart TB
     class BUILD_RESPONSE,RETURN responseClass
 ```
 
-### Structural Query Flow
+### Structural query flow
 
-The structural tools (`get_files_context`, `get_dependents`, `list_functions`, `get_complexity`) do not touch FTS5 at all — they scan or look up rows in `chunks` with indexed SQL and post-process in JS (dependency graph, complexity enrichment). `get_files_context` is the hot path: an indexed `SELECT ... WHERE file IN (...)` backed by `idx_chunks_file`.
+The structural tools (`get_files_context`, `get_dependents`, `list_functions`, `get_complexity`) do not touch FTS5 at all: they scan or look up rows in `chunks` with indexed SQL and post-process in JS (dependency graph, complexity enrichment). `get_files_context` is the hot path: an indexed `SELECT ... WHERE file IN (...)` backed by `idx_chunks_file`.
 
-## Relevance Scoring
+## Relevance scoring
 
 FTS5 lexical search attaches a `score` and a `relevance` category to each result, both derived from the BM25 rank.
 
@@ -203,9 +203,9 @@ flowchart LR
     class BANDS,HIGH,REL,LOOSE,NOT catClass
 ```
 
-Because bands are relative to the best hit in each result set, the top result is always `highly_relevant`. Relevance measures **keyword match strength**, not semantic similarity — a match means the query terms appear in the code or its comments.
+Because bands are relative to the best hit in each result set, the top result is always `highly_relevant`. Relevance measures **keyword match strength**, not semantic similarity: a match means the query terms appear in the code or its comments.
 
-## Incremental Update Data Flow
+## Incremental update data flow
 
 When files change, only modified files are reindexed. The FTS5 external-content index is kept consistent by the `AFTER INSERT/UPDATE/DELETE` triggers on `chunks`.
 
@@ -281,20 +281,11 @@ flowchart TB
     class FTS_TRIGGERS,UPDATE_VERSION,VERSION_POLL,RECONNECT,RELOAD_INDEX reconnectClass
 ```
 
-## Data Transformations
+## Data transformations
 
 ### File → Chunks
 
-```
-Source File (example.ts, 200 lines)
-    ↓ [AST chunker — Tree-sitter semantic boundaries]
-Chunks:
-    - Chunk 1: import block (lines 1-3)
-    - Chunk 2: method add() (lines 7-10)
-    - Chunk 3: method multiply() (lines 17-25)
-```
-
-AST chunking keeps functions and classes whole; a line-based fallback (fixed size + overlap) is used for unsupported languages, very large files, or parse errors.
+AST chunking keeps functions and classes whole; a line-based fallback (fixed size + overlap) is used for unsupported languages, very large files, or parse errors. See [Indexing Flow](./indexing-flow.md) → Chunking strategy for the worked example and the traverser mechanics.
 
 ### Chunk → Row
 
@@ -317,9 +308,9 @@ Ranked rows (best = most-negative bm25)
 Top-N results with metadata
 ```
 
-## Data Storage
+## Data storage
 
-### SQLite Schema (`chunks`)
+### SQLite schema (`chunks`)
 
 ```
 chunks (
@@ -344,9 +335,9 @@ chunks_fts  -- FTS5 external-content virtual table (content='chunks')
   kept in sync by AFTER INSERT/UPDATE/DELETE triggers on chunks
 ```
 
-`startLine`/`endLine` are `INTEGER` (the structural-store spike stored them as REAL; fixed in production). The multi-tenant `ChunkMetadata` fields (`repoId`, `orgId`, `branch`, `commitSha`) were never stored as columns and have since been removed entirely — none were ever wired to a write site. Cross-repo MCP mode itself (the `crossRepo`/`repoIds` tool parameters, `supportsCrossRepo`, `scanCrossRepo`) was removed — it was never implemented in the SQLite era.
+`startLine`/`endLine` are `INTEGER` (the structural-store spike stored them as REAL; fixed in production). The multi-tenant `ChunkMetadata` fields (`repoId`, `orgId`, `branch`, `commitSha`) were never stored as columns and have since been removed entirely; none were ever wired to a write site. Cross-repo MCP mode itself (the `crossRepo`/`repoIds` tool parameters, `supportsCrossRepo`, `scanCrossRepo`) was removed; it was never implemented in the SQLite era.
 
-### Version File
+### Version file
 
 ```json
 {
@@ -358,9 +349,9 @@ chunks_fts  -- FTS5 external-content virtual table (content='chunks')
 
 Purpose: lets the MCP server detect index changes and reopen its SQLite handle.
 
-## Error Handling
+## Error handling
 
-### Graceful Degradation
+### Graceful degradation
 
 ```
 File Processing Error:
@@ -369,7 +360,7 @@ File Processing Error:
     └─ Database write failure    → Throw error (critical)
 ```
 
-### Transaction Safety
+### Transaction safety
 
 Atomic file updates run inside a single SQLite transaction:
 ```
@@ -381,9 +372,9 @@ Atomic file updates run inside a single SQLite transaction:
 If any step fails → Rollback → File remains in its previous state
 ```
 
-## Performance Optimizations
+## Performance optimizations
 
-- **Indexed file lookup**: `get_files_context` uses `idx_chunks_file` for a sub-millisecond `WHERE file IN (...)` scan — the most frequent (mandatory pre-edit) query.
+- **Indexed file lookup**: `get_files_context` uses `idx_chunks_file` for a sub-millisecond `WHERE file IN (...)` scan: the most frequent (mandatory pre-edit) query. Measured at 0.04ms against a 44,430-chunk replicated corpus, down from 40.49ms on the prior LanceDB backend; see [ADR-011](decisions/0011-sqlite-structural-store-fts5-lexical-search.md) for the benchmark.
 - **Concurrent file processing**: `p-limit(concurrency)` parses files in parallel; the SQLite write is a fast synchronous step.
 - **WAL journaling**: `journal_mode=WAL`, `synchronous=NORMAL`, and a `busy_timeout` let the MCP watcher and a concurrent CLI index share handles without immediate `SQLITE_BUSY` failures.
 - **No model load**: there is no embedding model to download or keep resident.

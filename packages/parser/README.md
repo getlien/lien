@@ -2,19 +2,19 @@
 
 AST parsing, complexity analysis, and semantic chunking for [Lien](https://lien.dev).
 
-This package provides the core parsing and analysis capabilities used by Lien's semantic code search. It is extracted from `@liendev/core` to enable lightweight consumers (like `@liendev/review`) that need parsing without embeddings or vector DB dependencies.
+This package provides the core parsing and analysis capabilities used by Lien's lexical code search. It is extracted from `@liendev/core` to enable lightweight consumers (like `@liendev/review`) that need parsing without embeddings or vector DB dependencies.
 
 ## Features
 
-- **AST Parsing** — Tree-sitter-based parsing for TypeScript, JavaScript, Python, PHP, Rust, Go, Java, C#, Ruby, Kotlin, and Swift
-- **Semantic Chunking** — Split code into meaningful chunks respecting function/class boundaries
-- **Complexity Analysis** — Cyclomatic, cognitive, and Halstead complexity metrics
-- **Dependency Analysis** — Import/export tracking with transitive dependent resolution
-- **Symbol Extraction** — Extract functions, classes, interfaces, and call sites from AST
-- **Test Association Detection** — Convention-based and import-based test file detection
-- **Codebase Scanning** — File discovery with gitignore support and ecosystem presets
+- **AST parsing**: Tree-sitter-based parsing for TypeScript, JavaScript, Python, PHP, Rust, Go, Java, C#, Ruby, Kotlin, and Swift
+- **Semantic chunking**: split code into meaningful chunks respecting function/class boundaries
+- **Complexity analysis**: cyclomatic, cognitive, and Halstead complexity metrics
+- **Dependency analysis**: import/export tracking with transitive dependent resolution
+- **Symbol extraction**: extract functions, classes, interfaces, and call sites from AST
+- **Test association detection**: convention-based and import-based test file detection
+- **Codebase scanning**: file discovery with gitignore support and ecosystem presets
 
-## Supported Languages
+## Supported languages
 
 | Language | AST Parsing | Complexity Metrics | Import/Export Tracking |
 |----------|:-----------:|:------------------:|:---------------------:|
@@ -65,15 +65,10 @@ const report = analyzeComplexityFromChunks(chunks, files, {
 
 ## Architecture
 
-This package is part of the [Lien](https://github.com/getlien/lien) monorepo:
-
-```
-@liendev/parser   ← AST, complexity, chunking, scanning (this package)
-@liendev/core     ← embeddings, vector DB, search (depends on parser)
-@liendev/lien     ← CLI and MCP server (depends on both)
-@liendev/review   ← PR review (depends on parser only)
-```
+This package is part of the [Lien](https://github.com/getlien/lien) monorepo.
+See [CLAUDE.md](https://github.com/getlien/lien/blob/main/CLAUDE.md)
+for the current package dependency chain.
 
 ## License
 
-AGPL-3.0 — see [LICENSE](https://github.com/getlien/lien/blob/main/LICENSE) for details.
+AGPL-3.0. See [LICENSE](https://github.com/getlien/lien/blob/main/LICENSE) for details.

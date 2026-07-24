@@ -179,34 +179,34 @@ accepting the increased implementation complexity and dependency overhead.
 
 ### Positive
 
-* ✅ **Never splits functions** - Complete semantic units preserved
-* ✅ **Rich metadata** - 9 new metadata fields for code understanding
-* ✅ **Better search quality** - Queries find complete functions, not fragments
-* ✅ **Enables new features:**
+* **Never splits functions** - Complete semantic units preserved
+* **Rich metadata** - 9 new metadata fields for code understanding
+* **Better search quality** - Queries find complete functions, not fragments
+* **Enables new features:**
   - Symbol-based queries: "find all methods in class X"
   - Complexity-based search: "find functions with complexity > 10"
   - Signature search: "find functions with 3+ parameters"
-* ✅ **Multi-language ready** - Foundation for Python, Go, Rust support
-* ✅ **Industry-standard approach** - Same technique as GitHub Copilot, Sourcegraph
-* ✅ **Graceful degradation** - Automatically falls back to line-based for:
+* **Multi-language ready** - Foundation for Python, Go, Rust support
+* **Industry-standard approach** - Same technique as GitHub Copilot, Sourcegraph
+* **Graceful degradation** - Automatically falls back to line-based for:
   - Unsupported languages
   - Very large files (>1000 lines)
   - Parsing errors
 
 ### Negative
 
-* ⚠️ **Increased complexity** - ~400 lines vs ~50 lines for line-based
-* ⚠️ **Dependency overhead** - `tree-sitter` + language grammars (~2MB total)
-* ⚠️ **Slower chunking** - 5ms vs 1ms per file (acceptable for better quality)
-* ⚠️ **Large file limitation** - Tree-sitter fails on very large files (>1000 lines)
-  - Mitigated: Automatic fallback to line-based chunking (hardcoded, not configurable — see the
+* **Increased complexity** - ~400 lines vs ~50 lines for line-based
+* **Dependency overhead** - `tree-sitter` + language grammars (~2MB total)
+* **Slower chunking** - 5ms vs 1ms per file (acceptable for better quality)
+* **Large file limitation** - Tree-sitter fails on very large files (>1000 lines)
+  - Mitigated: Automatic fallback to line-based chunking (hardcoded, not configurable; see the
     "Update" note under Configuration below)
 
 ### Neutral
 
-* 🔄 **No breaking changes** - Line-based chunking still available for unsupported languages
-* 🔄 **Backward compatible** - Existing indices work with old chunks
-* 🔄 **User-transparent** - AST chunking happens automatically for supported files
+* **No breaking changes** - Line-based chunking still available for unsupported languages
+* **Backward compatible** - Existing indices work with old chunks
+* **User-transparent** - AST chunking happens automatically for supported files
 
 ## Implementation Details
 
@@ -223,7 +223,7 @@ Language definitions are managed via the per-language definition pattern. See [A
 
 ### Configuration
 
-> **Update:** The `chunking.useAST`/`chunking.astFallback` knobs described below were removed —
+> **Update:** The `chunking.useAST`/`chunking.astFallback` knobs described below were removed;
 > they were validated but never actually read by any indexing pipeline. AST-based chunking with a
 > line-based fallback is always on and not configurable. This section is kept for historical
 > context on the original design; see [docs/architecture/config-system.md](../config-system.md)
@@ -344,14 +344,5 @@ One result with everything.
 
 ## Notes
 
-This was one of the most impactful architectural decisions for Lien. The move from line-based to AST-based chunking:
-
-1. **Improved search quality by 30-35%** - Measured by user feedback and dogfooding
-2. **Enabled rich metadata** - Foundation for future features (symbol search, complexity queries)
-3. **Established multi-language pattern** - Path to supporting 10+ languages
-4. **Validated our vision** - Semantic code search requires semantic understanding
-
-The slight performance cost (5ms per file) is negligible compared to the quality improvement. Users searching for code care more about **finding the right function** than saving 4ms during indexing.
-
-**Lesson**: Invest in proper code understanding. Text-based approaches hit quality ceilings quickly. Structured approaches (AST) enable exponential feature growth. 🌳
+The slight performance cost (5ms per file) is negligible compared to the quality improvement. Users searching for code care more about finding the right function than saving 4ms during indexing.
 

@@ -9,19 +9,19 @@ to an identical prompt with no warning.
 **Headline result:** the nudge changed both the crossing rate and the
 extraction behavior. Control crossed its complexity threshold in 8/8 trials;
 the nudge condition crossed in 3/8, and every trial that avoided crossing did
-so by extracting a helper function — exactly what the warning's wording
+so by extracting a helper function, exactly what the warning's wording
 ("prefer extraction") asks for. N=8/condition is small; see Limitations.
 
-This document *is* the citable artifact — the prior A/B referenced from
+This document *is* the citable artifact: the prior A/B referenced from
 PR #772 and elsewhere in this repo's history lived only in unpublished
 session records. This is dogfooding #772's warning line for real, not a
 synthetic example.
 
 ## Protocol (pre-registered, frozen before any trial ran)
 
-The full pre-registration — hypothesis, exact prompt template, exclusion
+The full pre-registration (hypothesis, exact prompt template, exclusion
 rules, and analysis plan, written and frozen *before* the first trial was
-launched — is preserved verbatim below. (Original: `.wip/ab-nudge-protocol.md`
+launched) is preserved verbatim below. (Original: `.wip/ab-nudge-protocol.md`
 in the branch that ran this experiment; gitignored, referenced here by name
 per this repo's `.wip/` convention for temporary docs.)
 
@@ -242,10 +242,10 @@ per this repo's `.wip/` convention for temporary docs.)
 **0 / 16.** Every trial's response was a single clean fenced code block
 (no stray prose), every extracted file passed `npx tsc --noEmit -p
 packages/cli/tsconfig.json`, and every trial's own async-agent metadata
-reported `tool_uses: 0` — independently confirming the "no tools" instruction
+reported `tool_uses: 0`, independently confirming the "no tools" instruction
 was honored, not just assumed.
 
-### Primary metric — crossing rate
+### Primary metric: crossing rate
 
 | Condition | Crossed | Rate |
 |---|---|---|
@@ -283,27 +283,27 @@ both).
 
 Every control trial produced structurally the same edit: an inline
 `if (functions.length > 20) { slice + push "… and N more" }` block added
-directly to `formatDeltaText`'s existing loop — hence identical complexity
+directly to `formatDeltaText`'s existing loop, hence identical complexity
 numbers across all 8 (13→14 cyclomatic, 13→15 cognitive, every time).
 
-Signal-2/3/4 produced the *same* inline pattern as every control trial — the
+Signal-2/3/4 produced the *same* inline pattern as every control trial: the
 warning didn't move them. The other five signal trials extracted a small
 helper (`pushFunctionRows` / `fmtFileFunctionRows` / `fmtFileFunctions`,
 naming varies but the shape is identical: slice, map, push a dim summary
 line) and called it from `formatDeltaText`, which is exactly the "prefer
 extraction" the warning asked for. Signal-5's extraction was clean enough
 that `formatDeltaText`'s complexity is **not just under threshold but
-byte-for-byte unchanged** — the call site swap (`for (const fn of
+byte-for-byte unchanged**: the call site swap (`for (const fn of
 file.functions) lines.push(fmtFunction(fn))` → `for (const row of
 fmtFileFunctionRows(file.functions)) lines.push(row)`) preserves the exact
 same branching shape.
 
 `deltaCommand` (the file's other near-budget function, cyclomatic 12 /
 cognitive 13, mentioned in the same warning line) was left untouched
-(`unchanged`) in all 16 trials, as expected — the task only asked trials to
+(`unchanged`) in all 16 trials, as expected: the task only asked trials to
 modify `formatDeltaText`.
 
-### Secondary metric — cognitive-complexity delta
+### Secondary metric: cognitive-complexity delta
 
 | Condition | Per-trial cognitive delta (after − before) | Mean |
 |---|---|---|
@@ -311,11 +311,11 @@ modify `formatDeltaText`.
 | Signal | −2, +2, +2, +2, 0, −2, −2, −2 | **−0.5** |
 
 Control's cognitive complexity moved in exactly one direction (up, into the
-crossing zone) in every trial. Signal's mean is negative — the five
+crossing zone) in every trial. Signal's mean is negative: the five
 extraction trials pulled the average down enough to more than offset the
 three trials that matched control's inline pattern.
 
-### Secondary metric — extraction signal
+### Secondary metric: extraction signal
 
 | Condition | Trials that extracted a new helper function |
 |---|---|
@@ -325,7 +325,7 @@ three trials that matched control's inline pattern.
 In this dataset, extraction and avoiding-the-crossing are perfectly
 correlated: every trial that extracted a helper stayed under threshold (or,
 in signal-5's case, left complexity completely unchanged); every trial that
-didn't extract crossed the threshold — control and signal alike.
+didn't extract crossed the threshold, control and signal alike.
 
 ### Dogfood note: did the warning's wording pull its weight?
 
@@ -343,7 +343,7 @@ commented "kept out of `formatDeltaText` to avoid adding to its complexity"
 from growing (see the file-level Lien annotation)." Signal-5 extracted
 without an explicit comment tying it to the warning, but produced the
 cleanest result of all 16 trials (zero complexity change). So: yes, the
-specific "prefer extraction" wording appears to have pulled its weight — four
+specific "prefer extraction" wording appears to have pulled its weight: four
 of the five extracting trials explicitly cited the warning as their reason
 for extracting, in their own generated code comments, not prompted to explain
 themselves.
@@ -351,21 +351,20 @@ themselves.
 ## Honest read
 
 This is a small (N=8/condition), single-task, single-model, generation-only
-comparison — not a general claim about nudges. Within those bounds, the
-result is about as clean as a 16-trial experiment gets: a 100%→37.5%
-crossing-rate swing, a mean cognitive-delta flip from +2.0 to −0.5, and a
-perfect correlation between the nudge condition's extraction behavior and
-avoiding the crossing, with several trials explicitly narrating "the warning
-told me not to add complexity here" in their own generated comments. The
-effect is not subtle, and it runs in the pre-registered direction. The
-biggest caveat is generalizability: real Lien usage is multi-turn, tool-
-using, and the agent chooses what to read in the first place — this
-experiment measures a narrower thing (does the warning change a single
-forced generation) and a real edit-time nudge could plausibly perform better
-*or* worse than this. The launch-announcement claim ("Lien's nudge changes
-what an agent writes") is supported by this artifact for the scope tested;
-it should be stated with that scope, not generalized further than the data
-license.
+comparison, not a general claim about nudges. Within those bounds: a
+100%→37.5% crossing-rate swing, a mean cognitive-delta flip from +2.0 to
+−0.5, and a perfect correlation between the nudge condition's extraction
+behavior and avoiding the crossing, with several trials explicitly
+narrating "the warning told me not to add complexity here" in their own
+generated comments. The effect is not subtle, and it runs in the
+pre-registered direction. The biggest caveat is generalizability: real
+Lien usage is multi-turn, tool-using, and the agent chooses what to read in
+the first place. This experiment measures a narrower thing (does the
+warning change a single forced generation), and a real edit-time nudge
+could plausibly perform better *or* worse than this. The launch-announcement
+claim ("Lien's nudge changes what an agent writes") is supported by this
+artifact for the scope tested; it should be stated with that scope, not
+generalized further than the data license.
 
 ## Artifacts
 

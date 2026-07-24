@@ -22,7 +22,7 @@ npm link
 
 ### Dogfooding Lien while working on Lien
 
-The repo contains a Claude Code plugin at `plugins/claude/` and a marketplace manifest at `.claude-plugin/marketplace.json` — these are distribution files for end users. **Do not `/plugin install lien` in your dev environment** when working on Lien itself: that points the MCP server at the npm-published `@liendev/lien`, so you'd be testing the released build instead of your local changes.
+The repo contains a Claude Code plugin at `plugins/claude/` and a marketplace manifest at `.claude-plugin/marketplace.json`: these are distribution files for end users. **Do not `/plugin install lien` in your dev environment** when working on Lien itself: that points the MCP server at the npm-published `@liendev/lien`, so you'd be testing the released build instead of your local changes.
 
 Instead, register Lien per-project against your local `dist/`:
 
@@ -50,7 +50,7 @@ for details and the historical workaround it replaces.
 
 ## Project Structure
 
-Lien is a 6-package monorepo. `CLAUDE.md`'s ["What is Lien?"](./CLAUDE.md#what-is-lien) section (which contains "Package Structure") is the single source of truth for the per-package directory layout — start there. In short:
+Lien is a 6-package monorepo. `CLAUDE.md`'s ["What is Lien?"](./CLAUDE.md#what-is-lien) section (which contains "Package Structure") is the single source of truth for the per-package directory layout. Start there. In short:
 
 ```
 lien/
@@ -88,7 +88,7 @@ lien --help
 
 `CLAUDE.md`'s ["Before EVERY Commit"](./CLAUDE.md#before-every-commit-mandatory)
 section is the single source of truth for the 6 mandatory pre-commit gates
-(`format:check`, `lint`, `typecheck`, `build`, `test`, `lien delta`) — run
+(`format:check`, `lint`, `typecheck`, `build`, `test`, `lien delta`). Run
 that exact list before committing, no subset of it.
 
 **Fast inner loop** while iterating, instead of the full suite each time:
@@ -103,19 +103,19 @@ npm test
 
 `npm test` excludes `packages/cli`'s e2e tests (`vitest run --exclude
 'test/e2e/**'`). Those run separately via `npm run test:e2e:<lang>` (e.g.
-`test:e2e:python`, `test:e2e:swift` — see `packages/cli/package.json` for the
+`test:e2e:python`, `test:e2e:swift`; see `packages/cli/package.json` for the
 full list) and in CI only when a PR carries a changeset or the `e2e` label.
 
 **Native parser binary:** `packages/parser`'s `ast/native/compat.test.ts`
 drives the native backend (`LIEN_PARSER=native`, set explicitly inside that
 suite) against the compiled `parser-native.node`. Run
 `npm run build:native -w @liendev/parser-native` first (compiles the Rust
-crate via `cargo build --release`) — without it, that suite's
+crate via `cargo build --release`). Without it, that suite's
 explicit-native assertions fail loudly rather than skipping. CI always
 builds the native binary before running any test job.
 
 **`LIEN_PARSER`:** as of ADR-013 Phase 4-B, `@liendev/parser-native` is the
-**only** AST parser backend — `node-tree-sitter` and all 11
+**only** AST parser backend: `node-tree-sitter` and all 11
 `tree-sitter-<lang>` npm grammar packages have been removed. The flag now
 only validates `native` or unset (both select the sole backend); any other
 value, including the retired `legacy`, throws an actionable error naming
@@ -126,7 +126,7 @@ silently falling back and degrading every file to line-based chunking, as
 the Phase 4-A transitional fallback used to. A per-file parse error from an
 already-loaded binding is a separate, unaffected code path and still
 returns a per-file error as before. CI builds the native binary before
-every test job (`build:native -w @liendev/parser-native`) — there is no
+every test job (`build:native -w @liendev/parser-native`); there is no
 second parser-backend job to keep in sync anymore. See
 [ADR-013](docs/architecture/decisions/0013-prebuilt-native-parser-napi-rs.md)
 for the full staged rollout this flag was part of.
@@ -161,10 +161,10 @@ CLAUDE.md policy directly: **"Require harness evidence or bypass label"**
 `packages/review/src/plugins/agent/**` must show evidence of a >= 9/10
 harness calibration run (a `harness.yml` run link, a `harness-result.json`
 summary, a `calibrate` mention, or a deterministic fixture-comparison
-census — byte-identical/byte-diff/sha256/`build-prompts.ts`) in the PR body.
+census: byte-identical/byte-diff/sha256/`build-prompts.ts`) in the PR body.
 
 The `skip-harness-gate` label is an **owner-only** bypass for non-behavioral
-changes — it is not a self-serve escape hatch, and agents must never
+changes: it is not a self-serve escape hatch, and agents must never
 self-apply it to get past this check on their own PR. The gate only honors
 the label if its most recent `labeled` event was applied by a login on the
 allowlist in `.github/scripts/harness-gate-check.mjs`; anyone else's label
@@ -174,14 +174,14 @@ policy and its known limitations.
 
 ## Releasing
 
-Lien versions and publishes via [Changesets](https://github.com/changesets/changesets), driven by `.changeset/config.json` and `.github/workflows/release.yml`. Published packages: `@liendev/parser`, `@liendev/core`, `@liendev/lien` (the `cli` package). `review`, `action`, and `site` are `"private": true` and never published. The three published packages are `linked` — they always bump together, even when only one has code changes.
+Lien versions and publishes via [Changesets](https://github.com/changesets/changesets), driven by `.changeset/config.json` and `.github/workflows/release.yml`. Published packages: `@liendev/parser`, `@liendev/core`, `@liendev/lien` (the `cli` package). `review`, `action`, and `site` are `"private": true` and never published. The three published packages are `linked`: they always bump together, even when only one has code changes.
 
 ### Flow
 
-1. **In your PR**, run `npm run changeset` (or invoke the `/changeset` skill to draft one from your commits). Pick the affected packages and bump type, write a summary, commit the generated `.changeset/<name>.md` alongside your change. Skip this for changes scoped only to `packages/review`, `packages/action`, or `packages/site` — they're unpublished and never need one.
+1. **In your PR**, run `npm run changeset` (or invoke the `/changeset` skill to draft one from your commits). Pick the affected packages and bump type, write a summary, commit the generated `.changeset/<name>.md` alongside your change. Skip this for changes scoped only to `packages/review`, `packages/action`, or `packages/site`: they're unpublished and never need one.
 2. **Merge to main.** The release workflow runs on every push to main.
-3. If there are pending changesets, the **changesets bot** opens (or updates) a "Version Packages" PR that bumps versions, rewrites each published package's `CHANGELOG.md` from the changeset summaries, and deletes the consumed changeset files. The root `version` script also syncs `package-lock.json` in the same step (`changeset version && npx --yes npm@10.9.4 install --package-lock-only`) — `changeset version` never touches the lockfile on its own, which otherwise left every workspace's recorded `version` and internal `@liendev/*` ranges stale until the next unrelated `npm install`. The `npm@10.9.4` pin is deliberate: `release.yml` upgrades to npm 11.5.1 for OIDC trusted publishing before this step runs, and npm 11.5.1's dependency resolution on this repo's tree incorrectly prunes `tsx`'s nested pinned `esbuild` from the lockfile (a version genuinely different from the hoisted top-level `esbuild`), which breaks `npm ci` on every subsequent run until someone re-syncs the lockfile again. Pinning `npm@10.9.4` (Node 22's bundled version) for just this invocation sidesteps that regression.
-4. **Merging the Version Packages PR publishes to npm** — the same workflow, seeing no pending changesets left, runs `npm run release` (`npm run build && changeset publish --provenance`) via npm OIDC trusted publishing (no `NPM_TOKEN` needed).
+3. If there are pending changesets, the **changesets bot** opens (or updates) a "Version Packages" PR that bumps versions, rewrites each published package's `CHANGELOG.md` from the changeset summaries, and deletes the consumed changeset files. The root `version` script also syncs `package-lock.json` in the same step (`changeset version && npx --yes npm@10.9.4 install --package-lock-only`). `changeset version` never touches the lockfile on its own, which otherwise left every workspace's recorded `version` and internal `@liendev/*` ranges stale until the next unrelated `npm install`. The `npm@10.9.4` pin is deliberate: `release.yml` upgrades to npm 11.5.1 for OIDC trusted publishing before this step runs, and npm 11.5.1's dependency resolution on this repo's tree incorrectly prunes `tsx`'s nested pinned `esbuild` from the lockfile (a version genuinely different from the hoisted top-level `esbuild`), which breaks `npm ci` on every subsequent run until someone re-syncs the lockfile again. Pinning `npm@10.9.4` (Node 22's bundled version) for just this invocation sidesteps that regression.
+4. **Merging the Version Packages PR publishes to npm**: the same workflow, seeing no pending changesets left, runs `npm run release` (`npm run build && changeset publish --provenance`) via npm OIDC trusted publishing (no `NPM_TOKEN` needed).
 
 ### Versioning
 
@@ -199,45 +199,27 @@ Lien follows [Semantic Versioning](https://semver.org/). Pick the bump when runn
 
 ## Changelog Guidelines
 
-Don't hand-edit any `CHANGELOG.md`. Each published package's `CHANGELOG.md` (e.g. `packages/cli/CHANGELOG.md`) is generated automatically from your changeset's body text when the Version Packages PR is created — write a clear, user-facing summary in the changeset itself; that text becomes the changelog entry.
+Don't hand-edit any `CHANGELOG.md`. Each published package's `CHANGELOG.md` (e.g. `packages/cli/CHANGELOG.md`) is generated automatically from your changeset's body text when the Version Packages PR is created. Write a clear, user-facing summary in the changeset itself; that text becomes the changelog entry.
 
 ## Adding a New Ecosystem Preset
 
-Lien detects project type via lightweight **ecosystem presets** (marker file → include/exclude patterns), not a plugin/detector system. The old `FrameworkDetector` plugin architecture (~3,000 LOC) was removed in favor of this simpler model — see [ADR-007](docs/architecture/decisions/0007-replace-framework-detection-with-ecosystem-presets.md) for the full rationale.
+Lien detects project type via lightweight **ecosystem presets** (marker file → include/exclude patterns), not a plugin/detector system. The old `FrameworkDetector` plugin architecture (~3,000 LOC) was removed in favor of this simpler model. See [ADR-007](docs/architecture/decisions/0007-replace-framework-detection-with-ecosystem-presets.md) for the full rationale.
 
 To add support for a new ecosystem (e.g., a new language or build tool):
 
-1. Add an entry to `ECOSYSTEM_PRESETS` in `packages/parser/src/ecosystem-presets.ts` — a `{ name, markerFiles, excludePatterns }` object literal.
+1. Add an entry to `ECOSYSTEM_PRESETS` in `packages/parser/src/ecosystem-presets.ts`: a `{ name, markerFiles, excludePatterns }` object literal.
 2. Add a test case in `packages/parser/src/ecosystem-presets.test.ts`.
 3. Update the ecosystem preset list in `packages/site/docs/guide/configuration.md` and README.md's Supported Languages section if relevant.
 
-No detector classes, confidence levels, or registry — just add an object to the array.
+No detector classes, confidence levels, or registry are needed. Just add an object to the array.
 
 ## Adding a New AST Language
 
-Each AST-supported language is a **single self-contained file** in `packages/parser/src/ast/languages/` — traverser, export extractor, import extractor, and the `LanguageDefinition` that wires them together — registered in `languages/registry.ts`. That's the small part; the real work is verifying the tree-sitter grammar, plus the e2e/docs/changeset follow-through it takes to actually ship.
+Each AST-supported language is a **single self-contained file** in `packages/parser/src/ast/languages/` (traverser, export extractor, import extractor, and the `LanguageDefinition` that wires them together), registered in `languages/registry.ts`. That's the small part; the real work is verifying the tree-sitter grammar, plus the e2e/docs/changeset follow-through it takes to actually ship.
 
 See [docs/development/adding-a-language.md](docs/development/adding-a-language.md) for the full playbook: the grammar-verification gate, the complete wiring checklist, the 3-PR release arc, and every known gotcha (worktree native builds, lockfile grammar conflicts, no-field-name grammars, e2e project sizing).
 
 ---
-
-## Code Review
-
-All contributions should:
-
-- Follow TypeScript best practices
-- Include JSDoc comments for public APIs
-- Handle errors gracefully
-- Update documentation if needed
-- Add tests for new features (when applicable)
-
-## Questions?
-
-Feel free to open an issue for:
-- Bug reports
-- Feature requests
-- Questions about development
-- Ideas for improvements
 
 ## License and Contributor Agreement
 
@@ -247,13 +229,5 @@ By contributing to Lien, you agree that:
 2. **You grant the project maintainers** the right to use your contributions under the AGPL-3.0 license
 3. **You have the right to submit** the contribution under these terms (either you own the copyright or have permission from the copyright holder)
 4. **Your contribution is your original work** or you have obtained all necessary permissions
-
-### Why AGPL?
-
-Lien uses the AGPL-3.0 license to:
-- Protect our innovative AST-based semantic chunking architecture
-- Ensure improvements benefit the entire community
-- Prevent proprietary forks that don't contribute back
-- Enable sustainable long-term development
 
 **Local use of Lien is and always will be free.**

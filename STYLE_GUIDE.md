@@ -22,7 +22,7 @@ Design identity for all Lien properties (documentation site, platform app).
 |-------|-------|-----|
 | Regular | 400 | Body text, descriptions |
 | Medium | 500 | Labels, nav items, code |
-| **No bold (600+)** | — | Avoid — disrupts visual rhythm |
+| **No bold (600+)** | N/A | Avoid: disrupts visual rhythm |
 
 ### CSS Variables (VitePress)
 
@@ -37,9 +37,9 @@ Design identity for all Lien properties (documentation site, platform app).
 
 ### Philosophy
 
-- **Dark-first** — dark mode is the primary design target
-- **Zinc neutrals** — surfaces use zinc/gray scale, not blue-gray
-- **Purple accent** — single accent color, no secondary hues
+- **Dark-first**: dark mode is the primary design target
+- **Zinc neutrals**: surfaces use zinc/gray scale, not blue-gray
+- **Purple accent**: single accent color, no secondary hues
 
 ### Accent Scale (Purple)
 
@@ -48,7 +48,7 @@ Design identity for all Lien properties (documentation site, platform app).
 | brand-300 | `#c084fc` | purple-400 | Dark mode interactive highlights |
 | brand-500 | `#a855f7` | purple-500 | Primary accent (links, active states) |
 | brand-600 | `#9333ea` | purple-600 | Buttons, CTAs, logo gradient start |
-| brand-soft | `rgba(168,85,247,0.14)` | — | Subtle tints, badges |
+| brand-soft | `rgba(168,85,247,0.14)` | N/A | Subtle tints, badges |
 
 ### VitePress CSS Variables
 
@@ -72,14 +72,14 @@ Design identity for all Lien properties (documentation site, platform app).
 
 ### Neutrals
 
-Use VitePress `--vp-c-*` surface tokens. Do not hardcode neutral grays — they adapt between light/dark automatically.
+Use VitePress `--vp-c-*` surface tokens. Do not hardcode neutral grays; they adapt between light/dark automatically.
 
 ### What Not to Use
 
-- `#646cff` — old indigo brand color (replaced)
-- `#4a9eff` — old sky blue (replaced)
-- `rgba(99,102,241,*)` — indigo RGBA (replaced)
-- `rgba(74,158,255,*)` — sky blue RGBA (replaced)
+- `#646cff`: old indigo brand color (replaced)
+- `#4a9eff`: old sky blue (replaced)
+- `rgba(99,102,241,*)`: indigo RGBA (replaced)
+- `rgba(74,158,255,*)`: sky blue RGBA (replaced)
 
 ---
 
@@ -115,10 +115,10 @@ Use VitePress `--vp-c-*` surface tokens. Do not hardcode neutral grays — they 
 Floating language logos behind the hero section.
 
 - Default opacity: `0.25` (mobile: `0.15`)
-- Hover glow — light: `drop-shadow(0 0 20px rgba(168, 85, 247, 0.6))`
-- Hover glow — dark: `drop-shadow(0 0 25px rgba(192, 132, 252, 0.7))`
-- Pulse radial — light: `rgba(168, 85, 247, 0.2)`
-- Pulse radial — dark: `rgba(192, 132, 252, 0.2)`
+- Hover glow (light): `drop-shadow(0 0 20px rgba(168, 85, 247, 0.6))`
+- Hover glow (dark): `drop-shadow(0 0 25px rgba(192, 132, 252, 0.7))`
+- Pulse radial (light): `rgba(168, 85, 247, 0.2)`
+- Pulse radial (dark): `rgba(192, 132, 252, 0.2)`
 - Logo name label: `font-weight: 500`
 
 ---
@@ -154,5 +154,5 @@ Dark-mode CSS overrides also use `#a855f7` for strokes.
 
 - All interactive text must meet **WCAG AA** contrast (4.5:1 for normal text, 3:1 for large/bold)
 - `brand-500` (`#a855f7`) on a dark background (`#1a1a1a`) passes AA at normal size
-- Never convey information by color alone — pair with icons or labels
-- Respect `prefers-reduced-motion` — wrap animations in the media query
+- Never convey information by color alone; pair with icons or labels
+- Respect `prefers-reduced-motion`; wrap animations in the media query

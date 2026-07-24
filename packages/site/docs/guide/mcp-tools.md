@@ -1,22 +1,19 @@
 # MCP Tools
 
-Lien exposes six powerful tools via the Model Context Protocol (MCP) that enable AI assistants to understand your codebase.
-
-Lien exposes these tools through the Model Context Protocol (MCP), making them available in Cursor, Claude Code, and other MCP-compatible AI assistants.
+Lien exposes six tools through the Model Context Protocol (MCP), available in Cursor, Claude Code, and other MCP-compatible AI assistants.
 
 ## search_code
 
 Full-text keyword search over your codebase (FTS5/BM25). Despite the name, this is
-**lexical** search — it does not embed your query. It matches query terms against
+**lexical** search: it does not embed your query. It matches query terms against
 symbol names, identifier-split symbol tokens, and chunk content (including
 comments/docstrings), ranked by BM25.
 
 ::: warning Keyword search, not meaning search
-Query with concrete keywords, identifiers, and domain terms that actually appear in
-the code — not natural-language questions. A paraphrase that shares no words with
-the code will not match (e.g. "auth" will not surface `login`/`hashPassword`). For
-an exact symbol name, prefer `list_functions`. The tool keeps the `search_code`
-name for backward compatibility.
+Query with concrete keywords and identifiers that appear in the code, not natural-language
+questions. A paraphrase that shares no words with the code will not match (e.g. "auth" will
+not surface `login`/`hashPassword`). See [How It Works](/how-it-works#why-lexical-structural-not-semantic)
+for why Lien is lexical rather than semantic. For an exact symbol name, prefer `list_functions`.
 :::
 
 ### Parameters
@@ -56,7 +53,7 @@ Find code with terms: jwt token validation verify
 ### Best Practices
 
 - Query with keywords and identifiers that appear in the code, not questions
-- Include several related terms — they are OR-joined, and BM25 ranks multi-term matches highest
+- Include several related terms: they are OR-joined, and BM25 ranks multi-term matches highest
 - Lean on domain vocabulary the code actually uses ("token", "session", "retry", "backoff")
 - For an exact symbol name, use `list_functions`; for exact literal strings, use `grep`
 - Increase `limit` for broader exploration (up to 15)
@@ -72,8 +69,8 @@ Find code with terms: jwt token validation verify
 - "harness evidence gate skip label" (also matches YAML config, e.g. a GitHub Actions workflow step)
 
 **Poor queries:**
-- "how does login work?" (a question — use the code's own terms instead)
-- "is the user allowed in?" (paraphrase — no shared vocabulary with the code)
+- "how does login work?" (a question: use the code's own terms instead)
+- "is the user allowed in?" (paraphrase: no shared vocabulary with the code)
 - "code" (way too generic)
 
 ## find_similar
@@ -109,7 +106,7 @@ find_similar({
 
 ### Response
 
-Similar format to `search_code`. Matching is lexical (BM25 over the snippet's tokens), not semantic — it finds code that shares identifiers and keywords with your snippet.
+Similar format to `search_code`. Matching is lexical (BM25 over the snippet's tokens), not semantic: it finds code that shares identifiers and keywords with your snippet.
 
 When filters are applied or low-relevance results are pruned, the response includes:
 
@@ -126,14 +123,6 @@ When filters are applied or low-relevance results are pruned, the response inclu
 ::: tip Automatic Pruning
 Low-relevance results (`not_relevant` category) are automatically removed to reduce noise. The `prunedLowRelevance` count shows how many were removed.
 :::
-
-### Use Cases
-
-- **Refactoring**: Find all similar implementations to update together
-- **Consistency**: Ensure new code matches existing patterns
-- **Duplication Detection**: Locate duplicated logic across the codebase
-- **Language-Specific Search**: Focus on implementations in a specific language
-- **Directory-Scoped Search**: Find similar code within a specific area of the codebase
 
 ## get_files_context
 
@@ -199,6 +188,7 @@ Get file context for app/Models/User.php without related files
 - Optionally includes related chunks from other files
 - Useful before editing a file to understand dependencies
 - Supports batch operations for multiple files (up to 50)
+- When a function in the file is at or above 80% of its cyclomatic or cognitive complexity threshold, the response also includes a `complexityHeadroom` array (each entry has `symbol`, `metric`, `value`, `threshold`; capped at 5 per file, with `complexityHeadroomMore` giving the overflow count) plus a `complexityHeadroomWarning` string, a one-line imperative summary of the same data that appears before `complexityHeadroom` in the response. Both fields are omitted when nothing is near budget.
 
 ### Response Format
 
@@ -349,21 +339,12 @@ When `symbol` is provided, the response also includes `totalUsageCount` (number 
 Risk level is boosted if dependents have high complexity. A file with 10 dependents but complex dependent code may be rated "high" instead of "medium".
 :::
 
-### Use Cases
-
-- **Impact Analysis**: "What breaks if I change this?"
-- **Safe Deletion**: "Is this file still used?"
-- **Refactoring Planning**: "How many files need updating?"
-- **Code Review**: "What's affected by this PR?"
-
 ## get_complexity
 
-Analyze code complexity for tech debt identification and refactoring prioritization. Tracks multiple complexity metrics:
-
-- **Test paths**: Number of test cases needed (cyclomatic complexity)
-- **Mental load**: How hard to follow (penalizes nesting)
-- **Time to understand**: Estimated reading time (Halstead effort)
-- **Estimated bugs**: Predicted bug count (Halstead effort-based)
+Analyze code complexity for tech debt identification and refactoring prioritization. Tracks four
+metrics (cyclomatic, cognitive, Halstead effort, Halstead bugs). See
+[Configuration](/guide/configuration#complexity-analysis) for what each one measures and how to
+set thresholds.
 
 ### Parameters
 
@@ -449,9 +430,8 @@ Analyze complexity of src/api/
 | `halstead_bugs` | Estimated bug count (Effort^(2/3) / 3000) |
 
 ::: tip Halstead Metrics
-Both Halstead metrics use intuitive thresholds:
-- **Time to understand**: Configure with `timeToUnderstandMinutes` (default: 60 minutes = 1 hour)
-- **Estimated bugs**: Configure with `estimatedBugs` (default: 1.5 — functions likely to have >1.5 bugs)
+Both Halstead metrics have configurable thresholds (`timeToUnderstandMinutes`, `estimatedBugs`). See
+[Configuration](/guide/configuration#thresholds) for defaults and how to set them.
 :::
 
 ### Severity Levels
@@ -460,13 +440,6 @@ Both Halstead metrics use intuitive thresholds:
 |----------|------------|--------|
 | `warning` | 15-29 | Consider refactoring |
 | `error` | 30+ | Should refactor |
-
-### Use Cases
-
-- **Tech Debt Analysis**: "What needs refactoring?"
-- **Code Review**: "Are there complexity issues in this PR?"
-- **Prioritization**: "Which functions should I simplify first?"
-- **Metrics Tracking**: Monitor complexity over time
 
 ### Examples
 
@@ -492,14 +465,14 @@ An exact match on a symbol name is always promoted to `highly_relevant`.
 | Category | Meaning |
 |----------|---------|
 | `highly_relevant` | Strong BM25 match relative to the best hit (or an exact symbol-name match) |
-| `relevant` | Good match — useful context for the query |
-| `loosely_related` | Weaker match — may provide background context |
-| `not_relevant` | Weak match — automatically filtered out of results |
+| `relevant` | Good match, useful context for the query |
+| `loosely_related` | Weaker match, may provide background context |
+| `not_relevant` | Weak match, automatically filtered out of results |
 
 ::: tip
 Because bands are relative to the best hit in each result set, the top result is
 always `highly_relevant`. Categories are keyword-match strength, not semantic
-similarity — a match means your query terms appear in the code or its comments.
+similarity: a match means your query terms appear in the code or its comments.
 :::
 
 ## Test Associations
@@ -534,7 +507,7 @@ All search results include test association metadata:
 ## Tool Selection Guide
 
 ### Use `search_code` when:
-- Discovering code by keyword — identifiers and domain terms that appear in the source
+- Discovering code by keyword: identifiers and domain terms that appear in the source
 - You need to find where a concept lives before editing (query with the code's own vocabulary)
 - Looking for patterns, implementations, handlers, validators by their terminology
 
@@ -588,14 +561,8 @@ Use paths relative to project root, not absolute paths.
 
 ## Supported AI Assistants
 
-Lien works with any MCP-compatible AI assistant:
-
-- **Cursor** ✅ (per-project `.cursor/mcp.json`)
-- **Claude Code** ✅ (per-project `.mcp.json`)
-- **Windsurf** ✅ (global `~/.codeium/windsurf/mcp_config.json`)
-- **OpenCode** ✅ (per-project `opencode.json`)
-- **Kilo Code** ✅ (per-project `.kilocode/mcp.json`)
-- **Antigravity** ✅ (manual config)
-- **Other MCP clients** ✅ (see [Getting Started](/guide/getting-started) for setup)
+Lien works with any MCP-compatible AI assistant. See [Getting Started](/guide/getting-started)
+for the per-editor setup table (Cursor, Claude Code, Windsurf, OpenCode, Kilo Code, Antigravity,
+and other MCP clients).
 
 

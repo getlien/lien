@@ -6,25 +6,29 @@
 **Related**: [Issue #207](https://github.com/getlien/lien/issues/207), PR #278
 
 > **Update (2026-07-09):** ADR-009's deploy-size / install-speed drivers are
-> now largely obsolete — the ~100MB embedding/vector-DB stack this ADR cited
+> now largely obsolete: the ~100MB embedding/vector-DB stack this ADR cited
 > was removed in [ADR-011](0011-sqlite-structural-store-fts5-lexical-search.md).
 > The parser/core split now stands on its clean-boundaries rationale alone.
+> The tables below ("What Stays in `@liendev/core`", "Target dependency
+> chain") describe core's composition as of this ADR, before ADR-011: core
+> no longer has an `embeddings/` directory, and `vectordb/` now means the
+> SQLite/FTS5 backend, not LanceDB or Qdrant.
 
 ## Context and Problem Statement
 
-`@liendev/core` bundles two distinct responsibilities: AST parsing/analysis (~5-10MB) and vector DB/embeddings integration (~100MB with native dependencies). `@liendev/review` only needs AST parsing and complexity analysis to generate PR review comments, yet it depends on `@liendev/core` and transitively pulls in LanceDB, Qdrant, and transformers.js — none of which it uses.
+`@liendev/core` bundles two distinct responsibilities: AST parsing/analysis (~5-10MB) and vector DB/embeddings integration (~100MB with native dependencies). `@liendev/review` only needs AST parsing and complexity analysis to generate PR review comments, yet it depends on `@liendev/core` and transitively pulls in LanceDB, Qdrant, and transformers.js, none of which it uses.
 
 This causes:
-- **Bloated deployments** — the Lien Review GitHub App Docker image ships ~100MB of unused embedding/vector DB code
-- **Slow installs** — native dependencies (LanceDB, onnxruntime) compile during `npm install` even when not needed
-- **Unclear package boundaries** — parsing, chunking, and complexity analysis are conceptually independent from embedding and search
+- **Bloated deployments**: the Lien Review GitHub App Docker image ships ~100MB of unused embedding/vector DB code
+- **Slow installs**: native dependencies (LanceDB, onnxruntime) compile during `npm install` even when not needed
+- **Unclear package boundaries**: parsing, chunking, and complexity analysis are conceptually independent from embedding and search
 
 ## Decision Drivers
 
-* **Deploy size** — Lien Review runs as a Docker container; smaller images = faster cold starts
-* **Install speed** — CI pipelines and contributors shouldn't wait for native deps they don't need
-* **Clean boundaries** — packages should have a single clear responsibility
-* **No breaking external API** — this is an internal restructuring; MCP tools and CLI commands remain unchanged
+* **Deploy size**: Lien Review runs as a Docker container; smaller images = faster cold starts
+* **Install speed**: CI pipelines and contributors shouldn't wait for native deps they don't need
+* **Clean boundaries**: packages should have a single clear responsibility
+* **No breaking external API**: this is an internal restructuring; MCP tools and CLI commands remain unchanged
 
 ## Considered Options
 
@@ -40,7 +44,7 @@ Leave the architecture as-is. Accept the bloated dependency tree for `@liendev/r
 Use path-based imports like `@liendev/core/indexer/ast/parser` to avoid pulling in the full package.
 
 **Pros:** No new package needed.
-**Cons:** Fragile — deep imports break on internal refactors. Doesn't actually reduce install size since native deps are declared at the package level.
+**Cons:** Fragile. Deep imports break on internal refactors. Doesn't actually reduce install size since native deps are declared at the package level.
 
 ### Option 3: Extract `@liendev/parser` (chosen)
 
@@ -91,22 +95,22 @@ In the context of reducing deployment size for Lien Review and establishing clea
 
 ### Positive
 
-- **Smaller Lien Review image** — drops LanceDB, Qdrant, transformers.js, onnxruntime from the dependency tree
-- **Faster CI for review** — no native dependency compilation
-- **Clear package boundaries** — parsing is self-contained with zero imports from core
-- **Reusable** — `@liendev/parser` can be used independently for AST analysis without any vector DB setup
+- **Smaller Lien Review image**: drops LanceDB, Qdrant, transformers.js, onnxruntime from the dependency tree
+- **Faster CI for review**: no native dependency compilation
+- **Clear package boundaries**: parsing is self-contained with zero imports from core
+- **Reusable**: `@liendev/parser` can be used independently for AST analysis without any vector DB setup
 
 ### Negative
 
-- **One more package** — adds a `packages/parser/` directory to the monorepo
-- **Import churn** — all consuming packages (cli, core, review, app) had imports updated
-- **Build ordering** — CI must build parser before core (parser is a dependency of core)
+- **One more package**: adds a `packages/parser/` directory to the monorepo
+- **Import churn**: all consuming packages (cli, core, review, app) had imports updated
+- **Build ordering**: CI must build parser before core (parser is a dependency of core)
 
 ### Neutral
 
 - Tree-sitter dependencies moved from core to parser (they belong with AST parsing)
 - `glob` and `ignore` dependencies moved from core to parser (used by scanner/gitignore)
-- No external API changes — MCP tools, CLI commands, and review output are unchanged
+- No external API changes: MCP tools, CLI commands, and review output are unchanged
 
 ## Validation
 
@@ -122,17 +126,17 @@ In the context of reducing deployment size for Lien Review and establishing clea
 
 Before extraction, three preparatory refactors were needed:
 
-1. **Decouple `dependency-analyzer.ts` from `SearchResult`** — changed to use `CodeChunk` (structural subtype) instead of importing from vector DB types
-2. **Extract `analyzeComplexityFromChunks`** — pulled pure analysis logic out of `ComplexityAnalyzer` class so it can run without a VectorDB instance
-3. **Split parser constants** — moved `DEFAULT_CHUNK_SIZE`, `DEFAULT_CHUNK_OVERLAP`, `MAX_CHUNKS_PER_FILE` to a separate file
+1. **Decouple `dependency-analyzer.ts` from `SearchResult`**: changed to use `CodeChunk` (structural subtype) instead of importing from vector DB types
+2. **Extract `analyzeComplexityFromChunks`**: pulled pure analysis logic out of `ComplexityAnalyzer` class so it can run without a VectorDB instance
+3. **Split parser constants**: moved `DEFAULT_CHUNK_SIZE`, `DEFAULT_CHUNK_OVERLAP`, `MAX_CHUNKS_PER_FILE` to a separate file
 
 ## Related Decisions
 
-- [ADR-003](0003-ast-based-chunking.md) — AST-based chunking (now in parser)
-- [ADR-005](0005-per-language-definition-pattern.md) — Per-language definitions (now in parser)
-- [ADR-006](0006-consolidated-language-files-with-import-extractors.md) — Consolidated language files (now in parser)
+- [ADR-003](0003-ast-based-chunking.md): AST-based chunking (now in parser)
+- [ADR-005](0005-per-language-definition-pattern.md): Per-language definitions (now in parser)
+- [ADR-006](0006-consolidated-language-files-with-import-extractors.md): Consolidated language files (now in parser)
 
 ## References
 
-- [Issue #207](https://github.com/getlien/lien/issues/207) — Extract parser package
-- PR #278 — Implementation
+- [Issue #207](https://github.com/getlien/lien/issues/207): Extract parser package
+- PR #278: Implementation

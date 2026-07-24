@@ -2,7 +2,7 @@
 
 This document details how the MCP (Model Context Protocol) server initializes, handles requests, and manages real-time updates.
 
-## Server Initialization
+## Server initialization
 
 ```mermaid
 sequenceDiagram
@@ -80,22 +80,22 @@ sequenceDiagram
     MCP-->>AI: [search_code, find_similar, get_files_context, list_functions, get_dependents, get_complexity]
 ```
 
-### Available MCP Tools
+### Available MCP tools
 
 The server exposes six tools to AI assistants:
 
 | Tool | Description |
 |------|-------------|
-| `search_code` | Full-text (FTS5/BM25) keyword code search — lexical, not meaning-based |
+| `search_code` | Full-text (FTS5/BM25) keyword code search, lexical rather than meaning-based |
 | `find_similar` | Find lexically similar code (BM25 over a snippet's tokens) |
 | `get_files_context` | Get file context with dependencies and test associations (supports batch) |
 | `list_functions` | Fast symbol lookup by naming pattern |
 | `get_dependents` | Reverse dependency lookup for impact analysis |
 | `get_complexity` | Complexity analysis (cyclomatic, cognitive, Halstead) for files or codebase |
 
-## Tool Request Handling
+## Tool request handling
 
-### search_code Tool
+### search_code tool
 
 ```mermaid
 sequenceDiagram
@@ -142,7 +142,7 @@ sequenceDiagram
     AI->>AI: Present to user
 ```
 
-### get_files_context Tool
+### get_files_context tool
 
 ```mermaid
 sequenceDiagram
@@ -179,7 +179,7 @@ sequenceDiagram
     end
 ```
 
-## Background Update Monitoring
+## Background update monitoring
 
 The MCP server monitors for index changes and automatically reconnects.
 
@@ -278,7 +278,7 @@ flowchart TB
     class RECONNECT_START,CLOSE_CONN,REOPEN_CONN,RELOAD_INDEX,RECONNECT_DONE,NOTIFY_CLIENT reconnectClass
 ```
 
-## Error Handling in MCP Server
+## Error handling in MCP server
 
 ```mermaid
 flowchart TD
@@ -320,7 +320,7 @@ flowchart TD
     style CATCH fill:#fff9c4
 ```
 
-### Error Response Format
+### Error response format
 
 ```json
 {
@@ -332,77 +332,9 @@ flowchart TD
 }
 ```
 
-## MCP Protocol Messages
+## Performance optimizations
 
-### Tool List Request
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "tools/list"
-}
-```
-
-**Response:**
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "result": {
-    "tools": [
-      {
-        "name": "search_code",
-        "description": "Full-text keyword search over the codebase (BM25)...",
-        "inputSchema": {
-          "type": "object",
-          "properties": {
-            "query": {"type": "string", "description": "..."},
-            "limit": {"type": "number", "default": 5}
-          },
-          "required": ["query"]
-        }
-      }
-      // ... other tools
-    ]
-  }
-}
-```
-
-### Tool Call Request
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 2,
-  "method": "tools/call",
-  "params": {
-    "name": "search_code",
-    "arguments": {
-      "query": "how do we handle authentication",
-      "limit": 5
-    }
-  }
-}
-```
-
-**Response:**
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 2,
-  "result": {
-    "content": [{
-      "type": "text",
-      "text": "{\"indexInfo\":{...},\"results\":[...]}"
-    }]
-  }
-}
-```
-
-## Performance Optimizations
-
-### 1. Indexed Lookups
+### 1. Indexed lookups
 
 ```
 get_files_context("src/auth.ts")
@@ -414,7 +346,7 @@ FTS5 keyword search
   → single-digit milliseconds on typical indexes
 ```
 
-### 2. Fast Startup
+### 2. Fast startup
 
 ```
 Server Start:
@@ -423,7 +355,7 @@ Server Start:
   Total: ~1s
 ```
 
-### 3. Background Reindexing
+### 3. Background reindexing
 
 ```
 File changed → Trigger background reindex
@@ -437,9 +369,9 @@ Next query uses updated index
 User Experience: No downtime, seamless updates
 ```
 
-## Logging & Debugging
+## Logging & debugging
 
-### Normal Operation
+### Normal operation
 
 ```
 [Lien MCP] Initializing MCP server...
@@ -448,7 +380,7 @@ User Experience: No downtime, seamless updates
 [Lien MCP] MCP server running on stdio
 ```
 
-## Shutdown & Cleanup
+## Shutdown & cleanup
 
 ```mermaid
 sequenceDiagram
@@ -486,46 +418,5 @@ sequenceDiagram
     Process-->>User: Clean exit
 ```
 
-## Integration with AI Assistants
-
-### Cursor Integration
-
-```json
-// In Cursor settings (.cursor/mcp.json)
-{
-  "mcpServers": {
-    "lien": {
-      "command": "lien",
-      "args": ["serve"],
-      "cwd": "${workspaceFolder}"
-    }
-  }
-}
-```
-
-### Usage Flow
-
-```
-1. User opens Cursor
-2. Cursor reads MCP config
-3. Cursor spawns: lien serve (in project root)
-4. Lien MCP server initializes
-5. Cursor connects via stdio
-6. User asks: "Where is the authentication logic?"
-7. Cursor calls: search_code("authenticate session token") — keywords the code uses
-8. Lien returns: Relevant code chunks (BM25-ranked)
-9. Cursor uses results to answer user
-```
-
-### Multi-Project Support
-
-Each workspace gets its own MCP server instance:
-
-```
-Workspace A: lien serve (PID 1234) → Uses ~/.lien/workspace-a/
-Workspace B: lien serve (PID 5678) → Uses ~/.lien/workspace-b/
-Workspace C: lien serve (PID 9012) → Uses ~/.lien/workspace-c/
-
-Each server is isolated and manages its own index
-```
+For MCP client configuration (Cursor, Claude Code, etc.) and multi-project setup, see [getting-started](../../packages/site/docs/guide/getting-started.md) and [cli-commands](../../packages/site/docs/guide/cli-commands.md).
 

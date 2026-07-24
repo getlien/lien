@@ -39,14 +39,14 @@ LanceDB + embeddings backend was removed in favor of it (see
 [ADR-011](https://github.com/getlien/lien/blob/main/docs/architecture/decisions/0011-sqlite-structural-store-fts5-lexical-search.md)),
 and the Qdrant backend was retired before that. Existing configs that name a
 retired backend (`backend: "lancedb"` / `"qdrant"`, or the old `qdrant.*` keys) do
-not crash — Lien warns once and uses the SQLite backend. Old `code_chunks.lance`
+not crash: Lien warns once and uses the SQLite backend. Old `code_chunks.lance`
 directories left under `~/.lien/indices/` are inert after reindexing and can be
 deleted to reclaim disk space.
 :::
 
 ## Per-Project Configuration
 
-Per-project settings live in `.lien.config.json` in your project root. It supports exactly one field — `complexity.thresholds`, read by `lien delta` — so most users don't need this at all.
+Per-project settings live in `.lien.config.json` in your project root. It supports exactly one field, `complexity.thresholds` (read by `lien delta`), so most users don't need this at all.
 
 ```json
 {
@@ -156,11 +156,11 @@ Detected via `astro.config.*`. Indexes:
 
 ### Liquid
 
-Liquid (`.liquid`) files are indexed via the default scan pattern—no ecosystem preset or auto-detection is required. They work out of the box alongside all other supported file types.
+Liquid (`.liquid`) files are indexed via the default scan pattern: no ecosystem preset or auto-detection is required. They work out of the box alongside all other supported file types.
 
 ### YAML
 
-YAML (`.yml`/`.yaml`) files are indexed via the default scan pattern, chunked by top-level key into `search_code`-able config sections (e.g. a GitHub Actions `jobs.review` block). This includes `.github/**` explicitly, so CI workflow files under `.github/workflows/` are indexed even though the default scan otherwise skips dot-directories. Other dot-directory CI configs (e.g. `.circleci/config.yml`, a root `.gitlab-ci.yml`) are **not yet indexed**—only `.github/**` is covered today.
+YAML (`.yml`/`.yaml`) files are indexed via the default scan pattern, chunked by top-level key into `search_code`-able config sections (e.g. a GitHub Actions `jobs.review` block). This includes `.github/**` explicitly, so CI workflow files under `.github/workflows/` are indexed even though the default scan otherwise skips dot-directories. Other dot-directory CI configs (e.g. `.circleci/config.yml`, a root `.gitlab-ci.yml`) are **not yet indexed**: only `.github/**` is covered today.
 
 ### Monorepos
 
@@ -173,7 +173,7 @@ Configure complexity analysis for the `lien complexity` command and `get_complex
 - **Test Paths (Cyclomatic)**: Number of test cases needed for full branch coverage
 - **Mental Load**: How hard it is to follow the code (penalizes nesting depth)
 - **Time to Understand**: Estimated reading time based on Halstead effort
-- **Estimated Bugs**: Predicted bug count based on Halstead volume (Volume / 3000)
+- **Estimated Bugs**: Predicted bug count based on Halstead effort (Effort^(2/3) / 3000)
 
 ```json
 {
@@ -204,12 +204,14 @@ Configure complexity analysis for the `lien complexity` command and `get_complex
 
 ## Migrating from Old Config Files
 
-Older versions of `.lien.config.json` supported a lot more: `core`, `chunking`, `mcp`, `gitDetection`, `fileWatching`, `storage`, a deprecated `frameworks` array, and an even older `indexing`-based shape. None of it ever affected indexing, search, chunking, or the MCP server in practice — Lien now uses:
+Older versions of `.lien.config.json` supported a lot more: `core`, `chunking`, `mcp`, `gitDetection`, `fileWatching`, `storage`, a deprecated `frameworks` array, and an even older `indexing`-based shape. None of it ever affected indexing, search, chunking, or the MCP server in practice. Lien now uses:
 
 1. **Ecosystem presets** for auto-detecting project type and patterns (automatic, not configurable)
 2. **Global config** at `~/.lien/config.json` for backend selection (managed via `lien config`)
 3. **Per-project config** at `.lien.config.json` for `complexity.thresholds` only (optional)
 
-If your `.lien.config.json` still has any of the retired sections, Lien won't fail — it warns once per section, telling you what to delete, and ignores the rest. Your indices will continue to work — no need to re-index.
+If your `.lien.config.json` still has any of the retired sections, Lien handles it the same way it
+handles a retired backend name above: it warns once per section, telling you what to delete, and
+ignores the rest. No re-index needed, and your indices keep working.
 
 

@@ -24,7 +24,7 @@ features:
   
   - icon: 🧪
     title: Test Associations
-    details: Know which tests cover a file before you touch it — via naming convention and import analysis across 12+ frameworks.
+    details: Know which tests cover a file before you touch it, via naming convention and import analysis across 12+ frameworks.
   
   - icon: 🚀
     title: Lexical Code Search
@@ -32,23 +32,23 @@ features:
   
   - icon: 🔒
     title: 100% Local & Private
-    details: Code never leaves your machine. All analysis happens locally with no external API calls — and nothing to download on first run.
+    details: Code never leaves your machine for indexing or search, with no external API calls or telemetry. (Fetching the published package itself, via npm or npx, is the one network step.)
   
   - icon: 🎯
     title: MCP Integration
-    details: Works seamlessly with Cursor, Claude Code, and other MCP-compatible AI coding assistants via Model Context Protocol.
+    details: Works with Cursor, Claude Code, and other MCP-compatible AI coding assistants via the Model Context Protocol.
 ---
 
 ## Quick Start
 
-### Claude Code (recommended) — one-time plugin install
+### Claude Code (recommended): one-time plugin install
 
 ```text
 /plugin marketplace add getlien/lien
 /plugin install lien
 ```
 
-That's it. Lien's MCP tools and the Explore agent are available in every Claude Code session, in every repo — no per-project setup. First use in a new git repo triggers a one-time index automatically. See the [Claude Code plugin guide](/guide/claude-code-plugin) for what its hooks do beyond the MCP config.
+That's it. Lien's MCP tools and the Explore agent are available in every Claude Code session, in every repo, with no per-project setup. First use in a new git repo triggers a one-time index automatically. See the [Claude Code plugin guide](/guide/claude-code-plugin) for what its hooks do beyond the MCP config.
 
 ### Other editors (Cursor, Windsurf, OpenCode, Kilo Code, Antigravity)
 
@@ -72,50 +72,24 @@ Lien auto-detects your project structure and indexes on first use.
 
 ## How It Works
 
-1. **Index**: Lien scans your codebase and chunks it into semantic units (functions, classes, blocks) using Tree-sitter AST parsing — no model to download
-2. **Store**: Chunks, their complexity metrics, and the import graph are written to a local SQLite database in `~/.lien/indices/`
-3. **Answer**: When your AI assistant asks a structural question ("what depends on this?", "how complex is this?"), Lien answers it with indexed SQL
-4. **Search**: For discovery, Lien runs FTS5/BM25 lexical search over symbol names, identifier-split tokens, and content
-5. **Context**: Results flow back to your assistant, giving it accurate, explainable context
+Lien parses your code with Tree-sitter into a local SQLite database, then answers structural questions ("what depends on this?", "how complex is this?") with indexed SQL, and handles discovery with FTS5/BM25 lexical search. See [How It Works](/how-it-works) for the full pipeline.
 
 ## Use Cases
 
-- **Impact Analysis**: "What depends on this file?" / "Is this safe to delete?"
-- **Tech Debt Analysis**: "What are the most complex functions?"
-- **Test Coverage**: "What tests cover this module?"
-- **Find Implementations**: "Where is the retry backoff handled?" (use terms that appear in the code)
-- **Locate Patterns**: "Find similar error-handling code"
-- **Refactoring Scope**: "How many files need updating if I change this signature?"
+Impact analysis before a refactor, tech-debt hotspots, test coverage lookups, and keyword-based code discovery. See [Use Cases](/guide/#use-cases) in the guide for examples.
 
 ## Privacy First
 
-Lien is built with privacy as a core principle:
-
-- All code analysis happens on your machine
-- No data is sent to external servers
-- No telemetry or usage tracking
-- Open source and auditable
+Your code stays on your machine during indexing and search: no external API calls, no telemetry. The one network step is fetching the published npm package itself (via `npm install` or the Claude Code plugin's `npx`) on first setup. See [How It Works](/how-it-works#privacy-first) for details.
 
 ## Free & Open Source
 
-Lien is licensed under AGPL-3.0 and **free forever for local use**. The license ensures:
-
-- ✅ Use Lien locally without restrictions
-- ✅ Modify and distribute freely
-- ✅ Improvements benefit the community
-- ✅ Sustainable long-term development
-
-Questions about licensing? Contact alf@lien.dev
+Lien is licensed under AGPL-3.0 and free forever for local use. Questions about licensing? Contact alf@lien.dev
 
 ---
 
 <div style="text-align: center; margin-top: 2rem; color: var(--vp-c-text-2);">
-  <p><em>Lien</em> /ljɛ̃/ — French for "link"</p>
-  <p style="margin-top: 0.5rem; font-size: 0.9em;">Linking code intelligence with AI tools, one query at a time.</p>
-</div>
-
-<div style="text-align: center; margin-top: 2rem;">
-  <strong>Made with ❤️ for developers who care about privacy and local-first tools.</strong>
+  <p><em>Lien</em> /ljɛ̃/: French for "link"</p>
 </div>
 
 
