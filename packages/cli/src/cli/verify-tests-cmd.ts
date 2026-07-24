@@ -13,7 +13,13 @@
 import { lookupTestAssociations, formatTestReminder } from './annotate-cmd.js';
 import { resolveProjectRoot } from './project-root.js';
 import { toAbsolutePath } from '../types/paths.js';
-import { recordEdit, recordRun, readSession, type TestLedgerEvent } from '../utils/test-ledger.js';
+import {
+  recordEdit,
+  recordRun,
+  recordBlocked,
+  readSession,
+  type TestLedgerEvent,
+} from '../utils/test-ledger.js';
 import {
   classifyTestCommand,
   computeUnverifiedFiles,
@@ -94,11 +100,39 @@ function splitSessionEvents(events: TestLedgerEvent[]): {
   for (const event of events) {
     if (event.kind === 'edit') {
       edits.set(event.file, event.tests); // last-write-wins; a file's test associations don't change mid-session
-    } else {
+    } else if (event.kind === 'run') {
       runs.push(classifyTestCommand(event.command));
     }
   }
   return { edits, runs };
+}
+
+/**
+ * Belt-and-braces loop-prevention alongside the Stop hook's own
+ * `stop_hook_active` check: `stop_hook_active`'s presence in the real
+ * Stop-hook stdin payload could not be confirmed against current Claude
+ * Code docs during review (conflicting fetches — see the dated deviation
+ * note in docs/architecture/test-verification-nudge.md), so this ledger-
+ * based suppression is the mechanism that actually holds if that field
+ * turns out to be absent or unreliable in a given Claude Code version.
+ * 10 minutes, not configurable — long enough that a real editing session
+ * won't re-nag every single Stop, short enough that a genuinely new
+ * unverified edit later in a long session still gets flagged eventually.
+ */
+export const BLOCK_SUPPRESSION_WINDOW_MS = 10 * 60 * 1000;
+
+/** Pure: does `events` contain a 'blocked' event within `windowMs` of `now`? Exported for direct unit testing. */
+export function wasRecentlyBlocked(
+  events: TestLedgerEvent[],
+  now: Date = new Date(),
+  windowMs: number = BLOCK_SUPPRESSION_WINDOW_MS,
+): boolean {
+  const cutoffMs = now.getTime() - windowMs;
+  return events.some(e => {
+    if (e.kind !== 'blocked') return false;
+    const t = Date.parse(e.timestamp);
+    return Number.isFinite(t) && t >= cutoffMs;
+  });
 }
 
 const MAX_TESTS_SHOWN_PER_FILE = 1;
@@ -134,9 +168,22 @@ async function runReport(options: ReportOptions): Promise<void> {
   const format = options.format ?? 'text';
   if (!options.session || !VALID_FORMATS.includes(format)) return;
 
-  const events = await readSession(resolveRootDir(), options.session);
+  const rootDir = resolveRootDir();
+  const events = await readSession(rootDir, options.session);
   const { edits, runs } = splitSessionEvents(events);
-  const unverified = computeUnverifiedFiles(edits, runs);
+  let unverified = computeUnverifiedFiles(edits, runs);
+
+  // Loop-prevention fallback: if we already blocked within the suppression
+  // window, treat this report as clean rather than blocking again — the
+  // Stop hook's own `stop_hook_active` check is the first line of defense,
+  // this is the second (see wasRecentlyBlocked's doc comment above). Applies
+  // uniformly to both formats so `report` has one consistent answer to "is
+  // there something to nudge about right now."
+  if (unverified.length > 0 && wasRecentlyBlocked(events)) {
+    unverified = [];
+  } else if (unverified.length > 0) {
+    await recordBlocked(rootDir, options.session);
+  }
 
   if (format === 'json') {
     console.log(JSON.stringify({ unverified }));

@@ -6,12 +6,15 @@
 # docs/architecture/test-verification-nudge.md.
 #
 # A coarse shell-level keyword pre-filter runs FIRST, before shelling out to
-# `lien` at all: a command matching none of these substrings can never be a
-# recognized test run (the precise classification in `classifyTestCommand`,
-# driven via `lien verify-tests note-run`, is a strict superset of what this
-# filter lets through), so a routine non-test Bash call (ls, git status,
-# cat, ...) spawns no `lien` process at all — the whole point of doing this
-# check in shell rather than always shelling out and letting the CLI decide.
+# `lien` at all: this filter is a strict SUPERSET of what the precise
+# classification in `classifyTestCommand` (driven via `lien verify-tests
+# note-run`) ultimately recognizes — every command the classifier would
+# accept also passes this filter, so a real test run is never silently
+# dropped, but the filter also lets through some commands the classifier
+# later rejects (a wasted but harmless `lien` spawn). A routine non-test
+# Bash call (ls, git status, cat, ...) matches none of these substrings and
+# spawns no `lien` process at all — the whole point of doing this check in
+# shell rather than always shelling out and letting the CLI decide.
 #
 # Emits NOTHING to the model on any path — recording only, never a warning.
 # Best-effort throughout; never fails the Bash call. Disable via

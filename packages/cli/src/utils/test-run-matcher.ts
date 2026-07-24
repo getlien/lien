@@ -7,11 +7,15 @@
  * files with associated tests were never covered by an observed run?" —
  * zero I/O, zero LLM, fully unit-testable with synthetic strings.
  *
- * Matching is deliberately generous in both directions — recognizing more
- * commands as test runs, and treating more edits as "covered" — because a
- * false "you didn't test" nag defeats the nudge (see
- * docs/architecture/test-verification-nudge.md, "Conservative by
- * construction").
+ * Runner *recognition* stays generous by design — recognizing more commands
+ * as test runs only ever reduces false nags, never causes one. Coverage
+ * *matching* (`isCoveredByScope`) is deliberately NOT generous, despite an
+ * earlier version of this module being bidirectional-substring (see the
+ * 2026-07 deviation note in
+ * docs/architecture/test-verification-nudge.md#deviation-from-generous-substring-matching):
+ * substring containment let an unrelated run (`oauth.test.ts` covering
+ * `auth.ts`) silently suppress a real nag, which is a worse failure mode
+ * than an occasional false nag the escape-hatch wording already absorbs.
  */
 
 import path from 'node:path';
@@ -30,11 +34,37 @@ export interface TestRunClassification {
 // segment containing the runner keyword is inspected for scope arguments.
 const SEGMENT_SPLIT_RE = /&&|\|\||\||;/;
 
+// A leading `VAR=value` environment assignment (`CI=1 npm test`,
+// `NODE_ENV=test vitest`) must not defeat the runner-keyword match, which is
+// anchored to the start of the segment. Stripped in a loop so multiple
+// leading assignments (`CI=1 FORCE_COLOR=0 npm test`) are all removed.
+const ENV_ASSIGNMENT_RE = /^[A-Za-z_][A-Za-z0-9_]*=\S*\s+/;
+
+function stripLeadingEnvAssignments(segment: string): string {
+  let s = segment;
+  while (ENV_ASSIGNMENT_RE.test(s)) {
+    s = s.replace(ENV_ASSIGNMENT_RE, '');
+  }
+  return s;
+}
+
 // Flags whose VALUE scopes a whole package/workspace, not a single file —
 // `npm test -w @liendev/core` must classify as broad even though
 // "@liendev/core" contains a "/". The flag and its value are both skipped
 // before scanning for path-like tokens.
 const WORKSPACE_SCOPE_FLAGS = new Set(['-w', '--workspace', '--filter']);
+
+// Flags whose value is a config file path, not a test/source file —
+// `vitest --config vitest.config.ts` runs whatever the config's own
+// `include` pattern selects (typically the whole suite), not just the named
+// config file. The flag and its value are both skipped, same mechanism as
+// the workspace-scope flags above.
+const CONFIG_FLAGS = new Set(['-c', '--config']);
+
+// A token whose basename matches this is a config file even when it wasn't
+// preceded by a --config/-c flag (covers runners that accept the config
+// path positionally) — never a scope-narrowing argument.
+const CONFIG_FILE_RE = /\.config\.[^./]+$/i;
 
 // Go's "all packages, recursively" convention. Contains a "/" but names no
 // specific file, so it must not count as a scoping argument.
@@ -42,15 +72,18 @@ const GLOB_ALL_TOKENS = new Set(['./...', '...']);
 
 // Conservative allow-list (see docs/architecture/test-verification-nudge.md
 // section on runner recognition). Each pattern is anchored to the start of a
-// (trimmed) command segment; the boundary `(?=\s|$)` stops "npm t" from
-// matching inside "npm test".
+// (trimmed, env-assignment-stripped) command segment; the boundary
+// `(?=\s|$)` stops "npm t" from matching inside "npm test". `(:\S*)?` on the
+// npm-run-script/yarn/pnpm forms recognizes custom script names like
+// `npm run test:e2e:python` (this repo's own convention) — npm's bare `npm
+// test` shorthand has no such custom-name form, so it's left unextended.
 const RUNNER_PATTERNS: RegExp[] = [
-  /^npm\s+run\s+test(?=\s|$)/,
+  /^npm\s+run\s+test(:\S*)?(?=\s|$)/,
   /^npm\s+test(?=\s|$)/,
   /^npm\s+t(?=\s|$)/,
-  /^yarn\s+test(?=\s|$)/,
+  /^yarn\s+test(:\S*)?(?=\s|$)/,
   /^pnpm\s+--filter\s+\S+\s+test(?=\s|$)/,
-  /^pnpm\s+test(?=\s|$)/,
+  /^pnpm\s+test(:\S*)?(?=\s|$)/,
   /^bun\s+test(?=\s|$)/,
   /^npx\s+vitest(?=\s|$)/,
   /^vitest(?=\s|$)/,
@@ -86,6 +119,7 @@ function sourceExtensions(): ReadonlySet<string> {
 /** A token names a file/test when it looks like a path or ends in a source extension (test files share their language's extension). */
 function isPathLikeToken(token: string, extensions: ReadonlySet<string>): boolean {
   if (GLOB_ALL_TOKENS.has(token)) return false;
+  if (CONFIG_FILE_RE.test(token)) return false;
   if (token.includes('/')) return true;
   return [...extensions].some(ext => token.endsWith(ext));
 }
@@ -93,16 +127,17 @@ function isPathLikeToken(token: string, extensions: ReadonlySet<string>): boolea
 /**
  * Scan the remainder of a segment after its matched runner keyword for
  * scoping arguments. Skips flags (dash-prefixed) and, for workspace-scope
- * flags specifically, their value too (a manual index loop is required here
- * to look ahead one token — not a tree-sitter AST walk, so the codebase's
- * array-methods-only rule for SyntaxNode iteration doesn't apply).
+ * and config flags specifically, their value too (a manual index loop is
+ * required here to look ahead one token — not a tree-sitter AST walk, so the
+ * codebase's array-methods-only rule for SyntaxNode iteration doesn't
+ * apply).
  */
 function extractPathLikeTokens(remainder: string, extensions: ReadonlySet<string>): string[] {
   const tokens = remainder.trim().split(/\s+/).filter(Boolean);
   const found: string[] = [];
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i];
-    if (WORKSPACE_SCOPE_FLAGS.has(token)) {
+    if (WORKSPACE_SCOPE_FLAGS.has(token) || CONFIG_FLAGS.has(token)) {
       i++; // also skip the flag's value
       continue;
     }
@@ -123,7 +158,7 @@ export function classifyTestCommand(command: string): TestRunClassification {
   const extensions = sourceExtensions();
   const segments = command
     .split(SEGMENT_SPLIT_RE)
-    .map(s => s.trim())
+    .map(s => stripLeadingEnvAssignments(s.trim()))
     .filter(Boolean);
 
   let isTestRun = false;
@@ -147,22 +182,54 @@ export function classifyTestCommand(command: string): TestRunClassification {
   return { isTestRun: true, broad, scopeTokens: broad ? [] : [...scopeTokens] };
 }
 
-/** Case-insensitive basename of a scope token or associated test/file path, for generous substring matching. */
+/** Case-insensitive basename of a scope token or associated test/file path. */
 function baseKey(p: string): string {
   return path.basename(p).toLowerCase();
 }
 
 /**
- * A pending edited file is covered when any scoped run's token substring-
- * matches (either direction, case-insensitive) the file's own basename or
- * any of its associated tests' basenames. Generous on purpose — see the
- * module doc comment.
+ * Case-insensitive basename with one trailing extension AND one trailing
+ * `.test`/`.spec` segment stripped, so `foo.test.ts` and `foo.ts` (or
+ * `foo.spec.ts`) share the same stem. Scoped narrowly to the dotted
+ * `name.test.ext`/`name.spec.ext` convention per the reviewer's ruling below
+ * — other per-language test-naming conventions (Python's `test_foo.py`,
+ * Go's `foo_test.go`, Ruby's `foo_spec.rb`) are not covered by stem
+ * equality; they still match via the exact-basename branch in
+ * `isCoveredByScope` whenever the run names the real associated test file,
+ * which is the common case (the ledger already stores the true test path).
+ */
+function stemKey(p: string): string {
+  const base = baseKey(p);
+  const withoutExt = base.replace(/\.[^./]+$/, '');
+  return withoutExt.replace(/\.(test|spec)$/, '');
+}
+
+/**
+ * A pending edited file is covered when a scoped run's token EXACTLY matches
+ * (case-insensitive) the file's own basename or an associated test's
+ * basename, or when their stems match after stripping one extension and one
+ * `.test`/`.spec` segment (so a run naming `foo.test.ts` covers an edit to
+ * `foo.ts`, and vice versa).
+ *
+ * Deliberately NOT substring/bidirectional-containment, unlike an earlier
+ * version of this function — see the module doc comment and the dated
+ * deviation note in docs/architecture/test-verification-nudge.md: substring
+ * matching let e.g. a `oauth.test.ts` run silently "cover" an unrelated
+ * `auth.ts` edit (because "auth" is a substring of "oauth"), which is a
+ * worse failure mode (a real gap goes unnoticed) than the false nag this
+ * feature is otherwise biased to avoid.
  */
 function isCoveredByScope(file: string, tests: string[], scopeTokens: string[]): boolean {
-  const candidates = [baseKey(file), ...tests.map(baseKey)];
+  const fileBase = baseKey(file);
+  const fileStem = stemKey(file);
+  const testBases = tests.map(baseKey);
+  const testStems = tests.map(stemKey);
+
   return scopeTokens.some(token => {
-    const t = token.toLowerCase();
-    return candidates.some(c => t.includes(c) || c.includes(t));
+    const tokenBase = baseKey(token);
+    if (tokenBase === fileBase || testBases.includes(tokenBase)) return true;
+    const tokenStem = stemKey(token);
+    return tokenStem === fileStem || testStems.includes(tokenStem);
   });
 }
 

@@ -41,6 +41,18 @@ describe('classifyTestCommand — broad vs scoped classification table', () => {
     // A runner keyword buried after a shell chain — segment splitting.
     ['cd packages/cli && npm test', true, true, []],
     ['cd packages/cli && npm test -- src/foo.test.ts', true, false, ['src/foo.test.ts']],
+    // Leading VAR=value env assignments must not defeat the anchored match.
+    ['CI=1 npm test', true, true, []],
+    ['NODE_ENV=test vitest', true, true, []],
+    ['CI=1 FORCE_COLOR=0 npm test -- src/foo.test.ts', true, false, ['src/foo.test.ts']],
+    // npm run/yarn/pnpm custom script forms (npm test itself has no such form).
+    ['npm run test:e2e:python', true, true, []],
+    ['npm run test:e2e:python -w packages/cli', true, true, []],
+    ['yarn test:unit', true, true, []],
+    ['pnpm test:unit -- src/foo.test.ts', true, false, ['src/foo.test.ts']],
+    // A --config/-c value is never a scope token, even with a source extension.
+    ['vitest --config vitest.config.ts', true, true, []],
+    ['jest -c jest.config.js src/foo.test.ts', true, false, ['src/foo.test.ts']],
   ])('%s -> isTestRun=%s broad=%s scopeTokens=%j', (command, isTestRun, broad, scopeTokens) => {
     expect(classifyTestCommand(command)).toEqual({ isTestRun, broad, scopeTokens });
   });
@@ -118,6 +130,41 @@ describe('computeUnverifiedFiles', () => {
     const edits = new Map([['src/Foo.ts', ['src/Foo.test.ts']]]);
     const runs = [{ isTestRun: true, broad: false, scopeTokens: ['SRC/FOO.TEST.TS'] }];
     expect(computeUnverifiedFiles(edits, runs)).toEqual([]);
+  });
+
+  it('a stem match (different dir, .spec vs .test) still covers — not just exact basename', () => {
+    const edits = new Map([['src/foo.ts', ['src/foo.test.ts']]]);
+    const runs = [{ isTestRun: true, broad: false, scopeTokens: ['other/foo.spec.ts'] }];
+    expect(computeUnverifiedFiles(edits, runs)).toEqual([]);
+  });
+
+  // Reviewer repros (strict matching, no substring containment): a scope
+  // token must NOT cover a file just because one is a substring of the
+  // other's basename. Each of these NAGS (stays unverified) — under the
+  // prior bidirectional-substring version of isCoveredByScope, all three
+  // were silently (and wrongly) marked "covered".
+  it('does NOT cover auth.ts via an unrelated oauth.test.ts run (substring, not a real match)', () => {
+    const edits = new Map([['src/auth.ts', ['src/auth.test.ts']]]);
+    const runs = [{ isTestRun: true, broad: false, scopeTokens: ['src/oauth.test.ts'] }];
+    expect(computeUnverifiedFiles(edits, runs)).toEqual([
+      { file: 'src/auth.ts', tests: ['src/auth.test.ts'] },
+    ]);
+  });
+
+  it('does NOT cover user.ts via an unrelated superuser.test.ts run', () => {
+    const edits = new Map([['src/user.ts', ['src/user.test.ts']]]);
+    const runs = [{ isTestRun: true, broad: false, scopeTokens: ['src/superuser.test.ts'] }];
+    expect(computeUnverifiedFiles(edits, runs)).toEqual([
+      { file: 'src/user.ts', tests: ['src/user.test.ts'] },
+    ]);
+  });
+
+  it('does NOT cover a.ts via an unrelated data.test.ts run', () => {
+    const edits = new Map([['src/a.ts', ['src/a.test.ts']]]);
+    const runs = [{ isTestRun: true, broad: false, scopeTokens: ['src/data.test.ts'] }];
+    expect(computeUnverifiedFiles(edits, runs)).toEqual([
+      { file: 'src/a.ts', tests: ['src/a.test.ts'] },
+    ]);
   });
 
   it('a non-test-run classification (isTestRun: false) never contributes broad or scope', () => {

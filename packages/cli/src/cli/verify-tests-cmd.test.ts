@@ -8,8 +8,16 @@ import {
   noteRunCommand,
   reportCommand,
   formatVerifyTestsAdvisory,
+  wasRecentlyBlocked,
+  BLOCK_SUPPRESSION_WINDOW_MS,
 } from './verify-tests-cmd.js';
-import { recordEdit, recordRun, readSession } from '../utils/test-ledger.js';
+import {
+  recordEdit,
+  recordRun,
+  readSession,
+  testSessionFilePath,
+  type TestLedgerEvent,
+} from '../utils/test-ledger.js';
 
 // Only `createVectorDB` is mocked, mirroring annotate-cmd.test.ts's
 // `--tests-only` integration style — `note-edit` drives the exact same
@@ -75,6 +83,46 @@ describe('formatVerifyTestsAdvisory', () => {
     ]);
     expect(text).toContain('• a.ts → a.test.ts');
     expect(text).toContain('• b.ts → b.test.ts');
+  });
+});
+
+describe('wasRecentlyBlocked', () => {
+  it('is false with no events', () => {
+    expect(wasRecentlyBlocked([], new Date('2026-01-01T00:10:00.000Z'))).toBe(false);
+  });
+
+  it('is true for a blocked event within the window', () => {
+    const events: TestLedgerEvent[] = [{ kind: 'blocked', timestamp: '2026-01-01T00:05:00.000Z' }];
+    expect(wasRecentlyBlocked(events, new Date('2026-01-01T00:10:00.000Z'), 10 * 60 * 1000)).toBe(
+      true,
+    );
+  });
+
+  it('is false for a blocked event older than the window', () => {
+    const events: TestLedgerEvent[] = [{ kind: 'blocked', timestamp: '2026-01-01T00:00:00.000Z' }];
+    expect(wasRecentlyBlocked(events, new Date('2026-01-01T00:15:00.000Z'), 10 * 60 * 1000)).toBe(
+      false,
+    );
+  });
+
+  it('ignores non-blocked events', () => {
+    const events: TestLedgerEvent[] = [
+      { kind: 'edit', timestamp: '2026-01-01T00:09:00.000Z', file: 'a.ts', tests: [] },
+      { kind: 'run', timestamp: '2026-01-01T00:09:30.000Z', command: 'npm test' },
+    ];
+    expect(wasRecentlyBlocked(events, new Date('2026-01-01T00:10:00.000Z'))).toBe(false);
+  });
+
+  it('ignores an unparsable timestamp rather than throwing', () => {
+    const events: TestLedgerEvent[] = [{ kind: 'blocked', timestamp: 'not-a-date' }];
+    expect(wasRecentlyBlocked(events, new Date())).toBe(false);
+  });
+
+  it('defaults the window to BLOCK_SUPPRESSION_WINDOW_MS', () => {
+    const justInside = new Date(Date.now() - (BLOCK_SUPPRESSION_WINDOW_MS - 1000)).toISOString();
+    const justOutside = new Date(Date.now() - (BLOCK_SUPPRESSION_WINDOW_MS + 1000)).toISOString();
+    expect(wasRecentlyBlocked([{ kind: 'blocked', timestamp: justInside }])).toBe(true);
+    expect(wasRecentlyBlocked([{ kind: 'blocked', timestamp: justOutside }])).toBe(false);
   });
 });
 
@@ -249,6 +297,64 @@ describe('verify-tests-cmd — integration', () => {
       await reportCommand({});
       expect(logSpy).not.toHaveBeenCalled();
       expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it('records a blocked event the first time it actually blocks', async () => {
+      const rootDir = String((await import('./project-root.js')).resolveProjectRoot());
+      await recordEdit(rootDir, session, 'packages/cli/src/foo.ts', ['foo.test.ts']);
+
+      await reportCommand({ session });
+
+      const events = await readSession(rootDir, session);
+      expect(events.some(e => e.kind === 'blocked')).toBe(true);
+    });
+
+    it('suppresses a second block within the 10-minute window (belt-and-braces loop prevention)', async () => {
+      const rootDir = String((await import('./project-root.js')).resolveProjectRoot());
+      await recordEdit(rootDir, session, 'packages/cli/src/foo.ts', ['foo.test.ts']);
+      const filePath = testSessionFilePath(rootDir, session)!;
+      await fs.appendFile(
+        filePath,
+        `${JSON.stringify({ kind: 'blocked', timestamp: new Date().toISOString() })}\n`,
+        'utf-8',
+      );
+
+      await reportCommand({ session });
+
+      expect(logSpy).not.toHaveBeenCalled();
+    });
+
+    it('blocks again once the suppression window has passed', async () => {
+      const rootDir = String((await import('./project-root.js')).resolveProjectRoot());
+      await recordEdit(rootDir, session, 'packages/cli/src/foo.ts', ['foo.test.ts']);
+      const filePath = testSessionFilePath(rootDir, session)!;
+      const elevenMinutesAgo = new Date(Date.now() - 11 * 60 * 1000).toISOString();
+      await fs.appendFile(
+        filePath,
+        `${JSON.stringify({ kind: 'blocked', timestamp: elevenMinutesAgo })}\n`,
+        'utf-8',
+      );
+
+      await reportCommand({ session });
+
+      expect(logSpy).toHaveBeenCalledTimes(1);
+      expect(String(logSpy.mock.calls[0][0])).toContain('packages/cli/src/foo.ts → foo.test.ts');
+    });
+
+    it('the JSON {unverified} shape is also suppressed within the window (uniform across formats)', async () => {
+      const rootDir = String((await import('./project-root.js')).resolveProjectRoot());
+      await recordEdit(rootDir, session, 'packages/cli/src/foo.ts', ['foo.test.ts']);
+      const filePath = testSessionFilePath(rootDir, session)!;
+      await fs.appendFile(
+        filePath,
+        `${JSON.stringify({ kind: 'blocked', timestamp: new Date().toISOString() })}\n`,
+        'utf-8',
+      );
+
+      await reportCommand({ session, format: 'json' });
+
+      const parsed = JSON.parse(String(logSpy.mock.calls[0][0]));
+      expect(parsed).toEqual({ unverified: [] });
     });
   });
 });

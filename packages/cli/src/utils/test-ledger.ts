@@ -27,7 +27,8 @@ export const TEST_SESSIONS_DIRNAME = 'test-sessions';
 
 export type TestLedgerEvent =
   | { kind: 'edit'; timestamp: string; file: string; tests: string[] }
-  | { kind: 'run'; timestamp: string; command: string };
+  | { kind: 'run'; timestamp: string; command: string }
+  | { kind: 'blocked'; timestamp: string };
 
 // Defense-in-depth: sessionId is interpolated into a filesystem path (both
 // here and in the shell hooks). Reject anything outside this set rather than
@@ -94,6 +95,20 @@ export async function recordRun(
   });
 }
 
+/**
+ * Record that the Stop hook just emitted a block for this session — the
+ * belt-and-braces loop-prevention fallback alongside `stop_hook_active`
+ * (see `verify-tests-cmd.ts`'s `wasRecentlyBlocked`/`runReport`, and the
+ * dated deviation note in docs/architecture/test-verification-nudge.md:
+ * `stop_hook_active`'s presence in the real Stop-hook stdin payload could
+ * not be confirmed against current Claude Code docs during review, so this
+ * ledger-based suppression window is the mechanism that actually holds if
+ * that field turns out to be absent or unreliable).
+ */
+export async function recordBlocked(rootDir: string, sessionId: string): Promise<void> {
+  await appendEvent(rootDir, sessionId, { kind: 'blocked', timestamp: new Date().toISOString() });
+}
+
 function isValidTestLedgerEvent(value: unknown): value is TestLedgerEvent {
   if (typeof value !== 'object' || value === null) return false;
   const v = value as Record<string, unknown>;
@@ -106,6 +121,7 @@ function isValidTestLedgerEvent(value: unknown): value is TestLedgerEvent {
     );
   }
   if (v.kind === 'run') return typeof v.command === 'string';
+  if (v.kind === 'blocked') return true;
   return false;
 }
 

@@ -67,8 +67,13 @@ read-modify-write scheme would race; appending never can.
 ```ts
 type TestLedgerEvent =
   | { kind: 'edit'; timestamp: string; file: string; tests: string[] }
-  | { kind: 'run'; timestamp: string; command: string };
+  | { kind: 'run'; timestamp: string; command: string }
+  | { kind: 'blocked'; timestamp: string };
 ```
+
+The third variant, `blocked`, was added during PR #843's review as a
+loop-prevention fallback for the Stop hook — see section D.3's "Loop-
+prevention fallback" note.
 
 `sessionId` is validated against `^[A-Za-z0-9_-]+$` before it's ever used
 in a path — the same defense-in-depth every shell hook in this bundle
@@ -100,23 +105,34 @@ interface TestRunClassification { isTestRun: boolean; broad: boolean; scopeToken
 ```
 
 1. Splits the command on `&&`, `||`, `|`, `;` (so `cd packages/cli && npm
-   test` still recognizes the runner keyword after the `cd`).
+   test` still recognizes the runner keyword after the `cd`), and strips
+   any leading `VAR=value` environment assignments from each segment
+   (`CI=1 npm test`, `NODE_ENV=test vitest`) so they don't defeat the
+   runner-keyword match, which is anchored to the start of the segment.
 2. Matches each segment against a conservative allow-list of runner
    patterns: `npm test`/`npm run test`/`npm t`, `yarn test`, `pnpm test`,
    `bun test`, `npx vitest`/`vitest`, `jest`, `mocha`, `pytest`/`python -m
    pytest`, `go test`, `cargo test`/`cargo nextest`, `rspec`/`bundle exec
    rspec`, `phpunit`, `dotnet test`, `deno test`, `gradle test`, `mvn
    test`, plus workspace-scoped forms (`npm test -w <pkg>`, `pnpm --filter
-   <pkg> test`, `nx test <proj>`).
+   <pkg> test`, `nx test <proj>`) and custom npm-script forms (`npm run
+   test:e2e:python`, `yarn test:unit`, `pnpm test:unit` — this repo's own
+   `npm run test:e2e:<lang>` convention, per CLAUDE.md's gate chain, is
+   exactly this shape). npm's bare `npm test` shorthand has no such
+   custom-name form, so it's left unextended.
 3. For each matching segment, scans the remainder after the runner
    keyword for scoping arguments: a token is path-like if it contains `/`
    or ends in a source extension (reusing `getSupportedExtensions()` from
    `@liendev/parser` rather than hand-maintaining a second extension list —
    a test file shares its language's extension, so "ends in a source
-   extension" already covers the test-ish case). Two token classes are
-   excluded from ever counting as a scoping argument even though they can
-   contain `/`: a workspace-scope flag's value (`-w`/`--workspace`/`--filter`,
-   e.g. `@liendev/core`) and Go's glob-all convention (`./...`).
+   extension" already covers the test-ish case). Three token classes are
+   excluded from ever counting as a scoping argument even when they'd
+   otherwise qualify: a workspace-scope flag's value
+   (`-w`/`--workspace`/`--filter`, e.g. `@liendev/core`, which contains a
+   `/`), a config-flag's value (`-c`/`--config`, e.g. `vitest.config.ts`,
+   which ends in a source extension) or any bare token matching
+   `*.config.*` even without a preceding flag, and Go's glob-all convention
+   (`./...`).
 4. A segment with no scoping tokens is `broad` (whole-suite/workspace run);
    any `broad` segment makes the whole command's classification `broad`,
    even if another segment in the same command also named specific files.
@@ -128,13 +144,43 @@ interface TestRunClassification { isTestRun: boolean; broad: boolean; scopeToken
   so the report stays silent rather than risk a false nag against an
   incomplete per-file cross-check. This is the single biggest lever in the
   "conservative by construction" design.
-- Otherwise, an edited file (with associated tests) is **covered** when
-  any scoped run's token substring-matches — either direction,
-  case-insensitive — the file's own basename or any of its associated
-  tests' basenames. Generous on purpose: a run naming `foo.test.ts` covers
-  an edit to `src/foo.ts`, and a run naming `src/foo.ts` itself also
-  covers it.
+- Otherwise, an edited file (with associated tests) is **covered** when a
+  scoped run's token exactly matches (case-insensitive) the file's own
+  basename or an associated test's basename, or when their *stems* match —
+  basename with one trailing extension and one trailing `.test`/`.spec`
+  segment stripped, so `foo.test.ts` and `foo.ts` (or `foo.spec.ts`) share
+  a stem. A run naming `foo.test.ts` covers an edit to `src/foo.ts`, and a
+  run naming `src/foo.ts` itself also covers it — generous across
+  directories and the `.test`/`.spec` convention, but no longer generous
+  across unrelated names (see the deviation note below).
 - Uncovered files are returned as `{ file, tests }`.
+
+#### Deviation from generous substring matching (2026-07-24)
+
+The original design (`.wip/nudge-design.md` section 2.2) specified coverage
+matching as "any token substring match ⇒ covered," reasoning that
+generosity in both directions — recognizing more commands as test runs, and
+treating more edits as covered — was uniformly the safe, under-firing
+direction. Built that way first; changed during PR #843's adversarial
+review once a real failure mode surfaced: bidirectional substring
+containment lets an **unrelated** run silently mark a file "covered" merely
+because one filename happens to be a textual substring of another —
+`vitest run src/oauth.test.ts` (ran) covering an edit to `auth.ts` (never
+run), because `"auth"` is a substring of `"oauth"`; `superuser.test.ts`
+covering `user.ts`; `data.test.ts` covering `a.ts`. Unlike runner
+*recognition* (where over-matching only ever costs a wasted, harmless
+check), over-matching *coverage* actively suppresses a real nag — a worse
+failure mode than the false nag this feature is otherwise biased to avoid,
+since a suppressed nag means a genuinely untested file silently reads as
+verified. `isCoveredByScope` was tightened to exact-basename-or-stem
+equality (see above) instead of substring containment; three regression
+tests (`auth.ts`/`oauth.test.ts`, `user.ts`/`superuser.test.ts`,
+`a.ts`/`data.test.ts`, all of which must still nag) pin this in
+`test-run-matcher.test.ts`. Stem equality is deliberately scoped to the
+`name.test.ext`/`name.spec.ext` convention only — other per-language test
+naming conventions (Python's `test_foo.py`, Go's `foo_test.go`, Ruby's
+`foo_spec.rb`) fall back to exact-basename matching, which already covers
+the common case of a run naming the real associated test file.
 
 ## C. `lien verify-tests <subcommand>`
 
@@ -224,6 +270,39 @@ its own). If the report printed anything, emits
 (nothing unverified, or any resolution error), stays silent and allows the
 stop. Kill switch: `LIEN_TEST_VERIFY=off`.
 
+#### Loop-prevention fallback: `stop_hook_active`'s existence couldn't be confirmed (2026-07-24)
+
+During PR #843's adversarial review, a dedicated check (a `claude-code-guide`
+agent, plus two direct fetches of the official hooks reference) could not
+consistently confirm that Claude Code's real `Stop` hook stdin actually
+includes a `stop_hook_active` field: three independent fetches of the same
+documentation returned three different field lists for the `Stop` event,
+one of which included `stop_hook_active` and two of which didn't (one
+instead listed an unrelated `stop_reason` field). Rather than resolve this
+by trusting whichever fetch was most convenient, the uncertain result was
+treated as "unconfirmed" and a second, ledger-based loop-prevention
+mechanism was added as a fallback that holds regardless of whether
+`stop_hook_active` is ever actually populated:
+
+- `report` records a `{ kind: 'blocked', timestamp }` event to the session
+  ledger the first time it emits a non-empty advisory.
+- On every subsequent `report` call, `wasRecentlyBlocked` (pure, unit-tested
+  in `verify-tests-cmd.ts`) checks whether a `blocked` event exists within
+  the last `BLOCK_SUPPRESSION_WINDOW_MS` (10 minutes, not configurable). If
+  so, the report is treated as clean (empty `unverified`) even if the
+  underlying edits are still genuinely unverified — applied uniformly to
+  both `--format text` and `--format json`, so `report` has one consistent
+  answer to "is there something to nudge about right now," not two
+  format-dependent ones.
+- `stop_hook_active` stays as the first line of defense (free if the field
+  ever is populated in a given Claude Code version); the ledger-based
+  10-minute suppression is the mechanism that actually holds if it isn't.
+
+10 minutes was chosen to be long enough that a real editing session won't
+re-nag on every single Stop, short enough that a genuinely new unverified
+edit later in a long session still eventually gets flagged again once the
+window lapses.
+
 **Why `decision:block`, not `additionalContext`, for the Stop channel:**
 the design that shipped this feature was written on the premise that Stop
 hooks ignore `additionalContext` entirely and `decision:block` is the only
@@ -278,7 +357,8 @@ available for scripting or debugging outside the hook pipeline.
 | Malformed stdin / missing `session_id` | hook exits 0 (Edit/Bash hooks: silent; Stop hook: allows the stop) |
 | Invalid `session_id` characters | shell `case` guard rejects it; the CLI's own ledger validation also no-ops independently |
 | `report` errors at Stop | Stop hook exits 0 → allows the stop, never traps the agent |
-| `stop_hook_active == true` | exits 0 → allows the stop (loop prevention) |
+| `stop_hook_active == true` | exits 0 → allows the stop (loop prevention, first line of defense) |
+| Blocked within the last 10 minutes | `report` treats the session as clean regardless of `stop_hook_active` (loop prevention, second line of defense — see the "Loop-prevention fallback" note) |
 | Ledger write/read fails | swallowed; recording is best-effort, `report` degrades to silent |
 
 ## Dogfood evidence (real hook stdin shapes)
@@ -287,7 +367,7 @@ Verified by piping the real PostToolUse/Stop payload shapes directly into
 each script:
 
 - **`test-run-note.sh`**: a real `tool_input.command: "npm test -w
-  @liendev/cli -- path/to/foo.test.ts"` payload recorded a `run` event and
+  @liendev/lien -- path/to/foo.test.ts"` payload recorded a `run` event and
   emitted no stdout; a `tool_input.command: "git status"` payload spawned
   no `lien` process at all (confirmed via `bash -x` trace — execution never
   reaches the `lien` invocation line).
@@ -297,7 +377,14 @@ each script:
   covering scoped run first and re-running the same payload produced empty
   stdout (silent, allows the stop); a `stop_hook_active: true` payload with
   the same unverified edit still present produced empty stdout (loop
-  prevention).
+  prevention). **The ledger-based fallback specifically**: sending the exact
+  same `stop_hook_active: false` payload a *second* time immediately after
+  the first (real) block — i.e. simulating the scenario where Claude Code
+  does NOT actually set `stop_hook_active: true` on the re-entrant Stop —
+  also produced empty stdout, because `report` found its own just-recorded
+  `blocked` event inside the 10-minute suppression window. This is the case
+  the fallback exists for: loop prevention that holds even if
+  `stop_hook_active` never arrives.
 - **Fail-open**: malformed (non-JSON) stdin and a payload missing
   `session_id` both exited 0 with no output, for both new hooks.
 - **`test-reminder.sh` (rewired)**: a real `Edit` payload produced the

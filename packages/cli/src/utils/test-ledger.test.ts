@@ -6,6 +6,7 @@ import { getIndexDir } from '@liendev/parser';
 import {
   recordEdit,
   recordRun,
+  recordBlocked,
   readSession,
   clearSession,
   testSessionFilePath,
@@ -94,6 +95,13 @@ describe('recordEdit + recordRun + readSession', () => {
     expect(events[0]).toMatchObject({ kind: 'run', command: 'npm test' });
   });
 
+  it('round-trips a blocked event', async () => {
+    await recordBlocked(rootDir, sessionId);
+    const events = await readSession(rootDir, sessionId);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ kind: 'blocked' });
+  });
+
   it('is append-only: interleaved edit/run events preserve insertion order', async () => {
     await recordEdit(rootDir, sessionId, 'src/foo.ts', ['src/foo.test.ts']);
     await recordRun(rootDir, sessionId, 'npm test');
@@ -111,9 +119,10 @@ describe('recordEdit + recordRun + readSession', () => {
     expect(await readSession(rootDir, 'session-two')).toHaveLength(1);
   });
 
-  it('an invalid sessionId is a no-op for recordEdit/recordRun/readSession (fail-open, not thrown)', async () => {
+  it('an invalid sessionId is a no-op for recordEdit/recordRun/recordBlocked/readSession (fail-open, not thrown)', async () => {
     await expect(recordEdit(rootDir, '../evil', 'src/foo.ts', [])).resolves.toBeUndefined();
     await expect(recordRun(rootDir, '../evil', 'npm test')).resolves.toBeUndefined();
+    await expect(recordBlocked(rootDir, '../evil')).resolves.toBeUndefined();
     await expect(readSession(rootDir, '../evil')).resolves.toEqual([]);
   });
 
@@ -121,8 +130,9 @@ describe('recordEdit + recordRun + readSession', () => {
     await recordEdit(rootDir, sessionId, 'src/foo.ts', ['src/foo.test.ts']);
     process.env.LIEN_TEST_VERIFY = 'off';
     await recordRun(rootDir, sessionId, 'npm test');
+    await recordBlocked(rootDir, sessionId);
 
-    // The run event recorded while the switch was off never landed.
+    // The run/blocked events recorded while the switch was off never landed.
     const events = await readSession(rootDir, sessionId);
     expect(events).toHaveLength(1);
     expect(events[0].kind).toBe('edit');
