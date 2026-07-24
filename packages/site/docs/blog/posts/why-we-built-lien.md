@@ -1,7 +1,7 @@
 ---
 title: "Why We Built Lien"
 description: "A tool that gives AI coding assistants a real, structural understanding of your codebase: what depends on what, how complicated each piece of code is, and what tests actually cover it. Runs entirely on your own machine."
-date: 2026-07-19
+date: 2026-07-22
 author: Alf Henderson
 tags: [product, local-first]
 draft: true
@@ -270,5 +270,5 @@ The rest of the docs, the full evidence, and how we test all of this live
 elsewhere on this site. The code is at
 [github.com/getlien/lien](https://github.com/getlien/lien).
 
-[OWNER: closing line is yours, e.g. an invite to open an issue/discussion
-if it falls over on someone's codebase, or whatever you'd want to close on.]
+If you run it on your own codebase and it breaks, open an issue. I'd
+rather hear about a real failure than have you quietly stop using it.

@@ -1,7 +1,7 @@
 ---
 title: "The Blind Spot Every Reviewer Has, and the Bug That Proved It"
 description: "A popular open-source database toolkit added six new column types. Four companion packages were never updated to handle them. Our automated reviewer read all the right files and still missed it, most of the time."
-date: 2026-07-19
+date: 2026-07-24
 author: Alf Henderson
 tags: [evidence, review, architecture]
 draft: true
@@ -95,5 +95,6 @@ of this check isn't turned on for everyone by default yet. It's proven on
 this one real bug, in this one shape. We want more evidence before making
 it the default for everyone, not less.
 
-[OWNER: your call on whether to preview a timeline for turning this on
-more broadly, or leave this as a pure status update.]
+It's already turned on in Lien's own pull requests, for exactly this kind
+of check. Everywhere else it stays off by default until it proves itself
+again, on a bug we didn't already know was hiding there.

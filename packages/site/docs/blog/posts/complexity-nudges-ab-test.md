@@ -1,7 +1,7 @@
 ---
 title: "Does Warning a Coding Agent Actually Change What It Writes?"
 description: "We warned an AI coding agent, right before it touched a function, that the function was already hard to follow. Then we tested whether that actually changed what it wrote, or whether the agent just ignored it."
-date: 2026-07-19
+date: 2026-07-23
 author: Alf Henderson
 tags: [evidence, agents, complexity]
 draft: true
@@ -107,6 +107,7 @@ We also decided on how we'd score this before running a single attempt, so
 there was no chance to reinterpret an unhelpful result after the fact. If
 the warning had done nothing, that would have been the finding.
 
-[OWNER: your call on whether to add a line here about what this means
-next, e.g. whether warning agents before they edit becomes a bigger part
-of how Lien works, or what the next test should look at.]
+That same warning already runs in Lien today, surfacing automatically
+whenever a file is already close to that same line. What we want to test
+next is whether it holds up across more functions and more models than
+the one we used here.
