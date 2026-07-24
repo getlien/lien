@@ -1,13 +1,15 @@
 # The blast-radius nudge: `get_dependents` before an exported-signature edit
 
 `lien api-delta` detects, at edit time and from content alone, when a working-tree
-change altered or removed the signature of an *exported* symbol — a function or a
-class method that's part of a file's public API surface — and turns that into a
-CLI exit code, a warning from the plugin's post-edit hook, and a local event log
+change altered or removed the signature of an **exported top-level function or
+exported class method** — the two shapes covered, not "any exported symbol" (see
+"Known limitations" for what's out of scope) — and turns that into a CLI exit
+code, a warning from the plugin's post-edit hook, and a local event log
 (`lien stats`) tracking how often it fires. It extends the `lien delta` pattern
 (deterministic core → thin hook → local JSONL ledger) to the other mandatory rule
 in CLAUDE.md that was still honor-system: "run `get_dependents` before changing
-the signature of an exported symbol."
+the signature of an exported symbol." Within its covered shapes it's a nudge for
+that rule, not a complete enforcement of it.
 
 ## Motivation
 
@@ -80,12 +82,23 @@ chunks) — not assumed from the type declarations alone.
 
 Identical to `complexity-delta.ts`'s `functionMetadataByKey`: functions are
 matched by the qualified key `` `${parentClass ?? ''}::${symbolName}` ``, with
-same-keyed functions on either side (overloads) paired positionally by ascending
-`startLine`. The same known limitations carry over: a renamed function reads as
-one removed plus one added, and overload pairing is positional, best-effort.
+same-keyed functions on either side paired positionally by ascending `startLine`.
 Reusing the exact matching logic means the two detectors — complexity and
 exported-signature — can never structurally disagree about what counts as "the
 same function across an edit."
+
+**The positional-pairing mechanism does not actually engage for TypeScript's
+canonical overload-declaration pattern.** Verified empirically: chunking a
+function with two `declare`-only overload signatures followed by one
+implementation produces a *single* function chunk (the implementation), not
+three — the overload declaration lines (no body) aren't emitted as their own
+`symbolName`-bearing chunks at all, so there is never more than one chunk per
+qualified key for this shape. The positional-pairing code exists (inherited
+unchanged from `complexity-delta.ts`, so the two detectors stay in lockstep for
+whatever cases *do* produce multiple same-keyed chunks) but it has no effect
+here: an edit that changes only an overload declaration's signature, leaving
+the implementation signature untouched, is a **silent miss** — `signature-delta`
+only ever sees the implementation chunk's signature, which didn't change.
 
 ### Classification
 
@@ -251,6 +264,44 @@ no-index changes).
 the existing complexity-delta windows. JSON output nests the new data under a
 `blastRadius` key — additive; the pre-existing top-level `totalEvents`/`windows`
 shape is unchanged for any existing caller.
+
+## Known limitations
+
+All of these are silent misses (safe direction — the nudge under-fires, it
+never fires on something that isn't real), not false positives:
+
+- **Scope: exported top-level functions and exported class methods only.**
+  Verified misses, each confirmed not to produce a chunk `signature-delta` can
+  see:
+  - **Interface method signatures** (e.g. `export interface Foo { bar(x: number): void }`)
+    — an interface's methods aren't `function`/`method`-typed chunks with a
+    `symbolName`, so they're filtered out before classification ever runs.
+  - **Exported type-alias function types** (e.g. `export type Handler = (x: number) => void;`)
+    — same reason: not a function/method chunk.
+  - **Aliased re-exports** (`export { foo as bar }`) — the file's exported-name
+    list carries the alias (`bar`), not the declared function's own name
+    (`foo`); `isExportedChunk` matches on `symbolName`, so a function only
+    exported under an alias is never recognized as exported.
+  - **Reference-form default exports** (`function foo() {...}; export default foo;`)
+    — same alias problem: the export list doesn't necessarily carry `foo`'s own
+    name.
+  - **Anonymous default exports** (`export default function() {...}`) — no
+    `symbolName` at all, filtered out by the "must have a name" guard before
+    the exported check ever runs.
+- **TypeScript overload declarations** — see "Matching functions across
+  versions" above: only the implementation signature is trackable; an
+  overload-declaration-only signature change is a silent miss.
+- **Function-level renames are not tracked** (inherited from
+  `complexity-delta.ts`'s matching): renaming `foo` to `bar` reads as `foo`
+  removed plus `bar` added under a different qualified key, not one function
+  matched across the rename.
+- **Whitespace/formatting-only signature changes are normalized away**
+  (collapsed spacing, added/removed trailing commas, single-to-multi-line
+  param reflow all compare equal — see `normalizeSignature`), but a **positional
+  parameter rename is deliberately still flagged** (`f(a)` → `f(input)`):
+  identifier text is never touched by normalization, and a parameter rename is
+  a real API-surface change in keyword-argument languages (e.g. Python), not
+  noise.
 
 ## Why advisory, not a gate
 

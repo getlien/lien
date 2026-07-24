@@ -9,9 +9,13 @@
  * the deterministic half of the nudge; enrichment (dependent counts, risk)
  * happens separately, best-effort, against the index (see `api-delta-cmd.ts`).
  *
- * Reuses `complexity-delta.ts`'s exact machinery and known limitations
- * (qualified-name matching, positional overload pairing, renames not
- * tracked) — see docs/architecture/blast-radius-nudge.md.
+ * Reuses `complexity-delta.ts`'s exact qualified-name matching (function-level
+ * renames are not tracked, same as there). Covers exported top-level functions
+ * and exported class methods only — interface method signatures, exported
+ * type-alias function types, aliased re-exports, default exports, and
+ * TypeScript overload-declaration-only changes are known, safe-direction
+ * (silent) misses — see docs/architecture/blast-radius-nudge.md's "Known
+ * limitations".
  */
 
 import { chunkFile } from '@liendev/parser';
@@ -94,6 +98,26 @@ function functionMetadataByKey(
   return byKey;
 }
 
+/**
+ * Normalize a signature string for equality comparison only (display still
+ * uses the raw `before.signature`/`after.signature`). Collapses whitespace
+ * runs (including newlines) to nothing around structural punctuation, so a
+ * pure reflow — wrapping params onto multiple lines, adding/removing a
+ * trailing comma, or changing comma spacing (`f(a,b)` vs `f(a, b)`) — is
+ * invisible to the comparison. Deliberately does NOT touch identifier text:
+ * a positional parameter rename (`f(a)` -> `f(input)`) still produces a
+ * different normalized string and still fires — that's a real API-surface
+ * change in keyword-argument languages (e.g. Python), not noise. See the
+ * "Known limitations" section of docs/architecture/blast-radius-nudge.md.
+ */
+function normalizeSignature(signature: string): string {
+  return signature
+    .replace(/\s+/g, ' ')
+    .replace(/\s*([(),])\s*/g, '$1')
+    .replace(/,\)/g, ')')
+    .trim();
+}
+
 /** Build the display name / bare name / parentClass triple for a matched pair's anchor. */
 function symbolIdentity(
   anchor: ChunkMetadata,
@@ -127,7 +151,9 @@ function classifyPair(
     return { ...symbolIdentity(before), kind: 'removed' };
   }
 
-  if (before.signature !== after.signature) {
+  const beforeSig = before.signature ?? '';
+  const afterSig = after.signature ?? '';
+  if (normalizeSignature(beforeSig) !== normalizeSignature(afterSig)) {
     return {
       ...symbolIdentity(after),
       kind: 'signature-changed',

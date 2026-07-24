@@ -41,6 +41,38 @@ describe('computeExportedSignatureDelta — signature-changed', () => {
     expect(result.changes).toEqual([]);
   });
 
+  it('does not flag a single-to-multi-line param reflow with a trailing comma (whitespace/format-only)', () => {
+    const before = 'export function foo(a, b) { return a + b; }';
+    const after = ['export function foo(', '  a,', '  b,', ') {', '  return a + b;', '}'].join(
+      '\n',
+    );
+    const result = computeExportedSignatureDelta({ filepath: 'a.ts', before, after });
+    expect(result.changes).toEqual([]);
+  });
+
+  it('does not flag a trailing-comma-only addition (whitespace/format-only)', () => {
+    const before = 'export function foo(a, b) { return a + b; }';
+    const after = 'export function foo(a, b,) { return a + b; }';
+    const result = computeExportedSignatureDelta({ filepath: 'a.ts', before, after });
+    expect(result.changes).toEqual([]);
+  });
+
+  it('does not flag a comma-spacing change, f(a,b) -> f(a, b) (whitespace/format-only)', () => {
+    const before = 'export function foo(a,b) { return a + b; }';
+    const after = 'export function foo(a, b) { return a + b; }';
+    const result = computeExportedSignatureDelta({ filepath: 'a.ts', before, after });
+    expect(result.changes).toEqual([]);
+  });
+
+  it('still flags a positional parameter rename, f(a) -> f(input) (a real API-surface change, not noise)', () => {
+    const before = 'export function foo(a) { return a; }';
+    const after = 'export function foo(input) { return input; }';
+    const result = computeExportedSignatureDelta({ filepath: 'a.ts', before, after });
+    expect(result.changes).toEqual([
+      expect.objectContaining({ symbol: 'foo', kind: 'signature-changed' }),
+    ]);
+  });
+
   it('does not flag a non-exported function whose signature changed', () => {
     const before = 'function helper(x) { return x; }';
     const after = 'function helper(x, y) { return x; }';

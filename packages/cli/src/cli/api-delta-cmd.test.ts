@@ -375,10 +375,21 @@ describe('apiDeltaCommand — enrichment when an index is present', () => {
 
     const result = lastJsonLog() as {
       filepath: string;
-      changes: Array<{ symbol: string; enriched: boolean; dependentCount: number | null }>;
+      changes: Array<{
+        symbol: string;
+        enriched: boolean;
+        dependentCount: number | null;
+        untestedDependentCount: number | null;
+      }>;
     };
-    expect(result.changes[0].enriched).toBe(true);
-    expect(result.changes[0].dependentCount).toBeGreaterThanOrEqual(0);
+    // The stub index supplies exactly one caller (caller.ts, a non-test file
+    // importing and calling formatUser) — assert the real counts, not just
+    // that enrichment ran at all.
+    expect(result.changes[0]).toMatchObject({
+      enriched: true,
+      dependentCount: 1,
+      untestedDependentCount: 1,
+    });
     expect(errSpy).not.toHaveBeenCalled();
   });
 });
