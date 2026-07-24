@@ -152,6 +152,61 @@ describe('AnthropicAgentClient extended thinking + retry forcing', () => {
     expect(mixed).toBeDefined();
   }, 15000);
 
+  it('stops with stopReason=budget (not completed) when a naturally-finishing turn already meets the allocation (issue #839 between-turn check)', async () => {
+    // Parity with the OpenAI client's same fix: `stop_reason:'end_turn'` was
+    // checked BEFORE the cumulative-budget check, so a turn that both
+    // finished naturally AND blew the budget was misreported as a clean
+    // 'completed'. One turn alone (6,000 input tokens) already exceeds the
+    // 5,000-token budget.
+    const verdict =
+      '```json\n{"findings":[],"summary":{"riskLevel":"low","overview":"ok","keyChanges":[]}}\n```';
+    createMock.mockResolvedValueOnce(msg([textBlock(verdict)], 6_000, 0, 'end_turn'));
+    const { logger } = capturingLogger();
+
+    const result = await makeClient(5_000, logger).run(
+      'sys',
+      'init',
+      TOOLS as never,
+      async () => 'ok',
+    );
+
+    expect(result.stopReason).toBe('budget');
+    expect(result.incomplete).toBe(false);
+    expect(result.summary).toBeDefined();
+    expect(result.turns).toBe(1);
+  });
+
+  it('bounds a multi-turn context-accumulation overshoot to the turn that crossed the line (issue #839)', async () => {
+    // Mirrors the shape of the OpenAI client's same test: two ordinary
+    // tool_use turns stay under budget, crossing the 0.6 wrap-up threshold on
+    // turn 2 (forcing turn 3 to drop tools) — then the forced turn's own
+    // (unbounded) input cost is what actually blows the budget.
+    const verdict =
+      '```json\n{"findings":[],"summary":{"riskLevel":"low","overview":"ok","keyChanges":[]}}\n```';
+    createMock
+      .mockResolvedValueOnce(
+        msg([thinkingBlock('investigating'), toolUseBlock], 9_000, 0, 'tool_use'),
+      )
+      .mockResolvedValueOnce(
+        msg([thinkingBlock('still investigating'), toolUseBlock], 4_000, 0, 'tool_use'),
+      )
+      .mockResolvedValueOnce(msg([textBlock(verdict)], 40_000, 0, 'end_turn'));
+    const { logger } = capturingLogger();
+
+    const result = await makeClient(20_000, logger).run(
+      'sys',
+      'init',
+      TOOLS as never,
+      async () => 'ok',
+    );
+
+    expect(result.stopReason).toBe('budget');
+    expect(result.incomplete).toBe(false);
+    expect(result.turns).toBe(3);
+    // Bounded to the third turn's own cost — no fourth request attempted.
+    expect(createMock).toHaveBeenCalledTimes(3);
+  });
+
   it('forces the retry with tool_choice:none + thinking (parity with the loop)', async () => {
     createMock
       .mockResolvedValueOnce(
