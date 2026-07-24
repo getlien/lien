@@ -284,17 +284,14 @@ export type PassClientRunner = (
  * its own independently-sized budget. Rather than let that surplus simply
  * evaporate, it becomes additional headroom every extra pass can draw on.
  *
- * This is an UNCONDITIONAL additive top-up, not folded into any one pass's
- * own `budget()` formula: `runReviewPass` computes `spec.budget(baseBudget,
- * context) + rolledOverBudget` — the addition happens AFTER `spec.budget()`
- * returns, so it changes every gated-on pass's final allocation whenever
- * `rolledOverBudget` is nonzero, REGARDLESS of whether that pass's own
- * formula reads its `baseBudget` parameter (a separate, independent
- * question — see review-pass-architecture.md's "Budget scaling" for which
- * passes do). It can push a pass's final allocation past its own documented
- * ceiling (e.g. `docTruthPassBudget`'s `DOC_TRUTH_MAX_BUDGET`) — that's the
- * point: these are tokens the main pass never spent, not tokens taken from
- * anywhere else (see `runReviewPass`'s own comment on the same rationale).
+ * This computes the STARTING size of a single, SHARED pool — `runExtraPasses`
+ * (below) depletes it as each pass actually draws on it, so it is spent AT
+ * MOST once in total across every extra pass, not handed to each one
+ * independently. (PR #837's own real dogfood run on this repo caught the
+ * bug this fix closes: giving the FULL rollover to all three eligible extra
+ * passes independently inflated the run's reported `allocatedTokens` by the
+ * rollover amount for every pass beyond the first — see `runExtraPasses`'s
+ * own comment for the depletion mechanics.)
  */
 export function unspentMainBudget(mainAllocatedTokens: number, mainSpentTokens: number): number {
   return Math.max(0, mainAllocatedTokens - mainSpentTokens);
@@ -306,11 +303,14 @@ export function unspentMainBudget(mainAllocatedTokens: number, mainSpentTokens: 
  * (reporting the precise skip reason), then build+run, catching and
  * swallowing any failure — a pass-2+ error must never fail the whole review.
  *
- * `rolledOverBudget` (default 0, additive, issue #836) is added ON TOP of
- * whatever `spec.budget()` computes — after, not instead of, so it never
- * fights that formula's own floor/ceiling clamp; it can push the final
- * allocation past a pass's normal ceiling, which is the point: these are
- * tokens the main pass never spent, not tokens taken from anywhere else.
+ * `rolledOverBudget` (default 0, issue #836) is added ON TOP of whatever
+ * `spec.budget()` computes — after, not instead of, so it never fights that
+ * formula's own floor/ceiling clamp; it can push the final allocation past a
+ * pass's normal ceiling, which is the point: these are tokens the main pass
+ * never spent, not tokens taken from anywhere else. This function itself is
+ * pool-agnostic — it just adds whatever value it's given; `runExtraPasses`
+ * is the one that computes a DEPLETING value across calls so the same
+ * rollover isn't handed to every pass independently.
  */
 export async function runReviewPass(
   spec: ReviewPassSpec,
@@ -382,6 +382,19 @@ export interface PassOutcome {
    * fit inside this run's budget (the common case). Read straight off the
    * pass's own `AgentResult.candidatesDeferred` (set by its
    * `postProcessResult`).
+   *
+   * NOT the same signal as `stopReason: 'budget'`, and the two are NOT
+   * contradictory when seen together: this field is a STATIC pre-check (did
+   * the worklist fit under the ceiling before the pass ever ran), while
+   * `stopReason` is a DYNAMIC runtime outcome (did the client loop exhaust
+   * its budget while investigating whatever worklist it was given, however
+   * small). A pass can legitimately report `candidatesDeferred: 0` (every
+   * eligible candidate fit under the ceiling, nothing pre-emptively
+   * excluded) AND `stopReason: 'budget'` (it still ran out of budget
+   * mid-investigation of that small, undeferred worklist — e.g. one
+   * candidate needed far more tool-call round-trips than the per-candidate
+   * cost estimate assumed). Seen live on PR #837's own dogfood run (issue
+   * #836): doc-truth reported exactly this combination.
    */
   candidatesDeferred: number;
   /** Best-effort human-readable labels for the deferred candidates (capped short list). */
@@ -398,11 +411,58 @@ export interface PassOutcome {
  * must never overwrite the main pass's `neverRan` marker.
  *
  * `rolledOverBudget` (default 0, issue #836 — see `unspentMainBudget`) is the
- * main pass's own unspent allocation, threaded through to every pass's own
- * budget computation AND reflected in its reported `allocatedTokens` (so the
- * delivery attestation shows the REAL allocation a pass ran with, not an
- * understated pre-rollover figure).
+ * main pass's own unspent allocation — the STARTING size of a single SHARED
+ * pool, not a per-pass grant. A local `remainingRollover` counter starts at
+ * this value and is depleted by however much each pass actually draws on it
+ * (`max(0, spentTokens - thatPass's OWN budget() result)`, floored so a pass
+ * that never touches the rollover — spends within its own formula's value —
+ * leaves it untouched for the next one). Each pass's reported `allocatedTokens`
+ * reflects the rollover amount IT was actually given (the counter's value
+ * before its own depletion), so the delivery attestation shows the real
+ * ceiling each pass ran with. Fixes a real bug caught in PR #837's own
+ * dogfood run on this repo: before this fix, giving the FULL rollover to
+ * every gated-on pass independently (not decrementing) inflated the run's
+ * total reported `allocatedTokens` by the rollover amount for each pass
+ * beyond the first — three extra passes fired on that PR, and all three
+ * showed the SAME undiminished 8,869-token rollover in their own
+ * `allocatedTokens`, rather than one pool spent at most once in total.
  */
+
+/** How much of a shared, depleting rollover pool one pass actually drew on —
+ *  the overage of its actual spend beyond its own `budget()` result, capped
+ *  at what's left in the pool (0 for a pass that stayed within its own
+ *  formula's value, never touching the rollover at all). Extracted so
+ *  `runExtraPasses` itself stays a short orchestrator (lien delta: Halstead
+ *  effort budget). */
+function rolloverConsumedBy(
+  spentTokens: number,
+  ownBudget: number,
+  remainingRollover: number,
+): number {
+  return Math.min(Math.max(0, spentTokens - ownBudget), remainingRollover);
+}
+
+/** Build one pass's attestation-facing outcome. `remainingRollover` is the
+ *  pool's value BEFORE this pass's own depletion — the rollover amount it
+ *  was actually given. Extracted for the same reason as `rolloverConsumedBy`
+ *  above. */
+function buildPassOutcome(
+  spec: ReviewPassSpec,
+  passResult: AgentResult,
+  ownBudget: number,
+  remainingRollover: number,
+): PassOutcome {
+  return {
+    name: spec.name,
+    stopReason: passResult.stopReason,
+    neverRan: passResult.neverRan ?? false,
+    allocatedTokens: ownBudget + remainingRollover,
+    spentTokens: passResult.usage.totalTokens,
+    candidatesDeferred: passResult.candidatesDeferred ?? 0,
+    deferredCandidateIds: passResult.deferredCandidateIds,
+  };
+}
+
 export async function runExtraPasses(
   specs: ReviewPassSpec[],
   context: ReviewContext,
@@ -415,6 +475,7 @@ export async function runExtraPasses(
 ): Promise<{ findings: AgentFinding[]; outcomes: PassOutcome[] }> {
   const outcomes: PassOutcome[] = [];
   let merged = findings;
+  let remainingRollover = rolledOverBudget;
   for (const spec of specs) {
     if (main.neverRan) {
       context.reportSkip?.({
@@ -423,26 +484,24 @@ export async function runExtraPasses(
       });
       continue;
     }
+    const ownBudget = spec.budget(config.maxTokenBudget, context);
     const passResult = await runReviewPass(
       spec,
       context,
       config,
       logger,
       runClientFor(spec),
-      rolledOverBudget,
+      remainingRollover,
     );
     if (passResult) {
       appendPassTurns(main.trace, passResult.trace, spec.name);
       context.reportUsage?.(passResult.usage);
-      outcomes.push({
-        name: spec.name,
-        stopReason: passResult.stopReason,
-        neverRan: passResult.neverRan ?? false,
-        allocatedTokens: spec.budget(config.maxTokenBudget, context) + rolledOverBudget,
-        spentTokens: passResult.usage.totalTokens,
-        candidatesDeferred: passResult.candidatesDeferred ?? 0,
-        deferredCandidateIds: passResult.deferredCandidateIds,
-      });
+      outcomes.push(buildPassOutcome(spec, passResult, ownBudget, remainingRollover));
+      remainingRollover -= rolloverConsumedBy(
+        passResult.usage.totalTokens,
+        ownBudget,
+        remainingRollover,
+      );
     }
     merged = spec.mergeFindings(merged, passResult?.findings ?? []);
     spec.mergeResultState(main, passResult, merged);

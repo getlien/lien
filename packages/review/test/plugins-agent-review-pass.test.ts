@@ -625,9 +625,11 @@ describe('runExtraPasses', () => {
     ]);
   });
 
-  it('threads rolledOverBudget into every pass own budget AND its reported allocatedTokens (issue #836)', async () => {
+  it('gives the FIRST pass the full rollover when it does not touch it, undiminished for the next pass', async () => {
     // PR #835's exact receipt shape: main allocated 20,000, spent 7,771 ->
-    // +12,229 rolled into every extra pass's own budget.
+    // +12,229 rolled into the shared pool. pass-a spends well within its OWN
+    // budget (10,000) — it never draws on the rollover, so pass-b still
+    // sees the full, undiminished 12,229.
     const specA = makeSpec({ name: 'pass-a', budget: () => 10_000 });
     const specB = makeSpec({ name: 'pass-b', budget: () => 5_000 });
     const ctx = createTestContext();
@@ -635,7 +637,9 @@ describe('runExtraPasses', () => {
     const seenBudgets: number[] = [];
     const runClientFor = () => async (_sys: string, _init: string, budget: number) => {
       seenBudgets.push(budget);
-      return fakeResult();
+      return fakeResult({
+        usage: { promptTokens: 0, completionTokens: 0, totalTokens: 3_000, cost: 0 },
+      });
     };
 
     const { outcomes } = await runExtraPasses(
@@ -649,12 +653,86 @@ describe('runExtraPasses', () => {
       12_229,
     );
 
-    // Every pass's own client call actually ran with the bumped budget...
+    // Both passes' own client calls ran with the SAME full rollover added —
+    // pass-a never dipped into it (spent 3,000 of its own 10,000), so it's
+    // still fully available to pass-b.
     expect(seenBudgets).toEqual([10_000 + 12_229, 5_000 + 12_229]);
-    // ...and the attestation-facing allocatedTokens matches that reality,
-    // not the pre-rollover figure (which would understate the real spend
-    // ceiling a pass ran with).
     expect(outcomes.map(o => o.allocatedTokens)).toEqual([10_000 + 12_229, 5_000 + 12_229]);
+  });
+
+  it("depletes the shared rollover pool as a pass actually draws on it — doesn't hand the same tokens to every pass independently (issue #836 dogfood fix)", async () => {
+    // Reproduces the real bug PR #837's own dogfood run on this repo caught:
+    // main allocated 250,000/spent 241,131 (+8,869 rolled over), and doc-truth
+    // (own budget 12,000) overspent to 56,430 — consuming the ENTIRE 8,869
+    // rollover, not just its own 12,000. Before this fix, stale-duplicate-loop
+    // (own budget 11,000) and incomplete-handling-loop (own budget 65,000)
+    // BOTH still showed the full, undiminished 8,869 in their own
+    // allocatedTokens (19,869 / 73,869) — as if the SAME 8,869 tokens were
+    // handed to all three passes independently, rather than one pool spent at
+    // most once in total.
+    const docTruthLike = makeSpec({ name: 'doc-truth', budget: () => 12_000 });
+    const staleDupLike = makeSpec({ name: 'stale-duplicate-loop', budget: () => 11_000 });
+    const incompleteLike = makeSpec({ name: 'incomplete-handling-loop', budget: () => 65_000 });
+    const ctx = createTestContext();
+    const main = mainResult();
+    const runClientFor = (spec: ReviewPassSpec) => async () =>
+      spec.name === 'doc-truth'
+        ? fakeResult({
+            usage: { promptTokens: 0, completionTokens: 0, totalTokens: 56_430, cost: 0 },
+          })
+        : fakeResult({ usage: { promptTokens: 0, completionTokens: 0, totalTokens: 1, cost: 0 } });
+
+    const { outcomes } = await runExtraPasses(
+      [docTruthLike, staleDupLike, incompleteLike],
+      ctx,
+      cfg(),
+      silentLogger,
+      main,
+      main.findings,
+      runClientFor,
+      8_869,
+    );
+
+    // doc-truth: its own 12,000 + the full 8,869 pool (nothing depleted yet).
+    // Overspending past its own allocation consumes the ENTIRE pool.
+    expect(outcomes[0]).toMatchObject({ name: 'doc-truth', allocatedTokens: 12_000 + 8_869 });
+    // stale-duplicate-loop and incomplete-handling-loop see the pool ALREADY
+    // exhausted by doc-truth — their own allocatedTokens carry NO rollover,
+    // not another independent 8,869 (the bug this test guards against).
+    expect(outcomes[1]).toMatchObject({ name: 'stale-duplicate-loop', allocatedTokens: 11_000 });
+    expect(outcomes[2]).toMatchObject({
+      name: 'incomplete-handling-loop',
+      allocatedTokens: 65_000,
+    });
+  });
+
+  it('partially depletes the pool when a pass draws on only some of the rollover', async () => {
+    const specA = makeSpec({ name: 'pass-a', budget: () => 10_000 });
+    const specB = makeSpec({ name: 'pass-b', budget: () => 5_000 });
+    const ctx = createTestContext();
+    const main = mainResult();
+    const runClientFor = (spec: ReviewPassSpec) => async () =>
+      // pass-a's own budget is 10,000; it spends 12,000 -> draws 2,000 from
+      // the 5,000-token pool, leaving 3,000 for pass-b.
+      spec.name === 'pass-a'
+        ? fakeResult({
+            usage: { promptTokens: 0, completionTokens: 0, totalTokens: 12_000, cost: 0 },
+          })
+        : fakeResult({ usage: { promptTokens: 0, completionTokens: 0, totalTokens: 1, cost: 0 } });
+
+    const { outcomes } = await runExtraPasses(
+      [specA, specB],
+      ctx,
+      cfg(),
+      silentLogger,
+      main,
+      main.findings,
+      runClientFor,
+      5_000,
+    );
+
+    expect(outcomes[0]).toMatchObject({ name: 'pass-a', allocatedTokens: 10_000 + 5_000 });
+    expect(outcomes[1]).toMatchObject({ name: 'pass-b', allocatedTokens: 5_000 + 3_000 });
   });
 
   it('defaults rolledOverBudget to 0 when omitted (no regression)', async () => {
