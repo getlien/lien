@@ -103,20 +103,42 @@ function everyLineIsCodeContextOnly(chunk: CodeChunk, re: RegExp, tokenLength: n
   );
 }
 
+/** A lowercase letter immediately followed by an uppercase one, or vice versa
+ *  (`eV` in `createVectorDB`, `hT` in `authToken`, `yC` in `MyClass`, `Wi` in
+ *  `Widget`) — the case TRANSITION that marks camelCase, PascalCase, or a
+ *  single Capitalized word, as opposed to a bare ALL-CAPS acronym (`API`,
+ *  `ID`, `URL`, `DB`, `UI`, `HTTP`, `TODO`), which has no lowercase letter
+ *  anywhere to transition from/to. */
+const CASE_TRANSITION_RE = /[a-z][A-Z]|[A-Z][a-z]/;
+
+/** An underscore with a word character on BOTH sides (`o_b` in `foo_bar`) —
+ *  an internal separator, as opposed to a purely decorative leading/trailing
+ *  underscore (`_prefix`, `foo_`), which doesn't make an ordinary word any
+ *  less ambiguous. */
+const INTERNAL_UNDERSCORE_RE = /\w_\w/;
+
 /**
- * True iff `token` contains an uppercase letter or an underscore anywhere —
- * the shape no ordinary lowercase English word has (`index`, `config`,
- * `platform`), so it CANNOT be mistaken for one no matter how many plain-
- * prose occurrences turn up in the corpus. Deliberately not restricted to a
- * "camelCase/PascalCase boundary strictly after position 0": a single
- * Capitalized proper-noun-style token (a class name referenced in prose
- * without markdown code-formatting, e.g. "the Widget's constructor") is
- * exactly as unambiguous as `createVectorDB` or `authToken` — English
- * common nouns are lowercase mid-sentence, so any capital letter, anywhere,
- * is already a strong enough signal. Exposed for testing.
+ * True iff `token` has an internal camelCase/PascalCase case transition or an
+ * internal underscore — the shape no ordinary lowercase English word has
+ * (`index`, `config`, `platform`), so it CANNOT be mistaken for one no matter
+ * how many plain-prose occurrences turn up in the corpus.
+ *
+ * Deliberately NARROWER than "contains any uppercase letter or underscore
+ * anywhere": a bare ALL-CAPS acronym (`API`, `ID`, `URL`, `DB`, `UI`, `HTTP`,
+ * `TODO`) is exactly the kind of ordinary, high-frequency word this gate
+ * exists to catch — "call the API", "check the ID" are completely mundane
+ * prose, and a removed export literally named `ID` or `API` would otherwise
+ * false-fire against nearly every doc in a real corpus. A single trailing or
+ * leading underscore (`foo_`, `_prefix`) is excluded for the same reason: it
+ * doesn't turn an otherwise-ordinary word into an identifier the way an
+ * INTERNAL separator does. False-fires are this nudge's worst failure mode
+ * (an incorrect "N docs reference X" is actively misleading, whereas a missed
+ * reference is merely silent) — this is why the requirement is a genuine
+ * shape signal, not merely "has a capital letter somewhere." Exposed for
+ * testing.
  */
 export function isUnambiguousIdentifierShape(token: string): boolean {
-  return /[A-Z_]/.test(token);
+  return CASE_TRANSITION_RE.test(token) || INTERNAL_UNDERSCORE_RE.test(token);
 }
 
 /**

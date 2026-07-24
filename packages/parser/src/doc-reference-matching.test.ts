@@ -169,7 +169,7 @@ describe('isDistinctiveToken', () => {
 // ---------------------------------------------------------------------------
 
 describe('isUnambiguousIdentifierShape', () => {
-  it('is true for camelCase (internal capital)', () => {
+  it('is true for camelCase (internal lowercase->uppercase transition)', () => {
     expect(isUnambiguousIdentifierShape('createVectorDB')).toBe(true);
     expect(isUnambiguousIdentifierShape('authToken')).toBe(true);
   });
@@ -182,14 +182,34 @@ describe('isUnambiguousIdentifierShape', () => {
     expect(isUnambiguousIdentifierShape('Widget')).toBe(true);
   });
 
-  it('is true for a token containing an underscore', () => {
+  it('is true for a token containing an INTERNAL underscore', () => {
     expect(isUnambiguousIdentifierShape('my_helper')).toBe(true);
+    expect(isUnambiguousIdentifierShape('foo_bar')).toBe(true);
   });
 
   it('is false for a bare all-lowercase word', () => {
     expect(isUnambiguousIdentifierShape('index')).toBe(false);
     expect(isUnambiguousIdentifierShape('config')).toBe(false);
     expect(isUnambiguousIdentifierShape('platform')).toBe(false);
+  });
+
+  it('is false for a bare ALL-CAPS acronym (no lowercase letter to transition from/to)', () => {
+    expect(isUnambiguousIdentifierShape('API')).toBe(false);
+    expect(isUnambiguousIdentifierShape('ID')).toBe(false);
+    expect(isUnambiguousIdentifierShape('URL')).toBe(false);
+    expect(isUnambiguousIdentifierShape('DB')).toBe(false);
+    expect(isUnambiguousIdentifierShape('UI')).toBe(false);
+    expect(isUnambiguousIdentifierShape('HTTP')).toBe(false);
+    expect(isUnambiguousIdentifierShape('TODO')).toBe(false);
+  });
+
+  it('is false for a single letter (no adjacent pair to transition across)', () => {
+    expect(isUnambiguousIdentifierShape('T')).toBe(false);
+  });
+
+  it('is false for a purely leading/trailing underscore (not an internal separator)', () => {
+    expect(isUnambiguousIdentifierShape('foo_')).toBe(false);
+    expect(isUnambiguousIdentifierShape('_prefix')).toBe(false);
   });
 });
 
@@ -241,5 +261,22 @@ describe('isDistinctiveToken — identifier-shape exemption (reviewer repros)', 
     expect(isDistinctiveToken('index', indexDocs)).toBe(false);
     expect(isDistinctiveToken('config', configDocs)).toBe(false);
     expect(isDistinctiveToken('platform', platformDocs)).toBe(false);
+  });
+
+  it('a bare ALL-CAPS acronym (API/ID/URL) in ordinary prose is still suppressed, NOT granted the exemption', () => {
+    // The whole point of tightening the exemption to require a case TRANSITION: a removed export
+    // literally named `API`, `ID`, or `URL` must not false-fire against every mundane mention of
+    // that acronym elsewhere in the corpus — a false-fire is this nudge's worst failure mode.
+    const apiDocs = [makeChunk('docs/guide.md', 'Call the API to fetch data.')];
+    const idDocs = [makeChunk('docs/guide.md', 'Each user has an ID assigned at signup.')];
+    const urlDocs = [makeChunk('docs/guide.md', 'Check the URL before sharing it.')];
+    expect(isDistinctiveToken('API', apiDocs)).toBe(false);
+    expect(isDistinctiveToken('ID', idDocs)).toBe(false);
+    expect(isDistinctiveToken('URL', urlDocs)).toBe(false);
+  });
+
+  it('foo_bar (an internal underscore) fires despite plain prose mentions, same as a camelCase token', () => {
+    const docChunks = [makeChunk('docs/guide.md', 'The foo_bar helper is used throughout.')];
+    expect(isDistinctiveToken('foo_bar', docChunks)).toBe(true);
   });
 });
