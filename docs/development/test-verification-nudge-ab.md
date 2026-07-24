@@ -347,16 +347,20 @@ lean on but its own training, already tests before finishing at this task's
 scale. A null from naive agents is real information, not a failed
 experiment, and it is reported as such rather than downplayed.
 
-**Validity caveat.** As with the sibling re-run, a synthetic, zero-context
-environment is a ceiling on how large an effect can be measured in either
-direction: it removes the contamination that inflated the original's
-control condition, but it also removes every ordinary source of context a
-real session carries. A real repository usually does carry some
-instructions, just not, usually, the specific ones under test here. This
-number is a lower bound on what a genuinely naive agent does by default,
-not a forecast of the advisory's effect inside an actual, more richly
-contextualized coding session where an agent may be under time or context
-pressure the single-turn setup here cannot reproduce.
+**Validity caveat.** As with the sibling re-run, this is not a literally
+zero-context environment: the user's ambient `~/.claude/rules/context7.md`
+rule remained active throughout, unrelated to the test-verification
+behavior but present nonetheless. What was actually achieved, an
+environment free of repository context, CLAUDE.md, and the Lien plugin, is
+a ceiling on how large an effect can be measured in either direction: it
+removes the contamination that inflated the original's control condition,
+but it also removes every ordinary source of context a real session
+carries. A real repository usually does carry some instructions, just not,
+usually, the specific ones under test here. This number is a lower bound on
+what a genuinely naive agent does by default, not a forecast of the
+advisory's effect inside an actual, more richly contextualized coding
+session where an agent may be under time or context pressure the
+single-turn setup here cannot reproduce.
 
 ### Artifacts (this section)
 

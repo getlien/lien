@@ -379,18 +379,22 @@ and it is reported as a null rather than reframed as inconclusive-therefore-
 supportive, per this document's own standing rule against post-hoc
 reframing.
 
-**Validity caveat.** A synthetic, zero-context environment (no CLAUDE.md, no
-enabled plugins, no prior conversation, single forced generation turn) is a
-ceiling on how large a nudge's measured effect can be in the other
-direction too: it removes not only the contamination that produced the
-original's false ceiling, but also every ordinary source of context a real
-coding session carries (a real project's own conventions, prior turns,
-accumulated task framing). A real repository usually does carry some
-instructions, just not, usually, the specific ones under test here. So this
-number should be read as a lower bound on what a genuinely naive agent does
-by default, not as a forecast of the nudge's effect inside an actual, more
-richly contextualized coding session. Zero context is a floor for isolating
-the mechanism, not a simulation of production use.
+**Validity caveat.** This is not a literally zero-context environment: the
+user's ambient `~/.claude/rules/context7.md` rule remained active throughout
+(see above), unrelated to either nudged behavior but present nonetheless.
+What was actually achieved is an environment free of repository context,
+CLAUDE.md, and the Lien plugin (no enabled plugins, no prior conversation,
+single forced generation turn), which is a ceiling on how large a nudge's
+measured effect can be in the other direction too: it removes not only the
+contamination that produced the original's false ceiling, but also every
+ordinary source of context a real coding session carries (a real project's
+own conventions, prior turns, accumulated task framing). A real repository
+usually does carry some instructions, just not, usually, the specific ones
+under test here. So this number should be read as a lower bound on what a
+genuinely naive agent does by default, not as a forecast of the nudge's
+effect inside an actual, more richly contextualized coding session. An
+environment free of repository, CLAUDE.md, and Lien-plugin context is a
+floor for isolating the mechanism, not a simulation of production use.
 
 ### Artifacts (this section)
 
