@@ -93,3 +93,12 @@ jobs:
           # unit tests independent of that score; this opt-in is itself the
           # real-PR evidence-gathering step, not a claim of a passed bar.
           LIEN_DOCS_DRIFT_PASS: 'on'
+          # removed-exports-pass.ts — same dark/opt-in mechanism as the
+          # three above; this repo opts in as of 2026-07-25 to dogfood it on
+          # its own PRs. Still dark/off for every other @liendev/review /
+          # @liendev/action consumer. This loop has zero real-PR firing data
+          # anywhere (see docs/architecture/review-pass-architecture.md's
+          # status line) — this opt-in exists to start accumulating that
+          # data ahead of any consumer default-on decision, not to claim a
+          # passed calibration bar.
+          LIEN_REMOVED_EXPORTS_PASS: 'on'
