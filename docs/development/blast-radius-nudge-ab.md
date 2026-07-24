@@ -245,3 +245,161 @@ judgment about whether they're worth the additional trial cost.
 - Protocol: `.wip/ab-blast/protocol.md` (gitignored, referenced above)
 - Raw per-trial outputs: `.wip/ab-blast/trials/{control,signal}-{1..8}.md`
   (gitignored)
+
+---
+
+## 2026-07-24: A/B #1b, context-neutral re-run
+
+The null result above was diagnosed as a ceiling effect caused by trial
+subagents inheriting this repo's own CLAUDE.md (they were launched via the
+`Agent` tool from a session rooted in this Lien repository). This section
+re-runs the same experiment with prompts, target file, warning block,
+rubric, exclusion rules, and N identical to the frozen protocol above (see
+`.wip/ab-neutral/protocol-1b.md`, gitignored, for the full pre-registration).
+The only change is the execution environment: each trial ran headlessly via
+`claude -p --model sonnet`, from a synthetic directory outside any git
+repository and outside any directory carrying a CLAUDE.md, instead of via
+the `Agent` tool from within this repo.
+
+### Mandatory contamination probe (run before any trial)
+
+Before pre-registering, a probe was run against the planned invocation from
+a confirmed-clean directory (no git repo, no CLAUDE.md anywhere up to `/`).
+The probe asked the model to quote, verbatim, any project instructions or
+repo-specific rules present in its context.
+
+Result: contaminated. The response's own system-reminder block listed
+`plugin:lien:lien` among "MCP servers ... still connecting," even though the
+directory had no git repo and no CLAUDE.md. Root cause: the Lien plugin is
+enabled at user level in `~/.claude/settings.json` (`enabledPlugins`), not
+per repo, so its MCP instructions (which state, verbatim, "REQUIRED before
+renaming, removing, or changing the signature of any exported symbol:
+get_dependents(...)") auto-attach to every `claude` session on this machine
+regardless of directory. This is a second, independent contamination
+channel from the one originally diagnosed (repo CLAUDE.md inheritance): the
+confound was two-layered all along. The original A/B #1 trials, launched
+from a session with this same plugin enabled, carried both layers at once,
+which strengthens rather than weakens the original ceiling-effect
+interpretation.
+
+Fix, verified before any trial ran: adding `--strict-mcp-config
+--mcp-config <empty mcpServers file>` to the invocation (identical for both
+arms) produced a re-probe with zero mention of lien, get_dependents,
+complexity, or test-association content. The only remaining ambient item in
+context was the user's global `~/.claude/rules/context7.md` rule (fetch
+current docs via Context7 MCP for library/framework questions), present
+identically in every trial regardless of condition; it is orthogonal to
+caller-impact checking and cannot produce a control vs. signal difference,
+recorded here honestly rather than scrubbed. Raw probe outputs (both the
+contaminated run and the verified-clean run) are archived at
+`.wip/ab-neutral/probes/probe-contaminated.txt` and
+`.wip/ab-neutral/probes/probe-clean.txt`.
+
+### Results
+
+32 headless trials for this document's experiment plus its #2b sibling ran
+without error (0 invalid, matching the original's 0/16). Zero control
+trials, across either experiment, mention Lien, CLAUDE.md, get_dependents,
+or any repo-specific rule, confirming the fix held at trial time, not just
+at probe time (checked by grepping all 32 raw outputs for those terms).
+
+**Primary metric, as literally specified (criterion a or b):**
+
+| Condition | Addressed caller impact | Rate |
+|---|---|---|
+| Control (no warning) | 8 / 8 | 100% |
+| Signal (warning injected) | 8 / 8 | 100% |
+
+Same non-discrimination as the original, and for the same reason: "thread
+`opts` through" mechanically forces every competent completion to update the
+3 in-file call sites (criterion a), so this half of the metric still cannot
+discriminate between conditions. Not new information; reproduced here for
+completeness.
+
+**The real discriminator: spontaneous reasoning about callers beyond the 3
+visible in-file call sites (criterion b alone):**
+
+| Condition | Explicitly discussed beyond-file callers/dependents | Rate |
+|---|---|---|
+| Control (no warning) | 7 / 8 | 87.5% |
+| Signal (warning injected) | 8 / 8 | 100% |
+
+This is a small, directional difference (one trial), not the 8/8 vs. 8/8
+dead heat the original (contaminated) run produced. Every signal trial
+explicitly flagged that the file's 3 visible call sites don't account for
+the warning's claimed "4 dependents" and recommended locating the 4th (five
+of eight named `get_dependents` specifically, echoing the warning's own
+wording, which is expected since the tool name is literally in the injected
+text). Seven of eight control trials, despite never seeing any dependent
+count or tool name, independently raised the general risk that "any code
+outside this file" or "external callers" of the four exported functions
+would need auditing, in generic language with no mention of Lien or any
+specific tool. One control trial (control-8) did not raise this at all.
+
+With N=8 per arm, a 7/8 vs. 8/8 split is not a result that supports a lift
+claim: it could easily reverse on a re-roll. It is reported plainly, not
+inflated. What it does establish, cleanly, is that in a genuinely
+context-free environment, most naive agents (not just contaminated ones)
+already reason about beyond-file caller impact when asked to change an
+exported function's signature, control or signal alike. That is a different
+and more interesting finding than the original's ceiling effect: it
+suggests this specific caller-impact instinct is close to a baseline
+property of the model on this kind of task, not solely an artifact of
+repo-specific instructions or of Lien's plugin. The signal condition's 8/8
+sits at the same ceiling as control's 7/8, so this run still cannot cleanly
+isolate the warning's marginal lift over that baseline; it only narrows how
+much headroom there was to move.
+
+**Secondary metric: acknowledging the specific "1 untested" dependent
+(signal only, unchanged rubric):**
+
+| Condition | Acknowledges "1 untested" specifically | Rate |
+|---|---|---|
+| Control (no warning) | 0 / 8 | 0% (never shown the figure) |
+| Signal (warning injected) | 8 / 8 | 100% |
+
+Identical to the original: every signal trial read and repeated the
+warning's specific numbers faithfully. As before, this shows the warning's
+content is legible, not that it changed behavior the agent wouldn't
+otherwise have reached.
+
+### Honest read
+
+This re-run removed the two identified contamination channels (repo
+CLAUDE.md and the user-level Lien plugin) and still could not produce a
+clean control vs. signal separation on the primary metric: both remain at
+100%, because the task itself forces criterion (a). On the sharper
+criterion (b) measure, the gap narrowed from 8/8 vs. 8/8 (original,
+contaminated) to 7/8 vs. 8/8 (this run, verified clean), a one-trial
+difference that is directionally consistent with the warning having some
+effect but is far too small, at N=8, to call a result. Read plainly: this is
+a second null for the question this protocol was designed to answer,
+arrived at with a materially cleaner environment than the first attempt,
+and it is reported as a null rather than reframed as inconclusive-therefore-
+supportive, per this document's own standing rule against post-hoc
+reframing.
+
+**Validity caveat.** This is not a literally zero-context environment: the
+user's ambient `~/.claude/rules/context7.md` rule remained active throughout
+(see above), unrelated to either nudged behavior but present nonetheless.
+What was actually achieved is an environment free of repository context,
+CLAUDE.md, and the Lien plugin (no enabled plugins, no prior conversation,
+single forced generation turn), which is a ceiling on how large a nudge's
+measured effect can be in the other direction too: it removes not only the
+contamination that produced the original's false ceiling, but also every
+ordinary source of context a real coding session carries (a real project's
+own conventions, prior turns, accumulated task framing). A real repository
+usually does carry some instructions, just not, usually, the specific ones
+under test here. So this number should be read as a lower bound on what a
+genuinely naive agent does by default, not as a forecast of the nudge's
+effect inside an actual, more richly contextualized coding session. An
+environment free of repository, CLAUDE.md, and Lien-plugin context is a
+floor for isolating the mechanism, not a simulation of production use.
+
+### Artifacts (this section)
+
+- Pre-registration: `.wip/ab-neutral/protocol-1b.md` (gitignored)
+- Probe outputs: `.wip/ab-neutral/probes/probe-contaminated.txt`,
+  `.wip/ab-neutral/probes/probe-clean.txt` (gitignored)
+- Raw per-trial outputs: `.wip/ab-neutral/trials/blast/{control,signal}-{1..8}.md`
+  (gitignored)
