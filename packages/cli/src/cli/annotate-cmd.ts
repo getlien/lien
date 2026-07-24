@@ -221,18 +221,24 @@ async function run(file: string, options?: AnnotateOptions): Promise<void> {
   }
 }
 
+export interface FileTestAssociations {
+  filepath: RelativePath;
+  rootDir: AbsolutePath;
+  tests: string[];
+}
+
 /**
- * The cheap path for the post-edit `test-reminder.sh` hook: test-association
- * lookup only, skipping `findDependents`'s BFS over the import graph and the
- * complexity/blast-radius computation the full annotation needs. A single
- * `vectorDB.scanAll()` (the same column-projected full-table read
- * `get_files_context` uses for its own test-association scan) is all this
- * needs — reusing the index's existing knowledge, no new analysis.
- *
- * Prints nothing when the file has no associated tests (the signal for the
- * hook to stay silent).
+ * The cheap lookup shared by `lien annotate --tests-only` (via `runTestsOnly`
+ * below) and `lien verify-tests note-edit` (FEATURE 2 — see
+ * `verify-tests-cmd.ts`): a single `vectorDB.scanAll()` (the same
+ * column-projected full-table read `get_files_context` uses for its own
+ * test-association scan) followed by `findTestAssociationsFromChunks`,
+ * skipping `findDependents`'s BFS over the import graph and the
+ * complexity/blast-radius computation the full annotation needs. Both
+ * callers print via the same `formatTestReminder`, so the reminder text an
+ * agent sees can never drift between the two commands.
  */
-async function runTestsOnly(paths: ResolvedPaths): Promise<void> {
+async function scanTestAssociations(paths: ResolvedPaths): Promise<FileTestAssociations> {
   const { originalCwd, rootDir, filepath } = paths;
   const needsChdir = originalCwd !== rootDir;
   if (needsChdir) process.chdir(rootDir);
@@ -242,11 +248,33 @@ async function runTestsOnly(paths: ResolvedPaths): Promise<void> {
     const allChunks = adaptChunkImports(await vectorDB.scanAll());
     const tests =
       findTestAssociationsFromChunks([filepath], allChunks, rootDir).get(filepath) ?? [];
-    if (tests.length === 0) return;
-    console.log(formatTestReminder(filepath, tests));
+    return { filepath, rootDir, tests };
   } finally {
     if (needsChdir) process.chdir(originalCwd);
   }
+}
+
+/**
+ * `lien verify-tests note-edit`'s entry point: resolve `file` and look up its
+ * associated tests in one shot. Returns null when the path is unusable (see
+ * `resolvePaths`) — the same "stay silent" signal `annotateCommand` itself
+ * uses for any error.
+ */
+export async function lookupTestAssociations(file: string): Promise<FileTestAssociations | null> {
+  const paths = resolvePaths(file);
+  if (!paths) return null;
+  return scanTestAssociations(paths);
+}
+
+/**
+ * The cheap path for the post-edit `test-reminder.sh` hook: test-association
+ * lookup only (see `scanTestAssociations`). Prints nothing when the file has
+ * no associated tests (the signal for the hook to stay silent).
+ */
+async function runTestsOnly(paths: ResolvedPaths): Promise<void> {
+  const { filepath, tests } = await scanTestAssociations(paths);
+  if (tests.length === 0) return;
+  console.log(formatTestReminder(filepath, tests));
 }
 
 /**

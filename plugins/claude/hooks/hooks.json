@@ -1,5 +1,5 @@
 {
-  "description": "Lien Read-time impact annotator: surfaces dependents/coverage/complexity as a system reminder when the model reads an indexed file. Plus write-time hooks: a delta warning (a function whose complexity newly crossed a threshold), a blast-radius warning (an exported symbol's signature changed or was removed), and a test-association reminder (which tests to run). Suppresses repeats per session for 5 minutes.",
+  "description": "Lien Read-time impact annotator: surfaces dependents/coverage/complexity as a system reminder when the model reads an indexed file. Plus write-time hooks: a delta warning (a function whose complexity newly crossed a threshold), a blast-radius warning (an exported symbol's signature changed or was removed), and a test-association reminder (which tests to run) that also records the edit for the did-you-run-the-tests verification nudge. A Bash hook records observed test runs, and a Stop hook advises on any edited file whose associated tests were never observed running. Suppresses repeats per session for 5 minutes.",
   "hooks": {
     "PreToolUse": [
       {
@@ -50,6 +50,27 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/api-delta-write.sh",
+            "timeout": 5000
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/test-run-note.sh",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/test-verify-stop.sh",
             "timeout": 5000
           }
         ]

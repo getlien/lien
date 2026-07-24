@@ -19,6 +19,11 @@ version.
   the whole `tool_input` object, so the hook must echo back every original
   field (`subagent_type`, `description`, etc.) or the call silently breaks
   (`augment-explore-task.sh`).
+- `{"decision":"block","reason":"..."}` (Stop): stops the turn from
+  completing and forces one more turn with `reason` as context (same effect
+  as `exit 2` + stderr for this event). `test-verify-stop.sh` uses this. See
+  "Stop event: two channels, not one" below — `additionalContext` reaches
+  the model here too, but with different (non-blocking) semantics.
 
 ## Recorded but NOT delivered to the model
 
@@ -28,6 +33,32 @@ version.
 - `hookSpecificOutput.updatedToolOutput` for `Read` (PostToolUse): ignored;
   the Read result returns unchanged. Likely ignored for any tool returning
   structured (non-string) output.
+
+## Stop event: two channels, not one
+
+**Correction (2026-07-24, during the FEATURE 2 build — see
+[test-verification-nudge.md](test-verification-nudge.md)):** an earlier
+version of this doc, and the design doc that shipped FEATURE 2, both stated
+"Stop hooks ignore `additionalContext`; `decision:block` is the only channel
+that reaches the model." A fresh read of the official hooks reference during
+that build found this is **not correct** — `Stop` supports two independent
+channels with different semantics, and re-verifying claims like this against
+current docs (rather than trusting an earlier session's note indefinitely)
+is exactly why this file says "re-verify if the hook protocol changes":
+
+| Channel | Effect |
+| --- | --- |
+| top-level `{"decision":"block","reason":"..."}` | Stops the turn from completing and forces one more turn, with `reason` as the context the model sees. This is also what `exit 2` + stderr does for `Stop`. |
+| `hookSpecificOutput.additionalContext` (with `hookEventName: "Stop"`) | **Does NOT block.** Injects context the model can act on while still allowing the turn to end normally — the one event where `additionalContext` differs from its `PostToolUse` behavior (there, it always attaches non-blocking context; for `Stop` specifically, this is documented as continuing the conversation rather than ending it). |
+| Exit 0, no JSON | Allows the stop to proceed with no comment. |
+
+`test-verify-stop.sh` uses `decision:block` deliberately — the nudge is a
+one-shot "take one more look before you finish" interruption, not passive
+context to scroll past — and that choice holds up under the corrected
+understanding just as well as it did under the (wrong) "only channel"
+premise. But a future Stop hook that only wants to leave a note without
+forcing another turn should reach for `additionalContext`, not assume
+`decision:block` is the only option.
 
 ## The Agent-vs-Task matcher gotcha
 
@@ -64,6 +95,8 @@ and was left as-is.
 | Deliver context the model should see, mid-action | PostToolUse + `additionalContext` |
 | Block the tool with a message the model must read | exit 2 + stderr |
 | Mutate what a subagent sees in its own prompt | PreToolUse + `updatedInput` (echo every field) |
+| Force one more turn before the agent stops | Stop + `{"decision":"block","reason":...}` |
+| Leave a note at Stop without forcing another turn | Stop + `additionalContext` (non-blocking — see the Stop section above) |
 
 Before wiring a hook to a specific tool name, verify the name in the target CC
 version; grep a session transcript

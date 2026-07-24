@@ -15,6 +15,7 @@ import { configSetCommand, configGetCommand, configListCommand } from './config.
 import { pathCommand } from './path-cmd.js';
 import { annotateCommand } from './annotate-cmd.js';
 import { gcCommand } from './gc.js';
+import { noteEditCommand, noteRunCommand, reportCommand } from './verify-tests-cmd.js';
 
 // Get version from package.json dynamically
 const __filename = fileURLToPath(import.meta.url);
@@ -159,6 +160,44 @@ program
     'Print only the post-edit test-association reminder line (for the write hook)',
   )
   .action(annotateCommand);
+
+const verifyTestsCmd = program
+  .command('verify-tests')
+  .description(
+    'Session-scoped did-you-run-the-tests ledger (for the plugin hooks) — record edits/test-runs and report unverified files',
+  );
+
+// Session/file/command are plain (not required) options: every subcommand is
+// its own fail-open no-op when one is missing (see verify-tests-cmd.ts), so a
+// hard commander usage error here would contradict this feature's fail-open
+// contract for what is, in practice, hook-driven plumbing.
+verifyTestsCmd
+  .command('note-edit')
+  .description(
+    'Record that a file was edited and print its test-association reminder (replaces `annotate --tests-only` in the edit hook)',
+  )
+  .option('--session <id>', 'Session ID to record under')
+  .option('--file <path>', 'File that was edited')
+  .option('--format <type>', 'Output format: text, json', 'text')
+  .action(noteEditCommand);
+
+verifyTestsCmd
+  .command('note-run')
+  .description(
+    'Record a Bash command as a test run, if it looks like one (silent — for the Bash hook)',
+  )
+  .option('--session <id>', 'Session ID to record under')
+  .option('--command <cmd>', 'The Bash command that was run')
+  .action(noteRunCommand);
+
+verifyTestsCmd
+  .command('report')
+  .description(
+    'Report edited files whose associated tests were never observed running this session',
+  )
+  .option('--session <id>', 'Session ID to report on')
+  .option('--format <type>', 'Output format: text, json', 'text')
+  .action(reportCommand);
 
 program
   .command('gc')

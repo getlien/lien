@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# SessionStart hook: GC stale annotated-sessions/ dirs.
-# Keeps state from concurrent sessions intact (don't wipe other-session
-# state on startup); only removes dirs that haven't been touched in >24h.
+# SessionStart hook: GC stale annotated-sessions/ dirs, and FEATURE 2's
+# test-sessions/ ledger files (test-verification-nudge.md). Keeps state from
+# concurrent sessions intact (don't wipe other-session state on startup);
+# only removes entries that haven't been touched in >24h.
 
 set -u
 
@@ -24,6 +25,14 @@ fi
 sessions_root="$store/annotated-sessions"
 if [ -d "$sessions_root" ]; then
   find "$sessions_root" -mindepth 1 -maxdepth 1 -type d -mmin +1440 -exec rm -rf {} + 2>/dev/null
+fi
+
+# FEATURE 2's session ledger: one <sessionId>.jsonl file per session (not a
+# per-session directory, unlike annotated-sessions/ above), so the find
+# targets files, not dirs.
+test_sessions_root="$store/test-sessions"
+if [ -d "$test_sessions_root" ]; then
+  find "$test_sessions_root" -mindepth 1 -maxdepth 1 -type f -mmin +1440 -exec rm -f {} + 2>/dev/null
 fi
 
 # Pre-warm the resolver's npx fallback in the background (detached, so this
