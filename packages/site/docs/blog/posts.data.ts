@@ -43,9 +43,9 @@ export default createContentLoader('blog/posts/*.md', {
       }))
       // Must return 0 for equal dates -- `a.date < b.date ? 1 : -1` returns
       // -1 for BOTH (a, b) and (b, a) when the dates tie, which breaks the
-      // total-order contract Array.prototype.sort's comparator relies on
-      // (all three seed posts currently share one date, so ties aren't a
-      // hypothetical edge case here).
+      // total-order contract Array.prototype.sort's comparator relies on.
+      // Post dates are distinct today, but same-day posts remain a normal
+      // authoring case.
       .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
   },
 })
