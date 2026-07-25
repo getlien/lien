@@ -215,12 +215,18 @@ describe('Java Language', () => {
       expect(path).toBe('com.google.common.collect.ImmutableList');
     });
 
-    it('should handle wildcard imports', () => {
+    it('should extract the package path (no trailing .*) for wildcard imports', () => {
+      // A literal `.*` suffix never satisfies matchesPythonModule's dotted-
+      // identifier check in path-matching.ts, so it could never resolve to a
+      // test association or dependent for anything in the package (see #859's
+      // "extractImportPath must return a matchable path" contract). The
+      // clean package path (already computed by processImportSymbols below)
+      // is what must be returned here too.
       const code = 'import com.google.common.collect.*;';
       const root = mustParse(code, 'java');
       const importNode = root.namedChild(0)!;
       const path = importExtractor.extractImportPath(importNode);
-      expect(path).toBe('com.google.common.collect.*');
+      expect(path).toBe('com.google.common.collect');
     });
 
     it('should handle static imports', () => {

@@ -290,6 +290,19 @@ function isKotlinStdLib(importPath: string): boolean {
 }
 
 /**
+ * Strip a trailing wildcard segment (`.*`) from a dotted import path. See the
+ * identical helper (and its full rationale) in `java.ts`: a literal `.*`
+ * suffix never satisfies `matchesPythonModule`'s dotted-identifier check in
+ * path-matching.ts, so `extractImportPath` — whose output feeds
+ * `chunk.metadata.imports`, the source that matching reads — must return the
+ * clean package path (already computed separately by `processImportSymbols`)
+ * instead of the unmatchable wildcard-suffixed string.
+ */
+function stripWildcardSuffix(path: string): string {
+  return path.endsWith('.*') ? path.slice(0, -2) : path;
+}
+
+/**
  * Kotlin import extractor.
  *
  * Handles `import a.b.C`, wildcard `import a.b.*`, and aliased
@@ -304,7 +317,7 @@ export class KotlinImportExtractor implements LanguageImportExtractor {
   extractImportPath(node: SyntaxNode): string | null {
     const path = this.getImportPath(node);
     if (!path || isKotlinStdLib(path)) return null;
-    return path;
+    return stripWildcardSuffix(path);
   }
 
   processImportSymbols(node: SyntaxNode): { importPath: string; symbols: string[] } | null {

@@ -193,6 +193,23 @@ function isJavaStdLib(importPath: string): boolean {
 }
 
 /**
+ * Strip a trailing wildcard segment (`.*`) from a dotted import path.
+ * `getImportPath` appends `.*` to mark wildcard imports (consumed below by
+ * `processImportSymbols`'s package/symbol split), but a literal `.*` suffix
+ * never satisfies `matchesPythonModule`'s dotted-identifier check in
+ * path-matching.ts — the regex requires every segment to look like an
+ * identifier, so it never matches an asterisk. That means a raw `com.example.*`
+ * can never resolve to a test association or dependent for anything in
+ * `com/example/`. `extractImportPath` feeds `chunk.metadata.imports` (the
+ * source that matching reads), so it must return the clean package path —
+ * the same one `processImportSymbols` already computes — instead of the
+ * unmatchable wildcard-suffixed string.
+ */
+function stripWildcardSuffix(path: string): string {
+  return path.endsWith('.*') ? path.slice(0, -2) : path;
+}
+
+/**
  * Java import extractor
  *
  * Handles all Java import patterns:
@@ -209,7 +226,7 @@ export class JavaImportExtractor implements LanguageImportExtractor {
   extractImportPath(node: SyntaxNode): string | null {
     const path = this.getImportPath(node);
     if (!path || isJavaStdLib(path)) return null;
-    return path;
+    return stripWildcardSuffix(path);
   }
 
   processImportSymbols(node: SyntaxNode): { importPath: string; symbols: string[] } | null {

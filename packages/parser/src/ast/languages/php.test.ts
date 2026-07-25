@@ -215,6 +215,44 @@ class User {
         expect(result!.symbols).toContain('Auth');
       }
     });
+
+    // Grouped use (`use Ns\{A, B};`, PHP 7+) previously returned null for the
+    // WHOLE declaration from both extractImportPath and processImportSymbols
+    // — tree-sitter-php parses it as a `namespace_name` prefix sibling plus a
+    // `namespace_use_group` of `namespace_use_clause` items, a shape the
+    // extractor didn't recognize at all (distinct from the simple/aliased
+    // form's `namespace_use_clause -> qualified_name`). Each item targets a
+    // different file under PSR-4, so — mirroring GoImportExtractor's "first
+    // wins" precedent for its own multi-target grouped imports — only the
+    // first item is captured rather than the whole statement staying invisible.
+    it('should extract the first target from a grouped use declaration', () => {
+      const code = '<?php\nuse App\\Models\\{User, Post};';
+      const root = mustParse(code, 'php');
+      const useNode = root.namedChild(1)!;
+      expect(useNode.type).toBe('namespace_use_declaration');
+      const path = importExtractor.extractImportPath(useNode);
+      expect(path).toBe('App\\Models\\User');
+    });
+
+    it('should extract import symbols from a grouped use declaration', () => {
+      const code = '<?php\nuse App\\Models\\{User, Post};';
+      const root = mustParse(code, 'php');
+      const useNode = root.namedChild(1)!;
+      const result = importExtractor.processImportSymbols(useNode);
+      expect(result).not.toBeNull();
+      expect(result!.importPath).toBe('App\\Models\\User');
+      expect(result!.symbols).toEqual(['User']);
+    });
+
+    it('should use the alias as the symbol for an aliased item in a grouped use', () => {
+      const code = '<?php\nuse App\\Models\\{User as UserModel, Post};';
+      const root = mustParse(code, 'php');
+      const useNode = root.namedChild(1)!;
+      const result = importExtractor.processImportSymbols(useNode);
+      expect(result).not.toBeNull();
+      expect(result!.importPath).toBe('App\\Models\\User');
+      expect(result!.symbols).toEqual(['UserModel']);
+    });
   });
 
   describe('Symbol Extraction', () => {

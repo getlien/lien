@@ -129,9 +129,13 @@ describe('Kotlin Language', () => {
       expect(importExtractor.extractImportPath(imp)).toBe('com.example.Service');
     });
 
-    it('handles wildcard imports', () => {
+    it('extracts the package path (no trailing .*) for wildcard imports', () => {
+      // A literal `.*` suffix never satisfies matchesPythonModule's dotted-
+      // identifier check in path-matching.ts, so it could never resolve to a
+      // test association or dependent for anything in the package (same
+      // "extractImportPath must return a matchable path" contract as #859).
       const [imp] = importHeaders('import com.example.*\n');
-      expect(importExtractor.extractImportPath(imp)).toBe('com.example.*');
+      expect(importExtractor.extractImportPath(imp)).toBe('com.example');
     });
 
     it('uses the alias as the imported symbol', () => {
