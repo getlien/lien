@@ -122,7 +122,7 @@ Reference them from a later step via the step `id`:
 
 ## Advanced configuration
 
-Beyond the inputs above, one behavior is tunable only via an environment
+Beyond the inputs above, a few behaviors are tunable only via an environment
 variable on the action step, not a formal input:
 
 ```yaml
@@ -130,6 +130,7 @@ variable on the action step, not a formal input:
   env:
     LIEN_REVIEW_DOC_PASS: '0' # disable the doc-truth second pass
     LIEN_DOC_TRUTH_V2: 'off' # opt back into the pass's older open-findings-list behavior
+    LIEN_REVIEW_TOKEN_BUDGET: '400000' # raise the main pass's token budget for large diffs
   with:
     openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
 ```
@@ -143,6 +144,17 @@ variable on the action step, not a formal input:
   [Agent-Review Pass Architecture](https://github.com/getlien/lien/blob/main/docs/architecture/review-pass-architecture.md)
   for what v2 changes. Only takes effect when the doc-truth pass itself is
   enabled (i.e., not overridden by `LIEN_REVIEW_DOC_PASS` above).
+- **`LIEN_REVIEW_TOKEN_BUDGET=<int>`**: an absolute override for the main
+  pass's final token budget, for repos whose PRs reproducibly starve the
+  diff-scaled/blast-radius-scaled formula on large diffs (see
+  [Agent-Review Pass Architecture](https://github.com/getlien/lien/blob/main/docs/architecture/review-pass-architecture.md)'s
+  budget section for exactly where this applies). Unset by default — every
+  consumer gets the same diff-scaled budget as before. A non-numeric,
+  non-integer, zero, or negative value is ignored (fails open to the
+  computed budget, never crashes the run); a valid value is clamped to
+  [60,000, 1,250,000] (5× the existing 250,000 ceiling). Raising this raises
+  the run's worst-case per-PR OpenRouter cost — set it deliberately, not
+  speculatively.
 
 There is currently no `model` input. The OpenRouter path pins the calibrated
 default deliberately, since the calibration evidence backing this review
