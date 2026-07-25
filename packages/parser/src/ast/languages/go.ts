@@ -188,12 +188,33 @@ function isStdLibImport(importPath: string): boolean {
 export class GoImportExtractor implements LanguageImportExtractor {
   readonly importNodeTypes = ['import_declaration'];
 
+  /**
+   * Returns only the FIRST non-stdlib path from a grouped `import (...)`
+   * block — kept for existing callers/tests that want a single result.
+   * Delegates to `extractImportPaths` so the two can never disagree; see
+   * that method for why a grouped import can legitimately declare several
+   * distinct targets (#863).
+   */
   extractImportPath(node: SyntaxNode): string | null {
+    return this.extractImportPaths(node)[0] ?? null;
+  }
+
+  /**
+   * Returns EVERY non-stdlib path declared by this import node, in source
+   * order. A single `import (...)` block commonly groups 2+ external
+   * packages (e.g. `import ( "fmt"; "github.com/foo/utils"; "github.com/foo/models" )`),
+   * and each is a genuinely distinct target — silently keeping only the
+   * first (the pre-#863 behavior) dropped every subsequent target from
+   * `chunk.metadata.imports`, hiding any test file that only imports a
+   * later package in the group from `findTestAssociationsFromChunks`.
+   */
+  extractImportPaths(node: SyntaxNode): string[] {
+    const paths: string[] = [];
     for (const spec of this.collectImportSpecs(node)) {
       const path = this.extractSpecPath(spec);
-      if (path) return path;
+      if (path) paths.push(path);
     }
-    return null;
+    return paths;
   }
 
   processImportSymbols(node: SyntaxNode): { importPath: string; symbols: string[] } | null {

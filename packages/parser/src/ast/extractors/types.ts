@@ -91,10 +91,33 @@ export interface LanguageImportExtractor {
   /**
    * Extract the import path from an import node for the imports list.
    *
+   * For a declaration that groups multiple distinct targets (e.g. Go's
+   * `import ( "a"; "b" )`), this returns only the FIRST one — see
+   * `extractImportPaths` for the complete, order-preserving form. Kept
+   * as-is (not derived from `extractImportPaths`'s result in the
+   * interface contract itself) because most languages have exactly one
+   * target per declaration and existing per-language tests pin this
+   * exact "first" behavior.
+   *
    * @param node - AST node matching one of importNodeTypes
    * @returns The import path string, or null to skip
    */
   extractImportPath(node: SyntaxNode): string | null;
+
+  /**
+   * Extract ALL import targets from a single import declaration node.
+   *
+   * Most languages have exactly one target per declaration, so the
+   * default shape is `extractImportPath(node)` wrapped in an array (see
+   * `toImportPathsArray`). Go's grouped `import (...)` blocks can name
+   * several distinct external packages from one declaration node — its
+   * implementation overrides this to return every target instead of
+   * silently dropping all but the first (see #863).
+   *
+   * @param node - AST node matching one of importNodeTypes
+   * @returns Every import path declared by this node, in source order (empty if none)
+   */
+  extractImportPaths(node: SyntaxNode): string[];
 
   /**
    * Extract imported symbols mapped to their source path.
@@ -103,4 +126,14 @@ export interface LanguageImportExtractor {
    * @returns Object with importPath and symbols, or null to skip
    */
   processImportSymbols(node: SyntaxNode): { importPath: string; symbols: string[] } | null;
+}
+
+/**
+ * Default `extractImportPaths` shape for every language extractor that has
+ * exactly one import target per declaration node: wrap `extractImportPath`'s
+ * single result in an array (empty when it returns `null`). See
+ * `LanguageImportExtractor.extractImportPaths`.
+ */
+export function toImportPathsArray(path: string | null): string[] {
+  return path ? [path] : [];
 }

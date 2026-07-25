@@ -313,6 +313,18 @@ exports.bar = 42;`;
       expect(result).toBeNull();
     });
 
+    it('extractImportPaths wraps the single extractImportPath result in an array (default shape, #863)', () => {
+      const code = "import { foo } from './module';";
+      const root = mustParse(code, 'javascript');
+      const node = root.namedChild(0)!;
+      expect(importExtractor.extractImportPaths(node)).toEqual(['./module']);
+
+      const noSourceCode = 'const x = 42;';
+      const noSourceRoot = mustParse(noSourceCode, 'javascript');
+      const noSourceNode = noSourceRoot.namedChild(0)!;
+      expect(importExtractor.extractImportPaths(noSourceNode)).toEqual([]);
+    });
+
     it('should return null for dynamic require()', () => {
       const code = 'const mod = require(dynamicPath);';
       const root = mustParse(code, 'javascript');

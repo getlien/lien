@@ -322,6 +322,18 @@ describe('C# Language', () => {
       const result = importExtractor.processImportSymbols(importNode);
       expect(result).toBeNull();
     });
+
+    it('extractImportPaths wraps the single extractImportPath result in an array (default shape, #863)', () => {
+      const code = 'using Newtonsoft.Json;';
+      const root = mustParse(code, 'csharp');
+      const importNode = root.namedChild(0)!;
+      expect(importExtractor.extractImportPaths(importNode)).toEqual(['Newtonsoft.Json']);
+
+      const stdlibCode = 'using System;';
+      const stdlibRoot = mustParse(stdlibCode, 'csharp');
+      const stdlibNode = stdlibRoot.namedChild(0)!;
+      expect(importExtractor.extractImportPaths(stdlibNode)).toEqual([]);
+    });
   });
 
   describe('Symbol Extraction', () => {

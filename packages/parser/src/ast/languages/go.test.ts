@@ -276,6 +276,72 @@ import (
       expect(result!.importPath).toBe('github.com/lib/pq');
       expect(result!.symbols).toEqual(['pq']);
     });
+
+    describe('extractImportPaths (plural, #863)', () => {
+      it('should extract ALL external paths from a grouped import, not just the first', () => {
+        // Reproduces #863: a grouped import block naming two distinct
+        // non-stdlib targets used to silently drop the second.
+        const code = `package main
+import (
+	"fmt"
+	"github.com/foo/utils"
+	"github.com/foo/models"
+)`;
+        const root = mustParse(code, 'go');
+        const importNode = root.namedChild(1)!;
+        const paths = importExtractor.extractImportPaths(importNode);
+
+        expect(paths).toEqual(['github.com/foo/utils', 'github.com/foo/models']);
+      });
+
+      it('should return a single-element array for a single (non-grouped) import', () => {
+        const code = 'package main\nimport "github.com/gin-gonic/gin"';
+        const root = mustParse(code, 'go');
+        const importNode = root.namedChild(1)!;
+        const paths = importExtractor.extractImportPaths(importNode);
+
+        expect(paths).toEqual(['github.com/gin-gonic/gin']);
+      });
+
+      it('should return an empty array for a stdlib-only grouped import', () => {
+        const code = 'package main\nimport (\n  "fmt"\n  "net/http"\n)';
+        const root = mustParse(code, 'go');
+        const importNode = root.namedChild(1)!;
+        const paths = importExtractor.extractImportPaths(importNode);
+
+        expect(paths).toEqual([]);
+      });
+
+      it('should skip stdlib entries within a mixed group, preserving source order', () => {
+        const code = `package main
+import (
+	"fmt"
+	"github.com/foo/utils"
+	"net/http"
+	"github.com/foo/models"
+)`;
+        const root = mustParse(code, 'go');
+        const importNode = root.namedChild(1)!;
+        const paths = importExtractor.extractImportPaths(importNode);
+
+        expect(paths).toEqual(['github.com/foo/utils', 'github.com/foo/models']);
+      });
+
+      it('keeps extractImportPath (singular) returning only the first path, in agreement with extractImportPaths', () => {
+        const code = `package main
+import (
+	"fmt"
+	"github.com/foo/utils"
+	"github.com/foo/models"
+)`;
+        const root = mustParse(code, 'go');
+        const importNode = root.namedChild(1)!;
+
+        expect(importExtractor.extractImportPath(importNode)).toBe(
+          importExtractor.extractImportPaths(importNode)[0],
+        );
+      });
+    });
   });
 
   describe('Symbol Extraction', () => {

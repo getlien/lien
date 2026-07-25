@@ -169,6 +169,11 @@ describe('Ruby Language', () => {
     it('should declare call as the import node type', () => {
       expect(importExtractor.importNodeTypes).toEqual(['call']);
     });
+
+    it('extractImportPaths wraps the single extractImportPath result in an array (default shape, #863)', () => {
+      expect(importExtractor.extractImportPaths(firstCall("require 'json'"))).toEqual(['json']);
+      expect(importExtractor.extractImportPaths(firstCall("puts 'hello'"))).toEqual([]);
+    });
   });
 
   describe('Symbol Extraction', () => {

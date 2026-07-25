@@ -272,6 +272,20 @@ describe('Java Language', () => {
       const result = importExtractor.processImportSymbols(importNode);
       expect(result).toBeNull();
     });
+
+    it('extractImportPaths wraps the single extractImportPath result in an array (default shape, #863)', () => {
+      const code = 'import com.google.common.collect.ImmutableList;';
+      const root = mustParse(code, 'java');
+      const importNode = root.namedChild(0)!;
+      expect(importExtractor.extractImportPaths(importNode)).toEqual([
+        'com.google.common.collect.ImmutableList',
+      ]);
+
+      const stdlibCode = 'import java.util.List;';
+      const stdlibRoot = mustParse(stdlibCode, 'java');
+      const stdlibNode = stdlibRoot.namedChild(0)!;
+      expect(importExtractor.extractImportPaths(stdlibNode)).toEqual([]);
+    });
   });
 
   describe('Symbol Extraction', () => {

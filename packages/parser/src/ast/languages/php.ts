@@ -6,6 +6,7 @@ import type {
   LanguageImportExtractor,
   LanguageSymbolExtractor,
 } from '../extractors/types.js';
+import { toImportPathsArray } from '../extractors/types.js';
 import {
   extractSignature,
   extractParameters,
@@ -168,6 +169,10 @@ export class PHPImportExtractor implements LanguageImportExtractor {
 
   extractImportPath(node: SyntaxNode): string | null {
     return this.extractPHPUseDeclarationPath(node);
+  }
+
+  extractImportPaths(node: SyntaxNode): string[] {
+    return toImportPathsArray(this.extractImportPath(node));
   }
 
   processImportSymbols(node: SyntaxNode): { importPath: string; symbols: string[] } | null {

@@ -162,6 +162,14 @@ describe('Kotlin Language', () => {
       expect(result?.importPath).toBe('com.example.Service');
       expect(result?.symbols).toContain('Service');
     });
+
+    it('extractImportPaths wraps the single extractImportPath result in an array (default shape, #863)', () => {
+      const [imp] = importHeaders('import com.example.Service\n');
+      expect(importExtractor.extractImportPaths(imp)).toEqual(['com.example.Service']);
+
+      const [stdlib] = importHeaders('import kotlin.collections.List\n');
+      expect(importExtractor.extractImportPaths(stdlib)).toEqual([]);
+    });
   });
 
   // ===========================================================================
