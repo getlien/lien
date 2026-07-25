@@ -493,6 +493,32 @@ describe('analyzeDependencies', () => {
       expect(result.dependents[0].filepath).toBe('src/app.ts');
     });
   });
+
+  describe('whole-module-import basename hub (#884)', () => {
+    it('does not count Swift whole-module test imports as dependents of a same-basename file', () => {
+      const chunks: CodeChunk[] = [
+        createChunk('Source/Alamofire.swift', []),
+        createChunk('Tests/SessionTests.swift', ['Alamofire']),
+        createChunk('Tests/ValidationTests.swift', ['Alamofire']),
+      ];
+
+      const result = analyzeDependencies('Source/Alamofire.swift', chunks, workspaceRoot);
+
+      expect(result.dependentCount).toBe(0);
+    });
+
+    it('still counts a real dependent via the identical one-leading-segment shape for a non-whole-module language', () => {
+      const chunks: CodeChunk[] = [
+        createChunk('src/auth.rs', []),
+        createChunk('tests/auth_test.rs', ['auth']),
+      ];
+
+      const result = analyzeDependencies('src/auth.rs', chunks, workspaceRoot);
+
+      expect(result.dependentCount).toBe(1);
+      expect(result.dependents[0].filepath).toBe('tests/auth_test.rs');
+    });
+  });
 });
 
 // Direct unit coverage for the shared re-export intersection algorithm,

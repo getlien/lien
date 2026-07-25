@@ -18,12 +18,17 @@ can ever win a `matchesFile` comparison is this coincidental basename
 match — never a real per-file relationship. New
 `isUnresolvableWholeModuleImport(importSpecifier, importerFile)` in
 `@liendev/parser` lets callers skip a bare whole-module import before it
-ever reaches `matchesFile`, wired into both halves of the association
-pipeline: `findTestAssociationsFromChunks` (test coverage) and
-`get_dependents`'s import index (the "N files import this" dependents
-count and `lien annotate`'s dependents line). `Source/Alamofire.swift` now
-correctly falls back to #869's "not determinable from imports" signal on
-both lines instead of reporting a false hub.
+ever reaches `matchesFile`, wired into all four callers that independently
+implement import matching: `findTestAssociationsFromChunks` and
+`analyzeDependencies`/`buildImportIndex` in `@liendev/parser` (test
+coverage and dependents for `ComplexityAnalyzer`/`get_complexity`), and the
+CLI's own `get_dependents` import index and `get_files_context`'s
+`findTestAssociations` (the "N files import this" dependents count, `lien
+annotate`'s dependents line, and the `testAssociations` field every
+pre-edit `get_files_context` call returns). `Source/Alamofire.swift` now
+correctly falls back to #869's "not determinable from imports" signal (or
+an empty dependents/test-associations result) everywhere instead of
+reporting a false hub.
 
 `matchesAtBoundaryPrecise`'s general one-leading-segment guard is
 untouched — Rust's `auth` -> `src/auth.rs` and every other non-whole-module

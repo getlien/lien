@@ -7,6 +7,7 @@ import {
   matchesFile,
   getCanonicalPath,
   isTestFile,
+  isUnresolvableWholeModuleImport,
   MAX_CHUNKS_PER_FILE,
   DEFAULT_COMPLEXITY_DELTA_THRESHOLDS,
 } from '@liendev/parser';
@@ -232,6 +233,14 @@ export function createPathCache(workspaceRoot: string): {
  * Scans all indexed chunks to find test files that have import
  * statements matching the target files.
  *
+ * Skips bare whole-module imports (#884): for a `wholeModuleImports`
+ * language (Swift), a bare import can only ever match a target through
+ * basename coincidence, not a real per-file association — see
+ * `isUnresolvableWholeModuleImport`'s doc comment. This mirrors the same
+ * guard in `@liendev/parser`'s `findTestAssociationsFromChunks`; this
+ * function is `get_files_context`'s own separate implementation, so it
+ * needs the identical treatment.
+ *
  * @param filepaths - Array of source file paths
  * @param allChunks - All chunks from the vector database
  * @param ctx - Handler context
@@ -258,6 +267,7 @@ export function findTestAssociations(
       // Check if this test file imports the target
       const imports = chunk.metadata.imports || [];
       for (const imp of imports) {
+        if (isUnresolvableWholeModuleImport(imp, chunk.metadata.file)) continue;
         const normalizedImport = normalize(imp);
         if (matchesFile(normalizedImport, normalizedTarget)) {
           testFiles.add(chunkFile);

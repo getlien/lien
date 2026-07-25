@@ -1,6 +1,12 @@
 import type { CodeChunk } from './types.js';
 import type { RiskLevel } from './insights/types.js';
-import { normalizePath, getCanonicalPath, matchesFile, isTestFile } from './utils/path-matching.js';
+import {
+  normalizePath,
+  getCanonicalPath,
+  matchesFile,
+  isTestFile,
+  isUnresolvableWholeModuleImport,
+} from './utils/path-matching.js';
 import { RISK_ORDER } from './insights/types.js';
 
 /**
@@ -76,6 +82,15 @@ function createPathNormalizer(workspaceRoot: string): (path: string) => string {
  * Builds an index mapping normalized import paths to chunks that import them.
  * Enables O(1) lookup instead of O(n*m) iteration.
  *
+ * Skips bare whole-module imports (#884): for a `wholeModuleImports`
+ * language (Swift), a bare import can only ever match a target through
+ * basename coincidence, not a real per-file dependency — see
+ * `isUnresolvableWholeModuleImport`'s doc comment. This is the same guard
+ * applied in the CLI's `get_dependents` handler
+ * (`packages/cli/src/mcp/handlers/dependency-analyzer.ts`); this file feeds
+ * `analyzeDependencies`, consumed by `ComplexityAnalyzer` for complexity
+ * reports and `get_complexity`, so it needs the identical treatment.
+ *
  * @param chunks - All chunks from the vector database
  * @param normalizePathCached - Cached path normalization function
  * @returns Map of normalized import paths to chunks that import them
@@ -89,6 +104,7 @@ function buildImportIndex(
   for (const chunk of chunks) {
     const imports = chunk.metadata.imports || [];
     for (const imp of imports) {
+      if (isUnresolvableWholeModuleImport(imp, chunk.metadata.file)) continue;
       const normalizedImport = normalizePathCached(imp);
       let chunkList = importIndex.get(normalizedImport);
       if (!chunkList) {
