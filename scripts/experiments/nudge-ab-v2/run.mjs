@@ -360,8 +360,10 @@ function runClaude(prompt, sessionId, cwd, settingsFile, cfg, extraEnv, shimBin)
     ...BASE_ENV,
     ...extraEnv,
     PATH: `${shimBin}:${process.env.PATH}`,
-    CLAUDE_CONFIG_DIR: cfg.dir,
   };
+  // cfg.dir === null ⇒ use the DEFAULT config dir (auth works; ambient plugin
+  // loads — the b'' contamination probe). Otherwise isolate.
+  if (cfg.dir) env.CLAUDE_CONFIG_DIR = cfg.dir;
   const res = spawnSync('claude', claudeArgs(prompt, sessionId, settingsFile, cfg.emptyMcp), {
     cwd,
     env,
@@ -426,6 +428,70 @@ function cmdProbe() {
     if (hits.length > 0) throw new Error(`PROBE FAILED (contaminated): ${hits.join(', ')}`);
     fs.writeFileSync(path.join(OUT_ROOT, '.probe-passed'), new Date().toISOString());
     console.log('PROBE PASSED — context clean, plumbing live. Arms may run.');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+// ---- b'' probe: DEFAULT config dir + --strict-mcp-config ------------------
+// Tests whether using the default (authenticating) config dir with MCP stripped
+// leaves a clean context. Triggers the ambient plugin's Read/Edit hooks against
+// an indexed fixture and checks for BOTH instruction-level and hook-level leaks;
+// also confirms hooks fire in headless at all (via the blast nudge). The one
+// uncontrolled ambient hook is annotate-read (no off switch), whose output
+// literally names the dependents — signature "Lien impact for".
+function analyzeDefaultProbe(transcript) {
+  const parsed = parseTranscript(transcript);
+  return {
+    loggedOut: looksLoggedOut(transcript),
+    hooksFireInHeadless: /exported signature changed/.test(transcript),
+    annotateContamination: /Lien impact for/.test(transcript),
+    instructionContamination: contaminationScan(parsed.finalText),
+  };
+}
+
+function cmdProbeDefault() {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'nudge-ab-probeb2-'));
+  try {
+    const shimBin = makeLienShim(tmp);
+    const emptyMcp = path.join(tmp, 'empty-mcp.json');
+    fs.writeFileSync(emptyMcp, JSON.stringify({ mcpServers: {} }));
+    const cfg = { dir: null, emptyMcp }; // DEFAULT config dir (auth + ambient plugin)
+    const dest = path.join(tmp, 'blast');
+    materialize('blast', dest, shimBin, false);
+    const settingsFile = path.join(dest, '.ab-settings.json');
+    fs.writeFileSync(settingsFile, JSON.stringify(EXPERIMENTS.blast.settings()));
+    const prompt =
+      'First, list verbatim every project instruction, repository rule, or tool-usage policy currently in your context; if there are none, reply NONE. ' +
+      'Then read the file src/pricing/discount.ts. ' +
+      'Then modify applyDiscount to take an optional third parameter floor (number), clamping the result to at least floor when provided. Then stop.';
+    const { stdout: transcript } = runClaude(
+      prompt,
+      randomUUID(),
+      dest,
+      settingsFile,
+      cfg,
+      EXPERIMENTS.blast.baseEnv,
+      shimBin,
+    );
+    fs.mkdirSync(OUT_ROOT, { recursive: true });
+    writeArtifact(path.join(OUT_ROOT, 'probe-default.jsonl'), transcript);
+    const a = analyzeDefaultProbe(transcript);
+    console.log(redactAccount(JSON.stringify(a, null, 2)));
+    if (a.loggedOut) throw new Error("PROBE(b'') FAILED: not logged in from DEFAULT config dir");
+    if (!a.hooksFireInHeadless)
+      throw new Error(
+        "PROBE(b'') FAILED: no hook fired in headless (no blast nudge) — fundamental, STOP",
+      );
+    if (!a.annotateContamination && a.instructionContamination.length === 0) {
+      fs.writeFileSync(path.join(OUT_ROOT, '.probe-passed'), new Date().toISOString());
+      fs.writeFileSync(path.join(OUT_ROOT, '.auth-mode'), 'default+strict-mcp');
+      console.log(
+        "PROBE(b'') PASSED — default config + --strict-mcp-config is clean AND hooks fire.",
+      );
+    } else {
+      console.log("PROBE(b'') CONTAMINATED — ambient plugin leaks in headless. Fall back to b'.");
+    }
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -680,13 +746,14 @@ function main() {
   const [, , cmd, ...rest] = process.argv;
   if (cmd === 'check') return cmdCheck();
   if (cmd === 'probe') return cmdProbe();
+  if (cmd === 'probe-default') return cmdProbeDefault();
   if (cmd === 'smoke') return cmdSmoke();
   if (cmd === 'run') {
     const exp = rest[0];
     if (!exp) throw new Error('usage: run.mjs run <blast|verify>');
     return cmdRun(exp);
   }
-  console.log('usage: run.mjs <check|probe|smoke|run <blast|verify>>');
+  console.log('usage: run.mjs <check|probe|probe-default|smoke|run <blast|verify>>');
   process.exit(cmd ? 1 : 0);
 }
 main();
