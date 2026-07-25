@@ -450,6 +450,65 @@ func TestMode(t *testing.T) {
       });
     });
 
+    describe('PHP FQCN-reference scanning composed with PSR-4 (#878)', () => {
+      let testDir: string;
+
+      beforeEach(async () => {
+        testDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-test-chunker-fqcn-refs-'));
+      });
+
+      afterEach(async () => {
+        clearPsr4Cache();
+        await fs.rm(testDir, { recursive: true, force: true }).catch(() => {});
+      });
+
+      it('resolves a fully-qualified reference through the PSR-4 map, with no `use` import present', async () => {
+        await fs.mkdir(testDir, { recursive: true });
+        await fs.writeFile(
+          path.join(testDir, 'composer.json'),
+          JSON.stringify({ autoload: { 'psr-4': { 'GuzzleHttp\\': 'src/' } } }, null, 2),
+        );
+
+        // Deliberately no `use GuzzleHttp\RetryMiddleware;` -- the whole point
+        // of #878 is that this reference has none.
+        const content = `<?php
+use PHPUnit\\Framework\\TestCase;
+
+class RetryMiddlewareTest extends TestCase {
+  public function testRetry() {
+    $x = new \\GuzzleHttp\\RetryMiddleware($decider, $handler);
+  }
+}
+?>`;
+
+        const chunks = chunkByAST('tests/RetryMiddlewareTest.php', content, {
+          workspaceRoot: testDir,
+        });
+        const methodChunk = chunks.find(c => c.metadata.symbolName === 'testRetry');
+
+        expect(methodChunk?.metadata.imports).toContain('src/RetryMiddleware');
+      });
+
+      it('is a no-op for a plain bare `use`-only file (zero behavior change)', () => {
+        const content = `<?php
+use GuzzleHttp\\Cookie\\SetCookie;
+
+class SetCookieTest {
+  public function testFoo() {
+    return new SetCookie();
+  }
+}
+?>`;
+
+        const chunks = chunkByAST('tests/Cookie/SetCookieTest.php', content, {
+          workspaceRoot: testDir,
+        });
+        const methodChunk = chunks.find(c => c.metadata.symbolName === 'testFoo');
+
+        expect(methodChunk?.metadata.imports).toEqual(['GuzzleHttp\\Cookie\\SetCookie']);
+      });
+    });
+
     it('should calculate cyclomatic complexity', () => {
       const content = `
 function complexFunction(x: number): string {
