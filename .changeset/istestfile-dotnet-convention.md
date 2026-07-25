@@ -14,10 +14,11 @@ filenames ending in `Test.cs`/`Tests.cs` (`ScopeTests.cs`,
 failure for C# projects using the standard .NET project-template layout
 (confirmed on `AutoMapper/AutoMapper`, where none of its 364 test files
 under `src/UnitTests/`, `src/IntegrationTests/`, or
-`src/AutoMapper.DI.Tests/` ever cleared the gate). Scoped to `.cs` paths and
-case-sensitive (`Tests`/`Test`, capital T) so `Latest.cs`/`Contest.cs` and a
-`latest/`-style directory are not misclassified, and no other language's
-behavior moves, mirroring how the existing Swift branch is scoped to
-`.swift`.
+`src/AutoMapper.DI.Tests/` ever cleared the gate). Scoped to `.cs` paths;
+both the directory-segment and filename regexes require a literal
+capital-T `Tests`/`Test` suffix (no case-insensitive flag), so
+`Latest.cs`/`Contest.cs` and a `latest/`-style directory are not
+misclassified, and no other language's behavior moves, mirroring how the
+existing Swift branch is scoped to `.swift`.
 
 Fixes #866.
