@@ -31,7 +31,12 @@ import {
   wasRecentlyBlocked,
   formatVerifyTestsAdvisory,
 } from './verify-tests-cmd.js';
-import { readSession, recordBlocked, type TestLedgerEvent } from '../utils/test-ledger.js';
+import {
+  readSession,
+  recordBlocked,
+  recapEnabled,
+  type TestLedgerEvent,
+} from '../utils/test-ledger.js';
 import { computeUnverifiedFiles } from '../utils/test-run-matcher.js';
 import { readNudgeEvents, recordNudgeShown, type NudgeEvent } from '../utils/nudge-events.js';
 import {
@@ -50,11 +55,6 @@ export interface RecapOptions {
 }
 
 const VALID_FORMATS = ['text', 'json'];
-
-/** `LIEN_RECAP=off` disables the whole Stop recap surface (reading, computing, and blocking). */
-function recapEnabled(): boolean {
-  return process.env.LIEN_RECAP !== 'off';
-}
 
 function resolveRootDir(): string {
   return resolveProjectRoot(toAbsolutePath(process.cwd()));

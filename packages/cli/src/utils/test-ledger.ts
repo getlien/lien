@@ -15,10 +15,12 @@
  * report on.
  *
  * Kill switch: `LIEN_TEST_VERIFY=off` disables edit/run recording only; the
- * recap's loop-prevention `blocked` marker (`recordBlocked`) is written
- * regardless, governed by `LIEN_RECAP` at the call site instead. Reading
- * (`readSession`) is never gated by either, so a report requested after the
- * switch was flipped mid-session still sees whatever was recorded before.
+ * recap's loop-prevention `blocked` marker (`recordBlocked`) is exempt from it
+ * and governed by `LIEN_RECAP` instead — the single switch every caller gates
+ * on (both `recap-cmd.ts` and the legacy `verify-tests report`; see
+ * `recapEnabled`). Reading (`readSession`) is never gated by either, so a report
+ * requested after the switch was flipped mid-session still sees whatever was
+ * recorded before.
  */
 
 import fs from 'fs/promises';
@@ -41,6 +43,17 @@ const SESSION_ID_RE = /^[A-Za-z0-9_-]+$/;
 /** `LIEN_TEST_VERIFY=off` disables edit/run recording only (recordBlocked is exempt — see its note). Reading is never gated by this. */
 export function testVerifyEnabled(): boolean {
   return process.env.LIEN_TEST_VERIFY !== 'off';
+}
+
+/**
+ * `LIEN_RECAP=off` disables the Stop recap surface entirely — the single switch
+ * governing whether the loop-prevention `blocked` marker is written. Both the
+ * recap hook path (`recap-cmd.ts`) and the legacy `verify-tests report`
+ * (`verify-tests-cmd.ts`) gate their `recordBlocked` call on it, so the marker
+ * obeys one consistent rule everywhere. Reading is never gated by this.
+ */
+export function recapEnabled(): boolean {
+  return process.env.LIEN_RECAP !== 'off';
 }
 
 function testSessionsDir(rootDir: string): string {
@@ -119,11 +132,13 @@ export async function recordRun(
  */
 export async function recordBlocked(rootDir: string, sessionId: string): Promise<void> {
   // Deliberately NOT gated by `LIEN_TEST_VERIFY`: the `blocked` event is the
-  // Stop-recap loop-prevention marker (see `wasRecentlyBlocked`/`runReport` in
-  // verify-tests-cmd.ts and the recap command in recap-cmd.ts). The Stop recap
-  // has its own master kill switch, `LIEN_RECAP=off`, checked at the call site;
-  // recording the marker must survive `LIEN_TEST_VERIFY=off` so a delta/blast-only
-  // recap still suppresses its own re-nag on the next Stop.
+  // Stop-recap loop-prevention marker (see `wasRecentlyBlocked` and the recap
+  // command in recap-cmd.ts). Its master switch is `LIEN_RECAP=off`, which every
+  // caller gates on via `recapEnabled()` — the recap hook path (`recap-cmd.ts`)
+  // and the legacy `verify-tests report` (`runReport` in verify-tests-cmd.ts)
+  // both check it before calling this, so the marker obeys one consistent rule.
+  // Being exempt from `LIEN_TEST_VERIFY` lets a delta/blast-only recap still
+  // suppress its own re-nag on the next Stop.
   await writeEvent(rootDir, sessionId, { kind: 'blocked', timestamp: new Date().toISOString() });
 }
 

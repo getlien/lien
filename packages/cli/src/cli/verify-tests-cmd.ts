@@ -18,6 +18,7 @@ import {
   recordRun,
   recordBlocked,
   readSession,
+  recapEnabled,
   type TestLedgerEvent,
 } from '../utils/test-ledger.js';
 import {
@@ -190,7 +191,11 @@ async function runReport(options: ReportOptions): Promise<void> {
   // there something to nudge about right now."
   if (unverified.length > 0 && wasRecentlyBlocked(events)) {
     unverified = [];
-  } else if (unverified.length > 0) {
+  } else if (unverified.length > 0 && recapEnabled()) {
+    // Gate the `blocked` loop-prevention write on `LIEN_RECAP`, matching the
+    // recap hook path (`recap-cmd.ts` returns early when the recap is off). The
+    // marker is governed by exactly one switch everywhere, so this legacy path
+    // no longer writes a suppressing marker when the recap surface is disabled.
     await recordBlocked(rootDir, options.session);
   }
 

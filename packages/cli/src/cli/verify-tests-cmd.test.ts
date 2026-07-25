@@ -327,6 +327,34 @@ describe('verify-tests-cmd — integration', () => {
       expect(events.some(e => e.kind === 'blocked')).toBe(true);
     });
 
+    it('does NOT write a blocked marker when LIEN_RECAP=off — the kill switch is honored on the legacy report path (still prints the advisory)', async () => {
+      const rootDir = String((await import('./project-root.js')).resolveProjectRoot());
+      await recordEdit(rootDir, session, 'packages/cli/src/foo.ts', ['foo.test.ts']);
+      process.env.LIEN_RECAP = 'off';
+      try {
+        await reportCommand({ session });
+      } finally {
+        delete process.env.LIEN_RECAP;
+      }
+      // Only the loop-prevention WRITE is gated — the report still prints.
+      const events = await readSession(rootDir, session);
+      expect(events.some(e => e.kind === 'blocked')).toBe(false);
+      expect(logSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('writes a blocked marker when LIEN_RECAP is explicitly on (parity with the default/unset case above)', async () => {
+      const rootDir = String((await import('./project-root.js')).resolveProjectRoot());
+      await recordEdit(rootDir, session, 'packages/cli/src/foo.ts', ['foo.test.ts']);
+      process.env.LIEN_RECAP = 'on';
+      try {
+        await reportCommand({ session });
+      } finally {
+        delete process.env.LIEN_RECAP;
+      }
+      const events = await readSession(rootDir, session);
+      expect(events.some(e => e.kind === 'blocked')).toBe(true);
+    });
+
     it('suppresses a second block within the 10-minute window (belt-and-braces loop prevention)', async () => {
       const rootDir = String((await import('./project-root.js')).resolveProjectRoot());
       await recordEdit(rootDir, session, 'packages/cli/src/foo.ts', ['foo.test.ts']);

@@ -11,11 +11,13 @@ import {
   clearSession,
   testSessionFilePath,
   testVerifyEnabled,
+  recapEnabled,
   TEST_SESSIONS_DIRNAME,
 } from './test-ledger.js';
 
 let originalHome: string | undefined;
 let originalKillSwitch: string | undefined;
+let originalRecapSwitch: string | undefined;
 let home: string;
 const rootDir = '/fake/repo/for-test-ledger-test';
 const sessionId = 'session-abc-123';
@@ -23,9 +25,11 @@ const sessionId = 'session-abc-123';
 beforeEach(async () => {
   originalHome = process.env.LIEN_HOME;
   originalKillSwitch = process.env.LIEN_TEST_VERIFY;
+  originalRecapSwitch = process.env.LIEN_RECAP;
   home = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-test-ledger-test-'));
   process.env.LIEN_HOME = home;
   delete process.env.LIEN_TEST_VERIFY;
+  delete process.env.LIEN_RECAP;
 });
 
 afterEach(async () => {
@@ -33,6 +37,8 @@ afterEach(async () => {
   else process.env.LIEN_HOME = originalHome;
   if (originalKillSwitch === undefined) delete process.env.LIEN_TEST_VERIFY;
   else process.env.LIEN_TEST_VERIFY = originalKillSwitch;
+  if (originalRecapSwitch === undefined) delete process.env.LIEN_RECAP;
+  else process.env.LIEN_RECAP = originalRecapSwitch;
   await fs.rm(home, { recursive: true, force: true });
 });
 
@@ -69,6 +75,22 @@ describe('testVerifyEnabled', () => {
   it('is enabled for any other value (only the literal "off" disables it)', () => {
     process.env.LIEN_TEST_VERIFY = 'false';
     expect(testVerifyEnabled()).toBe(true);
+  });
+});
+
+describe('recapEnabled (the single switch governing the blocked-marker write)', () => {
+  it('is enabled by default', () => {
+    expect(recapEnabled()).toBe(true);
+  });
+
+  it('is disabled when LIEN_RECAP=off', () => {
+    process.env.LIEN_RECAP = 'off';
+    expect(recapEnabled()).toBe(false);
+  });
+
+  it('is enabled for any other value (only the literal "off" disables it)', () => {
+    process.env.LIEN_RECAP = 'false';
+    expect(recapEnabled()).toBe(true);
   });
 });
 
