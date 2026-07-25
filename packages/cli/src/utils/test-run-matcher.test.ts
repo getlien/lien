@@ -78,6 +78,11 @@ describe('classifyTestCommand — broad vs scoped classification table', () => {
     // But if `test` genuinely runs earlier in the same command, excluding a
     // *different* task afterward must not defeat recognition.
     ['./gradlew test -x integrationTest', true, true, []],
+    // Lien Review follow-up: excluding a *different* task before test also
+    // must not defeat recognition — only `test` itself being the excluded
+    // argument should be rejected.
+    ['./gradlew -x integrationTest test', true, true, []],
+    ['./gradlew --exclude-task integrationTest test', true, true, []],
     // Not test runs at all.
     ['ls -la', false, false, []],
     ['git status', false, false, []],
