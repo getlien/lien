@@ -96,10 +96,47 @@ const RUNNER_PATTERNS: RegExp[] = [
   /^cargo\s+test(?=\s|$)/,
   /^bundle\s+exec\s+rspec(?=\s|$)/,
   /^rspec(?=\s|$)/,
-  /^phpunit(?=\s|$)/,
+  // Ruby's Rake/Minitest convention: the task name is a namespaced suffix
+  // (`test`, `test:core`), never a file/path, so `(:\S*)?` mirrors the
+  // npm-run-script form above rather than being scanned as a scope token.
+  /^bundle\s+exec\s+rake\s+test(:\S*)?(?=\s|$)/,
+  /^(\.\/)?rake\s+test(:\S*)?(?=\s|$)/,
+  // PHP: phpunit is typically vendored per-project (`vendor/bin/phpunit`,
+  // `./vendor/bin/phpunit`), not installed globally; the bare form is kept
+  // as a subset of this pattern rather than a separate one.
+  /^(\.\/)?(vendor\/bin\/)?phpunit(?=\s|$)/,
+  // PHP: `composer test` is a common composer.json `scripts` alias, same
+  // class as `npm test`.
+  /^composer\s+test(?=\s|$)/,
   /^dotnet\s+test(?=\s|$)/,
   /^deno\s+test(?=\s|$)/,
+  // Swift/SwiftPM's one canonical test-invocation form. `--filter X` names a
+  // suite, not a path; `--filter` is already a workspace-scope flag above so
+  // it and its value are skipped, leaving this broad.
+  /^swift\s+test(?=\s|$)/,
   /^gradle\s+test(?=\s|$)/,
+  // Gradle wrapper script (the near-universal per-project convention,
+  // distinct from a globally-installed `gradle`). Gradle invocations commonly
+  // chain multiple task names and flags before the one that matters
+  // (`clean test`, `--no-daemon test`, `-PmyProp=value test`), so
+  // `(?:[\w.:=-]+\s+)*` absorbs any number of leading bare/colon-namespaced
+  // task tokens and `-P`-style property flags — deliberately excluding `/`
+  // so a real scope-narrowing file argument is never swallowed as a "task".
+  // The negative lookbehind guards specifically the `test` this pattern is
+  // about to accept as satisfying the match: `-x`/`--exclude-task` EXCLUDE
+  // their single following argument rather than running it, so a `test`
+  // immediately preceded by one of those flags (`-x test`, `--exclude-task
+  // test`) must not count as "ran test" — the opposite of what happened.
+  // Checking only immediately before the candidate `test` (rather than
+  // blanket-blocking `-x`/`--exclude-task` from ever appearing earlier in
+  // the command) correctly still recognizes `-x someOtherTask test` and
+  // `test -x someOtherTask`, where a *different* task is excluded and
+  // `test` genuinely runs. `(\S*:)?` absorbs a Gradle task path like
+  // `:exposed-core:test` into the match itself so it is never mistaken for
+  // a scope-narrowing file token (it names no file). Requires the literal
+  // `test` task to actually be present and not excluded (a bare `./gradlew
+  // clean` or `./gradlew -x test` stays unrecognized).
+  /^(\.\/)?gradlew\s+(?:[\w.:=-]+\s+)*(?<!(?:-x|--exclude-task)\s)(\S*:)?test(?=\s|$)/,
   /^mvn\s+test(?=\s|$)/,
   /^nx\s+test(?:\s+\S+)?(?=\s|$)/,
 ];

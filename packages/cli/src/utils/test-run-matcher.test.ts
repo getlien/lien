@@ -33,6 +33,56 @@ describe('classifyTestCommand — broad vs scoped classification table', () => {
     ['deno test', true, true, []],
     ['gradle test', true, true, []],
     ['mvn test', true, true, []],
+    // #870: Ruby (Rake/Minitest), PHP (vendored phpunit / composer script),
+    // Swift (SwiftPM), and Gradle-wrapper forms — each ecosystem's own
+    // standard/idiomatic test-invocation command.
+    ['bundle exec rake test:core', true, true, []],
+    ['rake test', true, true, []],
+    ['./rake test', true, true, []],
+    [
+      'vendor/bin/phpunit tests/Cookie/SetCookieTest.php',
+      true,
+      false,
+      ['tests/Cookie/SetCookieTest.php'],
+    ],
+    ['./vendor/bin/phpunit', true, true, []],
+    ['composer test', true, true, []],
+    ['swift test', true, true, []],
+    ['swift test --filter HTTPHeadersTests', true, true, []],
+    ['./gradlew test', true, true, []],
+    ['./gradlew :exposed-core:test', true, true, []],
+    ['gradlew test', true, true, []],
+    // CodeRabbit review finding on PR #873: a real, common Gradle
+    // multi-task invocation (`clean test`) was previously unrecognized
+    // because the pattern required `test` immediately after `gradlew`.
+    ['./gradlew clean test', true, true, []],
+    ['gradlew build test', true, true, []],
+    ['./gradlew clean :exposed-core:test', true, true, []],
+    // CodeRabbit review follow-up: common Gradle flags before the test task.
+    ['./gradlew --no-daemon test', true, true, []],
+    ['./gradlew -q test', true, true, []],
+    ['./gradlew -PmyProp=value test', true, true, []],
+    // Negative guards: a non-test Rake task must not be swallowed by the
+    // broad `rake test(:sub)?` recognition above, and a Gradle invocation
+    // with no `test` task at all must stay unrecognized.
+    ['rake db:migrate', false, false, []],
+    ['./gradlew build', false, false, []],
+    ['./gradlew clean', false, false, []],
+    // Lien Review finding on PR #873 (Medium Risk): `-x test` / `--exclude-task
+    // test` EXCLUDE the test task rather than running it — the opposite of
+    // "tests ran" — so these must stay unrecognized even though the literal
+    // substring "test" is present.
+    ['./gradlew -x test', false, false, []],
+    ['./gradlew build -x test', false, false, []],
+    ['./gradlew --exclude-task test', false, false, []],
+    // But if `test` genuinely runs earlier in the same command, excluding a
+    // *different* task afterward must not defeat recognition.
+    ['./gradlew test -x integrationTest', true, true, []],
+    // Lien Review follow-up: excluding a *different* task before test also
+    // must not defeat recognition — only `test` itself being the excluded
+    // argument should be rejected.
+    ['./gradlew -x integrationTest test', true, true, []],
+    ['./gradlew --exclude-task integrationTest test', true, true, []],
     // Not test runs at all.
     ['ls -la', false, false, []],
     ['git status', false, false, []],
