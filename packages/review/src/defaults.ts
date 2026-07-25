@@ -80,3 +80,73 @@ export const REVIEW_TOKEN_BUDGET_MULTIPLIERS: Record<string, number> = {
 export function reviewTokenBudgetMultiplier(model: string): number {
   return REVIEW_TOKEN_BUDGET_MULTIPLIERS[model] ?? 1;
 }
+
+/**
+ * Env var: an absolute override for the main pass's FINAL token budget (after
+ * diff-scaling AND blast-radius scaling — see `applyReviewTokenBudgetOverride`
+ * below for exactly where it applies). Read directly via `process.env`, the
+ * same "no `action.yml` input plumbing" mechanism the candidate-loop passes'
+ * own on/off flags use (`LIEN_STALE_DUP_PASS` etc., see
+ * `.github/workflows/lien-review.yml`).
+ */
+export const REVIEW_TOKEN_BUDGET_OVERRIDE_ENV = 'LIEN_REVIEW_TOKEN_BUDGET';
+
+/**
+ * Floor for `LIEN_REVIEW_TOKEN_BUDGET` — matches the existing floor
+ * `scaleAgentBudget` (`review-pr.ts`) already clamps every diff-scaled budget
+ * to (its inline `60_000`): below this a run can't afford even one real
+ * investigative tool round-trip.
+ */
+export const MIN_REVIEW_TOKEN_BUDGET_OVERRIDE = 60_000;
+
+/**
+ * Ceiling for `LIEN_REVIEW_TOKEN_BUDGET` — 5x `MAX_REVIEW_TOKEN_BUDGET`, the
+ * existing hard ceiling every diff-scaled/blast-radius-scaled budget is
+ * already clamped to. PR #855 is the sizing evidence: its main pass, already
+ * comfortably under that existing 250,000 ceiling at 161,588 allocated, still
+ * spent up to 475,055 tokens on its deepest-investigation variant before
+ * dying incomplete. 5x gives an operator room to size well past that observed
+ * cost while still bounding the worst case a fat-fingered env value (an extra
+ * zero) could rack up.
+ */
+export const MAX_REVIEW_TOKEN_BUDGET_OVERRIDE = MAX_REVIEW_TOKEN_BUDGET * 5;
+
+/**
+ * Apply the `LIEN_REVIEW_TOKEN_BUDGET` env override to a computed main-pass
+ * token budget.
+ *
+ * An operator-facing escape hatch, not a replacement for the diff-scaled/
+ * blast-radius-scaled formulas (`scaleAgentBudget`, `scaleBudgetForBlastRadius`
+ * in `plugins/agent/index.ts`) — those still run exactly as before and
+ * compute `computed`; this only decides whether to keep that value or replace
+ * it wholesale with an absolute operator-supplied one. Motivating case (PR
+ * #855): a genuinely large feature diff's main pass can need far more room
+ * than either formula estimates for — see `MAX_REVIEW_TOKEN_BUDGET_OVERRIDE`'s
+ * own doc comment for that PR's receipt.
+ *
+ * Fails open: an absent, non-numeric, non-integer, zero, or negative value
+ * leaves `computed` untouched — a typo'd env value must never crash a review
+ * run. A valid value is clamped to [`MIN_REVIEW_TOKEN_BUDGET_OVERRIDE`,
+ * `MAX_REVIEW_TOKEN_BUDGET_OVERRIDE`], so a well-intentioned extra zero can't
+ * blow past a sane worst-case cost either.
+ *
+ * Callers apply this at the same point they call `context.reportBudget`
+ * (`plugins/agent/index.ts`'s `analyze()`/`analyzeSummaryOnly()`) — the point
+ * the FINAL main-pass budget is established — so the delivery attestation's
+ * `allocatedTokens` always reflects whichever value, computed or overridden,
+ * the run was actually held to, and every existing downstream consumer of
+ * that final number (the client's own budget enforcement, the extra-pass
+ * rollover pool) sees it unchanged, with no formula of its own to update.
+ */
+export function applyReviewTokenBudgetOverride(computed: number): number {
+  const raw = process.env[REVIEW_TOKEN_BUDGET_OVERRIDE_ENV];
+  if (!raw) return computed;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed <= 0) {
+    return computed;
+  }
+  return Math.min(
+    Math.max(parsed, MIN_REVIEW_TOKEN_BUDGET_OVERRIDE),
+    MAX_REVIEW_TOKEN_BUDGET_OVERRIDE,
+  );
+}

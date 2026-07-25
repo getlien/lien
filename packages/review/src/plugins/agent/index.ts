@@ -51,6 +51,8 @@ import {
   DEFAULT_REVIEW_MODEL,
   DEFAULT_OPENROUTER_BASE_URL,
   MAX_REVIEW_TOKEN_BUDGET,
+  REVIEW_TOKEN_BUDGET_OVERRIDE_ENV,
+  applyReviewTokenBudgetOverride,
 } from '../../defaults.js';
 
 /**
@@ -258,19 +260,30 @@ export class AgentReviewPlugin implements ReviewPlugin {
 
     // High-impact PRs need more room to investigate; a too-tight budget is the
     // common cause of the agent bailing before producing a verdict.
-    const maxTokenBudget = scaleBudgetForBlastRadius(
+    const blastRadiusScaledBudget = scaleBudgetForBlastRadius(
       config.maxTokenBudget,
       blastRadius?.globalRisk.level,
     );
-    if (maxTokenBudget !== config.maxTokenBudget) {
+    if (blastRadiusScaledBudget !== config.maxTokenBudget) {
       logger.info(
-        `[${this.id}] Token budget scaled ${config.maxTokenBudget} → ${maxTokenBudget} for ${blastRadius?.globalRisk.level} blast radius`,
+        `[${this.id}] Token budget scaled ${config.maxTokenBudget} → ${blastRadiusScaledBudget} for ${blastRadius?.globalRisk.level} blast radius`,
       );
     }
-    // Report the FINAL allocated ceiling (post blast-radius scaling) for the
-    // delivery attestation's budget.allocatedTokens — the pre-scaling value
-    // computed upstream in review-pr.ts's scaleAgentBudget() isn't the real
-    // ceiling this run was held to.
+    // LIEN_REVIEW_TOKEN_BUDGET (PR #855): an operator-facing escape hatch for
+    // when the diff-scaled/blast-radius-scaled estimate above still isn't
+    // enough room for a genuinely large diff's investigation — see
+    // `applyReviewTokenBudgetOverride`'s own doc comment. A no-op (returns
+    // the same value) unless the env var is set to a valid positive integer.
+    const maxTokenBudget = applyReviewTokenBudgetOverride(blastRadiusScaledBudget);
+    if (maxTokenBudget !== blastRadiusScaledBudget) {
+      logger.info(
+        `[${this.id}] Token budget overridden ${blastRadiusScaledBudget} → ${maxTokenBudget} via ${REVIEW_TOKEN_BUDGET_OVERRIDE_ENV}`,
+      );
+    }
+    // Report the FINAL allocated ceiling (post blast-radius scaling AND any
+    // env override) for the delivery attestation's budget.allocatedTokens —
+    // the pre-scaling value computed upstream in review-pr.ts's
+    // scaleAgentBudget() isn't the real ceiling this run was held to.
     context.reportBudget?.(maxTokenBudget);
 
     const systemPrompt = buildSystemPrompt(rules);
@@ -358,8 +371,10 @@ export class AgentReviewPlugin implements ReviewPlugin {
     // The final budget was already scaled diff-proportionally by
     // `scaleSummaryOnlyBudget` upstream (review-pr.ts's buildPluginConfigs) —
     // unlike the normal path, there's no blast-radius upscale to layer on top
-    // (no chunks means no blast radius is computed).
-    const maxTokenBudget = config.maxTokenBudget;
+    // (no chunks means no blast radius is computed). LIEN_REVIEW_TOKEN_BUDGET
+    // (PR #855) can still raise it — same override, same mechanism as the
+    // normal path's `analyze()` above.
+    const maxTokenBudget = applyReviewTokenBudgetOverride(config.maxTokenBudget);
     context.reportBudget?.(maxTokenBudget);
 
     const result = await runAgentClient(

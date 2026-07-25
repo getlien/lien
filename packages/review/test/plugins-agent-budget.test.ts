@@ -18,10 +18,14 @@ import {
   DEFAULT_REVIEW_MODEL,
   MAX_REVIEW_TOKEN_BUDGET,
   REVIEW_TOKEN_BUDGET_MULTIPLIERS,
+  REVIEW_TOKEN_BUDGET_OVERRIDE_ENV,
+  MIN_REVIEW_TOKEN_BUDGET_OVERRIDE,
+  MAX_REVIEW_TOKEN_BUDGET_OVERRIDE,
+  applyReviewTokenBudgetOverride,
 } from '../src/defaults.js';
-import { silentLogger } from '../src/test-helpers.js';
+import { silentLogger, createTestContext } from '../src/test-helpers.js';
 import type { Logger } from '../src/logger.js';
-import type { PresentContext, ReviewFinding } from '../src/plugin-types.js';
+import type { PresentContext, ReviewFinding, ReviewContext } from '../src/plugin-types.js';
 import type { AgentResult } from '../src/plugins/agent/types.js';
 import type { PRContext } from '../src/types.js';
 
@@ -1025,6 +1029,198 @@ describe('scaleAgentBudget — model-aware multiplier', () => {
       ...scaleAgentBudget(5, [{ content: 'x'.repeat(40_002) }], DEFAULT_REVIEW_MODEL),
     };
     expect(() => plugin.configSchema.parse(cfg)).not.toThrow();
+  });
+});
+
+describe('applyReviewTokenBudgetOverride — LIEN_REVIEW_TOKEN_BUDGET (PR #855)', () => {
+  afterEach(() => {
+    delete process.env[REVIEW_TOKEN_BUDGET_OVERRIDE_ENV];
+  });
+
+  it('is a byte-identical no-op when unset — the computed value passes through', () => {
+    delete process.env[REVIEW_TOKEN_BUDGET_OVERRIDE_ENV];
+    expect(applyReviewTokenBudgetOverride(161_588)).toBe(161_588);
+  });
+
+  it('is a no-op for an empty-string value (unset in practice)', () => {
+    process.env[REVIEW_TOKEN_BUDGET_OVERRIDE_ENV] = '';
+    expect(applyReviewTokenBudgetOverride(161_588)).toBe(161_588);
+  });
+
+  it('applies a valid value inside the clamp range, replacing the computed budget', () => {
+    process.env[REVIEW_TOKEN_BUDGET_OVERRIDE_ENV] = '400000';
+    expect(applyReviewTokenBudgetOverride(161_588)).toBe(400_000);
+  });
+
+  it.each([
+    ['non-numeric garbage', 'not-a-number'],
+    ['a fractional value', '100000.5'],
+    ['zero', '0'],
+    ['a negative value', '-50000'],
+    ['NaN itself', 'NaN'],
+    ['Infinity', 'Infinity'],
+  ])('fails open to the computed value on %s', (_label, raw) => {
+    process.env[REVIEW_TOKEN_BUDGET_OVERRIDE_ENV] = raw;
+    expect(applyReviewTokenBudgetOverride(161_588)).toBe(161_588);
+  });
+
+  it('clamps a below-floor value up to MIN_REVIEW_TOKEN_BUDGET_OVERRIDE', () => {
+    process.env[REVIEW_TOKEN_BUDGET_OVERRIDE_ENV] = '1000';
+    expect(applyReviewTokenBudgetOverride(161_588)).toBe(MIN_REVIEW_TOKEN_BUDGET_OVERRIDE);
+  });
+
+  it('clamps an above-ceiling value down to MAX_REVIEW_TOKEN_BUDGET_OVERRIDE (5x the default)', () => {
+    process.env[REVIEW_TOKEN_BUDGET_OVERRIDE_ENV] = '999999999';
+    expect(applyReviewTokenBudgetOverride(161_588)).toBe(MAX_REVIEW_TOKEN_BUDGET_OVERRIDE);
+    expect(MAX_REVIEW_TOKEN_BUDGET_OVERRIDE).toBe(MAX_REVIEW_TOKEN_BUDGET * 5);
+  });
+
+  it('passes an in-range value through unchanged at the exact floor/ceiling boundaries', () => {
+    process.env[REVIEW_TOKEN_BUDGET_OVERRIDE_ENV] = String(MIN_REVIEW_TOKEN_BUDGET_OVERRIDE);
+    expect(applyReviewTokenBudgetOverride(1)).toBe(MIN_REVIEW_TOKEN_BUDGET_OVERRIDE);
+    process.env[REVIEW_TOKEN_BUDGET_OVERRIDE_ENV] = String(MAX_REVIEW_TOKEN_BUDGET_OVERRIDE);
+    expect(applyReviewTokenBudgetOverride(1)).toBe(MAX_REVIEW_TOKEN_BUDGET_OVERRIDE);
+  });
+});
+
+describe('AgentReviewPlugin.analyze — LIEN_REVIEW_TOKEN_BUDGET reaches the attestation (PR #855)', () => {
+  afterEach(() => {
+    delete process.env[REVIEW_TOKEN_BUDGET_OVERRIDE_ENV];
+  });
+
+  const CLEAN_JSON_LOCAL =
+    '```json\n' +
+    JSON.stringify({
+      findings: [],
+      summary: { riskLevel: 'low', overview: 'fine', keyChanges: [] },
+    }) +
+    '\n```';
+
+  function stopTurnLocal(content: string) {
+    return {
+      choices: [{ message: { role: 'assistant', content }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 },
+    };
+  }
+
+  function mockFetchLocal() {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        const resp = stopTurnLocal(CLEAN_JSON_LOCAL);
+        return {
+          ok: true,
+          status: 200,
+          json: async () => resp,
+          text: async () => JSON.stringify(resp),
+        };
+      }),
+    );
+  }
+
+  it('reports the overridden value (not the computed one) via context.reportBudget on the normal path', async () => {
+    mockFetchLocal();
+    process.env[REVIEW_TOKEN_BUDGET_OVERRIDE_ENV] = '400000';
+    const reportBudget = vi.fn();
+    const plugin = new AgentReviewPlugin();
+    const context: ReviewContext = createTestContext({
+      chunks: [
+        {
+          content: 'export function add(a, b) { return a + b; }',
+          metadata: { file: 'src/math.ts', language: 'typescript', symbolType: 'function' },
+        } as ReviewContext['chunks'][number],
+      ],
+      changedFiles: ['src/math.ts'],
+      repoChunks: [],
+      repoRootDir: '/tmp/does-not-matter',
+      reportBudget,
+      config: {
+        apiKey: 'k',
+        provider: 'openai',
+        model: 'test-model',
+        baseUrl: 'http://mock.local',
+        maxTurns: 8,
+        maxTokenBudget: 60_000,
+        summaryEnabled: false,
+        docTruthPass: false,
+      },
+      pr: {
+        title: 'feat: big diff',
+        patches: new Map([['src/math.ts', '@@ diff @@']]),
+      } as ReviewContext['pr'],
+    });
+
+    await plugin.analyze(context);
+
+    expect(reportBudget).toHaveBeenCalledWith(400_000);
+  });
+
+  it('leaves context.reportBudget unaffected on the normal path when unset (default byte-identical)', async () => {
+    mockFetchLocal();
+    delete process.env[REVIEW_TOKEN_BUDGET_OVERRIDE_ENV];
+    const reportBudget = vi.fn();
+    const plugin = new AgentReviewPlugin();
+    const context: ReviewContext = createTestContext({
+      chunks: [
+        {
+          content: 'export function add(a, b) { return a + b; }',
+          metadata: { file: 'src/math.ts', language: 'typescript', symbolType: 'function' },
+        } as ReviewContext['chunks'][number],
+      ],
+      changedFiles: ['src/math.ts'],
+      repoChunks: [],
+      repoRootDir: '/tmp/does-not-matter',
+      reportBudget,
+      config: {
+        apiKey: 'k',
+        provider: 'openai',
+        model: 'test-model',
+        baseUrl: 'http://mock.local',
+        maxTurns: 8,
+        maxTokenBudget: 60_000,
+        summaryEnabled: false,
+        docTruthPass: false,
+      },
+      pr: {
+        title: 'fix: small change',
+        patches: new Map([['src/math.ts', '@@ diff @@']]),
+      } as ReviewContext['pr'],
+    });
+
+    await plugin.analyze(context);
+
+    expect(reportBudget).toHaveBeenCalledWith(60_000);
+  });
+
+  it('reports the overridden value on the summary-only path too', async () => {
+    mockFetchLocal();
+    process.env[REVIEW_TOKEN_BUDGET_OVERRIDE_ENV] = '500000';
+    const reportBudget = vi.fn();
+    const plugin = new AgentReviewPlugin();
+    const context: ReviewContext = createTestContext({
+      chunks: [],
+      allChangedFiles: ['CLAUDE.md'],
+      reportBudget,
+      config: {
+        apiKey: 'k',
+        provider: 'openai',
+        model: 'test-model',
+        baseUrl: 'http://mock.local',
+        maxTurns: 8,
+        maxTokenBudget: 20_000,
+        summaryEnabled: true,
+        docTruthPass: false,
+      },
+      pr: {
+        title: 'docs: remove stale line',
+        patches: new Map([['CLAUDE.md', '@@ -1,2 +1,1 @@\n-stale\n context']]),
+      } as ReviewContext['pr'],
+      repoRootDir: '/tmp/does-not-matter',
+    });
+
+    await plugin.analyze(context);
+
+    expect(reportBudget).toHaveBeenCalledWith(500_000);
   });
 });
 

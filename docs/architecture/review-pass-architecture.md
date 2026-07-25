@@ -503,6 +503,55 @@ fires exactly once per pass that ran.
   documented above), which dominates for every real-PR candidate count
   this loop has measured so far (a 1-2 candidate run is the common case).
 
+### The main pass's own budget, and the `LIEN_REVIEW_TOKEN_BUDGET` override
+
+Every formula above scales off "the main pass's base budget"
+(`config.maxTokenBudget`), but that number is itself established upstream,
+in two steps, before any extra pass ever sees it:
+
+1. `scaleAgentBudget` (`review-pr.ts`) estimates a diff-proportional base
+   (content tokens + a per-turn tool-call allowance), scales it by
+   `reviewTokenBudgetMultiplier` (2.0× for the prod default model), and
+   clamps the result to `[60_000, MAX_REVIEW_TOKEN_BUDGET]` (250,000).
+2. `scaleBudgetForBlastRadius` (`plugins/agent/index.ts`) then upscales that
+   number again for a critical/high blast radius (1.5×/1.25×), reclamping to
+   the same `MAX_REVIEW_TOKEN_BUDGET` ceiling — this second clamp, not the
+   first, is the REAL ceiling a run is held to (the pre-blast-radius value
+   computed in step 1 is provisional; see that call site's own comment).
+
+Both steps run unconditionally and unchanged — nothing above was touched.
+`LIEN_REVIEW_TOKEN_BUDGET` (an env-only knob, `applyReviewTokenBudgetOverride`
+in `defaults.ts`) is a THIRD step layered on top, applied at the exact point
+`plugins/agent/index.ts`'s `analyze()`/`analyzeSummaryOnly()` call
+`context.reportBudget` — i.e. at the moment the final number is established
+and handed to the delivery attestation, so `allocatedTokens` always reflects
+whichever value (computed or overridden) the run actually used. Unset (the
+default for every `@liendev/review`/`@liendev/action` consumer), it's a
+byte-identical no-op: `applyReviewTokenBudgetOverride` returns its input
+unchanged. Set to a valid positive integer, it REPLACES that final number
+wholesale (not another multiplier on top), clamped to
+`[MIN_REVIEW_TOKEN_BUDGET_OVERRIDE, MAX_REVIEW_TOKEN_BUDGET_OVERRIDE]`
+(60,000, matching step 1's own floor, and 5× `MAX_REVIEW_TOKEN_BUDGET` =
+1,250,000) — a non-numeric, non-integer, zero, or negative value is ignored
+and the computed value is used instead (fail-open, never a crash). Everything
+downstream of this point — the client's own budget enforcement, the
+extra-pass rollover pool (`unspentMainBudget`) — reads whatever
+`maxTokenBudget` ends up being with no changes of its own; only this one
+substitution point exists.
+
+Motivating case (PR #855, 2026-07-25): the review check failed 3 of 4 runs on
+a genuinely large feature diff, the main pass exhausting its allocation.
+Attestation receipts across those runs: 161,588 allocated to the main pass
+(277,588 total across main + extra passes — already comfortably under the
+existing 250,000 per-pass ceiling), yet the deepest-investigation variant
+spent up to 475,055 tokens before dying incomplete; the one run that finished
+did so only because that particular investigation was shallower, not because
+161,588 was actually enough. This repo's own `.github/workflows/lien-review.yml`
+sets `LIEN_REVIEW_TOKEN_BUDGET: '555176'` (~2× that 277,588 prior effective
+total), comfortably clearing the observed 475,055 floor — see that workflow's
+own comment for the full sizing rationale. Every other `@liendev/review`/
+`@liendev/action` consumer leaves it unset and is unaffected.
+
 ## Which passes are live today
 
 - **doc-truth**: production-on, has been since PR #733. Kill-switches:
