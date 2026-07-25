@@ -23,6 +23,10 @@ touching the Rust crate itself, see its README for the `cargo build`
 toolchain requirement; that's a `parser-native`-specific concern, not a
 worktree one.
 
+## A fresh worktree with no `node_modules` fails quietly, not loudly
+
+A worktree that hasn't had `npm ci` run in it yet does not error out and tell you so. Node's module resolution walks up the directory tree looking for `node_modules`, and a worktree under `.claude/worktrees/<name>` sits two directories below the main checkout, so resolution silently falls through to the main checkout's `node_modules` instead of the (missing) one in the worktree. If that main checkout's `node_modules` happens to be stale, for example missing the `@liendev/parser-native` symlink, the result is confusing `tsc` module-resolution errors that reference the main checkout's own paths, not an obvious prompt to run `npm ci`. Diagnose it with `ls node_modules` in the worktree itself: if it's missing or empty, that's the cause. The remedy is the same as above: run `npm ci` in the worktree (about 7 seconds) and `npm run build`, adding `npm run build:native -w @liendev/parser-native` if you're touching the AST/parser layer.
+
 ## Historical note
 
 Before Phase 4-B, this doc documented a per-entry `node_modules` symlink
