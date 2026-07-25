@@ -122,7 +122,11 @@ describe('OpenAIAgentClient provider routing', () => {
     const { bodies } = mockFetch([stopTurn()]);
     await makeClient().run('sys', 'init', [], noopTool);
     expect(bodies[0].provider).toEqual(DEFAULT_PROVIDER_ROUTING);
-    expect(bodies[0].provider).toEqual({ sort: 'throughput', allow_fallbacks: true });
+    expect(bodies[0].provider).toEqual({
+      sort: 'throughput',
+      allow_fallbacks: true,
+      require_parameters: true,
+    });
   });
 
   it('omits the default block for a non-OpenRouter endpoint (Gemini/DeepSeek reject unknown fields)', async () => {
