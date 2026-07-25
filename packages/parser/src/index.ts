@@ -75,6 +75,7 @@ export {
   getAllLanguages,
   languageExists,
   hasWholeModuleImports,
+  hasEnclosingNamespaceAccess,
 } from './ast/languages/registry.js';
 
 // =============================================================================

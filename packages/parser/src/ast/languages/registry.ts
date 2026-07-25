@@ -127,6 +127,20 @@ export function hasWholeModuleImports(language: SupportedLanguage): boolean {
 }
 
 /**
+ * True when `language` lets a nested namespace body reference an *enclosing*
+ * namespace's members unqualified, with no `using`/`import` directive at all
+ * (see `LanguageDefinition.enclosingNamespaceAccess`). C# confirmed (#875):
+ * import-based test-association has no per-file signal for a test file that
+ * only reaches its subject this way. Distinct from `hasWholeModuleImports` —
+ * a language can have working per-file import matching for its *explicit*
+ * imports (C# does, #866/#868) while still having this gap for the implicit
+ * case, so callers must not conflate the two. Only C# sets this today.
+ */
+export function hasEnclosingNamespaceAccess(language: SupportedLanguage): boolean {
+  return getLanguage(language).enclosingNamespaceAccess === true;
+}
+
+/**
  * Get all registered language definitions.
  */
 export function getAllLanguages(): readonly LanguageDefinition[] {
