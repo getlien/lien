@@ -92,17 +92,23 @@ export function matchesAtBoundary(str: string, pattern: string): boolean {
 }
 
 /**
- * Like `matchesAtBoundary`, but additionally requires a bare (slash-free)
+ * Like `matchesAtBoundary`, but additionally requires a bare (non-relative)
  * `pattern` to represent the *whole* relationship rather than a coincidental
  * partial one:
  *
- * - The match must reach the end of `str`. An interior hit means `str`
- *   continues into an unrelated subtree beyond the identifier, e.g. a bare
- *   `require 'sinatra'` matching every file under `lib/sinatra/` rather than
- *   just the gem's own entry point (`lib/sinatra.rb`).
- * - At most `maxLeadingSegments` directory segments may precede the match.
- *   The two `matchesFile` call sites need different values here because a
- *   bare identifier plays a different role in each direction:
+ * - The match must reach the end of `str`, whether `pattern` is a single
+ *   segment or multi-segment. An interior hit means `str` continues into an
+ *   unrelated subtree beyond the pattern, e.g. a bare `require 'sinatra'`
+ *   matching every file under `lib/sinatra/` rather than just the gem's own
+ *   entry point (`lib/sinatra.rb`), or a bare multi-segment `require
+ *   'rack/protection'` matching every file under its own
+ *   `rack-protection/lib/rack/protection/` directory rather than just that
+ *   directory's own entry point (#887) — the single-segment and
+ *   multi-segment shapes of the same bug.
+ * - For a single-segment (slash-free) `pattern` specifically, at most
+ *   `maxLeadingSegments` directory segments may additionally precede the
+ *   match. The two `matchesFile` call sites need different values here
+ *   because a bare identifier plays a different role in each direction:
  *   - Strategy 2 passes 1, allowing the established "source directory
  *     prefix" convention (a bare *import* like `auth` resolving to
  *     `src/auth.rs`) — a real, confirmed pattern (see the Rust tests above).
@@ -116,7 +122,11 @@ export function matchesAtBoundary(str: string, pattern: string): boolean {
  *     segment happens to precede it.
  *   Both directions still reject a bare `import Combine` (system framework)
  *   matching `Source/Features/Combine.swift` (2 leading segments, over
- *   either threshold).
+ *   either threshold). This leading-segment restriction does NOT extend to
+ *   multi-segment patterns: a multi-segment specifier already carries its
+ *   own internal structure (e.g. `rack/protection`'s own slash), so it needs
+ *   no additional "how deep is the importer nested" scrutiny beyond the
+ *   end-of-string anchor above.
  *
  * Used only for `matchesFile`'s strategies 1/2, which compare the raw
  * import/target strings as given. A cleaned `./`/`../` relative import
@@ -140,8 +150,14 @@ function matchesAtBoundaryPrecise(
   const endIndex = index + pattern.length;
   if (endIndex !== str.length && str[endIndex] !== '/') return false;
 
+  // The match must reach the end of `str` for every bare pattern reaching
+  // this function -- single- or multi-segment (#887). Previously this only
+  // fired inside the slash-free branch below, so a multi-segment pattern
+  // like `rack/protection` could match anywhere `str` continued afterward
+  // (every file under its own directory), the exact #887 fan-out.
+  if (endIndex !== str.length) return false;
+
   if (!pattern.includes('/')) {
-    if (endIndex !== str.length) return false;
     const prefix = str.substring(0, index);
     const prefixSlashes = (prefix.match(/\//g) || []).length;
     if (prefixSlashes > maxLeadingSegments) return false;

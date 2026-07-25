@@ -361,6 +361,39 @@ describe('matchesFile - Path Boundary Checking', () => {
       });
     });
   });
+
+  describe('two-segment bare require precision (#887)', () => {
+    it('Ruby: a multi-segment bare require must not fan out to every file under its own directory', () => {
+      // sinatra's bundled rack-protection: `require 'rack/protection'` must
+      // match only the gem's own entry point, not every file nested under
+      // rack-protection/lib/rack/protection/ -- the multi-segment shape of
+      // the same #868/#883 single-segment bug (`sinatra` vs. `lib/sinatra/*`).
+      expect(testMatchesFile('rack/protection', 'rack-protection/lib/rack/protection/csrf')).toBe(
+        false,
+      );
+      expect(testMatchesFile('rack/protection', 'rack-protection/lib/rack/protection/base')).toBe(
+        false,
+      );
+      // The gem's own entry point still matches.
+      expect(testMatchesFile('rack/protection', 'rack-protection/lib/rack/protection')).toBe(true);
+    });
+
+    it('regression: the #868 single-segment guard is unaffected', () => {
+      expect(testMatchesFile('sinatra', 'lib/sinatra')).toBe(true);
+      expect(testMatchesFile('sinatra', 'lib/sinatra/base')).toBe(false);
+    });
+
+    it('regression: the Rust one-leading-segment source-prefix convention is unaffected', () => {
+      expect(testMatchesFile('auth', 'src/auth.rs')).toBe(true);
+    });
+
+    it('regression: a genuine multi-segment import still matches its multi-segment target', () => {
+      // Untouched by the #887 end-anchor extension -- these already reached
+      // the end of the compared string before the fix.
+      expect(testMatchesFile('auth/middleware', 'src/auth/middleware.rs')).toBe(true);
+      expect(testMatchesFile('github.com/gin-gonic/gin/internal/fs', 'internal/fs')).toBe(true);
+    });
+  });
 });
 
 /**

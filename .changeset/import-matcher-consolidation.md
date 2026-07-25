@@ -27,3 +27,15 @@ is a new, additive export. Behavior-preserving by construction: verified via a
 byte-identical before/after diff of `get_dependents`/test-association output
 across this repo and the multi-language `lien-review-testbed` fixture (see the
 PR body's golden-proof evidence).
+
+Also fixes #887: a multi-segment bare `require`/import specifier (e.g. Ruby's
+`require 'rack/protection'`) fanned out to every file nested under its own
+directory (`rack-protection/lib/rack/protection/*`) instead of matching only
+that directory's own entry point. `matchesAtBoundaryPrecise`'s "must reach
+the end of the compared string" anchor previously only applied to
+slash-free (single-segment) patterns like `sinatra`; it now applies to every
+bare, non-relative pattern regardless of how many segments it has. The
+existing single-segment guards (#868/#883), the Rust source-directory-prefix
+convention, and genuine multi-segment-to-multi-segment matches are
+unaffected — see the new `matchesFile` unit tests and the sinatra-clone
+association-level dogfood in the PR body.
