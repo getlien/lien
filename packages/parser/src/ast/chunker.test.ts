@@ -4,6 +4,8 @@ import os from 'os';
 import path from 'path';
 import { chunkByAST, shouldUseAST } from './chunker.js';
 import { clearWorkspacePackageCache } from '../workspace-packages.js';
+import { clearPsr4Cache } from '../php-psr4.js';
+import { clearGoModuleCache } from '../go-module.js';
 
 describe('AST Chunker', () => {
   describe('shouldUseAST', () => {
@@ -307,6 +309,144 @@ function run() {
         const funcChunk = chunks.find(c => c.metadata.symbolName === 'run');
 
         expect(funcChunk?.metadata.imports).toContain('@liendev/parser');
+      });
+    });
+
+    describe('manifest-root mapping (PHP PSR-4, Go module) — #867', () => {
+      let testDir: string;
+
+      beforeEach(async () => {
+        testDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-test-chunker-manifest-roots-'));
+      });
+
+      afterEach(async () => {
+        clearPsr4Cache();
+        clearGoModuleCache();
+        await fs.rm(testDir, { recursive: true, force: true }).catch(() => {});
+      });
+
+      async function writeJson(relPath: string, data: unknown): Promise<void> {
+        const abs = path.join(testDir, relPath);
+        await fs.mkdir(path.dirname(abs), { recursive: true });
+        await fs.writeFile(abs, JSON.stringify(data, null, 2));
+      }
+
+      async function writeFile(relPath: string, content: string): Promise<void> {
+        const abs = path.join(testDir, relPath);
+        await fs.mkdir(path.dirname(abs), { recursive: true });
+        await fs.writeFile(abs, content);
+      }
+
+      it('resolves a PHP PSR-4 namespaced import to its real source path (guzzle repro)', async () => {
+        await writeJson('composer.json', {
+          name: 'guzzlehttp/guzzle',
+          autoload: { 'psr-4': { 'GuzzleHttp\\': 'src/' } },
+        });
+
+        const content = `<?php
+use GuzzleHttp\\Cookie\\SetCookie;
+use PHPUnit\\Framework\\TestCase;
+
+class SetCookieTest {
+  public function testFoo() {
+    return new SetCookie();
+  }
+}
+?>`;
+
+        const chunks = chunkByAST('tests/Cookie/SetCookieTest.php', content, {
+          workspaceRoot: testDir,
+        });
+        const methodChunk = chunks.find(c => c.metadata.symbolName === 'testFoo');
+
+        expect(methodChunk?.metadata.imports).toContain('src/Cookie/SetCookie');
+        // No registered PSR-4 prefix for PHPUnit → passes through unresolved.
+        expect(methodChunk?.metadata.imports).toContain('PHPUnit\\Framework\\TestCase');
+      });
+
+      it('leaves PHP imports unresolved when there is no composer.json (zero behavior change)', () => {
+        const content = `<?php
+use GuzzleHttp\\Cookie\\SetCookie;
+
+class SetCookieTest {
+  public function testFoo() {
+    return new SetCookie();
+  }
+}
+?>`;
+
+        const chunks = chunkByAST('tests/Cookie/SetCookieTest.php', content, {
+          workspaceRoot: testDir,
+        });
+        const methodChunk = chunks.find(c => c.metadata.symbolName === 'testFoo');
+
+        expect(methodChunk?.metadata.imports).toContain('GuzzleHttp\\Cookie\\SetCookie');
+      });
+
+      it('resolves a Go module-prefixed import to its repo-relative path (gin repro)', async () => {
+        await writeFile('go.mod', 'module github.com/gin-gonic/gin\n\ngo 1.21\n');
+
+        const content = `package binding_test
+
+import (
+	"testing"
+
+	"github.com/gin-gonic/gin/binding"
+)
+
+func TestMode(t *testing.T) {
+	binding.Validator = nil
+}
+`;
+
+        const chunks = chunkByAST('mode_test.go', content, { workspaceRoot: testDir });
+        const funcChunk = chunks.find(c => c.metadata.symbolName === 'TestMode');
+
+        expect(funcChunk?.metadata.imports).toContain('binding');
+        expect(funcChunk?.metadata.imports).not.toContain('github.com/gin-gonic/gin/binding');
+      });
+
+      it('leaves Go imports unresolved when there is no go.mod (zero behavior change)', () => {
+        const content = `package binding_test
+
+import "github.com/gin-gonic/gin/binding"
+
+func TestMode(t *testing.T) {
+	binding.Validator = nil
+}
+`;
+
+        const chunks = chunkByAST('mode_test.go', content, { workspaceRoot: testDir });
+        const funcChunk = chunks.find(c => c.metadata.symbolName === 'TestMode');
+
+        expect(funcChunk?.metadata.imports).toContain('github.com/gin-gonic/gin/binding');
+      });
+
+      it('is a no-op for PHP/Go when workspaceRoot is omitted (existing callers unaffected)', () => {
+        const phpContent = `<?php
+use GuzzleHttp\\Cookie\\SetCookie;
+
+class SetCookieTest {
+  public function testFoo() {
+    return new SetCookie();
+  }
+}
+?>`;
+        const phpChunks = chunkByAST('tests/Cookie/SetCookieTest.php', phpContent);
+        const phpMethodChunk = phpChunks.find(c => c.metadata.symbolName === 'testFoo');
+        expect(phpMethodChunk?.metadata.imports).toContain('GuzzleHttp\\Cookie\\SetCookie');
+
+        const goContent = `package binding_test
+
+import "github.com/gin-gonic/gin/binding"
+
+func TestMode(t *testing.T) {
+	binding.Validator = nil
+}
+`;
+        const goChunks = chunkByAST('mode_test.go', goContent);
+        const goFuncChunk = goChunks.find(c => c.metadata.symbolName === 'TestMode');
+        expect(goFuncChunk?.metadata.imports).toContain('github.com/gin-gonic/gin/binding');
       });
     });
 

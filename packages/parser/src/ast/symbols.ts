@@ -4,6 +4,25 @@ import { getExtractor, getImportExtractor, getSymbolExtractor } from './extracto
 import { getLanguage } from './languages/registry.js';
 
 import { resolveRelativeImport, resolveWorkspaceImport } from '../utils/path-matching.js';
+import { resolvePsr4Import } from '../php-psr4.js';
+import { resolveGoModuleImport } from '../go-module.js';
+
+/**
+ * Per-project manifest-declared import-root mappings, threaded through as a
+ * third specifier-resolution step (after relative-import and workspace-
+ * package resolution) in `resolveImportSpecifier`. Built once per workspace
+ * root in `ast/chunker.ts`'s `prepareASTContext` — see `../php-psr4.ts` and
+ * `../go-module.ts` for how each map is read. At most one field is ever
+ * populated for a given file (the language determines which manifest, if
+ * any, applies), and both are optional so this is a no-op for every language
+ * without a manifest reader.
+ */
+export interface ManifestRoots {
+  /** PHP Composer PSR-4 namespace-prefix -> source-directory map. */
+  psr4Map?: ReadonlyMap<string, string>;
+  /** Go module's declared import-path prefix (`go.mod`'s `module` line). */
+  goModulePrefix?: string;
+}
 
 /**
  * Extract symbol information from an AST node using language-specific extractors.
@@ -54,18 +73,34 @@ function collectImportNodes(rootNode: SyntaxNode, nodeTypeSet: Set<string>): Syn
 }
 
 /**
- * Resolve a single raw import specifier: relative specifiers first (against
- * the importer's directory), then workspace package specifiers (against the
- * `workspacePackages` map). Both steps are no-ops when their respective
- * input isn't provided, so behavior for existing callers is unchanged.
+ * Resolve a single raw import specifier in three steps, each a no-op when its
+ * respective input isn't provided, so behavior for existing callers is
+ * unchanged:
+ * 1. Relative specifiers (`./foo`, `../bar`) against the importer's directory.
+ * 2. Workspace package specifiers (`@scope/pkg`) against the `workspacePackages` map.
+ * 3. Manifest-declared import roots (PHP PSR-4, Go module prefix) against `manifestRoots`.
  */
 function resolveImportSpecifier(
   specifier: string,
   filepath: string | undefined,
   workspacePackages: ReadonlyMap<string, string> | undefined,
+  manifestRoots: ManifestRoots | undefined,
 ): string {
   const relResolved = filepath ? resolveRelativeImport(filepath, specifier) : specifier;
-  return workspacePackages ? resolveWorkspaceImport(relResolved, workspacePackages) : relResolved;
+  const wsResolved = workspacePackages
+    ? resolveWorkspaceImport(relResolved, workspacePackages)
+    : relResolved;
+  return resolveManifestRoot(wsResolved, manifestRoots);
+}
+
+/** Apply step 3 (manifest-root resolution) of `resolveImportSpecifier`. */
+function resolveManifestRoot(specifier: string, manifestRoots: ManifestRoots | undefined): string {
+  if (!manifestRoots) return specifier;
+  if (manifestRoots.psr4Map) return resolvePsr4Import(specifier, manifestRoots.psr4Map);
+  if (manifestRoots.goModulePrefix) {
+    return resolveGoModuleImport(specifier, manifestRoots.goModulePrefix);
+  }
+  return specifier;
 }
 
 /**
@@ -84,6 +119,7 @@ function extractImportPaths(
   importExtractor: ReturnType<typeof getImportExtractor>,
   filepath?: string,
   workspacePackages?: ReadonlyMap<string, string>,
+  manifestRoots?: ManifestRoots,
 ): string[] {
   if (!importExtractor) return [];
 
@@ -92,7 +128,9 @@ function extractImportPaths(
 
   for (const node of collectImportNodes(rootNode, nodeTypeSet)) {
     const result = importExtractor.extractImportPath(node);
-    if (result) imports.push(resolveImportSpecifier(result, filepath, workspacePackages));
+    if (result) {
+      imports.push(resolveImportSpecifier(result, filepath, workspacePackages, manifestRoots));
+    }
   }
 
   return imports;
@@ -110,15 +148,24 @@ function extractImportPaths(
  * @param workspacePackages - Optional map of workspace package name -> source
  *   entry file (see `resolveWorkspacePackageEntries`). Enables resolution of
  *   bare `@scope/pkg` specifiers that reference sibling workspace packages.
+ * @param manifestRoots - Optional manifest-declared import-root mappings
+ *   (PHP PSR-4, Go module prefix). See `ManifestRoots`.
  */
 export function extractImports(
   rootNode: SyntaxNode,
   language?: SupportedLanguage,
   filepath?: string,
   workspacePackages?: ReadonlyMap<string, string>,
+  manifestRoots?: ManifestRoots,
 ): string[] {
   if (!language) return [];
-  return extractImportPaths(rootNode, getImportExtractor(language), filepath, workspacePackages);
+  return extractImportPaths(
+    rootNode,
+    getImportExtractor(language),
+    filepath,
+    workspacePackages,
+    manifestRoots,
+  );
 }
 
 /**
@@ -150,6 +197,7 @@ function extractSymbolsWithExtractor(
   importExtractor: ReturnType<typeof getImportExtractor>,
   filepath?: string,
   workspacePackages?: ReadonlyMap<string, string>,
+  manifestRoots?: ManifestRoots,
 ): Record<string, string[]> {
   if (!importExtractor) return {};
 
@@ -159,7 +207,12 @@ function extractSymbolsWithExtractor(
   for (const node of collectImportNodes(rootNode, nodeTypeSet)) {
     const result = importExtractor.processImportSymbols(node);
     if (result) {
-      const key = resolveImportSpecifier(result.importPath, filepath, workspacePackages);
+      const key = resolveImportSpecifier(
+        result.importPath,
+        filepath,
+        workspacePackages,
+        manifestRoots,
+      );
       addSymbolsToMap(importedSymbols, key, result.symbols);
     }
   }
@@ -178,12 +231,15 @@ function extractSymbolsWithExtractor(
  *   of `./` / `../` specifiers into workspace-relative keys.
  * @param workspacePackages - Optional map of workspace package name -> source
  *   entry file. Enables resolution of bare `@scope/pkg` keys.
+ * @param manifestRoots - Optional manifest-declared import-root mappings
+ *   (PHP PSR-4, Go module prefix). See `ManifestRoots`.
  */
 export function extractImportedSymbols(
   rootNode: SyntaxNode,
   language?: SupportedLanguage,
   filepath?: string,
   workspacePackages?: ReadonlyMap<string, string>,
+  manifestRoots?: ManifestRoots,
 ): Record<string, string[]> {
   if (!language) return {};
   return extractSymbolsWithExtractor(
@@ -191,6 +247,7 @@ export function extractImportedSymbols(
     getImportExtractor(language),
     filepath,
     workspacePackages,
+    manifestRoots,
   );
 }
 
