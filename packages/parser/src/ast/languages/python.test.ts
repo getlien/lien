@@ -246,11 +246,11 @@ describe('Python Language', () => {
       expect(importExtractor.extractImportPath(importNode)).toBe('typing');
     });
 
-    it('should extract "." for a bare relative from-import', () => {
+    it('should convert a bare relative from-import to "./" (#904)', () => {
       const code = 'from . import x\n';
       const root = mustParse(code, 'python');
       const importNode = root.namedChild(0)!;
-      expect(importExtractor.extractImportPath(importNode)).toBe('.');
+      expect(importExtractor.extractImportPath(importNode)).toBe('./');
     });
 
     it('extractImportPaths wraps the single extractImportPath result in an array (default shape, #863)', () => {
@@ -260,18 +260,32 @@ describe('Python Language', () => {
       expect(importExtractor.extractImportPaths(importNode)).toEqual(['os']);
     });
 
-    it('should extract ".foo" for a single-dot relative from-import', () => {
+    it('should convert a single-dot relative from-import to "./foo" (#904)', () => {
       const code = 'from .foo import x\n';
       const root = mustParse(code, 'python');
       const importNode = root.namedChild(0)!;
-      expect(importExtractor.extractImportPath(importNode)).toBe('.foo');
+      expect(importExtractor.extractImportPath(importNode)).toBe('./foo');
     });
 
-    it('should extract "..pkg" for a two-dot relative from-import', () => {
+    it('should convert a two-dot relative from-import to "../pkg" (#904)', () => {
       const code = 'from ..pkg import y\n';
       const root = mustParse(code, 'python');
       const importNode = root.namedChild(0)!;
-      expect(importExtractor.extractImportPath(importNode)).toBe('..pkg');
+      expect(importExtractor.extractImportPath(importNode)).toBe('../pkg');
+    });
+
+    it('should convert a three-dot relative from-import to "../../pkg.mod" -> "../../pkg/mod" (#904)', () => {
+      const code = 'from ...pkg.mod import z\n';
+      const root = mustParse(code, 'python');
+      const importNode = root.namedChild(0)!;
+      expect(importExtractor.extractImportPath(importNode)).toBe('../../pkg/mod');
+    });
+
+    it('should convert a bare two-dot relative from-import to "../" with no trailing segment (#904)', () => {
+      const code = 'from .. import x\n';
+      const root = mustParse(code, 'python');
+      const importNode = root.namedChild(0)!;
+      expect(importExtractor.extractImportPath(importNode)).toBe('../');
     });
 
     it('should process a simple import into a symbol', () => {
@@ -318,7 +332,7 @@ describe('Python Language', () => {
       const importNode = root.namedChild(0)!;
       const result = importExtractor.processImportSymbols(importNode);
       expect(result).not.toBeNull();
-      expect(result!.importPath).toBe('.');
+      expect(result!.importPath).toBe('./');
       expect(result!.symbols).toEqual(['x', 'y']);
     });
 
@@ -328,7 +342,7 @@ describe('Python Language', () => {
       const importNode = root.namedChild(0)!;
       const result = importExtractor.processImportSymbols(importNode);
       expect(result).not.toBeNull();
-      expect(result!.importPath).toBe('.foo');
+      expect(result!.importPath).toBe('./foo');
       expect(result!.symbols).toEqual(['x']);
     });
 
@@ -338,7 +352,7 @@ describe('Python Language', () => {
       const importNode = root.namedChild(0)!;
       const result = importExtractor.processImportSymbols(importNode);
       expect(result).not.toBeNull();
-      expect(result!.importPath).toBe('..pkg');
+      expect(result!.importPath).toBe('../pkg');
       expect(result!.symbols).toEqual(['y']);
     });
 
@@ -365,7 +379,7 @@ describe('Python Language', () => {
       const importNode = root.namedChild(0)!;
       const result = importExtractor.processImportSymbols(importNode);
       expect(result).not.toBeNull();
-      expect(result!.importPath).toBe('.foo');
+      expect(result!.importPath).toBe('./foo');
       expect(result!.symbols).toEqual(['*']);
     });
 

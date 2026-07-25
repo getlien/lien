@@ -283,6 +283,61 @@ describe('matchesFile - Path Boundary Checking', () => {
     });
   });
 
+  describe('bare Python package import matching (#901)', () => {
+    it('should match a bare package import to its own __init__.py', () => {
+      // `import flask` (flat layout, no src/ prefix) -> flask/__init__.py
+      expect(testMatchesFile('flask', 'flask/__init__.py')).toBe(true);
+    });
+
+    it('should match a bare package import to a direct module file', () => {
+      expect(testMatchesFile('flask', 'flask.py')).toBe(true);
+    });
+
+    it('should match a bare package import to any child module (parent-package match)', () => {
+      // `import flask` executes flask/__init__.py, which (for a barrel-style
+      // package like Flask) eagerly imports its submodules -- so a bare
+      // import genuinely reaches any file under the package, exactly like
+      // the existing dotted "django.http" -> django/http/*.py behavior above.
+      expect(testMatchesFile('flask', 'flask/app.py')).toBe(true);
+      expect(testMatchesFile('flask', 'flask/blueprints.py')).toBe(true);
+      expect(testMatchesFile('flask', 'flask/sansio/app.py')).toBe(true);
+    });
+
+    it('should NOT match a bare package import to an unrelated similarly-named sibling', () => {
+      // A bare identifier is the highest false-positive-risk shape (#883):
+      // "flask" must not spuriously match "flaskext" merely because the
+      // string "flask" is a textual prefix of it.
+      expect(testMatchesFile('flask', 'flaskext/app.py')).toBe(false);
+      expect(testMatchesFile('flask', 'flask_sqlalchemy/app.py')).toBe(false);
+    });
+
+    it('should NOT match a bare package import nested arbitrarily deep elsewhere in the repo', () => {
+      // Bare identifiers deliberately skip the unrestricted suffix/source-prefix
+      // strategies (matchesSuffixPythonModule/matchesWithSourcePrefix) that
+      // the dotted, multi-segment case above relies on -- those do
+      // unbounded substring search with no leading-segment cap, which is
+      // safe for a specific multi-segment path but not for a short bare word.
+      expect(testMatchesFile('flask', 'vendor/some/deep/flask/app.py')).toBe(false);
+    });
+
+    it('should still require dotted imports to use the full strategy set (no regression)', () => {
+      // Multi-segment dotted specifiers keep tolerating a single leading
+      // "src/"-style directory via matchesWithSourcePrefix, same as before.
+      expect(testMatchesFile('flask.json.tag', 'src/flask/json/tag.py')).toBe(true);
+    });
+
+    it('should match an already-resolved src-layout path via the generic boundary strategies', () => {
+      // Once `resolvePythonSrcLayoutImport` (python-src-layout.ts) prepends
+      // the detected src/ root, the specifier is a plain slash-path and no
+      // longer reaches matchesPythonModule at all (it contains '/') -- the
+      // existing language-agnostic boundary strategies handle it directly.
+      expect(testMatchesFile('src/flask', 'src/flask/__init__.py')).toBe(true);
+      expect(testMatchesFile('src/flask', 'src/flask/app.py')).toBe(true);
+      expect(testMatchesFile('src/flask', 'src/flask/sansio/blueprints.py')).toBe(true);
+      expect(testMatchesFile('src/flask', 'src/flaskext/app.py')).toBe(false);
+    });
+  });
+
   describe('bare identifier precision (#868)', () => {
     describe('repro canaries', () => {
       it('Go: a bare package-relative basename must not tail-match an unrelated deep import path', () => {
@@ -599,10 +654,34 @@ describe('resolveRelativeImport', () => {
     expect(resolveRelativeImport('packages/x/src/a.ts', '/abs/path')).toBe('/abs/path');
   });
 
-  it('passes dotted Python-style imports through unchanged', () => {
-    // `.module` does not start with `./` — Python relative imports are out of scope.
+  it('passes a raw (unconverted) Python-style leading-dot specifier through unchanged', () => {
+    // `.module` does not start with `./` — this function only ever sees a
+    // real Python relative import in its converted `./`/`../`-prefixed form
+    // (see `PythonImportExtractor.convertPythonRelativeImport` in
+    // `ast/languages/python.ts`, #904), never this raw grammar-node text.
+    // This case documents what happens if it somehow did: a no-op, same as
+    // any other specifier that doesn't start with `./`/`../`.
     expect(resolveRelativeImport('packages/x/src/a.py', '.module')).toBe('.module');
     expect(resolveRelativeImport('packages/x/src/a.py', '..pkg.thing')).toBe('..pkg.thing');
+  });
+
+  it('resolves a Python-converted relative import against the importer directory (#904)', () => {
+    // `from .globals import x` in src/flask/app.py -> extractor converts to
+    // "./globals" -> resolves to the sibling module.
+    expect(resolveRelativeImport('src/flask/app.py', './globals')).toBe('src/flask/globals');
+    // `from ..globals import x` in src/flask/sansio/app.py -> "../globals".
+    expect(resolveRelativeImport('src/flask/sansio/app.py', '../globals')).toBe(
+      'src/flask/globals',
+    );
+  });
+
+  it('strips a trailing slash left by a bare-dots relative import (#904)', () => {
+    // `from . import x` in src/flask/json/__init__.py -> extractor converts
+    // to "./" (empty remainder) -> path.posix.join/normalize would otherwise
+    // leave a trailing slash that can never boundary-match a target path.
+    expect(resolveRelativeImport('src/flask/json/__init__.py', './')).toBe('src/flask/json');
+    // `from .. import x` in src/flask/sansio/foo.py -> "../".
+    expect(resolveRelativeImport('src/flask/sansio/foo.py', '../')).toBe('src/flask');
   });
 
   it('lets specifiers that escape the workspace stay as relative paths', () => {

@@ -61,6 +61,36 @@ function findModulePathIndex(node: SyntaxNode): number {
   );
 }
 
+/**
+ * Convert a Python relative-import specifier — the verbatim text of a
+ * `relative_import` grammar node (e.g. ".", "..", ".foo", "..pkg.mod") — into
+ * a `./`/`../`-prefixed relative specifier that `resolveRelativeImport`
+ * (`../../utils/path-matching.js`) can resolve against the importing file's
+ * own directory, the same way it already resolves a JS `./foo` specifier.
+ * Mirrors `RustImportExtractor`'s `super::` -> `../` conversion: do the
+ * language-specific translation once, at extraction time, so the shared
+ * resolver only ever has to understand one relative-path shape (#904).
+ *
+ * Python's relative-import level (the leading dot count) means "ascend this
+ * many package directories from the package containing the importing file."
+ * A single dot is zero ascents, because `dirname(importerFile)` already IS
+ * that package's own directory — whether or not the importer itself is an
+ * `__init__.py`, since a package's `__package__` is its own dotted name
+ * either way. Each additional dot ascends one more directory:
+ *
+ * - "."         -> "./"          (`from . import X` — own package)
+ * - ".."        -> "../"         (`from .. import X` — parent package)
+ * - ".foo"      -> "./foo"
+ * - "..pkg.mod" -> "../pkg/mod"
+ */
+function convertPythonRelativeImport(specifier: string): string {
+  const match = /^(\.+)(.*)$/.exec(specifier);
+  if (!match) return specifier;
+  const [, dots, rest] = match;
+  const prefix = dots.length === 1 ? './' : '../'.repeat(dots.length - 1);
+  return prefix + rest.replace(/\./g, '/');
+}
+
 // =============================================================================
 // TRAVERSER
 // =============================================================================
@@ -246,13 +276,15 @@ export class PythonImportExtractor implements LanguageImportExtractor {
    * - `import os` -> "os"; `import os as system` -> "os" (module, not alias)
    * - `import x.y` / `import x.y as z` -> "x.y"
    * - `from utils.validate import X` -> "utils.validate"
-   * - Relative: `from . import X` -> "."; `from .foo import X` -> ".foo";
-   *   `from ..pkg import Y` -> "..pkg" (dots preserved — there's no file
-   *   context available here to resolve them against the importer's own
-   *   path, so the clean-but-unresolved dotted form is the best available
-   *   "path"; see `resolveRelativeImport()` in `../../utils/path-matching.js`
-   *   for why Python relative imports, unlike JS's `./`/`../`, pass through
-   *   that resolution step unchanged today).
+   * - Relative (#904): `from . import X` -> "./"; `from .foo import X` ->
+   *   "./foo"; `from ..pkg import Y` -> "../pkg" — `convertPythonRelativeImport`
+   *   (below) converts the grammar's leading-dot form to a `./`/`../`-prefixed
+   *   specifier, mirroring `RustImportExtractor`'s `super::` -> `../`
+   *   conversion, so `resolveRelativeImport()` in
+   *   `../../utils/path-matching.js` can resolve it against the importer's
+   *   own directory the same way it already resolves a JS `./foo` specifier
+   *   (see `chunker.ts`'s `RESOLVE_RELATIVE_IMPORTS`, which threads `filepath`
+   *   through for Python too).
    *
    * A statement with multiple comma-separated modules (`import a, b.c`)
    * yields only the first (`"a"`) — a pre-existing limitation of
@@ -321,7 +353,12 @@ export class PythonImportExtractor implements LanguageImportExtractor {
   private findModulePath(node: SyntaxNode): { path: string; startIndex: number } | null {
     const index = findModulePathIndex(node);
     if (index === -1) return null;
-    return { path: node.namedChildren[index].text, startIndex: index };
+    const moduleNode = node.namedChildren[index];
+    const path =
+      moduleNode.type === 'relative_import'
+        ? convertPythonRelativeImport(moduleNode.text)
+        : moduleNode.text;
+    return { path, startIndex: index };
   }
 
   private collectImportedSymbols(node: SyntaxNode, startIndex: number): string[] {

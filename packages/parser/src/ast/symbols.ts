@@ -6,22 +6,33 @@ import { getLanguage } from './languages/registry.js';
 import { resolveRelativeImport, resolveWorkspaceImport } from '../utils/path-matching.js';
 import { resolvePsr4Import } from '../php-psr4.js';
 import { resolveGoModuleImport } from '../go-module.js';
+import { resolvePythonSrcLayoutImport } from '../python-src-layout.js';
 
 /**
  * Per-project manifest-declared import-root mappings, threaded through as a
  * third specifier-resolution step (after relative-import and workspace-
  * package resolution) in `resolveImportSpecifier`. Built once per workspace
- * root in `ast/chunker.ts`'s `prepareASTContext` — see `../php-psr4.ts` and
- * `../go-module.ts` for how each map is read. At most one field is ever
- * populated for a given file (the language determines which manifest, if
- * any, applies), and both are optional so this is a no-op for every language
- * without a manifest reader.
+ * root in `ast/chunker.ts`'s `prepareASTContext` — see `../php-psr4.ts`,
+ * `../go-module.ts`, and `../python-src-layout.ts` for how each root is
+ * read/detected. At most one field is ever populated for a given file (the
+ * language determines which one, if any, applies), and all are optional so
+ * this is a no-op for every language without a matching root.
  */
 export interface ManifestRoots {
   /** PHP Composer PSR-4 namespace-prefix -> source-directory map. */
   psr4Map?: ReadonlyMap<string, string>;
   /** Go module's declared import-path prefix (`go.mod`'s `module` line). */
   goModulePrefix?: string;
+  /** Python src-layout root directory (`src`), when detected on disk. */
+  pythonSrcLayoutRoot?: string;
+  /**
+   * Absolute workspace root, needed only alongside `pythonSrcLayoutRoot`:
+   * `resolvePythonSrcLayoutImport` verifies each candidate path actually
+   * exists on disk (see `../python-src-layout.ts`) before rewriting a
+   * specifier, to avoid misresolving one nested Python project's own
+   * package against an unrelated, outer `src/` root.
+   */
+  workspaceRoot?: string;
 }
 
 /**
@@ -99,6 +110,13 @@ function resolveManifestRoot(specifier: string, manifestRoots: ManifestRoots | u
   if (manifestRoots.psr4Map) return resolvePsr4Import(specifier, manifestRoots.psr4Map);
   if (manifestRoots.goModulePrefix) {
     return resolveGoModuleImport(specifier, manifestRoots.goModulePrefix);
+  }
+  if (manifestRoots.pythonSrcLayoutRoot) {
+    return resolvePythonSrcLayoutImport(
+      specifier,
+      manifestRoots.pythonSrcLayoutRoot,
+      manifestRoots.workspaceRoot,
+    );
   }
   return specifier;
 }

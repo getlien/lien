@@ -13,6 +13,7 @@ import { getTraverser } from './traversers/index.js';
 import { resolveWorkspacePackageEntries } from '../workspace-packages.js';
 import { resolvePsr4Map } from '../php-psr4.js';
 import { resolveGoModulePrefix } from '../go-module.js';
+import { detectPythonSrcLayoutRoot } from '../python-src-layout.js';
 
 export interface ASTChunkOptions {
   minChunkSize?: number;
@@ -67,10 +68,29 @@ function parseAndValidate(filepath: string, content: string) {
  * sibling module `src/x`, not to `src/../x` — so applying filesystem-style
  * `..` resolution here would produce wrong keys.
  *
- * Python's `from . import x` passes through as-is (different mechanics: dot
- * counting rather than path joining).
+ * Includes Python (#904): `PythonImportExtractor` converts a relative
+ * import's leading-dot form (`.foo`, `..pkg`) to a `./`/`../`-prefixed
+ * specifier at extraction time — mirroring Rust's own `super::` -> `../`
+ * conversion, but unlike Rust the converted form IS a real filesystem-join
+ * relationship (Python's dot-counting maps directly onto ascending
+ * directories from the importer's own), so it's safe to resolve here the
+ * same way JS/TS specifiers are.
  */
 const RESOLVE_RELATIVE_IMPORTS: ReadonlySet<SupportedLanguage> = new Set([
+  'javascript',
+  'typescript',
+  'python',
+]);
+
+/**
+ * Languages whose bare package specifiers can name a sibling *workspace*
+ * package (`@scope/pkg`). Deliberately a separate, narrower set than
+ * `RESOLVE_RELATIVE_IMPORTS`: npm workspaces is a JS-ecosystem-specific
+ * mechanism, so extending workspace-package resolution to Python (whose bare
+ * specifiers mean something entirely different — see `../python-src-layout.ts`)
+ * would conflate two unrelated resolution concerns for no benefit.
+ */
+const RESOLVE_WORKSPACE_PACKAGES: ReadonlySet<SupportedLanguage> = new Set([
   'javascript',
   'typescript',
 ]);
@@ -78,11 +98,13 @@ const RESOLVE_RELATIVE_IMPORTS: ReadonlySet<SupportedLanguage> = new Set([
 /**
  * Build the manifest-declared import-root mapping for a file's language, when
  * `workspaceRoot` is available. PHP resolves `composer.json`'s PSR-4 map; Go
- * resolves `go.mod`'s module prefix; every other language gets `undefined`
- * (a no-op — see `ManifestRoots` in `./symbols.ts`). Returns `undefined`
- * (rather than an object with empty/absent fields) when the manifest itself
- * declares nothing, so `resolveImportSpecifier`'s manifest-root step is
- * skipped entirely for non-PHP/Go-module projects.
+ * resolves `go.mod`'s module prefix; Python detects an on-disk `src/`
+ * layout (#901 — see `../python-src-layout.ts` for why this is filesystem-
+ * detected rather than manifest-declared); every other language gets
+ * `undefined` (a no-op — see `ManifestRoots` in `./symbols.ts`). Returns
+ * `undefined` (rather than an object with empty/absent fields) when nothing
+ * is found, so `resolveImportSpecifier`'s manifest-root step is skipped
+ * entirely for projects that don't need it.
  */
 function buildManifestRoots(
   language: SupportedLanguage,
@@ -100,29 +122,36 @@ function buildManifestRoots(
     return goModulePrefix ? { goModulePrefix } : undefined;
   }
 
+  if (language === 'python') {
+    const pythonSrcLayoutRoot = detectPythonSrcLayoutRoot(workspaceRoot);
+    return pythonSrcLayoutRoot ? { pythonSrcLayoutRoot, workspaceRoot } : undefined;
+  }
+
   return undefined;
 }
 
 /**
  * Prepare AST context by extracting imports, exports, and symbols.
  *
- * For JS/TS, `filepath` is threaded into the import extractors so that relative
- * specifiers (`./foo`, `../bar`) are resolved to workspace-relative paths at
- * index time. This prevents cross-package basename collisions in the downstream
- * dependency analysis (see #525).
+ * For JS/TS/Python, `filepath` is threaded into the import extractors so that
+ * relative specifiers (`./foo`, `../bar`, and — since #904 — Python's
+ * extractor-converted `.foo`/`..pkg` forms) are resolved to workspace-relative
+ * paths at index time. This prevents cross-package basename collisions in the
+ * downstream dependency analysis (see #525).
  *
- * When `workspaceRoot` is also provided, bare package specifiers naming a
- * sibling workspace package (`@scope/pkg`) are resolved the same way, to that
- * package's source entry file — closing the monorepo cross-package blind
- * spot in `get_dependents`. Gated to the same JS/TS language set as relative
- * import resolution: npm workspaces is a JS-ecosystem mechanism, and other
- * languages' import syntax could otherwise coincidentally collide with a
- * workspace package name.
+ * When `workspaceRoot` is also provided and the file is JS/TS, bare package
+ * specifiers naming a sibling workspace package (`@scope/pkg`) are resolved
+ * the same way, to that package's source entry file — closing the monorepo
+ * cross-package blind spot in `get_dependents`. Gated to its own narrower
+ * `RESOLVE_WORKSPACE_PACKAGES` set (not the relative-imports set above): npm
+ * workspaces is a JS-ecosystem mechanism unrelated to Python's bare-specifier
+ * semantics.
  *
- * Independently, when `workspaceRoot` is provided and the file is PHP or Go,
- * `buildManifestRoots` resolves that project's manifest-declared import root
- * (composer.json PSR-4 / go.mod module prefix — see #867) so namespace- or
- * module-qualified imports resolve to real workspace-relative paths too.
+ * Independently, when `workspaceRoot` is provided and the file is PHP, Go, or
+ * Python, `buildManifestRoots` resolves that project's manifest- or
+ * filesystem-detected import root (composer.json PSR-4 / go.mod module
+ * prefix / on-disk `src/` layout — see #867, #901) so namespace-, module-, or
+ * package-qualified imports resolve to real workspace-relative paths too.
  */
 function prepareASTContext(
   content: string,
@@ -131,10 +160,11 @@ function prepareASTContext(
   filepath: string,
   workspaceRoot?: string,
 ): ASTContext {
-  const resolvesImports = RESOLVE_RELATIVE_IMPORTS.has(language);
-  const resolutionPath = resolvesImports ? filepath : undefined;
+  const resolutionPath = RESOLVE_RELATIVE_IMPORTS.has(language) ? filepath : undefined;
   const workspacePackages =
-    resolvesImports && workspaceRoot ? resolveWorkspacePackageEntries(workspaceRoot) : undefined;
+    RESOLVE_WORKSPACE_PACKAGES.has(language) && workspaceRoot
+      ? resolveWorkspacePackageEntries(workspaceRoot)
+      : undefined;
   const manifestRoots = buildManifestRoots(language, workspaceRoot);
   return {
     lines: content.split('\n'),
