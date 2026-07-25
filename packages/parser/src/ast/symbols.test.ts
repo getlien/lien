@@ -6,6 +6,7 @@ import {
   extractExports,
   extractCallSites,
 } from './symbols.js';
+import { matchesFile, normalizePath } from '../utils/path-matching.js';
 
 describe('Symbol Extraction', () => {
   describe('extractImportedSymbols', () => {
@@ -668,6 +669,47 @@ func run() {
       expect(imports).toContain('github.com/foo/utils');
       expect(imports).toContain('github.com/foo/models');
       expect(imports).not.toContain('fmt');
+    });
+  });
+
+  describe('extractImports - Java static-member class-path fallback (#864)', () => {
+    it('a specific static-member import now matches its defining class file end-to-end', () => {
+      // Reproduces #864: `import static a.B.member;` extracted only the raw,
+      // one-segment-too-deep path, which could never match the class's own
+      // file via matchesFile/matchesPythonModule. extractImports now also
+      // captures the class's FQN, so a test file doing this static import
+      // is discoverable as covering Preconditions.java.
+      const content = `
+import static com.google.common.base.Preconditions.checkNotNull;
+
+class Foo {
+  void bar() { checkNotNull(this); }
+}
+      `.trim();
+
+      const parseResult = parseAST(content, 'java');
+      const imports = extractImports(parseResult.tree!.rootNode, 'java');
+
+      expect(imports).toContain('com.google.common.base.Preconditions.checkNotNull');
+      expect(imports).toContain('com.google.common.base.Preconditions');
+
+      const target = normalizePath('com/google/common/base/Preconditions.java', '');
+      // Before the fix, none of `imports` would satisfy matchesFile against
+      // the class's own file — this is the concrete before/after behavior.
+      expect(imports.some(imp => matchesFile(normalizePath(imp, ''), target))).toBe(true);
+    });
+
+    it('an ordinary (non-static) import is unaffected — still exactly one path', () => {
+      const content = `
+import com.example.MyClass;
+
+class Foo {}
+      `.trim();
+
+      const parseResult = parseAST(content, 'java');
+      const imports = extractImports(parseResult.tree!.rootNode, 'java');
+
+      expect(imports).toEqual(['com.example.MyClass']);
     });
   });
 
