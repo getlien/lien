@@ -88,6 +88,65 @@ export function matchesAtBoundary(str: string, pattern: string): boolean {
 }
 
 /**
+ * Like `matchesAtBoundary`, but additionally requires a bare (slash-free)
+ * `pattern` to represent the *whole* relationship rather than a coincidental
+ * partial one:
+ *
+ * - The match must reach the end of `str`. An interior hit means `str`
+ *   continues into an unrelated subtree beyond the identifier, e.g. a bare
+ *   `require 'sinatra'` matching every file under `lib/sinatra/` rather than
+ *   just the gem's own entry point (`lib/sinatra.rb`).
+ * - At most `maxLeadingSegments` directory segments may precede the match.
+ *   The two `matchesFile` call sites need different values here because a
+ *   bare identifier plays a different role in each direction:
+ *   - Strategy 2 passes 1, allowing the established "source directory
+ *     prefix" convention (a bare *import* like `auth` resolving to
+ *     `src/auth.rs`) — a real, confirmed pattern (see the Rust tests above).
+ *   - Strategy 1 passes 0 (i.e. no match beyond the exact-match check
+ *     already done in `matchesFile`), because there's no confirmed
+ *     legitimate case for a bare *target* (a short top-level file's own
+ *     basename) matching merely the tail of a longer, qualified import —
+ *     that shape is exactly the Go bug: a manifest-resolved import like
+ *     `internal/fs` (already module-prefix-stripped by #867) must not
+ *     tail-match an unrelated top-level `fs` target just because one leading
+ *     segment happens to precede it.
+ *   Both directions still reject a bare `import Combine` (system framework)
+ *   matching `Source/Features/Combine.swift` (2 leading segments, over
+ *   either threshold).
+ *
+ * Used only for `matchesFile`'s strategies 1/2, which compare the raw
+ * import/target strings as given. A cleaned `./`/`../` relative import
+ * (strategy 3, below) is deliberately exempt: its leading relative marker is
+ * already proof the specifier names a real project file rather than an
+ * ambiguous external package/module/framework, so it doesn't need this extra
+ * scrutiny -- and unlike a bare package name, it carries no information about
+ * how deep the importer's own directory happens to be nested.
+ */
+function matchesAtBoundaryPrecise(
+  str: string,
+  pattern: string,
+  maxLeadingSegments: number,
+): boolean {
+  const index = str.indexOf(pattern);
+  if (index === -1) return false;
+
+  const charBefore = index > 0 ? str[index - 1] : '/';
+  if (charBefore !== '/' && index !== 0) return false;
+
+  const endIndex = index + pattern.length;
+  if (endIndex !== str.length && str[endIndex] !== '/') return false;
+
+  if (!pattern.includes('/')) {
+    if (endIndex !== str.length) return false;
+    const prefix = str.substring(0, index);
+    const prefixSlashes = (prefix.match(/\//g) || []).length;
+    if (prefixSlashes > maxLeadingSegments) return false;
+  }
+
+  return true;
+}
+
+/**
  * Determines if an import path matches a target file path.
  *
  * Handles various matching strategies:
@@ -106,24 +165,35 @@ export function matchesFile(normalizedImport: string, normalizedTarget: string):
   // Exact match
   if (normalizedImport === normalizedTarget) return true;
 
-  // Strategy 1: Check if target path appears in import at path boundaries
-  if (matchesAtBoundary(normalizedImport, normalizedTarget)) {
+  // Strategy 1: Check if target path appears in import at path boundaries.
+  // maxLeadingSegments: 0 -- see matchesAtBoundaryPrecise's doc comment.
+  if (matchesAtBoundaryPrecise(normalizedImport, normalizedTarget, 0)) {
     return true;
   }
 
-  // Strategy 2: Check if import path appears in target (for longer target paths)
-  if (matchesAtBoundary(normalizedTarget, normalizedImport)) {
+  // Strategy 2: Check if import path appears in target (for longer target paths).
+  // maxLeadingSegments: 1 -- see matchesAtBoundaryPrecise's doc comment.
+  if (matchesAtBoundaryPrecise(normalizedTarget, normalizedImport, 1)) {
     return true;
   }
 
   // Strategy 3: Handle relative imports (./logger vs src/utils/logger)
-  // Remove leading ./ and ../ from import
+  // Remove leading ./ and ../ from import. Only meaningful -- and only uses
+  // the unrestricted matchesAtBoundary -- when a leading relative marker was
+  // actually stripped; that marker is what proves the specifier names a real
+  // project file rather than an ambiguous external package/module/framework
+  // (see matchesAtBoundaryPrecise's doc comment). Without one, cleanedImport
+  // is identical to normalizedImport, and strategies 1/2 above already tried
+  // (and rejected) that exact pair with the appropriate scrutiny -- rerunning
+  // it here with the looser matcher would silently undo that guard.
   const cleanedImport = normalizedImport.replace(/^(\.\.?\/)+/, '');
-  if (
-    matchesAtBoundary(cleanedImport, normalizedTarget) ||
-    matchesAtBoundary(normalizedTarget, cleanedImport)
-  ) {
-    return true;
+  if (cleanedImport !== normalizedImport) {
+    if (
+      matchesAtBoundary(cleanedImport, normalizedTarget) ||
+      matchesAtBoundary(normalizedTarget, cleanedImport)
+    ) {
+      return true;
+    }
   }
 
   // Strategy 4: PHP namespace matching
@@ -229,6 +299,15 @@ function matchesPythonModule(importPath: string, targetPath: string): boolean {
  *
  * Also useful for case-insensitive file systems.
  *
+ * A single-component (bare) importPath is the same ambiguous case
+ * `matchesAtBoundaryPrecise` (above) guards for `matchesFile`'s strategies
+ * 1/2: on its own it doesn't name a specific file, so matching it against the
+ * tail of an arbitrarily deep targetPath needs the same "at most one leading
+ * directory" limit -- otherwise a bare `import Combine` (system framework)
+ * would match `Source/Features/Combine.swift` purely because the basenames
+ * coincide, exactly like the multi-segment case this function otherwise
+ * guards against.
+ *
  * @param importPath - The normalized import path
  * @param targetPath - The normalized file path
  * @returns True if paths match case-insensitively at component boundaries
@@ -257,9 +336,14 @@ function matchesPHPNamespace(importPath: string, targetPath: string): boolean {
     }
   }
 
-  // All import components must match (from the end)
-  // This ensures App/Models/User matches web/app/Models/User but not app/Services/User
-  return matched === importComponents.length;
+  // All import components must match (from the end).
+  // This ensures App/Models/User matches web/app/Models/User but not app/Services/User.
+  if (matched !== importComponents.length) return false;
+
+  // A bare (single-component) import additionally needs the same "at most
+  // one leading directory" evidence as matchesAtBoundaryPrecise's
+  // bare-identifier guard -- see the doc comment above.
+  return importComponents.length > 1 || targetComponents.length <= 2;
 }
 
 /**

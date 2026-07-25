@@ -281,6 +281,73 @@ describe('matchesFile - Path Boundary Checking', () => {
       expect(testMatchesFile('django.utils', 'django/utils/timezone.py')).toBe(true);
     });
   });
+
+  describe('bare identifier precision (#868)', () => {
+    describe('repro canaries', () => {
+      it('Go: a bare package-relative basename must not tail-match an unrelated deep import path', () => {
+        // fs.go (top-level, unrelated) must NOT be credited with an import
+        // that's actually internal/fs's (render/html.go imports
+        // github.com/gin-gonic/gin/internal/fs).
+        expect(testMatchesFile('github.com/gin-gonic/gin/internal/fs', 'fs')).toBe(false);
+        // The real relationship (a multi-segment import matching its
+        // multi-segment target) is untouched by this guard.
+        expect(testMatchesFile('github.com/gin-gonic/gin/internal/fs', 'internal/fs')).toBe(true);
+      });
+
+      it('Go: still rejects the bare-target shape even after #867 strips the module prefix', () => {
+        // #867 resolves the raw github.com/gin-gonic/gin/internal/fs import
+        // down to internal/fs (module prefix stripped). A bare, unrelated
+        // top-level "fs" target must still not tail-match it, even though
+        // only a single directory segment ("internal/") now precedes the
+        // match -- the same leniency that's correct for a bare *import*
+        // (Rust's auth -> src/auth.rs convention, strategy 2) is NOT
+        // legitimate for a bare *target* matched against a longer import
+        // (strategy 1): there's no confirmed real-world case for it, and
+        // it's exactly this bug's shape.
+        expect(testMatchesFile('internal/fs', 'fs')).toBe(false);
+        // The real relationship stays intact.
+        expect(testMatchesFile('internal/fs', 'internal/fs')).toBe(true);
+      });
+
+      it('Ruby: a bare gem require must not fan out to every file under the gem directory', () => {
+        // Every file under lib/sinatra/ must stop claiming a bare
+        // `require 'sinatra'` as a match -- only the gem's own entry point
+        // (lib/sinatra.rb) is a real match for a bare specifier.
+        expect(testMatchesFile('sinatra', 'lib/sinatra/base')).toBe(false);
+        expect(testMatchesFile('sinatra', 'lib/sinatra/main')).toBe(false);
+        expect(testMatchesFile('sinatra', 'lib/sinatra/show_exceptions')).toBe(false);
+        expect(testMatchesFile('sinatra', 'lib/sinatra/version')).toBe(false);
+        // The gem's own entry point still matches.
+        expect(testMatchesFile('sinatra', 'lib/sinatra')).toBe(true);
+      });
+
+      it('Swift: a bare system-framework import must not match an unrelated same-named file', () => {
+        // `import Combine` (Apple's system framework) must not match
+        // Source/Features/Combine.swift merely because the basenames
+        // coincide.
+        expect(testMatchesFile('Combine', 'Source/Features/Combine')).toBe(false);
+      });
+    });
+
+    describe('legitimate bare-identifier matches stay intact', () => {
+      it('keeps the single source-directory-prefix convention (Rust-style)', () => {
+        // Already covered under "Rust module matching" above; restated here
+        // to make the #868 guard's intent explicit: exactly one leading
+        // directory segment before a bare identifier is still allowed.
+        expect(testMatchesFile('auth', 'src/auth.rs')).toBe(true);
+        expect(testMatchesFile('utils', 'src/utils.rs')).toBe(true);
+      });
+
+      it('keeps an exact bare-identifier match', () => {
+        expect(testMatchesFile('logger', 'logger')).toBe(true);
+      });
+
+      it('keeps a relative import cleaned down to a bare identifier with a single prefix segment', () => {
+        expect(testMatchesFile('./logger', 'logger')).toBe(true);
+        expect(testMatchesFile('../logger', 'logger')).toBe(true);
+      });
+    });
+  });
 });
 
 /**
