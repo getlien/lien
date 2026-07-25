@@ -237,6 +237,74 @@ pub static COUNTER: i32 = 0;`;
       const result = importExtractor.processImportSymbols(useNode);
       expect(result).toBeNull();
     });
+
+    // `use crate::config;` (a single segment directly off a BARE crate/self/
+    // super root, no further `::`) previously resolved a correct path via
+    // extractImportPath (which converts the whole node's text) but returned
+    // null from processImportSymbols — which read the `path` field alone
+    // ("crate", with no "::" for convertRustModulePath to strip) instead of
+    // combining it with the imported name first.
+    it('should extract import path for a bare-root single-segment use (crate::x)', () => {
+      const code = 'use crate::config;';
+      const root = mustParse(code, 'rust');
+      const useNode = root.namedChild(0)!;
+      const path = importExtractor.extractImportPath(useNode);
+      expect(path).toBe('config');
+    });
+
+    it('should extract import symbols for a bare-root single-segment use (crate::x)', () => {
+      const code = 'use crate::config;';
+      const root = mustParse(code, 'rust');
+      const useNode = root.namedChild(0)!;
+      const result = importExtractor.processImportSymbols(useNode);
+      expect(result).not.toBeNull();
+      expect(result!.importPath).toBe('config');
+      expect(result!.symbols).toEqual(['config']);
+    });
+
+    it('should extract import symbols for a bare-root single-segment use (self::x)', () => {
+      const code = 'use self::config;';
+      const root = mustParse(code, 'rust');
+      const useNode = root.namedChild(0)!;
+      const result = importExtractor.processImportSymbols(useNode);
+      expect(result).not.toBeNull();
+      expect(result!.importPath).toBe('config');
+      expect(result!.symbols).toEqual(['config']);
+    });
+
+    // `use crate::{auth::AuthService, config::Settings};` groups items that
+    // point at genuinely DIFFERENT modules (unlike `use crate::auth::{A, B}`,
+    // where all items share one module) under a BARE crate/self/super root.
+    // tree-sitter-rust gives crate/self/super their own named node types with
+    // no further `::` segment, so convertRustModulePath's prefix-strip never
+    // matched and the whole declaration returned null. Mirrors
+    // GoImportExtractor's "first wins" precedent for its own multi-target
+    // grouped imports rather than dropping the statement entirely.
+    it('should extract the first target from a bare-root use group', () => {
+      const code = 'use crate::{auth::AuthService, config::Settings};';
+      const root = mustParse(code, 'rust');
+      const useNode = root.namedChild(0)!;
+      const path = importExtractor.extractImportPath(useNode);
+      expect(path).toBe('auth');
+    });
+
+    it('should extract first-target import symbols from a bare-root use group', () => {
+      const code = 'use crate::{auth::AuthService, config::Settings};';
+      const root = mustParse(code, 'rust');
+      const useNode = root.namedChild(0)!;
+      const result = importExtractor.processImportSymbols(useNode);
+      expect(result).not.toBeNull();
+      expect(result!.importPath).toBe('auth');
+      expect(result!.symbols).toEqual(['AuthService']);
+    });
+
+    it('should extract the first target from a flat bare-root use group (no submodule)', () => {
+      const code = 'use crate::{Foo, Bar};';
+      const root = mustParse(code, 'rust');
+      const useNode = root.namedChild(0)!;
+      const path = importExtractor.extractImportPath(useNode);
+      expect(path).toBe('Foo');
+    });
   });
 
   describe('Symbol Extraction', () => {

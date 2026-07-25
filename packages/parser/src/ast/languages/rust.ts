@@ -202,13 +202,59 @@ function convertRustModulePath(path: string): string | null {
 }
 
 /**
+ * tree-sitter-rust gives the bare `crate`/`self`/`super` path-root keywords
+ * their own named node types (equal to the keyword text) rather than folding
+ * them into a `scoped_identifier`. `convertRustModulePath` only recognizes
+ * these keywords as `crate::`/`self::`/`super::` *prefixes* (it string-matches
+ * on the `::`), so a bare root — with nothing textually following it — never
+ * matches and is misread as an external crate.
+ */
+const BARE_ROOT_TYPES = new Set(['crate', 'self', 'super']);
+
+function isBareRootToken(node: SyntaxNode): boolean {
+  return BARE_ROOT_TYPES.has(node.type);
+}
+
+/**
+ * The first `use_list` item's own path, prefixed with the bare root's text —
+ * e.g. for `use crate::{auth::AuthService, config::Settings}`, the root is
+ * `crate` and the first item is `auth::AuthService`, giving `crate::auth`.
+ * For a flat item with no further path (`use crate::{Foo, Bar}`), gives
+ * `crate::Foo`.
+ */
+function firstBareRootItemPath(pathNode: SyntaxNode, useList: SyntaxNode): string | null {
+  const firstItem = useList.namedChildren[0];
+  if (!firstItem) return null;
+  if (firstItem.type === 'identifier') return `${pathNode.text}::${firstItem.text}`;
+  if (firstItem.type === 'scoped_identifier') {
+    const itemPath = firstItem.childForFieldName('path')?.text;
+    return itemPath ? `${pathNode.text}::${itemPath}` : null;
+  }
+  return null;
+}
+
+/**
  * Extract the module path prefix from a scoped use argument.
  * For `crate::auth::AuthService`, returns `crate::auth`.
  * For `crate::auth::{A, B}`, returns `crate::auth`.
+ *
+ * When the shared root is a BARE `crate`/`self`/`super` keyword with no
+ * further `::` segment (`use crate::{auth::AuthService, config::Settings};`),
+ * there's no prefix for `convertRustModulePath` to strip and the group's
+ * items point at genuinely different modules. Falls back to
+ * `GoImportExtractor`'s "first wins" precedent for its own multi-target
+ * grouped imports (see `import_spec_list` handling in go.ts) rather than
+ * dropping the whole declaration — full multi-target support needs a
+ * broader change, since `extractImportPath` returns one path per node (see
+ * the "grouped imports" tracking issue).
  */
 function extractScopePath(node: SyntaxNode): string | null {
   const pathNode = node.childForFieldName('path');
-  return pathNode?.text ?? null;
+  if (!pathNode) return null;
+  if (!isBareRootToken(pathNode)) return pathNode.text;
+
+  const useList = node.namedChildren.find(child => child.type === 'use_list');
+  return useList ? firstBareRootItemPath(pathNode, useList) : null;
 }
 
 /**
@@ -320,7 +366,16 @@ export class RustImportExtractor implements LanguageImportExtractor {
     const nameNode = node.childForFieldName('name');
     if (!pathNode || !nameNode) return null;
 
-    const modulePath = convertRustModulePath(pathNode.text);
+    // `use crate::config;` / `use self::config;` / `use super::config;` — a
+    // single segment directly off a BARE root has no further module prefix
+    // for convertRustModulePath's `crate::`/`self::`/`super::` string-match to
+    // strip (see `isBareRootToken`). The referenced module IS the imported
+    // name itself, so combine root + name before converting (mirrors what
+    // `resolveFullPath`/`extractImportPath` already derive from the whole
+    // node's text for this same statement).
+    const modulePath = isBareRootToken(pathNode)
+      ? convertRustModulePath(`${pathNode.text}::${nameNode.text}`)
+      : convertRustModulePath(pathNode.text);
     if (!modulePath) return null;
 
     return { importPath: modulePath, symbols: [nameNode.text] };
@@ -333,9 +388,20 @@ export class RustImportExtractor implements LanguageImportExtractor {
     const modulePath = convertRustModulePath(scopePath);
     if (!modulePath) return null;
 
-    // Find the use_list child
     const useList = node.namedChildren.find(child => child.type === 'use_list');
     if (!useList) return null;
+
+    // Bare-root groups (`use crate::{auth::AuthService, config::Settings}`)
+    // only resolved `modulePath` from the FIRST item (see `extractScopePath`),
+    // so — mirroring `extractImportPath` — only that first item's own symbol
+    // is returned here, not the whole use_list, to avoid misattributing later
+    // items (e.g. `Settings`) to the wrong module (`auth`, not `config`).
+    const pathNode = node.childForFieldName('path');
+    if (pathNode && isBareRootToken(pathNode)) {
+      const firstItem = useList.namedChildren[0];
+      const firstSymbol = firstItem ? extractUseListItemSymbol(firstItem) : null;
+      return firstSymbol ? { importPath: modulePath, symbols: [firstSymbol] } : null;
+    }
 
     const symbols = extractUseListSymbols(useList);
     return symbols.length > 0 ? { importPath: modulePath, symbols } : null;
@@ -383,8 +449,7 @@ export class RustImportExtractor implements LanguageImportExtractor {
       return node.text;
     }
     if (node.type === 'scoped_use_list') {
-      const pathNode = node.childForFieldName('path');
-      return pathNode?.text ?? null;
+      return extractScopePath(node);
     }
     if (node.type === 'use_as_clause') {
       // Find the scoped_identifier inside

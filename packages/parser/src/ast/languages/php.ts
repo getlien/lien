@@ -160,6 +160,8 @@ export class PHPExportExtractor implements LanguageExportExtractor {
  * Handles:
  * - use App\Models\User;
  * - use App\Services\AuthService as Auth;
+ * - use App\Models\{User, Post as PostModel};   (grouped use, PHP 7+ — see
+ *   `firstGroupedTarget` for why only the first item is captured)
  */
 export class PHPImportExtractor implements LanguageImportExtractor {
   readonly importNodeTypes = ['namespace_use_declaration'];
@@ -188,12 +190,57 @@ export class PHPImportExtractor implements LanguageImportExtractor {
       return { importPath: fullPath, symbols: [symbol] };
     }
 
-    return null;
+    const grouped = this.firstGroupedTarget(node);
+    return grouped ? { importPath: grouped.importPath, symbols: [grouped.alias] } : null;
   }
 
   private extractPHPUseDeclarationPath(node: SyntaxNode): string | null {
     const clause = node.namedChildren.find(child => child.type === 'namespace_use_clause');
-    return clause ? this.extractPHPQualifiedName(clause) : null;
+    if (clause) return this.extractPHPQualifiedName(clause);
+    return this.firstGroupedTarget(node)?.importPath ?? null;
+  }
+
+  /**
+   * First target of a grouped use declaration's `namespace_use_group`
+   * (`use App\Models\{User, Post as PostModel};`). tree-sitter-php parses
+   * this shape as a `namespace_name` prefix sibling (`App\Models`) plus a
+   * `namespace_use_group` holding one `namespace_use_clause` per item — not
+   * the `namespace_use_clause` (with a `qualified_name` child) that the
+   * simple/aliased form above handles, so it was previously invisible to
+   * both `extractImportPath` and `processImportSymbols` (returned null for
+   * the *whole* declaration, dropping every item in the group).
+   *
+   * Each item targets a different file under PSR-4's one-class-per-file
+   * convention (unlike Rust's `use path::{A, B}`, where A and B share one
+   * module/file) — so, mirroring `GoImportExtractor`'s existing "first wins"
+   * precedent for its own multi-target grouped imports, this surfaces the
+   * first item rather than continuing to drop the whole statement. Full
+   * multi-target support needs a broader change (see the "grouped imports"
+   * tracking issue) since `extractImportPath` returns one path per node.
+   */
+  private firstGroupedTarget(node: SyntaxNode): { importPath: string; alias: string } | null {
+    const group = node.namedChildren.find(child => child.type === 'namespace_use_group');
+    if (!group) return null;
+
+    const firstClause = group.namedChildren.find(child => child.type === 'namespace_use_clause');
+    if (!firstClause) return null;
+
+    const names = firstClause.namedChildren.filter(child => child.type === 'name');
+    if (names.length === 0) return null;
+
+    const importedName = names[0].text;
+    const alias = names.length > 1 ? names[names.length - 1].text : importedName;
+    const prefix = this.extractNamespacePrefix(node);
+    const importPath = prefix ? `${prefix}\\${importedName}` : importedName;
+
+    return { importPath, alias };
+  }
+
+  private extractNamespacePrefix(node: SyntaxNode): string | null {
+    const namespaceName = node.namedChildren.find(child => child.type === 'namespace_name');
+    if (!namespaceName) return null;
+    const parts = this.extractNamespaceParts(namespaceName);
+    return parts.length > 0 ? parts.join('\\') : null;
   }
 
   private extractNamespaceParts(namespaceNode: SyntaxNode): string[] {
