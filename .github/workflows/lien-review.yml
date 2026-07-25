@@ -102,3 +102,27 @@ jobs:
           # data ahead of any consumer default-on decision, not to claim a
           # passed calibration bar.
           LIEN_REMOVED_EXPORTS_PASS: 'on'
+          # LIEN_REVIEW_TOKEN_BUDGET — an absolute override for the main
+          # pass's final token budget (see docs/architecture/review-pass-
+          # architecture.md's budget section and applyReviewTokenBudgetOverride's
+          # own doc comment, packages/review/src/defaults.ts). Motivating case
+          # (PR #855): the review check failed 3 of 4 runs on a genuinely
+          # large feature diff, the main pass exhausting its allocation.
+          # Attestation receipts across those runs: 161,588 allocated to the
+          # main pass (277,588 total across main + extra passes), yet the
+          # deepest-investigation variant spent up to 475,055 tokens before
+          # dying incomplete; only a shallower-investigation variant finished,
+          # and only because it stayed inside the original allocation by
+          # exploring less. 555,176 is ~2x that 277,588 prior effective total
+          # (555,176 = 277,588 * 2), comfortably clearing the observed 475,055
+          # floor with headroom for the deep path to actually finish. Quoted:
+          # an unquoted six-digit scalar is still worth avoiding on principle
+          # here (env values are always strings; see the 'on' quoting above
+          # for the same footgun class). Raises this repo's own worst-case
+          # per-run OpenRouter cost on large diffs — the owner explicitly
+          # approved that trade 2026-07-25. No action.yml input either (same
+          # env-only, undocumented-by-design mechanism as the flags above);
+          # every other @liendev/review / @liendev/action consumer is
+          # unaffected (unset there, so the diff-scaled/blast-radius-scaled
+          # formula runs exactly as before).
+          LIEN_REVIEW_TOKEN_BUDGET: '555176'
