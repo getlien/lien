@@ -6,6 +6,7 @@ import {
   resolveRelativeImport,
   resolveWorkspaceImport,
   isUnresolvableWholeModuleImport,
+  importMatchesTarget,
 } from './path-matching.js';
 
 /**
@@ -407,6 +408,55 @@ describe('isUnresolvableWholeModuleImport (#884)', () => {
 
   it('does not suppress bare imports from non-Swift, non-whole-module files', () => {
     expect(isUnresolvableWholeModuleImport('logger', 'src/logger.ts')).toBe(false);
+  });
+});
+
+/**
+ * Test cases for the #886 consolidated primitive: `importMatchesTarget`
+ * couples `isUnresolvableWholeModuleImport`'s guard to `matchesFile` so a
+ * match-side caller can never invoke one without the other.
+ */
+describe('importMatchesTarget (#886)', () => {
+  const normalize = (p: string): string => normalizePath(p, '/fake/workspace');
+
+  it('matches like matchesFile would, for a non-whole-module language', () => {
+    expect(importMatchesTarget('./logger', 'src/foo.ts', normalize('src/logger'), normalize)).toBe(
+      true,
+    );
+    expect(
+      importMatchesTarget('src/database.ts', 'src/foo.ts', normalize('src/logger.ts'), normalize),
+    ).toBe(false);
+  });
+
+  it('suppresses the #884 Alamofire whole-module false-hub shape that matchesFile alone would match', () => {
+    // matchesFile itself still matches this pair (#884's own regression pin) --
+    // the guard is what makes the combined primitive reject it.
+    expect(matchesFile(normalize('Alamofire'), normalize('Source/Alamofire.swift'))).toBe(true);
+    expect(
+      importMatchesTarget(
+        'Alamofire',
+        'Source/AlamofireTests.swift',
+        normalize('Source/Alamofire.swift'),
+        normalize,
+      ),
+    ).toBe(false);
+  });
+
+  it('leaves the identical bare-identifier shape alone for a non-whole-module language (Rust)', () => {
+    expect(
+      importMatchesTarget('auth', 'src/consumer.rs', normalize('src/auth.rs'), normalize),
+    ).toBe(true);
+  });
+
+  it('rejects a real per-file relationship guarded by the whole-module language, not the pair', () => {
+    // Swift's SwiftImportExtractor never emits anything but the bare module
+    // name, so even a genuine same-file relationship reads as "not
+    // determinable" rather than a match -- this is the same honest #869
+    // outcome isUnresolvableWholeModuleImport documents, just reached through
+    // the combined primitive instead of the open-coded pattern.
+    expect(
+      importMatchesTarget('Combine', 'Tests/CombineTests.swift', normalize('Combine'), normalize),
+    ).toBe(false);
   });
 });
 

@@ -166,14 +166,18 @@ function matchesAtBoundaryPrecise(
  * false-hub shape, one leading segment inside the window #868/#883
  * deliberately preserve for the legitimate Rust-style convention.
  *
- * Callers that discover imports per-chunk (`findTestAssociationsFromChunks`,
- * `get_dependents`'s import index) should call this *before* handing a
- * candidate import to `matchesFile`, and skip it entirely when true -- the
- * honest outcome is #869's "not determinable" signal, never a match. This is
- * intentionally the only place that combines path-matching with language
- * data; `matchesAtBoundaryPrecise`'s general guard stays untouched and keeps
- * serving every non-whole-module language (Rust, Go, Ruby, ...) exactly as
- * before.
+ * Match-side callers (does this import resolve to this target?) should go
+ * through `importMatchesTarget` below, which applies this guard before
+ * calling `matchesFile` so the two can never drift apart (#886). Build-side
+ * callers with no target in scope (`buildImportIndex`,
+ * `indexImportEntry`/`addChunkToImportIndex`) have nothing for
+ * `importMatchesTarget` to compare against, so they keep calling this
+ * predicate directly to decide whether an (import, chunk) pair is worth
+ * indexing at all -- the honest outcome when it's true is #869's "not
+ * determinable" signal, never a match. This is intentionally the only place
+ * that combines path-matching with language data; `matchesAtBoundaryPrecise`'s
+ * general guard stays untouched and keeps serving every non-whole-module
+ * language (Rust, Go, Ruby, ...) exactly as before.
  *
  * @param importSpecifier - The raw (pre-normalization) import specifier
  * @param importerFile - File path of the chunk doing the importing
@@ -250,6 +254,41 @@ export function matchesFile(normalizedImport: string, normalizedTarget: string):
   }
 
   return false;
+}
+
+/**
+ * The single guarded import-matching decision: does `importSpecifier` (as
+ * written in `importerFile`) resolve to `normalizedTarget`?
+ *
+ * Couples the #884 whole-module guard to `matchesFile` so the two can never
+ * drift apart again. `matchesFile` is language-agnostic -- it only ever sees
+ * normalized strings and cannot know the importer's language -- so the guard
+ * MUST run on the RAW specifier first. Every match-side reverse-dependency
+ * call path that used to open-code
+ * `!isUnresolvableWholeModuleImport(imp, f) && matchesFile(normalize(imp), t)`
+ * now goes through here instead (#886); the two build-side sites that index
+ * imports with no target in scope (`buildImportIndex`,
+ * `indexImportEntry`/`addChunkToImportIndex`) still call
+ * `isUnresolvableWholeModuleImport` directly, and `findDependentChunks`'s
+ * fuzzy loop and `buildReExportGraph` stay on raw `matchesFile` -- see #886's
+ * design comment for why those four are not routed through this primitive.
+ *
+ * @param importSpecifier - The raw (pre-normalization) import specifier, or
+ *   an `importedSymbols` key (same shape).
+ * @param importerFile - File path of the chunk doing the importing (needed
+ *   for the whole-module guard's language detection).
+ * @param normalizedTarget - The already-normalized target path to compare
+ *   against.
+ * @param normalize - The caller's own cached `normalizePath` wrapper.
+ */
+export function importMatchesTarget(
+  importSpecifier: string,
+  importerFile: string,
+  normalizedTarget: string,
+  normalize: (p: string) => string,
+): boolean {
+  if (isUnresolvableWholeModuleImport(importSpecifier, importerFile)) return false;
+  return matchesFile(normalize(importSpecifier), normalizedTarget);
 }
 
 /**

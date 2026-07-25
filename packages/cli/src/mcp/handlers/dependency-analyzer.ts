@@ -7,6 +7,7 @@ import {
   getCanonicalPath,
   isTestFile,
   isUnresolvableWholeModuleImport,
+  importMatchesTarget,
   COMPLEXITY_THRESHOLDS,
 } from '@liendev/parser';
 
@@ -152,10 +153,8 @@ function buildReExportGraph(
  * Check if any chunk in the file imports the target symbol from any of the
  * given paths (direct target or re-exporter paths).
  *
- * Skips bare whole-module imports (#884): for a `wholeModuleImports`
- * language (Swift), a bare import can only ever match a target through
- * basename coincidence, not a real per-file dependency — see
- * `isUnresolvableWholeModuleImport`'s doc comment.
+ * Uses `importMatchesTarget`, which applies the #884 whole-module guard
+ * before `matchesFile` — see its doc comment in path-matching.ts (#886).
  */
 function fileImportsSymbolFromAny(
   chunks: SearchResult[],
@@ -168,11 +167,11 @@ function fileImportsSymbolFromAny(
     if (!importedSymbols) return false;
 
     return Object.entries(importedSymbols).some(([importPath, symbols]) => {
-      if (isUnresolvableWholeModuleImport(importPath, chunk.metadata.file)) return false;
-      const normalizedImport = normalizePathCached(importPath);
-      const matchesAny = targetPaths.some(tp => matchesFile(normalizedImport, tp));
+      const pathMatches = targetPaths.some(tp =>
+        importMatchesTarget(importPath, chunk.metadata.file, tp, normalizePathCached),
+      );
       return (
-        matchesAny && (symbols.includes(targetSymbol) || symbols.some(s => s.startsWith('* as ')))
+        pathMatches && (symbols.includes(targetSymbol) || symbols.some(s => s.startsWith('* as ')))
       );
     });
   });

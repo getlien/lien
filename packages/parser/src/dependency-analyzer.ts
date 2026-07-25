@@ -6,6 +6,7 @@ import {
   matchesFile,
   isTestFile,
   isUnresolvableWholeModuleImport,
+  importMatchesTarget,
 } from './utils/path-matching.js';
 import { RISK_ORDER } from './insights/types.js';
 
@@ -317,10 +318,8 @@ const MAX_REEXPORT_DEPTH = 3;
  * Check if a single chunk imports from the given source path.
  * Checks both `importedSymbols` keys and raw `imports` array.
  *
- * Skips bare whole-module imports (#884): for a `wholeModuleImports`
- * language (Swift), a bare import can only ever match a target through
- * basename coincidence, not a real per-file dependency — see
- * `isUnresolvableWholeModuleImport`'s doc comment.
+ * Uses `importMatchesTarget`, which applies the #884 whole-module guard
+ * before `matchesFile` — see its doc comment in path-matching.ts (#886).
  */
 export function chunkImportsFrom(
   chunk: CodeChunk,
@@ -332,10 +331,8 @@ export function chunkImportsFrom(
     importedSymbols && typeof importedSymbols === 'object' ? Object.keys(importedSymbols) : [];
   const allImportPaths = [...importedSymbolPaths, ...(chunk.metadata.imports || [])];
 
-  return allImportPaths.some(
-    imp =>
-      !isUnresolvableWholeModuleImport(imp, chunk.metadata.file) &&
-      matchesFile(normalizePathCached(imp), sourcePath),
+  return allImportPaths.some(imp =>
+    importMatchesTarget(imp, chunk.metadata.file, sourcePath, normalizePathCached),
   );
 }
 
@@ -367,10 +364,8 @@ export function groupChunksByNormalizedPath(
  * file imports for side effect or does `export * from`, neither of which
  * should qualify it as a re-exporter on its own (#526).
  *
- * Skips bare whole-module imports (#884): for a `wholeModuleImports`
- * language (Swift), a bare import can only ever match a source path through
- * basename coincidence, not a real re-export relationship — see
- * `isUnresolvableWholeModuleImport`'s doc comment.
+ * Uses `importMatchesTarget`, which applies the #884 whole-module guard
+ * before `matchesFile` — see its doc comment in path-matching.ts (#886).
  */
 function collectImportedSymbolsFromSource(
   chunks: CodeChunk[],
@@ -382,10 +377,8 @@ function collectImportedSymbolsFromSource(
     const importedSymbols = chunk.metadata.importedSymbols;
     if (!importedSymbols || typeof importedSymbols !== 'object') continue;
     Object.entries(importedSymbols)
-      .filter(
-        ([importPath]) =>
-          !isUnresolvableWholeModuleImport(importPath, chunk.metadata.file) &&
-          matchesFile(normalizePathCached(importPath), sourcePath),
+      .filter(([importPath]) =>
+        importMatchesTarget(importPath, chunk.metadata.file, sourcePath, normalizePathCached),
       )
       .forEach(([, syms]) => syms.forEach(sym => symbols.add(sym)));
   }

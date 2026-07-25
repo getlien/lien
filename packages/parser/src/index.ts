@@ -41,6 +41,7 @@ export {
   getCanonicalPath,
   isTestFile,
   isUnresolvableWholeModuleImport,
+  importMatchesTarget,
 } from './utils/path-matching.js';
 
 export { extractRepoId } from './utils/repo-id.js';
