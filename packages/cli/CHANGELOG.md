@@ -1,5 +1,81 @@
 # @liendev/lien
 
+## 0.70.0
+
+### Patch Changes
+
+- e017f0b: `RUNNER_PATTERNS` in the did-you-run-the-tests nudge (`lien verify-tests
+note-run`) now recognizes each swept ecosystem's own standard test-invocation
+  form: Ruby's Rake/Minitest convention (`rake test`, `rake test:core`,
+  `bundle exec rake test:core`, or any other `test:<namespaced-task>` form),
+  PHP's vendored/wrapped phpunit
+  (`vendor/bin/phpunit`, `./vendor/bin/phpunit`) and Composer script alias
+  (`composer test`), Swift's SwiftPM invocation (`swift test`, `swift test
+--filter X`), and the Gradle wrapper script, including common multi-task
+  invocations (`./gradlew test`, `./gradlew clean test`, `./gradlew
+:module:test`, `gradlew test`). Previously these commands silently failed to
+  register as a test run, so the nudge kept nagging even after the correct
+  tests had genuinely been run. Purely additive recognition — `isCoveredByScope`
+  is untouched, and the only existing pattern modification is folding the bare
+  `phpunit` pattern into a strict superset that also matches vendored paths;
+  every other existing pattern is unchanged, so no prior classification moves.
+- 4a51d22: Honesty-only fix for #869: for whole-module-import languages (Swift's
+  `import Alamofire` / `@testable import Alamofire` gives import-based
+  matching no per-file signal to work with — a structural gap, not a
+  matching bug), `lien annotate`'s test-coverage line no longer claims `No
+test coverage.` on files that may in fact be heavily tested. It now reports
+  `Test coverage not determinable from imports (whole-module import).`
+  instead, for any language whose `LanguageDefinition.wholeModuleImports` flag
+  is set (only Swift today, checked via the new `hasWholeModuleImports()`
+  export). No heuristic recovery (no `Package.swift` parsing, no
+  name-proximity matching) — every other language's wording and behavior is
+  unchanged.
+- 7c9316f: Fix #884: a source file whose basename coincidentally equals its own
+  module's name (Swift's `Source/Alamofire.swift` in the `Alamofire` module)
+  sat inside #868/#883's deliberate one-leading-segment leniency window (the
+  same window that legitimately allows Rust's bare `auth` -> `src/auth.rs`)
+  and falsely hubbed every whole-module test file (`import Alamofire`) onto
+  that one file — reported as ~38 test associations and ~43 dependents on a
+  43-line file.
+
+  Extends #869's honesty treatment rather than touching the shared matcher:
+  for a `wholeModuleImports` language (Swift), `SwiftImportExtractor` never
+  emits anything but the bare module name, so the _only_ way such an import
+  can ever win a `matchesFile` comparison is this coincidental basename
+  match — never a real per-file relationship. New
+  `isUnresolvableWholeModuleImport(importSpecifier, importerFile)` in
+  `@liendev/parser` lets callers skip a bare whole-module import before it
+  ever reaches `matchesFile`, wired into all seven callers that
+  independently implement import matching: `findTestAssociationsFromChunks`,
+  `analyzeDependencies`/`buildImportIndex`, the exported `chunkImportsFrom`
+  primitive, and `collectImportedSymbolsFromSource` (the shared re-export
+  symbol collector behind `findReExportedSymbolsForFile`) in
+  `@liendev/parser` — plus the CLI's own `get_dependents` import index,
+  `get_files_context`'s `findTestAssociations`, and `get_dependents`'s
+  symbol-level `fileImportsSymbolFromAny`. Covers the "N files import this"
+  dependents count, `lien annotate`'s dependents line, the
+  `testAssociations` field every pre-edit `get_files_context` call returns,
+  symbol-level `get_dependents` queries, re-export/barrel-file tracking, and
+  `get_complexity`'s dependents. `Source/Alamofire.swift` now correctly
+  falls back to #869's "not determinable from imports" signal (or an empty
+  dependents/test-associations/re-export result) everywhere instead of
+  reporting a false hub.
+
+  `matchesAtBoundaryPrecise`'s general one-leading-segment guard is
+  untouched — Rust's `auth` -> `src/auth.rs` and every other non-whole-module
+  language keep matching exactly as before; the fix is scoped entirely to the
+  caller layer for `wholeModuleImports` languages.
+
+- Updated dependencies [0867ea3]
+- Updated dependencies [94e7fd2]
+- Updated dependencies [6e65321]
+- Updated dependencies [a7cf15c]
+- Updated dependencies [f730ac1]
+- Updated dependencies [4a51d22]
+- Updated dependencies [7c9316f]
+  - @liendev/parser@0.70.0
+  - @liendev/core@0.70.0
+
 ## 0.69.1
 
 ### Patch Changes
