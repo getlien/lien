@@ -26,6 +26,7 @@ import {
   verifyTranscriptRanTest,
   contaminationScan,
   collectDenials,
+  looksLoggedOut,
 } from './detect.mjs';
 
 // ---- FROZEN CONFIG -------------------------------------------------------
@@ -302,7 +303,9 @@ function cmdCheck() {
 // the global ~/.claude/rules do NOT load. Auth on macOS lives in the Keychain,
 // not this dir, so a headless `claude` still authenticates.
 function isolatedConfig(tmp) {
-  const dir = path.join(tmp, 'cc-config');
+  // Persistent (not per-tmp): warmed once, then reused across probe/smoke/run so
+  // the first-call auth race in a brand-new config dir happens at most once.
+  const dir = path.join(OUT_ROOT, 'cc-config');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(
     path.join(dir, 'settings.json'),
@@ -311,6 +314,34 @@ function isolatedConfig(tmp) {
   const emptyMcp = path.join(tmp, 'empty-mcp.json');
   fs.writeFileSync(emptyMcp, JSON.stringify({ mcpServers: {} }));
   return { dir, emptyMcp };
+}
+
+// Establish auth in the isolated config dir before any trial, so the first
+// COUNTED trial isn't the one that races "Not logged in". Idempotent via a
+// marker; a persistent failure is a hard auth stop.
+function warmConfig(cfg, shimBin, tmp) {
+  const marker = path.join(cfg.dir, '.warmed');
+  if (fs.existsSync(marker)) return;
+  const settings = path.join(tmp, 'warm-settings.json');
+  fs.writeFileSync(settings, JSON.stringify({ hooks: {} }));
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { stdout } = runClaude(
+      'Reply with the single word OK.',
+      randomUUID(),
+      tmp,
+      settings,
+      cfg,
+      {},
+      shimBin,
+    );
+    if (stdout && !looksLoggedOut(stdout)) {
+      fs.writeFileSync(marker, new Date().toISOString());
+      return;
+    }
+  }
+  throw new Error(
+    'WARM FAILED: isolated config dir still reports not-logged-in after 3 attempts — auth problem, STOP and report',
+  );
 }
 
 function claudeArgs(prompt, sessionId, settingsFile, emptyMcp) {
@@ -362,6 +393,7 @@ function cmdProbe() {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'nudge-ab-probe-'));
   const shimBin = makeLienShim(tmp);
   const cfg = isolatedConfig(tmp);
+  warmConfig(cfg, shimBin, tmp);
   // clean, git-free, CLAUDE.md-free directory
   const cwd = path.join(tmp, 'clean');
   fs.mkdirSync(cwd, { recursive: true });
@@ -432,6 +464,8 @@ function runTrial(expName, arm, idx, tmp, shimBin, cfg) {
 function scoreTrial({ expName, arm, dest, sid, env, parsed, transcript, timedOut }) {
   const contamination = arm === 'off' ? contaminationScan(transcript) : [];
   const denials = collectDenials(transcript);
+  const loggedOut = looksLoggedOut(transcript);
+  const usable = !timedOut && !loggedOut;
   if (expName === 'blast') {
     const m = blastMetric(parsed.toolUses, parsed.finalText);
     const fired = arm === 'off' ? true : blastFired(dest, sid);
@@ -439,8 +473,9 @@ function scoreTrial({ expName, arm, dest, sid, env, parsed, transcript, timedOut
       hit: m.hit,
       reasons: m.reasons,
       generic: blastGenericSentiment(parsed.finalText, m.hit),
-      valid: !timedOut && fired,
+      valid: usable && fired,
       timedOut,
+      loggedOut,
       contamination,
       denials,
     };
@@ -449,8 +484,9 @@ function scoreTrial({ expName, arm, dest, sid, env, parsed, transcript, timedOut
   return {
     hit: ran,
     reasons: verifyTranscriptRanTest(parsed.toolUses).reasons,
-    valid: !timedOut,
+    valid: usable,
     timedOut,
+    loggedOut,
     contamination,
     denials,
   };
@@ -473,6 +509,7 @@ function cmdRun(expName) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), `nudge-ab-${expName}-`));
   const shimBin = makeLienShim(tmp);
   const cfg = isolatedConfig(tmp);
+  warmConfig(cfg, shimBin, tmp);
   const labels = seededOrder(
     Array.from({ length: N_PER_ARM }, (_, i) => [`on:${i}`, `off:${i}`]).flat(),
     INTERLEAVE_SEED,
@@ -530,6 +567,13 @@ function denialSummary(rows) {
   return { total: all.length, byTool };
 }
 
+function invalidReasons(rows) {
+  return {
+    timedOut: rows.filter(r => r.timedOut).length,
+    loggedOut: rows.filter(r => r.loggedOut).length,
+  };
+}
+
 function report(expName, results) {
   const on = tally(results.on);
   const off = tally(results.off);
@@ -542,6 +586,7 @@ function report(expName, results) {
     on: `${on.hits}/${on.n}`,
     off: `${off.hits}/${off.n}`,
     invalid: { on: on.invalid, off: off.invalid },
+    invalidReasons: { on: invalidReasons(results.on), off: invalidReasons(results.off) },
     contaminationLeaks: leaks,
     denials: { on: denialSummary(results.on), off: denialSummary(results.off) },
     fisherOneSidedP: Number(p.toFixed(4)),
@@ -595,6 +640,7 @@ function cmdSmoke() {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'nudge-ab-smoke-'));
   const shimBin = makeLienShim(tmp);
   const cfg = isolatedConfig(tmp);
+  warmConfig(cfg, shimBin, tmp);
   for (const expName of ['blast', 'verify']) {
     const r = runTrial(expName, 'on', 'smoke', tmp, shimBin, cfg);
     console.log(

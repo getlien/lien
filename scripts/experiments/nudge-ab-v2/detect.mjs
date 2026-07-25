@@ -172,6 +172,15 @@ export function contaminationScan(text) {
   return CONTAMINATION_TERMS.filter(term => t.includes(term));
 }
 
+// A trial (or probe/warm) call that came back unauthenticated — the first call
+// against a brand-new CLAUDE_CONFIG_DIR can race on auth. Such a trial is
+// invalid (never a measured negative) and re-drawn.
+const LOGGED_OUT_RE =
+  /not logged in|please run \/login|invalid api key|authentication_error|oauth token .*expired/i;
+export function looksLoggedOut(text) {
+  return LOGGED_OUT_RE.test(text || '');
+}
+
 // --- tool-permission denials (logged per arm; must difference out) --------
 // The allowlist is identical in both arms, so any denial is a constant, not a
 // confound. We record them so arm-symmetry can be verified after the run.
