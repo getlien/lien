@@ -6,10 +6,13 @@ import {
   extractImportedSymbols,
   extractExports,
   extractCallSites,
+  type ManifestRoots,
 } from './symbols.js';
 import { calculateCognitiveComplexity, calculateHalstead } from './complexity/index.js';
 import { getTraverser } from './traversers/index.js';
 import { resolveWorkspacePackageEntries } from '../workspace-packages.js';
+import { resolvePsr4Map } from '../php-psr4.js';
+import { resolveGoModulePrefix } from '../go-module.js';
 
 export interface ASTChunkOptions {
   minChunkSize?: number;
@@ -73,6 +76,34 @@ const RESOLVE_RELATIVE_IMPORTS: ReadonlySet<SupportedLanguage> = new Set([
 ]);
 
 /**
+ * Build the manifest-declared import-root mapping for a file's language, when
+ * `workspaceRoot` is available. PHP resolves `composer.json`'s PSR-4 map; Go
+ * resolves `go.mod`'s module prefix; every other language gets `undefined`
+ * (a no-op — see `ManifestRoots` in `./symbols.ts`). Returns `undefined`
+ * (rather than an object with empty/absent fields) when the manifest itself
+ * declares nothing, so `resolveImportSpecifier`'s manifest-root step is
+ * skipped entirely for non-PHP/Go-module projects.
+ */
+function buildManifestRoots(
+  language: SupportedLanguage,
+  workspaceRoot: string | undefined,
+): ManifestRoots | undefined {
+  if (!workspaceRoot) return undefined;
+
+  if (language === 'php') {
+    const psr4Map = resolvePsr4Map(workspaceRoot);
+    return psr4Map.size > 0 ? { psr4Map } : undefined;
+  }
+
+  if (language === 'go') {
+    const goModulePrefix = resolveGoModulePrefix(workspaceRoot);
+    return goModulePrefix ? { goModulePrefix } : undefined;
+  }
+
+  return undefined;
+}
+
+/**
  * Prepare AST context by extracting imports, exports, and symbols.
  *
  * For JS/TS, `filepath` is threaded into the import extractors so that relative
@@ -87,6 +118,11 @@ const RESOLVE_RELATIVE_IMPORTS: ReadonlySet<SupportedLanguage> = new Set([
  * import resolution: npm workspaces is a JS-ecosystem mechanism, and other
  * languages' import syntax could otherwise coincidentally collide with a
  * workspace package name.
+ *
+ * Independently, when `workspaceRoot` is provided and the file is PHP or Go,
+ * `buildManifestRoots` resolves that project's manifest-declared import root
+ * (composer.json PSR-4 / go.mod module prefix — see #867) so namespace- or
+ * module-qualified imports resolve to real workspace-relative paths too.
  */
 function prepareASTContext(
   content: string,
@@ -99,10 +135,23 @@ function prepareASTContext(
   const resolutionPath = resolvesImports ? filepath : undefined;
   const workspacePackages =
     resolvesImports && workspaceRoot ? resolveWorkspacePackageEntries(workspaceRoot) : undefined;
+  const manifestRoots = buildManifestRoots(language, workspaceRoot);
   return {
     lines: content.split('\n'),
-    fileImports: extractImports(rootNode, language, resolutionPath, workspacePackages),
-    importedSymbols: extractImportedSymbols(rootNode, language, resolutionPath, workspacePackages),
+    fileImports: extractImports(
+      rootNode,
+      language,
+      resolutionPath,
+      workspacePackages,
+      manifestRoots,
+    ),
+    importedSymbols: extractImportedSymbols(
+      rootNode,
+      language,
+      resolutionPath,
+      workspacePackages,
+      manifestRoots,
+    ),
     fileExports: extractExports(rootNode, language),
     traverser: getTraverser(language),
   };
