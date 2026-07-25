@@ -595,6 +595,34 @@ describe('findReExportedSymbolsForFile', () => {
     ];
     expect(findReExportedSymbolsForFile(chunks, 'src/a.ts', identity)).toEqual(['ns']);
   });
+
+  describe('whole-module-import basename hub (#884)', () => {
+    it('does not falsely credit a Swift whole-module bare import as re-exporting from a same-basename source', () => {
+      // SwiftImportExtractor.processImportSymbols records a bare `import
+      // Alamofire` as importedSymbols: { Alamofire: ['Alamofire'] }. Without
+      // the guard, collectImportedSymbolsFromSource would match "Alamofire"
+      // against sourcePath "Source/Alamofire" via basename coincidence, and
+      // if the file also happens to export a symbol literally named
+      // "Alamofire", it would be falsely reported as re-exporting it.
+      const chunks = [
+        chunk('Source/Core/Session.swift', {
+          importedSymbols: { Alamofire: ['Alamofire'] },
+          exports: ['Alamofire'],
+        }),
+      ];
+      expect(findReExportedSymbolsForFile(chunks, 'Source/Alamofire', identity)).toEqual([]);
+    });
+
+    it('still finds a real re-export via the identical one-leading-segment shape for a non-whole-module language', () => {
+      const chunks = [
+        chunk('src/reexport.rs', {
+          importedSymbols: { auth: ['auth'] },
+          exports: ['auth'],
+        }),
+      ];
+      expect(findReExportedSymbolsForFile(chunks, 'src/auth', identity)).toEqual(['auth']);
+    });
+  });
 });
 
 describe('chunkImportsFrom', () => {

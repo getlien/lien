@@ -366,6 +366,11 @@ export function groupChunksByNormalizedPath(
  * Deliberately ignores the raw `imports` array — a raw-only match means the
  * file imports for side effect or does `export * from`, neither of which
  * should qualify it as a re-exporter on its own (#526).
+ *
+ * Skips bare whole-module imports (#884): for a `wholeModuleImports`
+ * language (Swift), a bare import can only ever match a source path through
+ * basename coincidence, not a real re-export relationship — see
+ * `isUnresolvableWholeModuleImport`'s doc comment.
  */
 function collectImportedSymbolsFromSource(
   chunks: CodeChunk[],
@@ -376,11 +381,13 @@ function collectImportedSymbolsFromSource(
   for (const chunk of chunks) {
     const importedSymbols = chunk.metadata.importedSymbols;
     if (!importedSymbols || typeof importedSymbols !== 'object') continue;
-    for (const [importPath, syms] of Object.entries(importedSymbols)) {
-      if (matchesFile(normalizePathCached(importPath), sourcePath)) {
-        for (const sym of syms) symbols.add(sym);
-      }
-    }
+    Object.entries(importedSymbols)
+      .filter(
+        ([importPath]) =>
+          !isUnresolvableWholeModuleImport(importPath, chunk.metadata.file) &&
+          matchesFile(normalizePathCached(importPath), sourcePath),
+      )
+      .forEach(([, syms]) => syms.forEach(sym => symbols.add(sym)));
   }
   return symbols;
 }

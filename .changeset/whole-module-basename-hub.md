@@ -18,19 +18,20 @@ can ever win a `matchesFile` comparison is this coincidental basename
 match — never a real per-file relationship. New
 `isUnresolvableWholeModuleImport(importSpecifier, importerFile)` in
 `@liendev/parser` lets callers skip a bare whole-module import before it
-ever reaches `matchesFile`, wired into all six callers that independently
-implement import matching: `findTestAssociationsFromChunks`,
-`analyzeDependencies`/`buildImportIndex`, and the exported
-`chunkImportsFrom` primitive in `@liendev/parser` (test coverage and
-dependents for `ComplexityAnalyzer`/`get_complexity`, and the public
-per-chunk import check), and the CLI's own `get_dependents` import index,
+ever reaches `matchesFile`, wired into all seven callers that
+independently implement import matching: `findTestAssociationsFromChunks`,
+`analyzeDependencies`/`buildImportIndex`, the exported `chunkImportsFrom`
+primitive, and `collectImportedSymbolsFromSource` (the shared re-export
+symbol collector behind `findReExportedSymbolsForFile`) in
+`@liendev/parser` — plus the CLI's own `get_dependents` import index,
 `get_files_context`'s `findTestAssociations`, and `get_dependents`'s
-symbol-level `fileImportsSymbolFromAny` (the "N files import this"
+symbol-level `fileImportsSymbolFromAny`. Covers the "N files import this"
 dependents count, `lien annotate`'s dependents line, the
 `testAssociations` field every pre-edit `get_files_context` call returns,
-and symbol-level `get_dependents` queries). `Source/Alamofire.swift` now
-correctly falls back to #869's "not determinable from imports" signal (or
-an empty dependents/test-associations result) everywhere instead of
+symbol-level `get_dependents` queries, re-export/barrel-file tracking, and
+`get_complexity`'s dependents. `Source/Alamofire.swift` now correctly
+falls back to #869's "not determinable from imports" signal (or an empty
+dependents/test-associations/re-export result) everywhere instead of
 reporting a false hub.
 
 `matchesAtBoundaryPrecise`'s general one-leading-segment guard is
