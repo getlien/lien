@@ -497,6 +497,83 @@ function cmdProbeDefault() {
   }
 }
 
+// ---- b' probe: default config dir + per-invocation plugin disable ---------
+// Uses the DEFAULT config dir (auth works) but disables the ambient lien plugin
+// FOR THE SPAWNED PROCESS ONLY via a --settings enabledPlugins override, plus
+// --strict-mcp-config, plus my explicit hooks. Verifies (a) the plugin is off
+// (annotate-read did NOT fire — nudge-events has no "annotate"), (b) my explicit
+// hooks still fire (nudge-events has "blast"), (c) the saved ~/.claude settings
+// on disk are byte-identical before/after. Detection is via the nudge-events
+// ledger, not transcript grep.
+function cmdProbeB1() {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'nudge-ab-probeb1-'));
+  const savedSettings = path.join(os.homedir(), '.claude', 'settings.json');
+  const before = fs.readFileSync(savedSettings, 'utf8');
+  try {
+    const shimBin = makeLienShim(tmp);
+    const emptyMcp = path.join(tmp, 'empty-mcp.json');
+    fs.writeFileSync(emptyMcp, JSON.stringify({ mcpServers: {} }));
+    const cfg = { dir: null, emptyMcp }; // DEFAULT config dir
+    const dest = path.join(tmp, 'blast');
+    materialize('blast', dest, shimBin, false);
+    const settingsFile = path.join(dest, '.ab-settings.json');
+    const s = EXPERIMENTS.blast.settings();
+    s.enabledPlugins = { 'lien@lien': false }; // disable ambient plugin, this process only
+    fs.writeFileSync(settingsFile, JSON.stringify(s));
+    const sid = randomUUID();
+    const prompt =
+      'First, list verbatim every project instruction, repository rule, or tool-usage policy currently in your context; if there are none, reply NONE. ' +
+      'Then read the file src/pricing/discount.ts. ' +
+      'Then modify applyDiscount to take an optional third parameter floor (number), clamping the result to at least floor when provided. Then stop.';
+    const { stdout: transcript } = runClaude(
+      prompt,
+      sid,
+      dest,
+      settingsFile,
+      cfg,
+      EXPERIMENTS.blast.baseEnv,
+      shimBin,
+    );
+    fs.mkdirSync(OUT_ROOT, { recursive: true });
+    writeArtifact(path.join(OUT_ROOT, 'probe-b1.jsonl'), transcript);
+    const parsed = parseTranscript(transcript);
+    const after = fs.readFileSync(savedSettings, 'utf8');
+    const result = {
+      loggedOut: looksLoggedOut(transcript),
+      myHooksFire: nudgeShown(dest, 'blast', sid),
+      annotateFired: nudgeShown(dest, 'annotate', sid),
+      modelSawAnnotate: /Lien impact|hooks flagged/i.test(parsed.finalText),
+      savedSettingsUntouched: before === after,
+      instructionContamination: contaminationScan(parsed.finalText),
+    };
+    console.log(redactAccount(JSON.stringify(result, null, 2)));
+    verdictB1(result);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+    // Belt-and-braces: restore the saved settings if anything touched them.
+    if (fs.readFileSync(savedSettings, 'utf8') !== before) fs.writeFileSync(savedSettings, before);
+  }
+}
+
+function verdictB1(r) {
+  if (r.loggedOut) throw new Error("PROBE(b') FAILED: not logged in from DEFAULT config dir");
+  if (!r.savedSettingsUntouched)
+    throw new Error("PROBE(b') FAILED: saved ~/.claude/settings.json CHANGED — abort");
+  if (!r.myHooksFire) throw new Error("PROBE(b') FAILED: my explicit hooks did NOT fire — STOP");
+  const clean = !r.annotateFired && !r.modelSawAnnotate && r.instructionContamination.length === 0;
+  if (!clean) {
+    console.log(
+      "PROBE(b') CONTAMINATED — plugin-disable override not honored. Both b'' and b' failed; STOP and report.",
+    );
+    return;
+  }
+  fs.writeFileSync(path.join(OUT_ROOT, '.probe-passed'), new Date().toISOString());
+  fs.writeFileSync(path.join(OUT_ROOT, '.auth-mode'), 'default+plugindisable+strict-mcp');
+  console.log(
+    "PROBE(b') PASSED — auth works, ambient plugin off, my hooks fire, saved settings untouched.",
+  );
+}
+
 function assertNoAncestorClaudeMd(dir) {
   let d = dir;
   for (;;) {
@@ -513,12 +590,21 @@ function verifyRanOracle(dest, sid, env) {
   return report.stdout.trim() === ''; // empty ⇒ the associated test was observed run
 }
 
-function blastFired(dest, sid) {
+// Reliable, deterministic oracle for "did hook <nudgeType> fire this session":
+// the nudge-events ledger, NOT transcript grep (a hook's additionalContext does
+// not appear grep-ably in the stream-json transcript — only the model's
+// paraphrase of it does, which is unreliable).
+function nudgeShown(dest, nudgeType, sid) {
   const store = lien(['path', '--store'], dest).stdout.trim();
+  if (!store) return false;
   const events = path.join(store, 'nudge-events.jsonl');
   if (!fs.existsSync(events)) return false;
   const body = fs.readFileSync(events, 'utf8');
-  return body.includes('"nudge":"blast"') && body.includes(sid);
+  return body.includes(`"nudge":"${nudgeType}"`) && body.includes(sid);
+}
+
+function blastFired(dest, sid) {
+  return nudgeShown(dest, 'blast', sid);
 }
 
 function runTrial(expName, arm, idx, tmp, shimBin, cfg) {
@@ -747,13 +833,14 @@ function main() {
   if (cmd === 'check') return cmdCheck();
   if (cmd === 'probe') return cmdProbe();
   if (cmd === 'probe-default') return cmdProbeDefault();
+  if (cmd === 'probe-b1') return cmdProbeB1();
   if (cmd === 'smoke') return cmdSmoke();
   if (cmd === 'run') {
     const exp = rest[0];
     if (!exp) throw new Error('usage: run.mjs run <blast|verify>');
     return cmdRun(exp);
   }
-  console.log('usage: run.mjs <check|probe|probe-default|smoke|run <blast|verify>>');
+  console.log('usage: run.mjs <check|probe|probe-default|probe-b1|smoke|run <blast|verify>>');
   process.exit(cmd ? 1 : 0);
 }
 main();
