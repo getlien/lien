@@ -1,5 +1,14 @@
 # @liendev/core
 
+## 0.69.1
+
+### Patch Changes
+
+- Updated dependencies [242892d]
+- Updated dependencies [cf0d462]
+- Updated dependencies [4fd502b]
+  - @liendev/parser@0.69.1
+
 ## 0.68.0
 
 ### Patch Changes
