@@ -26,10 +26,26 @@ export const DEFAULT_OPENROUTER_OUTPUT_COST_PER_MTOK = 3.5;
  * (the direct lever against those timeouts); `allow_fallbacks` keeps the run
  * resilient if that endpoint fails. Overridable via the `providerRouting`
  * config (e.g. add `ignore`/`order` once logs name a flaky provider).
+ *
+ * `require_parameters: true` (issue #829) restricts routing to providers that
+ * actually support every parameter on the request — per OpenRouter's own
+ * "Filter Providers by Parameter Support" guidance, without it a provider can
+ * silently ignore an unsupported parameter instead of honoring or rejecting
+ * it. The forced-verdict retry (`attemptVerdictCompletion`) depends on
+ * `response_format: { type: 'json_object' }` to structurally guarantee JSON
+ * back — a provider that ignores that field would return ordinary prose
+ * instead, which is indistinguishable from the model itself derailing. Two
+ * real incidents (PR #845, runs 30113956762/30114812093) show exactly that
+ * shape: the main pass's forced-finish turn AND both bounded summary-retry
+ * attempts (all three `response_format:'json_object'` requests) came back
+ * unparseable on a JSON-dense diff. `sort`/`allow_fallbacks` are unaffected —
+ * `require_parameters` only prunes the candidate set each request is routed
+ * within, it doesn't change the sort or fallback behavior itself.
  */
 export const DEFAULT_PROVIDER_ROUTING: Record<string, unknown> = {
   sort: 'throughput',
   allow_fallbacks: true,
+  require_parameters: true,
 };
 
 /**

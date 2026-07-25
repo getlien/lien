@@ -89,16 +89,25 @@ export function logTurn(logger: Logger, turn: TurnTrace | undefined, label?: str
  *  1. each ```json fence, LAST first — the model emits its verdict last, so a
  *     few-shot/example fence earlier in the prose must not win;
  *  2. the raw body (a response_format:json_object / forced-verdict turn);
- *  3. the first balanced JSON object in the text (brace-depth scan — recovers
- *     a complete, valid verdict followed by trailing prose, e.g. "Wait, I need
- *     to double-check…" appended after the closing brace, #792's
- *     incomplete-handling canary);
+ *  3. every top-level balanced JSON object in the text, in the order they
+ *     appear (brace-depth scan — recovers a complete, valid verdict followed
+ *     by trailing prose, e.g. "Wait, I need to double-check…" appended after
+ *     the closing brace, #792's incomplete-handling canary; also recovers a
+ *     verdict that isn't the first such object, e.g. an incidental
+ *     JSON-shaped fragment quoted earlier while investigating a JSON-dense
+ *     diff, #829);
  *  4. a naive first-open-to-last-close slice of the whole text (model ignored
  *     json_object and wrapped the verdict in prose with no other braces).
  *
  * Prefer a candidate carrying a `summary` (the verdict marker) so an
  * `{"findings": [...]}`-only example can't beat the real verdict; fall back to
- * the first findings-only candidate if nothing carries a summary.
+ * the first findings-only candidate if nothing carries a summary. This holds
+ * both ACROSS strategies (a fence beats a balanced object) and WITHIN the
+ * balanced-object strategy (the first object carrying `summary` wins over a
+ * later one) — see `allBalancedJsonObjects`'s doc comment for why that keeps
+ * #792's "trust the original verdict, not a later self-revision" behavior
+ * unchanged while still recovering a verdict an earlier non-verdict object
+ * previously hid.
  */
 export function extractFindingsFromText(
   text: string,
@@ -114,10 +123,10 @@ export function extractFindingsFromText(
   const candidates: Array<{ value: string | undefined; recovered?: string }> = [
     ...fences.map(value => ({ value })),
     { value: text.trim() },
-    {
-      value: firstBalancedJsonObject(text),
+    ...allBalancedJsonObjects(text).map(value => ({
+      value,
       recovered: 'balanced-object extraction (trailing content after the closing brace)',
-    },
+    })),
     { value: embeddedJsonObject(text) },
   ];
 
@@ -263,26 +272,32 @@ export function embeddedJsonObject(content: string): string | undefined {
   return start !== -1 && end > start ? content.slice(start, end + 1) : undefined;
 }
 
-/**
- * Scan from the first `{` and track brace depth — respecting string literals
- * and escapes — to find the first *complete, balanced* JSON object, stopping
- * as soon as depth returns to zero and ignoring everything after.
- *
- * Recovers a verdict that is otherwise valid but has trailing content
- * appended after its closing brace — observed on the incomplete-handling
- * canary post-#787 (#792 3-vote screen): the model emits a complete, correct
- * verdict, then appends "Wait, I need to double-check…" prose (which itself
- * contains further `{`/`}` characters). `embeddedJsonObject`'s naive
- * first-open/last-close slice overshoots into that trailing content and
- * produces unparseable JSON; this stops at the first balanced close instead.
- * Returns undefined if the text has no `{` or never balances (e.g. a
- * genuinely truncated response) — never guesses at an unbalanced slice.
- */
 /** Matches a double-quoted JSON string literal, escapes included. */
 const JSON_STRING_LITERAL = /"(?:\\.|[^"\\])*"/g;
 
-export function firstBalancedJsonObject(text: string): string | undefined {
-  const start = text.indexOf('{');
+/**
+ * Safety valve on `allBalancedJsonObjects`' scan: each object found re-masks
+ * the remaining text, so a pathological "{}{}{}…" essay could otherwise cost
+ * O(n²). A genuine verdict is always among the first few objects in real
+ * model output; this bounds worst-case work on adversarial/degenerate input
+ * without affecting any real recovery.
+ */
+const MAX_BALANCED_OBJECTS_SCANNED = 25;
+
+/**
+ * Find the single balanced JSON object starting at `text`'s first `{` at or
+ * after `searchFrom`, tracking brace depth (respecting string literals and
+ * escapes) until it returns to zero. Returns its `[start, end]` (inclusive)
+ * indices, or `undefined` if there's no more `{` or it never balances (e.g. a
+ * genuinely truncated response) — never guesses at an unbalanced slice.
+ * Pulled out of `allBalancedJsonObjects` so that function's own loop stays
+ * under the complexity budget.
+ */
+function nextBalancedObjectRange(
+  text: string,
+  searchFrom: number,
+): { start: number; end: number } | undefined {
+  const start = text.indexOf('{', searchFrom);
   if (start === -1) return undefined;
 
   // Mask string contents with same-length `"` filler so quotes/escapes never
@@ -294,9 +309,57 @@ export function firstBalancedJsonObject(text: string): string | undefined {
   let depth = 0;
   for (let i = 0; i < masked.length; i++) {
     if (masked[i] === '{') depth++;
-    else if (masked[i] === '}' && --depth === 0) return text.slice(start, start + i + 1);
+    else if (masked[i] === '}' && --depth === 0) return { start, end: start + i };
   }
   return undefined; // never balanced — no complete object found
+}
+
+/**
+ * Scan the whole text for every top-level *complete, balanced* JSON object,
+ * in the order they appear, resuming right after each one's closing brace to
+ * look for the next. Stops (without emitting a partial entry) the moment a
+ * `{` never balances, since a genuinely truncated response can't be guessed
+ * at.
+ *
+ * Recovers, in one pass:
+ *  - a verdict that is otherwise valid but has trailing content appended
+ *    after its closing brace — observed on the incomplete-handling canary
+ *    post-#787 (#792's 3-vote screen): the model emits a complete, correct
+ *    verdict, then appends "Wait, I need to double-check…" prose (which
+ *    itself contains further `{`/`}` characters). `embeddedJsonObject`'s
+ *    naive first-open/last-close slice overshoots into that trailing
+ *    content and produces unparseable JSON; stopping at each balanced close
+ *    instead means the first object is recovered cleanly and any later ones
+ *    are visible as separate candidates rather than corrupting the slice.
+ *  - a verdict that isn't the FIRST top-level object in the text — e.g. an
+ *    incidental JSON-shaped fragment the model quoted while investigating a
+ *    JSON-dense diff (issue #829) sits before the real, later verdict.
+ *    `extractFindingsFromText` tries every object this returns and still
+ *    prefers the first one carrying `summary`, so a genuine verdict
+ *    followed by the model second-guessing itself into a "revised" verdict
+ *    (also #792) is unaffected — only a real verdict that was previously
+ *    invisible because an earlier, non-verdict object ate the single-object
+ *    scan's only attempt is newly recovered.
+ */
+export function allBalancedJsonObjects(text: string): string[] {
+  const objects: string[] = [];
+  let searchFrom = 0;
+  while (objects.length < MAX_BALANCED_OBJECTS_SCANNED) {
+    const range = nextBalancedObjectRange(text, searchFrom);
+    if (!range) break;
+    objects.push(text.slice(range.start, range.end + 1));
+    searchFrom = range.end + 1;
+  }
+  return objects;
+}
+
+/**
+ * The first top-level balanced JSON object in the text — see
+ * `allBalancedJsonObjects` for the full scan this delegates to and why a
+ * caller may prefer the complete list instead.
+ */
+export function firstBalancedJsonObject(text: string): string | undefined {
+  return allBalancedJsonObjects(text)[0];
 }
 
 /** Type guard to validate a summary object. */
