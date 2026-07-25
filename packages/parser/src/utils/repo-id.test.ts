@@ -1,5 +1,8 @@
-import { describe, it, expect } from 'vitest';
 import crypto from 'crypto';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { describe, it, expect, afterEach } from 'vitest';
 import { extractRepoId } from './repo-id.js';
 
 describe('extractRepoId', () => {
@@ -38,5 +41,54 @@ describe('extractRepoId', () => {
     const parts = result.split('-');
     const hash = parts[parts.length - 1];
     expect(hash).toMatch(/^[0-9a-f]{8}$/);
+  });
+
+  describe('symlink canonicalization (#858)', () => {
+    const tmpDirs: string[] = [];
+
+    afterEach(() => {
+      for (const dir of tmpDirs.splice(0)) {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('yields the same id for a symlinked path and its physical target', () => {
+      const base = fs.mkdtempSync(path.join(os.tmpdir(), 'lien-repo-id-'));
+      tmpDirs.push(base);
+      const physical = path.join(base, 'my-project');
+      fs.mkdirSync(physical);
+      const symlink = path.join(base, 'my-project-link');
+      fs.symlinkSync(physical, symlink, 'dir');
+
+      const idFromPhysical = extractRepoId(physical);
+      const idFromSymlink = extractRepoId(symlink);
+
+      expect(idFromSymlink).toBe(idFromPhysical);
+    });
+
+    it('resolves a symlink whose own directory segment is symlinked, not just the leaf', () => {
+      const base = fs.mkdtempSync(path.join(os.tmpdir(), 'lien-repo-id-'));
+      tmpDirs.push(base);
+      const realParent = path.join(base, 'real-parent');
+      fs.mkdirSync(realParent);
+      const project = path.join(realParent, 'nested-project');
+      fs.mkdirSync(project);
+      const linkedParent = path.join(base, 'linked-parent');
+      fs.symlinkSync(realParent, linkedParent, 'dir');
+
+      const idViaRealParent = extractRepoId(project);
+      const idViaLinkedParent = extractRepoId(path.join(linkedParent, 'nested-project'));
+
+      expect(idViaLinkedParent).toBe(idViaRealParent);
+    });
+
+    it('falls back gracefully (no crash) for a path that does not exist', () => {
+      const nonexistent = '/definitely/does/not/exist/my-project';
+      expect(() => extractRepoId(nonexistent)).not.toThrow();
+      const result = extractRepoId(nonexistent);
+      expect(result.startsWith('my-project-')).toBe(true);
+      // Stable and consistent with the plain path.resolve() fallback.
+      expect(result).toBe(extractRepoId(nonexistent));
+    });
   });
 });
