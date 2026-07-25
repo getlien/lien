@@ -1,8 +1,8 @@
-import { describe, it, expect, afterEach } from 'vitest';
 import crypto from 'crypto';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { describe, it, expect, afterEach } from 'vitest';
 import { extractRepoId } from './repo-id.js';
 
 describe('extractRepoId', () => {
