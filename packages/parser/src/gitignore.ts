@@ -2,6 +2,10 @@ import ignore, { type Ignore } from 'ignore';
 import fs from 'fs/promises';
 import type fsSync from 'fs';
 import path from 'path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 
 /**
  * Patterns that should always be ignored regardless of user configuration.
@@ -36,6 +40,69 @@ export const ALWAYS_IGNORE_PATTERNS = [
 
 /** Directories to skip during .gitignore discovery (no useful .gitignore inside) */
 const SKIP_DIRS = new Set(['node_modules', 'vendor', '.git', '.lien', 'dist', 'build']);
+
+/**
+ * Paths that are never indexed even when git tracks them. Deliberately much
+ * narrower than {@link ALWAYS_IGNORE_PATTERNS}: `dist/**`, `build/**`,
+ * `vendor/**`, and minified assets are intentionally NOT here, because a
+ * tracked file living under one of those is exactly the case the tracked-file
+ * exemption exists to rescue (see #899, #900). What IS here is either Lien's
+ * own bookkeeping (`.git`, `.lien`) or a path that would be actively dangerous
+ * to index regardless of tracked status: git *can* track `node_modules`
+ * (e.g. a vendored/committed dependency tree) or a `.claude/worktrees` nested
+ * clone, and indexing either reproduces the exact 21GB-index blowup
+ * `ALWAYS_IGNORE_PATTERNS` (below) was introduced to prevent.
+ */
+export const NEVER_INDEX_EVEN_IF_TRACKED_PATTERNS = [
+  '.git/**',
+  '**/.git/**',
+  '.lien/**',
+  '**/.lien/**',
+  'node_modules/**',
+  '**/node_modules/**',
+  '.claude/worktrees/**',
+  '**/.claude/worktrees/**',
+];
+
+// git ls-files output can be large for repos with hundreds of thousands of
+// tracked files; keep the buffer generous so large repos never truncate
+// silently rather than raising an error.
+const LS_FILES_MAX_BUFFER = 256 * 1024 * 1024;
+const LS_FILES_TIMEOUT_MS = 30_000;
+
+/**
+ * Returns the set of paths (relative to `rootDir`, forward-slash-normalized)
+ * that git tracks, or an empty set if `rootDir` is not inside a git working
+ * tree, or git itself isn't available. Never throws.
+ *
+ * Real git only ever applies `.gitignore` to UNTRACKED files -- a pattern
+ * added to silence a local build artifact never hides a file that's already
+ * committed. This is the single source of truth for that tracked-file
+ * exemption: a file git reports as tracked is by definition real, committed
+ * source, regardless of what `.gitignore` or {@link ALWAYS_IGNORE_PATTERNS}
+ * say about its path (see #899, #900). One `git ls-files -z` call, cached by
+ * the caller for the lifetime of one scan/filter -- never a per-file
+ * subprocess.
+ */
+export async function getGitTrackedFiles(rootDir: string): Promise<Set<string>> {
+  try {
+    const { stdout } = await execFileAsync('git', ['ls-files', '-z'], {
+      cwd: rootDir,
+      timeout: LS_FILES_TIMEOUT_MS,
+      maxBuffer: LS_FILES_MAX_BUFFER,
+    });
+    return new Set(
+      stdout
+        .split('\0')
+        .filter(Boolean)
+        .map(p => p.replace(/\\/g, '/')),
+    );
+  } catch {
+    // Not a git repo, git not installed, or the command otherwise failed --
+    // fall back to pure lexical behavior (empty set = no rescues applied).
+    return new Set();
+  }
+}
 
 /** Whether a directory entry should be traversed during .gitignore discovery */
 function shouldTraverseDir(entry: fsSync.Dirent): boolean {
@@ -104,11 +171,26 @@ function matchesScopedIgnore(normalized: string, prefix: string, ig: Ignore): bo
 }
 
 /**
+ * Whether a git-tracked path should be exempted from lexical ignore rules.
+ * False for paths under {@link NEVER_INDEX_EVEN_IF_TRACKED_PATTERNS} even if
+ * git tracks them -- see that constant's doc comment for why.
+ */
+function isRescuedByGitTracking(
+  normalized: string,
+  trackedFiles: Set<string>,
+  neverIndexIg: Ignore,
+): boolean {
+  return trackedFiles.has(normalized) && !neverIndexIg.ignores(normalized);
+}
+
+/**
  * Create a filter function that checks if a file path is gitignored.
  * Discovers .gitignore files throughout the directory tree and applies
  * each at its appropriate scope, plus built-in exclusions (node_modules,
  * vendor, .git, .lien, .claude/worktrees, dist, build, minified assets) to
- * match the full scan behavior in scanner.ts.
+ * match the full scan behavior in scanner.ts. In a git repository, a path
+ * git tracks is exempted from all of the above (see {@link getGitTrackedFiles})
+ * except the narrow {@link NEVER_INDEX_EVEN_IF_TRACKED_PATTERNS} carve-out.
  *
  * Limitation: scoped evaluation is OR across .gitignore files, so a nested
  * .gitignore cannot un-ignore a pattern from a parent. Cross-scope negation
@@ -125,8 +207,15 @@ export async function createGitignoreFilter(
   const alwaysIg = ignore();
   alwaysIg.add(ALWAYS_IGNORE_PATTERNS);
 
-  // Discover all .gitignore files and build scoped ignore instances
-  const gitignoreMap = await discoverGitignoreFiles(rootDir);
+  const neverIndexIg = ignore();
+  neverIndexIg.add(NEVER_INDEX_EVEN_IF_TRACKED_PATTERNS);
+
+  // Discover all .gitignore files and the tracked-file set in parallel --
+  // independent I/O, no reason to serialize them.
+  const [gitignoreMap, trackedFiles] = await Promise.all([
+    discoverGitignoreFiles(rootDir),
+    getGitTrackedFiles(rootDir),
+  ]);
   const scopedIgnores: Array<{ prefix: string; ig: Ignore }> = [];
 
   for (const [relDir, content] of gitignoreMap) {
@@ -140,6 +229,7 @@ export async function createGitignoreFilter(
 
   return (relativePath: string) => {
     const normalized = relativePath.replace(/\\/g, '/');
+    if (isRescuedByGitTracking(normalized, trackedFiles, neverIndexIg)) return false;
     if (alwaysIg.ignores(normalized)) return true;
     return scopedIgnores.some(({ prefix, ig }) => matchesScopedIgnore(normalized, prefix, ig));
   };
