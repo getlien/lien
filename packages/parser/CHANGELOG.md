@@ -1,5 +1,220 @@
 # @liendev/parser
 
+## 0.70.0
+
+### Minor Changes
+
+- 94e7fd2: Fix C# properties being invisible to symbol tooling (#871): `property_declaration` and `indexer_declaration` are now chunked as their own symbols, so `api-delta`, `get_dependents`, and `list_functions` can see a property being removed or changing type — properties are C#'s dominant public-API idiom (auto-properties, expression-bodied properties, DTO/POCO surfaces), and previously not one of them was chunked as a symbol.
+
+  Chunked as `symbolType: 'method'` (Route A), reusing the existing type rather than adding a new `'property'` value to the `symbolType` union — no language emits `'property'` today, and `signature-delta.ts`'s `functionMetadataByKey`/`isExportedChunk` already treat `'method'`-typed chunks as part of a class's exported surface when the class itself is exported, so this requires zero changes outside `csharp.ts`.
+
+  Covered forms:
+  - Accessor-list properties (`public string Name { get; set; }`), including a getter-only shape and `init` accessors.
+  - Expression-bodied properties (`public int Count => …`) — the signature captures the contract (type + normalized accessor shape, `{ get; }`) and deliberately excludes the getter's expression, mirroring how a method's body is excluded from its own signature: editing the expression is not a signature change, but changing the property's type or accessor shape is.
+  - Static properties.
+  - Interface properties.
+  - Indexers (`public int this[int index] { get; set; }`), named `this` (indexers have no `name` field in the grammar).
+
+  Deliberately not covered: record primary-constructor properties (`record Person(string Name)`) — the grammar represents them as plain `parameter` nodes inside the record's `parameter_list`, a different node shape than `property_declaration`, out of scope for this fix.
+
+  Honest cost: chunking every property means a DTO/POCO-heavy C# codebase's index grows. Measured on a shallow clone of AutoMapper/AutoMapper (560 files, 512 `.cs`): chunk count went from 11,175 to 12,411 (+1,236, +11.1%; +1,053 of those are the new `method`-typed property/indexer chunks), and `structural.db` grew from ~23.4 MiB to ~24.4 MiB (+~1.08 MiB, +~4.6%). No other language's chunking changed.
+
+- 6e65321: Fix Go grouped `import (...)` blocks silently dropping every target but the
+  first from `chunk.metadata.imports` (#863). A single `import (...)` block
+  commonly groups 2+ non-stdlib packages (e.g. `import ( "fmt";
+"github.com/foo/utils"; "github.com/foo/models" )`), and each is a distinct
+  target — but `GoImportExtractor.extractImportPath()`'s one-string-per-node
+  contract could only ever report one, so `findTestAssociationsFromChunks`
+  (which reads only `chunk.metadata.imports`) was structurally blind to any
+  test file that imported a later package in the group. Confirmed on a real
+  shallow clone of gin-gonic/gin: `gin.go`'s own grouped import (6 non-stdlib
+  targets across `internal/bytesconv`, `internal/fs`, `render`, and three
+  external packages) previously recorded only the first
+  (`["internal/bytesconv"]`); it now records all six.
+
+  Widens the shared `LanguageImportExtractor` interface with a new
+  `extractImportPaths(node): string[]` method (returning every target in
+  source order) alongside the existing singular `extractImportPath` (kept
+  as-is — still used directly by ~60 existing per-language regression tests,
+  and by `extractImportPaths`'s own default implementation). Every language
+  extractor now implements it: nine languages (JS/TS, PHP, Python, Kotlin,
+  C#, Ruby, Swift, Java, Rust) get the default shape — `extractImportPath`'s
+  single result wrapped in an array via the new `toImportPathsArray` helper,
+  zero behavior change — and only `GoImportExtractor` overrides it with real
+  multi-target extraction; `extractImportPath` itself becomes a thin
+  `extractImportPaths(node)[0] ?? null` delegate so the two can never
+  disagree. `ast/symbols.ts`'s internal `extractImportPaths` (the function
+  that builds `chunk.metadata.imports`) now iterates every path an import
+  node yields instead of taking at most one.
+
+  Deliberately scoped to Go only, per the #859 audit's existing "first wins"
+  mitigation for PHP's grouped `use Ns\{A, B};` and Rust's bare-root
+  `use crate::{a::X, b::Y};` groups (both already fixed to keep at least the
+  first target instead of losing the whole declaration) — those two are
+  pinned by regression tests added in that audit and are intentionally NOT
+  widened to capture every target here; only Go's genuinely common,
+  previously-total-loss case is fixed in this PR.
+
+  Does not touch `processImportSymbols` (the `importedSymbols` map, used for
+  symbol-usage tracking, not test-association) — Go's existing first-wins
+  behavior there is unchanged; `findTestAssociationsFromChunks` reads only
+  `imports`, so that was the entire blast radius for #863.
+
+- f730ac1: Fix a 100% test-association failure on standard PHP (Composer PSR-4) and Go
+  (module-path) project layouts (#867). `matchesFile()`'s namespace/module
+  matching in `path-matching.ts` guesses a project's source layout by aligning
+  literal directory-name segments, but neither ecosystem's dominant convention
+  is guessable that way: Composer's PSR-4 autoloading maps a namespace prefix
+  to a directory declared in `composer.json` (e.g. `"GuzzleHttp\\": "src/"`),
+  and Go imports are always full module paths (`github.com/org/repo/pkg`)
+  whose root segment never equals the literal checkout directory name. Neither
+  manifest was ever read, so `GuzzleHttp\Cookie\SetCookie` and
+  `github.com/gin-gonic/gin/binding` could never match their real files —
+  confirmed on real OSS repos as 67/67 PHP files (guzzle/guzzle) and 59/59 Go
+  files (gin-gonic/gin) silently reporting "No test coverage" despite complete,
+  passing test suites.
+
+  Two small manifest readers, mirroring `workspace-packages.ts`'s existing
+  pattern exactly (parse once per workspace root, cache, no-op when the
+  manifest is absent): `php-psr4.ts` parses `composer.json`'s `autoload.psr-4`
+  / `autoload-dev.psr-4` maps; `go-module.ts` parses `go.mod`'s `module` line.
+  Both are wired in as a third specifier-resolution step (`ManifestRoots`, in
+  `ast/symbols.ts`'s `resolveImportSpecifier`), built once per file in
+  `ast/chunker.ts`'s `prepareASTContext` from the existing `workspaceRoot`
+  option — no new public option was needed. `extractImports`/
+  `extractImportedSymbols` gained a new optional trailing parameter to thread
+  it through; existing callers that don't pass it are unaffected.
+
+  PHP's PSR-4 resolution runs on the raw backslash-separated specifier
+  (`GuzzleHttp\Cookie\SetCookie`), matching the longest registered namespace
+  prefix and converting the remainder to `/`-separated form — this
+  deliberately happens _before_ `path-matching.ts`'s `normalizePath` would
+  otherwise convert `\` to `/`, since the prefix lookup needs the native PHP
+  separator. Go's resolution is exact string-prefix stripping once the module
+  line is known, no guessing required.
+
+  Verified against a live shallow clone of guzzle/guzzle: 58 of 67 `src/*.php`
+  files now resolve real test coverage (up from 0), including the issue's
+  named target (`src/Cookie/SetCookie.php` → `tests/Cookie/SetCookieTest.php`).
+  The remaining 9 are a separate, pre-existing gap (test files that exercise
+  the class through a factory or FQCN reference rather than a `use` import of
+  it directly — nothing to resolve from import data alone) and are out of
+  scope for this fix. Gin's Go re-sweep is deferred to #868 (a separate
+  `matchesAtBoundary` false-positive that still causes a bare tail-segment
+  collision after prefix stripping), so Go acceptance is not claimed here.
+
+  Scope: only `autoload.psr-4`/`autoload-dev.psr-4` (not `classmap`/`files`,
+  not PSR-0) and the single `go.mod` `module` line, matching the issue's
+  explicit "no general manifest framework" constraint.
+
+### Patch Changes
+
+- 0867ea3: Fix `matchesAtBoundary`/`matchesFile` (and the parallel `matchesPHPNamespace`
+  reverse-component matcher) so a bare, slash-free import specifier no longer
+  wins a coincidental boundary match against an unrelated multi-segment path.
+
+  Confirmed independently in three languages during an OSS dogfood sweep:
+  - **Go**: `github.com/gin-gonic/gin/internal/fs` tail-matched the unrelated
+    top-level `fs.go`, misattributing a real dependency away from
+    `internal/fs/fs.go` to the wrong file.
+  - **Ruby**: a bare `require 'sinatra'` matched every file under `lib/sinatra/`
+    (`base.rb`, `main.rb`, `show_exceptions.rb`, `version.rb`), not just the
+    gem's own entry point (`lib/sinatra.rb`).
+  - **Swift**: `import Combine` (Apple's system framework) falsely matched the
+    unrelated `Source/Features/Combine.swift` purely because the basenames
+    coincide.
+
+  The fix is one targeted guard, not a scoring system: a bare (no `/`)
+  specifier must reach the _end_ of the longer string (not merely appear as an
+  interior component — this alone fixes the Ruby fan-out), and the number of
+  directory segments allowed before it depends on which side is bare. A bare
+  _import_ matching within a longer _target_ may have at most one leading
+  segment — the established "source directory prefix" convention (bare `auth`
+  resolving to `src/auth.rs`). A bare _target_ (a short top-level file's own
+  basename) matching within a longer _import_ gets no leading-segment leniency
+  at all: there's no confirmed legitimate case for it, and it's exactly the Go
+  bug's shape — `internal/fs` (already module-prefix-stripped by #867) must not
+  tail-match an unrelated top-level `fs` target just because only one directory
+  segment happens to precede the match. Multi-segment patterns, and a cleaned
+  `./`/`../` relative import (already proof the specifier names a real project
+  file, not an ambiguous external package), are both unaffected.
+
+  `matchesPHPNamespace` independently implements the same reverse
+  tail-matching idea for PHP-style namespaces and had the identical gap for a
+  single-component import (e.g. the Swift `Combine` case actually flows
+  through this fallback strategy, not just `matchesAtBoundary`), so it gets the
+  same "at most one leading directory" guard.
+
+  Fixes #868.
+
+- a7cf15c: Fix `isTestFile()` in path-matching.ts to recognize the dominant .NET
+  xUnit/NUnit/MSTest test-naming convention: a `Tests` suffix glued onto a
+  longer identifier (`UnitTests/`, `IntegrationTests/`, `AutoMapper.DI.Tests/`
+  directories) rather than a delimited `test`/`spec` path segment, and
+  filenames ending in `Test.cs`/`Tests.cs` (`ScopeTests.cs`,
+  `ConfigurationFeatureTest.cs`).
+
+  `isTestFile()` is the pre-filter gating all test-association discovery
+  (`findTestAssociationsFromChunks`), so this was a 100% test-association
+  failure for C# projects using the standard .NET project-template layout
+  (confirmed on `AutoMapper/AutoMapper`, where none of its 364 test files
+  under `src/UnitTests/`, `src/IntegrationTests/`, or
+  `src/AutoMapper.DI.Tests/` ever cleared the gate). Scoped to `.cs` paths;
+  both the directory-segment and filename regexes require a literal
+  capital-T `Tests`/`Test` suffix (no case-insensitive flag), so
+  `Latest.cs`/`Contest.cs` and a `latest/`-style directory are not
+  misclassified, and no other language's behavior moves, mirroring how the
+  existing Swift branch is scoped to `.swift`.
+
+  Fixes #866.
+
+- 4a51d22: Honesty-only fix for #869: for whole-module-import languages (Swift's
+  `import Alamofire` / `@testable import Alamofire` gives import-based
+  matching no per-file signal to work with — a structural gap, not a
+  matching bug), `lien annotate`'s test-coverage line no longer claims `No
+test coverage.` on files that may in fact be heavily tested. It now reports
+  `Test coverage not determinable from imports (whole-module import).`
+  instead, for any language whose `LanguageDefinition.wholeModuleImports` flag
+  is set (only Swift today, checked via the new `hasWholeModuleImports()`
+  export). No heuristic recovery (no `Package.swift` parsing, no
+  name-proximity matching) — every other language's wording and behavior is
+  unchanged.
+- 7c9316f: Fix #884: a source file whose basename coincidentally equals its own
+  module's name (Swift's `Source/Alamofire.swift` in the `Alamofire` module)
+  sat inside #868/#883's deliberate one-leading-segment leniency window (the
+  same window that legitimately allows Rust's bare `auth` -> `src/auth.rs`)
+  and falsely hubbed every whole-module test file (`import Alamofire`) onto
+  that one file — reported as ~38 test associations and ~43 dependents on a
+  43-line file.
+
+  Extends #869's honesty treatment rather than touching the shared matcher:
+  for a `wholeModuleImports` language (Swift), `SwiftImportExtractor` never
+  emits anything but the bare module name, so the _only_ way such an import
+  can ever win a `matchesFile` comparison is this coincidental basename
+  match — never a real per-file relationship. New
+  `isUnresolvableWholeModuleImport(importSpecifier, importerFile)` in
+  `@liendev/parser` lets callers skip a bare whole-module import before it
+  ever reaches `matchesFile`, wired into all seven callers that
+  independently implement import matching: `findTestAssociationsFromChunks`,
+  `analyzeDependencies`/`buildImportIndex`, the exported `chunkImportsFrom`
+  primitive, and `collectImportedSymbolsFromSource` (the shared re-export
+  symbol collector behind `findReExportedSymbolsForFile`) in
+  `@liendev/parser` — plus the CLI's own `get_dependents` import index,
+  `get_files_context`'s `findTestAssociations`, and `get_dependents`'s
+  symbol-level `fileImportsSymbolFromAny`. Covers the "N files import this"
+  dependents count, `lien annotate`'s dependents line, the
+  `testAssociations` field every pre-edit `get_files_context` call returns,
+  symbol-level `get_dependents` queries, re-export/barrel-file tracking, and
+  `get_complexity`'s dependents. `Source/Alamofire.swift` now correctly
+  falls back to #869's "not determinable from imports" signal (or an empty
+  dependents/test-associations/re-export result) everywhere instead of
+  reporting a false hub.
+
+  `matchesAtBoundaryPrecise`'s general one-leading-segment guard is
+  untouched — Rust's `auth` -> `src/auth.rs` and every other non-whole-module
+  language keep matching exactly as before; the fix is scoped entirely to the
+  caller layer for `wholeModuleImports` languages.
+
 ## 0.69.1
 
 ### Patch Changes
