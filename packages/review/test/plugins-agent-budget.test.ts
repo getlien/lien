@@ -301,6 +301,51 @@ describe('OpenAIAgentClient budget handling', () => {
     expect(bodies).toHaveLength(3);
   });
 
+  it('forces wrap-up after a single turn whose own input already exhausts remaining budget — BEFORE the coarser near-budget fraction would fire (issue #839 input-growth check)', async () => {
+    // A large pre-rendered worklist can make even turn 1's own input cost
+    // most of a small extra-pass budget. Turn 1's input (11,500) leaves
+    // cumulative spend at 11,500 — still UNDER the 0.6 wrap-up fraction
+    // (12,000 on a 20,000 budget), so the pre-#839 near-budget-only check
+    // would NOT yet force a wrap-up and would let turn 2 keep investigating
+    // (growing conversation history further before any forced-finish turn).
+    // The input-growth check catches it a turn earlier: remaining budget
+    // (8,500) can't even cover a repeat of turn 1's own input, so turn 2 is
+    // forced to drop tools and emit its verdict right away.
+    //
+    // Turn 2's own input (13,000) is deliberately >= turn 1's (11,500): the
+    // client re-sends the FULL conversation history every request (`messages`
+    // is append-only, never trimmed — see TOOL_RESULT_MAX_CHARS's per-call cap
+    // but no whole-history trim), so a real turn's prompt_tokens can never be
+    // smaller than the turn before it. A non-monotonic mock here would assert
+    // a physically impossible sequence and manufacture a rosier outcome than a
+    // real run could produce.
+    const { bodies } = mockFetch([toolCallTurn(11_500), stopTurn(CLEAN_JSON, 13_000)]);
+    const { logger, lines } = capturingLogger();
+    const client = makeClient(20_000, logger);
+    const tools = [
+      { type: 'function', function: { name: 'read_file', description: 'd', parameters: {} } },
+    ];
+
+    const result = await client.run('sys', 'init', tools as never, noopTool);
+
+    expect(result.turns).toBe(2);
+    expect(bodies[1].tools).toBeUndefined(); // forced-finish: no tools offered
+    expect(bodies[1].response_format).toEqual({ type: 'json_object' });
+    expect(bodies).toHaveLength(2); // verdict recovered from the forced turn itself — no summary-retry needed
+    // Even the forced turn's own (still budget-blind) input cost (13,000) is
+    // enough, on top of turn 1's 11,500, to cross the 20,000 budget — the
+    // true benefit here is NOT a smaller total spend (this input-growth fix
+    // cannot shrink a turn's own real cost, only decide sooner whether to risk
+    // another one), it's that the model was cut off ONE investigative
+    // round-trip earlier than the pre-#839 near-budget check alone would have
+    // allowed, and still produced a clean, directly-recovered verdict.
+    expect(result.usage.totalTokens).toBe(24_500);
+    expect(result.stopReason).toBe('budget');
+    expect(result.incomplete).toBe(false); // verdict parsed cleanly despite the budget stop
+    expect(result.summary).toBeDefined();
+    expect(lines.some(l => l.includes('input-growth check'))).toBe(true);
+  });
+
   it('recovers a verdict via the json-forced summary-retry after a bail', async () => {
     // Loop bails on budget with no verdict; the retry returns raw JSON (as
     // response_format:json_object would) and must be parsed into a summary.
