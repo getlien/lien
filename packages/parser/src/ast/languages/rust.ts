@@ -6,6 +6,7 @@ import type {
   LanguageImportExtractor,
   LanguageSymbolExtractor,
 } from '../extractors/types.js';
+import { toImportPathsArray } from '../extractors/types.js';
 import {
   extractSignature,
   extractParameters,
@@ -321,6 +322,10 @@ export class RustImportExtractor implements LanguageImportExtractor {
 
     const fullPath = this.resolveFullPath(argument);
     return fullPath ? convertRustModulePath(fullPath) : null;
+  }
+
+  extractImportPaths(node: SyntaxNode): string[] {
+    return toImportPathsArray(this.extractImportPath(node));
   }
 
   processImportSymbols(node: SyntaxNode): { importPath: string; symbols: string[] } | null {

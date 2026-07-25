@@ -642,6 +642,35 @@ from typing import Optional
     });
   });
 
+  describe('extractImports - Go grouped imports (#863)', () => {
+    it('should extract ALL non-stdlib targets from a grouped import, not just the first', () => {
+      // Reproduces #863: a test file that only imports the SECOND grouped
+      // target used to be invisible to findTestAssociationsFromChunks,
+      // because chunk.metadata.imports silently dropped everything but the
+      // first non-stdlib path in the group.
+      const content = `
+package main
+
+import (
+	"fmt"
+	"github.com/foo/utils"
+	"github.com/foo/models"
+)
+
+func run() {
+	fmt.Println(utils.Format(models.Load()))
+}
+      `.trim();
+
+      const parseResult = parseAST(content, 'go');
+      const imports = extractImports(parseResult.tree!.rootNode, 'go');
+
+      expect(imports).toContain('github.com/foo/utils');
+      expect(imports).toContain('github.com/foo/models');
+      expect(imports).not.toContain('fmt');
+    });
+  });
+
   describe('extractImportedSymbols - PHP', () => {
     it('should extract PHP use statement symbols', () => {
       const content = `<?php

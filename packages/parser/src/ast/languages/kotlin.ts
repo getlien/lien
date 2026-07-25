@@ -6,6 +6,7 @@ import type {
   LanguageImportExtractor,
   LanguageSymbolExtractor,
 } from '../extractors/types.js';
+import { toImportPathsArray } from '../extractors/types.js';
 import { calculateComplexity } from '../complexity/index.js';
 
 // =============================================================================
@@ -318,6 +319,10 @@ export class KotlinImportExtractor implements LanguageImportExtractor {
     const path = this.getImportPath(node);
     if (!path || isKotlinStdLib(path)) return null;
     return stripWildcardSuffix(path);
+  }
+
+  extractImportPaths(node: SyntaxNode): string[] {
+    return toImportPathsArray(this.extractImportPath(node));
   }
 
   processImportSymbols(node: SyntaxNode): { importPath: string; symbols: string[] } | null {

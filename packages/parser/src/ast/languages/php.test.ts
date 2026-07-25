@@ -253,6 +253,13 @@ class User {
       expect(result!.importPath).toBe('App\\Models\\User');
       expect(result!.symbols).toEqual(['UserModel']);
     });
+
+    it('extractImportPaths wraps the single extractImportPath result in an array (default shape, #863)', () => {
+      const code = '<?php\nuse App\\Models\\User;';
+      const root = mustParse(code, 'php');
+      const useNode = root.namedChild(1)!;
+      expect(importExtractor.extractImportPaths(useNode)).toEqual(['App\\Models\\User']);
+    });
   });
 
   describe('Symbol Extraction', () => {

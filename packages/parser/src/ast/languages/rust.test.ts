@@ -238,6 +238,18 @@ pub static COUNTER: i32 = 0;`;
       expect(result).toBeNull();
     });
 
+    it('extractImportPaths wraps the single extractImportPath result in an array (default shape, #863)', () => {
+      const code = 'use crate::auth::AuthService;';
+      const root = mustParse(code, 'rust');
+      const useNode = root.namedChild(0)!;
+      expect(importExtractor.extractImportPaths(useNode)).toEqual(['auth/AuthService']);
+
+      const stdlibCode = 'use std::io::Read;';
+      const stdlibRoot = mustParse(stdlibCode, 'rust');
+      const stdlibNode = stdlibRoot.namedChild(0)!;
+      expect(importExtractor.extractImportPaths(stdlibNode)).toEqual([]);
+    });
+
     // `use crate::config;` (a single segment directly off a BARE crate/self/
     // super root, no further `::`) previously resolved a correct path via
     // extractImportPath (which converts the whole node's text) but returned

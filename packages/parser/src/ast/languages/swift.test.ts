@@ -152,6 +152,14 @@ describe('Swift Language', () => {
       expect(result?.importPath).toBe('Combine.Just');
       expect(result?.symbols).toContain('Just');
     });
+
+    it('extractImportPaths wraps the single extractImportPath result in an array (default shape, #863)', () => {
+      const [imp] = imports('import Foundation\n');
+      expect(importExtractor.extractImportPaths(imp)).toEqual(['Foundation']);
+
+      const [stdlib] = imports('import Swift\n');
+      expect(importExtractor.extractImportPaths(stdlib)).toEqual([]);
+    });
   });
 
   // ===========================================================================

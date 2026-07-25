@@ -253,6 +253,13 @@ describe('Python Language', () => {
       expect(importExtractor.extractImportPath(importNode)).toBe('.');
     });
 
+    it('extractImportPaths wraps the single extractImportPath result in an array (default shape, #863)', () => {
+      const code = 'import os\n';
+      const root = mustParse(code, 'python');
+      const importNode = root.namedChild(0)!;
+      expect(importExtractor.extractImportPaths(importNode)).toEqual(['os']);
+    });
+
     it('should extract ".foo" for a single-dot relative from-import', () => {
       const code = 'from .foo import x\n';
       const root = mustParse(code, 'python');

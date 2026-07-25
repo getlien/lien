@@ -11,6 +11,7 @@ import {
   extractParameters,
   clampSignatureLength,
 } from '../extractors/symbol-helpers.js';
+import { toImportPathsArray } from '../extractors/types.js';
 import { calculateComplexity } from '../complexity/index.js';
 
 // =============================================================================
@@ -273,6 +274,10 @@ export class CSharpImportExtractor implements LanguageImportExtractor {
     const path = this.getImportPath(node);
     if (!path || isCSharpStdLib(path)) return null;
     return path;
+  }
+
+  extractImportPaths(node: SyntaxNode): string[] {
+    return toImportPathsArray(this.extractImportPath(node));
   }
 
   processImportSymbols(node: SyntaxNode): { importPath: string; symbols: string[] } | null {

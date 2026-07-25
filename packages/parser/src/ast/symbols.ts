@@ -127,8 +127,7 @@ function extractImportPaths(
   const nodeTypeSet = new Set(importExtractor.importNodeTypes);
 
   for (const node of collectImportNodes(rootNode, nodeTypeSet)) {
-    const result = importExtractor.extractImportPath(node);
-    if (result) {
+    for (const result of importExtractor.extractImportPaths(node)) {
       imports.push(resolveImportSpecifier(result, filepath, workspacePackages, manifestRoots));
     }
   }
