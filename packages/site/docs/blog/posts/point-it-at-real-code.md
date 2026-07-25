@@ -4,10 +4,8 @@ description: "We shipped a stack of nudges that check in on an agent's work auto
 date: 2026-07-25
 author: Alf Henderson
 tags: [evidence, languages, architecture]
-draft: true
+draft: false
 ---
-
-<!-- DRAFT: awaiting owner voice pass -->
 
 # The Nudges Are Only as Good as the Data Under Them
 
