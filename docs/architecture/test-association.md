@@ -53,11 +53,15 @@ for any file whose language sets `LanguageDefinition.wholeModuleImports` (checke
 
 A related guard, `isUnresolvableWholeModuleImport`, additionally excludes the one case a whole-module import can otherwise "win" a match: a coincidental basename, where a source file's name happens to equal its own module's name (`Source/Alamofire.swift` inside a module also named Alamofire). Without it, that file would falsely appear to be imported by every test in the module. The guard is applied at each of the four independent places that match imports against files: `findTestAssociationsFromChunks` (this document), `get_dependents`'s import index, and the two callers above that share `path-matching.ts`.
 
+## Java static-member imports: a derived second candidate
+
+`import static pkg.Class.member;` (a specific, non-wildcard static-member import) extracts a path one segment deeper than the file that defines it — `com.example.Utils.method`, when the file is `com/example/Utils.java` — so it could never match via `matchesFile` on its own. `JavaImportExtractor.extractImportPaths` (`packages/parser/src/ast/languages/java.ts`) now returns the class's derived FQN (the path with its trailing segment dropped) as a second candidate alongside the unchanged original. This is safe rather than a guess: Java requires every top-level type to live in a file named after it, and nested types/members always live inside their enclosing top-level type's file, so dropping the trailing segment always yields that type's correct FQN — whether the segment names a static member or a nested class (`import static a.B.Inner;`, correct by the same rule). A static import reaching two-plus levels into nested classes under-matches silently, the same as before this fix, rather than mismatching. Wildcard static imports and ordinary (non-static) imports are unaffected. Verified on a real clone of google/gson: `JsonReaderTest.java`'s static imports of `JsonToken.STRING`/`NUMBER`/etc. now associate it with `JsonToken.java`, with zero other test-association changes across the repo's 264 Java files.
+
 ## Known gaps
 
 These are structural: no import-level signal exists for the case, so the honest answer is a gap, not a bug to fix in the matcher. Each is tracked as an open issue; check its current state before treating this list as final.
 
-- **Java static member imports and Kotlin top-level function/property imports** ([#864](https://github.com/getlien/lien/issues/864)): `import static pkg.Class.member;` (and the Kotlin equivalent for a top-level function or property) extracts a path one segment deeper than the file that defines it, so it does not match via `matchesFile`. Ordinary class-level imports in both languages are unaffected.
+- **Kotlin top-level function/property imports** ([#864](https://github.com/getlien/lien/issues/864)): `import a.b.myFunction`, for a top-level function or property defined in an arbitrarily-named file within the package, extracts a path that never matches its defining file. Java's analogous static-member shape is fixed (above) because the `static` keyword is itself proof the trailing segment is a class member or nested type; Kotlin's grammar has no equivalent marker — a top-level declaration and a class/object-member access (`import a.b.MyObject.method`) parse to the identical flat `identifier` of `simple_identifier` segments — so guessing which applies risks the false-positive fan-out #868 warned against. Ordinary Kotlin class imports are unaffected. Confirmed unchanged on a real clone of JetBrains/Exposed: zero test-association changes across 755 Kotlin files.
 - **C# enclosing-namespace references** ([#875](https://github.com/getlien/lien/issues/875)): a file in a sub-namespace can reference an enclosing namespace's members with no `using` statement at all, leaving no import signal. Only the dotted `using X.Y;` form resolves.
 - **PHP factory/FQCN usage** ([#878](https://github.com/getlien/lien/issues/878)): a test that reaches production code through a factory method or a fully-qualified class name at the call site, rather than a `use` import, leaves no import signal to match on.
 
@@ -77,8 +81,8 @@ These are structural: no import-level signal exists for the case, so the honest 
 | Go | generic patterns | yes | go.mod module path |
 | Ruby | generic patterns | yes | none needed |
 | C# | `Tests`/`Test` suffix convention | yes | none (see known gaps) |
-| Java | generic patterns | yes | none (see known gaps for static member imports) |
-| Kotlin | generic patterns | yes | none (see known gaps for top-level imports) |
+| Java | generic patterns | yes (incl. static-member imports, derived class-path candidate) | none |
+| Kotlin | generic patterns | yes | none (see known gaps for top-level function/property imports) |
 | Rust | generic patterns | yes | none needed |
 | Swift | `Tests`/`Test` convention | not determinable (whole-module imports) | none |
 

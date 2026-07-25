@@ -211,6 +211,47 @@ function stripWildcardSuffix(path: string): string {
 }
 
 /**
+ * For `import static a.b.ClassName.member;` (specific, non-wildcard), the
+ * path `extractImportPath` returns is one segment deeper than the file that
+ * defines it — the file is named after `ClassName`, not the trailing
+ * `member` (#864). Java requires every top-level type to live in a file
+ * named after it, and nested types/members always live inside their
+ * enclosing top-level type's file, so dropping the trailing segment always
+ * yields that type's correct FQN — whether the trailing segment names a
+ * static member (the common case) or a nested class
+ * (`import static a.B.Inner;`, where `Inner` is itself a type — dropping
+ * still resolves to `a.B`'s file, correct by the same rule). This can only
+ * under-match silently (a static import reaching two-plus levels into
+ * nested classes, e.g. `a.Outer.Middle.member`, where dropping one segment
+ * gives `a.Outer.Middle` — still not a real file, so it simply won't match
+ * anything, same as today) — it can never mismatch. So it's returned as an
+ * ADDITIONAL candidate path from `extractImportPaths`, never a replacement:
+ * `extractImportPath`'s pinned single-path return stays exactly as-is.
+ *
+ * Wildcard static imports (`import static a.B.*;`) are excluded: their
+ * `extractImportPath` result is already the class's FQN (the trailing `.*`
+ * is stripped above), so dropping another segment there would walk past the
+ * class into its package — wrong, not merely imprecise.
+ *
+ * Regular (non-static) imports don't get this treatment either — the whole
+ * path already IS the class's FQN there, so dropping a segment would be a
+ * real regression, not a safe extra candidate.
+ *
+ * Kotlin has an analogous-looking shape (`import a.b.Foo.member` /
+ * `import a.b.topLevelFn`) but no equivalent fix: its grammar gives both a
+ * flat `identifier` of `simple_identifier` segments with no marker
+ * distinguishing "class member access" from "bare top-level declaration" —
+ * unlike Java, there's no `static` keyword (or anything else) to hang this
+ * logic on, so guessing would risk the false-positive shape #868 warned
+ * against. Left as an honest gap per the #864/#869 precedent.
+ */
+function staticMemberClassPath(node: SyntaxNode, path: string): string | null {
+  if (!hasChildOfType(node, 'static') || hasChildOfType(node, 'asterisk')) return null;
+  const lastDot = path.lastIndexOf('.');
+  return lastDot > 0 ? path.slice(0, lastDot) : null;
+}
+
+/**
  * Java import extractor
  *
  * Handles all Java import patterns:
@@ -231,7 +272,10 @@ export class JavaImportExtractor implements LanguageImportExtractor {
   }
 
   extractImportPaths(node: SyntaxNode): string[] {
-    return toImportPathsArray(this.extractImportPath(node));
+    const path = this.extractImportPath(node);
+    if (!path) return [];
+    const classPath = staticMemberClassPath(node, path);
+    return classPath ? [path, classPath] : toImportPathsArray(path);
   }
 
   processImportSymbols(node: SyntaxNode): { importPath: string; symbols: string[] } | null {

@@ -170,6 +170,18 @@ describe('Kotlin Language', () => {
       const [stdlib] = importHeaders('import kotlin.collections.List\n');
       expect(importExtractor.extractImportPaths(stdlib)).toEqual([]);
     });
+
+    it('honestly leaves a top-level function/property import as a single, one-segment-too-deep path (#864, no analogous fix — see class doc comment)', () => {
+      // `import a.b.topLevelFn` and `import a.b.MyObject.method` parse to the
+      // identical flat identifier shape in this grammar — there is no
+      // syntactic marker (unlike Java's `static` keyword) distinguishing
+      // "class/object member" from "genuine top-level declaration in an
+      // arbitrarily-named file". Guessing which one applies risks the
+      // false-positive fan-out #868 warned against, so no fallback candidate
+      // is added here; this pins that (documented, deliberate) behavior.
+      const [imp] = importHeaders('import a.b.topLevelFn\n');
+      expect(importExtractor.extractImportPaths(imp)).toEqual(['a.b.topLevelFn']);
+    });
   });
 
   // ===========================================================================
