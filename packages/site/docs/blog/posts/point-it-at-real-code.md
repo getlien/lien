@@ -1,6 +1,6 @@
 ---
-title: "Was Our Test-Coverage Check Actually Right for Every Language We Claimed?"
-description: "We pointed Lien at real, unmodified open-source projects across nine programming languages and found the feature that tells an agent which tests cover the file it just edited was silently wrong on almost every one of them, in a different way each time."
+title: "The Nudges Are Only as Good as the Data Under Them"
+description: "We shipped a stack of nudges that check in on an agent's work automatically. Most of them depend on knowing which tests cover which files, data we hadn't tested against real code until we pointed Lien at nine real open-source projects and read what it actually said."
 date: 2026-07-25
 author: Alf Henderson
 tags: [evidence, languages, architecture]
@@ -9,22 +9,42 @@ draft: true
 
 <!-- DRAFT: awaiting owner voice pass -->
 
-# Was Our Test-Coverage Check Actually Right for Every Language We Claimed?
+# The Nudges Are Only as Good as the Data Under Them
 
 Lien is a tool that gives AI coding agents a structural understanding of a
-codebase, including which tests actually cover the file an agent just
-changed, and it runs entirely on your own machine. That last part, test
-coverage, is one of the plainer things Lien does: an agent edits a file,
-Lien tells it which test files go with that file, and the agent knows what
-to run before calling the work done.
+codebase, and it runs entirely on your own machine. Over the past few
+releases we shipped a small stack of things that check in on an agent's
+work without it having to ask: a complexity check that speaks up the
+moment an edit makes a function meaningfully harder to follow, [a warning
+when an edit changes or removes an exported function's
+signature](https://github.com/getlien/lien/pull/841), including how many
+of that function's callers have no test covering them at all (and, more
+recently, [whether a removed export still has documentation pointing at
+it](https://github.com/getlien/lien/pull/845)), [a reminder about which
+tests go with a file you just changed](https://github.com/getlien/lien/pull/843),
+[a single advisory at the end of a session naming whatever risk from all
+of the above is still unresolved](https://github.com/getlien/lien/pull/855),
+and [telemetry tracking whether any of this is actually being acted
+on](https://github.com/getlien/lien/pull/847). Different nudges doing
+different jobs, but most of them ultimately depend on the same underlying
+fact: which files import which, and which tests actually cover which
+files.
 
-We assumed that part worked. It was one of the earlier features we built,
-and it had been running quietly for a long time without complaint. Then we
-pointed it at real, unmodified open-source projects in languages other than
-the one Lien itself is written in, nine of them, across nine ecosystems.
-What came back wasn't a small correction. For most non-JavaScript
-languages, the feature was either silently broken or actively lying, and
-had been the whole time.
+That's the part we hadn't properly tested. Every one of those nudges
+shipped with its own unit suite green the whole time. A green suite only
+proves the code does what the tests describe, and every test we had
+written described the one situation we already understood well: our own
+codebase, written mostly in TypeScript. We hold ourselves to a rule for
+changes like this: a clean build and a passing suite are necessary, never
+sufficient, and you exercise the change the way its real user experiences
+it before calling it done. So we did the product-level version of that. We
+installed Lien against real, unmodified projects in every language we
+claim to support, nine of them, across nine ecosystems, and read what it
+actually told us instead of trusting our own fixtures.
+
+For most non-JavaScript languages, what it told us was wrong, in a
+different way each time, and none of it had ever shown up as a failing
+test.
 
 ## What was actually happening
 
@@ -129,9 +149,16 @@ for.
 
 Test-association discovery, and the dependents lookups underneath it, now
 work on the mainstream convention in TypeScript, JavaScript, Python, PHP,
-Go, Ruby, and C#. Kotlin's own matching was already correct; only its
-did-you-actually-run-the-tests nudge needed the fix, for its own
-idiomatic invocation. Swift's whole-module shape gets an honest label
-instead of a guess, for the reason above. None of it shipped as one
-release. It went out language by language, real repo by real repo, over
-two days.
+Go, Ruby, and C#, which means the whole stack above, the test reminder,
+the session recap, the blast-radius warning's untested-caller count, is
+reading real data on those languages now, not a guess. Kotlin's own
+matching was already correct; only its did-you-actually-run-the-tests
+signal needed the fix, for its own idiomatic invocation. Swift's
+whole-module shape gets an honest label instead of a guess, for the
+reason above. None of it shipped as one release. It went out language by
+language, real repo by real repo, over two days.
+
+The lesson we're taking from this isn't really about these seven bugs. A
+green test suite told us nothing about whether any of it worked on code we
+hadn't written ourselves. The only way we actually found out was by
+running the real thing against real code.
