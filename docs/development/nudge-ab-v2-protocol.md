@@ -142,12 +142,18 @@ command being *issued and executed*, independent of the test's result.
 
 Clean context is enforced by three independent controls, all identical across arms:
 
-1. **Isolated config dir.** `CLAUDE_CONFIG_DIR` points at a runner-generated dir with
-   a minimal `settings.json` and **no `enabledPlugins` and no user `rules/`**. This is
-   what disables the ambient, user-level `lien@lien` plugin — both its MCP
-   *instructions* (the confound PR #844 discovered) and its *hooks* — for the run.
-   macOS auth lives in the Keychain, not this dir, so headless `claude` still
-   authenticates.
+1. **Isolated config dir.** `CLAUDE_CONFIG_DIR` points at a throwaway `mktemp -d` dir
+   (outside the repo) with a minimal `settings.json` and **no `enabledPlugins` and no
+   user `rules/`**. This is what disables the ambient, user-level `lien@lien` plugin —
+   both its MCP *instructions* (the confound PR #844 discovered) and its *hooks* — for
+   the run. A fresh config dir otherwise reports **"Not logged in"** (CC reads the
+   account/OAuth linkage from `.claude.json`, which the fresh dir lacks), so the runner
+   seeds an **account-only** `.claude.json` — `userID` + `oauthAccount` **only**, read
+   from the real `~/.claude.json` at runtime, with **no `mcpServers`, no `projects`, no
+   `enabledPlugins`** — restoring auth while staying plugin- and MCP-free (the probe
+   proves the context stays clean). Those personal fields live only in the throwaway
+   dir, are deleted in cleanup, are redacted from every on-disk artifact, and never
+   enter the repo, `.wip/`, or any committed output.
 2. **Stripped MCP.** `--strict-mcp-config --mcp-config <{"mcpServers":{}}>` — belt and
    braces; zero MCP servers, no Lien tool instructions.
 3. **Explicit hooks only.** The nudge under test is wired by absolute path via

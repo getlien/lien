@@ -299,49 +299,34 @@ function cmdCheck() {
 }
 
 // ---- isolated clean config dir + empty mcp -------------------------------
-// No enabledPlugins, no user rules → the ambient Lien plugin (hooks + MCP) and
-// the global ~/.claude/rules do NOT load. Auth on macOS lives in the Keychain,
-// not this dir, so a headless `claude` still authenticates.
+// A throwaway config dir INSIDE the caller's mktemp `tmp` (outside the repo, never
+// committed). settings.json carries NO enabledPlugins and NO user rules, so the
+// ambient `lien@lien` plugin (hooks + MCP) does not load. Auth is restored by
+// seeding an ACCOUNT-ONLY .claude.json (userID + oauthAccount only) read from the
+// real ~/.claude.json at runtime — CC otherwise reports "not logged in" because a
+// fresh config dir lacks the account linkage. No mcpServers / projects /
+// enabledPlugins are copied, so the seed stays plugin- and MCP-free (the probe
+// proves it). The personal fields live only in this tmp dir and are deleted in
+// cleanup; they never enter the repo, .wip/, or any committed artifact.
+function seedAccountOnly(dir) {
+  const real = path.join(os.homedir(), '.claude.json');
+  const src = JSON.parse(fs.readFileSync(real, 'utf8'));
+  if (!src.oauthAccount) throw new Error('SEED FAILED: no oauthAccount in ~/.claude.json');
+  const seed = { userID: src.userID, oauthAccount: src.oauthAccount };
+  fs.writeFileSync(path.join(dir, '.claude.json'), JSON.stringify(seed));
+}
+
 function isolatedConfig(tmp) {
-  // Persistent (not per-tmp): warmed once, then reused across probe/smoke/run so
-  // the first-call auth race in a brand-new config dir happens at most once.
-  const dir = path.join(OUT_ROOT, 'cc-config');
+  const dir = path.join(tmp, 'cc-config');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(
     path.join(dir, 'settings.json'),
     JSON.stringify({ model: MODEL, includeCoAuthoredBy: false }, null, 2),
   );
+  seedAccountOnly(dir);
   const emptyMcp = path.join(tmp, 'empty-mcp.json');
   fs.writeFileSync(emptyMcp, JSON.stringify({ mcpServers: {} }));
   return { dir, emptyMcp };
-}
-
-// Establish auth in the isolated config dir before any trial, so the first
-// COUNTED trial isn't the one that races "Not logged in". Idempotent via a
-// marker; a persistent failure is a hard auth stop.
-function warmConfig(cfg, shimBin, tmp) {
-  const marker = path.join(cfg.dir, '.warmed');
-  if (fs.existsSync(marker)) return;
-  const settings = path.join(tmp, 'warm-settings.json');
-  fs.writeFileSync(settings, JSON.stringify({ hooks: {} }));
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const { stdout } = runClaude(
-      'Reply with the single word OK.',
-      randomUUID(),
-      tmp,
-      settings,
-      cfg,
-      {},
-      shimBin,
-    );
-    if (stdout && !looksLoggedOut(stdout)) {
-      fs.writeFileSync(marker, new Date().toISOString());
-      return;
-    }
-  }
-  throw new Error(
-    'WARM FAILED: isolated config dir still reports not-logged-in after 3 attempts — auth problem, STOP and report',
-  );
 }
 
 function claudeArgs(prompt, sessionId, settingsFile, emptyMcp) {
@@ -388,30 +373,61 @@ function runClaude(prompt, sessionId, cwd, settingsFile, cfg, extraEnv, shimBin)
   return { stdout: res.stdout || '', timedOut };
 }
 
+// Redaction: the seed's personal fields (email/org/account UUIDs) must never
+// appear in any on-disk artifact (probe output, transcripts, summaries). Terms
+// are read from the real ~/.claude.json at runtime — never hardcoded — and
+// stripped from everything written under OUT_ROOT.
+let _redactTerms = null;
+function redactionTerms() {
+  if (_redactTerms) return _redactTerms;
+  const oa =
+    JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude.json'), 'utf8')).oauthAccount || {};
+  _redactTerms = [
+    oa.emailAddress,
+    oa.accountUuid,
+    oa.organizationUuid,
+    oa.organizationName,
+    oa.displayName,
+  ].filter(v => typeof v === 'string' && v.length > 2);
+  return _redactTerms;
+}
+function redactAccount(text) {
+  return redactionTerms().reduce((acc, term) => acc.split(term).join('[REDACTED]'), text);
+}
+function writeArtifact(file, text) {
+  fs.writeFileSync(file, redactAccount(text));
+}
+
 // ---- probe (mandatory precondition) --------------------------------------
 function cmdProbe() {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'nudge-ab-probe-'));
-  const shimBin = makeLienShim(tmp);
-  const cfg = isolatedConfig(tmp);
-  warmConfig(cfg, shimBin, tmp);
-  // clean, git-free, CLAUDE.md-free directory
-  const cwd = path.join(tmp, 'clean');
-  fs.mkdirSync(cwd, { recursive: true });
-  assertNoAncestorClaudeMd(cwd);
-  const settingsFile = path.join(tmp, 'probe-settings.json');
-  fs.writeFileSync(settingsFile, JSON.stringify({ hooks: {} }));
-  const prompt = fs.readFileSync(path.join(KIT, 'prompts', 'probe.txt'), 'utf8');
-  const { stdout: out } = runClaude(prompt, randomUUID(), cwd, settingsFile, cfg, {}, shimBin);
-  fs.mkdirSync(OUT_ROOT, { recursive: true });
-  fs.writeFileSync(path.join(OUT_ROOT, 'probe.jsonl'), out);
-  const hits = contaminationScan(out);
-  if (out.trim() === '')
-    throw new Error('PROBE FAILED: empty output (auth/plumbing problem with isolated config dir)');
-  if (looksLoggedOut(out))
-    throw new Error('PROBE FAILED: not logged in — auth does not survive the isolated config dir');
-  if (hits.length > 0) throw new Error(`PROBE FAILED (contaminated): ${hits.join(', ')}`);
-  fs.writeFileSync(path.join(OUT_ROOT, '.probe-passed'), new Date().toISOString());
-  console.log('PROBE PASSED — context clean, plumbing live. Arms may run.');
+  try {
+    const shimBin = makeLienShim(tmp);
+    const cfg = isolatedConfig(tmp);
+    const cwd = path.join(tmp, 'clean'); // clean, git-free, CLAUDE.md-free directory
+    fs.mkdirSync(cwd, { recursive: true });
+    assertNoAncestorClaudeMd(cwd);
+    const settingsFile = path.join(tmp, 'probe-settings.json');
+    fs.writeFileSync(settingsFile, JSON.stringify({ hooks: {} }));
+    const prompt = fs.readFileSync(path.join(KIT, 'prompts', 'probe.txt'), 'utf8');
+    const { stdout: out } = runClaude(prompt, randomUUID(), cwd, settingsFile, cfg, {}, shimBin);
+    fs.mkdirSync(OUT_ROOT, { recursive: true });
+    writeArtifact(path.join(OUT_ROOT, 'probe.jsonl'), out);
+    const hits = contaminationScan(out);
+    if (out.trim() === '')
+      throw new Error(
+        'PROBE FAILED: empty output (auth/plumbing problem with isolated config dir)',
+      );
+    if (looksLoggedOut(out))
+      throw new Error(
+        'PROBE FAILED: not logged in — auth does not survive the isolated config dir',
+      );
+    if (hits.length > 0) throw new Error(`PROBE FAILED (contaminated): ${hits.join(', ')}`);
+    fs.writeFileSync(path.join(OUT_ROOT, '.probe-passed'), new Date().toISOString());
+    console.log('PROBE PASSED — context clean, plumbing live. Arms may run.');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 }
 
 function assertNoAncestorClaudeMd(dir) {
@@ -497,8 +513,8 @@ function scoreTrial({ expName, arm, dest, sid, env, parsed, transcript, timedOut
 function saveTrial(expName, arm, idx, transcript, result) {
   const dir = path.join(OUT_ROOT, expName, arm);
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, `${idx}.jsonl`), transcript);
-  fs.writeFileSync(path.join(dir, `${idx}.json`), JSON.stringify(result, null, 2));
+  writeArtifact(path.join(dir, `${idx}.jsonl`), transcript);
+  writeArtifact(path.join(dir, `${idx}.json`), JSON.stringify(result, null, 2));
 }
 
 function cmdRun(expName) {
@@ -511,7 +527,6 @@ function cmdRun(expName) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), `nudge-ab-${expName}-`));
   const shimBin = makeLienShim(tmp);
   const cfg = isolatedConfig(tmp);
-  warmConfig(cfg, shimBin, tmp);
   const labels = seededOrder(
     Array.from({ length: N_PER_ARM }, (_, i) => [`on:${i}`, `off:${i}`]).flat(),
     INTERLEAVE_SEED,
@@ -595,11 +610,8 @@ function report(expName, results) {
     primarySeparated: separated,
     launchClaimPermitted: separated,
   };
-  fs.writeFileSync(
-    path.join(OUT_ROOT, `${expName}-summary.json`),
-    JSON.stringify(summary, null, 2),
-  );
-  console.log(JSON.stringify(summary, null, 2));
+  writeArtifact(path.join(OUT_ROOT, `${expName}-summary.json`), JSON.stringify(summary, null, 2));
+  console.log(redactAccount(JSON.stringify(summary, null, 2)));
 }
 
 // One-sided Fisher exact (P(X >= observed on-hits) under the null), via the
@@ -642,14 +654,16 @@ function cmdSmoke() {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'nudge-ab-smoke-'));
   const shimBin = makeLienShim(tmp);
   const cfg = isolatedConfig(tmp);
-  warmConfig(cfg, shimBin, tmp);
   for (const expName of ['blast', 'verify']) {
     const r = runTrial(expName, 'on', 'smoke', tmp, shimBin, cfg);
     console.log(
-      `[smoke] ${expName} on: hit=${r.hit} valid=${r.valid} timedOut=${r.timedOut} ` +
-        `denials=${r.denials.length} reasons=${JSON.stringify(r.reasons)}`,
+      redactAccount(
+        `[smoke] ${expName} on: hit=${r.hit} valid=${r.valid} timedOut=${r.timedOut} ` +
+          `loggedOut=${r.loggedOut} denials=${r.denials.length} reasons=${JSON.stringify(r.reasons)}`,
+      ),
     );
-    if (r.denials.length) console.log(`         denied: ${JSON.stringify(r.denials)}`);
+    if (r.denials.length)
+      console.log(redactAccount(`         denied: ${JSON.stringify(r.denials)}`));
   }
   fs.rmSync(tmp, { recursive: true, force: true });
   console.log('SMOKE done — inspect validity/denials above before the counted run.');
