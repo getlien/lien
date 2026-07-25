@@ -7,7 +7,11 @@
 
 import * as path from 'node:path';
 
-import { getSupportedExtensions } from '../ast/languages/registry.js';
+import {
+  getSupportedExtensions,
+  detectLanguage,
+  hasWholeModuleImports,
+} from '../ast/languages/registry.js';
 
 /**
  * Escape special regex characters in a string.
@@ -144,6 +148,43 @@ function matchesAtBoundaryPrecise(
   }
 
   return true;
+}
+
+/**
+ * True when `importSpecifier` is a bare (slash-free) import from a file whose
+ * language sets `LanguageDefinition.wholeModuleImports` (Swift today — see
+ * `hasWholeModuleImports`'s doc comment for #869's structural background).
+ *
+ * `matchesFile` is deliberately language-agnostic: it only ever sees raw
+ * import/target strings, never a language tag. But for a whole-module-import
+ * language, every extracted import IS the bare module name (`SwiftImport
+ * Extractor` never emits a per-file specifier), so the *only* way such an
+ * import can ever "win" a `matchesFile` comparison is through strategy 2's
+ * one-leading-segment leniency (`auth` -> `src/auth.rs`) firing purely
+ * because a target file's basename happens to coincide with the module's own
+ * name (`Source/Alamofire.swift` vs. `import Alamofire`) -- the exact #884
+ * false-hub shape, one leading segment inside the window #868/#883
+ * deliberately preserve for the legitimate Rust-style convention.
+ *
+ * Callers that discover imports per-chunk (`findTestAssociationsFromChunks`,
+ * `get_dependents`'s import index) should call this *before* handing a
+ * candidate import to `matchesFile`, and skip it entirely when true -- the
+ * honest outcome is #869's "not determinable" signal, never a match. This is
+ * intentionally the only place that combines path-matching with language
+ * data; `matchesAtBoundaryPrecise`'s general guard stays untouched and keeps
+ * serving every non-whole-module language (Rust, Go, Ruby, ...) exactly as
+ * before.
+ *
+ * @param importSpecifier - The raw (pre-normalization) import specifier
+ * @param importerFile - File path of the chunk doing the importing
+ */
+export function isUnresolvableWholeModuleImport(
+  importSpecifier: string,
+  importerFile: string,
+): boolean {
+  if (importSpecifier.includes('/')) return false;
+  const language = detectLanguage(importerFile);
+  return language !== null && hasWholeModuleImports(language);
 }
 
 /**

@@ -721,6 +721,52 @@ describe('findDependents', () => {
     });
   });
 
+  describe('whole-module-import basename hub (#884)', () => {
+    // The Alamofire shape: Source/Alamofire.swift's basename coincidentally
+    // equals the module name every test file bare-imports (`import
+    // Alamofire`, whole-module). Before #884 this fell inside #868/#883's
+    // deliberate one-leading-segment leniency (the same window that
+    // legitimately allows Rust's `auth` -> `src/auth.rs`) and falsely hubbed
+    // every whole-module test file onto this file.
+    it('does not count Swift whole-module test imports as dependents of a same-basename file', async () => {
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('Source/Alamofire.swift'),
+        createChunk('Tests/SessionTests.swift', { imports: ['Alamofire'] }),
+        createChunk('Tests/ValidationTests.swift', { imports: ['Alamofire'] }),
+      ]);
+
+      const result = await findDependents(mockDB as any, 'Source/Alamofire.swift', mockLog);
+
+      expect(result.dependents).toHaveLength(0);
+    });
+
+    it('still counts a real dependent via the identical one-leading-segment shape for a non-whole-module language', async () => {
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/auth.rs'),
+        createChunk('tests/auth_test.rs', { imports: ['auth'] }),
+      ]);
+
+      const result = await findDependents(mockDB as any, 'src/auth.rs', mockLog);
+
+      expect(result.dependents.map(d => d.filepath)).toEqual(['tests/auth_test.rs']);
+    });
+
+    it('leaves other Swift files alone when their imports are not bare whole-module hits', async () => {
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('Source/Networking/Session.swift'),
+        createChunk('Tests/SessionTests.swift', { imports: ['./Networking/Session'] }),
+      ]);
+
+      const result = await findDependents(
+        mockDB as any,
+        'Source/Networking/Session.swift',
+        mockLog,
+      );
+
+      expect(result.dependents.map(d => d.filepath)).toEqual(['Tests/SessionTests.swift']);
+    });
+  });
+
   describe('import index caching', () => {
     it('should cache scan results and reuse on same indexVersion', async () => {
       const chunks = [

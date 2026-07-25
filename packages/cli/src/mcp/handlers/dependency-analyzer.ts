@@ -6,6 +6,7 @@ import {
   matchesFile,
   getCanonicalPath,
   isTestFile,
+  isUnresolvableWholeModuleImport,
   COMPLEXITY_THRESHOLDS,
 } from '@liendev/parser';
 
@@ -174,6 +175,28 @@ function fileImportsSymbolFromAny(
 }
 
 /**
+ * Index one (importPath, chunk) pair, unless it's a bare whole-module import
+ * (#884): for a `wholeModuleImports` language (Swift), a bare import can only
+ * ever match a target through basename coincidence, not a real per-file
+ * dependency — see `isUnresolvableWholeModuleImport`'s doc comment. Indexing
+ * it anyway would let it win both the direct-lookup and fuzzy-match branches
+ * of `findDependentChunks` below purely by coincidence.
+ */
+function indexImportEntry(
+  importPath: string,
+  chunk: SearchResult,
+  normalizePathCached: (path: string) => string,
+  importIndex: Map<string, SearchResult[]>,
+): void {
+  if (isUnresolvableWholeModuleImport(importPath, chunk.metadata.file)) return;
+  const normalizedImport = normalizePathCached(importPath);
+  if (!importIndex.has(normalizedImport)) {
+    importIndex.set(normalizedImport, []);
+  }
+  importIndex.get(normalizedImport)!.push(chunk);
+}
+
+/**
  * Add a chunk to the import index.
  */
 function addChunkToImportIndex(
@@ -183,21 +206,13 @@ function addChunkToImportIndex(
 ): void {
   const imports = chunk.metadata.imports || [];
   for (const imp of imports) {
-    const normalizedImport = normalizePathCached(imp);
-    if (!importIndex.has(normalizedImport)) {
-      importIndex.set(normalizedImport, []);
-    }
-    importIndex.get(normalizedImport)!.push(chunk);
+    indexImportEntry(imp, chunk, normalizePathCached, importIndex);
   }
 
   const importedSymbols = chunk.metadata.importedSymbols;
   if (importedSymbols && typeof importedSymbols === 'object') {
     for (const modulePath of Object.keys(importedSymbols)) {
-      const normalizedImport = normalizePathCached(modulePath);
-      if (!importIndex.has(normalizedImport)) {
-        importIndex.set(normalizedImport, []);
-      }
-      importIndex.get(normalizedImport)!.push(chunk);
+      indexImportEntry(modulePath, chunk, normalizePathCached, importIndex);
     }
   }
 }
