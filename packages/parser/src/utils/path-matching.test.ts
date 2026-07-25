@@ -394,6 +394,42 @@ describe('isTestFile - Precise Test Detection', () => {
       expect(isTestFile('src\\auth.test.ts')).toBe(true);
     });
   });
+
+  describe('.NET conventions (glued Tests suffix, .cs-scoped)', () => {
+    it('should match a directory segment ending in Tests', () => {
+      expect(isTestFile('src/UnitTests/ConfigurationFeatureTest.cs')).toBe(true);
+      expect(isTestFile('src/IntegrationTests/SomeFeature.cs')).toBe(true);
+      expect(isTestFile('src/AutoMapper.DI.Tests/ContainerTests.cs')).toBe(true);
+    });
+
+    it('should match a filename ending in Test.cs or Tests.cs', () => {
+      expect(isTestFile('src/UnitTests/ScopeTests.cs')).toBe(true);
+      expect(isTestFile('src/UnitTests/ConfigurationFeatureTest.cs')).toBe(true);
+      expect(isTestFile('FooTest.cs')).toBe(true);
+      expect(isTestFile('FooTests.cs')).toBe(true);
+    });
+
+    it('should handle Windows paths for the directory convention', () => {
+      expect(isTestFile('src\\UnitTests\\ConfigurationFeatureTest.cs')).toBe(true);
+    });
+
+    it('should NOT match lowercase test/contest lookalikes (case-sensitive guard)', () => {
+      expect(isTestFile('src/AutoMapper/Latest.cs')).toBe(false);
+      expect(isTestFile('src/AutoMapper/Contest.cs')).toBe(false);
+      expect(isTestFile('latest/Config.cs')).toBe(false);
+      expect(isTestFile('contest/Config.cs')).toBe(false);
+    });
+
+    it('should NOT affect non-.cs files with a glued Tests suffix', () => {
+      expect(isTestFile('FooTests.ts')).toBe(false);
+      expect(isTestFile('src/UnitTests/Helper.ts')).toBe(false);
+    });
+
+    it('should NOT match regular .cs source files', () => {
+      expect(isTestFile('src/AutoMapper/Mapper.cs')).toBe(false);
+      expect(isTestFile('src/AutoMapper/TypeMap.cs')).toBe(false);
+    });
+  });
 });
 
 describe('resolveRelativeImport', () => {
