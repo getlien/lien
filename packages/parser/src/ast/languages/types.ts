@@ -61,4 +61,19 @@ export interface LanguageDefinition {
     /** AST node types representing function/method calls */
     callExpressionTypes: string[];
   };
+
+  /**
+   * True when this language's typical test files import their subject as a
+   * whole module (e.g. Swift's `import Alamofire` / `@testable import
+   * Alamofire`) rather than a specific per-file/per-symbol path, so
+   * `chunk.metadata.imports` carries no per-file signal an import-based
+   * test-association matcher (`matchesFile`) can ever resolve to a specific
+   * source file. This is a structural gap, not a matching bug (#869) — no
+   * heuristic recovers it here. Absent/false (the default for every
+   * language except Swift) means the existing per-file import matching
+   * applies as before; unset is NOT the same as "confirmed false", it's just
+   * unconfirmed, so only set this where the whole-module convention has
+   * been verified against real code.
+   */
+  wholeModuleImports?: boolean;
 }

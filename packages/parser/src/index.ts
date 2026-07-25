@@ -68,6 +68,7 @@ export {
   getLanguage,
   getAllLanguages,
   languageExists,
+  hasWholeModuleImports,
 } from './ast/languages/registry.js';
 
 // =============================================================================

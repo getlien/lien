@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { detectLanguage, getLanguage, languageExists, getAllLanguages } from './registry.js';
+import {
+  detectLanguage,
+  getLanguage,
+  languageExists,
+  getAllLanguages,
+  hasWholeModuleImports,
+} from './registry.js';
 import type { SupportedLanguage } from './registry.js';
 
 describe('Language Registry', () => {
@@ -139,6 +145,22 @@ describe('Language Registry', () => {
       const extensions = all.flatMap(d => d.extensions);
       expect(new Set(ids).size).toBe(ids.length);
       expect(new Set(extensions).size).toBe(extensions.length);
+    });
+  });
+
+  describe('hasWholeModuleImports', () => {
+    it('is true for Swift (#869: confirmed whole-module import convention)', () => {
+      expect(hasWholeModuleImports('swift')).toBe(true);
+    });
+
+    it('is false for every other registered language', () => {
+      const others = getAllLanguages()
+        .map(d => d.id)
+        .filter(id => id !== 'swift');
+      expect(others.length).toBeGreaterThan(0);
+      others.forEach(id => {
+        expect(hasWholeModuleImports(id)).toBe(false);
+      });
     });
   });
 });

@@ -114,6 +114,19 @@ export function languageExists(language: string): boolean {
 }
 
 /**
+ * True when `language`'s typical test files import their subject as a whole
+ * module rather than a specific file/symbol path (see
+ * `LanguageDefinition.wholeModuleImports`), so import-based test-association
+ * matching can never resolve a test file to the specific source file(s) it
+ * covers — a structural gap (#869), not a fixable matching bug. Callers use
+ * this to give an honest "not determinable" signal instead of a misleading
+ * "no coverage" one. Only Swift sets this today.
+ */
+export function hasWholeModuleImports(language: SupportedLanguage): boolean {
+  return getLanguage(language).wholeModuleImports === true;
+}
+
+/**
  * Get all registered language definitions.
  */
 export function getAllLanguages(): readonly LanguageDefinition[] {
