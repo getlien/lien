@@ -12,4 +12,6 @@ form: Ruby's Rake/Minitest convention (`rake test`, `rake test:core`,
 :module:test`, `gradlew test`). Previously these commands silently failed to
 register as a test run, so the nudge kept nagging even after the correct
 tests had genuinely been run. Purely additive recognition — `isCoveredByScope`
-and every existing pattern are unchanged, so no prior classification moves.
+is untouched, and the only existing pattern modification is folding the bare
+`phpunit` pattern into a strict superset that also matches vendored paths;
+every other existing pattern is unchanged, so no prior classification moves.
