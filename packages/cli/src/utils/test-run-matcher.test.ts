@@ -33,6 +33,28 @@ describe('classifyTestCommand — broad vs scoped classification table', () => {
     ['deno test', true, true, []],
     ['gradle test', true, true, []],
     ['mvn test', true, true, []],
+    // #870: Ruby (Rake/Minitest), PHP (vendored phpunit / composer script),
+    // Swift (SwiftPM), and Gradle-wrapper forms — each ecosystem's own
+    // standard/idiomatic test-invocation command.
+    ['bundle exec rake test:core', true, true, []],
+    ['rake test', true, true, []],
+    ['./rake test', true, true, []],
+    [
+      'vendor/bin/phpunit tests/Cookie/SetCookieTest.php',
+      true,
+      false,
+      ['tests/Cookie/SetCookieTest.php'],
+    ],
+    ['./vendor/bin/phpunit', true, true, []],
+    ['composer test', true, true, []],
+    ['swift test', true, true, []],
+    ['swift test --filter HTTPHeadersTests', true, true, []],
+    ['./gradlew test', true, true, []],
+    ['./gradlew :exposed-core:test', true, true, []],
+    ['gradlew test', true, true, []],
+    // Negative guard: a non-test Rake task must not be swallowed by the
+    // broad `rake test(:sub)?` recognition above.
+    ['rake db:migrate', false, false, []],
     // Not test runs at all.
     ['ls -la', false, false, []],
     ['git status', false, false, []],

@@ -96,10 +96,30 @@ const RUNNER_PATTERNS: RegExp[] = [
   /^cargo\s+test(?=\s|$)/,
   /^bundle\s+exec\s+rspec(?=\s|$)/,
   /^rspec(?=\s|$)/,
-  /^phpunit(?=\s|$)/,
+  // Ruby's Rake/Minitest convention: the task name is a namespaced suffix
+  // (`test`, `test:core`), never a file/path, so `(:\S*)?` mirrors the
+  // npm-run-script form above rather than being scanned as a scope token.
+  /^bundle\s+exec\s+rake\s+test(:\S*)?(?=\s|$)/,
+  /^(\.\/)?rake\s+test(:\S*)?(?=\s|$)/,
+  // PHP: phpunit is typically vendored per-project (`vendor/bin/phpunit`,
+  // `./vendor/bin/phpunit`), not installed globally; the bare form is kept
+  // as a subset of this pattern rather than a separate one.
+  /^(\.\/)?(vendor\/bin\/)?phpunit(?=\s|$)/,
+  // PHP: `composer test` is a common composer.json `scripts` alias, same
+  // class as `npm test`.
+  /^composer\s+test(?=\s|$)/,
   /^dotnet\s+test(?=\s|$)/,
   /^deno\s+test(?=\s|$)/,
+  // Swift/SwiftPM's one canonical test-invocation form. `--filter X` names a
+  // suite, not a path; `--filter` is already a workspace-scope flag above so
+  // it and its value are skipped, leaving this broad.
+  /^swift\s+test(?=\s|$)/,
   /^gradle\s+test(?=\s|$)/,
+  // Gradle wrapper script (the near-universal per-project convention,
+  // distinct from a globally-installed `gradle`). `(\S*:)?` absorbs a Gradle
+  // task path like `:exposed-core:test` into the match itself so it is never
+  // mistaken for a scope-narrowing file token (it names no file).
+  /^(\.\/)?gradlew\s+(\S*:)?test(?=\s|$)/,
   /^mvn\s+test(?=\s|$)/,
   /^nx\s+test(?:\s+\S+)?(?=\s|$)/,
 ];
