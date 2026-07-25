@@ -6,6 +6,7 @@ import {
   matchesFile,
   getCanonicalPath,
   isTestFile,
+  isUnresolvableWholeModuleImport,
   COMPLEXITY_THRESHOLDS,
 } from '@liendev/parser';
 
@@ -150,6 +151,11 @@ function buildReExportGraph(
 /**
  * Check if any chunk in the file imports the target symbol from any of the
  * given paths (direct target or re-exporter paths).
+ *
+ * Skips bare whole-module imports (#884): for a `wholeModuleImports`
+ * language (Swift), a bare import can only ever match a target through
+ * basename coincidence, not a real per-file dependency — see
+ * `isUnresolvableWholeModuleImport`'s doc comment.
  */
 function fileImportsSymbolFromAny(
   chunks: SearchResult[],
@@ -161,16 +167,37 @@ function fileImportsSymbolFromAny(
     const importedSymbols = chunk.metadata.importedSymbols;
     if (!importedSymbols) return false;
 
-    for (const [importPath, symbols] of Object.entries(importedSymbols)) {
+    return Object.entries(importedSymbols).some(([importPath, symbols]) => {
+      if (isUnresolvableWholeModuleImport(importPath, chunk.metadata.file)) return false;
       const normalizedImport = normalizePathCached(importPath);
       const matchesAny = targetPaths.some(tp => matchesFile(normalizedImport, tp));
-      if (matchesAny) {
-        if (symbols.includes(targetSymbol)) return true;
-        if (symbols.some(s => s.startsWith('* as '))) return true;
-      }
-    }
-    return false;
+      return (
+        matchesAny && (symbols.includes(targetSymbol) || symbols.some(s => s.startsWith('* as ')))
+      );
+    });
   });
+}
+
+/**
+ * Index one (importPath, chunk) pair, unless it's a bare whole-module import
+ * (#884): for a `wholeModuleImports` language (Swift), a bare import can only
+ * ever match a target through basename coincidence, not a real per-file
+ * dependency — see `isUnresolvableWholeModuleImport`'s doc comment. Indexing
+ * it anyway would let it win both the direct-lookup and fuzzy-match branches
+ * of `findDependentChunks` below purely by coincidence.
+ */
+function indexImportEntry(
+  importPath: string,
+  chunk: SearchResult,
+  normalizePathCached: (path: string) => string,
+  importIndex: Map<string, SearchResult[]>,
+): void {
+  if (isUnresolvableWholeModuleImport(importPath, chunk.metadata.file)) return;
+  const normalizedImport = normalizePathCached(importPath);
+  if (!importIndex.has(normalizedImport)) {
+    importIndex.set(normalizedImport, []);
+  }
+  importIndex.get(normalizedImport)!.push(chunk);
 }
 
 /**
@@ -183,21 +210,13 @@ function addChunkToImportIndex(
 ): void {
   const imports = chunk.metadata.imports || [];
   for (const imp of imports) {
-    const normalizedImport = normalizePathCached(imp);
-    if (!importIndex.has(normalizedImport)) {
-      importIndex.set(normalizedImport, []);
-    }
-    importIndex.get(normalizedImport)!.push(chunk);
+    indexImportEntry(imp, chunk, normalizePathCached, importIndex);
   }
 
   const importedSymbols = chunk.metadata.importedSymbols;
   if (importedSymbols && typeof importedSymbols === 'object') {
     for (const modulePath of Object.keys(importedSymbols)) {
-      const normalizedImport = normalizePathCached(modulePath);
-      if (!importIndex.has(normalizedImport)) {
-        importIndex.set(normalizedImport, []);
-      }
-      importIndex.get(normalizedImport)!.push(chunk);
+      indexImportEntry(modulePath, chunk, normalizePathCached, importIndex);
     }
   }
 }

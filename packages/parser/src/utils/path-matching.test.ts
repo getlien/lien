@@ -5,6 +5,7 @@ import {
   isTestFile,
   resolveRelativeImport,
   resolveWorkspaceImport,
+  isUnresolvableWholeModuleImport,
 } from './path-matching.js';
 
 /**
@@ -346,7 +347,66 @@ describe('matchesFile - Path Boundary Checking', () => {
         expect(testMatchesFile('./logger', 'logger')).toBe(true);
         expect(testMatchesFile('../logger', 'logger')).toBe(true);
       });
+
+      it('#884: matchesFile itself is deliberately left unchanged for the Alamofire shape', () => {
+        // `import Alamofire` vs. `Source/Alamofire.swift` sits inside the
+        // exact same one-leading-segment window as the legitimate Rust
+        // `auth` -> `src/auth.rs` case above -- matchesFile cannot tell them
+        // apart, and #884's fix deliberately doesn't ask it to. The real fix
+        // lives at the caller layer (isUnresolvableWholeModuleImport, tested
+        // below), which stops wholeModuleImports-language callers from ever
+        // handing this bare import to matchesFile in the first place.
+        expect(testMatchesFile('Alamofire', 'Source/Alamofire')).toBe(true);
+      });
     });
+  });
+});
+
+/**
+ * Test cases for the #884 caller-layer guard: bare whole-module imports
+ * (Swift's `import ModuleName`) must never be handed to `matchesFile` by a
+ * wholeModuleImports-language caller, because the only way such a bare
+ * import can ever match a target is coincidental basename equality (the
+ * Alamofire false-hub shape) -- see `isUnresolvableWholeModuleImport`'s own
+ * doc comment for the full reasoning.
+ */
+describe('isUnresolvableWholeModuleImport (#884)', () => {
+  it('suppresses the Alamofire shape: bare import == module name == target basename, 1 leading segment', () => {
+    expect(isUnresolvableWholeModuleImport('Alamofire', 'Source/Alamofire.swift')).toBe(true);
+    // Also true with zero leading segments (module file at the repo root).
+    expect(isUnresolvableWholeModuleImport('Alamofire', 'Alamofire.swift')).toBe(true);
+  });
+
+  it('leaves the identical shape alone for a non-whole-module language (Rust auth -> src/auth.rs)', () => {
+    // Same "bare identifier, one leading segment, basename match" shape as
+    // Alamofire, but Rust doesn't set wholeModuleImports, so matchesFile's
+    // legitimate source-directory-prefix convention must keep working --
+    // this predicate must not suppress it.
+    expect(isUnresolvableWholeModuleImport('auth', 'src/auth.rs')).toBe(false);
+  });
+
+  it('leaves other Swift bare imports alone that do not share the target basename', () => {
+    // `import Combine` (system framework) is still a bare Swift import, but
+    // the caller only ever asks this predicate about the (import, importer)
+    // pair -- it doesn't take a target at all, since a wholeModuleImports
+    // language's bare import is unusable for *any* target, not just a
+    // basename-coincidental one (see the doc comment: matchesFile can only
+    // ever win via the coincidental path for these imports, full stop).
+    expect(isUnresolvableWholeModuleImport('Combine', 'Source/Features/Combine.swift')).toBe(true);
+  });
+
+  it('does not suppress a qualified/dotted or path-like Swift import', () => {
+    // The guard is scoped to genuinely bare (slash-free) specifiers only --
+    // a hypothetical qualified import (e.g. a submodule path containing a
+    // separator) is left alone, matching #868/#883's own "only the bare-
+    // identifier path" scope discipline.
+    expect(isUnresolvableWholeModuleImport('Alamofire/Session', 'Source/Alamofire.swift')).toBe(
+      false,
+    );
+  });
+
+  it('does not suppress bare imports from non-Swift, non-whole-module files', () => {
+    expect(isUnresolvableWholeModuleImport('logger', 'src/logger.ts')).toBe(false);
   });
 });
 

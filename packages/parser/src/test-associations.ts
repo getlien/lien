@@ -3,7 +3,12 @@
  * Finds test files that import given source files by analyzing chunk metadata.
  */
 
-import { isTestFile, normalizePath, matchesFile } from './utils/path-matching.js';
+import {
+  isTestFile,
+  normalizePath,
+  matchesFile,
+  isUnresolvableWholeModuleImport,
+} from './utils/path-matching.js';
 import type { CodeChunk } from './types.js';
 
 /**
@@ -40,7 +45,17 @@ export function findTestAssociationsFromChunks(
 
     for (const chunk of testChunks) {
       const imports = chunk.metadata.imports || [];
-      if (imports.some(imp => matchesFile(normalize(imp), normalizedTarget))) {
+      // Skip bare whole-module imports (#884): for a wholeModuleImports
+      // language (Swift), a bare import can only ever match a target through
+      // basename coincidence, not a real per-file association -- see
+      // isUnresolvableWholeModuleImport's doc comment.
+      if (
+        imports.some(
+          imp =>
+            !isUnresolvableWholeModuleImport(imp, chunk.metadata.file) &&
+            matchesFile(normalize(imp), normalizedTarget),
+        )
+      ) {
         testFiles.add(chunk.metadata.file);
       }
     }

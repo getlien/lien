@@ -1,6 +1,12 @@
 import type { CodeChunk } from './types.js';
 import type { RiskLevel } from './insights/types.js';
-import { normalizePath, getCanonicalPath, matchesFile, isTestFile } from './utils/path-matching.js';
+import {
+  normalizePath,
+  getCanonicalPath,
+  matchesFile,
+  isTestFile,
+  isUnresolvableWholeModuleImport,
+} from './utils/path-matching.js';
 import { RISK_ORDER } from './insights/types.js';
 
 /**
@@ -76,6 +82,15 @@ function createPathNormalizer(workspaceRoot: string): (path: string) => string {
  * Builds an index mapping normalized import paths to chunks that import them.
  * Enables O(1) lookup instead of O(n*m) iteration.
  *
+ * Skips bare whole-module imports (#884): for a `wholeModuleImports`
+ * language (Swift), a bare import can only ever match a target through
+ * basename coincidence, not a real per-file dependency — see
+ * `isUnresolvableWholeModuleImport`'s doc comment. This is the same guard
+ * applied in the CLI's `get_dependents` handler
+ * (`packages/cli/src/mcp/handlers/dependency-analyzer.ts`); this file feeds
+ * `analyzeDependencies`, consumed by `ComplexityAnalyzer` for complexity
+ * reports and `get_complexity`, so it needs the identical treatment.
+ *
  * @param chunks - All chunks from the vector database
  * @param normalizePathCached - Cached path normalization function
  * @returns Map of normalized import paths to chunks that import them
@@ -89,6 +104,7 @@ function buildImportIndex(
   for (const chunk of chunks) {
     const imports = chunk.metadata.imports || [];
     for (const imp of imports) {
+      if (isUnresolvableWholeModuleImport(imp, chunk.metadata.file)) continue;
       const normalizedImport = normalizePathCached(imp);
       let chunkList = importIndex.get(normalizedImport);
       if (!chunkList) {
@@ -300,6 +316,11 @@ const MAX_REEXPORT_DEPTH = 3;
 /**
  * Check if a single chunk imports from the given source path.
  * Checks both `importedSymbols` keys and raw `imports` array.
+ *
+ * Skips bare whole-module imports (#884): for a `wholeModuleImports`
+ * language (Swift), a bare import can only ever match a target through
+ * basename coincidence, not a real per-file dependency — see
+ * `isUnresolvableWholeModuleImport`'s doc comment.
  */
 export function chunkImportsFrom(
   chunk: CodeChunk,
@@ -307,18 +328,15 @@ export function chunkImportsFrom(
   normalizePathCached: (path: string) => string,
 ): boolean {
   const importedSymbols = chunk.metadata.importedSymbols;
-  if (importedSymbols && typeof importedSymbols === 'object') {
-    for (const importPath of Object.keys(importedSymbols)) {
-      if (matchesFile(normalizePathCached(importPath), sourcePath)) return true;
-    }
-  }
+  const importedSymbolPaths =
+    importedSymbols && typeof importedSymbols === 'object' ? Object.keys(importedSymbols) : [];
+  const allImportPaths = [...importedSymbolPaths, ...(chunk.metadata.imports || [])];
 
-  const imports = chunk.metadata.imports || [];
-  for (const imp of imports) {
-    if (matchesFile(normalizePathCached(imp), sourcePath)) return true;
-  }
-
-  return false;
+  return allImportPaths.some(
+    imp =>
+      !isUnresolvableWholeModuleImport(imp, chunk.metadata.file) &&
+      matchesFile(normalizePathCached(imp), sourcePath),
+  );
 }
 
 /**
@@ -348,6 +366,11 @@ export function groupChunksByNormalizedPath(
  * Deliberately ignores the raw `imports` array — a raw-only match means the
  * file imports for side effect or does `export * from`, neither of which
  * should qualify it as a re-exporter on its own (#526).
+ *
+ * Skips bare whole-module imports (#884): for a `wholeModuleImports`
+ * language (Swift), a bare import can only ever match a source path through
+ * basename coincidence, not a real re-export relationship — see
+ * `isUnresolvableWholeModuleImport`'s doc comment.
  */
 function collectImportedSymbolsFromSource(
   chunks: CodeChunk[],
@@ -358,11 +381,13 @@ function collectImportedSymbolsFromSource(
   for (const chunk of chunks) {
     const importedSymbols = chunk.metadata.importedSymbols;
     if (!importedSymbols || typeof importedSymbols !== 'object') continue;
-    for (const [importPath, syms] of Object.entries(importedSymbols)) {
-      if (matchesFile(normalizePathCached(importPath), sourcePath)) {
-        for (const sym of syms) symbols.add(sym);
-      }
-    }
+    Object.entries(importedSymbols)
+      .filter(
+        ([importPath]) =>
+          !isUnresolvableWholeModuleImport(importPath, chunk.metadata.file) &&
+          matchesFile(normalizePathCached(importPath), sourcePath),
+      )
+      .forEach(([, syms]) => syms.forEach(sym => symbols.add(sym)));
   }
   return symbols;
 }

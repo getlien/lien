@@ -35,7 +35,13 @@ export {
 // UTILITIES
 // =============================================================================
 
-export { normalizePath, matchesFile, getCanonicalPath, isTestFile } from './utils/path-matching.js';
+export {
+  normalizePath,
+  matchesFile,
+  getCanonicalPath,
+  isTestFile,
+  isUnresolvableWholeModuleImport,
+} from './utils/path-matching.js';
 
 export { extractRepoId } from './utils/repo-id.js';
 

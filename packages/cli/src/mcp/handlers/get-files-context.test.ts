@@ -258,6 +258,42 @@ describe('handleGetFilesContext - test-association scan (scanAll fast path + cac
     expect(parsed.testAssociations).toEqual(['src/__tests__/auth.test.ts']);
   });
 
+  describe('whole-module-import basename hub (#884)', () => {
+    it('does not associate a Swift file whose basename equals the module name with every whole-module test', async () => {
+      const scanAll = vi
+        .fn()
+        .mockResolvedValue([
+          makeChunk('Source/Alamofire.swift'),
+          makeChunk('Tests/SessionTests.swift', ['Alamofire']),
+          makeChunk('Tests/ValidationTests.swift', ['Alamofire']),
+        ]);
+      const ctx = makeCtx({ scanAll, indexVersion: 1 });
+
+      const result = await handleGetFilesContext(
+        { filepaths: 'Source/Alamofire.swift', includeRelated: false },
+        ctx,
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.testAssociations).toEqual([]);
+    });
+
+    it('still associates a real Rust file via the identical one-leading-segment shape', async () => {
+      const scanAll = vi
+        .fn()
+        .mockResolvedValue([makeChunk('src/auth.rs'), makeChunk('tests/auth_test.rs', ['auth'])]);
+      const ctx = makeCtx({ scanAll, indexVersion: 1 });
+
+      const result = await handleGetFilesContext(
+        { filepaths: 'src/auth.rs', includeRelated: false },
+        ctx,
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.testAssociations).toEqual(['tests/auth_test.rs']);
+    });
+  });
+
   it('caches the scan across calls with the same indexVersion (no re-scan)', async () => {
     const scanAll = vi.fn().mockResolvedValue([]);
     const ctx = makeCtx({ scanAll, indexVersion: 42 });

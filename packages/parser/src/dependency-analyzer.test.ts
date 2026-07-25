@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   analyzeDependencies,
   findReExportedSymbolsForFile,
+  chunkImportsFrom,
   COMPLEXITY_THRESHOLDS,
 } from './dependency-analyzer.js';
 import type { CodeChunk, ChunkMetadata } from './types.js';
@@ -493,6 +494,32 @@ describe('analyzeDependencies', () => {
       expect(result.dependents[0].filepath).toBe('src/app.ts');
     });
   });
+
+  describe('whole-module-import basename hub (#884)', () => {
+    it('does not count Swift whole-module test imports as dependents of a same-basename file', () => {
+      const chunks: CodeChunk[] = [
+        createChunk('Source/Alamofire.swift', []),
+        createChunk('Tests/SessionTests.swift', ['Alamofire']),
+        createChunk('Tests/ValidationTests.swift', ['Alamofire']),
+      ];
+
+      const result = analyzeDependencies('Source/Alamofire.swift', chunks, workspaceRoot);
+
+      expect(result.dependentCount).toBe(0);
+    });
+
+    it('still counts a real dependent via the identical one-leading-segment shape for a non-whole-module language', () => {
+      const chunks: CodeChunk[] = [
+        createChunk('src/auth.rs', []),
+        createChunk('tests/auth_test.rs', ['auth']),
+      ];
+
+      const result = analyzeDependencies('src/auth.rs', chunks, workspaceRoot);
+
+      expect(result.dependentCount).toBe(1);
+      expect(result.dependents[0].filepath).toBe('tests/auth_test.rs');
+    });
+  });
 });
 
 // Direct unit coverage for the shared re-export intersection algorithm,
@@ -567,5 +594,79 @@ describe('findReExportedSymbolsForFile', () => {
       }),
     ];
     expect(findReExportedSymbolsForFile(chunks, 'src/a.ts', identity)).toEqual(['ns']);
+  });
+
+  describe('whole-module-import basename hub (#884)', () => {
+    it('does not falsely credit a Swift whole-module bare import as re-exporting from a same-basename source', () => {
+      // SwiftImportExtractor.processImportSymbols records a bare `import
+      // Alamofire` as importedSymbols: { Alamofire: ['Alamofire'] }. Without
+      // the guard, collectImportedSymbolsFromSource would match "Alamofire"
+      // against sourcePath "Source/Alamofire" via basename coincidence, and
+      // if the file also happens to export a symbol literally named
+      // "Alamofire", it would be falsely reported as re-exporting it.
+      const chunks = [
+        chunk('Source/Core/Session.swift', {
+          importedSymbols: { Alamofire: ['Alamofire'] },
+          exports: ['Alamofire'],
+        }),
+      ];
+      expect(findReExportedSymbolsForFile(chunks, 'Source/Alamofire', identity)).toEqual([]);
+    });
+
+    it('still finds a real re-export via the identical one-leading-segment shape for a non-whole-module language', () => {
+      const chunks = [
+        chunk('src/reexport.rs', {
+          importedSymbols: { auth: ['auth'] },
+          exports: ['auth'],
+        }),
+      ];
+      expect(findReExportedSymbolsForFile(chunks, 'src/auth', identity)).toEqual(['auth']);
+    });
+  });
+});
+
+describe('chunkImportsFrom', () => {
+  const identity = (path: string): string => path;
+
+  function makeChunk(
+    file: string,
+    options: { imports?: string[]; importedSymbols?: Record<string, string[]> } = {},
+  ): CodeChunk {
+    return {
+      content: '',
+      metadata: {
+        file,
+        startLine: 1,
+        endLine: 10,
+        type: 'function',
+        language: 'typescript',
+        imports: options.imports,
+        importedSymbols: options.importedSymbols,
+      } as ChunkMetadata,
+    };
+  }
+
+  describe('whole-module-import basename hub (#884)', () => {
+    it('does not report a Swift whole-module bare import as importing a same-basename target (raw imports array)', () => {
+      const chunk = makeChunk('Tests/SessionTests.swift', { imports: ['Alamofire'] });
+      expect(chunkImportsFrom(chunk, 'Source/Alamofire', identity)).toBe(false);
+    });
+
+    it('does not report a Swift whole-module bare import as importing a same-basename target (importedSymbols keys)', () => {
+      const chunk = makeChunk('Tests/SessionTests.swift', {
+        importedSymbols: { Alamofire: ['Alamofire'] },
+      });
+      expect(chunkImportsFrom(chunk, 'Source/Alamofire', identity)).toBe(false);
+    });
+
+    it('still reports the identical shape for a non-whole-module language (Rust auth -> src/auth.rs)', () => {
+      const chunk = makeChunk('tests/auth_test.rs', { imports: ['auth'] });
+      expect(chunkImportsFrom(chunk, 'src/auth', identity)).toBe(true);
+    });
+
+    it('still reports a real import from a Swift file when it is not the bare whole-module case', () => {
+      const chunk = makeChunk('Tests/SessionTests.swift', { imports: ['./Networking/Session'] });
+      expect(chunkImportsFrom(chunk, 'Source/Networking/Session', identity)).toBe(true);
+    });
   });
 });
