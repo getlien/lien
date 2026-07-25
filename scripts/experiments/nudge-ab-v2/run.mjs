@@ -407,6 +407,8 @@ function cmdProbe() {
   const hits = contaminationScan(out);
   if (out.trim() === '')
     throw new Error('PROBE FAILED: empty output (auth/plumbing problem with isolated config dir)');
+  if (looksLoggedOut(out))
+    throw new Error('PROBE FAILED: not logged in — auth does not survive the isolated config dir');
   if (hits.length > 0) throw new Error(`PROBE FAILED (contaminated): ${hits.join(', ')}`);
   fs.writeFileSync(path.join(OUT_ROOT, '.probe-passed'), new Date().toISOString());
   console.log('PROBE PASSED — context clean, plumbing live. Arms may run.');
