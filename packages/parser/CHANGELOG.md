@@ -1,5 +1,72 @@
 # @liendev/parser
 
+## 0.69.1
+
+### Patch Changes
+
+- 242892d: Fix the #859 bug class (`extractImportPath` returning an unmatchable value
+  instead of a clean path) in three other languages found by auditing every
+  import extractor against it:
+  - **Java / Kotlin**: wildcard imports (`import com.example.*;` /
+    `import a.b.*`) returned the raw `pkg.*`-suffixed string, which never
+    satisfies `matchesPythonModule()`'s dotted-identifier check in
+    path-matching.ts (an asterisk never matches `[A-Za-z_]\w*`) — so a wildcard
+    import could never resolve to a test association or dependent for anything
+    in that package. `extractImportPath` now strips the trailing `.*` and
+    returns the clean package path, matching what `processImportSymbols`
+    already computed separately.
+  - **PHP**: grouped `use` declarations (`use App\Models\{User, Post};`, PHP
+    7+) returned `null` from both `extractImportPath` and `processImportSymbols`
+    — tree-sitter-php parses this as a `namespace_name` prefix sibling plus a
+    `namespace_use_group` of clauses, a shape the extractor didn't recognize at
+    all, so the whole statement (every item in the group) was invisible to
+    test-association discovery. Now captures the first item's full path,
+    mirroring `GoImportExtractor`'s existing "first wins" precedent for its own
+    multi-target grouped imports.
+  - **Rust**: `use crate::x;` / `use self::x;` / `use super::x;` (a single
+    segment directly off a bare root, with tree-sitter-rust giving
+    `crate`/`self`/`super` their own named node types) resolved a path via
+    `extractImportPath` but returned `null` from `processImportSymbols`, since
+    it converted the bare root's text alone (no `::` for the prefix-strip to
+    match) instead of combining it with the imported name. Grouped bare-root
+    imports with divergent per-item paths
+    (`use crate::{auth::AuthService, config::Settings};`) returned `null`
+    entirely for the same reason — now fixed with the same Go-style "first
+    wins" mitigation as PHP.
+
+  Also adds regression-pinning import-extraction tests across every audited
+  language (TypeScript, JavaScript, PHP, Ruby, Rust, Go, Java, C#, Kotlin,
+  Swift) covering their main import forms, so this bug class can't silently
+  regress in any of them again. Two remaining structural gaps found by the
+  audit — Go's grouped-import "first wins" behavior only ever keeps one target
+  per `import (...)` block, and Java static member-imports / Kotlin top-level
+  function imports don't match their defining file — are filed as separate
+  issues (#863, #864) rather than fixed here, since both need a design call
+  beyond a mechanical extractor fix.
+
+- cf0d462: Fix Python test-association discovery being silently broken for every import
+  form: `PythonImportExtractor.extractImportPath()` was returning the raw,
+  unparsed statement text (e.g. `"from starlette.responses import FileResponse, ..."`)
+  instead of a clean dotted module path, so `chunk.metadata.imports` never
+  contained anything `matchesPythonModule()` could match. It now returns the
+  clean module path (e.g. `"starlette.responses"`, `"os"`, `".foo"` for
+  relative imports) by delegating to the same symbol-processing logic already
+  used to build `importedSymbols` — the two can no longer disagree. Also fixes
+  two related latent bugs in that shared logic: relative from-imports
+  (`from . import x`, `from .foo import x`) silently dropped their imported
+  symbols entirely, because the module-path lookup didn't account for the
+  `relative_import` wrapper node; and wildcard from-imports (`from x.y import
+*`) were dropped in their entirety (module path included), because the
+  symbol collector didn't recognize `wildcard_import` nodes and treated the
+  resulting empty symbol list as "no import here" — it now records a `'*'`
+  placeholder symbol, mirroring `RustImportExtractor`'s existing convention for
+  `use crate::models::*;`.
+- 4fd502b: Fix a silent duplicate-index bug: `extractRepoId()` hashed the project-root path exactly as given, with no symlink canonicalization. `lien serve --root <path>` (and any other caller passing an explicit, non-`cwd`-derived root — a hook-provided cwd, an MCP client's configured root, etc.) for a directory reachable through a symlinked path segment resolved to a **different** repo ID than plain `cd <dir> && lien index`/`lien serve` for the exact same physical directory — because `process.cwd()` is already realpath-resolved by the OS, but an explicit path string is not. The server then reported "No index found" and silently built a second, empty index next to the real one; every MCP tool (`search_code`, `get_dependents`, etc.) returned empty/wrong results for that session. Reproduced on macOS via `/tmp` → `/private/tmp` (see #858), but the same class of bug applies to any symlinked path — home-dir symlinks, Docker bind mounts, CI workspace symlinks.
+
+  `extractRepoId()` now resolves symlinks (`fs.realpathSync`) before hashing, falling back to the previous `path.resolve()` behavior when the path doesn't exist yet or `realpath` fails for any other reason (e.g. permissions). This is the single chokepoint every caller funnels through (`getIndexDir`, `SqliteBackend`, `getStoreRoot`, `lien status`, `lien gc`'s current-project guard), so `cwd`, `--root`, hook-provided cwd, and MCP root all derive the same repo ID for the same physical directory without any caller-side changes.
+
+  **Migration note:** this changes the computed repo ID for any project whose path (or an ancestor segment) is a symlink — plain `cwd`-based usage is unaffected, since `process.cwd()` was already OS-resolved. Affected users get one silent re-index the next time they run `lien index`/`lien serve` against the same project (their old index is simply superseded, not corrupted). The now-abandoned old index directory is reclaimed by `lien gc`: if its recorded source root has itself disappeared, a bare `lien gc` collects it as an orphan immediately; if the symlinked path persists (the common case — e.g. macOS's `/tmp`), the old directory is classified "present" (not orphan) and is instead reclaimed by `lien gc --stale` once it ages past the staleness window (default 60 days), since it will never be touched again post-upgrade. A dual-ID back-compat lookup (recognizing both the old and new hash for one project) was considered and declined: the affected population is limited to symlinked-path setups, the fix is a one-time re-index (not data loss), and `lien gc`/`--stale` already reclaims the orphaned directory without extra machinery — adding a compat layer for this would be YAGNI.
+
 ## 0.68.0
 
 ### Minor Changes
