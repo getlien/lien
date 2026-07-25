@@ -203,9 +203,9 @@ export class PHPImportExtractor implements LanguageImportExtractor {
    * Scan the WHOLE file (recursively — unlike declaration-based extraction,
    * which only looks at top-level `namespace_use_declaration` nodes) for
    * fully-qualified class-name references that never go through a `use`
-   * statement at all. Closes the structural gap in #878: a test can
-   * genuinely exercise a source class via a factory (`Middleware::retry()`
-   * internally `new`-ing `RetryMiddleware`) or a direct FQCN (`new
+   * statement at all. Partially addresses #878 — direct fully-qualified
+   * references only (see below for what's still open): a test can
+   * genuinely exercise a source class via a direct FQCN (`new
    * \GuzzleHttp\RetryMiddleware()`, `\GuzzleHttp\RetryMiddleware::class`)
    * with zero corresponding import declaration for `use`-based extraction to
    * find.
@@ -224,8 +224,10 @@ export class PHPImportExtractor implements LanguageImportExtractor {
    * a different file" shape (e.g. `Middleware::retry()` from a *test* file,
    * where `RetryMiddleware` is only named inside `Middleware.php`, never in
    * the test itself) — that needs graph-level reasoning across files, well
-   * beyond a single-file structural scan. That case has no signal available
-   * at this layer and is the honest, documented remainder of #878.
+   * beyond a single-file structural scan. That factory-indirection case has
+   * no signal available at this layer and is unresolvable here; it stays an
+   * honest, documented, still-open remainder of #878, not something this
+   * method claims to handle.
    */
   extractReferencedFQCNs(rootNode: SyntaxNode): string[] {
     const refs: string[] = [];
