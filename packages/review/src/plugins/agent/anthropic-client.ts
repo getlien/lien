@@ -24,6 +24,8 @@ import {
   envDisabled,
   logTurn,
   extractFindingsFromText,
+  computeWrapUpReason,
+  logWrapUpReason,
 } from './agent-client-shared.js';
 
 /** Extract the assistant's text content from an Anthropic response for trace. */
@@ -257,12 +259,24 @@ export class AnthropicAgentClient {
         break;
       }
 
-      // Approaching budget or last turn — tell the agent to wrap up.
-      // Threshold kept below the hard cap with headroom so a single capped
-      // tool result can't skip past the wrap-up window into the hard stop.
-      const nearBudget = totalTokens >= this.maxTokenBudget * 0.6;
-      const lastTurn = turn >= this.maxTurns - 1;
-      const shouldWrapUp = nearBudget || lastTurn;
+      // Approaching budget, last turn, or (issue #839) this turn's own input
+      // already ate enough of the budget that another investigative
+      // round-trip can't fit — see `computeWrapUpReason`'s doc comment.
+      const wrapUpReason = computeWrapUpReason({
+        totalTokens,
+        turnInputTokens,
+        maxTokenBudget: this.maxTokenBudget,
+        turn,
+        maxTurns: this.maxTurns,
+      });
+      logWrapUpReason(
+        this.logger,
+        wrapUpReason,
+        turn,
+        turnInputTokens,
+        this.maxTokenBudget - totalTokens,
+      );
+      const shouldWrapUp = wrapUpReason !== null;
       // Drop tools next turn so the model must produce its verdict.
       if (shouldWrapUp) forceFinish = true;
 

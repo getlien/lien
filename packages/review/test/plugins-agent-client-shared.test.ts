@@ -11,6 +11,9 @@ import {
   isValidSummary,
   isValidFinding,
   AGENT_LOG_MAX,
+  computeWrapUpReason,
+  logWrapUpReason,
+  NEAR_BUDGET_FRACTION,
 } from '../src/plugins/agent/agent-client-shared.js';
 import { silentLogger } from '../src/test-helpers.js';
 import type { Logger } from '../src/logger.js';
@@ -543,5 +546,113 @@ describe('extractFindingsWithReasoningFallback (reasoning-channel verdict recove
     const logger = { ...silentLogger, info: (m: string) => void infos.push(m) };
     extractFindingsWithReasoningFallback(null, fence({ findings: [], summary }), logger);
     expect(infos.some(m => m.includes('recovered from the reasoning channel'))).toBe(true);
+  });
+});
+
+describe('computeWrapUpReason (issue #839 — multi-turn budget accumulation)', () => {
+  const base = { totalTokens: 0, turnInputTokens: 0, maxTokenBudget: 20_000, turn: 1, maxTurns: 8 };
+
+  it('returns null when nothing warrants wrapping up', () => {
+    expect(computeWrapUpReason({ ...base, totalTokens: 2_000, turnInputTokens: 1_500 })).toBeNull();
+  });
+
+  it('reports near-budget once cumulative spend crosses NEAR_BUDGET_FRACTION of the whole budget', () => {
+    expect(NEAR_BUDGET_FRACTION).toBe(0.6);
+    // 12,000/20,000 = exactly 0.6 — the boundary itself counts.
+    expect(computeWrapUpReason({ ...base, totalTokens: 12_000, turnInputTokens: 1_000 })).toBe(
+      'near-budget',
+    );
+    expect(
+      computeWrapUpReason({ ...base, totalTokens: 11_999, turnInputTokens: 1_000 }),
+    ).toBeNull();
+  });
+
+  it('reports last-turn on the final turn the loop allows, even with budget to spare', () => {
+    expect(
+      computeWrapUpReason({ ...base, totalTokens: 100, turnInputTokens: 50, turn: 7, maxTurns: 8 }),
+    ).toBe('last-turn');
+    expect(
+      computeWrapUpReason({ ...base, totalTokens: 100, turnInputTokens: 50, turn: 6, maxTurns: 8 }),
+    ).toBeNull();
+  });
+
+  it("reports input-growth when THIS turn's own input already meets/exceeds what's left of the budget, even though cumulative spend is still well under the near-budget fraction (the #839 fix)", () => {
+    // 20,000 budget: after this turn, totalTokens=11,500 (< 12,000 near-budget
+    // threshold) — the coarse fraction check would NOT yet fire. But this
+    // turn's own input (11,500) already meets what's left (8,500): another
+    // investigative turn's input can only be as large or larger (history only
+    // grows), so it can't possibly fit — the fix forces the wrap-up NOW.
+    const result = computeWrapUpReason({
+      ...base,
+      totalTokens: 11_500,
+      turnInputTokens: 11_500,
+    });
+    expect(result).toBe('input-growth');
+  });
+
+  it('input-growth is checked before near-budget/last-turn (priority when multiple would fire)', () => {
+    // Cumulative spend is ALSO past the near-budget fraction here, but the
+    // more specific input-growth reason wins so logs name the real cause.
+    const result = computeWrapUpReason({
+      ...base,
+      totalTokens: 19_000,
+      turnInputTokens: 19_000,
+      turn: 7,
+      maxTurns: 8,
+    });
+    expect(result).toBe('input-growth');
+  });
+
+  it("does not trigger merely because a turn's input is large in absolute terms, when remaining budget covers it comfortably", () => {
+    // A big first turn (10,000 input) on a huge 200,000-token main-pass budget
+    // leaves plenty of room (190,000) — must not force wrap-up prematurely.
+    expect(
+      computeWrapUpReason({
+        totalTokens: 10_500,
+        turnInputTokens: 10_000,
+        maxTokenBudget: 200_000,
+        turn: 1,
+        maxTurns: 20,
+      }),
+    ).toBeNull();
+  });
+
+  it('reproduces the real doc-truth receipt shape (20,869 allocated / 56,430 spent, issue #839 census) without regressing the existing near-budget classification', () => {
+    // Turn 1: input 9,000 (cumulative 9,000) — neither near-budget (< 12,000)
+    // nor input-growth (remaining 11,000 > 9,000) fires yet.
+    expect(computeWrapUpReason({ ...base, totalTokens: 9_000, turnInputTokens: 9_000 })).toBeNull();
+    // Turn 2: input 4,000 (cumulative 13,000) — crosses near-budget (>= 12,000);
+    // input-growth alone would NOT have fired here (remaining 7,000 > 4,000) —
+    // near-budget is still the reason this specific real-shaped case catches,
+    // exactly as it did before this fix (no regression).
+    expect(
+      computeWrapUpReason({ ...base, totalTokens: 13_000, turnInputTokens: 4_000, turn: 2 }),
+    ).toBe('near-budget');
+  });
+});
+
+describe('logWrapUpReason', () => {
+  function capturingLogger(): { logger: Logger; lines: string[] } {
+    const lines: string[] = [];
+    const record = (m: string) => lines.push(m);
+    return { logger: { info: record, warning: record, error: record, debug: record }, lines };
+  }
+
+  it('logs an info line naming turn, own-input, and remaining budget for input-growth', () => {
+    const { logger, lines } = capturingLogger();
+    logWrapUpReason(logger, 'input-growth', 3, 11_500, 8_500);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('Turn 3');
+    expect(lines[0]).toContain('11500');
+    expect(lines[0]).toContain('8500');
+    expect(lines[0]).toContain('#839');
+  });
+
+  it('is a no-op for near-budget/last-turn/null (unchanged, silent pre-#839 behavior)', () => {
+    const { logger, lines } = capturingLogger();
+    logWrapUpReason(logger, 'near-budget', 2, 1, 1);
+    logWrapUpReason(logger, 'last-turn', 7, 1, 1);
+    logWrapUpReason(logger, null, 1, 1, 1);
+    expect(lines).toHaveLength(0);
   });
 });

@@ -45,6 +45,116 @@ export function truncate(s: string, max: number): string {
   return s.length > max ? `${s.slice(0, max)}\n…[truncated ${s.length - max} chars]` : s;
 }
 
+// ---------------------------------------------------------------------------
+// Wrap-up decision (issue #839 — multi-turn budget accumulation)
+// ---------------------------------------------------------------------------
+
+/**
+ * Fraction of the whole budget at which an ordinary investigative turn is
+ * nudged to wrap up (drop tools, emit a verdict next turn) — kept below the
+ * hard cap with headroom so a single capped tool result can't skip past the
+ * wrap-up window straight into the hard stop. Pre-#839 behavior; unchanged by
+ * this fix (see `computeWrapUpReason`'s doc comment for what #839 adds).
+ */
+export const NEAR_BUDGET_FRACTION = 0.6;
+
+/** Inputs to `computeWrapUpReason` — the turn-loop locals both clients already track, passed by
+ *  name so the function itself stays provider-agnostic and testable without either client's
+ *  HTTP/SDK transport. */
+export interface WrapUpCheckInput {
+  /** Cumulative spend (input+output across every turn so far, including the turn just completed). */
+  totalTokens: number;
+  /** THIS turn's own input/prompt token cost (`usage.prompt_tokens` / `usage.input_tokens`). */
+  turnInputTokens: number;
+  maxTokenBudget: number;
+  /** 1-indexed number of the turn just completed. */
+  turn: number;
+  maxTurns: number;
+}
+
+/**
+ * Why (if at all) the NEXT turn should be forced to drop tools and emit its
+ * verdict now, instead of continuing to investigate. `near-budget`/
+ * `last-turn` are the pre-existing coarse checks (issue #836); `input-growth`
+ * is issue #839's own addition — see `computeWrapUpReason`.
+ */
+export type WrapUpReason = 'input-growth' | 'near-budget' | 'last-turn' | null;
+
+/**
+ * Decide whether an ordinary investigative turn should hand off to a forced,
+ * no-tools verdict turn next — and, when so, WHY (surfaced so a client can log
+ * the more surprising `input-growth` case for diagnosability).
+ *
+ * ISSUE #839: conversation history — system prompt + every prior turn's own
+ * response + every tool result — is re-sent in full on every request and is
+ * NEVER bounded by `max_tokens` (only a turn's OUTPUT is; see
+ * `turnMaxTokens`/`requestMaxTokens`). The pre-existing `near-budget` check
+ * only fires once CUMULATIVE spend crosses `NEAR_BUDGET_FRACTION` of the
+ * WHOLE budget — by which point the single forced-finish turn that follows
+ * can still re-send an arbitrarily large accumulated history as its own
+ * (budget-blind) input. That is exactly the mechanism behind the real
+ * doc-truth receipt this closes: 20,869 allocated / 56,430 spent (2.7x, PR
+ * #837's dogfood run) — two ordinary tool-calling turns stayed comfortably
+ * under 60%, then the forced-finish turn's OWN input cost (the now much
+ * larger history) alone blew the budget (see the `plugins-agent-budget.test.ts`
+ * / `plugins-agent-anthropic.test.ts` regression tests reproducing this exact
+ * shape).
+ *
+ * `input-growth` catches this earlier and is data-driven, not a retuned
+ * constant: conversation history only grows turn over turn (nothing is ever
+ * trimmed in this codebase — see `TOOL_RESULT_MAX_CHARS`'s per-call cap, but
+ * no whole-history trim), so THIS turn's own input cost is a conservative
+ * FLOOR on what the next turn's input will cost. If what's left of the budget
+ * can't even cover a repeat of this turn's own input, one more investigative
+ * round-trip cannot possibly complete inside it — force the wrap-up now,
+ * while the conversation is as small as it will ever again be, rather than
+ * let it grow through one or more further turns before the coarser
+ * `near-budget` fraction catches up. This bounds — but, because the
+ * forced-finish turn's own input is still real and still unbounded by
+ * `max_tokens`, cannot fully eliminate — the residual overshoot; see
+ * `turnMaxTokens`'s doc comment for the complementary output-side bound and
+ * `EXTRA_PASS_MIN_BUDGET_TOKENS`'s for the allocation-sizing complement.
+ * Verified NOT to change behavior on any pre-#839 budget test: every existing
+ * fixture crosses `near-budget` or `input-growth` at the same turn boundary
+ * (see the two clients' own test suites) — this is a strict, additive
+ * improvement, not a retuning of the existing thresholds.
+ *
+ * Checked before `near-budget`/`last-turn` so a fast, single-turn spike (a
+ * large pre-rendered worklist on turn 1, or one oversized tool result) is
+ * named precisely rather than folded into the generic near-budget bucket.
+ */
+export function computeWrapUpReason(input: WrapUpCheckInput): WrapUpReason {
+  const { totalTokens, turnInputTokens, maxTokenBudget, turn, maxTurns } = input;
+  const remaining = maxTokenBudget - totalTokens;
+  if (turnInputTokens >= remaining) return 'input-growth';
+  if (totalTokens >= maxTokenBudget * NEAR_BUDGET_FRACTION) return 'near-budget';
+  if (turn >= maxTurns - 1) return 'last-turn';
+  return null;
+}
+
+/**
+ * Log `computeWrapUpReason`'s new `input-growth` case for CI diagnosability —
+ * a no-op for `near-budget`/`last-turn`/`null` (the pre-#839 cases stay
+ * exactly as silent as before this fix). Called unconditionally by both
+ * clients right after computing the reason, so neither of their already-
+ * over-complexity-budget `run()` methods gains an inline branch just to
+ * decide whether to log (see `computeWrapUpReason`'s own call sites).
+ */
+export function logWrapUpReason(
+  logger: Logger,
+  reason: WrapUpReason,
+  turn: number,
+  turnInputTokens: number,
+  remainingBudget: number,
+): void {
+  if (reason !== 'input-growth') return;
+  logger.info(
+    `[agent] Turn ${turn}: this turn's own input (${turnInputTokens}) already meets/exceeds ` +
+      `the ${remainingBudget} tokens left of budget — forcing wrap-up now rather than risking ` +
+      'a further turn (issue #839 input-growth check)',
+  );
+}
+
 /**
  * Parse a boolean-ish env *disable* flag. Per-turn agent logging is ON by
  * default (so every review is diagnosable); only an explicit '0'/'false'

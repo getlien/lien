@@ -23,6 +23,8 @@ import {
   envDisabled,
   logTurn,
   extractFindingsWithReasoningFallback,
+  computeWrapUpReason,
+  logWrapUpReason,
 } from './agent-client-shared.js';
 
 // `envDisabled` is re-exported so its existing test import path
@@ -479,11 +481,23 @@ export class OpenAIAgentClient {
         break;
       }
 
-      // Approaching budget or last turn — nudge to wrap up.
-      // Threshold kept below the hard cap with headroom so a single capped
-      // tool result can't skip past the wrap-up window into the hard stop.
-      const nearBudget = totalTokens >= this.maxTokenBudget * 0.6;
-      const lastTurn = turn >= this.maxTurns - 1;
+      // Approaching budget, last turn, or (issue #839) this turn's own input
+      // already ate enough of the budget that another investigative
+      // round-trip can't fit — see `computeWrapUpReason`'s doc comment.
+      const wrapUpReason = computeWrapUpReason({
+        totalTokens,
+        turnInputTokens,
+        maxTokenBudget: this.maxTokenBudget,
+        turn,
+        maxTurns: this.maxTurns,
+      });
+      logWrapUpReason(
+        this.logger,
+        wrapUpReason,
+        turn,
+        turnInputTokens,
+        this.maxTokenBudget - totalTokens,
+      );
 
       // Process tool calls
       if (choice.finish_reason === 'tool_calls' && choice.message.tool_calls) {
@@ -494,7 +508,7 @@ export class OpenAIAgentClient {
           turnTrace,
           toolExecutor,
         );
-        if (nearBudget || lastTurn) {
+        if (wrapUpReason) {
           messages.push({ role: 'user', content: WRAP_UP_NUDGE });
           // Next turn is forced to emit a JSON verdict (no tools).
           forceFinish = true;

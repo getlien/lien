@@ -301,6 +301,35 @@ describe('OpenAIAgentClient budget handling', () => {
     expect(bodies).toHaveLength(3);
   });
 
+  it('forces wrap-up after a single turn whose own input already exhausts remaining budget — BEFORE the coarser near-budget fraction would fire (issue #839 input-growth check)', async () => {
+    // A large pre-rendered worklist can make even turn 1's own input cost
+    // most of a small extra-pass budget. Turn 1's input (11,500) leaves
+    // cumulative spend at 11,500 — still UNDER the 0.6 wrap-up fraction
+    // (12,000 on a 20,000 budget), so the pre-#839 near-budget-only check
+    // would NOT yet force a wrap-up and would let turn 2 keep investigating
+    // (growing conversation history further before any forced-finish turn).
+    // The input-growth check catches it a turn earlier: remaining budget
+    // (8,500) can't even cover a repeat of turn 1's own input, so turn 2 is
+    // forced to drop tools and emit its verdict right away.
+    const { bodies } = mockFetch([toolCallTurn(11_500), stopTurn(CLEAN_JSON, 2_000)]);
+    const { logger, lines } = capturingLogger();
+    const client = makeClient(20_000, logger);
+    const tools = [
+      { type: 'function', function: { name: 'read_file', description: 'd', parameters: {} } },
+    ];
+
+    const result = await client.run('sys', 'init', tools as never, noopTool);
+
+    expect(result.turns).toBe(2);
+    expect(bodies[1].tools).toBeUndefined(); // forced-finish: no tools offered
+    expect(bodies[1].response_format).toEqual({ type: 'json_object' });
+    // Bounded well under the 20,000 budget — no context-accumulation blowout,
+    // because the forced-finish turn fired while history was still small.
+    expect(result.usage.totalTokens).toBe(13_500);
+    expect(result.stopReason).toBe('completed');
+    expect(lines.some(l => l.includes('input-growth check'))).toBe(true);
+  });
+
   it('recovers a verdict via the json-forced summary-retry after a bail', async () => {
     // Loop bails on budget with no verdict; the retry returns raw JSON (as
     // response_format:json_object would) and must be parsed into a summary.

@@ -207,6 +207,38 @@ describe('AnthropicAgentClient extended thinking + retry forcing', () => {
     expect(createMock).toHaveBeenCalledTimes(3);
   });
 
+  it('forces wrap-up after a single turn whose own input already exhausts remaining budget — BEFORE the coarser near-budget fraction would fire (issue #839 input-growth check)', async () => {
+    // Parity with the OpenAI client's same fix. Turn 1's own input (11,500)
+    // leaves cumulative spend at 11,500 — still UNDER the 0.6 wrap-up
+    // fraction (12,000 on a 20,000 budget), so the pre-#839 near-budget-only
+    // check would NOT yet force a wrap-up. The input-growth check catches it
+    // a turn earlier: remaining budget (8,500) can't even cover a repeat of
+    // turn 1's own input, so turn 2 is forced to drop tools and emit its
+    // verdict right away — bounding the run well under budget instead of
+    // letting a third, much larger forced-finish turn compound the overshoot.
+    const verdict =
+      '```json\n{"findings":[],"summary":{"riskLevel":"low","overview":"ok","keyChanges":[]}}\n```';
+    createMock
+      .mockResolvedValueOnce(
+        msg([thinkingBlock('investigating'), toolUseBlock], 11_500, 0, 'tool_use'),
+      )
+      .mockResolvedValueOnce(msg([textBlock(verdict)], 2_000, 0, 'end_turn'));
+    const { logger, lines } = capturingLogger();
+
+    const result = await makeClient(20_000, logger).run(
+      'sys',
+      'init',
+      TOOLS as never,
+      async () => 'ok',
+    );
+
+    expect(result.turns).toBe(2);
+    expect(createMock.mock.calls[1][0].tool_choice).toEqual({ type: 'none' }); // forced-finish
+    expect(result.usage.totalTokens).toBe(13_500); // bounded — no blowout
+    expect(result.stopReason).toBe('completed');
+    expect(lines.some(l => l.includes('input-growth check'))).toBe(true);
+  });
+
   it('forces the retry with tool_choice:none + thinking (parity with the loop)', async () => {
     createMock
       .mockResolvedValueOnce(
