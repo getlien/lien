@@ -6,6 +6,7 @@ import {
   computeBlastRadiusRisk,
   detectLanguage,
   hasWholeModuleImports,
+  hasEnclosingNamespaceAccess,
   type BlastRadiusRisk,
   type CodeChunk,
 } from '@liendev/parser';
@@ -429,12 +430,23 @@ export function formatDependents(
  * wholeModuleImports`), an empty `tests` array is reported as honestly
  * undeterminable rather than as an absence of coverage: the file may be
  * heavily tested, but import-based matching structurally cannot tell (#869).
+ *
+ * Same honesty treatment for a language with `enclosingNamespaceAccess` set
+ * (C# — see that field's doc comment): a test file that only reaches this
+ * one via implicit enclosing-namespace access carries no relevant `using`,
+ * so it's structurally invisible to import-based matching too (#875) — even
+ * though C#'s *explicit* dotted usings still resolve normally (#866/#868),
+ * which is why this is a separate flag checked only as this empty-array
+ * fallback, not folded into `wholeModuleImports`.
  */
 export function formatTests(tests: string[], filepath?: string): string {
   if (tests.length === 0) {
     const language = filepath ? detectLanguage(filepath) : null;
     if (language && hasWholeModuleImports(language)) {
       return 'Test coverage not determinable from imports (whole-module import).';
+    }
+    if (language && hasEnclosingNamespaceAccess(language)) {
+      return 'Test coverage not determinable from imports (enclosing-namespace access).';
     }
     return 'No test coverage.';
   }

@@ -76,4 +76,21 @@ export interface LanguageDefinition {
    * been verified against real code.
    */
   wholeModuleImports?: boolean;
+
+  /**
+   * True when this language lets a nested namespace body reference an
+   * *enclosing* namespace's members unqualified, with no `using`/`import`
+   * directive at all (C# confirmed — see ECMA-334 simple-name resolution:
+   * `namespace AutoMapper.UnitTests { ... }` gets implicit access to
+   * `AutoMapper`'s public members purely because it's a dotted-nested
+   * namespace, never emitting an import for it). Unlike `wholeModuleImports`,
+   * this does NOT mean per-file import matching is universally useless for
+   * the language — C#'s dotted `using X.Y;` still resolves real per-file
+   * associations correctly (#866/#868) — so this must stay a *separate* flag
+   * a caller only consults as a last-resort, empty-associations fallback
+   * (see `hasEnclosingNamespaceAccess` and its one call site in
+   * `annotate-cmd.ts`'s `formatTests`), never folded into
+   * `wholeModuleImports` or `isUnresolvableWholeModuleImport` (#875).
+   */
+  enclosingNamespaceAccess?: boolean;
 }

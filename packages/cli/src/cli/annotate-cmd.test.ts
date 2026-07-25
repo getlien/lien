@@ -213,6 +213,23 @@ describe('formatTests', () => {
       'Test coverage: Tests/SessionTests.swift.',
     );
   });
+
+  // #875: C# lets a nested namespace body reach an *enclosing* namespace's
+  // members with zero `using` directive (AutoMapper.UnitTests -> AutoMapper),
+  // so import-based matching has no per-file signal for a test that only
+  // reaches its subject this way. Same honesty treatment as #869's Swift
+  // case, via the separate `enclosingNamespaceAccess` flag.
+  it('reports not-determinable (not "no coverage") for an empty array on a C# file', () => {
+    expect(formatTests([], 'src/AutoMapper/TypeMap.cs')).toBe(
+      'Test coverage not determinable from imports (enclosing-namespace access).',
+    );
+  });
+
+  it('a non-empty array on a C# file still lists the real tests, unaffected by the honesty branch', () => {
+    expect(formatTests(['src/UnitTests/Features.cs'], 'src/AutoMapper/TypeMap.cs')).toBe(
+      'Test coverage: src/UnitTests/Features.cs.',
+    );
+  });
 });
 
 describe('formatTestReminder', () => {

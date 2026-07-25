@@ -192,6 +192,27 @@ OPENROUTER_API_KEY=… ./packages/review/test/harness/sweep.sh
 OPENROUTER_API_KEY=… ./packages/review/test/harness/sweep.sh anthropic/claude-haiku-4.5 deepseek/deepseek-chat-v3.1
 ```
 
+## Reliability fixtures (main-pass completion, not a rule finding)
+
+These pin a run-COMPLETION regression rather than a specific finding — the
+`expect` closure is a minimal Tier-1 sanity check (the run engaged the diff
+at all), and the fixture's real signal is the harness's own pass/fail rate
+across `--votes`/`--calibrate` and the per-vote `--trace` output. Always
+tagged `characterization` (a model-reliability frontier, not a rule to push
+to 9/10 by prompt iteration).
+
+| Fixture | PR | Why |
+|---|---|---|
+| `incomplete-handling/pr845-json-dense-verdict-derailment` | #845 | Issue #829: on this JSON-dense diff, the main pass's own final turn (and both bounded summary-retry attempts) can emit prose instead of the required findings/summary JSON — reported honestly as `incomplete`, never a silent clean review. Real GH Actions incidents (runs 30113956762, 30114812093) reproduced 2026-07-25 in the harness itself: 1 of 3 fresh votes pre-fix derailed the same way (`finishReason:'length'` on both retries — truncated, not merely mis-parsed), 0 of 3 post-fix (`DEFAULT_PROVIDER_ROUTING.require_parameters`, `defaults.ts`). `config: { docTruthPass: false }` is baked into the captured fixture so a vote only pays for the main pass. |
+
+Regenerate:
+
+```bash
+npx tsx packages/review/test/harness/capture-pr.ts 845 \
+  packages/review/test/harness/fixtures/incomplete-handling/pr845-json-dense-verdict-derailment.fixture.json
+# then re-apply config: { docTruthPass: false } to the captured JSON (capture-pr.ts doesn't take a --config flag)
+```
+
 ## Captured fixtures aren't committed (size)
 
 Snapshot-captured fixtures are typically 10MB+ (a full repo's `repoChunks`).
