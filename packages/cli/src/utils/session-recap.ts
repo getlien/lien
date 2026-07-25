@@ -80,50 +80,63 @@ export interface SessionRecap {
 /**
  * Which blast-radius nudges shown THIS session were never followed by a
  * `get_dependents` naming the same file or symbol. Inverts `nudge-stats.ts`'s
- * blast matched-join: a blast `shown` (recorded by `api-delta-write.sh` at edit
- * time) counts as UNRESOLVED unless a `get_dependents` signal at/after its
- * earliest shown timestamp names the same symbol, or a file it was shown for.
+ * blast matched-join per **(file, symbol) pair**: a blast `shown` (recorded by
+ * `api-delta-write.sh` at edit time) counts as UNRESOLVED unless a
+ * `get_dependents` signal at/after its latest shown for that exact (file,
+ * symbol) names the same symbol OR the same file — the identical
+ * file-OR-symbol predicate `isActedOn`'s `blast` case uses.
+ *
+ * Keyed per (file, symbol), NOT by symbol alone: a same-named symbol changed in
+ * two different files is two distinct concerns, and a `get_dependents` for one
+ * file must not silently clear the other — matching the forward funnel, which
+ * evaluates each `shown` independently rather than folding files together.
  *
  * Pure. `sessionId` scopes to this session (the log accumulates across
- * sessions). Deduped by symbol, most-recently-shown first, so the cap keeps the
- * freshest concerns. A shown event with no `symbol` is skipped (can't render or
- * match it) — a silent miss in the safe direction.
+ * sessions). Most-recently-shown first, so the cap keeps the freshest concerns.
+ * A shown event with no `symbol` is skipped (can't render or match it) — a
+ * silent miss in the safe direction.
  */
 interface DepSignal {
   timeMs: number;
   file?: string;
   symbol?: string;
 }
-interface BlastShownInfo {
+interface BlastPairInfo {
+  symbol: string;
+  file?: string;
   earliestMs: number;
   latestMs: number;
-  files: Set<string>;
 }
 
-/** Fold one blast-shown observation into the per-symbol info map (first-seen / last-seen / files). */
+/** Map key for one (file, symbol) concern. `\0` can't appear in a path or identifier, so it's a safe joiner. */
+function blastPairKey(file: string | undefined, symbol: string): string {
+  return `${file ?? ''}\u0000${symbol}`;
+}
+
+/** Fold one blast-shown observation into its (file, symbol) entry (first-seen / last-seen). */
 function recordBlastShown(
-  map: Map<string, BlastShownInfo>,
+  map: Map<string, BlastPairInfo>,
   symbol: string,
+  file: string | undefined,
   timeMs: number,
-  file?: string,
 ): void {
-  const cur = map.get(symbol);
+  const key = blastPairKey(file, symbol);
+  const cur = map.get(key);
   if (!cur) {
-    map.set(symbol, { earliestMs: timeMs, latestMs: timeMs, files: new Set(file ? [file] : []) });
+    map.set(key, { symbol, file, earliestMs: timeMs, latestMs: timeMs });
     return;
   }
   cur.earliestMs = Math.min(cur.earliestMs, timeMs);
   cur.latestMs = Math.max(cur.latestMs, timeMs);
-  if (file) cur.files.add(file);
 }
 
-/** Split this-session events into get_dependents signals and per-symbol blast-shown info. */
+/** Split this-session events into get_dependents signals and per-(file, symbol) blast-shown info. */
 function collectBlastSessionState(
   events: NudgeEvent[],
   sessionId: string,
-): { deps: DepSignal[]; shownBySymbol: Map<string, BlastShownInfo> } {
+): { deps: DepSignal[]; shownByPair: Map<string, BlastPairInfo> } {
   const deps: DepSignal[] = [];
-  const shownBySymbol = new Map<string, BlastShownInfo>();
+  const shownByPair = new Map<string, BlastPairInfo>();
   for (const e of events) {
     if (e.sessionId !== sessionId) continue;
     const t = Date.parse(e.timestamp);
@@ -131,18 +144,25 @@ function collectBlastSessionState(
     if (e.kind === 'signal' && e.signal === 'get_dependents') {
       deps.push({ timeMs: t, file: e.file, symbol: e.symbol });
     } else if (e.kind === 'shown' && e.nudge === 'blast' && e.symbol) {
-      recordBlastShown(shownBySymbol, e.symbol, t, e.file);
+      recordBlastShown(shownByPair, e.symbol, e.file, t);
     }
   }
-  return { deps, shownBySymbol };
+  return { deps, shownByPair };
 }
 
-/** A blast concern is acted-on when some get_dependents at/after its first shown names its symbol or a shown file. */
-function isBlastActed(deps: DepSignal[], symbol: string, info: BlastShownInfo): boolean {
+/**
+ * A (file, symbol) concern is acted-on when some get_dependents at/after its
+ * LATEST shown names its symbol OR its file — the exact file-OR-symbol predicate
+ * `nudge-stats.ts`'s forward blast join uses, applied per (file, symbol) so a
+ * signal for one file never clears a same-named symbol's concern in another.
+ * Using the latest shown means a re-warning after an earlier check re-opens it
+ * (⇔ the forward join has ≥1 unacted shown for the pair).
+ */
+function isBlastActed(deps: DepSignal[], pair: BlastPairInfo): boolean {
   return deps.some(
     s =>
-      s.timeMs >= info.earliestMs &&
-      (s.symbol === symbol || (s.file !== undefined && info.files.has(s.file))),
+      s.timeMs >= pair.latestMs &&
+      (s.symbol === pair.symbol || (pair.file !== undefined && s.file === pair.file)),
   );
 }
 
@@ -150,12 +170,15 @@ export function computeUnactedBlastNudges(
   events: NudgeEvent[],
   sessionId: string,
 ): BlastRecapItem[] {
-  const { deps, shownBySymbol } = collectBlastSessionState(events, sessionId);
+  const { deps, shownByPair } = collectBlastSessionState(events, sessionId);
   const unacted: Array<BlastRecapItem & { latestMs: number }> = [];
-  for (const [symbol, info] of shownBySymbol) {
-    if (isBlastActed(deps, symbol, info)) continue;
-    const file = [...info.files][0];
-    unacted.push({ symbol, ...(file ? { file } : {}), latestMs: info.latestMs });
+  for (const pair of shownByPair.values()) {
+    if (isBlastActed(deps, pair)) continue;
+    unacted.push({
+      symbol: pair.symbol,
+      ...(pair.file ? { file: pair.file } : {}),
+      latestMs: pair.latestMs,
+    });
   }
   return unacted
     .sort((a, b) => b.latestMs - a.latestMs)

@@ -7,6 +7,17 @@ verbatim from `lien verify-tests report`) measurably changes whether a Sonnet
 subagent's next action is to run the named associated tests, relative to an
 identical prompt with no advisory.
 
+> **What this experiment measured vs. what ships today.** The A/B captured the
+> **legacy single-source** advisory — `test-verify-stop.sh` shelling out to
+> `lien verify-tests report`. Today `recap-stop.sh` invokes `lien recap`, which
+> folds this unrun-tests advisory into a consolidated
+> [session risk-ledger recap](../architecture/session-risk-recap.md). The text
+> measured here is byte-identical to a **tests-only** recap (no unresolved
+> complexity crossings or unacted blast-radius warnings); when those other
+> sources are also open, the recap prepends their sections above this one. So
+> this result speaks to the unrun-tests advisory specifically, not to the full
+> recap.
+
 **Headline result: null, for the same reason as the sibling blast-radius A/B.**
 Both conditions came back **8/8** on the primary metric — every trial,
 control and signal alike, chose to run both named test files via a scoped

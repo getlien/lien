@@ -151,7 +151,7 @@ Read this to understand the sibling nudge to `lien delta` and the blast-radius n
 The single Stop-time advisory that re-raises UNRESOLVED risk from the current session — unrun tests, live complexity crossings, and unacted `get_dependents` warnings — as one block. Replaces `test-verify-stop.sh`.
 
 Explains the consolidated finish-line surface:
-- `lien recap <--session>` CLI + the pure `session-recap.ts` join (all three sources are unresolved-only)
+- `lien recap --session <id>` CLI + the pure `session-recap.ts` join (all three sources are unresolved-only)
 - `plugins/claude/hooks/recap-stop.sh` — one `decision:block` per stop episode, both #843 loop-prevention layers kept
 - The delta-source decision: a LIVE working-tree recompute (not mining `delta-events.jsonl`, which has no session_id or before/after values)
 - Why the PreCompact half was dropped (no documented model-visible channel)

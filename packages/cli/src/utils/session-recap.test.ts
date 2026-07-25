@@ -90,14 +90,69 @@ describe('computeUnactedBlastNudges', () => {
     expect(computeUnactedBlastNudges(events, 's1')).toEqual([]);
   });
 
-  it('DEDUPE: multiple shown for the same symbol collapse to one, and an act on the later one clears it', () => {
+  it('DEDUPE: repeated shown for the same (file, symbol) collapse to one item', () => {
     const events = [
       blastShown('s1', at(1), { symbol: 'parseBar', file: 'src/bar.ts' }),
       blastShown('s1', at(3), { symbol: 'parseBar', file: 'src/bar.ts' }),
-      depSignal('s1', at(2), { symbol: 'parseBar' }),
+      depSignal('s1', at(4), { symbol: 'parseBar' }),
     ];
-    // earliest shown is at(1); the get_dependents at at(2) >= at(1) resolves it.
+    // A get_dependents after the LATEST shown clears the collapsed pair.
     expect(computeUnactedBlastNudges(events, 's1')).toEqual([]);
+  });
+
+  it('RE-WARNED: a check BETWEEN two shown for the same pair does not resolve the later warning', () => {
+    const events = [
+      blastShown('s1', at(1), { symbol: 'parseBar', file: 'src/bar.ts' }),
+      depSignal('s1', at(2), { symbol: 'parseBar' }),
+      blastShown('s1', at(3), { symbol: 'parseBar', file: 'src/bar.ts' }),
+    ];
+    // Latest shown is at(3); the check at at(2) precedes it, so the pair stays
+    // unacted — exactly what the forward funnel counts (shown@3 unacted).
+    expect(computeUnactedBlastNudges(events, 's1')).toEqual([
+      { symbol: 'parseBar', file: 'src/bar.ts' },
+    ]);
+  });
+
+  // The three matched-join cases, mirroring nudge-stats.ts's forward blast join
+  // (a signal clears a shown on relative-file match OR symbol match).
+  it('MATCHED-JOIN: an unrelated get_dependents (other file AND other symbol) does not clear it', () => {
+    const events = [
+      blastShown('s1', at(1), { symbol: 'parse', file: 'src/a.ts' }),
+      depSignal('s1', at(2), { symbol: 'other', file: 'src/other.ts' }),
+    ];
+    expect(computeUnactedBlastNudges(events, 's1')).toEqual([
+      { symbol: 'parse', file: 'src/a.ts' },
+    ]);
+  });
+
+  it('MATCHED-JOIN: same-file, DIFFERENT-symbol get_dependents clears it (file match)', () => {
+    const events = [
+      blastShown('s1', at(1), { symbol: 'parse', file: 'src/a.ts' }),
+      depSignal('s1', at(2), { symbol: 'unrelated', file: 'src/a.ts' }),
+    ];
+    expect(computeUnactedBlastNudges(events, 's1')).toEqual([]);
+  });
+
+  it('MATCHED-JOIN: same-symbol, DIFFERENT-file get_dependents clears it (symbol match)', () => {
+    const events = [
+      blastShown('s1', at(1), { symbol: 'parse', file: 'src/a.ts' }),
+      depSignal('s1', at(2), { symbol: 'parse', file: 'src/b.ts' }),
+    ];
+    expect(computeUnactedBlastNudges(events, 's1')).toEqual([]);
+  });
+
+  it('CONFLATION FIX: a same-named symbol in two files, cleared for only one, keeps the other', () => {
+    // The bug the (file, symbol) keying fixes: a get_dependents naming ONLY
+    // src/a.ts (no symbol) must not clear the distinct concern in src/b.ts —
+    // the forward funnel leaves shown(parse, b.ts) unacted, so must the recap.
+    const events = [
+      blastShown('s1', at(1), { symbol: 'parse', file: 'src/a.ts' }),
+      blastShown('s1', at(2), { symbol: 'parse', file: 'src/b.ts' }),
+      depSignal('s1', at(3), { file: 'src/a.ts' }), // file-only signal, no symbol
+    ];
+    expect(computeUnactedBlastNudges(events, 's1')).toEqual([
+      { symbol: 'parse', file: 'src/b.ts' },
+    ]);
   });
 
   it('ORDER: most-recently-shown symbol comes first', () => {
