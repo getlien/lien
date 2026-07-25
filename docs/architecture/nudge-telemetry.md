@@ -122,7 +122,7 @@ which is the honest direction for this metric; inflation is not.
 | --- | --- |
 | `shown{annotate}` | `annotate-read.sh`, after it emits a (non-empty) annotation |
 | `shown{blast}` | `api-delta-write.sh`, after it emits a warning (records the edited file + the primary changed symbol) |
-| `shown{test-verify}` | `test-verify-stop.sh`, after the advisory fires |
+| `shown{test-verify}` | `lien recap` (recap-cmd.ts), when the recap blocks and its tests section fired |
 | `signal{get_dependents/get_files_context}` | `nudge-signal.sh` (PostToolUse on the Lien MCP tools) |
 | `signal{test_run}` | `lien verify-tests note-run` (reusing its one classification) |
 

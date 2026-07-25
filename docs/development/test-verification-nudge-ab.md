@@ -1,10 +1,22 @@
 # Behavioral A/B: does the "tests not run" advisory change what an agent does next?
 
 A small, pre-registered experiment testing whether FEATURE 2's real Stop
-advisory (as rendered by `plugins/claude/hooks/test-verify-stop.sh`, sourced
+advisory (as rendered by `plugins/claude/hooks/test-verify-stop.sh` — since
+superseded by `recap-stop.sh` / `lien recap` — sourced
 verbatim from `lien verify-tests report`) measurably changes whether a Sonnet
 subagent's next action is to run the named associated tests, relative to an
 identical prompt with no advisory.
+
+> **What this experiment measured vs. what ships today.** The A/B captured the
+> **legacy single-source** advisory — `test-verify-stop.sh` shelling out to
+> `lien verify-tests report`. Today `recap-stop.sh` invokes `lien recap`, which
+> folds this unrun-tests advisory into a consolidated
+> [session risk-ledger recap](../architecture/session-risk-recap.md). The text
+> measured here is byte-identical to a **tests-only** recap (no unresolved
+> complexity crossings or unacted blast-radius warnings); when those other
+> sources are also open, the recap prepends their sections above this one. So
+> this result speaks to the unrun-tests advisory specifically, not to the full
+> recap.
 
 **Headline result: null, for the same reason as the sibling blast-radius A/B.**
 Both conditions came back **8/8** on the primary metric — every trial,
@@ -29,7 +41,8 @@ record).
 > ### Hypothesis
 >
 > Injecting FEATURE 2's real Stop advisory (as rendered by
-> `test-verify-stop.sh`'s `reason`, sourced from `lien verify-tests report`)
+> `test-verify-stop.sh`'s `reason` (the hook now superseded by `recap-stop.sh`),
+> sourced from `lien verify-tests report`)
 > into a wrap-up prompt increases the rate at which the agent's next action
 > is to run the named associated tests, vs an identical prompt with no
 > advisory.
@@ -43,7 +56,7 @@ record).
 > `packages/core/src/bar.test.ts`, indexing it, running
 > `lien verify-tests note-edit` for both files under one session, then
 > `lien verify-tests report --session <id>` — the exact command
-> `test-verify-stop.sh` shells out to for its `reason` field:
+> `test-verify-stop.sh` (now `recap-stop.sh`) shells out to for its `reason` field:
 >
 > ```
 > Before finishing: these files you edited this session have associated tests I

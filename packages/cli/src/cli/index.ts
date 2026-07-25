@@ -17,6 +17,7 @@ import { annotateCommand } from './annotate-cmd.js';
 import { gcCommand } from './gc.js';
 import { noteEditCommand, noteRunCommand, reportCommand } from './verify-tests-cmd.js';
 import { noteShownCommand, noteSignalCommand } from './nudge-cmd.js';
+import { recapCommand } from './recap-cmd.js';
 
 // Get version from package.json dynamically
 const __filename = fileURLToPath(import.meta.url);
@@ -127,6 +128,15 @@ program
   )
   .option('--format <type>', 'Output format: text, json', 'text')
   .action(statsCommand);
+
+program
+  .command('recap')
+  .description(
+    'Session risk-ledger recap: at Stop, re-raise UNRESOLVED risk from this session (unrun tests, live complexity crossings, unacted get_dependents warnings) as one advisory (for the plugin Stop hook)',
+  )
+  .option('--session <id>', 'Session ID to recap')
+  .option('--format <type>', 'Output format: text, json', 'text')
+  .action(recapCommand);
 
 const configCmd = program
   .command('config')

@@ -14,8 +14,10 @@
  * rather than accumulated indefinitely — there is no cross-session history to
  * report on.
  *
- * Kill switch: `LIEN_TEST_VERIFY=off` disables recording only; reading
- * (`readSession`) is never gated by it, so a report requested after the
+ * Kill switch: `LIEN_TEST_VERIFY=off` disables edit/run recording only; the
+ * recap's loop-prevention `blocked` marker (`recordBlocked`) is written
+ * regardless, governed by `LIEN_RECAP` at the call site instead. Reading
+ * (`readSession`) is never gated by either, so a report requested after the
  * switch was flipped mid-session still sees whatever was recorded before.
  */
 
@@ -36,7 +38,7 @@ export type TestLedgerEvent =
 // *[!A-Za-z0-9_-]*)` guard.
 const SESSION_ID_RE = /^[A-Za-z0-9_-]+$/;
 
-/** `LIEN_TEST_VERIFY=off` disables recording only. Reading is never gated by this. */
+/** `LIEN_TEST_VERIFY=off` disables edit/run recording only (recordBlocked is exempt — see its note). Reading is never gated by this. */
 export function testVerifyEnabled(): boolean {
   return process.env.LIEN_TEST_VERIFY !== 'off';
 }
@@ -51,12 +53,12 @@ export function testSessionFilePath(rootDir: string, sessionId: string): string 
   return path.join(testSessionsDir(rootDir), `${sessionId}.jsonl`);
 }
 
-async function appendEvent(
+/** Raw append — mkdir + append one JSONL line, best-effort. NOT gated by any kill switch. */
+async function writeEvent(
   rootDir: string,
   sessionId: string,
   event: TestLedgerEvent,
 ): Promise<void> {
-  if (!testVerifyEnabled()) return;
   const filePath = testSessionFilePath(rootDir, sessionId);
   if (!filePath) return;
   try {
@@ -65,6 +67,16 @@ async function appendEvent(
   } catch {
     // Best-effort: recording must never break the hook that triggered it.
   }
+}
+
+/** Append a test-verify recording event (edit/run) — gated by `LIEN_TEST_VERIFY=off`. */
+async function appendEvent(
+  rootDir: string,
+  sessionId: string,
+  event: TestLedgerEvent,
+): Promise<void> {
+  if (!testVerifyEnabled()) return;
+  await writeEvent(rootDir, sessionId, event);
 }
 
 /** Record that `file` was edited and has associated `tests` (never called for a file with no associated tests — see verify-tests-cmd.ts). */
@@ -106,7 +118,13 @@ export async function recordRun(
  * that field turns out to be absent or unreliable).
  */
 export async function recordBlocked(rootDir: string, sessionId: string): Promise<void> {
-  await appendEvent(rootDir, sessionId, { kind: 'blocked', timestamp: new Date().toISOString() });
+  // Deliberately NOT gated by `LIEN_TEST_VERIFY`: the `blocked` event is the
+  // Stop-recap loop-prevention marker (see `wasRecentlyBlocked`/`runReport` in
+  // verify-tests-cmd.ts and the recap command in recap-cmd.ts). The Stop recap
+  // has its own master kill switch, `LIEN_RECAP=off`, checked at the call site;
+  // recording the marker must survive `LIEN_TEST_VERIFY=off` so a delta/blast-only
+  // recap still suppresses its own re-nag on the next Stop.
+  await writeEvent(rootDir, sessionId, { kind: 'blocked', timestamp: new Date().toISOString() });
 }
 
 function isValidTestLedgerEvent(value: unknown): value is TestLedgerEvent {

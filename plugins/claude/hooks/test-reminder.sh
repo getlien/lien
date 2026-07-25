@@ -16,8 +16,8 @@
 # byte-identical text to the old `lien annotate <file> --tests-only` (both
 # call `formatTestReminder`); the difference is a side effect, not a text
 # change: it ALSO records the edit into FEATURE 2's session-scoped test ledger
-# (`test-sessions/<sessionId>.jsonl`), read back by `test-verify-stop.sh` at
-# session Stop — see docs/architecture/test-verification-nudge.md. Silent
+# (`test-sessions/<sessionId>.jsonl`), read back by the session recap
+# (`recap-stop.sh` / `lien recap`) at session Stop — see docs/architecture/test-verification-nudge.md. Silent
 # when the file has no associated tests. TTL-suppressed per file per session
 # (same touchfile pattern and `annotated-sessions/` directory as
 # `annotate-read.sh`, so the existing SessionStart/SessionEnd GC covers this

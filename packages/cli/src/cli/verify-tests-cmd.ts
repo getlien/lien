@@ -99,7 +99,8 @@ export async function noteRunCommand(options: NoteRunOptions): Promise<void> {
   await runFailOpen(() => runNoteRun(options));
 }
 
-function splitSessionEvents(events: TestLedgerEvent[]): {
+/** Split a session ledger into a per-file edit map (last-write-wins) and classified runs. Exported for reuse by `lien recap`. */
+export function splitSessionEvents(events: TestLedgerEvent[]): {
   edits: Map<string, string[]>;
   runs: TestRunClassification[];
 } {
