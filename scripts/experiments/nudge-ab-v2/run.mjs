@@ -310,6 +310,19 @@ function cmdCheck() {
 // off-switch) from injecting "Lien impact for … <named dependents>" into both
 // arms. cfg.dir === null tells runClaude not to override CLAUDE_CONFIG_DIR.
 const PLUGIN_DISABLE = { 'lien@lien': false };
+// Lien plugin MCP tool/rule vocabulary that the blast NUDGE never contains — so
+// its appearance in the probe's instruction self-report means plugin
+// instructions leaked (they must not, under --strict-mcp-config + plugin disable).
+const PLUGIN_INSTRUCTION_TERMS = [
+  'get_files_context',
+  'search_code',
+  'list_functions',
+  'find_similar',
+  'get_complexity',
+  'testassociations',
+  'test association',
+  'complexityheadroom',
+];
 function runConfig(tmp) {
   const emptyMcp = path.join(tmp, 'empty-mcp.json');
   fs.writeFileSync(emptyMcp, JSON.stringify({ mcpServers: {} }));
@@ -496,9 +509,16 @@ function cmdProbeB1() {
       loggedOut: looksLoggedOut(transcript),
       myHooksFire: nudgeShown(dest, 'blast', sid),
       annotateFired: nudgeShown(dest, 'annotate', sid),
-      modelSawAnnotate: /Lien impact|hooks flagged/i.test(parsed.finalText),
+      sawAnnotateOutput: /lien impact|files import this/i.test(parsed.finalText),
       savedSettingsUntouched: before === after,
-      instructionContamination: contaminationScan(parsed.finalText),
+      // Instruction-leak = the Lien PLUGIN's own MCP tool/rule vocabulary that the
+      // blast NUDGE does NOT contain. (The nudge says "get_dependents"/"lien", so
+      // those are excluded — the model referencing the nudge is not contamination;
+      // it even reported get_dependents "doesn't exist in my toolset", confirming
+      // --strict-mcp-config worked.)
+      mcpInstructionLeak: PLUGIN_INSTRUCTION_TERMS.filter(t =>
+        parsed.finalText.toLowerCase().includes(t),
+      ),
     };
     console.log(redactAccount(JSON.stringify(result, null, 2)));
     verdictB1(result);
@@ -514,7 +534,7 @@ function verdictB1(r) {
   if (!r.savedSettingsUntouched)
     throw new Error("PROBE(b') FAILED: saved ~/.claude/settings.json CHANGED — abort");
   if (!r.myHooksFire) throw new Error("PROBE(b') FAILED: my explicit hooks did NOT fire — STOP");
-  const clean = !r.annotateFired && !r.modelSawAnnotate && r.instructionContamination.length === 0;
+  const clean = !r.annotateFired && !r.sawAnnotateOutput && r.mcpInstructionLeak.length === 0;
   if (!clean) {
     console.log(
       "PROBE(b') CONTAMINATED — plugin-disable override not honored. Both b'' and b' failed; STOP and report.",
