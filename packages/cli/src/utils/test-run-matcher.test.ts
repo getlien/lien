@@ -52,9 +52,18 @@ describe('classifyTestCommand — broad vs scoped classification table', () => {
     ['./gradlew test', true, true, []],
     ['./gradlew :exposed-core:test', true, true, []],
     ['gradlew test', true, true, []],
-    // Negative guard: a non-test Rake task must not be swallowed by the
-    // broad `rake test(:sub)?` recognition above.
+    // CodeRabbit review finding on PR #873: a real, common Gradle
+    // multi-task invocation (`clean test`) was previously unrecognized
+    // because the pattern required `test` immediately after `gradlew`.
+    ['./gradlew clean test', true, true, []],
+    ['gradlew build test', true, true, []],
+    ['./gradlew clean :exposed-core:test', true, true, []],
+    // Negative guards: a non-test Rake task must not be swallowed by the
+    // broad `rake test(:sub)?` recognition above, and a Gradle invocation
+    // with no `test` task at all must stay unrecognized.
     ['rake db:migrate', false, false, []],
+    ['./gradlew build', false, false, []],
+    ['./gradlew clean', false, false, []],
     // Not test runs at all.
     ['ls -la', false, false, []],
     ['git status', false, false, []],
