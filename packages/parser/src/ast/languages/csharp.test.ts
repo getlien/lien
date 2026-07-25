@@ -21,6 +21,11 @@ describe('C# Language', () => {
       expect(traverser.targetNodeTypes).toContain('constructor_declaration');
     });
 
+    it('should identify property_declaration and indexer_declaration as target nodes (#871)', () => {
+      expect(traverser.targetNodeTypes).toContain('property_declaration');
+      expect(traverser.targetNodeTypes).toContain('indexer_declaration');
+    });
+
     it('should identify class/interface/struct/record/enum as container types', () => {
       expect(traverser.containerTypes).toContain('class_declaration');
       expect(traverser.containerTypes).toContain('interface_declaration');
@@ -463,6 +468,126 @@ describe('C# Language', () => {
     });
   });
 
+  describe('Property/Indexer Extraction (#871)', () => {
+    it('should extract an accessor-list property ({ get; set; }) as a method-typed symbol', () => {
+      const code = `public class Person {
+    public string Name { get; set; }
+}`;
+      const root = mustParse(code, 'csharp');
+      const propNode = findNode(root, 'property_declaration')!;
+      const symbol = symbolExtractor.extractSymbol(propNode, code, 'Person');
+      expect(symbol).not.toBeNull();
+      expect(symbol!.name).toBe('Name');
+      expect(symbol!.type).toBe('method');
+      expect(symbol!.parentClass).toBe('Person');
+      expect(symbol!.signature).toContain('string Name');
+      expect(symbol!.signature).toContain('get;');
+      expect(symbol!.signature).toContain('set;');
+    });
+
+    it('should extract an expression-bodied property (=> …) as a method-typed symbol, contract-only', () => {
+      const code = `public class Features {
+    public int Count => _features?.Count ?? 0;
+}`;
+      const root = mustParse(code, 'csharp');
+      const propNode = findNode(root, 'property_declaration')!;
+      const symbol = symbolExtractor.extractSymbol(propNode, code, 'Features');
+      expect(symbol).not.toBeNull();
+      expect(symbol!.name).toBe('Count');
+      expect(symbol!.type).toBe('method');
+      expect(symbol!.signature).toContain('int Count');
+      expect(symbol!.signature).toContain('get;');
+      // Contract-only: the getter's expression is excluded, same principle as a
+      // method body being excluded from its signature.
+      expect(symbol!.signature).not.toContain('_features');
+    });
+
+    it('should extract a static property as a method-typed symbol', () => {
+      const code = `public class Config {
+    public static string StaticProp { get; set; }
+}`;
+      const root = mustParse(code, 'csharp');
+      const propNode = findNode(root, 'property_declaration')!;
+      const symbol = symbolExtractor.extractSymbol(propNode, code, 'Config');
+      expect(symbol).not.toBeNull();
+      expect(symbol!.name).toBe('StaticProp');
+      expect(symbol!.type).toBe('method');
+      expect(symbol!.signature).toContain('static string StaticProp');
+    });
+
+    it('should extract an interface property as a method-typed symbol', () => {
+      const code = `public interface IRepository {
+    string Name { get; set; }
+}`;
+      const root = mustParse(code, 'csharp');
+      const propNode = findNode(root, 'property_declaration')!;
+      const symbol = symbolExtractor.extractSymbol(propNode, code, 'IRepository');
+      expect(symbol).not.toBeNull();
+      expect(symbol!.name).toBe('Name');
+      expect(symbol!.type).toBe('method');
+      expect(symbol!.parentClass).toBe('IRepository');
+    });
+
+    it('should extract a get-only property as a method-typed symbol', () => {
+      const code = `public class InitOnly {
+    public int InitProp { get; init; }
+}`;
+      const root = mustParse(code, 'csharp');
+      const propNode = findNode(root, 'property_declaration')!;
+      const symbol = symbolExtractor.extractSymbol(propNode, code, 'InitOnly');
+      expect(symbol).not.toBeNull();
+      expect(symbol!.signature).toContain('get;');
+      expect(symbol!.signature).toContain('init;');
+    });
+
+    it('should extract a multi-line accessor-list property as a method-typed symbol', () => {
+      const code = `public class Wide {
+    public int Multi
+    {
+        get { return _x; }
+        set { _x = value; }
+    }
+}`;
+      const root = mustParse(code, 'csharp');
+      const propNode = findNode(root, 'property_declaration')!;
+      const symbol = symbolExtractor.extractSymbol(propNode, code, 'Wide');
+      expect(symbol).not.toBeNull();
+      expect(symbol!.name).toBe('Multi');
+      expect(symbol!.signature).toContain('int Multi');
+      expect(symbol!.signature).toContain('get;');
+      expect(symbol!.signature).toContain('set;');
+      // Contract-only: accessor bodies are excluded.
+      expect(symbol!.signature).not.toContain('_x');
+    });
+
+    it('should extract an indexer as a method-typed symbol named "this"', () => {
+      const code = `public class Container {
+    public int this[int index] { get { return 0; } set { } }
+}`;
+      const root = mustParse(code, 'csharp');
+      const indexerNode = findNode(root, 'indexer_declaration')!;
+      const symbol = symbolExtractor.extractSymbol(indexerNode, code, 'Container');
+      expect(symbol).not.toBeNull();
+      expect(symbol!.name).toBe('this');
+      expect(symbol!.type).toBe('method');
+      expect(symbol!.parentClass).toBe('Container');
+      expect(symbol!.signature).toContain('this[int index]');
+      expect(symbol!.signature).toContain('get;');
+      expect(symbol!.signature).toContain('set;');
+    });
+
+    it('should not treat record primary-constructor properties as property_declaration nodes', () => {
+      // Documents a deliberate non-coverage boundary: record positional
+      // properties (`record Person(string Name)`) are `parameter` nodes
+      // inside the record's `parameter_list`, not `property_declaration` —
+      // a different grammar shape, out of scope for #871.
+      const code = `public record Person(string Name, int Age);`;
+      const root = mustParse(code, 'csharp');
+      const propNode = findNode(root, 'property_declaration');
+      expect(propNode).toBeNull();
+    });
+  });
+
   describe('AST Chunking Integration', () => {
     it('should chunk C# methods with parentClass', () => {
       const content = `public class Calculator {
@@ -676,6 +801,72 @@ public class App {
       const executeChunk = chunks.find(c => c.metadata.symbolName === 'Execute');
       expect(executeChunk).toBeDefined();
       expect(executeChunk?.metadata.parentClass).toBe('Service');
+    });
+
+    it('should chunk a property as a method-typed symbol, distinct from the class chunk (#871)', () => {
+      const content = `public class Person {
+    public string Name { get; set; }
+    public int Age { get; set; }
+}`;
+
+      const chunks = chunkByAST('Person.cs', content);
+      // class + 2 properties, each its own chunk.
+      expect(chunks.length).toBeGreaterThanOrEqual(3);
+
+      const nameChunk = chunks.find(c => c.metadata.symbolName === 'Name');
+      expect(nameChunk).toBeDefined();
+      expect(nameChunk?.metadata.symbolType).toBe('method');
+      expect(nameChunk?.metadata.parentClass).toBe('Person');
+
+      const ageChunk = chunks.find(c => c.metadata.symbolName === 'Age');
+      expect(ageChunk).toBeDefined();
+      expect(ageChunk?.metadata.symbolType).toBe('method');
+    });
+
+    it('should chunk an expression-bodied property distinctly from an accessor-list one (#871)', () => {
+      const content = `public class Features {
+    private readonly List<string> _features;
+
+    public int Count => _features?.Count ?? 0;
+}`;
+
+      const chunks = chunkByAST('Features.cs', content);
+      const countChunk = chunks.find(c => c.metadata.symbolName === 'Count');
+      expect(countChunk).toBeDefined();
+      expect(countChunk?.metadata.symbolType).toBe('method');
+      expect(countChunk?.metadata.parentClass).toBe('Features');
+    });
+
+    it('should chunk an indexer as a method-typed symbol (#871)', () => {
+      const content = `public class Container {
+    public int this[int index] { get { return 0; } set { } }
+}`;
+
+      const chunks = chunkByAST('Container.cs', content);
+      const indexerChunk = chunks.find(
+        c => c.metadata.symbolName === 'this' && c.metadata.symbolType === 'method',
+      );
+      expect(indexerChunk).toBeDefined();
+      expect(indexerChunk?.metadata.parentClass).toBe('Container');
+    });
+
+    it('should NOT chunk record primary-constructor properties as separate symbols (#871, deliberate)', () => {
+      const content = `public record Point(int X, int Y) {
+    public double Distance() {
+        return Math.Sqrt(X * X + Y * Y);
+    }
+}`;
+
+      const chunks = chunkByAST('Point.cs', content);
+      // Only the record itself and its one real method are chunked; X/Y have
+      // no property_declaration chunk of their own (see the "should not treat
+      // record primary-constructor properties..." symbol-extraction test).
+      const propertyLikeChunks = chunks.filter(
+        c =>
+          c.metadata.symbolType === 'method' &&
+          (c.metadata.symbolName === 'X' || c.metadata.symbolName === 'Y'),
+      );
+      expect(propertyLikeChunks).toEqual([]);
     });
   });
 });

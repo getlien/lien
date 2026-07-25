@@ -6,7 +6,11 @@ import type {
   LanguageImportExtractor,
   LanguageSymbolExtractor,
 } from '../extractors/types.js';
-import { extractSignature, extractParameters } from '../extractors/symbol-helpers.js';
+import {
+  extractSignature,
+  extractParameters,
+  clampSignatureLength,
+} from '../extractors/symbol-helpers.js';
 import { calculateComplexity } from '../complexity/index.js';
 
 // =============================================================================
@@ -23,9 +27,28 @@ import { calculateComplexity } from '../complexity/index.js';
  *
  * Lambda expressions can appear in variable declarations:
  *   Action a = () => { ... };
+ *
+ * `property_declaration` and `indexer_declaration` are target nodes too
+ * (issue #871): properties are C#'s dominant public-API idiom (auto-props,
+ * expression-bodied props, DTO/POCO surfaces), and without a dedicated chunk
+ * per property, `api-delta`/`get_dependents`/`list_functions` are structurally
+ * blind to a property being removed or changing type. Chunked as
+ * `symbolType: 'method'` (see `extractPropertyInfo`) rather than a new
+ * `'property'` symbolType — no language emits `'property'` today, and adding
+ * one would ripple into `signature-delta.ts`, `complexity-delta.ts`, risk
+ * scoring, and formatters for a single language's gap. Record primary-
+ * constructor properties (`record Person(string Name)`) are NOT covered:
+ * the grammar represents them as plain `parameter` nodes inside the record's
+ * `parameter_list`, not `property_declaration` — a different, out-of-scope
+ * node shape.
  */
 export class CSharpTraverser implements LanguageTraverser {
-  targetNodeTypes = ['method_declaration', 'constructor_declaration'];
+  targetNodeTypes = [
+    'method_declaration',
+    'constructor_declaration',
+    'property_declaration',
+    'indexer_declaration',
+  ];
 
   containerTypes = [
     'class_declaration',
@@ -296,6 +319,8 @@ export class CSharpImportExtractor implements LanguageImportExtractor {
  * - struct_declaration (struct MyStruct {})
  * - record_declaration (record MyRecord(int X) {})
  * - enum_declaration (enum MyEnum {})
+ * - property_declaration (public string Name { get; set; } / public int Count => …)
+ * - indexer_declaration (public int this[int index] { get; set; })
  *
  * Call sites: invocation_expression (direct calls and obj.Method() calls)
  */
@@ -308,6 +333,8 @@ export class CSharpSymbolExtractor implements LanguageSymbolExtractor {
     'struct_declaration',
     'record_declaration',
     'enum_declaration',
+    'property_declaration',
+    'indexer_declaration',
   ];
 
   extractSymbol(node: SyntaxNode, content: string, parentClass?: string): SymbolInfo | null {
@@ -326,6 +353,9 @@ export class CSharpSymbolExtractor implements LanguageSymbolExtractor {
         return this.extractRecordInfo(node);
       case 'enum_declaration':
         return this.extractEnumInfo(node);
+      case 'property_declaration':
+      case 'indexer_declaration':
+        return this.extractPropertyInfo(node, content, parentClass);
       default:
         return null;
     }
@@ -392,6 +422,42 @@ export class CSharpSymbolExtractor implements LanguageSymbolExtractor {
       parentClass,
       signature: extractSignature(node, content),
       parameters: extractParameters(node, content),
+      complexity: calculateComplexity(node),
+    };
+  }
+
+  /**
+   * Extract a property or indexer as a `method`-typed symbol (Route A,
+   * issue #871 — see the rationale on `CSharpTraverser`). An indexer has no
+   * `name` field in the grammar (it's accessed via `this[...]`), so it is
+   * named literally `this`; C# forbids more than one indexer sharing a
+   * parameter signature, so this can't collide the way an overload-set
+   * already doesn't (same positional-pairing behavior as method overloads).
+   *
+   * The signature is built (not reused from `extractSignature`, which
+   * bounds itself on a `body` field that property/indexer nodes don't have)
+   * from the declaration head plus a normalized accessor shape, so a type
+   * change or accessor added/removed is a real signature change, but editing
+   * an expression-bodied getter's expression is not — mirroring how a
+   * method's body is excluded from its own signature.
+   */
+  private extractPropertyInfo(
+    node: SyntaxNode,
+    content: string,
+    parentClass?: string,
+  ): SymbolInfo | null {
+    const isIndexer = node.type === 'indexer_declaration';
+    const name = isIndexer ? 'this' : node.childForFieldName('name')?.text;
+    if (!name) return null;
+
+    return {
+      name,
+      type: 'method',
+      startLine: node.startPosition.row + 1,
+      endLine: node.endPosition.row + 1,
+      parentClass,
+      signature: extractPropertySignature(node, content),
+      parameters: isIndexer ? extractParameters(node, content) : undefined,
       complexity: calculateComplexity(node),
     };
   }
@@ -494,6 +560,50 @@ function extractCSharpReturnType(node: SyntaxNode): string | undefined {
   const typeNode = node.childForFieldName('returns');
   if (!typeNode) return undefined;
   return typeNode.text;
+}
+
+/**
+ * The declaration "head" of a property/indexer: everything up to whichever
+ * of its `accessors` (`{ get; set; }`) or `value` (`=> expr`) field comes
+ * first — e.g. "public int Count" for `public int Count => …` or
+ * "public int this[int index]" for an indexer. Neither node type has a
+ * `body` field, so `extractSignature`'s body-boundary trick doesn't apply
+ * directly; this is its property/indexer equivalent.
+ */
+function propertyHead(node: SyntaxNode, content: string): string {
+  const boundaries = [node.childForFieldName('accessors'), node.childForFieldName('value')].filter(
+    (n): n is SyntaxNode => n !== null,
+  );
+  const end =
+    boundaries.length > 0 ? Math.min(...boundaries.map(n => n.startIndex)) : node.endIndex;
+  return content.slice(node.startIndex, end).replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Accessor kinds (`get`/`set`/`init`/`add`/`remove`) present on a property or
+ * indexer, normalized so an expression-bodied property (`=> expr`, no
+ * `accessor_list`) reads as its semantic equivalent: get-only. This keeps
+ * the accessor *contract* in the signature while excluding the getter's
+ * actual expression, the same principle as excluding a method's body.
+ */
+function accessorKinds(node: SyntaxNode): string[] {
+  const accessorList = node.childForFieldName('accessors');
+  if (accessorList) {
+    return accessorList.namedChildren
+      .filter(child => child.type === 'accessor_declaration')
+      .map(child => child.childForFieldName('name')?.text)
+      .filter((kind): kind is string => !!kind);
+  }
+  return node.childForFieldName('value') ? ['get'] : [];
+}
+
+/** Full property/indexer signature: declaration head + normalized accessor shape. */
+function extractPropertySignature(node: SyntaxNode, content: string): string {
+  const head = propertyHead(node, content);
+  const kinds = accessorKinds(node);
+  const signature =
+    kinds.length > 0 ? `${head} { ${kinds.map(kind => `${kind};`).join(' ')} }` : head;
+  return clampSignatureLength(signature);
 }
 
 /**
