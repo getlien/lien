@@ -343,6 +343,14 @@ export function getCanonicalPath(filepath: string, workspaceRoot: string): strin
  * Swift Package Manager `Tests/` directory). Those checks are scoped to
  * `.swift` paths so behavior for other languages is unchanged.
  *
+ * .NET/xUnit/NUnit/MSTest use a `Tests` suffix glued onto a longer
+ * identifier rather than a delimited `test`/`spec` segment: project
+ * directories like `UnitTests/`, `IntegrationTests/`, `AutoMapper.DI.Tests/`
+ * and files like `ScopeTests.cs`, `ConfigurationFeatureTest.cs`. Those checks
+ * are scoped to `.cs` paths and are case-sensitive (`Tests`/`Test`, capital
+ * T) so `Latest.cs`/`Contest.cs` and a `latest/`-style directory are not
+ * misclassified, and no other language's behavior moves.
+ *
  * @param filepath - The file path to check
  * @returns True if the file is a test file
  */
@@ -352,6 +360,8 @@ export function isTestFile(filepath: string): boolean {
     /_(test|spec)\.[^/]+$/.test(filepath) ||
     /(^|[/\\])(test|tests|spec|specs|__tests__)[/\\]/.test(filepath) ||
     (/\.swift$/.test(filepath) &&
-      (/Tests?\.swift$/.test(filepath) || /(^|[/\\])Tests?[/\\]/.test(filepath)))
+      (/Tests?\.swift$/.test(filepath) || /(^|[/\\])Tests?[/\\]/.test(filepath))) ||
+    (/\.cs$/.test(filepath) &&
+      (/Tests?\.cs$/.test(filepath) || /(^|[/\\])[^/\\]*Tests[/\\]/.test(filepath)))
   );
 }
