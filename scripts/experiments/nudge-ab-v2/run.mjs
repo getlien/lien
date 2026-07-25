@@ -299,35 +299,21 @@ function cmdCheck() {
   }
 }
 
-// ---- isolated clean config dir + empty mcp -------------------------------
-// A throwaway config dir INSIDE the caller's mktemp `tmp` (outside the repo, never
-// committed). settings.json carries NO enabledPlugins and NO user rules, so the
-// ambient `lien@lien` plugin (hooks + MCP) does not load. Auth is restored by
-// seeding an ACCOUNT-ONLY .claude.json (userID + oauthAccount only) read from the
-// real ~/.claude.json at runtime — CC otherwise reports "not logged in" because a
-// fresh config dir lacks the account linkage. No mcpServers / projects /
-// enabledPlugins are copied, so the seed stays plugin- and MCP-free (the probe
-// proves it). The personal fields live only in this tmp dir and are deleted in
-// cleanup; they never enter the repo, .wip/, or any committed artifact.
-function seedAccountOnly(dir) {
-  const real = path.join(os.homedir(), '.claude.json');
-  const src = JSON.parse(fs.readFileSync(real, 'utf8'));
-  if (!src.oauthAccount) throw new Error('SEED FAILED: no oauthAccount in ~/.claude.json');
-  const seed = { userID: src.userID, oauthAccount: src.oauthAccount };
-  fs.writeFileSync(path.join(dir, '.claude.json'), JSON.stringify(seed));
-}
-
-function isolatedConfig(tmp) {
-  const dir = path.join(tmp, 'cc-config');
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(
-    path.join(dir, 'settings.json'),
-    JSON.stringify({ model: MODEL, includeCoAuthoredBy: false }, null, 2),
-  );
-  seedAccountOnly(dir);
+// ---- run/context config (the b' mechanism) -------------------------------
+// Clean context = the DEFAULT config dir (so macOS Keychain auth works — an
+// isolated CLAUDE_CONFIG_DIR reports "not logged in" because the OAuth token is
+// in the Keychain, not .claude.json) with the ambient `lien@lien` plugin
+// disabled FOR THE SPAWNED PROCESS ONLY via a per-invocation --settings
+// `enabledPlugins` override (leaves saved settings untouched — verified by
+// probe-b1), plus `--strict-mcp-config`, plus this checkout's explicit hooks.
+// Disabling the plugin is what stops the ambient annotate-read hook (no
+// off-switch) from injecting "Lien impact for … <named dependents>" into both
+// arms. cfg.dir === null tells runClaude not to override CLAUDE_CONFIG_DIR.
+const PLUGIN_DISABLE = { 'lien@lien': false };
+function runConfig(tmp) {
   const emptyMcp = path.join(tmp, 'empty-mcp.json');
   fs.writeFileSync(emptyMcp, JSON.stringify({ mcpServers: {} }));
-  return { dir, emptyMcp };
+  return { dir: null, emptyMcp };
 }
 
 function claudeArgs(prompt, sessionId, settingsFile, emptyMcp) {
@@ -399,38 +385,6 @@ function redactAccount(text) {
 }
 function writeArtifact(file, text) {
   fs.writeFileSync(file, redactAccount(text));
-}
-
-// ---- probe (mandatory precondition) --------------------------------------
-function cmdProbe() {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'nudge-ab-probe-'));
-  try {
-    const shimBin = makeLienShim(tmp);
-    const cfg = isolatedConfig(tmp);
-    const cwd = path.join(tmp, 'clean'); // clean, git-free, CLAUDE.md-free directory
-    fs.mkdirSync(cwd, { recursive: true });
-    assertNoAncestorClaudeMd(cwd);
-    const settingsFile = path.join(tmp, 'probe-settings.json');
-    fs.writeFileSync(settingsFile, JSON.stringify({ hooks: {} }));
-    const prompt = fs.readFileSync(path.join(KIT, 'prompts', 'probe.txt'), 'utf8');
-    const { stdout: out } = runClaude(prompt, randomUUID(), cwd, settingsFile, cfg, {}, shimBin);
-    fs.mkdirSync(OUT_ROOT, { recursive: true });
-    writeArtifact(path.join(OUT_ROOT, 'probe.jsonl'), out);
-    const hits = contaminationScan(out);
-    if (out.trim() === '')
-      throw new Error(
-        'PROBE FAILED: empty output (auth/plumbing problem with isolated config dir)',
-      );
-    if (looksLoggedOut(out))
-      throw new Error(
-        'PROBE FAILED: not logged in — auth does not survive the isolated config dir',
-      );
-    if (hits.length > 0) throw new Error(`PROBE FAILED (contaminated): ${hits.join(', ')}`);
-    fs.writeFileSync(path.join(OUT_ROOT, '.probe-passed'), new Date().toISOString());
-    console.log('PROBE PASSED — context clean, plumbing live. Arms may run.');
-  } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
 }
 
 // ---- b'' probe: DEFAULT config dir + --strict-mcp-config ------------------
@@ -611,8 +565,13 @@ function runTrial(expName, arm, idx, tmp, shimBin, cfg) {
   const exp = EXPERIMENTS[expName];
   const dest = path.join(tmp, `${expName}-${arm}-${idx}`);
   const env = materialize(exp.fixture, dest, shimBin, true);
+  assertNoAncestorClaudeMd(dest); // structural: no repo CLAUDE.md can load in the sandbox
   const settingsFile = path.join(dest, '.ab-settings.json');
-  fs.writeFileSync(settingsFile, JSON.stringify(exp.settings()));
+  // b' mechanism: disable the ambient plugin for this process; wire our hooks.
+  fs.writeFileSync(
+    settingsFile,
+    JSON.stringify({ ...exp.settings(), enabledPlugins: PLUGIN_DISABLE }),
+  );
   const sid = randomUUID();
   const task = fs.readFileSync(path.join(KIT, exp.task), 'utf8');
   const armEnv = { ...exp.baseEnv, ...exp.armEnv[arm] };
@@ -675,16 +634,20 @@ function saveTrial(expName, arm, idx, transcript, result) {
   writeArtifact(path.join(dir, `${idx}.json`), JSON.stringify(result, null, 2));
 }
 
+const B1_AUTH_MODE = 'default+plugindisable+strict-mcp';
 function cmdRun(expName) {
-  if (!fs.existsSync(path.join(OUT_ROOT, '.probe-passed'))) {
+  const modeFile = path.join(OUT_ROOT, '.auth-mode');
+  const passed = fs.existsSync(path.join(OUT_ROOT, '.probe-passed'));
+  const mode = passed && fs.existsSync(modeFile) ? fs.readFileSync(modeFile, 'utf8').trim() : '';
+  if (mode !== B1_AUTH_MODE) {
     throw new Error(
-      'Refusing to run: contamination probe has not passed. Run `node run.mjs probe` first.',
+      `Refusing to run: probe-b1 has not passed clean. Run \`node run.mjs probe-b1\` first (need auth-mode ${B1_AUTH_MODE}).`,
     );
   }
   if (!EXPERIMENTS[expName]) throw new Error(`unknown experiment: ${expName}`);
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), `nudge-ab-${expName}-`));
   const shimBin = makeLienShim(tmp);
-  const cfg = isolatedConfig(tmp);
+  const cfg = runConfig(tmp);
   const labels = seededOrder(
     Array.from({ length: N_PER_ARM }, (_, i) => [`on:${i}`, `off:${i}`]).flat(),
     INTERLEAVE_SEED,
@@ -811,7 +774,7 @@ function fisherOneSided(a, n1, c, n2) {
 function cmdSmoke() {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'nudge-ab-smoke-'));
   const shimBin = makeLienShim(tmp);
-  const cfg = isolatedConfig(tmp);
+  const cfg = runConfig(tmp);
   for (const expName of ['blast', 'verify']) {
     const r = runTrial(expName, 'on', 'smoke', tmp, shimBin, cfg);
     console.log(
@@ -831,16 +794,15 @@ function cmdSmoke() {
 function main() {
   const [, , cmd, ...rest] = process.argv;
   if (cmd === 'check') return cmdCheck();
-  if (cmd === 'probe') return cmdProbe();
-  if (cmd === 'probe-default') return cmdProbeDefault();
-  if (cmd === 'probe-b1') return cmdProbeB1();
+  if (cmd === 'probe-default') return cmdProbeDefault(); // b'' diagnostic (contaminated)
+  if (cmd === 'probe' || cmd === 'probe-b1') return cmdProbeB1(); // the run precondition
   if (cmd === 'smoke') return cmdSmoke();
   if (cmd === 'run') {
     const exp = rest[0];
     if (!exp) throw new Error('usage: run.mjs run <blast|verify>');
     return cmdRun(exp);
   }
-  console.log('usage: run.mjs <check|probe|probe-default|probe-b1|smoke|run <blast|verify>>');
+  console.log('usage: run.mjs <check|probe|probe-default|smoke|run <blast|verify>>');
   process.exit(cmd ? 1 : 0);
 }
 main();

@@ -140,25 +140,49 @@ offline rather than stalling on a network fetch. The test command is recorded by
 `test-run-note.sh` whether or not vitest exits zero, so the verify metric fires on the
 command being *issued and executed*, independent of the test's result.
 
-Clean context is enforced by three independent controls, all identical across arms:
+Clean context is enforced by three independent controls, all identical across arms.
+The chosen mechanism (call it **b'**) is empirically validated by `run.mjs probe-b1`;
+two rejected alternatives and why they failed are recorded in §3c.
 
-1. **Isolated config dir.** `CLAUDE_CONFIG_DIR` points at a throwaway `mktemp -d` dir
-   (outside the repo) with a minimal `settings.json` and **no `enabledPlugins` and no
-   user `rules/`**. This is what disables the ambient, user-level `lien@lien` plugin —
-   both its MCP *instructions* (the confound PR #844 discovered) and its *hooks* — for
-   the run. A fresh config dir otherwise reports **"Not logged in"** (CC reads the
-   account/OAuth linkage from `.claude.json`, which the fresh dir lacks), so the runner
-   seeds an **account-only** `.claude.json` — `userID` + `oauthAccount` **only**, read
-   from the real `~/.claude.json` at runtime, with **no `mcpServers`, no `projects`, no
-   `enabledPlugins`** — restoring auth while staying plugin- and MCP-free (the probe
-   proves the context stays clean). Those personal fields live only in the throwaway
-   dir, are deleted in cleanup, are redacted from every on-disk artifact, and never
-   enter the repo, `.wip/`, or any committed output.
-2. **Stripped MCP.** `--strict-mcp-config --mcp-config <{"mcpServers":{}}>` — belt and
-   braces; zero MCP servers, no Lien tool instructions.
-3. **Explicit hooks only.** The nudge under test is wired by absolute path via
-   `--settings` (see §4), so the experiment exercises **this checkout's** hook
-   scripts, not a commit-pinned plugin snapshot.
+1. **Default config dir + per-invocation plugin disable.** Trials run with the
+   **default** `CLAUDE_CONFIG_DIR` (unchanged), because macOS auth lives in the
+   **Keychain**, not in `.claude.json` — an *isolated* config dir reports "Not logged
+   in" no matter what account metadata is seeded (see §3c). The ambient user-level
+   `lien@lien` plugin is disabled **for the spawned process only** via a
+   per-invocation `--settings` override, `enabledPlugins: {"lien@lien": false}`. This
+   does **not** mutate the saved `~/.claude/settings.json` (the probe diffs it byte-for-
+   byte before/after). Disabling the plugin is what stops its **hooks** from firing —
+   critically `annotate-read`, which has no env kill switch and whose output literally
+   **names the out-of-file dependents** (`Lien impact for … src/checkout/cart.ts,
+   src/reports/invoice.ts`); if it fired it would hand both arms the exact fact the
+   blast nudge is meant to reveal.
+2. **Stripped MCP.** `--strict-mcp-config --mcp-config <{"mcpServers":{}}>` — zero MCP
+   servers, no Lien tool *instructions* (the confound PR #844 diagnosed).
+3. **Explicit hooks by absolute path.** The nudge under test is wired via `--settings`
+   to **this checkout's** hook scripts (not a commit-pinned plugin snapshot), and
+   `probe-b1` confirms these `--settings` hooks *do* fire in headless `-p` (nudge-events
+   ledger records the `blast` shown-event) while the disabled plugin's `annotate` does
+   not.
+
+Trials run inside fixture sandboxes under `mktemp` (outside the repo), and the runner
+asserts no `CLAUDE.md` exists in the cwd or any ancestor — so no repo instructions
+load. The one remaining ambient item is the user's `~/.claude/rules/context7.md`
+(unrelated to either nudged behavior, identical across arms — acceptable per the v1
+precedent). All on-disk artifacts are redacted of account fields (email/org UUIDs) read
+from `~/.claude.json` at runtime.
+
+### 3c. Rejected context mechanisms (for the record)
+
+- **(a) Isolated `CLAUDE_CONFIG_DIR` + account-only `.claude.json` seed** — *failed*.
+  A fresh config dir reports "Not logged in": the OAuth **token** is in the macOS
+  Keychain, and `oauthAccount` in `.claude.json` is only metadata, so seeding it does
+  not authenticate. (Copying the Keychain credential itself was ruled out as an
+  out-of-scope live-credential copy.)
+- **(b'') Default config dir + `--strict-mcp-config` alone** — *failed (contaminated)*.
+  `--strict-mcp-config` removes the plugin's MCP instructions, but its **hooks** still
+  fire in headless: `probe-default` showed the agent reporting "the hooks flagged …
+  invoice.ts and cart.ts, both untested," i.e. `annotate-read` injected the named
+  dependents into the context. Hence the plugin must be disabled outright (b').
 
 The hooks shell out to the bare `lien` binary; the runner puts a `lien` shim on
 `PATH` that resolves to this checkout's build (`packages/cli/dist/index.js`), so the
@@ -166,23 +190,27 @@ CLI under test is unambiguous.
 
 ### 3a. Mandatory contamination + plumbing probe (hard precondition)
 
-Before **any** arm runs, `run.mjs probe` executes one `claude -p` with the exact arm
-invocation (isolated config dir, stripped MCP, `--settings {hooks:{}}`) from a
-git-free, `CLAUDE.md`-free directory, asking the model to quote verbatim every project
-instruction / repo rule / tool-usage policy in its context (`prompts/probe.txt`,
-"…if there are none, reply NONE"). It **passes only if**:
+Before **any** arm runs, `run.mjs probe-b1` executes one `claude -p` with the **exact
+arm invocation** (default config dir, plugin disabled via `--settings`, stripped MCP,
+this checkout's blast hook wired) inside an indexed fixture sandbox. The prompt has the
+model list its context instructions verbatim, then Read and Edit `discount.ts` — so the
+ambient plugin's Read/Edit hooks would fire *if* the disable didn't take. It **passes
+only if** (all via `verdictB1`):
 
-- the output is non-empty (proves auth + the isolated-config plumbing work), **and**
-- the output contains **none** of: `get_dependents`, `get_files_context`,
-  `search_code`, `claude.md`, `lien`, `blast radius`, `complexity threshold`,
-  `test association` (the frozen `contaminationScan` list), **and**
-- programmatically: no `CLAUDE.md` in the scenario dir or any ancestor up to `/`, and
-  the mcp-config is empty.
+- **auth works** — not "Not logged in"; **and**
+- **the plugin is off** — the nudge-events ledger has **no `annotate` event** and the
+  transcript shows no `Lien impact` / `hooks flagged` text; **and**
+- **our hooks fire** — the ledger **has the `blast` shown-event** (proves `--settings`
+  hooks fire in headless); **and**
+- **saved settings untouched** — `~/.claude/settings.json` is byte-identical
+  before/after; **and**
+- the model's answer contains none of the `contaminationScan` Lien terms.
 
-The runner writes a `.probe-passed` marker only on success and **refuses to run any
-arm without it**. The probe output is archived to `.wip/nudge-ab-v2/probe.jsonl`.
-(The user's ambient `~/.claude/rules/context7.md` is removed by control #1 above, so
-unlike PR #844 it is *not* present in this environment — a strictly cleaner context.)
+The runner writes `.probe-passed` + `.auth-mode = default+plugindisable+strict-mcp` only
+on success, and `cmdRun` **refuses to run any arm** unless that exact auth-mode marker is
+present. The probe transcript is archived (redacted) to `.wip/nudge-ab-v2/probe-b1.jsonl`.
+The ambient `~/.claude/rules/context7.md` remains present (identical across arms —
+acceptable per the v1 precedent).
 
 ### 3b. Hook-liveness precondition (zero-LLM)
 
@@ -374,14 +402,11 @@ npm ci && npm run build && npm run build:native -w @liendev/parser-native
 # 1. zero-LLM instrument check (free) — must pass
 node scripts/experiments/nudge-ab-v2/run.mjs check
 
-# 2. mandatory contamination + plumbing probe (1 claude call) — must pass
-node scripts/experiments/nudge-ab-v2/run.mjs probe
+# 2. mandatory contamination + plumbing probe (1 claude call, the b' mechanism)
+#    — must pass (writes .auth-mode=default+plugindisable+strict-mcp)
+node scripts/experiments/nudge-ab-v2/run.mjs probe-b1
 
-# 3. scoped-permission viability smoke (2 uncounted claude calls) — confirm
-#    trials complete under acceptEdits + the allowlist, no fatal denials
-node scripts/experiments/nudge-ab-v2/run.mjs smoke
-
-# 4. the arms (gated on the probe marker)
+# 3. the arms (gated on the b' auth-mode marker; §7 re-draw to N=10 valid)
 node scripts/experiments/nudge-ab-v2/run.mjs run blast
 node scripts/experiments/nudge-ab-v2/run.mjs run verify
 ```

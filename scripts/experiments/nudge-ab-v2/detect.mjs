@@ -155,11 +155,15 @@ export function verifyTranscriptRanTest(toolUses) {
 // --- contamination scan (both arms; hard-fail if hit in an OFF arm) --------
 // FROZEN. Any of these surfacing in a transcript means the clean-context
 // guarantee leaked (repo CLAUDE.md, Lien plugin MCP instructions, etc.).
+// NOTE: 'claude.md' is deliberately NOT a term. The repo-CLAUDE.md channel is
+// closed structurally (trials/probes run in fixture sandboxes with no CLAUDE.md
+// ancestor — asserted separately), and the substring false-positives on a model
+// merely *stating* "no CLAUDE.md is present." These are the Lien-plugin's own
+// rule/tool vocabulary, which is the actual instruction-contamination signal.
 const CONTAMINATION_TERMS = [
   'get_dependents',
   'get_files_context',
   'search_code',
-  'claude.md',
   'lien',
   'blast radius',
   'blast-radius',
