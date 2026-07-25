@@ -117,15 +117,17 @@ const RUNNER_PATTERNS: RegExp[] = [
   /^gradle\s+test(?=\s|$)/,
   // Gradle wrapper script (the near-universal per-project convention,
   // distinct from a globally-installed `gradle`). Gradle invocations commonly
-  // chain multiple task names before the one that matters (`clean test`,
-  // `build test`), so `(?:[\w.:-]+\s+)*` absorbs any number of leading
-  // bare/colon-namespaced task tokens — deliberately excluding `/` so a real
-  // scope-narrowing file argument is never swallowed as a "task". `(\S*:)?`
-  // then absorbs a Gradle task path like `:exposed-core:test` into the match
-  // itself so it is never mistaken for a scope-narrowing file token (it
-  // names no file). Requires the literal `test` task to actually be present
-  // (a bare `./gradlew clean` with no test task stays unrecognized).
-  /^(\.\/)?gradlew\s+(?:[\w.:-]+\s+)*(\S*:)?test(?=\s|$)/,
+  // chain multiple task names and flags before the one that matters
+  // (`clean test`, `--no-daemon test`, `-PmyProp=value test`), so
+  // `(?:[\w.:=-]+\s+)*` absorbs any number of leading bare/colon-namespaced
+  // task tokens and `-P`-style property flags — deliberately excluding `/`
+  // so a real scope-narrowing file argument is never swallowed as a "task".
+  // `(\S*:)?` then absorbs a Gradle task path like `:exposed-core:test` into
+  // the match itself so it is never mistaken for a scope-narrowing file
+  // token (it names no file). Requires the literal `test` task to actually
+  // be present (a bare `./gradlew clean` with no test task stays
+  // unrecognized).
+  /^(\.\/)?gradlew\s+(?:[\w.:=-]+\s+)*(\S*:)?test(?=\s|$)/,
   /^mvn\s+test(?=\s|$)/,
   /^nx\s+test(?:\s+\S+)?(?=\s|$)/,
 ];

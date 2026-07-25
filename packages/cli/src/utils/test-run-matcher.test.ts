@@ -58,6 +58,10 @@ describe('classifyTestCommand — broad vs scoped classification table', () => {
     ['./gradlew clean test', true, true, []],
     ['gradlew build test', true, true, []],
     ['./gradlew clean :exposed-core:test', true, true, []],
+    // CodeRabbit review follow-up: common Gradle flags before the test task.
+    ['./gradlew --no-daemon test', true, true, []],
+    ['./gradlew -q test', true, true, []],
+    ['./gradlew -PmyProp=value test', true, true, []],
     // Negative guards: a non-test Rake task must not be swallowed by the
     // broad `rake test(:sub)?` recognition above, and a Gradle invocation
     // with no `test` task at all must stay unrecognized.
