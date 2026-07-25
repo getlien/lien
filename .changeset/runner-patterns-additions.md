@@ -5,7 +5,8 @@
 `RUNNER_PATTERNS` in the did-you-run-the-tests nudge (`lien verify-tests
 note-run`) now recognizes each swept ecosystem's own standard test-invocation
 form: Ruby's Rake/Minitest convention (`rake test`, `rake test:core`,
-`bundle exec rake test[:sub]`), PHP's vendored/wrapped phpunit
+`bundle exec rake test:core`, or any other `test:<namespaced-task>` form),
+PHP's vendored/wrapped phpunit
 (`vendor/bin/phpunit`, `./vendor/bin/phpunit`) and Composer script alias
 (`composer test`), Swift's SwiftPM invocation (`swift test`, `swift test
 --filter X`), and the Gradle wrapper script (`./gradlew test`, `./gradlew
