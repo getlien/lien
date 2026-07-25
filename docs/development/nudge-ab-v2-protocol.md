@@ -111,10 +111,34 @@ silent. `recap-stop.sh` wraps that report text as `{"decision":"block","reason":
 
 ## 3. Execution environment (frozen)
 
-Each trial is one headless, agentic `claude -p` run **with tools enabled** (Edit,
-Write, Read, Bash, Grep, Glob), from inside the trial's scenario dir. This is the
-core departure from v1, whose trials were tool-free single-turn generations: the v2
-metrics are about what the agent *does* in a repo, so it must be able to act.
+Each trial is one headless, agentic `claude -p` run **with a scoped, explicit tool
+allowlist**, from inside the trial's scenario dir. This is the core departure from v1,
+whose trials were tool-free single-turn generations: the v2 metrics are about what the
+agent *does* in a repo, so it must be able to act.
+
+**Permissions (frozen, identical in both arms).** Trials run with
+`--permission-mode acceptEdits` (auto-accepts file edits inside the throwaway sandbox)
+plus an **explicit `--allowedTools` allowlist** — *not* `bypassPermissions`. The
+allowlist is `Read, Grep, Glob, Edit, Write, MultiEdit` plus a curated set of scoped
+`Bash(<prefix>:*)` rules covering exactly a trial's legitimate actions: read-only
+inspection/search (`grep`, `rg`, `git grep`, `cat`, `ls`, `find`, `sed`, …) — the
+blast metric's measured behavior — and the fixture's test runner (`npx vitest`,
+`vitest`, `npm test`/`npm run test`, `node --test`, `tsc`) — the verify metric's
+measured behavior. It excludes arbitrary shell (no `rm`/`curl`/`wget`/`install`/
+network). Because the allowlist is byte-identical across arms, any denial is a
+constant that differences out; in headless `-p` a non-allowlisted call is
+denied-and-continues (never an interactive stall), and **every denial is logged per
+arm** (`detect.mjs` `collectDenials`) so arm-symmetry is verifiable in the summary.
+The exact list lives in `run.mjs` (`ALLOWED_TOOLS`). The scoped config's viability was
+confirmed before the counted run via `run.mjs smoke` (one real tool-using ON trial per
+experiment; no fatal denial of a measured behavior).
+
+The verify fixture's `vitest` devDep is provisioned once into a cache and symlinked
+into each verify trial dir **after indexing** (so the index never walks
+`node_modules`), so a trial's `npx vitest run <path>` resolves locally and runs
+offline rather than stalling on a network fetch. The test command is recorded by
+`test-run-note.sh` whether or not vitest exits zero, so the verify metric fires on the
+command being *issued and executed*, independent of the test's result.
 
 Clean context is enforced by three independent controls, all identical across arms:
 
@@ -347,7 +371,11 @@ node scripts/experiments/nudge-ab-v2/run.mjs check
 # 2. mandatory contamination + plumbing probe (1 claude call) — must pass
 node scripts/experiments/nudge-ab-v2/run.mjs probe
 
-# 3. the arms (gated on the probe marker)
+# 3. scoped-permission viability smoke (2 uncounted claude calls) — confirm
+#    trials complete under acceptEdits + the allowlist, no fatal denials
+node scripts/experiments/nudge-ab-v2/run.mjs smoke
+
+# 4. the arms (gated on the probe marker)
 node scripts/experiments/nudge-ab-v2/run.mjs run blast
 node scripts/experiments/nudge-ab-v2/run.mjs run verify
 ```

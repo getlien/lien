@@ -171,3 +171,51 @@ export function contaminationScan(text) {
   const t = text.toLowerCase();
   return CONTAMINATION_TERMS.filter(term => t.includes(term));
 }
+
+// --- tool-permission denials (logged per arm; must difference out) --------
+// The allowlist is identical in both arms, so any denial is a constant, not a
+// confound. We record them so arm-symmetry can be verified after the run.
+const DENIAL_RE =
+  /permission|haven't granted|not allowed|requested permission|denied|isn't allowed/i;
+
+function denialText(content) {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content))
+    return content.map(c => (typeof c?.text === 'string' ? c.text : '')).join(' ');
+  return '';
+}
+
+function summarizeToolInput(tu) {
+  const i = tu.input || {};
+  return String(i.command || i.file_path || i.pattern || i.path || '').slice(0, 120);
+}
+
+function indexToolUseIds(objs) {
+  const map = new Map();
+  for (const obj of objs) {
+    const content = obj?.message?.content;
+    if (!Array.isArray(content)) continue;
+    for (const b of content)
+      if (b?.type === 'tool_use') map.set(b.id, { name: b.name, input: b.input });
+  }
+  return map;
+}
+
+function isDeniedResult(b) {
+  return b?.type === 'tool_result' && b.is_error && DENIAL_RE.test(denialText(b.content));
+}
+
+function denialsInObj(obj, idToTool) {
+  const content = obj?.message?.content;
+  if (!Array.isArray(content)) return [];
+  return content.filter(isDeniedResult).map(b => {
+    const tu = idToTool.get(b.tool_use_id) || {};
+    return { tool: tu.name || 'unknown', detail: summarizeToolInput(tu) };
+  });
+}
+
+export function collectDenials(text) {
+  const objs = parseLines(text);
+  const idToTool = indexToolUseIds(objs);
+  return objs.flatMap(obj => denialsInObj(obj, idToTool));
+}

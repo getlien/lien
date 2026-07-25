@@ -25,13 +25,60 @@ import {
   blastGenericSentiment,
   verifyTranscriptRanTest,
   contaminationScan,
+  collectDenials,
 } from './detect.mjs';
 
 // ---- FROZEN CONFIG -------------------------------------------------------
 const N_PER_ARM = 10; // justified in the protocol doc (detection-oriented power)
+const TRIAL_TIMEOUT_MS = 240000; // per-trial wall clock; a timeout ⇒ invalid trial (§7)
 const MODEL = 'sonnet';
 const INTERLEAVE_SEED = 20260725; // fixed; drives the arm order
-const ALLOWED_TOOLS = 'Edit,Write,Read,Bash,Grep,Glob';
+
+// Trials run with --permission-mode acceptEdits (auto-accepts file edits in the
+// sandbox) plus this EXPLICIT allowlist — NOT bypassPermissions. The list is
+// identical in both arms, so any denial is a constant that differences out; it
+// covers exactly what a legitimate trial does (read/search/edit + run the
+// fixture's test runner) and nothing else (no rm/curl/network/install). In
+// headless -p a non-allowlisted tool call is denied-and-continues (never an
+// interactive stall); denials are logged per arm for symmetry (see report()).
+const PERMISSION_MODE = 'acceptEdits';
+const ALLOWED_TOOLS = [
+  'Read',
+  'Grep',
+  'Glob',
+  'Edit',
+  'Write',
+  'MultiEdit',
+  // read-only inspection + search — the blast metric's measured behavior
+  'Bash(grep:*)',
+  'Bash(rg:*)',
+  'Bash(git grep:*)',
+  'Bash(git diff:*)',
+  'Bash(git log:*)',
+  'Bash(git status:*)',
+  'Bash(cat:*)',
+  'Bash(head:*)',
+  'Bash(tail:*)',
+  'Bash(ls:*)',
+  'Bash(find:*)',
+  'Bash(sed:*)',
+  'Bash(awk:*)',
+  'Bash(wc:*)',
+  'Bash(pwd:*)',
+  'Bash(echo:*)',
+  // the fixture's test runner + typecheck — the verify metric's measured behavior
+  'Bash(npx vitest:*)',
+  'Bash(vitest:*)',
+  'Bash(npm test:*)',
+  'Bash(npm run test:*)',
+  'Bash(npm t:*)',
+  'Bash(node --test:*)',
+  'Bash(node --check:*)',
+  'Bash(npx tsc:*)',
+  'Bash(tsc:*)',
+  'Bash(pnpm test:*)',
+  'Bash(yarn test:*)',
+];
 
 const KIT = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(KIT, '..', '..', '..');
@@ -118,8 +165,27 @@ function seededOrder(labels, seed) {
   return a;
 }
 
+// One-time: install the verify fixture's devDeps (vitest) into a cache, so a
+// trial's `npx vitest run <path>` resolves LOCALLY and runs offline rather than
+// stalling on a network fetch. Symlinked into each verify trial dir.
+const VERIFY_NM_CACHE = path.join(OUT_ROOT, 'verify-nm');
+function ensureVerifyDeps() {
+  const nm = path.join(VERIFY_NM_CACHE, 'node_modules');
+  if (fs.existsSync(path.join(nm, 'vitest'))) return nm;
+  fs.mkdirSync(VERIFY_NM_CACHE, { recursive: true });
+  fs.copyFileSync(
+    path.join(KIT, 'fixtures', 'verify', 'package.json'),
+    path.join(VERIFY_NM_CACHE, 'package.json'),
+  );
+  execFileSync('npm', ['install', '--no-audit', '--no-fund', '--silent'], {
+    cwd: VERIFY_NM_CACHE,
+    stdio: 'ignore',
+  });
+  return nm;
+}
+
 // ---- materialization -----------------------------------------------------
-function materialize(fixtureName, dest, shimBin) {
+function materialize(fixtureName, dest, shimBin, provision) {
   const src = path.join(KIT, 'fixtures', fixtureName);
   fs.cpSync(src, dest, { recursive: true });
   const env = { ...process.env, PATH: `${shimBin}:${process.env.PATH}` };
@@ -134,6 +200,10 @@ function materialize(fixtureName, dest, shimBin) {
   );
   const r = lien(['index'], dest, env);
   if (r.status !== 0) throw new Error(`index failed in ${dest}: ${r.stderr}`);
+  // Symlink deps AFTER indexing so the index never walks node_modules.
+  if (provision && fixtureName === 'verify') {
+    fs.symlinkSync(ensureVerifyDeps(), path.join(dest, 'node_modules'), 'dir');
+  }
   return env;
 }
 
@@ -146,7 +216,7 @@ function assert(cond, msg) {
 function checkBlast(tmp, shimBin) {
   console.log('[check] blast fixture');
   const dest = path.join(tmp, 'blast');
-  const env = materialize('blast', dest, shimBin);
+  const env = materialize('blast', dest, shimBin, false);
   const before = lien(
     ['api-delta', '--file', 'src/pricing/discount.ts', '--format', 'json'],
     dest,
@@ -182,7 +252,7 @@ function checkBlast(tmp, shimBin) {
 function checkVerify(tmp, shimBin) {
   console.log('[check] verify fixture');
   const dest = path.join(tmp, 'verify');
-  const env = materialize('verify', dest, shimBin);
+  const env = materialize('verify', dest, shimBin, false);
   const sid = 'checkverify01';
   const note = lien(
     ['verify-tests', 'note-edit', '--session', sid, '--file', 'src/order-status.ts'],
@@ -257,12 +327,13 @@ function claudeArgs(prompt, sessionId, settingsFile, emptyMcp) {
     '--mcp-config',
     emptyMcp,
     '--permission-mode',
-    'bypassPermissions',
-    '--allowedTools',
-    ALLOWED_TOOLS,
+    PERMISSION_MODE,
     '--output-format',
     'stream-json',
     '--verbose',
+    // variadic, kept LAST so it can't consume a following flag
+    '--allowedTools',
+    ...ALLOWED_TOOLS,
   ];
 }
 
@@ -279,8 +350,11 @@ function runClaude(prompt, sessionId, cwd, settingsFile, cfg, extraEnv, shimBin)
     env,
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
+    timeout: TRIAL_TIMEOUT_MS,
+    killSignal: 'SIGKILL',
   });
-  return res.stdout || '';
+  const timedOut = Boolean(res.error && res.error.code === 'ETIMEDOUT');
+  return { stdout: res.stdout || '', timedOut };
 }
 
 // ---- probe (mandatory precondition) --------------------------------------
@@ -295,7 +369,7 @@ function cmdProbe() {
   const settingsFile = path.join(tmp, 'probe-settings.json');
   fs.writeFileSync(settingsFile, JSON.stringify({ hooks: {} }));
   const prompt = fs.readFileSync(path.join(KIT, 'prompts', 'probe.txt'), 'utf8');
-  const out = runClaude(prompt, randomUUID(), cwd, settingsFile, cfg, {}, shimBin);
+  const { stdout: out } = runClaude(prompt, randomUUID(), cwd, settingsFile, cfg, {}, shimBin);
   fs.mkdirSync(OUT_ROOT, { recursive: true });
   fs.writeFileSync(path.join(OUT_ROOT, 'probe.jsonl'), out);
   const hits = contaminationScan(out);
@@ -333,38 +407,52 @@ function blastFired(dest, sid) {
 function runTrial(expName, arm, idx, tmp, shimBin, cfg) {
   const exp = EXPERIMENTS[expName];
   const dest = path.join(tmp, `${expName}-${arm}-${idx}`);
-  const env = materialize(exp.fixture, dest, shimBin);
+  const env = materialize(exp.fixture, dest, shimBin, true);
   const settingsFile = path.join(dest, '.ab-settings.json');
   fs.writeFileSync(settingsFile, JSON.stringify(exp.settings()));
   const sid = randomUUID();
   const task = fs.readFileSync(path.join(KIT, exp.task), 'utf8');
   const armEnv = { ...exp.baseEnv, ...exp.armEnv[arm] };
-  const transcript = runClaude(task, sid, dest, settingsFile, cfg, armEnv, shimBin);
+  const { stdout: transcript, timedOut } = runClaude(
+    task,
+    sid,
+    dest,
+    settingsFile,
+    cfg,
+    armEnv,
+    shimBin,
+  );
   const parsed = parseTranscript(transcript);
-  const result = scoreTrial(expName, arm, dest, sid, env, parsed, transcript);
+  const result = scoreTrial({ expName, arm, dest, sid, env, parsed, transcript, timedOut });
   saveTrial(expName, arm, idx, transcript, result);
   fs.rmSync(dest, { recursive: true, force: true });
   return result;
 }
 
-function scoreTrial(expName, arm, dest, sid, env, parsed, transcript) {
+function scoreTrial({ expName, arm, dest, sid, env, parsed, transcript, timedOut }) {
   const contamination = arm === 'off' ? contaminationScan(transcript) : [];
+  const denials = collectDenials(transcript);
   if (expName === 'blast') {
     const m = blastMetric(parsed.toolUses, parsed.finalText);
+    const fired = arm === 'off' ? true : blastFired(dest, sid);
     return {
       hit: m.hit,
       reasons: m.reasons,
       generic: blastGenericSentiment(parsed.finalText, m.hit),
-      valid: arm === 'off' ? true : blastFired(dest, sid),
+      valid: !timedOut && fired,
+      timedOut,
       contamination,
+      denials,
     };
   }
   const ran = verifyRanOracle(dest, sid, env);
   return {
     hit: ran,
     reasons: verifyTranscriptRanTest(parsed.toolUses).reasons,
-    valid: true,
+    valid: !timedOut,
+    timedOut,
     contamination,
+    denials,
   };
 }
 
@@ -395,8 +483,34 @@ function cmdRun(expName) {
     console.log(`[run] ${expName} ${arm} #${i}`);
     results[arm].push(runTrial(expName, arm, i, tmp, shimBin, cfg));
   }
+  redrawInvalids(expName, results, tmp, shimBin, cfg);
   fs.rmSync(tmp, { recursive: true, force: true });
   report(expName, results);
+}
+
+// §7: re-draw invalid trials (with fresh session ids) until each arm has
+// N_PER_ARM VALID trials, aborting if an arm exceeds the 20% invalid cap.
+function redrawInvalids(expName, results, tmp, shimBin, cfg) {
+  const cap = Math.ceil(0.2 * N_PER_ARM);
+  for (const arm of ['on', 'off']) {
+    let invalid = results[arm].filter(r => !r.valid).length;
+    let extra = 0;
+    while (results[arm].filter(r => r.valid).length < N_PER_ARM) {
+      if (invalid > cap) {
+        throw new Error(
+          `ABORT: ${expName} ${arm} exceeded invalid cap (${invalid} > ${cap}) — instrument failure, no result claimed`,
+        );
+      }
+      const id = `${arm}-redraw-${extra++}`;
+      console.log(`[redraw] ${expName} ${id}`);
+      const r = runTrial(expName, arm, id, tmp, shimBin, cfg);
+      results[arm].push(r);
+      if (!r.valid) invalid++;
+    }
+    if (invalid > cap) {
+      throw new Error(`ABORT: ${expName} ${arm} exceeded invalid cap (${invalid} > ${cap})`);
+    }
+  }
 }
 
 // ---- reporting -----------------------------------------------------------
@@ -409,6 +523,13 @@ function tally(rows) {
   };
 }
 
+function denialSummary(rows) {
+  const all = rows.flatMap(r => r.denials || []);
+  const byTool = {};
+  for (const d of all) byTool[d.tool] = (byTool[d.tool] || 0) + 1;
+  return { total: all.length, byTool };
+}
+
 function report(expName, results) {
   const on = tally(results.on);
   const off = tally(results.off);
@@ -417,10 +538,12 @@ function report(expName, results) {
   const separated = p < 0.05 && on.hits / Math.max(on.n, 1) > off.hits / Math.max(off.n, 1);
   const summary = {
     experiment: expName,
+    permissionMode: PERMISSION_MODE,
     on: `${on.hits}/${on.n}`,
     off: `${off.hits}/${off.n}`,
     invalid: { on: on.invalid, off: off.invalid },
     contaminationLeaks: leaks,
+    denials: { on: denialSummary(results.on), off: denialSummary(results.off) },
     fisherOneSidedP: Number(p.toFixed(4)),
     primarySeparated: separated,
     launchClaimPermitted: separated,
@@ -463,17 +586,39 @@ function fisherOneSided(a, n1, c, n2) {
   return Math.min(1, p);
 }
 
+// ---- smoke (scoped-mode viability, uncounted) ----------------------------
+// Runs one real tool-using ON trial per experiment under the exact scoped
+// permission config, so we can confirm trials COMPLETE (edits auto-accepted,
+// search + test-run allowed, no fatal denial of a measured behavior) before
+// spending on the counted arms. Not part of the frozen sample.
+function cmdSmoke() {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'nudge-ab-smoke-'));
+  const shimBin = makeLienShim(tmp);
+  const cfg = isolatedConfig(tmp);
+  for (const expName of ['blast', 'verify']) {
+    const r = runTrial(expName, 'on', 'smoke', tmp, shimBin, cfg);
+    console.log(
+      `[smoke] ${expName} on: hit=${r.hit} valid=${r.valid} timedOut=${r.timedOut} ` +
+        `denials=${r.denials.length} reasons=${JSON.stringify(r.reasons)}`,
+    );
+    if (r.denials.length) console.log(`         denied: ${JSON.stringify(r.denials)}`);
+  }
+  fs.rmSync(tmp, { recursive: true, force: true });
+  console.log('SMOKE done — inspect validity/denials above before the counted run.');
+}
+
 // ---- entry ---------------------------------------------------------------
 function main() {
   const [, , cmd, ...rest] = process.argv;
   if (cmd === 'check') return cmdCheck();
   if (cmd === 'probe') return cmdProbe();
+  if (cmd === 'smoke') return cmdSmoke();
   if (cmd === 'run') {
     const exp = rest[0];
     if (!exp) throw new Error('usage: run.mjs run <blast|verify>');
     return cmdRun(exp);
   }
-  console.log('usage: run.mjs <check|probe|run <blast|verify>>');
+  console.log('usage: run.mjs <check|probe|smoke|run <blast|verify>>');
   process.exit(cmd ? 1 : 0);
 }
 main();
