@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   analyzeDependencies,
   findReExportedSymbolsForFile,
+  chunkImportsFrom,
   COMPLEXITY_THRESHOLDS,
 } from './dependency-analyzer.js';
 import type { CodeChunk, ChunkMetadata } from './types.js';
@@ -593,5 +594,51 @@ describe('findReExportedSymbolsForFile', () => {
       }),
     ];
     expect(findReExportedSymbolsForFile(chunks, 'src/a.ts', identity)).toEqual(['ns']);
+  });
+});
+
+describe('chunkImportsFrom', () => {
+  const identity = (path: string): string => path;
+
+  function makeChunk(
+    file: string,
+    options: { imports?: string[]; importedSymbols?: Record<string, string[]> } = {},
+  ): CodeChunk {
+    return {
+      content: '',
+      metadata: {
+        file,
+        startLine: 1,
+        endLine: 10,
+        type: 'function',
+        language: 'typescript',
+        imports: options.imports,
+        importedSymbols: options.importedSymbols,
+      } as ChunkMetadata,
+    };
+  }
+
+  describe('whole-module-import basename hub (#884)', () => {
+    it('does not report a Swift whole-module bare import as importing a same-basename target (raw imports array)', () => {
+      const chunk = makeChunk('Tests/SessionTests.swift', { imports: ['Alamofire'] });
+      expect(chunkImportsFrom(chunk, 'Source/Alamofire', identity)).toBe(false);
+    });
+
+    it('does not report a Swift whole-module bare import as importing a same-basename target (importedSymbols keys)', () => {
+      const chunk = makeChunk('Tests/SessionTests.swift', {
+        importedSymbols: { Alamofire: ['Alamofire'] },
+      });
+      expect(chunkImportsFrom(chunk, 'Source/Alamofire', identity)).toBe(false);
+    });
+
+    it('still reports the identical shape for a non-whole-module language (Rust auth -> src/auth.rs)', () => {
+      const chunk = makeChunk('tests/auth_test.rs', { imports: ['auth'] });
+      expect(chunkImportsFrom(chunk, 'src/auth', identity)).toBe(true);
+    });
+
+    it('still reports a real import from a Swift file when it is not the bare whole-module case', () => {
+      const chunk = makeChunk('Tests/SessionTests.swift', { imports: ['./Networking/Session'] });
+      expect(chunkImportsFrom(chunk, 'Source/Networking/Session', identity)).toBe(true);
+    });
   });
 });

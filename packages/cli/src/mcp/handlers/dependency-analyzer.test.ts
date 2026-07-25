@@ -765,6 +765,31 @@ describe('findDependents', () => {
 
       expect(result.dependents.map(d => d.filepath)).toEqual(['Tests/SessionTests.swift']);
     });
+
+    it('does not resolve a symbol-level query through fileImportsSymbolFromAny via the same basename coincidence', async () => {
+      // SwiftImportExtractor.processImportSymbols records a bare `import
+      // Alamofire` as importedSymbols: { Alamofire: ['Alamofire'] } (the
+      // "symbol" is just the module's own name). A symbol-level query for
+      // that exact name must not resolve through the coincidental basename
+      // match either.
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('Source/Alamofire.swift', { exports: ['AF', 'AFInfo'] }),
+        createChunk('Tests/SessionTests.swift', {
+          imports: ['Alamofire'],
+          importedSymbols: { Alamofire: ['Alamofire'] },
+          callSites: [{ symbol: 'Alamofire', line: 3 }],
+        }),
+      ]);
+
+      const result = await findDependents(
+        mockDB as any,
+        'Source/Alamofire.swift',
+        mockLog,
+        'Alamofire',
+      );
+
+      expect(result.dependents).toHaveLength(0);
+    });
   });
 
   describe('import index caching', () => {

@@ -316,6 +316,11 @@ const MAX_REEXPORT_DEPTH = 3;
 /**
  * Check if a single chunk imports from the given source path.
  * Checks both `importedSymbols` keys and raw `imports` array.
+ *
+ * Skips bare whole-module imports (#884): for a `wholeModuleImports`
+ * language (Swift), a bare import can only ever match a target through
+ * basename coincidence, not a real per-file dependency — see
+ * `isUnresolvableWholeModuleImport`'s doc comment.
  */
 export function chunkImportsFrom(
   chunk: CodeChunk,
@@ -323,18 +328,15 @@ export function chunkImportsFrom(
   normalizePathCached: (path: string) => string,
 ): boolean {
   const importedSymbols = chunk.metadata.importedSymbols;
-  if (importedSymbols && typeof importedSymbols === 'object') {
-    for (const importPath of Object.keys(importedSymbols)) {
-      if (matchesFile(normalizePathCached(importPath), sourcePath)) return true;
-    }
-  }
+  const importedSymbolPaths =
+    importedSymbols && typeof importedSymbols === 'object' ? Object.keys(importedSymbols) : [];
+  const allImportPaths = [...importedSymbolPaths, ...(chunk.metadata.imports || [])];
 
-  const imports = chunk.metadata.imports || [];
-  for (const imp of imports) {
-    if (matchesFile(normalizePathCached(imp), sourcePath)) return true;
-  }
-
-  return false;
+  return allImportPaths.some(
+    imp =>
+      !isUnresolvableWholeModuleImport(imp, chunk.metadata.file) &&
+      matchesFile(normalizePathCached(imp), sourcePath),
+  );
 }
 
 /**

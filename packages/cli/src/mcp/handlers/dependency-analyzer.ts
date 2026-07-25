@@ -151,6 +151,11 @@ function buildReExportGraph(
 /**
  * Check if any chunk in the file imports the target symbol from any of the
  * given paths (direct target or re-exporter paths).
+ *
+ * Skips bare whole-module imports (#884): for a `wholeModuleImports`
+ * language (Swift), a bare import can only ever match a target through
+ * basename coincidence, not a real per-file dependency — see
+ * `isUnresolvableWholeModuleImport`'s doc comment.
  */
 function fileImportsSymbolFromAny(
   chunks: SearchResult[],
@@ -162,15 +167,14 @@ function fileImportsSymbolFromAny(
     const importedSymbols = chunk.metadata.importedSymbols;
     if (!importedSymbols) return false;
 
-    for (const [importPath, symbols] of Object.entries(importedSymbols)) {
+    return Object.entries(importedSymbols).some(([importPath, symbols]) => {
+      if (isUnresolvableWholeModuleImport(importPath, chunk.metadata.file)) return false;
       const normalizedImport = normalizePathCached(importPath);
       const matchesAny = targetPaths.some(tp => matchesFile(normalizedImport, tp));
-      if (matchesAny) {
-        if (symbols.includes(targetSymbol)) return true;
-        if (symbols.some(s => s.startsWith('* as '))) return true;
-      }
-    }
-    return false;
+      return (
+        matchesAny && (symbols.includes(targetSymbol) || symbols.some(s => s.startsWith('* as ')))
+      );
+    });
   });
 }
 
