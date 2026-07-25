@@ -36,6 +36,30 @@ function extractAliasedSymbolName(node: SyntaxNode): string | null {
   return dottedName?.text ?? null;
 }
 
+/**
+ * Locate the module-path node within a Python `import_from_statement`'s
+ * named children.
+ *
+ * Two grammar shapes:
+ * - Absolute (`from utils.validate import X`): the module path is a
+ *   top-level `dotted_name` (e.g. "utils.validate").
+ * - Relative (`from . import X`, `from .foo import X`, `from ..pkg import Y`):
+ *   the leading dots — and any dotted sub-path after them — are wrapped in a
+ *   single `relative_import` node (e.g. ".", ".foo", "..pkg"). The module's
+ *   own `dotted_name`, if any, is nested *inside* that node, not a sibling
+ *   of it, so it must not be matched directly here.
+ *
+ * Whichever shape applies, the module-path node is always the first named
+ * child — imported symbol names (`dotted_name`/`aliased_import`/
+ * `wildcard_import`) always come after it — so a single `findIndex` checking
+ * both node types is sufficient and always correct.
+ */
+function findModulePathIndex(node: SyntaxNode): number {
+  return node.namedChildren.findIndex(
+    child => child.type === 'relative_import' || child.type === 'dotted_name',
+  );
+}
+
 // =============================================================================
 // TRAVERSER
 // =============================================================================
@@ -179,14 +203,8 @@ export class PythonExportExtractor implements LanguageExportExtractor {
     return exports;
   }
 
-  private findModulePathIndex(node: SyntaxNode): number {
-    return node.namedChildren.findIndex(
-      child => child.type === 'relative_import' || child.type === 'dotted_name',
-    );
-  }
-
   private extractReExportNames(node: SyntaxNode, addExport: (name: string) => void): void {
-    const startIndex = this.findModulePathIndex(node);
+    const startIndex = findModulePathIndex(node);
     if (startIndex === -1) return;
 
     node.namedChildren.slice(startIndex + 1).forEach(child => {
@@ -216,9 +234,31 @@ export class PythonExportExtractor implements LanguageExportExtractor {
 export class PythonImportExtractor implements LanguageImportExtractor {
   readonly importNodeTypes = ['import_statement', 'import_from_statement'];
 
+  /**
+   * Extract the clean dotted module path for the `imports` list (used by
+   * test-association discovery and dependency analysis) — never the raw
+   * statement text. Delegates to `processImportSymbols()` so the `imports`
+   * list and the `importedSymbols` map are always derived from the same
+   * computation and can never disagree.
+   *
+   * Shapes:
+   * - `import os` -> "os"; `import os as system` -> "os" (module, not alias)
+   * - `import x.y` / `import x.y as z` -> "x.y"
+   * - `from utils.validate import X` -> "utils.validate"
+   * - Relative: `from . import X` -> "."; `from .foo import X` -> ".foo";
+   *   `from ..pkg import Y` -> "..pkg" (dots preserved — there's no file
+   *   context available here to resolve them against the importer's own
+   *   path, so the clean-but-unresolved dotted form is the best available
+   *   "path"; see `resolveRelativeImport()` in `../../utils/path-matching.js`
+   *   for why Python relative imports, unlike JS's `./`/`../`, pass through
+   *   that resolution step unchanged today).
+   *
+   * A statement with multiple comma-separated modules (`import a, b.c`)
+   * yields only the first (`"a"`) — a pre-existing limitation of
+   * `processPythonImport()`, not a new one introduced here.
+   */
   extractImportPath(node: SyntaxNode): string | null {
-    // Return the raw text for Python imports (used in the imports list)
-    return node.text.split('\n')[0];
+    return this.processImportSymbols(node)?.importPath ?? null;
   }
 
   processImportSymbols(node: SyntaxNode): { importPath: string; symbols: string[] } | null {
@@ -269,7 +309,7 @@ export class PythonImportExtractor implements LanguageImportExtractor {
   }
 
   private findModulePath(node: SyntaxNode): { path: string; startIndex: number } | null {
-    const index = node.namedChildren.findIndex(child => child.type === 'dotted_name');
+    const index = findModulePathIndex(node);
     if (index === -1) return null;
     return { path: node.namedChildren[index].text, startIndex: index };
   }
