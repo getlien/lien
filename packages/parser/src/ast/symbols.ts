@@ -10,18 +10,31 @@ import { resolveGoModuleImport } from '../go-module.js';
 /**
  * Per-project manifest-declared import-root mappings, threaded through as a
  * third specifier-resolution step (after relative-import and workspace-
- * package resolution) in `resolveImportSpecifier`. Built once per workspace
- * root in `ast/chunker.ts`'s `prepareASTContext` — see `../php-psr4.ts` and
- * `../go-module.ts` for how each map is read. At most one field is ever
- * populated for a given file (the language determines which manifest, if
- * any, applies), and both are optional so this is a no-op for every language
- * without a manifest reader.
+ * package resolution) in `resolveImportSpecifier` — EXCEPT for Rust, whose
+ * `rustCrateMap` is threaded straight into the import extractor instead (see
+ * its own doc comment below). Built once per workspace root in
+ * `ast/chunker.ts`'s `prepareASTContext` — see `../php-psr4.ts`,
+ * `../go-module.ts`, and `../rust-crate-map.ts` for how each map is read. At
+ * most one field is ever populated for a given file (the language determines
+ * which manifest, if any, applies), and all are optional so this is a no-op
+ * for every language without a manifest reader.
  */
 export interface ManifestRoots {
   /** PHP Composer PSR-4 namespace-prefix -> source-directory map. */
   psr4Map?: ReadonlyMap<string, string>;
   /** Go module's declared import-path prefix (`go.mod`'s `module` line). */
   goModulePrefix?: string;
+  /**
+   * Rust Cargo workspace crate name (underscore form) -> crate `src/` dir map
+   * (#903). Unlike `psr4Map`/`goModulePrefix`, this is NOT consumed by
+   * `resolveManifestRoot` below — Rust's extractor (`ast/languages/rust.ts`)
+   * must decide "internal vs. external crate" BEFORE it ever emits a
+   * specifier (a `crate::`/`self::`/`super::`-relative path is converted;
+   * anything else is dropped), so the map is passed straight into
+   * `extractImportPaths`/`processImportSymbols` as an extra argument instead
+   * of being applied as post-extraction string resolution.
+   */
+  rustCrateMap?: ReadonlyMap<string, string>;
 }
 
 /**
@@ -158,7 +171,7 @@ function extractImportPaths(
   const nodeTypeSet = new Set(importExtractor.importNodeTypes);
 
   for (const node of collectImportNodes(rootNode, nodeTypeSet)) {
-    for (const result of importExtractor.extractImportPaths(node)) {
+    for (const result of importExtractor.extractImportPaths(node, manifestRoots?.rustCrateMap)) {
       imports.push(resolveImportSpecifier(result, filepath, workspacePackages, manifestRoots));
     }
   }
@@ -244,7 +257,7 @@ function extractSymbolsWithExtractor(
   const nodeTypeSet = new Set(importExtractor.importNodeTypes);
 
   for (const node of collectImportNodes(rootNode, nodeTypeSet)) {
-    const result = importExtractor.processImportSymbols(node);
+    const result = importExtractor.processImportSymbols(node, manifestRoots?.rustCrateMap);
     if (result) {
       const key = resolveImportSpecifier(
         result.importPath,
