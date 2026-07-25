@@ -4,6 +4,8 @@ import { createVectorDB, ComplexityAnalyzer } from '@liendev/core';
 import {
   findTestAssociationsFromChunks,
   computeBlastRadiusRisk,
+  detectLanguage,
+  hasWholeModuleImports,
   type BlastRadiusRisk,
   type CodeChunk,
 } from '@liendev/parser';
@@ -351,7 +353,7 @@ function emitAnnotation(
   if (dependents.length > 0) {
     lines.push(`  • ${formatDependents(dependents, risk.level, risk.reasoning)}`);
   }
-  lines.push(`  • ${formatTests(tests)}`);
+  lines.push(`  • ${formatTests(tests, filepath)}`);
   if (complexity.warningCount > 0) {
     lines.push(`  • ${formatComplexity(complexity)}`);
   }
@@ -419,8 +421,23 @@ export function formatDependents(
   return `${count} ${noun} this — ${shown.join(', ')}${extra}; risk: ${level}${reason}.`;
 }
 
-export function formatTests(tests: string[]): string {
-  if (tests.length === 0) return 'No test coverage.';
+/**
+ * `filepath` is optional only for callers that genuinely have no file
+ * context (none exist today; kept optional so this stays a narrow,
+ * additive signature change). When present and its language is a
+ * whole-module-import language (Swift — see `LanguageDefinition.
+ * wholeModuleImports`), an empty `tests` array is reported as honestly
+ * undeterminable rather than as an absence of coverage: the file may be
+ * heavily tested, but import-based matching structurally cannot tell (#869).
+ */
+export function formatTests(tests: string[], filepath?: string): string {
+  if (tests.length === 0) {
+    const language = filepath ? detectLanguage(filepath) : null;
+    if (language && hasWholeModuleImports(language)) {
+      return 'Test coverage not determinable from imports (whole-module import).';
+    }
+    return 'No test coverage.';
+  }
   const shown = tests.slice(0, MAX_TESTS_LISTED).join(', ');
   const extra =
     tests.length > MAX_TESTS_LISTED ? ` (+${tests.length - MAX_TESTS_LISTED} more)` : '';

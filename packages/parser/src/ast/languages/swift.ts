@@ -446,6 +446,11 @@ export const swiftDefinition: LanguageDefinition = {
   exportExtractor: new SwiftExportExtractor(),
   importExtractor: new SwiftImportExtractor(),
   symbolExtractor: new SwiftSymbolExtractor(),
+  // Confirmed against real code (#869): `SwiftImportExtractor` extracts only
+  // the bare module path (`import Alamofire` -> `"Alamofire"`), never a
+  // per-file specifier, so import-based test-association can structurally
+  // never resolve a Swift test file to the specific source file it covers.
+  wholeModuleImports: true,
 
   complexity: {
     decisionPoints: [

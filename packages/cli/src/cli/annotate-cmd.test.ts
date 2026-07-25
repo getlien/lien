@@ -189,6 +189,30 @@ describe('formatTests', () => {
       'Test coverage: a.test.ts, b.test.ts (+2 more).',
     );
   });
+
+  // #869: whole-module-import languages (Swift confirmed) get an honest
+  // "not determinable" signal instead of the misleading "No test coverage."
+  // — import-based matching structurally cannot see per-file coverage for
+  // these languages, so an empty array does not mean untested.
+  it('reports not-determinable (not "no coverage") for an empty array on a Swift file', () => {
+    expect(formatTests([], 'Sources/Alamofire/Session.swift')).toBe(
+      'Test coverage not determinable from imports (whole-module import).',
+    );
+  });
+
+  it('still reports "No test coverage." for an empty array on a non-whole-module-import language', () => {
+    expect(formatTests([], 'src/user.ts')).toBe('No test coverage.');
+  });
+
+  it('still reports "No test coverage." for an empty array with no filepath given', () => {
+    expect(formatTests([])).toBe('No test coverage.');
+  });
+
+  it('a non-empty array on a Swift file still lists the real tests, unaffected by the honesty branch', () => {
+    expect(formatTests(['Tests/SessionTests.swift'], 'Sources/Alamofire/Session.swift')).toBe(
+      'Test coverage: Tests/SessionTests.swift.',
+    );
+  });
 });
 
 describe('formatTestReminder', () => {

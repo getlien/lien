@@ -2,6 +2,32 @@
 
 This document describes Lien's two-pass test detection system that links test files to their source files.
 
+> [!WARNING]
+> **Staleness note:** the two-pass system (convention detection + import
+> analysis) described below predates the current implementation and does not
+> match it. The shipped code runs a single import-based pass
+> (`findTestAssociationsFromChunks` in `packages/parser/src/test-associations.ts`)
+> uniformly across all registered languages — there is no separate
+> convention-matching pass, no per-tier language split, and no framework
+> detection. Swift is also absent from the language support matrix below
+> (added after this doc was last accurate). Treat the diagrams and accuracy
+> figures on this page as aspirational, not the current contract; this is
+> flagged for a dedicated doc-truth rewrite, not fixed here.
+>
+> **Whole-module-import languages (Swift): an honest limitation, not a
+> matching bug.** Swift test files import their subject as a whole module
+> (`import Alamofire`, `@testable import Alamofire`) rather than a specific
+> file or symbol path, so `chunk.metadata.imports` carries no per-file signal
+> the import-based matcher can resolve to a specific source file — this is a
+> structural gap ([#869](https://github.com/getlien/lien/issues/869)), not a
+> fixable false negative. Rather than reporting the misleading `No test
+> coverage.` on files that may in fact be heavily tested, `lien annotate`
+> reports `Test coverage not determinable from imports (whole-module
+> import).` for any language whose `LanguageDefinition.wholeModuleImports`
+> flag is set (checked via `hasWholeModuleImports()` in the language
+> registry). Only Swift sets this flag today; no other language's wording or
+> behavior changes.
+
 ## Overview
 
 Test association links each source file to the tests that cover it, so an AI assistant (or a developer) knows which tests to run after changing a given file.
