@@ -39,6 +39,14 @@ Both readers are intentionally narrow: parsed once per workspace root, cached, a
 
 Verified directly: a `composer.json` with `"GuzzleHttp\\": "src/"` correctly associates a test under `tests/` that imports `GuzzleHttp\Cookie\SetCookie` with `src/Cookie/SetCookie.php`, and a `go.mod` declaring `module example.com/gadget` correctly associates a test importing `example.com/gadget/internal/foo` with `internal/foo/foo.go`.
 
+## PHP fully-qualified class-name references
+
+PHP resolves a leading-`\` name absolutely, regardless of what's `use`-imported in scope — so a test can genuinely reference a class through `new \Foo\Bar\Baz(...)`, `\Foo\Bar\Baz::class`, or `\Foo\Bar\Baz::method()` with no corresponding `use` statement anywhere in the file, invisible to the declaration-based extraction above. `PHPImportExtractor.extractReferencedFQCNs` (`packages/parser/src/ast/languages/php.ts`) recursively scans a whole file for exactly those three expression shapes, requiring the class-name part to be a `qualified_name` node whose own text starts with `\` — genuinely unambiguous, unlike a "qualified but not fully-qualified" name (`Foo\Bar`, no leading `\`), which resolves relative to the current namespace or a `use` alias and is excluded as ambiguous. A fully-qualified single-segment name (`\DateTime`, `\Exception`) is also excluded, since it can only ever be a PHP built-in, never a Composer-autoloaded project file. The results are resolved through the exact same PSR-4 pipeline as a normal `use` import and merged in, deduplicated.
+
+Verified on a live guzzle/guzzle clone: `tests/ClientTest.php` references `\GuzzleHttp\Exception\ClientException::class` with no `use` import for it (it already imports `GuzzleHttp\Client`, not the exception), and now correctly appears in `src/Exception/ClientException.php`'s test-coverage list alongside the file's other, already-`use`-resolved test associations.
+
+This does not resolve the more common factory-indirection shape in the same codebase (see Known gaps below): a test that calls a factory method (`Middleware::retry()`) whose *internal implementation* — in a different file — is what actually names the concrete class (`RetryMiddleware`). No FQCN or `use` reference to that class exists anywhere in the test file itself for a single-file scan to find.
+
 ## Whole-module-import languages: an honest limitation
 
 Swift test files import their subject as a whole module (`import Alamofire`, `@testable import Alamofire`) rather than a specific file or symbol path, so there is no per-file signal for the matcher to resolve. This is a structural gap, not a fixable false negative: every test file in a module carries the identical bare-module import string.
@@ -59,7 +67,7 @@ These are structural: no import-level signal exists for the case, so the honest 
 
 - **Java static member imports and Kotlin top-level function/property imports** ([#864](https://github.com/getlien/lien/issues/864)): `import static pkg.Class.member;` (and the Kotlin equivalent for a top-level function or property) extracts a path one segment deeper than the file that defines it, so it does not match via `matchesFile`. Ordinary class-level imports in both languages are unaffected.
 - **C# enclosing-namespace references** ([#875](https://github.com/getlien/lien/issues/875)): a file in a sub-namespace can reference an enclosing namespace's members with no `using` statement at all, leaving no import signal. Only the dotted `using X.Y;` form resolves.
-- **PHP factory/FQCN usage** ([#878](https://github.com/getlien/lien/issues/878)): a test that reaches production code through a factory method or a fully-qualified class name at the call site, rather than a `use` import, leaves no import signal to match on.
+- **PHP factory-indirection usage** ([#878](https://github.com/getlien/lien/issues/878), partial): a direct fully-qualified class-name reference (`\Foo\Bar\Baz::class`, `new \Foo\Bar\Baz(...)`) is resolved (see above). What's left is a test that only ever names a *factory* (`Middleware::retry()`), where the factory's own implementation — in a different file — is what actually instantiates the concrete class. That needs reasoning across files, not just within one; still an honest no-signal gap.
 
 ## Where associations surface
 
