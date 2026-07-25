@@ -27,6 +27,23 @@ This document describes Lien's two-pass test detection system that links test fi
 > flag is set (checked via `hasWholeModuleImports()` in the language
 > registry). Only Swift sets this flag today; no other language's wording or
 > behavior changes.
+>
+> **C# enclosing-namespace resolution: the same honesty gap, a different
+> cause ([#875](https://github.com/getlien/lien/issues/875)).** A C#
+> namespace body gets implicit, unqualified access to every *enclosing*
+> namespace's public members — `namespace AutoMapper.UnitTests { ... }` can
+> reference `AutoMapper.TypeMap` with no `using` directive at all, per
+> ordinary C# name resolution. Confirmed against AutoMapper/AutoMapper:
+> 355/364 `UnitTests/` files rely on exactly this and carry no relevant
+> `using`, so they're structurally invisible to import-based matching. This
+> is distinct from Swift's `wholeModuleImports` gap: C#'s *explicit* dotted
+> `using AutoMapper.X;` still resolves real per-file associations normally
+> (the other 9/364 files, and the reason `wholeModuleImports` is not set for
+> C# — that flag would discard those working usings too). `lien annotate`
+> reports `Test coverage not determinable from imports (enclosing-namespace
+> access).` for any language whose `LanguageDefinition.enclosingNamespaceAccess`
+> flag is set (checked via `hasEnclosingNamespaceAccess()`). Only C# sets
+> this flag today.
 
 ## Overview
 

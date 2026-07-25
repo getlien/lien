@@ -634,6 +634,20 @@ export const csharpDefinition: LanguageDefinition = {
   exportExtractor: new CSharpExportExtractor(),
   importExtractor: new CSharpImportExtractor(),
   symbolExtractor: new CSharpSymbolExtractor(),
+  // Confirmed against real code (#875, AutoMapper/AutoMapper): a C# namespace
+  // body gets implicit, unqualified access to every *enclosing* namespace's
+  // public members (`namespace AutoMapper.UnitTests { ... }` can reference
+  // `AutoMapper.TypeMap` with zero `using` directive — standard C# simple-
+  // name resolution, not a convention). 355/364 of AutoMapper's UnitTests
+  // files rely on exactly this, carrying no relevant `using` at all, so
+  // import-based test-association has no per-file signal for them. This is
+  // NOT `wholeModuleImports`: the 9/364 files with a real dotted
+  // `using AutoMapper.X;` resolve correctly today via ordinary per-file
+  // matching (#866/#868). C# usings are dotted, not slashed, so EVERY C#
+  // import (including those real, working dotted ones) is "bare" by
+  // `isUnresolvableWholeModuleImport`'s slash check — setting
+  // `wholeModuleImports` here would discard all of them and regress #866.
+  enclosingNamespaceAccess: true,
 
   complexity: {
     decisionPoints: [
