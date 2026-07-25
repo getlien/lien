@@ -27,6 +27,7 @@ import {
   contaminationScan,
   collectDenials,
   looksLoggedOut,
+  editedTarget,
 } from './detect.mjs';
 
 // ---- FROZEN CONFIG -------------------------------------------------------
@@ -498,13 +499,18 @@ function scoreTrial({ expName, arm, dest, sid, env, parsed, transcript, timedOut
       denials,
     };
   }
+  // Verify: an empty `verify-tests report` only means "test ran" if the target
+  // was actually edited — otherwise a no-op/logged-out trial reads as a false
+  // positive. Require the edit for validity.
+  const edited = editedTarget(parsed.toolUses, EXPERIMENTS.verify.target);
   const ran = verifyRanOracle(dest, sid, env);
   return {
     hit: ran,
     reasons: verifyTranscriptRanTest(parsed.toolUses).reasons,
-    valid: usable,
+    valid: usable && edited,
     timedOut,
     loggedOut,
+    edited,
     contamination,
     denials,
   };

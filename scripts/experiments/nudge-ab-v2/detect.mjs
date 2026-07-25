@@ -181,6 +181,19 @@ export function looksLoggedOut(text) {
   return LOGGED_OUT_RE.test(text || '');
 }
 
+// Did the agent actually edit the target file? Guards the verify oracle: an
+// EMPTY `verify-tests report` means "test observed run" ONLY if the file was
+// really edited — a no-op/logged-out trial also produces an empty report and
+// must NOT be scored as a run (it is invalid instead).
+export function editedTarget(toolUses, targetPath) {
+  const base = targetPath.split('/').pop();
+  return toolUses.some(
+    tu =>
+      /^(edit|write|multiedit)$/i.test(tu.name || '') &&
+      String(tu.input?.file_path || '').includes(base),
+  );
+}
+
 // --- tool-permission denials (logged per arm; must difference out) --------
 // The allowlist is identical in both arms, so any denial is a constant, not a
 // confound. We record them so arm-symmetry can be verified after the run.
