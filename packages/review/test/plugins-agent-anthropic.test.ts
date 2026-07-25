@@ -214,15 +214,20 @@ describe('AnthropicAgentClient extended thinking + retry forcing', () => {
     // check would NOT yet force a wrap-up. The input-growth check catches it
     // a turn earlier: remaining budget (8,500) can't even cover a repeat of
     // turn 1's own input, so turn 2 is forced to drop tools and emit its
-    // verdict right away — bounding the run well under budget instead of
-    // letting a third, much larger forced-finish turn compound the overshoot.
+    // verdict right away.
+    //
+    // Turn 2's own input (13,000) is deliberately >= turn 1's (11,500): the
+    // client re-sends the FULL conversation history every request (`messages`
+    // is append-only, never trimmed), so a real turn's input_tokens can never
+    // be smaller than the turn before it. A non-monotonic mock here would
+    // assert a physically impossible sequence.
     const verdict =
       '```json\n{"findings":[],"summary":{"riskLevel":"low","overview":"ok","keyChanges":[]}}\n```';
     createMock
       .mockResolvedValueOnce(
         msg([thinkingBlock('investigating'), toolUseBlock], 11_500, 0, 'tool_use'),
       )
-      .mockResolvedValueOnce(msg([textBlock(verdict)], 2_000, 0, 'end_turn'));
+      .mockResolvedValueOnce(msg([textBlock(verdict)], 13_000, 0, 'end_turn'));
     const { logger, lines } = capturingLogger();
 
     const result = await makeClient(20_000, logger).run(
@@ -234,8 +239,18 @@ describe('AnthropicAgentClient extended thinking + retry forcing', () => {
 
     expect(result.turns).toBe(2);
     expect(createMock.mock.calls[1][0].tool_choice).toEqual({ type: 'none' }); // forced-finish
-    expect(result.usage.totalTokens).toBe(13_500); // bounded — no blowout
-    expect(result.stopReason).toBe('completed');
+    expect(createMock).toHaveBeenCalledTimes(2); // verdict recovered directly — no summary-retry needed
+    // Even the forced turn's own (still budget-blind) input cost (13,000) is
+    // enough, on top of turn 1's 11,500, to cross the 20,000 budget — the
+    // true benefit is NOT a smaller total spend (this fix cannot shrink a
+    // turn's own real cost), it's that the model was cut off ONE
+    // investigative round-trip earlier than the pre-#839 near-budget check
+    // alone would have allowed, and still produced a clean, directly-
+    // recovered verdict.
+    expect(result.usage.totalTokens).toBe(24_500);
+    expect(result.stopReason).toBe('budget');
+    expect(result.incomplete).toBe(false); // verdict parsed cleanly despite the budget stop
+    expect(result.summary).toBeDefined();
     expect(lines.some(l => l.includes('input-growth check'))).toBe(true);
   });
 

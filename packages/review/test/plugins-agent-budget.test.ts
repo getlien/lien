@@ -311,7 +311,15 @@ describe('OpenAIAgentClient budget handling', () => {
     // The input-growth check catches it a turn earlier: remaining budget
     // (8,500) can't even cover a repeat of turn 1's own input, so turn 2 is
     // forced to drop tools and emit its verdict right away.
-    const { bodies } = mockFetch([toolCallTurn(11_500), stopTurn(CLEAN_JSON, 2_000)]);
+    //
+    // Turn 2's own input (13,000) is deliberately >= turn 1's (11,500): the
+    // client re-sends the FULL conversation history every request (`messages`
+    // is append-only, never trimmed — see TOOL_RESULT_MAX_CHARS's per-call cap
+    // but no whole-history trim), so a real turn's prompt_tokens can never be
+    // smaller than the turn before it. A non-monotonic mock here would assert
+    // a physically impossible sequence and manufacture a rosier outcome than a
+    // real run could produce.
+    const { bodies } = mockFetch([toolCallTurn(11_500), stopTurn(CLEAN_JSON, 13_000)]);
     const { logger, lines } = capturingLogger();
     const client = makeClient(20_000, logger);
     const tools = [
@@ -323,10 +331,18 @@ describe('OpenAIAgentClient budget handling', () => {
     expect(result.turns).toBe(2);
     expect(bodies[1].tools).toBeUndefined(); // forced-finish: no tools offered
     expect(bodies[1].response_format).toEqual({ type: 'json_object' });
-    // Bounded well under the 20,000 budget — no context-accumulation blowout,
-    // because the forced-finish turn fired while history was still small.
-    expect(result.usage.totalTokens).toBe(13_500);
-    expect(result.stopReason).toBe('completed');
+    expect(bodies).toHaveLength(2); // verdict recovered from the forced turn itself — no summary-retry needed
+    // Even the forced turn's own (still budget-blind) input cost (13,000) is
+    // enough, on top of turn 1's 11,500, to cross the 20,000 budget — the
+    // true benefit here is NOT a smaller total spend (this input-growth fix
+    // cannot shrink a turn's own real cost, only decide sooner whether to risk
+    // another one), it's that the model was cut off ONE investigative
+    // round-trip earlier than the pre-#839 near-budget check alone would have
+    // allowed, and still produced a clean, directly-recovered verdict.
+    expect(result.usage.totalTokens).toBe(24_500);
+    expect(result.stopReason).toBe('budget');
+    expect(result.incomplete).toBe(false); // verdict parsed cleanly despite the budget stop
+    expect(result.summary).toBeDefined();
     expect(lines.some(l => l.includes('input-growth check'))).toBe(true);
   });
 
