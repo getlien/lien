@@ -294,6 +294,21 @@ describe('matchesFile - Path Boundary Checking', () => {
         expect(testMatchesFile('github.com/gin-gonic/gin/internal/fs', 'internal/fs')).toBe(true);
       });
 
+      it('Go: still rejects the bare-target shape even after #867 strips the module prefix', () => {
+        // #867 resolves the raw github.com/gin-gonic/gin/internal/fs import
+        // down to internal/fs (module prefix stripped). A bare, unrelated
+        // top-level "fs" target must still not tail-match it, even though
+        // only a single directory segment ("internal/") now precedes the
+        // match -- the same leniency that's correct for a bare *import*
+        // (Rust's auth -> src/auth.rs convention, strategy 2) is NOT
+        // legitimate for a bare *target* matched against a longer import
+        // (strategy 1): there's no confirmed real-world case for it, and
+        // it's exactly this bug's shape.
+        expect(testMatchesFile('internal/fs', 'fs')).toBe(false);
+        // The real relationship stays intact.
+        expect(testMatchesFile('internal/fs', 'internal/fs')).toBe(true);
+      });
+
       it('Ruby: a bare gem require must not fan out to every file under the gem directory', () => {
         // Every file under lib/sinatra/ must stop claiming a bare
         // `require 'sinatra'` as a match -- only the gem's own entry point

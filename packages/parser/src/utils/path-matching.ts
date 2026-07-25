@@ -96,12 +96,23 @@ export function matchesAtBoundary(str: string, pattern: string): boolean {
  *   continues into an unrelated subtree beyond the identifier, e.g. a bare
  *   `require 'sinatra'` matching every file under `lib/sinatra/` rather than
  *   just the gem's own entry point (`lib/sinatra.rb`).
- * - At most one directory segment may precede the match — the common "source
- *   directory prefix" convention (bare `auth` resolving to `src/auth.rs`).
- *   More than that is a coincidental name collision, not a real import
- *   relationship, e.g. a bare `import Combine` (system framework) matching
- *   `Source/Features/Combine.swift`, or a bare `fs` tail-matching
- *   `github.com/gin-gonic/gin/internal/fs`.
+ * - At most `maxLeadingSegments` directory segments may precede the match.
+ *   The two `matchesFile` call sites need different values here because a
+ *   bare identifier plays a different role in each direction:
+ *   - Strategy 2 passes 1, allowing the established "source directory
+ *     prefix" convention (a bare *import* like `auth` resolving to
+ *     `src/auth.rs`) — a real, confirmed pattern (see the Rust tests above).
+ *   - Strategy 1 passes 0 (i.e. no match beyond the exact-match check
+ *     already done in `matchesFile`), because there's no confirmed
+ *     legitimate case for a bare *target* (a short top-level file's own
+ *     basename) matching merely the tail of a longer, qualified import —
+ *     that shape is exactly the Go bug: a manifest-resolved import like
+ *     `internal/fs` (already module-prefix-stripped by #867) must not
+ *     tail-match an unrelated top-level `fs` target just because one leading
+ *     segment happens to precede it.
+ *   Both directions still reject a bare `import Combine` (system framework)
+ *   matching `Source/Features/Combine.swift` (2 leading segments, over
+ *   either threshold).
  *
  * Used only for `matchesFile`'s strategies 1/2, which compare the raw
  * import/target strings as given. A cleaned `./`/`../` relative import
@@ -110,11 +121,12 @@ export function matchesAtBoundary(str: string, pattern: string): boolean {
  * ambiguous external package/module/framework, so it doesn't need this extra
  * scrutiny -- and unlike a bare package name, it carries no information about
  * how deep the importer's own directory happens to be nested.
- *
- * Mirrors the same `prefixSlashes <= 1` convention already used by
- * `matchesWithSourcePrefix` for Python module matching, below.
  */
-function matchesAtBoundaryPrecise(str: string, pattern: string): boolean {
+function matchesAtBoundaryPrecise(
+  str: string,
+  pattern: string,
+  maxLeadingSegments: number,
+): boolean {
   const index = str.indexOf(pattern);
   if (index === -1) return false;
 
@@ -128,7 +140,7 @@ function matchesAtBoundaryPrecise(str: string, pattern: string): boolean {
     if (endIndex !== str.length) return false;
     const prefix = str.substring(0, index);
     const prefixSlashes = (prefix.match(/\//g) || []).length;
-    if (prefixSlashes > 1) return false;
+    if (prefixSlashes > maxLeadingSegments) return false;
   }
 
   return true;
@@ -153,13 +165,15 @@ export function matchesFile(normalizedImport: string, normalizedTarget: string):
   // Exact match
   if (normalizedImport === normalizedTarget) return true;
 
-  // Strategy 1: Check if target path appears in import at path boundaries
-  if (matchesAtBoundaryPrecise(normalizedImport, normalizedTarget)) {
+  // Strategy 1: Check if target path appears in import at path boundaries.
+  // maxLeadingSegments: 0 -- see matchesAtBoundaryPrecise's doc comment.
+  if (matchesAtBoundaryPrecise(normalizedImport, normalizedTarget, 0)) {
     return true;
   }
 
-  // Strategy 2: Check if import path appears in target (for longer target paths)
-  if (matchesAtBoundaryPrecise(normalizedTarget, normalizedImport)) {
+  // Strategy 2: Check if import path appears in target (for longer target paths).
+  // maxLeadingSegments: 1 -- see matchesAtBoundaryPrecise's doc comment.
+  if (matchesAtBoundaryPrecise(normalizedTarget, normalizedImport, 1)) {
     return true;
   }
 

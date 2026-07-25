@@ -20,13 +20,18 @@ Confirmed independently in three languages during an OSS dogfood sweep:
 
 The fix is one targeted guard, not a scoring system: a bare (no `/`)
 specifier must reach the *end* of the longer string (not merely appear as an
-interior component — this alone fixes the Ruby fan-out) and may have at most
-one leading directory segment before it (the common "source directory
-prefix" convention, e.g. bare `auth` resolving to `src/auth.rs` — more than
-that is a coincidental name collision, not a real relationship). Multi-segment
-patterns, and a cleaned `./`/`../` relative import (already proof the
-specifier names a real project file, not an ambiguous external package), are
-both unaffected.
+interior component — this alone fixes the Ruby fan-out), and the number of
+directory segments allowed before it depends on which side is bare. A bare
+*import* matching within a longer *target* may have at most one leading
+segment — the established "source directory prefix" convention (bare `auth`
+resolving to `src/auth.rs`). A bare *target* (a short top-level file's own
+basename) matching within a longer *import* gets no leading-segment leniency
+at all: there's no confirmed legitimate case for it, and it's exactly the Go
+bug's shape — `internal/fs` (already module-prefix-stripped by #867) must not
+tail-match an unrelated top-level `fs` target just because only one directory
+segment happens to precede the match. Multi-segment patterns, and a cleaned
+`./`/`../` relative import (already proof the specifier names a real project
+file, not an ambiguous external package), are both unaffected.
 
 `matchesPHPNamespace` independently implements the same reverse
 tail-matching idea for PHP-style namespaces and had the identical gap for a
