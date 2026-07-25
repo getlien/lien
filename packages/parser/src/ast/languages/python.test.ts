@@ -341,6 +341,33 @@ describe('Python Language', () => {
       const node = root.namedChild(0)!;
       expect(importExtractor.processImportSymbols(node)).toBeNull();
     });
+
+    it('should process an absolute wildcard from-import with a "*" symbol (regression: was silently dropped)', () => {
+      const code = 'from django.http import *\n';
+      const root = mustParse(code, 'python');
+      const importNode = root.namedChild(0)!;
+      const result = importExtractor.processImportSymbols(importNode);
+      expect(result).not.toBeNull();
+      expect(result!.importPath).toBe('django.http');
+      expect(result!.symbols).toEqual(['*']);
+    });
+
+    it('should process a relative wildcard from-import with a "*" symbol', () => {
+      const code = 'from .foo import *\n';
+      const root = mustParse(code, 'python');
+      const importNode = root.namedChild(0)!;
+      const result = importExtractor.processImportSymbols(importNode);
+      expect(result).not.toBeNull();
+      expect(result!.importPath).toBe('.foo');
+      expect(result!.symbols).toEqual(['*']);
+    });
+
+    it('should extract the module path for a wildcard from-import via extractImportPath', () => {
+      const code = 'from django.http import *\n';
+      const root = mustParse(code, 'python');
+      const importNode = root.namedChild(0)!;
+      expect(importExtractor.extractImportPath(importNode)).toBe('django.http');
+    });
   });
 
   describe('Symbol Extraction', () => {

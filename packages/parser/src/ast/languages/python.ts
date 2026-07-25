@@ -256,6 +256,11 @@ export class PythonImportExtractor implements LanguageImportExtractor {
    * A statement with multiple comma-separated modules (`import a, b.c`)
    * yields only the first (`"a"`) — a pre-existing limitation of
    * `processPythonImport()`, not a new one introduced here.
+   *
+   * Wildcard from-imports (`from x.y import *`) still yield the module path
+   * (`"x.y"`) — `collectImportedSymbols()` records a `'*'` placeholder symbol
+   * (mirroring `RustImportExtractor.processUseWildcard()`) so the statement
+   * isn't dropped entirely just because it names no specific symbols.
    */
   extractImportPath(node: SyntaxNode): string | null {
     return this.processImportSymbols(node)?.importPath ?? null;
@@ -322,6 +327,14 @@ export class PythonImportExtractor implements LanguageImportExtractor {
       } else if (child.type === 'aliased_import') {
         const symbolName = extractAliasedSymbolName(child);
         if (symbolName) symbols.push(symbolName);
+      } else if (child.type === 'wildcard_import') {
+        // `from x.y import *` — mirrors RustImportExtractor.processUseWildcard's
+        // `symbols: ['*']` convention. Without this, a wildcard from-import has
+        // zero named children after the module path, so collectImportedSymbols
+        // would return [] and processPythonFromImport would drop the whole
+        // statement (including its otherwise-known importPath) via the
+        // `symbols.length === 0` guard below.
+        symbols.push('*');
       }
     });
     return symbols;
