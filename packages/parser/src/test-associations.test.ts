@@ -135,4 +135,40 @@ describe('findTestAssociationsFromChunks', () => {
       expect(result.get('Source/Networking/Session.swift')).toEqual(['Tests/SessionTests.swift']);
     });
   });
+
+  describe('PHP FQCN-reference association (#878)', () => {
+    // These chunks model the shape `PHPImportExtractor.extractReferencedFQCNs`
+    // (ast/languages/php.ts) plus PSR-4 resolution (php-psr4.ts) actually
+    // produce -- a workspace-relative path merged into `imports` alongside
+    // any real `use`-based imports, with no per-node distinction left by the
+    // time it reaches this layer. See ast/chunker.test.ts and
+    // ast/languages/php.test.ts for coverage of the extraction step itself.
+    it('associates a test file that references the class only via a fully-qualified `new`, no `use` import at all', () => {
+      const chunks: CodeChunk[] = [
+        makeChunk('src/RetryMiddleware.php'),
+        makeChunk('tests/RetryMiddlewareTest.php', ['src/RetryMiddleware']),
+      ];
+
+      const result = findTestAssociationsFromChunks(['src/RetryMiddleware.php'], chunks);
+
+      expect(result.get('src/RetryMiddleware.php')).toEqual(['tests/RetryMiddlewareTest.php']);
+    });
+
+    it('honestly finds no association for the factory-indirection remainder (no signal in either file)', () => {
+      // The real, unresolved guzzle shape: the test only ever names the
+      // factory (`Middleware`), never `RetryMiddleware` itself -- that name
+      // lives exclusively inside Middleware.php, a different file. No
+      // extraction change can manufacture a signal that isn't textually
+      // present anywhere in the test file; this is #878's honest remainder.
+      const chunks: CodeChunk[] = [
+        makeChunk('src/RetryMiddleware.php'),
+        makeChunk('src/Middleware.php'),
+        makeChunk('tests/RetryMiddlewareTest.php', ['src/Middleware']),
+      ];
+
+      const result = findTestAssociationsFromChunks(['src/RetryMiddleware.php'], chunks);
+
+      expect(result.has('src/RetryMiddleware.php')).toBe(false);
+    });
+  });
 });

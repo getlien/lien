@@ -199,6 +199,95 @@ export class PHPImportExtractor implements LanguageImportExtractor {
     return grouped ? { importPath: grouped.importPath, symbols: [grouped.alias] } : null;
   }
 
+  /**
+   * Scan the WHOLE file (recursively — unlike declaration-based extraction,
+   * which only looks at top-level `namespace_use_declaration` nodes) for
+   * fully-qualified class-name references that never go through a `use`
+   * statement at all. Closes the structural gap in #878: a test can
+   * genuinely exercise a source class via a factory (`Middleware::retry()`
+   * internally `new`-ing `RetryMiddleware`) or a direct FQCN (`new
+   * \GuzzleHttp\RetryMiddleware()`, `\GuzzleHttp\RetryMiddleware::class`)
+   * with zero corresponding import declaration for `use`-based extraction to
+   * find.
+   *
+   * Only three PHP expression shapes are considered, and only when their
+   * class-name part is a `qualified_name` node whose own text starts with a
+   * leading `\` (i.e. genuinely fully-qualified, resolved absolutely
+   * regardless of any `use` imports in scope — see
+   * `isFullyQualifiedReference`'s doc comment for why this is the
+   * unambiguous case, unlike a bare or merely-"qualified" name):
+   * - `new \Foo\Bar\Baz(...)` (`object_creation_expression`)
+   * - `\Foo\Bar\Baz::class` / `\Foo\Bar\Baz::SOME_CONST` (`class_constant_access_expression`)
+   * - `\Foo\Bar\Baz::method()` (`scoped_call_expression`)
+   *
+   * Deliberately does NOT attempt the transitive "factory hides the FQCN in
+   * a different file" shape (e.g. `Middleware::retry()` from a *test* file,
+   * where `RetryMiddleware` is only named inside `Middleware.php`, never in
+   * the test itself) — that needs graph-level reasoning across files, well
+   * beyond a single-file structural scan. That case has no signal available
+   * at this layer and is the honest, documented remainder of #878.
+   */
+  extractReferencedFQCNs(rootNode: SyntaxNode): string[] {
+    const refs: string[] = [];
+    const seen = new Set<string>();
+
+    const visit = (node: SyntaxNode): void => {
+      const fqcn = this.extractFQCNReference(node);
+      if (fqcn && !seen.has(fqcn)) {
+        seen.add(fqcn);
+        refs.push(fqcn);
+      }
+      node.namedChildren.forEach(visit);
+    };
+    visit(rootNode);
+
+    return refs;
+  }
+
+  private static readonly FQCN_REFERENCE_NODE_TYPES = new Set([
+    'object_creation_expression',
+    'class_constant_access_expression',
+    'scoped_call_expression',
+  ]);
+
+  private extractFQCNReference(node: SyntaxNode): string | null {
+    if (!PHPImportExtractor.FQCN_REFERENCE_NODE_TYPES.has(node.type)) return null;
+
+    const classPart = node.namedChildren.find(child => child.type === 'qualified_name');
+    if (!classPart || !this.isFullyQualifiedReference(classPart)) return null;
+
+    const parts = this.extractQualifiedNameParts(classPart);
+    // Require an actual namespace segment (>= 2 parts). A fully-qualified
+    // SINGLE-segment name (`\DateTime`, `\Exception`) always names a PHP
+    // built-in or global-namespace class, never a Composer-autoloaded
+    // project file under a PSR-4 vendor prefix -- so it can't correspond to
+    // a real source file and would only ever risk exercising the bare-
+    // identifier ambiguity #868/#883 guard against, for zero possible gain.
+    return parts.length > 1 ? parts.join('\\') : null;
+  }
+
+  /**
+   * True when `qualifiedName` (a `qualified_name` node) is FULLY qualified —
+   * its own source text starts with a leading `\`. PHP resolves such a name
+   * absolutely, ignoring any `use` imports in scope, so it is unambiguous
+   * proof the file names that exact class.
+   *
+   * A `qualified_name` WITHOUT the leading `\` (e.g. `Foo\Bar` inside `use
+   * Foo\Bar::method()`) is merely "qualified": PHP resolves it relative to
+   * the current namespace, or via an imported alias for its first segment —
+   * genuinely ambiguous without cross-referencing the file's own namespace
+   * and `use` imports. Treating it as a reference here would risk exactly
+   * the false-positive shape #868/#883 guard against, so it's excluded.
+   *
+   * `qualified_name`'s own child structure (`namespace_name` + `name`) is
+   * IDENTICAL whether or not the leading `\` is present — the marker exists
+   * only in the node's own text span, not as a separate child — so this
+   * checks `.text` directly rather than inspecting children.
+   */
+  private isFullyQualifiedReference(qualifiedName: SyntaxNode): boolean {
+    return qualifiedName.text.startsWith('\\');
+  }
+
   private extractPHPUseDeclarationPath(node: SyntaxNode): string | null {
     const clause = node.namedChildren.find(child => child.type === 'namespace_use_clause');
     if (clause) return this.extractPHPQualifiedName(clause);

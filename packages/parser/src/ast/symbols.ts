@@ -104,6 +104,34 @@ function resolveManifestRoot(specifier: string, manifestRoots: ManifestRoots | u
 }
 
 /**
+ * Append `extractReferencedFQCNs`'s results (PHP only, today — see that
+ * method's doc comment for #878's background) to `imports` IN PLACE, each
+ * resolved through the same pipeline as a declaration-based import and
+ * deduplicated against what's already present. A no-op when the extractor
+ * doesn't implement the optional method, so every other language's
+ * `extractImportPaths` behavior is unaffected.
+ */
+function appendReferencedFQCNs(
+  imports: string[],
+  importExtractor: ReturnType<typeof getImportExtractor>,
+  rootNode: SyntaxNode,
+  filepath: string | undefined,
+  workspacePackages: ReadonlyMap<string, string> | undefined,
+  manifestRoots: ManifestRoots | undefined,
+): void {
+  if (!importExtractor?.extractReferencedFQCNs) return;
+
+  const seen = new Set(imports);
+  for (const result of importExtractor.extractReferencedFQCNs(rootNode)) {
+    const resolved = resolveImportSpecifier(result, filepath, workspacePackages, manifestRoots);
+    if (!seen.has(resolved)) {
+      seen.add(resolved);
+      imports.push(resolved);
+    }
+  }
+}
+
+/**
  * Extract import paths using the language-specific extractor.
  *
  * When `filepath` is provided, relative specifiers (`./foo`, `../bar`) are
@@ -113,6 +141,9 @@ function resolveManifestRoot(specifier: string, manifestRoots: ManifestRoots | u
  * resolve to that package's source entry file, enabling cross-package
  * dependency analysis in monorepos. Everything else passes through
  * unchanged.
+ *
+ * Also merges in `appendReferencedFQCNs`'s results (#878) — see its doc
+ * comment.
  */
 function extractImportPaths(
   rootNode: SyntaxNode,
@@ -131,6 +162,15 @@ function extractImportPaths(
       imports.push(resolveImportSpecifier(result, filepath, workspacePackages, manifestRoots));
     }
   }
+
+  appendReferencedFQCNs(
+    imports,
+    importExtractor,
+    rootNode,
+    filepath,
+    workspacePackages,
+    manifestRoots,
+  );
 
   return imports;
 }

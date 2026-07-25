@@ -126,6 +126,36 @@ export interface LanguageImportExtractor {
    * @returns Object with importPath and symbols, or null to skip
    */
   processImportSymbols(node: SyntaxNode): { importPath: string; symbols: string[] } | null;
+
+  /**
+   * Extract additional "reference" import-like specifiers that name another
+   * file's symbol WITHOUT going through this language's own import-
+   * declaration syntax at all — so declaration-based extraction (the
+   * `importNodeTypes` walk above) is structurally blind to them.
+   *
+   * PHP's motivating case (#878): a fully-qualified class name (`new
+   * \Foo\Bar\Baz(...)`, `\Foo\Bar\Baz::class`, `\Foo\Bar\Baz::method()`)
+   * never requires a `use` statement — PHP resolves a leading-`\` name as
+   * absolute regardless of what's imported — so a test file can genuinely
+   * reference a source class with zero corresponding
+   * `namespace_use_declaration` node anywhere in the file.
+   *
+   * Optional: most languages have no such construct and simply omit this
+   * method. Callers (`extractImportPaths` in `ast/symbols.ts`) treat a
+   * missing implementation as "no additional references" — a no-op, so
+   * every existing language and caller sees zero behavior change.
+   *
+   * @param rootNode - AST root node for the whole file. Unlike the
+   *   declaration-based walk (which only looks at the top one-or-two levels
+   *   from the root), implementations of this method are expected to scan
+   *   the entire file recursively, since these references can appear
+   *   anywhere in a function/method body.
+   * @returns Extra raw specifiers, in the same pre-resolution form
+   *   `extractImportPaths` returns — subject to the same downstream
+   *   resolution pipeline (relative-import / workspace-package /
+   *   manifest-root resolution).
+   */
+  extractReferencedFQCNs?(rootNode: SyntaxNode): string[];
 }
 
 /**

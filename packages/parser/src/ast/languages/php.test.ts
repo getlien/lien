@@ -260,6 +260,126 @@ class User {
       const useNode = root.namedChild(1)!;
       expect(importExtractor.extractImportPaths(useNode)).toEqual(['App\\Models\\User']);
     });
+
+    // FQCN-reference scanning (#878): a test file can genuinely exercise a
+    // source class via a fully-qualified reference with no corresponding
+    // `use` import for declaration-based extraction to find. Guzzle's real
+    // remainder from #877's dogfood (`RetryMiddleware.php`, referenced only
+    // via `Middleware::retry()`) stays unresolved by design -- see the
+    // last test in this block.
+    describe('extractReferencedFQCNs (fully-qualified class-name references, #878)', () => {
+      it('extracts a fully-qualified `new` instantiation', () => {
+        const code = `<?php
+class FooTest {
+  public function testFoo() {
+    $x = new \\GuzzleHttp\\RetryMiddleware($a, $b);
+  }
+}`;
+        const root = mustParse(code, 'php');
+        expect(importExtractor.extractReferencedFQCNs(root)).toEqual([
+          'GuzzleHttp\\RetryMiddleware',
+        ]);
+      });
+
+      it('extracts a fully-qualified `::class` reference', () => {
+        const code = `<?php
+class FooTest {
+  public function testFoo() {
+    $this->expectException(\\GuzzleHttp\\Exception\\ClientException::class);
+  }
+}`;
+        const root = mustParse(code, 'php');
+        expect(importExtractor.extractReferencedFQCNs(root)).toEqual([
+          'GuzzleHttp\\Exception\\ClientException',
+        ]);
+      });
+
+      it('extracts a fully-qualified static method call', () => {
+        const code = `<?php
+class FooTest {
+  public function testFoo() {
+    $y = \\GuzzleHttp\\Middleware::retry();
+  }
+}`;
+        const root = mustParse(code, 'php');
+        expect(importExtractor.extractReferencedFQCNs(root)).toEqual(['GuzzleHttp\\Middleware']);
+      });
+
+      it('deduplicates repeated references to the same class', () => {
+        const code = `<?php
+class FooTest {
+  public function testFoo() {
+    $a = new \\GuzzleHttp\\RetryMiddleware();
+    $b = new \\GuzzleHttp\\RetryMiddleware();
+  }
+}`;
+        const root = mustParse(code, 'php');
+        expect(importExtractor.extractReferencedFQCNs(root)).toEqual([
+          'GuzzleHttp\\RetryMiddleware',
+        ]);
+      });
+
+      it('ignores a "qualified" (not fully-qualified) name -- no leading backslash', () => {
+        // Inside namespace Tests, `GuzzleHttp\Middleware` (no leading \) resolves
+        // relative to the current namespace or a `use`-imported alias -- genuinely
+        // ambiguous without cross-referencing the file's own use imports, and
+        // exactly the shape #868/#883 guard against elsewhere. Real PHP code
+        // always uses either a leading-\ FQCN or a bare `use`-imported name for
+        // this; this input is deliberately the untrusted middle case.
+        const code = `<?php
+namespace Tests;
+class FooTest {
+  public function testFoo() {
+    $y = GuzzleHttp\\Middleware::retry();
+  }
+}`;
+        const root = mustParse(code, 'php');
+        expect(importExtractor.extractReferencedFQCNs(root)).toEqual([]);
+      });
+
+      it('ignores a bare name already reachable via a `use` import', () => {
+        const code = `<?php
+use GuzzleHttp\\Exception\\ClientException;
+class FooTest {
+  public function testFoo() {
+    self::assertInstanceOf(ClientException::class, $e);
+  }
+}`;
+        const root = mustParse(code, 'php');
+        expect(importExtractor.extractReferencedFQCNs(root)).toEqual([]);
+      });
+
+      it('ignores a fully-qualified single-segment (global-namespace) reference', () => {
+        // \DateTime, \Exception, etc. are PHP built-ins or global-namespace
+        // classes -- never a Composer-autoloaded project file under a PSR-4
+        // vendor prefix, so there is no source file this could ever match.
+        const code = `<?php
+class FooTest {
+  public function testFoo() {
+    $x = \\DateTime::class;
+  }
+}`;
+        const root = mustParse(code, 'php');
+        expect(importExtractor.extractReferencedFQCNs(root)).toEqual([]);
+      });
+
+      it('does not resolve the transitive factory-indirection shape (honest remainder, #878)', () => {
+        // The real guzzle case: RetryMiddlewareTest.php calls Middleware::retry()
+        // and never mentions RetryMiddleware anywhere in its own text -- the
+        // factory (a DIFFERENT file, Middleware.php) is what internally `new`s
+        // RetryMiddleware. A single-file structural scan has no way to see that;
+        // this is the honest, documented remainder of #878.
+        const code = `<?php
+use GuzzleHttp\\Middleware;
+class RetryMiddlewareTest {
+  public function testRetry() {
+    $middleware = Middleware::retry(fn() => true);
+  }
+}`;
+        const root = mustParse(code, 'php');
+        expect(importExtractor.extractReferencedFQCNs(root)).toEqual([]);
+      });
+    });
   });
 
   describe('Symbol Extraction', () => {
