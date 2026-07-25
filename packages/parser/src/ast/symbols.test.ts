@@ -626,7 +626,7 @@ use Illuminate\\Http\\Request;
       expect(imports).toContain('Illuminate\\Http\\Request');
     });
 
-    it('should extract Python import statements', () => {
+    it('should extract clean Python module paths (not raw statement text)', () => {
       const content = `
 from utils.validate import validateEmail
 import os
@@ -636,9 +636,9 @@ from typing import Optional
       const parseResult = parseAST(content, 'python');
       const imports = extractImports(parseResult.tree!.rootNode, 'python');
 
-      expect(imports).toContain('from utils.validate import validateEmail');
-      expect(imports).toContain('import os');
-      expect(imports).toContain('from typing import Optional');
+      expect(imports).toContain('utils.validate');
+      expect(imports).toContain('os');
+      expect(imports).toContain('typing');
     });
   });
 

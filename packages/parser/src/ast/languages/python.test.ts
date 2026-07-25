@@ -203,12 +203,68 @@ describe('Python Language', () => {
       expect(importExtractor.importNodeTypes).toContain('import_from_statement');
     });
 
-    it('should extract a simple import path', () => {
+    it('should extract a clean simple import path (not raw statement text)', () => {
       const code = 'import os\n';
       const root = mustParse(code, 'python');
       const importNode = root.namedChild(0)!;
       const path = importExtractor.extractImportPath(importNode);
-      expect(path).toBe('import os');
+      expect(path).toBe('os');
+    });
+
+    it('should extract the module (not the alias) for a simple aliased import', () => {
+      const code = 'import os as system\n';
+      const root = mustParse(code, 'python');
+      const importNode = root.namedChild(0)!;
+      expect(importExtractor.extractImportPath(importNode)).toBe('os');
+    });
+
+    it('should extract a dotted import path', () => {
+      const code = 'import x.y\n';
+      const root = mustParse(code, 'python');
+      const importNode = root.namedChild(0)!;
+      expect(importExtractor.extractImportPath(importNode)).toBe('x.y');
+    });
+
+    it('should extract the dotted module path for a dotted aliased import', () => {
+      const code = 'import x.y as z\n';
+      const root = mustParse(code, 'python');
+      const importNode = root.namedChild(0)!;
+      expect(importExtractor.extractImportPath(importNode)).toBe('x.y');
+    });
+
+    it('should extract a clean dotted module path for a from-import', () => {
+      const code = 'from utils.validate import validateEmail, validatePhone\n';
+      const root = mustParse(code, 'python');
+      const importNode = root.namedChild(0)!;
+      expect(importExtractor.extractImportPath(importNode)).toBe('utils.validate');
+    });
+
+    it('should extract the module path (not the alias) for a from-import alias', () => {
+      const code = 'from typing import Optional as Opt\n';
+      const root = mustParse(code, 'python');
+      const importNode = root.namedChild(0)!;
+      expect(importExtractor.extractImportPath(importNode)).toBe('typing');
+    });
+
+    it('should extract "." for a bare relative from-import', () => {
+      const code = 'from . import x\n';
+      const root = mustParse(code, 'python');
+      const importNode = root.namedChild(0)!;
+      expect(importExtractor.extractImportPath(importNode)).toBe('.');
+    });
+
+    it('should extract ".foo" for a single-dot relative from-import', () => {
+      const code = 'from .foo import x\n';
+      const root = mustParse(code, 'python');
+      const importNode = root.namedChild(0)!;
+      expect(importExtractor.extractImportPath(importNode)).toBe('.foo');
+    });
+
+    it('should extract "..pkg" for a two-dot relative from-import', () => {
+      const code = 'from ..pkg import y\n';
+      const root = mustParse(code, 'python');
+      const importNode = root.namedChild(0)!;
+      expect(importExtractor.extractImportPath(importNode)).toBe('..pkg');
     });
 
     it('should process a simple import into a symbol', () => {
@@ -249,11 +305,68 @@ describe('Python Language', () => {
       expect(result!.symbols).toEqual(['Opt']);
     });
 
+    it('should process a bare relative from-import (regression: symbols were silently dropped)', () => {
+      const code = 'from . import x, y\n';
+      const root = mustParse(code, 'python');
+      const importNode = root.namedChild(0)!;
+      const result = importExtractor.processImportSymbols(importNode);
+      expect(result).not.toBeNull();
+      expect(result!.importPath).toBe('.');
+      expect(result!.symbols).toEqual(['x', 'y']);
+    });
+
+    it('should process a single-dot relative from-import (regression: module path was misread as the symbol)', () => {
+      const code = 'from .foo import x\n';
+      const root = mustParse(code, 'python');
+      const importNode = root.namedChild(0)!;
+      const result = importExtractor.processImportSymbols(importNode);
+      expect(result).not.toBeNull();
+      expect(result!.importPath).toBe('.foo');
+      expect(result!.symbols).toEqual(['x']);
+    });
+
+    it('should process a two-dot relative from-import', () => {
+      const code = 'from ..pkg import y\n';
+      const root = mustParse(code, 'python');
+      const importNode = root.namedChild(0)!;
+      const result = importExtractor.processImportSymbols(importNode);
+      expect(result).not.toBeNull();
+      expect(result!.importPath).toBe('..pkg');
+      expect(result!.symbols).toEqual(['y']);
+    });
+
     it('should return null for an unrecognized node type', () => {
       const code = 'x = 5\n';
       const root = mustParse(code, 'python');
       const node = root.namedChild(0)!;
       expect(importExtractor.processImportSymbols(node)).toBeNull();
+    });
+
+    it('should process an absolute wildcard from-import with a "*" symbol (regression: was silently dropped)', () => {
+      const code = 'from django.http import *\n';
+      const root = mustParse(code, 'python');
+      const importNode = root.namedChild(0)!;
+      const result = importExtractor.processImportSymbols(importNode);
+      expect(result).not.toBeNull();
+      expect(result!.importPath).toBe('django.http');
+      expect(result!.symbols).toEqual(['*']);
+    });
+
+    it('should process a relative wildcard from-import with a "*" symbol', () => {
+      const code = 'from .foo import *\n';
+      const root = mustParse(code, 'python');
+      const importNode = root.namedChild(0)!;
+      const result = importExtractor.processImportSymbols(importNode);
+      expect(result).not.toBeNull();
+      expect(result!.importPath).toBe('.foo');
+      expect(result!.symbols).toEqual(['*']);
+    });
+
+    it('should extract the module path for a wildcard from-import via extractImportPath', () => {
+      const code = 'from django.http import *\n';
+      const root = mustParse(code, 'python');
+      const importNode = root.namedChild(0)!;
+      expect(importExtractor.extractImportPath(importNode)).toBe('django.http');
     });
   });
 
