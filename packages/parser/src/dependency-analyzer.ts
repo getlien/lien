@@ -7,6 +7,7 @@ import {
   isTestFile,
   isUnresolvableWholeModuleImport,
   importMatchesTarget,
+  hasSingleFileImportSemantics,
 } from './utils/path-matching.js';
 import { RISK_ORDER } from './insights/types.js';
 
@@ -120,6 +121,42 @@ function buildImportIndex(
 }
 
 /**
+ * Add the chunks keyed by `normalizedImport` to the dependent set via
+ * `addChunk`, applying the #887 per-chunk language check when the match is
+ * ambiguous.
+ *
+ * A multi-segment specifier that matches `normalizedTarget` ONLY through the
+ * permissive (package-directory) path -- not the strict (single-file) path
+ * -- is #887's ambiguous shape: a Go-shaped importer legitimately means it
+ * (every file in the package directory is a member); a Ruby-shaped importer
+ * doesn't (a sibling file under the same directory is a separate, unrelated
+ * module). `matchesFile` can't disambiguate that without both a target and
+ * an importer's language in scope at once, and this function's `chunks`
+ * bucket can span multiple importer files (and in principle languages)
+ * sharing the same normalized import key, so the language check runs per
+ * chunk rather than once per key -- see `hasSingleFileImportSemantics`'s doc
+ * comment. `importMatchesTarget` (used by every match-side call site that
+ * *does* have a single importer file) makes the same derivation once,
+ * up front.
+ */
+function addFuzzyMatchChunks(
+  normalizedImport: string,
+  normalizedTarget: string,
+  chunks: CodeChunk[],
+  addChunk: (chunk: CodeChunk) => void,
+): void {
+  if (!matchesFile(normalizedImport, normalizedTarget)) return;
+
+  const ambiguous =
+    normalizedImport.includes('/') && !matchesFile(normalizedImport, normalizedTarget, true);
+
+  for (const chunk of chunks) {
+    if (ambiguous && hasSingleFileImportSemantics(chunk.metadata.file)) continue;
+    addChunk(chunk);
+  }
+}
+
+/**
  * Finds all chunks that import the target file using index + fuzzy matching.
  *
  * @param normalizedTarget - The normalized path of the target file
@@ -153,10 +190,8 @@ function findDependentChunks(
   // Note: This is O(M) where M = unique import paths. For large codebases with many
   // violations, consider caching fuzzy match results at a higher level.
   for (const [normalizedImport, chunks] of importIndex.entries()) {
-    if (normalizedImport !== normalizedTarget && matchesFile(normalizedImport, normalizedTarget)) {
-      for (const chunk of chunks) {
-        addChunk(chunk);
-      }
+    if (normalizedImport !== normalizedTarget) {
+      addFuzzyMatchChunks(normalizedImport, normalizedTarget, chunks, addChunk);
     }
   }
 

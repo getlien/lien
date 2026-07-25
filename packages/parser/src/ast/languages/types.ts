@@ -93,4 +93,34 @@ export interface LanguageDefinition {
    * `wholeModuleImports` or `isUnresolvableWholeModuleImport` (#875).
    */
   enclosingNamespaceAccess?: boolean;
+
+  /**
+   * True when a BARE (non-relative), potentially multi-segment import
+   * specifier in this language always names a single file, never a
+   * directory whose files are all implicitly members of the same unit
+   * (#887).
+   *
+   * Ruby sets this: `require 'rack/protection'` loads exactly one file
+   * (`rack/protection.rb`, resolved via `$LOAD_PATH`) — a sibling file like
+   * `rack/protection/base.rb` is a separate, unrelated module that merely
+   * shares a directory, not an implicit member of the `rack/protection`
+   * specifier. Go is the opposite and deliberately leaves this unset:
+   * `import "mymodule/internal/fs"` normalizes (after #877's module-prefix
+   * stripping) to the bare `internal/fs`, which names a PACKAGE — every
+   * `.go` file inside that directory is a member of the package, so
+   * `internal/fs` legitimately matches `internal/fs/fs.go`,
+   * `internal/fs/utils.go`, etc. Absent/false (the default for every
+   * language except Ruby) preserves that permissive package-directory
+   * matching. Every other currently-supported language is unaffected either
+   * way and leaves this unset too: TypeScript/JavaScript resolve specifiers
+   * to a concrete file before `matchesFile` ever runs, Python/PHP use their
+   * own dedicated matching strategies (`matchesPythonModule`/
+   * `matchesPHPNamespace`), and Rust's multi-segment module paths already
+   * name an exact file — see `matchesFile`'s
+   * `requireExactTailForMultiSegment` parameter for how this flag is
+   * consumed (only `importMatchesTarget` derives it from the importer's
+   * language; the two build-side sites and the two stay-raw `matchesFile`
+   * call sites don't have a specific target to disambiguate against).
+   */
+  singleFileImports?: boolean;
 }

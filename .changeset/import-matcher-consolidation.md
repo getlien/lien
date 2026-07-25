@@ -31,11 +31,26 @@ PR body's golden-proof evidence).
 Also fixes #887: a multi-segment bare `require`/import specifier (e.g. Ruby's
 `require 'rack/protection'`) fanned out to every file nested under its own
 directory (`rack-protection/lib/rack/protection/*`) instead of matching only
-that directory's own entry point. `matchesAtBoundaryPrecise`'s "must reach
-the end of the compared string" anchor previously only applied to
-slash-free (single-segment) patterns like `sinatra`; it now applies to every
-bare, non-relative pattern regardless of how many segments it has. The
-existing single-segment guards (#868/#883), the Rust source-directory-prefix
-convention, and genuine multi-segment-to-multi-segment matches are
-unaffected — see the new `matchesFile` unit tests and the sinatra-clone
-association-level dogfood in the PR body.
+that directory's own entry point. The fix is language-aware, not a blanket
+change to `matchesFile`: Ruby's bare multi-segment `require` names exactly
+one file, but Go's `import "pkg/sub"` (normalized to the bare `pkg/sub` by
+#877's module-prefix stripping) names a *package* — every file in that
+directory is a legitimate member, so the same "must reach the end of the
+compared string" tightening would have wrongly rejected real Go dependents
+if applied unconditionally (an earlier revision of this fix did exactly that
+and was caught in review — see the PR body's Correction section for the
+proof and the fix).
+
+`matchesFile` gains an optional third parameter,
+`requireExactTailForMultiSegment` (default `false`, preserving every
+existing caller's behavior unchanged), and a new `LanguageDefinition`
+flag — `singleFileImports` (set on Ruby only) — drives it via the new
+`hasSingleFileImportSemantics` helper. `importMatchesTarget` derives the
+flag from the importer's language for the five migrated call sites;
+`findDependentChunks`'s fuzzy-match loop (in both `@liendev/parser` and the
+CLI) applies the same derivation per chunk, since its import-index bucket
+can span multiple importer files sharing one normalized specifier. Verified
+against both a real sinatra clone (820 spurious dependent edges removed,
+gem/library entry points unchanged) and a real gin clone (all 67 dependent
+edges preserved, including the `internal/fs` package-directory case) — see
+the PR body.
