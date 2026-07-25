@@ -68,6 +68,16 @@ describe('classifyTestCommand — broad vs scoped classification table', () => {
     ['rake db:migrate', false, false, []],
     ['./gradlew build', false, false, []],
     ['./gradlew clean', false, false, []],
+    // Lien Review finding on PR #873 (Medium Risk): `-x test` / `--exclude-task
+    // test` EXCLUDE the test task rather than running it — the opposite of
+    // "tests ran" — so these must stay unrecognized even though the literal
+    // substring "test" is present.
+    ['./gradlew -x test', false, false, []],
+    ['./gradlew build -x test', false, false, []],
+    ['./gradlew --exclude-task test', false, false, []],
+    // But if `test` genuinely runs earlier in the same command, excluding a
+    // *different* task afterward must not defeat recognition.
+    ['./gradlew test -x integrationTest', true, true, []],
     // Not test runs at all.
     ['ls -la', false, false, []],
     ['git status', false, false, []],

@@ -122,12 +122,19 @@ const RUNNER_PATTERNS: RegExp[] = [
   // `(?:[\w.:=-]+\s+)*` absorbs any number of leading bare/colon-namespaced
   // task tokens and `-P`-style property flags — deliberately excluding `/`
   // so a real scope-narrowing file argument is never swallowed as a "task".
-  // `(\S*:)?` then absorbs a Gradle task path like `:exposed-core:test` into
-  // the match itself so it is never mistaken for a scope-narrowing file
-  // token (it names no file). Requires the literal `test` task to actually
-  // be present (a bare `./gradlew clean` with no test task stays
-  // unrecognized).
-  /^(\.\/)?gradlew\s+(?:[\w.:=-]+\s+)*(\S*:)?test(?=\s|$)/,
+  // The negative lookahead guards `-x`/`--exclude-task`: those flags EXCLUDE
+  // their argument task rather than running it, so `-x test` must not be
+  // absorbed as an ordinary leading token feeding into the required `test`
+  // match below (that would falsely read "exclude test" as "ran test" — the
+  // opposite of what happened). If `test` genuinely runs earlier in the
+  // same command (`test -x someOtherTask`), backtracking still finds it;
+  // the guard only blocks `-x`/`--exclude-task` from ever being the thing
+  // that satisfies the match. `(\S*:)?` then absorbs a Gradle task path like
+  // `:exposed-core:test` into the match itself so it is never mistaken for a
+  // scope-narrowing file token (it names no file). Requires the literal
+  // `test` task to actually be present and not excluded (a bare `./gradlew
+  // clean` or `./gradlew -x test` stays unrecognized).
+  /^(\.\/)?gradlew\s+(?:(?!(?:-x|--exclude-task)(?:\s|$))[\w.:=-]+\s+)*(\S*:)?test(?=\s|$)/,
   /^mvn\s+test(?=\s|$)/,
   /^nx\s+test(?:\s+\S+)?(?=\s|$)/,
 ];
