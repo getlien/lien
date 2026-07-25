@@ -1,596 +1,106 @@
 # Test Association Flow
 
-This document describes Lien's two-pass test detection system that links test files to their source files.
-
-> [!WARNING]
-> **Staleness note:** the two-pass system (convention detection + import
-> analysis) described below predates the current implementation and does not
-> match it. The shipped code runs a single import-based pass
-> (`findTestAssociationsFromChunks` in `packages/parser/src/test-associations.ts`)
-> uniformly across all registered languages — there is no separate
-> convention-matching pass, no per-tier language split, and no framework
-> detection. Swift is also absent from the language support matrix below
-> (added after this doc was last accurate). Treat the diagrams and accuracy
-> figures on this page as aspirational, not the current contract; this is
-> flagged for a dedicated doc-truth rewrite, not fixed here.
->
-> **Whole-module-import languages (Swift): an honest limitation, not a
-> matching bug.** Swift test files import their subject as a whole module
-> (`import Alamofire`, `@testable import Alamofire`) rather than a specific
-> file or symbol path, so `chunk.metadata.imports` carries no per-file signal
-> the import-based matcher can resolve to a specific source file — this is a
-> structural gap ([#869](https://github.com/getlien/lien/issues/869)), not a
-> fixable false negative. Rather than reporting the misleading `No test
-> coverage.` on files that may in fact be heavily tested, `lien annotate`
-> reports `Test coverage not determinable from imports (whole-module
-> import).` for any language whose `LanguageDefinition.wholeModuleImports`
-> flag is set (checked via `hasWholeModuleImports()` in the language
-> registry). Only Swift sets this flag today; no other language's wording or
-> behavior changes.
-
-## Overview
-
 Test association links each source file to the tests that cover it, so an AI assistant (or a developer) knows which tests to run after changing a given file.
 
-## Two-pass detection strategy
+## How it works today
 
-```mermaid
-graph LR
-    FILES[All Source Files] --> PASS1[Pass 1:<br/>Convention-Based<br/>~80% accuracy]
-    PASS1 --> MAP1[Association Map<br/>Coverage: 80%]
-    MAP1 --> PASS2[Pass 2:<br/>Import Analysis<br/>~90% accuracy]
-    PASS2 --> FINAL[Final Association Map<br/>Coverage: 85-90%]
-    
-    style PASS1 fill:#fff3e0,stroke:#e65100,stroke-width:2px
-    style PASS2 fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
-    style FINAL fill:#e1f5ff,stroke:#01579b,stroke-width:3px
-```
+Association runs as a single pass: `findTestAssociationsFromChunks` in `packages/parser/src/test-associations.ts`. For each target file, it checks every indexed test file's declared imports against that target using boundary-aware string matching, entirely from in-memory chunk metadata (no filesystem access at match time). This runs uniformly across all 11 registered languages (TypeScript, JavaScript, Python, Go, Rust, Java, C#, PHP, Ruby, Kotlin, Swift). There is no separate convention-matching pass, no per-language tier split, and no test-framework detection (jest, vitest, pytest, and so on are not identified).
 
-**Why two passes?**
+## Identifying test files
 
-1. **Pass 1 (Convention)**: Fast, language-agnostic, covers 12 languages
-2. **Pass 2 (Import)**: Slower, language-specific, more accurate for Tier 1 languages
+`isTestFile` (`packages/parser/src/utils/path-matching.ts`) filters which files are scanned as candidate test files:
 
-## Pass 1: convention-based detection
+- `.test.` / `.spec.` extensions (`user.test.ts`, `auth.spec.js`)
+- `_test.` / `_spec.` suffixes (`parser_test.py`, `math_spec.rb`)
+- a `test`, `tests`, `spec`, `specs`, or `__tests__` path segment
+- Swift: `Tests.swift` / `Test.swift` files, or a `Tests`/`Test` directory segment
+- C#: a `Tests`/`Test` suffix on a filename or directory segment, case-sensitive (`ScopeTests.cs`, `AutoMapper.DI.Tests/`), so `Latest.cs` or a `latest/` directory is never misclassified
 
-```mermaid
-flowchart TB
-    START[Scan All Files]
-    PARTITION[Partition by Framework]
-    
-    subgraph "For Each File"
-        CHECK_TYPE{Is Test File?}
-        CHECK_PATTERN[Check Patterns]
-        CHECK_DIR[Check Directories]
-        MARK_TEST[Mark as Test]
-    end
-    
-    subgraph "Pattern Matching"
-        EXT_MATCH{Extension<br/>Match?}
-        NAME_MATCH{Filename<br/>Match?}
-        DIR_MATCH{Directory<br/>Match?}
-    end
-    
-    subgraph "Association Logic"
-        FIND_SOURCE[Find Corresponding Source]
-        REMOVE_TEST[Remove test suffix/prefix]
-        TRY_PATHS[Try Common Paths]
-        MATCH_FOUND{Source<br/>Found?}
-        CREATE_ASSOC[Create Association]
-    end
-    
-    RESULT[Association Map]
-    
-    START --> PARTITION
-    PARTITION --> CHECK_TYPE
-    
-    CHECK_TYPE -->|Maybe| CHECK_PATTERN
-    CHECK_PATTERN --> EXT_MATCH
-    EXT_MATCH -->|Yes| MARK_TEST
-    EXT_MATCH -->|No| NAME_MATCH
-    NAME_MATCH -->|Yes| MARK_TEST
-    NAME_MATCH -->|No| CHECK_DIR
-    CHECK_DIR --> DIR_MATCH
-    DIR_MATCH -->|Yes| MARK_TEST
-    DIR_MATCH -->|No| CHECK_TYPE
-    
-    MARK_TEST --> FIND_SOURCE
-    FIND_SOURCE --> REMOVE_TEST
-    REMOVE_TEST --> TRY_PATHS
-    TRY_PATHS --> MATCH_FOUND
-    MATCH_FOUND -->|Yes| CREATE_ASSOC
-    MATCH_FOUND -->|No| RESULT
-    CREATE_ASSOC --> RESULT
-    
-    CHECK_TYPE -->|No| RESULT
-    
-    style MARK_TEST fill:#fff3e0
-    style CREATE_ASSOC fill:#c8e6c9
-```
+## Matching an import to its target
 
-### Pattern examples
+`matchesFile` (same file) tries, in order: an exact match; the target appearing at a path boundary inside the import; the import appearing at a path boundary inside the target; a relative import (`./`, `../`) cleaned and retried; PHP namespace matching (`matchesPHPNamespace`, case-insensitive, matched from the end of the path); and Python dotted-module matching (`matchesPythonModule`, four strategies covering direct, parent-package, suffix, and single-source-directory-prefix matches).
 
-**Extension Patterns:**
-```
-test.ts   → user.test.ts ✓
-spec.js   → auth.spec.js ✓
-_test.py  → parser_test.py ✓
-Test.java → UserTest.java ✓
-```
+A bare, slash-free identifier (a package name, a Ruby `require`, a Swift framework import) gets extra scrutiny before it can win one of these boundary matches, so it cannot fan out across an unrelated subtree just because its basename happens to coincide with part of a longer path. Three cases this guards against, verified against real repositories:
 
-**Filename Patterns:**
-```
-PREFIX:
-test_user.py  ✓ (prefix: "test_")
-test-auth.js  ✓ (prefix: "test-")
+- Go: `github.com/gin-gonic/gin/internal/fs` no longer tail-matches an unrelated top-level `fs.go`
+- Ruby: a bare `require 'sinatra'` no longer matches every file under `lib/sinatra/`, only the gem's own entry point (`lib/sinatra.rb`)
+- Swift: `import Combine` (a system framework) no longer matches an unrelated `Source/Features/Combine.swift`
 
-SUFFIX:
-user_test.py  ✓ (suffix: "_test")
-auth.test.ts  ✓ (suffix: ".test")
-```
+The exception is a bare import resolving to a same-named file one directory below the source root (for example Rust's `auth` resolving to `src/auth.rs`), which stays allowed as an established convention.
 
-**Directory Patterns:**
-```
-tests/unit/user.py        ✓ (directory: "tests/")
-__tests__/auth.test.ts    ✓ (directory: "__tests__/")
-test/integration/api.js   ✓ (directory: "test/")
-spec/models/user_spec.rb  ✓ (directory: "spec/")
-```
+## Resolving import specifiers before matching
 
-### Source file resolution
+Before `matchesFile` runs, a raw import specifier is resolved in `resolveImportSpecifier` (`packages/parser/src/ast/symbols.ts`) in three steps: relative-import resolution, workspace-package resolution (for JS/TS monorepos, via `workspace-packages.ts`), and manifest-root resolution for languages whose imports are never filesystem-relative:
 
-```typescript
-// Example: user.test.ts → user.ts
+- PHP: `packages/parser/src/php-psr4.ts` reads `composer.json`'s `autoload.psr-4` / `autoload-dev.psr-4` maps and resolves an import by its longest matching namespace prefix. This is what makes a standard, non-Laravel PSR-4 layout resolvable (a namespace root like `GuzzleHttp\` rarely equals a literal directory name; only `composer.json` declares the real mapping to `src/`).
+- Go: `packages/parser/src/go-module.ts` reads `go.mod`'s `module` line and strips that exact prefix from an import path, since Go imports are always full module paths and the module's own root segment never corresponds to a literal directory in a real checkout.
 
-1. Remove test suffix/prefix:
-   "user.test.ts" → "user.ts"
+Both readers are intentionally narrow: parsed once per workspace root, cached, and a no-op when the manifest is absent or has no matching entry, so a non-Composer or non-Go-module project sees no behavior change. PHP's `classmap`/`files` autoloading and PSR-0 are out of scope; Go's per-module (as opposed to per-repo) `go.mod` files are not read separately.
 
-2. Try common paths:
-   - Same directory: src/__tests__/user.test.ts → src/user.ts
-   - Parent directory: tests/user.test.ts → user.ts
-   - Sibling directory: tests/unit/user.test.ts → src/user.ts
-   - Mirror structure: backend/tests/user.test.ts → backend/src/user.ts
+Verified directly: a `composer.json` with `"GuzzleHttp\\": "src/"` correctly associates a test under `tests/` that imports `GuzzleHttp\Cookie\SetCookie` with `src/Cookie/SetCookie.php`, and a `go.mod` declaring `module example.com/gadget` correctly associates a test importing `example.com/gadget/internal/foo` with `internal/foo/foo.go`.
 
-3. Check if file exists:
-   fs.access(resolvedPath)
+## Whole-module-import languages: an honest limitation
 
-4. If found: Create association
-   test: "src/__tests__/user.test.ts"
-   source: "src/user.ts"
-```
+Swift test files import their subject as a whole module (`import Alamofire`, `@testable import Alamofire`) rather than a specific file or symbol path, so there is no per-file signal for the matcher to resolve. This is a structural gap, not a fixable false negative: every test file in a module carries the identical bare-module import string.
 
-## Pass 2: import analysis
-
-Only runs for Tier 1 languages (TypeScript, JavaScript, Python)
-
-```mermaid
-sequenceDiagram
-    participant Manager as Test Association Manager
-    participant Parser as Import Analyzer
-    participant FS as File System
-    participant Resolver as Path Resolver
-    
-    Note over Manager: Filter to Tier 1 languages
-    Manager->>Manager: Get test files (from Pass 1)
-    
-    loop For each test file
-        Manager->>Parser: analyzeTestImports(testFile)
-        
-        Parser->>FS: Read test file content
-        FS-->>Parser: File content
-        
-        rect rgb(255, 243, 224)
-            Note over Parser: Extract Imports
-            
-            alt TypeScript/JavaScript
-                Parser->>Parser: Match: import X from 'Y'
-                Parser->>Parser: Match: require('Y')
-                Parser->>Parser: Match: import('Y')
-            else Python
-                Parser->>Parser: Match: import X
-                Parser->>Parser: Match: from X import Y
-            end
-        end
-        
-        rect rgb(232, 245, 233)
-            Note over Parser,Resolver: Resolve Paths
-            
-            loop For each import
-                Parser->>Resolver: Resolve relative path
-                Resolver->>Resolver: path.resolve(testDir, importPath)
-                Resolver->>Resolver: Try extensions: .ts, .tsx, .js, .jsx
-                Resolver->>FS: Check if file exists
-                FS-->>Resolver: Exists: true/false
-                
-                alt File exists
-                    Resolver-->>Parser: Resolved path
-                    Parser->>Parser: Add to source files list
-                else Not found
-                    Resolver-->>Parser: Skip (external module)
-                end
-            end
-        end
-        
-        Parser-->>Manager: Array of source file paths
-        Manager->>Manager: Merge with Pass 1 results
-    end
-    
-    Manager->>Manager: Build final association map
-```
-
-### Import pattern recognition
-
-**TypeScript/JavaScript:**
-```typescript
-// ES6 imports
-import { User } from './user';               ✓
-import * as utils from '../utils';           ✓
-import type { Config } from './config';      ✓
-
-// CommonJS
-const user = require('./user');              ✓
-const { auth } = require('../auth');         ✓
-
-// Dynamic imports
-const module = await import('./module');     ✓
-
-// External modules (ignored)
-import React from 'react';                   ✗
-import { expect } from 'vitest';             ✗
-```
-
-**Python:**
-```python
-# Absolute imports
-import user                                  ✓
-from auth import login                       ✓
-
-# Relative imports
-from . import utils                          ✓
-from ..models import User                    ✓
-
-# External modules (ignored)
-import pytest                                ✗
-from unittest import TestCase                ✗
-```
-
-### Path resolution algorithm
-
-```typescript
-function resolvePath(testFilePath: string, importPath: string): string | null {
-  // 1. Only relative imports are candidates; a bare specifier ("react",
-  //    "pytest") is external and was already excluded upstream (see above)
-  if (!importPath.startsWith('.')) {
-    return null;
-  }
-
-  // 2. Resolve relative to test file
-  const testDir = path.dirname(testFilePath);
-  const resolved = path.resolve(testDir, importPath);
-
-  // 3. Exact path first, so an already-extensioned import (e.g. "./user.ts")
-  //    doesn't get a second extension appended ("user.ts.ts")
-  if (fs.existsSync(resolved)) {
-    return resolved;
-  }
-
-  // 4. Try common extensions
-  for (const ext of ['.ts', '.tsx', '.js', '.jsx', '.py']) {
-    const withExt = resolved + ext;
-    if (fs.existsSync(withExt)) {
-      return withExt;
-    }
-  }
-
-  // 5. Try index files
-  for (const index of ['/index.ts', '/index.tsx', '/index.js', '/index.jsx']) {
-    const indexPath = resolved + index;
-    if (fs.existsSync(indexPath)) {
-      return indexPath;
-    }
-  }
-
-  // 6. Not found
-  return null;
-}
-```
-
-This is a simplified illustration of the resolution concept; the actual
-implementation (`packages/parser/src/utils/path-matching.ts`,
-`test-associations.ts`) uses boundary-aware string matching rather than
-filesystem existence checks.
-
-## Merging results
-
-```mermaid
-flowchart LR
-    PASS1_MAP[Pass 1 Map:<br/>Convention-Based]
-    PASS2_RESULTS[Pass 2 Results:<br/>Import Analysis]
-    
-    MERGE[Merge Logic]
-    
-    subgraph "Merge Strategy"
-        UNION[Union of both sources]
-        DEDUPE[Deduplicate]
-        BIDIRECTIONAL[Create bidirectional links]
-    end
-    
-    FINAL_MAP[Final Association Map]
-    
-    PASS1_MAP --> MERGE
-    PASS2_RESULTS --> MERGE
-    MERGE --> UNION
-    UNION --> DEDUPE
-    DEDUPE --> BIDIRECTIONAL
-    BIDIRECTIONAL --> FINAL_MAP
-    
-    style PASS1_MAP fill:#fff3e0
-    style PASS2_RESULTS fill:#e8f5e9
-    style FINAL_MAP fill:#e1f5ff,stroke:#01579b,stroke-width:3px
-```
-
-### Merge example
-
-```typescript
-// Pass 1 (Convention):
-{
-  "src/user.ts": {
-    relatedTests: ["src/__tests__/user.test.ts"],
-    detectionMethod: "convention"
-  }
-}
-
-// Pass 2 (Import Analysis):
-{
-  "src/__tests__/user.test.ts": {
-    relatedSources: ["src/user.ts", "src/utils.ts"], // Found via imports
-    detectionMethod: "import"
-  }
-}
-
-// Merged:
-{
-  "src/user.ts": {
-    relatedTests: ["src/__tests__/user.test.ts"],
-    detectionMethod: "convention+import"
-  },
-  "src/utils.ts": {
-    relatedTests: ["src/__tests__/user.test.ts"],
-    detectionMethod: "import"  // New discovery!
-  },
-  "src/__tests__/user.test.ts": {
-    isTest: true,
-    relatedSources: ["src/user.ts", "src/utils.ts"],
-    testFramework: "vitest",
-    detectionMethod: "convention+import"
-  }
-}
-```
-
-## Framework detection
-
-Test frameworks are detected from file content:
-
-```mermaid
-flowchart TD
-    READ[Read Test File]
-    SCAN[Scan for Framework Markers]
-    
-    subgraph "Framework Signatures"
-        JEST["'jest' in imports?"]
-        VITEST["'vitest' in imports?"]
-        MOCHA["describe/it without import?"]
-        PYTEST["'pytest' in imports?"]
-        PHPUNIT["'PHPUnit' in class name?"]
-        JUNIT["@Test annotation?"]
-        RSPEC["'RSpec' in imports?"]
-        XUNIT["'Xunit' in imports?"]
-    end
-    
-    MATCH{Match<br/>Found?}
-    SET_FRAMEWORK[Set framework in metadata]
-    UNKNOWN[framework: null]
-    
-    READ --> SCAN
-    SCAN --> JEST
-    SCAN --> VITEST
-    SCAN --> MOCHA
-    SCAN --> PYTEST
-    SCAN --> PHPUNIT
-    SCAN --> JUNIT
-    SCAN --> RSPEC
-    SCAN --> XUNIT
-    
-    JEST -->|Yes| MATCH
-    VITEST -->|Yes| MATCH
-    MOCHA -->|Yes| MATCH
-    PYTEST -->|Yes| MATCH
-    PHPUNIT -->|Yes| MATCH
-    JUNIT -->|Yes| MATCH
-    RSPEC -->|Yes| MATCH
-    XUNIT -->|Yes| MATCH
-    
-    JEST -->|No| VITEST
-    
-    MATCH -->|Yes| SET_FRAMEWORK
-    MATCH -->|No| UNKNOWN
-    
-    style SET_FRAMEWORK fill:#c8e6c9
-```
-
-## Metadata enrichment
-
-Once associations are built, metadata is added to each code chunk:
-
-```typescript
-interface ChunkMetadata {
-  file: string;
-  startLine: number;
-  endLine: number;
-  language: string;
-  
-  // Test association metadata:
-  isTest?: boolean;                    // Is this chunk from a test file?
-  relatedTests?: string[];             // For source files: which tests cover this?
-  relatedSources?: string[];           // For test files: which sources are tested?
-  testFramework?: string;              // jest, vitest, pytest, etc.
-  detectionMethod?: 'convention' | 'import' | 'convention+import';
-  
-  symbols?: {
-    functions: string[];
-    classes: string[];
-    interfaces: string[];
-  };
-}
-```
-
-## Performance characteristics
-
-### Pass 1 (convention-based)
+Rather than reporting the misleading `No test coverage.` on a file that may in fact be heavily tested, `lien annotate` reports:
 
 ```
-1,000 files, mixed languages
-Time: ~2-3 seconds
-Coverage: ~80% accuracy
-Memory: Minimal (Map<string, TestAssociation>)
+Test coverage not determinable from imports (whole-module import).
 ```
 
-### Pass 2 (import analysis)
+for any file whose language sets `LanguageDefinition.wholeModuleImports` (checked via `hasWholeModuleImports()` in the language registry, verified empirically against a fixture). Only Swift sets this flag today.
+
+A related guard, `isUnresolvableWholeModuleImport`, additionally excludes the one case a whole-module import can otherwise "win" a match: a coincidental basename, where a source file's name happens to equal its own module's name (`Source/Alamofire.swift` inside a module also named Alamofire). Without it, that file would falsely appear to be imported by every test in the module. The guard is applied at each of the four independent places that match imports against files: `findTestAssociationsFromChunks` (this document), `get_dependents`'s import index, and the two callers above that share `path-matching.ts`.
+
+## Enclosing-namespace-access languages: an honest limitation
+
+A C# namespace body gets implicit, unqualified access to every *enclosing* namespace's public members — `namespace AutoMapper.UnitTests { ... }` can reference `AutoMapper.TypeMap` with no `using` directive at all, per ordinary C# name resolution. Confirmed against AutoMapper/AutoMapper: 355/364 `UnitTests/` files rely on exactly this and carry no relevant `using`, so there is no per-file import signal for them ([#875](https://github.com/getlien/lien/issues/875)). The remaining 9/364 files use an explicit dotted `using AutoMapper.X;` and resolve correctly through ordinary import matching (same mechanism as the section above).
+
+Rather than reporting the misleading `No test coverage.` on a file that may in fact be heavily tested, `lien annotate` reports:
 
 ```
-250 test files (TypeScript/JavaScript/Python only)
-Average 5 imports per test
-Time: ~2 seconds
-Coverage: ~90% accuracy for analyzed files
-Memory: Moderate (parses file contents)
+Test coverage not determinable from imports (enclosing-namespace access).
 ```
 
-### Combined
+for any file whose language sets `LanguageDefinition.enclosingNamespaceAccess` (checked via `hasEnclosingNamespaceAccess()` in the language registry, verified empirically against a real AutoMapper clone: 47 previously-misleading `No test coverage.` files across `src/AutoMapper/**` all switched to this message, with the 26 files that had genuine associations via the dotted-`using` path unaffected). Only C# sets this flag today.
 
-```
-Total time: ~5 seconds
-Overall coverage: 85-90% accuracy
-Supported languages: 12 (Pass 1), 3 (Pass 2)
-```
+This is a deliberately separate flag from `wholeModuleImports`, not a reuse of it: unlike Swift's bare module imports, which never carry per-file signal at all, C#'s explicit dotted usings do resolve real per-file associations correctly. C# usings are dotted rather than slashed, so folding this into `wholeModuleImports` would make `isUnresolvableWholeModuleImport`'s slash check treat every C# `using` as an unresolvable bare import too, discarding the working dotted-`using` cases.
 
-## Language support matrix
+The structural remainder — which specific test covers which specific file within an enclosing namespace — stays genuinely unrecoverable from import data alone, the same as Swift's whole-module gap: there is no heuristic recovery here (no name-proximity matching), per the same false-positives-are-worse-than-silence reasoning as the bare-identifier guard above.
 
-| Language | Pass 1 (Convention) | Pass 2 (Import) | Test Frameworks Detected |
-|----------|:-------------------:|:---------------:|-------------------------|
-| TypeScript | ✅ | ✅ | Jest, Vitest, Mocha |
-| JavaScript | ✅ | ✅ | Jest, Vitest, Mocha |
-| Python | ✅ | ✅ | pytest, unittest |
-| Go | ✅ | ❌ | Go test |
-| Rust | ✅ | ❌ | Cargo test |
-| Java | ✅ | ❌ | JUnit, TestNG |
-| C# | ✅ | ❌ | xUnit, NUnit |
-| PHP | ✅ | ❌ | PHPUnit |
-| Ruby | ✅ | ❌ | RSpec, Minitest |
-| C/C++ | ✅ | ❌ | GoogleTest |
-| Scala | ✅ | ❌ | ScalaTest |
-| Kotlin | ✅ | ❌ | JUnit, Kotest |
+## Java static-member imports: a derived second candidate
 
-## Real-world example
+`import static pkg.Class.member;` (a specific, non-wildcard static-member import) extracts a path one segment deeper than the file that defines it — `com.example.Utils.method`, when the file is `com/example/Utils.java` — so it could never match via `matchesFile` on its own. `JavaImportExtractor.extractImportPaths` (`packages/parser/src/ast/languages/java.ts`) now returns the class's derived FQN (the path with its trailing segment dropped) as a second candidate alongside the unchanged original. This is safe rather than a guess: Java requires every top-level type to live in a file named after it, and nested types/members always live inside their enclosing top-level type's file, so dropping the trailing segment always yields that type's correct FQN — whether the segment names a static member or a nested class (`import static a.B.Inner;`, correct by the same rule). A static import reaching two-plus levels into nested classes under-matches silently, the same as before this fix, rather than mismatching. Wildcard static imports and ordinary (non-static) imports are unaffected. Verified on a real clone of google/gson: `JsonReaderTest.java`'s static imports of `JsonToken.STRING`/`NUMBER`/etc. now associate it with `JsonToken.java`, with zero other test-association changes across the repo's 264 Java files.
 
-### Input files
+## Known gaps
 
-```
-project/
-├── src/
-│   ├── user.ts                (Source)
-│   ├── auth.ts                (Source)
-│   └── utils.ts               (Source)
-└── tests/
-    └── unit/
-        └── user.test.ts       (Test)
-```
+These are structural: no import-level signal exists for the case, so the honest answer is a gap, not a bug to fix in the matcher. Each is tracked as an open issue; check its current state before treating this list as final.
 
-**user.test.ts:**
-```typescript
-import { describe, it, expect } from 'vitest';
-import { User } from '../../src/user';
-import { hashPassword } from '../../src/auth';
+- **Kotlin top-level function/property imports** ([#864](https://github.com/getlien/lien/issues/864)): `import a.b.myFunction`, for a top-level function or property defined in an arbitrarily-named file within the package, extracts a path that never matches its defining file. Java's analogous static-member shape is fixed (above) because the `static` keyword is itself proof the trailing segment is a class member or nested type; Kotlin's grammar has no equivalent marker — a top-level declaration and a class/object-member access (`import a.b.MyObject.method`) parse to the identical flat `identifier` of `simple_identifier` segments — so guessing which applies risks the false-positive fan-out #868 warned against. Ordinary Kotlin class imports are unaffected. Confirmed unchanged on a real clone of JetBrains/Exposed: zero test-association changes across 755 Kotlin files.
+- **PHP factory/FQCN usage** ([#878](https://github.com/getlien/lien/issues/878)): a test that reaches production code through a factory method or a fully-qualified class name at the call site, rather than a `use` import, leaves no import signal to match on.
 
-describe('User', () => {
-  it('creates user with hashed password', () => {
-    // ...
-  });
-});
-```
+## Where associations surface
 
-### Pass 1 results
+- `get_files_context`'s `testAssociations` field (MCP tool)
+- `lien annotate` and the post-edit test-association reminder hook (`lien annotate --tests-only`, and its ledger-recording sibling `lien verify-tests note-edit`)
+- `@liendev/review`'s blast-radius rendering (test coverage context for a changed file)
 
-```typescript
-{
-  "src/user.ts": {
-    relatedTests: ["tests/unit/user.test.ts"],
-    detectionMethod: "convention"
-  },
-  "tests/unit/user.test.ts": {
-    isTest: true,
-    relatedSources: ["src/user.ts"],  // Guessed from filename
-    testFramework: "vitest",
-    detectionMethod: "convention"
-  }
-}
-```
+## Language support
 
-### Pass 2 discovers more
+| Language | Test-file detection | Import matching | Manifest-aware resolution |
+|----------|---------------------|------------------|---------------------------|
+| TypeScript / JavaScript | generic patterns | yes | workspace packages (monorepo) |
+| Python | generic patterns | yes (dotted modules) | none needed |
+| PHP | generic patterns | yes | composer.json PSR-4 |
+| Go | generic patterns | yes | go.mod module path |
+| Ruby | generic patterns | yes | none needed |
+| C# | `Tests`/`Test` suffix convention | yes (dotted `using`); not determinable for enclosing-namespace references | none (see honest limitation above) |
+| Java | generic patterns | yes (incl. static-member imports, derived class-path candidate) | none |
+| Kotlin | generic patterns | yes | none (see known gaps for top-level function/property imports) |
+| Rust | generic patterns | yes | none needed |
+| Swift | `Tests`/`Test` convention | not determinable (whole-module imports) | none |
 
-```typescript
-{
-  "src/user.ts": {
-    relatedTests: ["tests/unit/user.test.ts"],
-    detectionMethod: "convention+import"
-  },
-  "src/auth.ts": {  // NEW! Found via import analysis
-    relatedTests: ["tests/unit/user.test.ts"],
-    detectionMethod: "import"
-  },
-  "tests/unit/user.test.ts": {
-    isTest: true,
-    relatedSources: ["src/user.ts", "src/auth.ts"],  // Both discovered
-    testFramework: "vitest",
-    detectionMethod: "convention+import"
-  }
-}
-```
+## History
 
-## Error handling
-
-### Graceful degradation
-
-```typescript
-try {
-  // Pass 1: Always runs
-  const conventionAssociations = buildConventionBasedAssociations(files);
-  
-  try {
-    // Pass 2: May fail for some files
-    const importAssociations = await analyzeImports(testFiles);
-    return mergeAssociations(conventionAssociations, importAssociations);
-  } catch (error) {
-    console.warn('Import analysis failed, using convention-based only');
-    return conventionAssociations;  // Fall back to Pass 1
-  }
-} catch (error) {
-  console.warn('Test association failed, continuing without associations');
-  return new Map();  // Empty map, indexing continues
-}
-```
-
-### File-level errors
-
-```typescript
-// Skip problematic files, continue with others
-for (const testFile of testFiles) {
-  try {
-    const sources = await analyzeTestImports(testFile);
-    associations.set(testFile, sources);
-  } catch (error) {
-    console.warn(`Failed to analyze ${testFile}: ${error.message}`);
-    // Continue with next file
-  }
-}
-```
-
+This document originally described a two-pass design (a convention-based pass plus a separate import-analysis pass, limited to three "Tier 1" languages) that was proposed in [ADR-004](decisions/0004-test-association-detection.md). That two-pass system was never shipped; the single import-based pass above is what actually runs, and it covers all 11 registered languages rather than three. ADR-004 is kept as the historical record of that original design discussion.

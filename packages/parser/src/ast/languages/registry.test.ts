@@ -5,6 +5,7 @@ import {
   languageExists,
   getAllLanguages,
   hasWholeModuleImports,
+  hasEnclosingNamespaceAccess,
 } from './registry.js';
 import type { SupportedLanguage } from './registry.js';
 
@@ -161,6 +162,27 @@ describe('Language Registry', () => {
       others.forEach(id => {
         expect(hasWholeModuleImports(id)).toBe(false);
       });
+    });
+  });
+
+  describe('hasEnclosingNamespaceAccess', () => {
+    it('is true for C# (#875: confirmed enclosing-namespace resolution against AutoMapper)', () => {
+      expect(hasEnclosingNamespaceAccess('csharp')).toBe(true);
+    });
+
+    it('is false for every other registered language', () => {
+      const others = getAllLanguages()
+        .map(d => d.id)
+        .filter(id => id !== 'csharp');
+      expect(others.length).toBeGreaterThan(0);
+      others.forEach(id => {
+        expect(hasEnclosingNamespaceAccess(id)).toBe(false);
+      });
+    });
+
+    it('is independent of hasWholeModuleImports (C# is not a whole-module-import language)', () => {
+      expect(hasWholeModuleImports('csharp')).toBe(false);
+      expect(hasEnclosingNamespaceAccess('swift')).toBe(false);
     });
   });
 });

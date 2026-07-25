@@ -286,6 +286,75 @@ describe('Java Language', () => {
       const stdlibNode = stdlibRoot.namedChild(0)!;
       expect(importExtractor.extractImportPaths(stdlibNode)).toEqual([]);
     });
+
+    describe('static-member class-path fallback (#864)', () => {
+      it('extractImportPaths adds the class FQN as a second candidate for a specific static-member import', () => {
+        const code = 'import static com.google.common.base.Preconditions.checkNotNull;';
+        const root = mustParse(code, 'java');
+        const importNode = root.namedChild(0)!;
+
+        // extractImportPath (singular) stays exactly as-is — pinned by the test above.
+        expect(importExtractor.extractImportPath(importNode)).toBe(
+          'com.google.common.base.Preconditions.checkNotNull',
+        );
+
+        // extractImportPaths (plural) adds the class's own FQN so matching
+        // against Preconditions.java's file path can succeed.
+        expect(importExtractor.extractImportPaths(importNode)).toEqual([
+          'com.google.common.base.Preconditions.checkNotNull',
+          'com.google.common.base.Preconditions',
+        ]);
+      });
+
+      it('resolves a nested static class import to its enclosing type by the same rule (coincidentally correct)', () => {
+        const code = 'import static com.example.Outer.Inner;';
+        const root = mustParse(code, 'java');
+        const importNode = root.namedChild(0)!;
+
+        expect(importExtractor.extractImportPaths(importNode)).toEqual([
+          'com.example.Outer.Inner',
+          'com.example.Outer',
+        ]);
+      });
+
+      it('only drops one segment for multi-level nested static imports — an honest partial result, not a wrong guess', () => {
+        const code = 'import static com.example.Outer.Middle.member;';
+        const root = mustParse(code, 'java');
+        const importNode = root.namedChild(0)!;
+
+        // Dropping one segment gives 'com.example.Outer.Middle', which still
+        // isn't Outer.java's real path — this candidate simply won't match
+        // anything, same as before the fix (no false positive, no crash).
+        expect(importExtractor.extractImportPaths(importNode)).toEqual([
+          'com.example.Outer.Middle.member',
+          'com.example.Outer.Middle',
+        ]);
+      });
+
+      it('does not add a class-path candidate for static wildcard imports (already resolved to the class FQN)', () => {
+        const code = 'import static com.example.Utils.*;';
+        const root = mustParse(code, 'java');
+        const importNode = root.namedChild(0)!;
+
+        expect(importExtractor.extractImportPaths(importNode)).toEqual(['com.example.Utils']);
+      });
+
+      it('does not add a class-path candidate for ordinary (non-static) imports', () => {
+        const code = 'import com.example.MyClass;';
+        const root = mustParse(code, 'java');
+        const importNode = root.namedChild(0)!;
+
+        expect(importExtractor.extractImportPaths(importNode)).toEqual(['com.example.MyClass']);
+      });
+
+      it('returns [] for a static stdlib member import (filtered before the fallback runs)', () => {
+        const code = 'import static java.lang.Math.PI;';
+        const root = mustParse(code, 'java');
+        const importNode = root.namedChild(0)!;
+
+        expect(importExtractor.extractImportPaths(importNode)).toEqual([]);
+      });
+    });
   });
 
   describe('Symbol Extraction', () => {

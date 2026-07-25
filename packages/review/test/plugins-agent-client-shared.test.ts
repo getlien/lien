@@ -8,6 +8,7 @@ import {
   readVerdict,
   embeddedJsonObject,
   firstBalancedJsonObject,
+  allBalancedJsonObjects,
   isValidSummary,
   isValidFinding,
   AGENT_LOG_MAX,
@@ -240,6 +241,37 @@ describe('firstBalancedJsonObject', () => {
   });
 });
 
+describe('allBalancedJsonObjects', () => {
+  it('returns a single-element list for one object (matches firstBalancedJsonObject)', () => {
+    expect(allBalancedJsonObjects('{"a":1}')).toEqual(['{"a":1}']);
+  });
+
+  it('returns an empty list when there is no opening brace', () => {
+    expect(allBalancedJsonObjects('no braces here')).toEqual([]);
+  });
+
+  it('returns an empty list when the (only) braces never balance', () => {
+    expect(allBalancedJsonObjects('{"a": {"b": 1')).toEqual([]);
+  });
+
+  it('finds every top-level object in sequence, resuming after each close', () => {
+    const text = '{"a":1} between {"b":2} and {"c":3}';
+    expect(allBalancedJsonObjects(text)).toEqual(['{"a":1}', '{"b":2}', '{"c":3}']);
+  });
+
+  it('stops scanning once a later `{` never balances, keeping the earlier complete ones', () => {
+    const text = '{"a":1} then {"b": unbalanced';
+    expect(allBalancedJsonObjects(text)).toEqual(['{"a":1}']);
+  });
+
+  it('bounds the scan against a pathological run of tiny objects (no hang, no crash)', () => {
+    const text = '{}'.repeat(1000);
+    const objects = allBalancedJsonObjects(text);
+    expect(objects.length).toBeLessThanOrEqual(25);
+    expect(objects.every(o => o === '{}')).toBe(true);
+  });
+});
+
 describe('readVerdict', () => {
   it('reads a {findings, summary} object', () => {
     const { findings, summary: s } = readVerdict({ findings: [finding], summary });
@@ -457,6 +489,30 @@ describe('extractFindingsFromText (fence-priority verdict recovery)', () => {
     expect(out.findings).toHaveLength(1);
   });
 
+  // Issue #829: on a JSON-dense diff, the model's own investigative prose can
+  // quote an incidental JSON-shaped fragment (e.g. discussing a literal from
+  // the diff) BEFORE its real verdict, unfenced. The single-object scan used
+  // to stop at that first (non-verdict) object and never look further;
+  // `allBalancedJsonObjects` now tries every one in order, so the real
+  // verdict — still the first candidate that carries `summary` — is
+  // recovered instead of being shadowed by the earlier fragment.
+  it('#829: recovers a verdict that is not the first balanced object in unfenced text', () => {
+    const verdict = JSON.stringify({ findings: [finding], summary });
+    const text =
+      'Issue 7: JSON.stringify({x: NaN}) produces `{"x":null}`. Not a real verdict.\n' +
+      `Here is my actual verdict:\n${verdict}`;
+    const out = extractFindingsFromText(text);
+    expect(out.summary).toEqual(summary);
+    expect(out.findings).toHaveLength(1);
+  });
+
+  // The mirror-image case is a genuine, stated limitation, not a regression:
+  // if the EARLIER object also fully mimics the verdict shape (a leaked
+  // `<output_format>` contract example carrying its own dummy summary), a
+  // purely positional/shape-based scan cannot tell it apart from a real
+  // verdict without risking shape A's "trust the original, not a
+  // self-revision" behavior above. First-with-summary-wins is the documented
+  // trade-off (see `allBalancedJsonObjects`'s doc comment).
   it('shape B (#792 stale-duplicate): a wholesale-corrupted stop-turn stays unrecovered', () => {
     // Verbatim 28-char corrupted payload from both stale-duplicate screen
     // runs. It happens to be syntactically valid JSON (all the punctuation

@@ -311,6 +311,21 @@ function stripWildcardSuffix(path: string): string {
  * `import_list`; the engine's import scan descends one level to reach them
  * (see `collectImportNodes` in ast/symbols.ts). Standard-library imports
  * (kotlin.*, kotlinx.*, java.*, javax.*) are filtered out.
+ *
+ * `extractImportPaths` has no analogue of Java's `staticMemberClassPath`
+ * fallback (#864): a top-level function/property import (`import
+ * a.b.myFunction`, defined in an arbitrarily-named file within package
+ * `a.b`) and a class/object-member import (`import a.b.MyObject.method`)
+ * parse to the identical shape — a flat `identifier` of `simple_identifier`
+ * segments with no distinguishing marker (verified empirically: no
+ * `static`-equivalent keyword, no different node type). Java's fix works
+ * because the `static` keyword's presence is itself the syntactic proof that
+ * the trailing segment is a class member/nested type, not a package
+ * component. Without an equivalent marker here, dropping the trailing
+ * segment can't be told apart from truncating a genuine top-level
+ * declaration down to a bare package directory (a many-files fan-out, the
+ * same false-positive shape #868 warned against) — so this stays an honest,
+ * undetermined gap rather than a guess.
  */
 export class KotlinImportExtractor implements LanguageImportExtractor {
   readonly importNodeTypes = ['import_header'];
