@@ -6,6 +6,8 @@ import {
   matchesFile,
   isTestFile,
   isUnresolvableWholeModuleImport,
+  importMatchesTarget,
+  hasSingleFileImportSemantics,
 } from './utils/path-matching.js';
 import { RISK_ORDER } from './insights/types.js';
 
@@ -119,6 +121,42 @@ function buildImportIndex(
 }
 
 /**
+ * Add the chunks keyed by `normalizedImport` to the dependent set via
+ * `addChunk`, applying the #887 per-chunk language check when the match is
+ * ambiguous.
+ *
+ * A multi-segment specifier that matches `normalizedTarget` ONLY through the
+ * permissive (package-directory) path -- not the strict (single-file) path
+ * -- is #887's ambiguous shape: a Go-shaped importer legitimately means it
+ * (every file in the package directory is a member); a Ruby-shaped importer
+ * doesn't (a sibling file under the same directory is a separate, unrelated
+ * module). `matchesFile` can't disambiguate that without both a target and
+ * an importer's language in scope at once, and this function's `chunks`
+ * bucket can span multiple importer files (and in principle languages)
+ * sharing the same normalized import key, so the language check runs per
+ * chunk rather than once per key -- see `hasSingleFileImportSemantics`'s doc
+ * comment. `importMatchesTarget` (used by every match-side call site that
+ * *does* have a single importer file) makes the same derivation once,
+ * up front.
+ */
+function addFuzzyMatchChunks(
+  normalizedImport: string,
+  normalizedTarget: string,
+  chunks: CodeChunk[],
+  addChunk: (chunk: CodeChunk) => void,
+): void {
+  if (!matchesFile(normalizedImport, normalizedTarget)) return;
+
+  const ambiguous =
+    normalizedImport.includes('/') && !matchesFile(normalizedImport, normalizedTarget, true);
+
+  for (const chunk of chunks) {
+    if (ambiguous && hasSingleFileImportSemantics(chunk.metadata.file)) continue;
+    addChunk(chunk);
+  }
+}
+
+/**
  * Finds all chunks that import the target file using index + fuzzy matching.
  *
  * @param normalizedTarget - The normalized path of the target file
@@ -152,10 +190,8 @@ function findDependentChunks(
   // Note: This is O(M) where M = unique import paths. For large codebases with many
   // violations, consider caching fuzzy match results at a higher level.
   for (const [normalizedImport, chunks] of importIndex.entries()) {
-    if (normalizedImport !== normalizedTarget && matchesFile(normalizedImport, normalizedTarget)) {
-      for (const chunk of chunks) {
-        addChunk(chunk);
-      }
+    if (normalizedImport !== normalizedTarget) {
+      addFuzzyMatchChunks(normalizedImport, normalizedTarget, chunks, addChunk);
     }
   }
 
@@ -317,10 +353,8 @@ const MAX_REEXPORT_DEPTH = 3;
  * Check if a single chunk imports from the given source path.
  * Checks both `importedSymbols` keys and raw `imports` array.
  *
- * Skips bare whole-module imports (#884): for a `wholeModuleImports`
- * language (Swift), a bare import can only ever match a target through
- * basename coincidence, not a real per-file dependency — see
- * `isUnresolvableWholeModuleImport`'s doc comment.
+ * Uses `importMatchesTarget`, which applies the #884 whole-module guard
+ * before `matchesFile` — see its doc comment in path-matching.ts (#886).
  */
 export function chunkImportsFrom(
   chunk: CodeChunk,
@@ -332,10 +366,8 @@ export function chunkImportsFrom(
     importedSymbols && typeof importedSymbols === 'object' ? Object.keys(importedSymbols) : [];
   const allImportPaths = [...importedSymbolPaths, ...(chunk.metadata.imports || [])];
 
-  return allImportPaths.some(
-    imp =>
-      !isUnresolvableWholeModuleImport(imp, chunk.metadata.file) &&
-      matchesFile(normalizePathCached(imp), sourcePath),
+  return allImportPaths.some(imp =>
+    importMatchesTarget(imp, chunk.metadata.file, sourcePath, normalizePathCached),
   );
 }
 
@@ -367,10 +399,8 @@ export function groupChunksByNormalizedPath(
  * file imports for side effect or does `export * from`, neither of which
  * should qualify it as a re-exporter on its own (#526).
  *
- * Skips bare whole-module imports (#884): for a `wholeModuleImports`
- * language (Swift), a bare import can only ever match a source path through
- * basename coincidence, not a real re-export relationship — see
- * `isUnresolvableWholeModuleImport`'s doc comment.
+ * Uses `importMatchesTarget`, which applies the #884 whole-module guard
+ * before `matchesFile` — see its doc comment in path-matching.ts (#886).
  */
 function collectImportedSymbolsFromSource(
   chunks: CodeChunk[],
@@ -382,10 +412,8 @@ function collectImportedSymbolsFromSource(
     const importedSymbols = chunk.metadata.importedSymbols;
     if (!importedSymbols || typeof importedSymbols !== 'object') continue;
     Object.entries(importedSymbols)
-      .filter(
-        ([importPath]) =>
-          !isUnresolvableWholeModuleImport(importPath, chunk.metadata.file) &&
-          matchesFile(normalizePathCached(importPath), sourcePath),
+      .filter(([importPath]) =>
+        importMatchesTarget(importPath, chunk.metadata.file, sourcePath, normalizePathCached),
       )
       .forEach(([, syms]) => syms.forEach(sym => symbols.add(sym)));
   }

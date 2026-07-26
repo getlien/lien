@@ -520,6 +520,74 @@ describe('analyzeDependencies', () => {
       expect(result.dependents[0].filepath).toBe('tests/auth_test.rs');
     });
   });
+
+  describe('#887 language-aware directory-vs-file matching (findDependentChunks)', () => {
+    it('Ruby: a bare multi-segment require does not credit a sibling file under the same directory', () => {
+      // rack-protection/lib/rack/protection/base.rb bare-requires
+      // 'rack/protection' -- that must resolve to the umbrella
+      // rack-protection/lib/rack/protection.rb, not to an unrelated sibling
+      // module that merely shares the directory (#887).
+      const chunks: CodeChunk[] = [
+        createChunk('rack-protection/lib/rack/protection/base.rb', ['rack/protection']),
+      ];
+
+      const result = analyzeDependencies(
+        'rack-protection/lib/rack/protection/xss_header.rb',
+        chunks,
+        workspaceRoot,
+      );
+
+      expect(result.dependents.map(d => d.filepath)).not.toContain(
+        'rack-protection/lib/rack/protection/base.rb',
+      );
+    });
+
+    it('Ruby: the umbrella entry point itself is still a legitimate match', () => {
+      const chunks: CodeChunk[] = [
+        createChunk('rack-protection/lib/rack/protection/base.rb', ['rack/protection']),
+      ];
+
+      const result = analyzeDependencies(
+        'rack-protection/lib/rack/protection.rb',
+        chunks,
+        workspaceRoot,
+      );
+
+      expect(result.dependents.map(d => d.filepath)).toContain(
+        'rack-protection/lib/rack/protection/base.rb',
+      );
+    });
+
+    it('Go: a package-directory import still credits every file in the directory as a dependent (the caught regression)', () => {
+      // #877 normalizes `import "mymodule/internal/fs"` down to the bare
+      // `internal/fs`. In Go that names a PACKAGE, so every .go file inside
+      // the directory (e.g. fs.go) is a legitimate dependent -- an earlier
+      // revision of the #887 fix broke this (67 -> 9 dependent edges on a
+      // real gin clone) by applying Ruby's stricter anchor unconditionally.
+      const chunks: CodeChunk[] = [createChunk('render/html.go', ['internal/fs'])];
+
+      const result = analyzeDependencies('internal/fs/fs.go', chunks, workspaceRoot);
+
+      expect(result.dependents.map(d => d.filepath)).toContain('render/html.go');
+    });
+
+    it('applies the language check per chunk, not once per shared import key', () => {
+      // Two chunks share the identical normalized import key ('pkg/sub'):
+      // one Go, one Ruby. findDependentChunks's fuzzy loop iterates the
+      // index by key, so it must not decide "match or no match" once per
+      // key -- the Go chunk is a real dependent, the Ruby chunk is not.
+      const chunks: CodeChunk[] = [
+        createChunk('render/html.go', ['pkg/sub']),
+        createChunk('lib/pkg/consumer.rb', ['pkg/sub']),
+      ];
+
+      const result = analyzeDependencies('pkg/sub/child.go', chunks, workspaceRoot);
+      const filepaths = result.dependents.map(d => d.filepath);
+
+      expect(filepaths).toContain('render/html.go');
+      expect(filepaths).not.toContain('lib/pkg/consumer.rb');
+    });
+  });
 });
 
 // Direct unit coverage for the shared re-export intersection algorithm,

@@ -296,6 +296,13 @@ export const rubyDefinition: LanguageDefinition = {
   exportExtractor: new RubyExportExtractor(),
   importExtractor: new RubyImportExtractor(),
   symbolExtractor: new RubySymbolExtractor(),
+  // A bare, multi-segment `require` (e.g. `require 'rack/protection'`) loads
+  // exactly one file resolved via $LOAD_PATH -- a sibling file that happens
+  // to share the same directory (`rack/protection/base.rb`) is a distinct,
+  // unrelated module, not an implicit member of the required specifier
+  // (#887). See `LanguageDefinition.singleFileImports`'s doc comment for the
+  // contrast with Go's package-directory semantics.
+  singleFileImports: true,
 
   complexity: {
     // Structural control-flow branch points. NOTE: Ruby's logical operators

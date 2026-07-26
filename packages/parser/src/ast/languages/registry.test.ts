@@ -6,6 +6,7 @@ import {
   getAllLanguages,
   hasWholeModuleImports,
   hasEnclosingNamespaceAccess,
+  hasSingleFileImports,
 } from './registry.js';
 import type { SupportedLanguage } from './registry.js';
 
@@ -183,6 +184,28 @@ describe('Language Registry', () => {
     it('is independent of hasWholeModuleImports (C# is not a whole-module-import language)', () => {
       expect(hasWholeModuleImports('csharp')).toBe(false);
       expect(hasEnclosingNamespaceAccess('swift')).toBe(false);
+    });
+  });
+
+  describe('hasSingleFileImports', () => {
+    it('is true for Ruby (#887: a bare multi-segment require names one file, not a package directory)', () => {
+      expect(hasSingleFileImports('ruby')).toBe(true);
+    });
+
+    it('is false for every other registered language, notably Go (package-directory semantics)', () => {
+      expect(hasSingleFileImports('go')).toBe(false);
+      const others = getAllLanguages()
+        .map(d => d.id)
+        .filter(id => id !== 'ruby');
+      expect(others.length).toBeGreaterThan(0);
+      others.forEach(id => {
+        expect(hasSingleFileImports(id)).toBe(false);
+      });
+    });
+
+    it('is independent of hasWholeModuleImports/hasEnclosingNamespaceAccess', () => {
+      expect(hasWholeModuleImports('ruby')).toBe(false);
+      expect(hasEnclosingNamespaceAccess('ruby')).toBe(false);
     });
   });
 });

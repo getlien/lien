@@ -6,6 +6,8 @@ import {
   resolveRelativeImport,
   resolveWorkspaceImport,
   isUnresolvableWholeModuleImport,
+  importMatchesTarget,
+  hasSingleFileImportSemantics,
 } from './path-matching.js';
 
 /**
@@ -23,10 +25,14 @@ describe('matchesFile - Path Boundary Checking', () => {
   // Test helper: normalize paths without workspace root (not needed for unit tests)
   const normalize = (path: string): string => normalizePath(path, '/fake/workspace');
 
-  const testMatchesFile = (importPath: string, targetPath: string): boolean => {
+  const testMatchesFile = (
+    importPath: string,
+    targetPath: string,
+    requireExactTailForMultiSegment = false,
+  ): boolean => {
     const normalizedImport = normalize(importPath);
     const normalizedTarget = normalize(targetPath);
-    return matchesFile(normalizedImport, normalizedTarget);
+    return matchesFile(normalizedImport, normalizedTarget, requireExactTailForMultiSegment);
   };
 
   describe('should match valid imports', () => {
@@ -423,6 +429,67 @@ describe('matchesFile - Path Boundary Checking', () => {
       });
     });
   });
+
+  describe('two-segment bare require precision (#887, language-aware)', () => {
+    it('Ruby (strict mode): a multi-segment bare require must not fan out to every file under its own directory', () => {
+      // sinatra's bundled rack-protection: `require 'rack/protection'` must
+      // match only the gem's own entry point, not every file nested under
+      // rack-protection/lib/rack/protection/ -- the multi-segment shape of
+      // the same #868/#883 single-segment bug (`sinatra` vs. `lib/sinatra/*`).
+      // `requireExactTailForMultiSegment: true` is exactly what
+      // `importMatchesTarget` derives for a `.rb` importer via
+      // `hasSingleFileImportSemantics` (see below) -- passed explicitly here
+      // to unit-test the matcher in isolation.
+      expect(
+        testMatchesFile('rack/protection', 'rack-protection/lib/rack/protection/csrf', true),
+      ).toBe(false);
+      expect(
+        testMatchesFile('rack/protection', 'rack-protection/lib/rack/protection/base', true),
+      ).toBe(false);
+      // The gem's own entry point still matches.
+      expect(testMatchesFile('rack/protection', 'rack-protection/lib/rack/protection', true)).toBe(
+        true,
+      );
+    });
+
+    it('Go (default/permissive mode): the identical multi-segment shape is a legitimate package-directory member match', () => {
+      // A HIGH-severity regression caught in review: #877 normalizes
+      // `import "mymodule/internal/fs"` down to the bare `internal/fs`
+      // after module-prefix stripping. In Go that names a PACKAGE -- every
+      // `.go` file inside the directory is a member, so `internal/fs` MUST
+      // keep matching `internal/fs/fs.go` (and any other file in that
+      // directory) under the default, non-strict mode real Go callers use.
+      // An earlier version of this fix applied the Ruby-only anchor
+      // unconditionally and broke exactly this case (67 → 9 dependent edges
+      // on a real gin clone) before being caught and reworked.
+      expect(testMatchesFile('internal/fs', 'internal/fs/fs.go')).toBe(true);
+      expect(testMatchesFile('internal/fs', 'internal/fs/utils.go')).toBe(true);
+      // Explicitly confirms the default parameter IS permissive (`false`).
+      expect(testMatchesFile('internal/fs', 'internal/fs/fs.go', false)).toBe(true);
+    });
+
+    it('regression: the #868 single-segment guard is unaffected by the strict flag either way', () => {
+      expect(testMatchesFile('sinatra', 'lib/sinatra')).toBe(true);
+      expect(testMatchesFile('sinatra', 'lib/sinatra/base')).toBe(false);
+      expect(testMatchesFile('sinatra', 'lib/sinatra', true)).toBe(true);
+      expect(testMatchesFile('sinatra', 'lib/sinatra/base', true)).toBe(false);
+    });
+
+    it('regression: the Rust one-leading-segment source-prefix convention is unaffected', () => {
+      expect(testMatchesFile('auth', 'src/auth.rs')).toBe(true);
+    });
+
+    it('regression: a genuine multi-segment import still matches its multi-segment target in both modes', () => {
+      // Untouched by the #887 end-anchor extension -- these already reached
+      // the end of the compared string before the fix, in either mode.
+      expect(testMatchesFile('auth/middleware', 'src/auth/middleware.rs')).toBe(true);
+      expect(testMatchesFile('auth/middleware', 'src/auth/middleware.rs', true)).toBe(true);
+      expect(testMatchesFile('github.com/gin-gonic/gin/internal/fs', 'internal/fs')).toBe(true);
+      expect(testMatchesFile('github.com/gin-gonic/gin/internal/fs', 'internal/fs', true)).toBe(
+        true,
+      );
+    });
+  });
 });
 
 /**
@@ -470,6 +537,109 @@ describe('isUnresolvableWholeModuleImport (#884)', () => {
 
   it('does not suppress bare imports from non-Swift, non-whole-module files', () => {
     expect(isUnresolvableWholeModuleImport('logger', 'src/logger.ts')).toBe(false);
+  });
+});
+
+/**
+ * Test cases for the #886 consolidated primitive: `importMatchesTarget`
+ * couples `isUnresolvableWholeModuleImport`'s guard to `matchesFile` so a
+ * match-side caller can never invoke one without the other.
+ */
+describe('importMatchesTarget (#886)', () => {
+  const normalize = (p: string): string => normalizePath(p, '/fake/workspace');
+
+  it('matches like matchesFile would, for a non-whole-module language', () => {
+    expect(importMatchesTarget('./logger', 'src/foo.ts', normalize('src/logger'), normalize)).toBe(
+      true,
+    );
+    expect(
+      importMatchesTarget('src/database.ts', 'src/foo.ts', normalize('src/logger.ts'), normalize),
+    ).toBe(false);
+  });
+
+  it('suppresses the #884 Alamofire whole-module false-hub shape that matchesFile alone would match', () => {
+    // matchesFile itself still matches this pair (#884's own regression pin) --
+    // the guard is what makes the combined primitive reject it.
+    expect(matchesFile(normalize('Alamofire'), normalize('Source/Alamofire.swift'))).toBe(true);
+    expect(
+      importMatchesTarget(
+        'Alamofire',
+        'Source/AlamofireTests.swift',
+        normalize('Source/Alamofire.swift'),
+        normalize,
+      ),
+    ).toBe(false);
+  });
+
+  it('leaves the identical bare-identifier shape alone for a non-whole-module language (Rust)', () => {
+    expect(
+      importMatchesTarget('auth', 'src/consumer.rs', normalize('src/auth.rs'), normalize),
+    ).toBe(true);
+  });
+
+  it('rejects a real per-file relationship guarded by the whole-module language, not the pair', () => {
+    // Swift's SwiftImportExtractor never emits anything but the bare module
+    // name, so even a genuine same-file relationship reads as "not
+    // determinable" rather than a match -- this is the same honest #869
+    // outcome isUnresolvableWholeModuleImport documents, just reached through
+    // the combined primitive instead of the open-coded pattern.
+    expect(
+      importMatchesTarget('Combine', 'Tests/CombineTests.swift', normalize('Combine'), normalize),
+    ).toBe(false);
+  });
+
+  describe('#887 language-aware routing', () => {
+    it('Ruby importer: rejects the rack/protection child-file fan-out, keeps the entry point', () => {
+      const importerFile = 'rack-protection/spec/spec_helper.rb';
+      expect(
+        importMatchesTarget(
+          'rack/protection',
+          importerFile,
+          normalize('rack-protection/lib/rack/protection/xss_header'),
+          normalize,
+        ),
+      ).toBe(false);
+      expect(
+        importMatchesTarget(
+          'rack/protection',
+          importerFile,
+          normalize('rack-protection/lib/rack/protection'),
+          normalize,
+        ),
+      ).toBe(true);
+    });
+
+    it('Go importer: keeps matching every file inside its package directory (the caught regression)', () => {
+      // The reviewer's proven-failing shape at an earlier revision of this
+      // fix: a language-unaware unconditional end-anchor made this return
+      // false, reversing #877 on a real gin clone (67 -> 9 dependent edges).
+      const importerFile = 'render/html.go';
+      expect(
+        importMatchesTarget('internal/fs', importerFile, normalize('internal/fs/fs.go'), normalize),
+      ).toBe(true);
+      expect(
+        importMatchesTarget(
+          'internal/fs',
+          importerFile,
+          normalize('internal/fs/utils.go'),
+          normalize,
+        ),
+      ).toBe(true);
+    });
+  });
+});
+
+describe('hasSingleFileImportSemantics (#887)', () => {
+  it('is true for a Ruby importer file', () => {
+    expect(hasSingleFileImportSemantics('rack-protection/lib/rack/protection/base.rb')).toBe(true);
+  });
+
+  it('is false for a Go importer file', () => {
+    expect(hasSingleFileImportSemantics('render/html.go')).toBe(false);
+  });
+
+  it('is false for an importer file in an unrecognized/undetectable language', () => {
+    expect(hasSingleFileImportSemantics('README.md')).toBe(false);
   });
 });
 

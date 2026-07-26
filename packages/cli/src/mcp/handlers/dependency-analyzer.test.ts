@@ -110,6 +110,80 @@ describe('findDependents', () => {
     });
   });
 
+  describe('#887 language-aware directory-vs-file matching', () => {
+    it('Ruby: a bare multi-segment require does not credit a sibling file under the same directory', async () => {
+      // rack-protection/lib/rack/protection/base.rb bare-requires
+      // 'rack/protection' -- that must resolve to the umbrella
+      // rack-protection/lib/rack/protection.rb, not to an unrelated sibling
+      // module that merely shares the directory (#887).
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('rack-protection/lib/rack/protection/base.rb', {
+          imports: ['rack/protection'],
+        }),
+      ]);
+
+      const result = await findDependents(
+        mockDB as any,
+        'rack-protection/lib/rack/protection/xss_header.rb',
+        mockLog,
+      );
+
+      expect(result.dependents.map(d => d.filepath)).not.toContain(
+        'rack-protection/lib/rack/protection/base.rb',
+      );
+    });
+
+    it('Ruby: the umbrella entry point itself is still a legitimate match', async () => {
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('rack-protection/lib/rack/protection/base.rb', {
+          imports: ['rack/protection'],
+        }),
+      ]);
+
+      const result = await findDependents(
+        mockDB as any,
+        'rack-protection/lib/rack/protection.rb',
+        mockLog,
+      );
+
+      expect(result.dependents.map(d => d.filepath)).toContain(
+        'rack-protection/lib/rack/protection/base.rb',
+      );
+    });
+
+    it('Go: a package-directory import still credits every file in the directory as a dependent (the caught regression)', async () => {
+      // #877 normalizes `import "mymodule/internal/fs"` down to the bare
+      // `internal/fs`. In Go that names a PACKAGE, so every .go file inside
+      // the directory (e.g. fs.go) is a legitimate dependent -- an earlier
+      // revision of the #887 fix broke this (67 -> 9 dependent edges on a
+      // real gin clone) by applying Ruby's stricter anchor unconditionally.
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('render/html.go', { imports: ['internal/fs'] }),
+      ]);
+
+      const result = await findDependents(mockDB as any, 'internal/fs/fs.go', mockLog);
+
+      expect(result.dependents.map(d => d.filepath)).toContain('render/html.go');
+    });
+
+    it('applies the language check per chunk, not once per shared import key', async () => {
+      // Two chunks share the identical normalized import key ('pkg/sub'):
+      // one Go, one Ruby. The fuzzy-match loop iterates the index by key, so
+      // it must not decide "match or no match" once per key -- the Go chunk
+      // is a real dependent, the Ruby chunk is not.
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('render/html.go', { imports: ['pkg/sub'] }),
+        createChunk('lib/pkg/consumer.rb', { imports: ['pkg/sub'] }),
+      ]);
+
+      const result = await findDependents(mockDB as any, 'pkg/sub/child.go', mockLog);
+      const filepaths = result.dependents.map(d => d.filepath);
+
+      expect(filepaths).toContain('render/html.go');
+      expect(filepaths).not.toContain('lib/pkg/consumer.rb');
+    });
+  });
+
   describe('re-export chains / barrel files', () => {
     it('should find transitive dependents through barrel file re-exports', async () => {
       // target.ts exports Foo

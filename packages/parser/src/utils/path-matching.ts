@@ -11,6 +11,7 @@ import {
   getSupportedExtensions,
   detectLanguage,
   hasWholeModuleImports,
+  hasSingleFileImports,
 } from '../ast/languages/registry.js';
 
 /**
@@ -92,17 +93,18 @@ export function matchesAtBoundary(str: string, pattern: string): boolean {
 }
 
 /**
- * Like `matchesAtBoundary`, but additionally requires a bare (slash-free)
+ * Like `matchesAtBoundary`, but additionally requires a bare (non-relative)
  * `pattern` to represent the *whole* relationship rather than a coincidental
  * partial one:
  *
- * - The match must reach the end of `str`. An interior hit means `str`
- *   continues into an unrelated subtree beyond the identifier, e.g. a bare
- *   `require 'sinatra'` matching every file under `lib/sinatra/` rather than
- *   just the gem's own entry point (`lib/sinatra.rb`).
- * - At most `maxLeadingSegments` directory segments may precede the match.
- *   The two `matchesFile` call sites need different values here because a
- *   bare identifier plays a different role in each direction:
+ * - For a single-segment (slash-free) `pattern`, the match must always
+ *   reach the end of `str`. An interior hit means `str` continues into an
+ *   unrelated subtree beyond the identifier, e.g. a bare `require 'sinatra'`
+ *   matching every file under `lib/sinatra/` rather than just the gem's own
+ *   entry point (`lib/sinatra.rb`). At most `maxLeadingSegments` directory
+ *   segments may additionally precede the match. The two `matchesFile` call
+ *   sites need different values here because a bare identifier plays a
+ *   different role in each direction:
  *   - Strategy 2 passes 1, allowing the established "source directory
  *     prefix" convention (a bare *import* like `auth` resolving to
  *     `src/auth.rs`) — a real, confirmed pattern (see the Rust tests above).
@@ -117,6 +119,25 @@ export function matchesAtBoundary(str: string, pattern: string): boolean {
  *   Both directions still reject a bare `import Combine` (system framework)
  *   matching `Source/Features/Combine.swift` (2 leading segments, over
  *   either threshold).
+ * - For a MULTI-segment `pattern`, whether an interior hit (an unrelated
+ *   subtree continuing beyond the match) is rejected depends on
+ *   `requireExactTailForMultiSegment`, because the two currently-supported
+ *   languages that reach this branch disagree about what a multi-segment
+ *   bare specifier names:
+ *   - Ruby: `require 'rack/protection'` loads exactly ONE file
+ *     (`rack/protection.rb`) — a sibling `rack/protection/base.rb` is a
+ *     separate module, not a member (#887). Callers for Ruby-shaped
+ *     importers pass `true`, rejecting the interior-hit ("child file")
+ *     case the same way the single-segment branch always has.
+ *   - Go: `import "mymodule/internal/fs"` (normalized to the bare
+ *     `internal/fs` after #877's module-prefix stripping) names a PACKAGE —
+ *     every `.go` file inside that directory is a legitimate member, so an
+ *     interior hit (`internal/fs/fs.go`) must still match. Callers for
+ *     Go-shaped importers (and the default, permissive value) pass `false`.
+ *   `maxLeadingSegments` is never applied to a multi-segment pattern in
+ *   either case: it already carries its own internal structure (e.g.
+ *   `rack/protection`'s own slash), so it needs no additional "how deep is
+ *   the importer nested" scrutiny.
  *
  * Used only for `matchesFile`'s strategies 1/2, which compare the raw
  * import/target strings as given. A cleaned `./`/`../` relative import
@@ -130,6 +151,7 @@ function matchesAtBoundaryPrecise(
   str: string,
   pattern: string,
   maxLeadingSegments: number,
+  requireExactTailForMultiSegment: boolean,
 ): boolean {
   const index = str.indexOf(pattern);
   if (index === -1) return false;
@@ -138,16 +160,35 @@ function matchesAtBoundaryPrecise(
   if (charBefore !== '/' && index !== 0) return false;
 
   const endIndex = index + pattern.length;
-  if (endIndex !== str.length && str[endIndex] !== '/') return false;
+  const atEnd = endIndex === str.length;
+  if (!atEnd && str[endIndex] !== '/') return false;
 
   if (!pattern.includes('/')) {
-    if (endIndex !== str.length) return false;
-    const prefix = str.substring(0, index);
-    const prefixSlashes = (prefix.match(/\//g) || []).length;
-    if (prefixSlashes > maxLeadingSegments) return false;
+    return matchesSingleSegmentTail(str, index, atEnd, maxLeadingSegments);
   }
+  // Multi-segment: an interior hit (`!atEnd`, e.g. a "child file" under the
+  // pattern's own directory) is only rejected for single-file-import
+  // languages (Ruby) -- see the doc comment above and
+  // `requireExactTailForMultiSegment`'s callers.
+  return atEnd || !requireExactTailForMultiSegment;
+}
 
-  return true;
+/**
+ * Single-segment-only tail of `matchesAtBoundaryPrecise`: the match must
+ * reach the end of `str`, and at most `maxLeadingSegments` directory
+ * segments may precede it. Split out to keep the parent function's
+ * cognitive complexity down.
+ */
+function matchesSingleSegmentTail(
+  str: string,
+  index: number,
+  atEnd: boolean,
+  maxLeadingSegments: number,
+): boolean {
+  if (!atEnd) return false;
+  const prefix = str.substring(0, index);
+  const prefixSlashes = (prefix.match(/\//g) || []).length;
+  return prefixSlashes <= maxLeadingSegments;
 }
 
 /**
@@ -166,14 +207,18 @@ function matchesAtBoundaryPrecise(
  * false-hub shape, one leading segment inside the window #868/#883
  * deliberately preserve for the legitimate Rust-style convention.
  *
- * Callers that discover imports per-chunk (`findTestAssociationsFromChunks`,
- * `get_dependents`'s import index) should call this *before* handing a
- * candidate import to `matchesFile`, and skip it entirely when true -- the
- * honest outcome is #869's "not determinable" signal, never a match. This is
- * intentionally the only place that combines path-matching with language
- * data; `matchesAtBoundaryPrecise`'s general guard stays untouched and keeps
- * serving every non-whole-module language (Rust, Go, Ruby, ...) exactly as
- * before.
+ * Match-side callers (does this import resolve to this target?) should go
+ * through `importMatchesTarget` below, which applies this guard before
+ * calling `matchesFile` so the two can never drift apart (#886). Build-side
+ * callers with no target in scope (`buildImportIndex`,
+ * `indexImportEntry`/`addChunkToImportIndex`) have nothing for
+ * `importMatchesTarget` to compare against, so they keep calling this
+ * predicate directly to decide whether an (import, chunk) pair is worth
+ * indexing at all -- the honest outcome when it's true is #869's "not
+ * determinable" signal, never a match. This is intentionally the only place
+ * that combines path-matching with language data; `matchesAtBoundaryPrecise`'s
+ * general guard stays untouched and keeps serving every non-whole-module
+ * language (Rust, Go, Ruby, ...) exactly as before.
  *
  * @param importSpecifier - The raw (pre-normalization) import specifier
  * @param importerFile - File path of the chunk doing the importing
@@ -198,23 +243,51 @@ export function isUnresolvableWholeModuleImport(
  * 5. PHP namespace imports (App\Models\User vs app/Models/User.php)
  * 6. Python module imports (django.http → django/http/__init__.py or django/http/*.py)
  *
+ * `matchesFile` itself stays language-agnostic (see `isUnresolvableWholeModuleImport`'s
+ * doc comment) — it never inspects `importerFile` or detects a language. But
+ * strategies 1/2's multi-segment boundary check has one genuine language-
+ * dependent fork (#887): does a bare multi-segment specifier name a single
+ * file (Ruby) or a package directory whose files are all members (Go)? A
+ * language-agnostic caller can't know, so it's threaded in as an explicit
+ * parameter rather than decided here — see `requireExactTailForMultiSegment`
+ * and `importMatchesTarget`, the only caller that derives it from the
+ * importer's language. Every other caller passes the default (`false`,
+ * permissive/Go-safe), preserving this function's pre-#887 behavior exactly.
+ *
  * @param normalizedImport - Normalized import path
  * @param normalizedTarget - Normalized target file path
+ * @param requireExactTailForMultiSegment - When true, a multi-segment bare
+ *   pattern must reach the end of the compared string (Ruby's single-file
+ *   `require` semantics); when false (the default), a multi-segment bare
+ *   pattern may also match a "child" continuing past it (Go's package-
+ *   directory semantics, and the safe default for every other language).
  * @returns True if the import matches the target file
  */
-export function matchesFile(normalizedImport: string, normalizedTarget: string): boolean {
+export function matchesFile(
+  normalizedImport: string,
+  normalizedTarget: string,
+  requireExactTailForMultiSegment = false,
+): boolean {
   // Exact match
   if (normalizedImport === normalizedTarget) return true;
 
   // Strategy 1: Check if target path appears in import at path boundaries.
   // maxLeadingSegments: 0 -- see matchesAtBoundaryPrecise's doc comment.
-  if (matchesAtBoundaryPrecise(normalizedImport, normalizedTarget, 0)) {
+  // `pattern` here is the TARGET (a concrete file reference), never a raw
+  // import specifier -- the "does a bare multi-segment specifier name a
+  // file or a directory" question `requireExactTailForMultiSegment` answers
+  // doesn't apply to this position, so this call always passes `false`
+  // regardless of the caller's language, matching this strategy's
+  // pre-#887 behavior unconditionally.
+  if (matchesAtBoundaryPrecise(normalizedImport, normalizedTarget, 0, false)) {
     return true;
   }
 
   // Strategy 2: Check if import path appears in target (for longer target paths).
   // maxLeadingSegments: 1 -- see matchesAtBoundaryPrecise's doc comment.
-  if (matchesAtBoundaryPrecise(normalizedTarget, normalizedImport, 1)) {
+  if (
+    matchesAtBoundaryPrecise(normalizedTarget, normalizedImport, 1, requireExactTailForMultiSegment)
+  ) {
     return true;
   }
 
@@ -250,6 +323,68 @@ export function matchesFile(normalizedImport: string, normalizedTarget: string):
   }
 
   return false;
+}
+
+/**
+ * The single guarded import-matching decision: does `importSpecifier` (as
+ * written in `importerFile`) resolve to `normalizedTarget`?
+ *
+ * Couples two guards to `matchesFile` so neither can drift apart from a
+ * match-side call site again:
+ * - The #884 whole-module guard (`isUnresolvableWholeModuleImport`) --
+ *   `matchesFile` is language-agnostic and cannot know the importer's
+ *   language, so this MUST run on the RAW specifier first.
+ * - The #887 single-file-vs-package-directory distinction
+ *   (`requireExactTailForMultiSegment`) -- derived from the importer's
+ *   language via `hasSingleFileImports`, since that's the only information
+ *   that can disambiguate a bare multi-segment specifier like `rack/protection`
+ *   (Ruby: names one file) from `internal/fs` (Go: names a package directory
+ *   whose files are all members). This is the ONE call site with both an
+ *   importer file *and* a target to compare against, so it's the only place
+ *   this derivation happens.
+ *
+ * Every match-side reverse-dependency call path that used to open-code
+ * `!isUnresolvableWholeModuleImport(imp, f) && matchesFile(normalize(imp), t)`
+ * now goes through here instead (#886); the two build-side sites that index
+ * imports with no target in scope (`buildImportIndex`,
+ * `indexImportEntry`/`addChunkToImportIndex`) still call
+ * `isUnresolvableWholeModuleImport` directly, and `findDependentChunks`'s
+ * fuzzy loop and `buildReExportGraph` stay on raw `matchesFile` -- see #886's
+ * design comment for why those four are not routed through this primitive,
+ * and `findDependentChunks`'s own doc comment for how it independently
+ * derives the #887 distinction per-chunk (it has no single importer file).
+ *
+ * @param importSpecifier - The raw (pre-normalization) import specifier, or
+ *   an `importedSymbols` key (same shape).
+ * @param importerFile - File path of the chunk doing the importing (needed
+ *   for both guards' language detection).
+ * @param normalizedTarget - The already-normalized target path to compare
+ *   against.
+ * @param normalize - The caller's own cached `normalizePath` wrapper.
+ */
+export function importMatchesTarget(
+  importSpecifier: string,
+  importerFile: string,
+  normalizedTarget: string,
+  normalize: (p: string) => string,
+): boolean {
+  if (isUnresolvableWholeModuleImport(importSpecifier, importerFile)) return false;
+  return matchesFile(
+    normalize(importSpecifier),
+    normalizedTarget,
+    hasSingleFileImportSemantics(importerFile),
+  );
+}
+
+/**
+ * True when `importerFile`'s language sets `LanguageDefinition.singleFileImports`
+ * (Ruby today) -- see that flag's doc comment for the Ruby-vs-Go distinction
+ * this drives. Shared by `importMatchesTarget` and `findDependentChunks`'s
+ * per-chunk #887 check so the two can't compute it differently.
+ */
+export function hasSingleFileImportSemantics(importerFile: string): boolean {
+  const language = detectLanguage(importerFile);
+  return language !== null && hasSingleFileImports(language);
 }
 
 /**

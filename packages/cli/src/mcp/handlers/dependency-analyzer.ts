@@ -7,6 +7,8 @@ import {
   getCanonicalPath,
   isTestFile,
   isUnresolvableWholeModuleImport,
+  importMatchesTarget,
+  hasSingleFileImportSemantics,
   COMPLEXITY_THRESHOLDS,
 } from '@liendev/parser';
 
@@ -152,10 +154,8 @@ function buildReExportGraph(
  * Check if any chunk in the file imports the target symbol from any of the
  * given paths (direct target or re-exporter paths).
  *
- * Skips bare whole-module imports (#884): for a `wholeModuleImports`
- * language (Swift), a bare import can only ever match a target through
- * basename coincidence, not a real per-file dependency — see
- * `isUnresolvableWholeModuleImport`'s doc comment.
+ * Uses `importMatchesTarget`, which applies the #884 whole-module guard
+ * before `matchesFile` — see its doc comment in path-matching.ts (#886).
  */
 function fileImportsSymbolFromAny(
   chunks: SearchResult[],
@@ -168,11 +168,11 @@ function fileImportsSymbolFromAny(
     if (!importedSymbols) return false;
 
     return Object.entries(importedSymbols).some(([importPath, symbols]) => {
-      if (isUnresolvableWholeModuleImport(importPath, chunk.metadata.file)) return false;
-      const normalizedImport = normalizePathCached(importPath);
-      const matchesAny = targetPaths.some(tp => matchesFile(normalizedImport, tp));
+      const pathMatches = targetPaths.some(tp =>
+        importMatchesTarget(importPath, chunk.metadata.file, tp, normalizePathCached),
+      );
       return (
-        matchesAny && (symbols.includes(targetSymbol) || symbols.some(s => s.startsWith('* as ')))
+        pathMatches && (symbols.includes(targetSymbol) || symbols.some(s => s.startsWith('* as ')))
       );
     });
   });
@@ -813,6 +813,42 @@ function hasTestImporter(filepath: string, ctx: ScanContext): boolean {
 }
 
 /**
+ * Add the chunks keyed by `normalizedImport` to the dependent set via
+ * `addChunk`, applying the #887 per-chunk language check when the match is
+ * ambiguous.
+ *
+ * A multi-segment specifier that matches `normalizedTarget` ONLY through the
+ * permissive (package-directory) path -- not the strict (single-file) path
+ * -- is #887's ambiguous shape: a Go-shaped importer legitimately means it
+ * (every file in the package directory is a member); a Ruby-shaped importer
+ * doesn't (a sibling file under the same directory is a separate, unrelated
+ * module). `matchesFile` can't disambiguate that without both a target and
+ * an importer's language in scope at once, and this function's `chunks`
+ * bucket can span multiple importer files (and in principle languages)
+ * sharing the same normalized import key, so the language check runs per
+ * chunk rather than once per key -- see `hasSingleFileImportSemantics`'s doc
+ * comment. `importMatchesTarget` (used by every match-side call site that
+ * *does* have a single importer file) makes the same derivation once,
+ * up front.
+ */
+function addFuzzyMatchChunks(
+  normalizedImport: string,
+  normalizedTarget: string,
+  chunks: SearchResult[],
+  addChunk: (chunk: SearchResult) => void,
+): void {
+  if (!matchesFile(normalizedImport, normalizedTarget)) return;
+
+  const ambiguous =
+    normalizedImport.includes('/') && !matchesFile(normalizedImport, normalizedTarget, true);
+
+  for (const chunk of chunks) {
+    if (ambiguous && hasSingleFileImportSemantics(chunk.metadata.file)) continue;
+    addChunk(chunk);
+  }
+}
+
+/**
  * Find dependent chunks using direct lookup and fuzzy matching.
  */
 function findDependentChunks(
@@ -839,10 +875,8 @@ function findDependentChunks(
 
   // Fuzzy match for relative imports and path variations
   for (const [normalizedImport, chunks] of importIndex.entries()) {
-    if (normalizedImport !== normalizedTarget && matchesFile(normalizedImport, normalizedTarget)) {
-      for (const chunk of chunks) {
-        addChunk(chunk);
-      }
+    if (normalizedImport !== normalizedTarget) {
+      addFuzzyMatchChunks(normalizedImport, normalizedTarget, chunks, addChunk);
     }
   }
 
