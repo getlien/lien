@@ -433,21 +433,31 @@ function matchesWithSourcePrefix(moduleAsPath: string, targetWithoutPy: string):
 }
 
 /**
- * Checks if a Python dotted module path matches a file path.
+ * Checks if a Python dotted (or bare, #901) module path matches a file path.
  *
  * Python imports use dotted paths like "django.http" which should match:
  * - django/http/__init__.py (package)
  * - django/http/response.py (module within package)
  * - django/http.py (direct module, less common)
  *
- * @param importPath - The import path (may contain dots)
+ * A bare, dot-free specifier (`import flask`) matches the same way against
+ * its package's own `__init__.py` and children (`flask/__init__.py`,
+ * `flask/app.py`, ...) — see #901. A src-layout project's `src/` root is
+ * resolved separately, upstream, before this function ever runs (see
+ * `../python-src-layout.ts`); this function only ever sees the already-
+ * resolved specifier.
+ *
+ * @param importPath - The import path (may contain dots, or be a bare word)
  * @param targetPath - The normalized file path
  * @returns True if the Python module matches the file path
  */
 function matchesPythonModule(importPath: string, targetPath: string): boolean {
-  // Only apply to Python-style dotted module identifiers (e.g., django.http.response)
-  // Excludes file paths (contain /), relative imports (start with .), and npm-style packages (lodash.get)
-  if (!/^[A-Za-z_]\w*(\.[A-Za-z_]\w*)+$/.test(importPath)) {
+  // Only apply to Python-style module identifiers: a bare word (django) or a
+  // dotted path (django.http.response). Excludes file paths (contain /) and
+  // relative imports (start with .) -- both are resolved to real paths
+  // upstream (see `resolveRelativeImport`/`resolvePythonSrcLayoutImport`)
+  // before reaching here, so they never need this dotted-specific matcher.
+  if (!/^[A-Za-z_]\w*(\.[A-Za-z_]\w*)*$/.test(importPath)) {
     return false;
   }
 
@@ -456,6 +466,24 @@ function matchesPythonModule(importPath: string, targetPath: string): boolean {
 
   // Strip .py extension from target for comparison
   const targetWithoutPy = targetPath.replace(/\.py$/, '');
+
+  if (!importPath.includes('.')) {
+    // Bare (single-segment) specifier: only the two position-anchored
+    // strategies apply. `matchesSuffixPythonModule`/`matchesWithSourcePrefix`
+    // do unrestricted substring search with no word-boundary check after the
+    // match -- safe for a multi-segment dotted path (low collision odds) but
+    // would let a short bare word like "flask" spuriously match an unrelated
+    // sibling like "flaskext" or a same-named package nested arbitrarily
+    // deep elsewhere in the repo. Mirrors the established precedent of
+    // scoping extra leniency away from bare identifiers (see
+    // `matchesAtBoundaryPrecise`'s `maxLeadingSegments` and
+    // `matchesPHPNamespace`'s bare-importPath guard, both above) -- do not
+    // widen this without a confirmed real-world bare-package case, per #883.
+    return (
+      matchesDirectPythonModule(moduleAsPath, targetWithoutPy) ||
+      matchesParentPythonPackage(moduleAsPath, targetWithoutPy)
+    );
+  }
 
   // Try matching strategies in order of specificity
   return (
@@ -526,13 +554,23 @@ function matchesPHPNamespace(importPath: string, targetPath: string): boolean {
  * Resolve a relative import specifier against its importer's file path.
  *
  * Only acts on specifiers starting with `./` or `../`. Package specifiers
- * (e.g. `@liendev/core`, `lodash`), dotted Python-style imports, and absolute
- * paths pass through unchanged.
+ * (e.g. `@liendev/core`, `lodash`), dotted Python-style *absolute* imports,
+ * and absolute paths pass through unchanged. Since #904, Python's leading-dot
+ * *relative* imports (`.foo`, `..pkg`) DO reach this function too —
+ * `PythonImportExtractor` converts them to this same `./`/`../`-prefixed
+ * shape at extraction time (see `ast/languages/python.ts`'s
+ * `convertPythonRelativeImport`) before `resolveImportSpecifier` calls this.
  *
  * Returns the resolved path in the same form as `importerFile` — relative when
- * `importerFile` is relative, absolute when absolute. The caller's downstream
- * normalization (`normalizePath`) is what ultimately strips extensions and the
- * workspace-root prefix, so no extra work is needed here.
+ * `importerFile` is relative, absolute when absolute. Any trailing slash is
+ * stripped: a bare `./` or `../` specifier (Python's `from . import X` /
+ * `from .. import X`, converted with an empty remainder — see
+ * `convertPythonRelativeImport`) resolves to the importer's own directory
+ * with nothing joined after it, and `path.posix.normalize`/`join` leave that
+ * directory's trailing slash intact, which would otherwise never
+ * boundary-match a target path (those never carry one). The caller's
+ * downstream normalization (`normalizePath`) is what ultimately strips
+ * extensions and the workspace-root prefix, so no other work is needed here.
  *
  * @param importerFile - File path of the chunk doing the importing
  * @param specifier - The raw import specifier from source code
@@ -543,7 +581,7 @@ export function resolveRelativeImport(importerFile: string, specifier: string): 
     return specifier;
   }
   const importerDir = path.posix.dirname(importerFile.replace(/\\/g, '/'));
-  return path.posix.normalize(path.posix.join(importerDir, specifier));
+  return path.posix.normalize(path.posix.join(importerDir, specifier)).replace(/\/+$/, '');
 }
 
 /**

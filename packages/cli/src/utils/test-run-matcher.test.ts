@@ -103,6 +103,47 @@ describe('classifyTestCommand — broad vs scoped classification table', () => {
     // A --config/-c value is never a scope token, even with a source extension.
     ['vitest --config vitest.config.ts', true, true, []],
     ['jest -c jest.config.js src/foo.test.ts', true, false, ['src/foo.test.ts']],
+    // #905: package-manager/environment-runner wrapper prefixes must not
+    // defeat the wrapped command's own pattern — same broad-vs-scoped
+    // semantics as the unwrapped form.
+    ['uv run pytest', true, true, []],
+    ['uv run pytest tests/foo.py', true, false, ['tests/foo.py']],
+    ['poetry run pytest', true, true, []],
+    ['poetry run pytest tests/foo.py', true, false, ['tests/foo.py']],
+    ['pipenv run pytest', true, true, []],
+    ['pipenv run pytest tests/foo.py', true, false, ['tests/foo.py']],
+    ['rye run pytest', true, true, []],
+    ['rye run pytest tests/foo.py', true, false, ['tests/foo.py']],
+    ['pdm run pytest', true, true, []],
+    ['pdm run pytest tests/foo.py', true, false, ['tests/foo.py']],
+    // Flags-with-values on the wrapper's own `run` invocation must be skipped
+    // (flag + value), not naively popped as a single generic token.
+    ['uv run --group tests pytest', true, true, []],
+    ['uv run --group tests pytest tests/foo.py', true, false, ['tests/foo.py']],
+    ['uv run --group=tests pytest', true, true, []],
+    // The flask CI repro from #905 (uv run --locked --no-default-groups
+    // --group dev tox run) — boolean flags then a value flag then the
+    // wrapped `tox run` command.
+    ['uv run --locked --no-default-groups --group dev tox run', true, true, []],
+    // A leading VAR=value assignment before the wrapper must still be
+    // stripped (the two stripping passes compose).
+    ['CI=1 uv run pytest', true, true, []],
+    // #905: tox — bare/`run`/`-e ENV` forms are broad (no file named); the
+    // `--` passthrough is scoped when it forwards a path-like argument.
+    ['tox', true, true, []],
+    ['tox run', true, true, []],
+    ['tox -e py311', true, true, []],
+    ['python -m tox', true, true, []],
+    ['python3.11 -m tox', true, true, []],
+    ['tox -e py311 -- tests/test_x.py', true, false, ['tests/test_x.py']],
+    // nox: same shape and same passthrough convention as tox.
+    ['nox', true, true, []],
+    ['nox -s test', true, true, []],
+    ['python -m nox', true, true, []],
+    ['nox -s test -- tests/test_x.py', true, false, ['tests/test_x.py']],
+    // Composed: a wrapper around tox.
+    ['uv run tox run', true, true, []],
+    ['uv run tox -e py311 -- tests/test_x.py', true, false, ['tests/test_x.py']],
   ])('%s -> isTestRun=%s broad=%s scopeTokens=%j', (command, isTestRun, broad, scopeTokens) => {
     expect(classifyTestCommand(command)).toEqual({ isTestRun, broad, scopeTokens });
   });

@@ -115,17 +115,28 @@ export interface LanguageImportExtractor {
    * silently dropping all but the first (see #863).
    *
    * @param node - AST node matching one of importNodeTypes
+   * @param rustCrateMap - Rust-only (#903): map of workspace crate name
+   *   (underscore form) -> crate `src/` dir, from `resolveRustCrateMap`.
+   *   Every other language's implementation ignores this parameter — Rust's
+   *   own extractor is the only one that needs to resolve a bare `use` root
+   *   against a workspace crate BEFORE deciding whether the import is
+   *   internal or external, which (unlike PHP/Go) happens inside the
+   *   extractor itself rather than as post-processing in `ast/symbols.ts`.
    * @returns Every import path declared by this node, in source order (empty if none)
    */
-  extractImportPaths(node: SyntaxNode): string[];
+  extractImportPaths(node: SyntaxNode, rustCrateMap?: ReadonlyMap<string, string>): string[];
 
   /**
    * Extract imported symbols mapped to their source path.
    *
    * @param node - AST node matching one of importNodeTypes
+   * @param rustCrateMap - Rust-only (#903) — see `extractImportPaths`.
    * @returns Object with importPath and symbols, or null to skip
    */
-  processImportSymbols(node: SyntaxNode): { importPath: string; symbols: string[] } | null;
+  processImportSymbols(
+    node: SyntaxNode,
+    rustCrateMap?: ReadonlyMap<string, string>,
+  ): { importPath: string; symbols: string[] } | null;
 
   /**
    * Extract additional "reference" import-like specifiers that name another
