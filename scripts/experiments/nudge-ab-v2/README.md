@@ -49,8 +49,7 @@ node run.mjs run verify   # 20 arm trials
 `check` requires only a built CLI (`npm run build` + `build:native`). `probe`/`run`
 additionally require the `claude` CLI and API budget — **run only after owner
 approval of the cost** (protocol §9). The runner refuses to start an arm until the
-probe has passed in the same invocation. Outputs land in `.wip/nudge-ab-v2/`
-(gitignored).
+probe has passed. Outputs land in `.wip/nudge-ab-v2/` (gitignored).
 
 ## Do not
 

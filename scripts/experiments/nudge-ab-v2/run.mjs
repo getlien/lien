@@ -471,7 +471,11 @@ function cmdProbeDefault() {
         "PROBE(b'') PASSED — default config + --strict-mcp-config is clean AND hooks fire.",
       );
     } else {
-      console.log("PROBE(b'') CONTAMINATED — ambient plugin leaks in headless. Fall back to b'.");
+      // Throw (like the sibling checks) so a contaminated b'' probe exits non-zero,
+      // matching how §3c records b'' as failed.
+      throw new Error(
+        "PROBE(b'') CONTAMINATED — ambient plugin leaks in headless. Fall back to b'.",
+      );
     }
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
