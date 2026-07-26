@@ -53,6 +53,20 @@ describe('buildGoTestDirIndex + pairGoBasenameTest (tier 1)', () => {
 
     expect(pairGoBasenameTest('pkg/cmd/label/list', index)).toEqual(['pkg/cmd/label/list_test.go']);
   });
+
+  it('structurally cannot self-match when the query target is itself a _test.go file', () => {
+    // A _test.go target would need a candidate whose basename is the
+    // target's own basename plus a second, literal "_test" suffix
+    // (list_test -> list_test_test) to match -- never the target's own
+    // basename, so no self-match guard is needed here (unlike
+    // findGoPackageLevelTests below, which has no basename discriminator).
+    const index = buildGoTestDirIndex([
+      candidate('pkg/cmd/label/list_test.go'),
+      candidate('pkg/cmd/label/create_test.go'),
+    ]);
+
+    expect(pairGoBasenameTest('pkg/cmd/label/list_test', index)).toEqual([]);
+  });
 });
 
 describe('findGoPackageLevelTests (tier 2, fallback only)', () => {
@@ -94,5 +108,27 @@ describe('findGoPackageLevelTests (tier 2, fallback only)', () => {
     expect(findGoPackageLevelTests('internal/licenses/embed_linux_amd64', index)).toEqual([
       'internal/licenses/licenses_test.go',
     ]);
+  });
+
+  it('excludes the target itself when the query target is a _test.go file in its own directory index', () => {
+    // Calling `lien annotate` directly on a _test.go file (or scanning one
+    // as a target for any other reason) must not report the file as
+    // "covered by itself" -- the target is a candidate in its own
+    // directory's index, same as any other test file there.
+    const index = buildGoTestDirIndex([
+      candidate('pkg/cmd/label/list_test.go'),
+      candidate('pkg/cmd/label/create_test.go'),
+    ]);
+
+    const result = findGoPackageLevelTests('pkg/cmd/label/list_test', index);
+
+    expect(result).not.toContain('pkg/cmd/label/list_test.go');
+    expect(result).toEqual(['pkg/cmd/label/create_test.go']);
+  });
+
+  it('returns an empty array when the only candidate in the directory is the target itself', () => {
+    const index = buildGoTestDirIndex([candidate('pkg/cmd/label/list_test.go')]);
+
+    expect(findGoPackageLevelTests('pkg/cmd/label/list_test', index)).toEqual([]);
   });
 });

@@ -95,6 +95,13 @@ function dedupeFiles(files: string[]): string[] {
  * `normalizedTarget` must already be extension-stripped (Go's own
  * `foo_test.go` normalizes to `.../foo_test`, so the expected suffix is a
  * plain `_test`, not `_test.go`).
+ *
+ * No self-match guard is needed here (unlike `findGoPackageLevelTests`
+ * below): the required candidate basename is `normalizedTarget`'s own
+ * basename with a non-empty `_test` literal appended, which can never equal
+ * `normalizedTarget`'s own basename again -- so a target can never satisfy
+ * its own match condition, even when the target is itself a `_test.go` file
+ * (its basename would need to double-suffix to `..._test_test` to match).
  */
 export function pairGoBasenameTest(normalizedTarget: string, dirIndex: GoTestDirIndex): string[] {
   const dir = path.posix.dirname(normalizedTarget);
@@ -110,10 +117,14 @@ export function pairGoBasenameTest(normalizedTarget: string, dirIndex: GoTestDir
 
 /**
  * Tier 2, fallback only: every same-directory-test-convention test file in
- * `normalizedTarget`'s own directory, regardless of basename. Callers must
- * only consult this when tier 1 (`pairGoBasenameTest`) finds nothing for the
- * same target, and must present the result distinctly from a direct match —
- * see `annotate-cmd.ts`'s honesty label for the one place this is wired in.
+ * `normalizedTarget`'s own directory, regardless of basename, EXCLUDING
+ * `normalizedTarget` itself. Without that exclusion, calling this on a
+ * `_test.go` file directly (e.g. `lien annotate some_test.go`) would list
+ * the file as covered by itself, since a `_test.go` target is itself a
+ * candidate in its own directory's index. Callers must only consult this
+ * when tier 1 (`pairGoBasenameTest`) finds nothing for the same target, and
+ * must present the result distinctly from a direct match — see
+ * `annotate-cmd.ts`'s honesty label for the one place this is wired in.
  */
 export function findGoPackageLevelTests(
   normalizedTarget: string,
@@ -121,5 +132,10 @@ export function findGoPackageLevelTests(
 ): string[] {
   const dir = path.posix.dirname(normalizedTarget);
   const candidates = dirIndex.get(dir);
-  return candidates ? dedupeFiles(candidates.map(candidate => candidate.file)) : [];
+  if (!candidates) return [];
+  return dedupeFiles(
+    candidates
+      .filter(candidate => candidate.normalized !== normalizedTarget)
+      .map(candidate => candidate.file),
+  );
 }

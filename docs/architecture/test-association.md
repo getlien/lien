@@ -78,7 +78,7 @@ Unlike the whole-module/enclosing-namespace gaps above, this one needs no heuris
 - **Tier 1 (`pairGoBasenameTest`)**: `foo.go` <-> `foo_test.go`, same directory, exact stem match. Folded directly into the same result as a real import match — no hedging — in both `findTestAssociationsFromChunks` (this document) and `get_files_context`'s own separate `findTestAssociations`, gated by `LanguageDefinition.sameDirectoryTestConvention` (checked via `hasSameDirectoryTestConvention()` in the language registry; only Go sets this today). This is why it flows automatically to every consumer listed below with no signature changes.
 - **Tier 2 (`findGoPackageLevelTests`)**: every `_test.go` file in the target's directory, consulted only when tier 1 finds nothing for that specific file. Real, same-package signal, but coarser — a directory's one test file may not literally exercise every sibling (though Go's own per-directory build-tag convention, e.g. platform-specific `embed_linux_amd64.go` variants of a single abstraction, is the common shape here). `lien annotate` reports this distinctly rather than folding it into the same claim as tier 1 or an import match:
 
-  ```
+  ```text
   Test coverage (package-level, no dedicated test file for this specific file): licenses_test.go.
   ```
 
