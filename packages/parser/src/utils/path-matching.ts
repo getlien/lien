@@ -334,14 +334,19 @@ function matchesPythonModule(importPath: string, targetPath: string): boolean {
 
   if (!importPath.includes('.')) {
     // Bare (single-segment) specifier: only the two position-anchored
-    // strategies apply. `matchesSuffixPythonModule`/`matchesWithSourcePrefix`
-    // do unrestricted substring search with no word-boundary check after the
-    // match -- safe for a multi-segment dotted path (low collision odds) but
-    // would let a short bare word like "flask" spuriously match an unrelated
-    // sibling like "flaskext" or a same-named package nested arbitrarily
-    // deep elsewhere in the repo. Mirrors the established precedent of
-    // scoping extra leniency away from bare identifiers (see
-    // `matchesAtBoundaryPrecise`'s `maxLeadingSegments` and
+    // strategies apply. The other two are each risky in their own way for a
+    // short bare word: `matchesSuffixPythonModule` is properly boundary-
+    // checked (its `endsWith('/' + moduleAsPath)` requires a leading `/` and
+    // anchors to the end of the string) but places NO cap on how many
+    // directories may precede that match, so "flask" could match a
+    // same-named package nested arbitrarily deep elsewhere in the repo.
+    // `matchesWithSourcePrefix` caps the leading side (at most one directory)
+    // but never checks what follows the match at all, so it would let
+    // "flask" spuriously match purely because it's a textual prefix of an
+    // unrelated sibling like "flaskext". Both are safe for a multi-segment
+    // dotted path (low collision odds) but not for a bare word. Mirrors the
+    // established precedent of scoping extra leniency away from bare
+    // identifiers (see `matchesAtBoundaryPrecise`'s `maxLeadingSegments` and
     // `matchesPHPNamespace`'s bare-importPath guard, both above) -- do not
     // widen this without a confirmed real-world bare-package case, per #883.
     return (
