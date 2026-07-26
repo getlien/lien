@@ -369,11 +369,13 @@ The run aborts (no result claimed) if any holds:
 
 ## 8. Validity caveats (carried forward, stated before running)
 
-- **Lower-bound environment.** Like PR #844, this removes not just the contamination
-  but *every* ambient instruction (no CLAUDE.md, no plugin, no user rules, no prior
-  turns). It is a floor for isolating the mechanism, not a forecast of the effect in a
-  real, richly-contextualized session under time pressure — the exact gap these nudges
-  exist to close. A separation here is strong evidence; a null here does **not** prove
+- **Lower-bound environment.** Like PR #844, this removes nearly every ambient
+  instruction (no CLAUDE.md, no Lien plugin, no repo rules, no prior turns) — the one
+  documented exception is the user's global `~/.claude/rules/context7.md`, which remains
+  present identically in both arms (unrelated to caller-checking or test-running, so it
+  cannot produce an arm difference; see §3a). It is a floor for isolating the mechanism,
+  not a forecast of the effect in a real, richly-contextualized session under time
+  pressure — the exact gap these nudges exist to close. A separation here is strong evidence; a null here does **not** prove
   the nudge is useless in production, only that a maximally-naive agent doesn't need it
   at this task scale.
 - **Blast tool absence.** With MCP stripped, the ON agent cannot literally call
