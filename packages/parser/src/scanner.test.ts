@@ -2,7 +2,24 @@ import { describe, it, expect, afterEach } from 'vitest';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { detectFileType, detectLanguage, scanCodebase } from './scanner.js';
+
+const execFileAsync = promisify(execFile);
+
+/** Initialize a git repo with a fixed identity, for tracked-file rescue tests. */
+async function initGitRepo(dir: string): Promise<void> {
+  await execFileAsync('git', ['init', '-q'], { cwd: dir });
+  await execFileAsync('git', ['config', 'user.email', 'test@example.com'], { cwd: dir });
+  await execFileAsync('git', ['config', 'user.name', 'Test User'], { cwd: dir });
+}
+
+/** Stage and commit everything currently on disk. */
+async function gitCommitAll(dir: string, message = 'initial commit'): Promise<void> {
+  await execFileAsync('git', ['add', '-A'], { cwd: dir });
+  await execFileAsync('git', ['commit', '-q', '-m', message], { cwd: dir });
+}
 
 describe('detectFileType', () => {
   it('should export detectLanguage as a backwards-compat alias', () => {
@@ -191,5 +208,158 @@ describe('scanCodebase', () => {
     const relative = files.map(f => path.relative(testDir, f));
 
     expect(relative).toContain(path.join('.github', 'workflows', 'ci.yml'));
+  });
+});
+
+// Regression tests for #899 (hardcoded `build/**` swallows a real, tracked
+// `build`-named source directory) and #900 (a stale bare-name `.gitignore`
+// pattern shadows a real, tracked source subtree). Fix: in a git repository,
+// union the lexical scan with `git ls-files` so tracked files are always
+// indexable -- see `rescueTrackedFiles` / `getGitTrackedFiles`.
+describe('scanCodebase — git-tracked-file rescue (#899, #900)', () => {
+  let testDir: string;
+
+  afterEach(async () => {
+    if (!testDir) return;
+    try {
+      await fs.rm(testDir, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup errors
+    }
+  });
+
+  it('rescues a tracked file at depth inside a directory literally named "build" (#899)', async () => {
+    testDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-test-scanner-tracked-build-'));
+
+    await fs.mkdir(path.join(testDir, 'internal', 'build'), { recursive: true });
+    await fs.writeFile(
+      path.join(testDir, 'internal', 'build', 'build.go'),
+      'package build\n\nvar Version = "dev"\n',
+    );
+    await fs.mkdir(path.join(testDir, 'src'), { recursive: true });
+    await fs.writeFile(path.join(testDir, 'src', 'real.ts'), 'export const real = true;\n');
+
+    await initGitRepo(testDir);
+    await gitCommitAll(testDir);
+
+    const files = await scanCodebase({ rootDir: testDir });
+    const relative = files.map(f => path.relative(testDir, f).replace(/\\/g, '/'));
+
+    expect(relative).toContain('internal/build/build.go');
+    expect(relative).toContain('src/real.ts');
+  });
+
+  it('rescues tracked files shadowed by a bare-name .gitignore pattern (#900)', async () => {
+    testDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-test-scanner-tracked-bare-gh-'));
+
+    await fs.mkdir(path.join(testDir, 'cmd', 'gh'), { recursive: true });
+    await fs.writeFile(
+      path.join(testDir, 'cmd', 'gh', 'main.go'),
+      'package main\n\nfunc main() {}\n',
+    );
+    await fs.mkdir(path.join(testDir, 'internal', 'gh'), { recursive: true });
+    await fs.writeFile(
+      path.join(testDir, 'internal', 'gh', 'gh.go'),
+      'package gh\n\ntype Config interface{}\n',
+    );
+
+    await initGitRepo(testDir);
+    // Commit BEFORE the .gitignore line exists -- otherwise `git add` would
+    // itself refuse to stage these paths, which wouldn't exercise the bug at
+    // all. The real-world shape (#900) is a bare, slash-free pattern (which
+    // legitimately matches a path component named "gh" at any depth, per
+    // git semantics) added *after* the files it now shadows were tracked.
+    await gitCommitAll(testDir);
+    await fs.writeFile(path.join(testDir, '.gitignore'), 'gh\n');
+    await gitCommitAll(testDir, 'add stale gh ignore pattern');
+
+    const files = await scanCodebase({ rootDir: testDir });
+    const relative = files.map(f => path.relative(testDir, f).replace(/\\/g, '/'));
+
+    expect(relative).toContain('cmd/gh/main.go');
+    expect(relative).toContain('internal/gh/gh.go');
+  });
+
+  it('does not rescue untracked files under a hardcoded-ignored path (tracked-vs-untracked distinction)', async () => {
+    testDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-test-scanner-untracked-build-'));
+
+    await fs.mkdir(path.join(testDir, 'src'), { recursive: true });
+    await fs.writeFile(path.join(testDir, 'src', 'real.ts'), 'export const real = true;\n');
+
+    await initGitRepo(testDir);
+    await gitCommitAll(testDir);
+
+    // Created AFTER the commit -- genuinely untracked generated output,
+    // exactly the case ALWAYS_IGNORE_PATTERNS' build/** exists to exclude.
+    await fs.mkdir(path.join(testDir, 'build'), { recursive: true });
+    await fs.writeFile(path.join(testDir, 'build', 'output.js'), 'console.log("generated");\n');
+
+    const files = await scanCodebase({ rootDir: testDir });
+    const relative = files.map(f => path.relative(testDir, f).replace(/\\/g, '/'));
+
+    expect(relative).toContain('src/real.ts');
+    expect(relative).not.toContain('build/output.js');
+  });
+
+  it('does not rescue untracked files shadowed by a bare-name .gitignore pattern', async () => {
+    testDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-test-scanner-untracked-bare-gh-'));
+
+    await fs.writeFile(path.join(testDir, '.gitignore'), 'gh\n');
+    await fs.mkdir(path.join(testDir, 'src'), { recursive: true });
+    await fs.writeFile(path.join(testDir, 'src', 'real.ts'), 'export const real = true;\n');
+
+    await initGitRepo(testDir);
+    await gitCommitAll(testDir);
+
+    // Created AFTER the commit -- a genuine local build artifact the
+    // .gitignore line is meant to hide, never added to git.
+    await fs.mkdir(path.join(testDir, 'cmd', 'gh'), { recursive: true });
+    await fs.writeFile(path.join(testDir, 'cmd', 'gh', 'main.go'), 'package main\n');
+
+    const files = await scanCodebase({ rootDir: testDir });
+    const relative = files.map(f => path.relative(testDir, f).replace(/\\/g, '/'));
+
+    expect(relative).toContain('src/real.ts');
+    expect(relative).not.toContain('cmd/gh/main.go');
+  });
+
+  it('never rescues node_modules even if git tracks it (hard non-negotiable carve-out)', async () => {
+    testDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-test-scanner-tracked-node-modules-'));
+
+    await fs.mkdir(path.join(testDir, 'src'), { recursive: true });
+    await fs.writeFile(path.join(testDir, 'src', 'real.ts'), 'export const real = true;\n');
+
+    // A misconfigured repo that committed its dependency tree -- git is
+    // perfectly capable of tracking this; Lien must never index it anyway.
+    await fs.mkdir(path.join(testDir, 'node_modules', 'leftpad'), { recursive: true });
+    await fs.writeFile(
+      path.join(testDir, 'node_modules', 'leftpad', 'index.js'),
+      'module.exports = () => {};\n',
+    );
+
+    await initGitRepo(testDir);
+    await gitCommitAll(testDir);
+
+    const files = await scanCodebase({ rootDir: testDir });
+    const relative = files.map(f => path.relative(testDir, f).replace(/\\/g, '/'));
+
+    expect(relative).toContain('src/real.ts');
+    expect(relative).not.toContain('node_modules/leftpad/index.js');
+  });
+
+  it('keeps pure lexical behavior for non-git directories (build/** stays excluded)', async () => {
+    testDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-test-scanner-nongit-build-'));
+
+    await fs.mkdir(path.join(testDir, 'src'), { recursive: true });
+    await fs.writeFile(path.join(testDir, 'src', 'real.ts'), 'export const real = true;\n');
+    await fs.mkdir(path.join(testDir, 'build'), { recursive: true });
+    await fs.writeFile(path.join(testDir, 'build', 'output.js'), 'console.log("generated");\n');
+
+    // No git init -- this directory is not a git repo at all.
+    const files = await scanCodebase({ rootDir: testDir });
+    const relative = files.map(f => path.relative(testDir, f).replace(/\\/g, '/'));
+
+    expect(relative).toContain('src/real.ts');
+    expect(relative).not.toContain('build/output.js');
   });
 });

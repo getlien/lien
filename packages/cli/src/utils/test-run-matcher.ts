@@ -48,6 +48,76 @@ function stripLeadingEnvAssignments(segment: string): string {
   return s;
 }
 
+// Package-manager/environment-runner wrappers (#905): `uv run pytest`,
+// `poetry run pytest tests/foo.py`, `pipenv run pytest`, `rye run pytest`,
+// and `pdm run pytest` all defeat every ^-anchored RUNNER_PATTERNS entry the
+// same way an unstripped `CI=1` prefix would. These five are the mainstream
+// named wrappers (uv/Astral, Poetry, Pipenv, Rye, PDM) — deliberately a
+// closed allow-list, not a heuristic over arbitrary leading words, so a
+// project's own custom wrapper script never gets silently treated as
+// transparent. Only the `<wrapper> run` form is recognized; flags on the
+// wrapper's own invocation *before* `run` (e.g. `poetry -C /path run ...`)
+// are out of scope — not reported by #905 and not worth the complexity.
+const WRAPPER_PREFIX_RE = /^(?:uv|poetry|pipenv|rye|pdm)\s+run(?=\s|$)/;
+
+// Flags on the wrapper's `run` invocation itself that take a following,
+// space-separated value — e.g. `uv run --group tests pytest` must not treat
+// "tests" as the start of the wrapped command. `--flag=value` (a single
+// token) never needs this list; it's handled generically below. Deliberately
+// scoped to uv's documented flags (the only one of the five with common
+// value-taking flags before the wrapped command in practice); harmless if a
+// future wrapper happens to share a flag name.
+const WRAPPER_VALUE_FLAGS = new Set([
+  '--group',
+  '--no-group',
+  '--extra',
+  '--no-extra',
+  '--with',
+  '--with-editable',
+  '--with-requirements',
+  '--index',
+  '--python',
+  '-p',
+  '--directory',
+  '-C',
+  '--env-file',
+  '--package',
+]);
+
+/** Drop leading flags (and, for known value-taking flags, their value) until the wrapped command's own keyword is reached. */
+function stripWrapperFlags(tokens: string[]): string[] {
+  let i = 0;
+  while (i < tokens.length && tokens[i].startsWith('-')) {
+    const token = tokens[i];
+    i += !token.includes('=') && WRAPPER_VALUE_FLAGS.has(token) ? 2 : 1;
+  }
+  return tokens.slice(i);
+}
+
+/** Strip one recognized `<wrapper> run [flags...]` prefix, or return null when the segment doesn't start with one. */
+function stripLeadingWrapperPrefix(segment: string): string | null {
+  const match = segment.match(WRAPPER_PREFIX_RE);
+  if (!match) return null;
+  const tokens = segment.slice(match[0].length).trim().split(/\s+/).filter(Boolean);
+  return stripWrapperFlags(tokens).join(' ');
+}
+
+/**
+ * Repeatedly strip leading `VAR=value` assignments and recognized wrapper
+ * prefixes until neither applies — handles both `CI=1 uv run pytest` (env
+ * before wrapper) and a wrapper stripped down to reveal a further env
+ * assignment or nested wrapper (e.g. `uv run poetry run pytest`).
+ */
+function stripLeadingWrappersAndEnv(segment: string): string {
+  let s = stripLeadingEnvAssignments(segment);
+  for (;;) {
+    const stripped = stripLeadingWrapperPrefix(s);
+    if (stripped === null) break;
+    s = stripLeadingEnvAssignments(stripped);
+  }
+  return s;
+}
+
 // Flags whose VALUE scopes a whole package/workspace, not a single file —
 // `npm test -w @liendev/core` must classify as broad even though
 // "@liendev/core" contains a "/". The flag and its value are both skipped
@@ -139,6 +209,20 @@ const RUNNER_PATTERNS: RegExp[] = [
   /^(\.\/)?gradlew\s+(?:[\w.:=-]+\s+)*(?<!(?:-x|--exclude-task)\s)(\S*:)?test(?=\s|$)/,
   /^mvn\s+test(?=\s|$)/,
   /^nx\s+test(?:\s+\S+)?(?=\s|$)/,
+  // #905: tox (Python's test-orchestration tool, alongside nox) had no entry
+  // at all. Bare `tox`/`tox run`/`tox -e py311` run the whole configured
+  // suite for that environment — no file is named, so these stay broad (the
+  // existing scope-token scan below already treats `-e`'s value as an
+  // ordinary non-path token). tox's own convention for narrowing is the `--`
+  // passthrough (`tox -e py311 -- tests/test_x.py`), forwarding args to the
+  // env's underlying test command — the same generic path-token scan that
+  // already handles `npm test -- path/to/x.test.ts` picks up a path-like
+  // token after `--` for free, since `--` itself is skipped as a flag.
+  /^tox(\s+run)?(?=\s|$)/,
+  /^python[0-9.]*\s+-m\s+tox(?=\s|$)/,
+  // nox: same shape and same passthrough (`nox -s test -- tests/test_x.py`).
+  /^nox(?=\s|$)/,
+  /^python[0-9.]*\s+-m\s+nox(?=\s|$)/,
 ];
 
 function matchRunner(segment: string): RegExpMatchArray | null {
@@ -195,7 +279,7 @@ export function classifyTestCommand(command: string): TestRunClassification {
   const extensions = sourceExtensions();
   const segments = command
     .split(SEGMENT_SPLIT_RE)
-    .map(s => stripLeadingEnvAssignments(s.trim()))
+    .map(s => stripLeadingWrappersAndEnv(s.trim()))
     .filter(Boolean);
 
   let isTestRun = false;

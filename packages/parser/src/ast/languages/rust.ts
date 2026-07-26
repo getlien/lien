@@ -13,6 +13,7 @@ import {
   extractReturnType,
 } from '../extractors/symbol-helpers.js';
 import { calculateComplexity } from '../complexity/index.js';
+import { resolveRustCrateImport } from '../../rust-crate-map.js';
 
 // =============================================================================
 // TRAVERSER
@@ -186,8 +187,25 @@ export class RustExportExtractor implements LanguageExportExtractor {
  * - `self::config` -> `config`
  * - `super::utils` -> `../utils`
  * - `std::io` -> null (external crate, skip)
+ * - `tokio_util::codec::Framed` -> `tokio-util/src/codec/Framed`, but ONLY
+ *   when `rustCrateMap` identifies `tokio_util` as a known workspace member
+ *   crate (#903) — otherwise falls through to the same "external crate,
+ *   skip" outcome as before this fix, so a project with no manifest-declared
+ *   crate map (or a genuinely external crates.io dependency) sees zero
+ *   behavior change. See `../../rust-crate-map.ts` for how the map is built
+ *   and matched.
+ *
+ * @param path - The raw `use` path (never itself a bare `crate`/`self`/`super`
+ *   keyword — see `isBareRootToken`'s callers, which combine that case with
+ *   the following segment before calling this function).
+ * @param rustCrateMap - Map of workspace crate name (underscore form) ->
+ *   crate `src/` dir. Undefined/empty for every project without a resolvable
+ *   Cargo workspace/package manifest.
  */
-function convertRustModulePath(path: string): string | null {
+function convertRustModulePath(
+  path: string,
+  rustCrateMap?: ReadonlyMap<string, string>,
+): string | null {
   // Remove leading `crate::`, `self::`, or `super::`
   if (path.startsWith('crate::')) {
     return path.slice('crate::'.length).replace(/::/g, '/');
@@ -198,8 +216,9 @@ function convertRustModulePath(path: string): string | null {
   if (path.startsWith('super::')) {
     return '../' + path.slice('super::'.length).replace(/::/g, '/');
   }
-  // External crate - skip
-  return null;
+  // Not crate/self/super-relative — resolve against a known workspace crate
+  // (#903), or treat as a genuinely external crate (skip) when it isn't one.
+  return resolveRustCrateImport(path, rustCrateMap);
 }
 
 /**
@@ -316,44 +335,50 @@ function extractUseListSymbols(useList: SyntaxNode): string[] {
 export class RustImportExtractor implements LanguageImportExtractor {
   readonly importNodeTypes = ['use_declaration'];
 
-  extractImportPath(node: SyntaxNode): string | null {
+  extractImportPath(node: SyntaxNode, rustCrateMap?: ReadonlyMap<string, string>): string | null {
     const argument = node.childForFieldName('argument');
     if (!argument) return null;
 
     const fullPath = this.resolveFullPath(argument);
-    return fullPath ? convertRustModulePath(fullPath) : null;
+    return fullPath ? convertRustModulePath(fullPath, rustCrateMap) : null;
   }
 
-  extractImportPaths(node: SyntaxNode): string[] {
-    return toImportPathsArray(this.extractImportPath(node));
+  extractImportPaths(node: SyntaxNode, rustCrateMap?: ReadonlyMap<string, string>): string[] {
+    return toImportPathsArray(this.extractImportPath(node, rustCrateMap));
   }
 
-  processImportSymbols(node: SyntaxNode): { importPath: string; symbols: string[] } | null {
+  processImportSymbols(
+    node: SyntaxNode,
+    rustCrateMap?: ReadonlyMap<string, string>,
+  ): { importPath: string; symbols: string[] } | null {
     const argument = node.childForFieldName('argument');
     if (!argument) return null;
 
-    return this.processUseArgument(argument);
+    return this.processUseArgument(argument, rustCrateMap);
   }
 
-  private processUseArgument(node: SyntaxNode): { importPath: string; symbols: string[] } | null {
+  private processUseArgument(
+    node: SyntaxNode,
+    rustCrateMap?: ReadonlyMap<string, string>,
+  ): { importPath: string; symbols: string[] } | null {
     // Simple: `use crate::auth::AuthService;`
     if (node.type === 'scoped_identifier') {
-      return this.processScopedIdentifier(node);
+      return this.processScopedIdentifier(node, rustCrateMap);
     }
 
     // List: `use crate::auth::{AuthService, AuthError};`
     if (node.type === 'scoped_use_list') {
-      return this.processScopedUseList(node);
+      return this.processScopedUseList(node, rustCrateMap);
     }
 
     // Alias: `use crate::auth::Service as Auth;`
     if (node.type === 'use_as_clause') {
-      return this.processUseAsClause(node);
+      return this.processUseAsClause(node, rustCrateMap);
     }
 
     // Wildcard: `use crate::models::*;`
     if (node.type === 'use_wildcard') {
-      return this.processUseWildcard(node);
+      return this.processUseWildcard(node, rustCrateMap);
     }
 
     // Direct identifier (rare): `use SomeItem;`
@@ -366,6 +391,7 @@ export class RustImportExtractor implements LanguageImportExtractor {
 
   private processScopedIdentifier(
     node: SyntaxNode,
+    rustCrateMap?: ReadonlyMap<string, string>,
   ): { importPath: string; symbols: string[] } | null {
     const pathNode = node.childForFieldName('path');
     const nameNode = node.childForFieldName('name');
@@ -379,18 +405,21 @@ export class RustImportExtractor implements LanguageImportExtractor {
     // `resolveFullPath`/`extractImportPath` already derive from the whole
     // node's text for this same statement).
     const modulePath = isBareRootToken(pathNode)
-      ? convertRustModulePath(`${pathNode.text}::${nameNode.text}`)
-      : convertRustModulePath(pathNode.text);
+      ? convertRustModulePath(`${pathNode.text}::${nameNode.text}`, rustCrateMap)
+      : convertRustModulePath(pathNode.text, rustCrateMap);
     if (!modulePath) return null;
 
     return { importPath: modulePath, symbols: [nameNode.text] };
   }
 
-  private processScopedUseList(node: SyntaxNode): { importPath: string; symbols: string[] } | null {
+  private processScopedUseList(
+    node: SyntaxNode,
+    rustCrateMap?: ReadonlyMap<string, string>,
+  ): { importPath: string; symbols: string[] } | null {
     const scopePath = extractScopePath(node);
     if (!scopePath) return null;
 
-    const modulePath = convertRustModulePath(scopePath);
+    const modulePath = convertRustModulePath(scopePath, rustCrateMap);
     if (!modulePath) return null;
 
     const useList = node.namedChildren.find(child => child.type === 'use_list');
@@ -412,7 +441,10 @@ export class RustImportExtractor implements LanguageImportExtractor {
     return symbols.length > 0 ? { importPath: modulePath, symbols } : null;
   }
 
-  private processUseAsClause(node: SyntaxNode): { importPath: string; symbols: string[] } | null {
+  private processUseAsClause(
+    node: SyntaxNode,
+    rustCrateMap?: ReadonlyMap<string, string>,
+  ): { importPath: string; symbols: string[] } | null {
     // `use crate::auth::Service as Auth;`
     // The first child is the path (scoped_identifier), alias field has the alias
     const aliasNode = node.childForFieldName('alias');
@@ -422,7 +454,7 @@ export class RustImportExtractor implements LanguageImportExtractor {
     const scopePathNode = pathChild.childForFieldName('path');
     if (!scopePathNode) return null;
 
-    const modulePath = convertRustModulePath(scopePathNode.text);
+    const modulePath = convertRustModulePath(scopePathNode.text, rustCrateMap);
     if (!modulePath) return null;
 
     const symbol = aliasNode?.text || pathChild.childForFieldName('name')?.text;
@@ -431,7 +463,10 @@ export class RustImportExtractor implements LanguageImportExtractor {
     return { importPath: modulePath, symbols: [symbol] };
   }
 
-  private processUseWildcard(node: SyntaxNode): { importPath: string; symbols: string[] } | null {
+  private processUseWildcard(
+    node: SyntaxNode,
+    rustCrateMap?: ReadonlyMap<string, string>,
+  ): { importPath: string; symbols: string[] } | null {
     // `use crate::models::*;` -> AST is:
     //   use_wildcard
     //     scoped_identifier (crate::models)
@@ -440,7 +475,7 @@ export class RustImportExtractor implements LanguageImportExtractor {
     const scopedId = node.namedChildren.find(child => child.type === 'scoped_identifier');
     if (!scopedId) return null;
 
-    const modulePath = convertRustModulePath(scopedId.text);
+    const modulePath = convertRustModulePath(scopedId.text, rustCrateMap);
     if (!modulePath) return null;
     return { importPath: modulePath, symbols: ['*'] };
   }

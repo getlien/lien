@@ -14,6 +14,7 @@ import { resolveWorkspacePackageEntries } from '../workspace-packages.js';
 import { resolvePsr4Map } from '../php-psr4.js';
 import { resolveGoModulePrefix } from '../go-module.js';
 import { detectPythonSrcLayoutRoot } from '../python-src-layout.js';
+import { resolveRustCrateMap } from '../rust-crate-map.js';
 
 export interface ASTChunkOptions {
   minChunkSize?: number;
@@ -100,11 +101,12 @@ const RESOLVE_WORKSPACE_PACKAGES: ReadonlySet<SupportedLanguage> = new Set([
  * `workspaceRoot` is available. PHP resolves `composer.json`'s PSR-4 map; Go
  * resolves `go.mod`'s module prefix; Python detects an on-disk `src/`
  * layout (#901 — see `../python-src-layout.ts` for why this is filesystem-
- * detected rather than manifest-declared); every other language gets
+ * detected rather than manifest-declared); Rust resolves the Cargo
+ * workspace's member crate names (#903); every other language gets
  * `undefined` (a no-op — see `ManifestRoots` in `./symbols.ts`). Returns
  * `undefined` (rather than an object with empty/absent fields) when nothing
- * is found, so `resolveImportSpecifier`'s manifest-root step is skipped
- * entirely for projects that don't need it.
+ * is found, so the corresponding resolution step is skipped entirely for
+ * projects that don't need it.
  */
 function buildManifestRoots(
   language: SupportedLanguage,
@@ -127,6 +129,11 @@ function buildManifestRoots(
     return pythonSrcLayoutRoot ? { pythonSrcLayoutRoot, workspaceRoot } : undefined;
   }
 
+  if (language === 'rust') {
+    const rustCrateMap = resolveRustCrateMap(workspaceRoot);
+    return rustCrateMap.size > 0 ? { rustCrateMap } : undefined;
+  }
+
   return undefined;
 }
 
@@ -147,11 +154,12 @@ function buildManifestRoots(
  * workspaces is a JS-ecosystem mechanism unrelated to Python's bare-specifier
  * semantics.
  *
- * Independently, when `workspaceRoot` is provided and the file is PHP, Go, or
- * Python, `buildManifestRoots` resolves that project's manifest- or
+ * Independently, when `workspaceRoot` is provided and the file is PHP, Go,
+ * Python, or Rust, `buildManifestRoots` resolves that project's manifest- or
  * filesystem-detected import root (composer.json PSR-4 / go.mod module
- * prefix / on-disk `src/` layout — see #867, #901) so namespace-, module-, or
- * package-qualified imports resolve to real workspace-relative paths too.
+ * prefix / on-disk `src/` layout / Cargo workspace member crate names — see
+ * #867, #901, #903) so namespace-, module-, package-, or crate-qualified
+ * imports resolve to real workspace-relative paths too.
  */
 function prepareASTContext(
   content: string,
