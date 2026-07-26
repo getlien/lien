@@ -171,4 +171,98 @@ describe('findTestAssociationsFromChunks', () => {
       expect(result.has('src/RetryMiddleware.php')).toBe(false);
     });
   });
+
+  describe('Go same-package test convention, tier 1 basename pairing (#902)', () => {
+    it('associates foo.go with foo_test.go in the same directory, with no import at all', () => {
+      // The dominant Go shape: package foo in both files, zero import
+      // statement -- Go forbids a package importing itself.
+      const chunks: CodeChunk[] = [
+        makeChunk('pkg/cmd/label/list.go'),
+        makeChunk('pkg/cmd/label/list_test.go'),
+      ];
+
+      const result = findTestAssociationsFromChunks(['pkg/cmd/label/list.go'], chunks);
+
+      expect(result.get('pkg/cmd/label/list.go')).toEqual(['pkg/cmd/label/list_test.go']);
+    });
+
+    it('still basename-pairs an external test package file (package foo_test) sharing the directory', () => {
+      // Basename pairing is deliberately package-clause-blind (#902's
+      // design): an external `package foo_test` file still sits in the same
+      // directory, so it pairs the same way -- no double-counting risk
+      // since the result is a Set.
+      const chunks: CodeChunk[] = [
+        makeChunk('internal/prompter/prompter.go'),
+        makeChunk('internal/prompter/prompter_test.go'),
+      ];
+
+      const result = findTestAssociationsFromChunks(['internal/prompter/prompter.go'], chunks);
+
+      expect(result.get('internal/prompter/prompter.go')).toEqual([
+        'internal/prompter/prompter_test.go',
+      ]);
+    });
+
+    it('does not fan out to every test file in a directory -- only the exact basename pair', () => {
+      // internal/licenses shape: several sibling .go files, one test file
+      // named after only ONE of them. The others get nothing from tier 1
+      // (they may get tier 2's package-level fallback -- lien annotate only,
+      // not this function -- see annotate-cmd.test.ts).
+      const chunks: CodeChunk[] = [
+        makeChunk('internal/licenses/licenses.go'),
+        makeChunk('internal/licenses/embed_linux_amd64.go'),
+        makeChunk('internal/licenses/licenses_test.go'),
+      ];
+
+      const result = findTestAssociationsFromChunks(
+        ['internal/licenses/licenses.go', 'internal/licenses/embed_linux_amd64.go'],
+        chunks,
+      );
+
+      expect(result.get('internal/licenses/licenses.go')).toEqual([
+        'internal/licenses/licenses_test.go',
+      ]);
+      expect(result.has('internal/licenses/embed_linux_amd64.go')).toBe(false);
+    });
+
+    it('reports no association for a genuinely untested Go file (no _test.go sibling at all)', () => {
+      const chunks: CodeChunk[] = [
+        makeChunk('pkg/cmd/label/list.go'),
+        makeChunk('pkg/cmd/label/list_test.go'),
+        makeChunk('pkg/cmd/label/untested.go'),
+      ];
+
+      const result = findTestAssociationsFromChunks(['pkg/cmd/label/untested.go'], chunks);
+
+      expect(result.has('pkg/cmd/label/untested.go')).toBe(false);
+    });
+
+    it('composes with a real cross-package import match without duplicating the test file', () => {
+      const chunks: CodeChunk[] = [
+        makeChunk('pkg/cmd/label/list.go'),
+        makeChunk('pkg/cmd/label/list_test.go'),
+        makeChunk('pkg/cmd/other/other_test.go', ['pkg/cmd/label']),
+      ];
+
+      const result = findTestAssociationsFromChunks(['pkg/cmd/label/list.go'], chunks);
+
+      expect(result.get('pkg/cmd/label/list.go')).toHaveLength(2);
+      expect(result.get('pkg/cmd/label/list.go')).toContain('pkg/cmd/label/list_test.go');
+      expect(result.get('pkg/cmd/label/list.go')).toContain('pkg/cmd/other/other_test.go');
+    });
+
+    it('does not apply the same-directory convention to a non-Go language', () => {
+      // A same-named, same-directory pair in a language without
+      // sameDirectoryTestConvention set must not get this treatment --
+      // only real import-based matching applies.
+      const chunks: CodeChunk[] = [
+        makeChunk('src/list.ts'),
+        makeChunk('src/list_test.ts'), // no import -- would only match via Go's convention
+      ];
+
+      const result = findTestAssociationsFromChunks(['src/list.ts'], chunks);
+
+      expect(result.has('src/list.ts')).toBe(false);
+    });
+  });
 });

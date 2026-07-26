@@ -153,6 +153,19 @@ export function hasSingleFileImports(language: SupportedLanguage): boolean {
 }
 
 /**
+ * True when `language`'s dominant test convention colocates a test file in
+ * the same directory as its subject with no import statement at all (see
+ * `LanguageDefinition.sameDirectoryTestConvention`, #902). Only Go sets this
+ * today. Unlike `hasWholeModuleImports`/`hasEnclosingNamespaceAccess`, a
+ * caller consulting this recovers a real association (the directory itself
+ * is reliable evidence), not just an honesty label — see
+ * `go-same-directory-tests.ts`.
+ */
+export function hasSameDirectoryTestConvention(language: SupportedLanguage): boolean {
+  return getLanguage(language).sameDirectoryTestConvention === true;
+}
+
+/**
  * Get all registered language definitions.
  */
 export function getAllLanguages(): readonly LanguageDefinition[] {

@@ -597,4 +597,9 @@ export const goDefinition: LanguageDefinition = {
   symbols: {
     callExpressionTypes: ['call_expression'],
   },
+
+  // #902: a _test.go file tests its own directory's package with no import
+  // statement at all -- see LanguageDefinition.sameDirectoryTestConvention's
+  // doc comment for the full rationale.
+  sameDirectoryTestConvention: true,
 };

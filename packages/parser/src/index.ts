@@ -78,6 +78,7 @@ export {
   languageExists,
   hasWholeModuleImports,
   hasEnclosingNamespaceAccess,
+  hasSameDirectoryTestConvention,
 } from './ast/languages/registry.js';
 
 // =============================================================================
@@ -134,6 +135,12 @@ export { computeContentHash, isHashAlgorithmCompatible } from './content-hash.js
 // =============================================================================
 
 export { findTestAssociationsFromChunks } from './test-associations.js';
+export {
+  buildGoTestDirIndex,
+  pairGoBasenameTest,
+  findGoPackageLevelTests,
+} from './go-same-directory-tests.js';
+export type { GoTestCandidate, GoTestDirIndex } from './go-same-directory-tests.js';
 
 // =============================================================================
 // GRAPH TRAVERSAL (generic bounded BFS — domain graphs build on this)

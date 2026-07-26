@@ -7,8 +7,14 @@ import {
   getCanonicalPath,
   isTestFile,
   importMatchesTarget,
+  detectLanguage,
+  hasSameDirectoryTestConvention,
+  buildGoTestDirIndex,
+  pairGoBasenameTest,
   MAX_CHUNKS_PER_FILE,
   DEFAULT_COMPLEXITY_DELTA_THRESHOLDS,
+  type GoTestCandidate,
+  type GoTestDirIndex,
 } from '@liendev/parser';
 import type { SearchResult, VectorDBInterface } from '@liendev/core';
 
@@ -226,6 +232,76 @@ export function createPathCache(workspaceRoot: string): {
   return { normalize, cache };
 }
 
+/** Canonical test-file paths among `allChunks` whose imports resolve to `normalizedTarget`. */
+function collectImportMatchedTestFiles(
+  allChunks: Array<{ metadata: { file: string; imports?: string[] } }>,
+  normalizedTarget: string,
+  normalize: (path: string) => string,
+  workspaceRoot: string,
+): string[] {
+  const matched: string[] = [];
+  for (const chunk of allChunks) {
+    const chunkFile = getCanonicalPath(chunk.metadata.file, workspaceRoot);
+    if (!isTestFile(chunkFile)) continue;
+
+    const imports = chunk.metadata.imports || [];
+    if (
+      imports.some(imp =>
+        importMatchesTarget(imp, chunk.metadata.file, normalizedTarget, normalize),
+      )
+    ) {
+      matched.push(chunkFile);
+    }
+  }
+  return matched;
+}
+
+/**
+ * True when `filepath`'s language sets `sameDirectoryTestConvention` (Go
+ * today, #902) — mirrors `@liendev/parser`'s own
+ * `hasGoSameDirectoryConvention` (test-associations.ts); this handler is
+ * `get_files_context`'s separate implementation, so it needs the identical
+ * per-file check.
+ */
+function hasGoSameDirectoryConvention(filepath: string): boolean {
+  const language = detectLanguage(filepath);
+  return language !== null && hasSameDirectoryTestConvention(language);
+}
+
+/**
+ * #902: directory index of same-directory-test-convention (Go) test chunks,
+ * built once per `findTestAssociations` call and reused for every target
+ * file below — mirrors `@liendev/parser`'s own `findTestAssociationsFromChunks`
+ * (this handler is `get_files_context`'s separate implementation, so it
+ * needs the identical treatment; tier 2's package-level fallback stays
+ * `lien annotate`-only, see annotate-cmd.ts).
+ */
+function buildGoTestDirIndexFromChunks(
+  allChunks: Array<{ metadata: { file: string; imports?: string[] } }>,
+  workspaceRoot: string,
+  normalize: (path: string) => string,
+): GoTestDirIndex {
+  const candidates: GoTestCandidate[] = allChunks
+    .filter(chunk => isTestFile(getCanonicalPath(chunk.metadata.file, workspaceRoot)))
+    .filter(chunk => hasGoSameDirectoryConvention(chunk.metadata.file))
+    .map(chunk => ({
+      file: getCanonicalPath(chunk.metadata.file, workspaceRoot),
+      normalized: normalize(chunk.metadata.file),
+    }));
+  return buildGoTestDirIndex(candidates);
+}
+
+/** #902 tier 1: same-directory basename-paired Go test(s) for `filepath`. */
+function collectGoBasenameTestFiles(
+  filepath: string,
+  normalizedTarget: string,
+  goTestDirIndex: GoTestDirIndex,
+): string[] {
+  return hasGoSameDirectoryConvention(filepath)
+    ? pairGoBasenameTest(normalizedTarget, goTestDirIndex)
+    : [];
+}
+
 /**
  * Find test files that import the given source files.
  *
@@ -237,6 +313,10 @@ export function createPathCache(workspaceRoot: string): {
  * This mirrors the same guard in `@liendev/parser`'s
  * `findTestAssociationsFromChunks`; this function is `get_files_context`'s
  * own separate implementation, so it needs the identical treatment.
+ *
+ * Also folds in #902 tier 1 (Go's same-directory basename-paired test
+ * convention, which carries no import statement at all) — see
+ * `buildGoTestDirIndexFromChunks`/`collectGoBasenameTestFiles` above.
  *
  * @param filepaths - Array of source file paths
  * @param allChunks - All chunks from the vector database
@@ -250,26 +330,14 @@ export function findTestAssociations(
 ): string[][] {
   const { workspaceRoot } = ctx;
   const { normalize } = createPathCache(workspaceRoot);
+  const goTestDirIndex = buildGoTestDirIndexFromChunks(allChunks, workspaceRoot, normalize);
 
   return filepaths.map(filepath => {
     const normalizedTarget = normalize(filepath);
-    const testFiles = new Set<string>();
-
-    for (const chunk of allChunks) {
-      const chunkFile = getCanonicalPath(chunk.metadata.file, workspaceRoot);
-
-      // Skip if not a test file
-      if (!isTestFile(chunkFile)) continue;
-
-      // Check if this test file imports the target
-      const imports = chunk.metadata.imports || [];
-      for (const imp of imports) {
-        if (importMatchesTarget(imp, chunk.metadata.file, normalizedTarget, normalize)) {
-          testFiles.add(chunkFile);
-          break;
-        }
-      }
-    }
+    const testFiles = new Set<string>([
+      ...collectImportMatchedTestFiles(allChunks, normalizedTarget, normalize, workspaceRoot),
+      ...collectGoBasenameTestFiles(filepath, normalizedTarget, goTestDirIndex),
+    ]);
 
     return Array.from(testFiles);
   });

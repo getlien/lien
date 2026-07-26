@@ -69,6 +69,23 @@ This is a deliberately separate flag from `wholeModuleImports`, not a reuse of i
 
 The structural remainder — which specific test covers which specific file within an enclosing namespace — stays genuinely unrecoverable from import data alone, the same as Swift's whole-module gap: there is no heuristic recovery here (no name-proximity matching), per the same false-positives-are-worse-than-silence reasoning as the bare-identifier guard above.
 
+## Go's same-package test convention: a recovered signal, not just an honest label
+
+Go's dominant unit-test shape colocates a `_test.go` file in the same directory and `package` as the file it tests, with **no import statement connecting them at all** — Go forbids a package from importing itself, so `chunk.metadata.imports` carries zero signal for this convention ([#902](https://github.com/getlien/lien/issues/902)). Measured against a real `cli/cli` clone: 336/356 (94.4%) of `_test.go` files basename-pair with a same-named sibling (`foo.go` <-> `foo_test.go`); the remainder are either external `package foo_test` files (still resolved via ordinary import matching, since an external test package must import what it tests) or the rare directory with no sibling source file at all (e.g. a repo-wide acceptance test).
+
+Unlike the whole-module/enclosing-namespace gaps above, this one needs no heuristic and no honesty label for its primary tier — Go's compiler already enforces one package per directory, so "same directory" is itself deterministic evidence, recoverable with pure filepath-string reasoning (`packages/parser/src/go-same-directory-tests.ts`), no AST or `package`-clause parsing required:
+
+- **Tier 1 (`pairGoBasenameTest`)**: `foo.go` <-> `foo_test.go`, same directory, exact stem match. Folded directly into the same result as a real import match — no hedging — in both `findTestAssociationsFromChunks` (this document) and `get_files_context`'s own separate `findTestAssociations`, gated by `LanguageDefinition.sameDirectoryTestConvention` (checked via `hasSameDirectoryTestConvention()` in the language registry; only Go sets this today). This is why it flows automatically to every consumer listed below with no signature changes.
+- **Tier 2 (`findGoPackageLevelTests`)**: every `_test.go` file in the target's directory, consulted only when tier 1 finds nothing for that specific file. Real, same-package signal, but coarser — a directory's one test file may not literally exercise every sibling (though Go's own per-directory build-tag convention, e.g. platform-specific `embed_linux_amd64.go` variants of a single abstraction, is the common shape here). `lien annotate` reports this distinctly rather than folding it into the same claim as tier 1 or an import match:
+
+  ```text
+  Test coverage (package-level, no dedicated test file for this specific file): licenses_test.go.
+  ```
+
+  Deliberately scoped to `lien annotate`'s own printed text only (mirroring the whole-module/enclosing-namespace sections' single-site discipline) — **not** threaded into `get_files_context`'s `testAssociations`, `@liendev/review`'s test-coverage gap detection, or `verify-tests`'s ledger/scope-matching. A file with only tier-2 coverage still reads as a gap to those three, which is the conservative, correct call: tier 2's evidence is real but not precise enough to suppress a review finding or clear a verification nudge on its own.
+
+Both tiers are structurally bounded to the same directory (Go's own compiler guarantee) — the worst either can produce is "attributed to the wrong file in the same package," never the cross-directory textual collisions the bare-identifier guard above protects against.
+
 ## Java static-member imports: a derived second candidate
 
 `import static pkg.Class.member;` (a specific, non-wildcard static-member import) extracts a path one segment deeper than the file that defines it — `com.example.Utils.method`, when the file is `com/example/Utils.java` — so it could never match via `matchesFile` on its own. `JavaImportExtractor.extractImportPaths` (`packages/parser/src/ast/languages/java.ts`) now returns the class's derived FQN (the path with its trailing segment dropped) as a second candidate alongside the unchanged original. This is safe rather than a guess: Java requires every top-level type to live in a file named after it, and nested types/members always live inside their enclosing top-level type's file, so dropping the trailing segment always yields that type's correct FQN — whether the segment names a static member or a nested class (`import static a.B.Inner;`, correct by the same rule). A static import reaching two-plus levels into nested classes under-matches silently, the same as before this fix, rather than mismatching. Wildcard static imports and ordinary (non-static) imports are unaffected. Verified on a real clone of google/gson: `JsonReaderTest.java`'s static imports of `JsonToken.STRING`/`NUMBER`/etc. now associate it with `JsonToken.java`, with zero other test-association changes across the repo's 264 Java files.
@@ -90,9 +107,9 @@ These are structural: no import-level signal exists for the case, so the honest 
 
 ## Where associations surface
 
-- `get_files_context`'s `testAssociations` field (MCP tool)
-- `lien annotate` and the post-edit test-association reminder hook (`lien annotate --tests-only`, and its ledger-recording sibling `lien verify-tests note-edit`)
-- `@liendev/review`'s blast-radius rendering (test coverage context for a changed file)
+- `get_files_context`'s `testAssociations` field (MCP tool) — includes Go tier 1 (basename pairing), not tier 2 (package-level fallback)
+- `lien annotate` and the post-edit test-association reminder hook (`lien annotate --tests-only`, and its ledger-recording sibling `lien verify-tests note-edit`) — the only surface that also shows Go's tier 2 fallback, distinctly labeled; `verify-tests`'s ledger/scope-matching itself still only sees tier 1
+- `@liendev/review`'s blast-radius rendering (test coverage context for a changed file) — tier 1 only, same reasoning as `get_files_context`
 
 ## Language support
 
@@ -101,7 +118,7 @@ These are structural: no import-level signal exists for the case, so the honest 
 | TypeScript / JavaScript | generic patterns | yes | workspace packages (monorepo) |
 | Python | generic patterns | yes (dotted modules) | none needed |
 | PHP | generic patterns | yes (incl. fully-qualified class-name references) | composer.json PSR-4 |
-| Go | generic patterns | yes | go.mod module path |
+| Go | generic patterns | yes (imports) + same-directory basename pairing, no import needed (package-level fallback in `lien annotate` only) | go.mod module path |
 | Ruby | generic patterns | yes | none needed |
 | C# | `Tests`/`Test` suffix convention | yes (dotted `using`); not determinable for enclosing-namespace references | none (see honest limitation above) |
 | Java | generic patterns | yes (incl. static-member imports, derived class-path candidate) | none |

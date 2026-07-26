@@ -230,6 +230,47 @@ describe('formatTests', () => {
       'Test coverage: src/UnitTests/Features.cs.',
     );
   });
+
+  // #902 tier 2: Go's same-package convention has real signal even when
+  // `tests` (tier 1's basename pairing / imports) comes back empty --
+  // package-level fallback gets its own distinct wording, never conflated
+  // with a direct match or with Swift/C#'s "not determinable" (this case IS
+  // determinable, just coarser).
+  describe('Go package-level fallback (#902 tier 2)', () => {
+    it('reports the distinct package-level wording when tests is empty but package-level tests exist', () => {
+      expect(
+        formatTests([], 'internal/licenses/embed_linux_amd64.go', [
+          'internal/licenses/licenses_test.go',
+        ]),
+      ).toBe(
+        'Test coverage (package-level, no dedicated test file for this specific file): internal/licenses/licenses_test.go.',
+      );
+    });
+
+    it('truncates package-level fallback tests with a (+N more) suffix', () => {
+      expect(
+        formatTests([], 'pkg/cmd/codespace/root.go', [
+          'pkg/cmd/codespace/create_test.go',
+          'pkg/cmd/codespace/list_test.go',
+          'pkg/cmd/codespace/edit_test.go',
+        ]),
+      ).toBe(
+        'Test coverage (package-level, no dedicated test file for this specific file): pkg/cmd/codespace/create_test.go, pkg/cmd/codespace/list_test.go (+1 more).',
+      );
+    });
+
+    it('still reports "No test coverage." when both tests and package-level tests are empty', () => {
+      expect(formatTests([], 'pkg/cmd/label/untested.go', [])).toBe('No test coverage.');
+    });
+
+    it('ignores package-level tests entirely once a real (tier 1) association exists', () => {
+      expect(
+        formatTests(['pkg/cmd/label/list_test.go'], 'pkg/cmd/label/list.go', [
+          'pkg/cmd/label/should-not-appear_test.go',
+        ]),
+      ).toBe('Test coverage: pkg/cmd/label/list_test.go.');
+    });
+  });
 });
 
 describe('formatTestReminder', () => {
@@ -250,6 +291,28 @@ describe('formatTestReminder', () => {
       formatTestReminder('src/foo.ts', ['a.test.ts', 'b.test.ts', 'c.test.ts', 'd.test.ts']),
     ).toBe(
       'Lien: you changed src/foo.ts — associated tests: a.test.ts, b.test.ts (+2 more). Run them before completing.',
+    );
+  });
+
+  // #902 tier 2: mirrors formatTests's package-level fallback wording, for
+  // the shorter post-edit reminder line.
+  it('reports the package-level fallback wording when tests is empty but package-level tests exist', () => {
+    expect(
+      formatTestReminder(
+        'internal/licenses/embed_linux_amd64.go',
+        [],
+        ['internal/licenses/licenses_test.go'],
+      ),
+    ).toBe(
+      'Lien: you changed internal/licenses/embed_linux_amd64.go — no dedicated test file, but its package has: internal/licenses/licenses_test.go. Consider running them before completing.',
+    );
+  });
+
+  it('prefers the direct-tests wording when both tests and package-level tests are non-empty', () => {
+    expect(
+      formatTestReminder('src/foo.ts', ['src/foo.test.ts'], ['should-not-appear.test.ts']),
+    ).toBe(
+      'Lien: you changed src/foo.ts — associated tests: src/foo.test.ts. Run them before completing.',
     );
   });
 });

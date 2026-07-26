@@ -7,8 +7,14 @@ import {
   detectLanguage,
   hasWholeModuleImports,
   hasEnclosingNamespaceAccess,
+  hasSameDirectoryTestConvention,
+  isTestFile,
+  normalizePath,
+  buildGoTestDirIndex,
+  findGoPackageLevelTests,
   type BlastRadiusRisk,
   type CodeChunk,
+  type GoTestCandidate,
 } from '@liendev/parser';
 import { findDependents, type DependentInfo } from '../mcp/handlers/dependency-analyzer.js';
 import {
@@ -168,6 +174,128 @@ function adaptChunkImports(chunks: DependencyAnalysisChunk[]): CodeChunk[] {
 // signature honest without leaking the SearchResult import here.
 type DependencyAnalysisChunk = Awaited<ReturnType<typeof findDependents>>['allChunks'][number];
 
+/**
+ * #902 tier 2, last resort: when `tests` (the core tier-1/import-based
+ * result) is empty and `filepath`'s language sets
+ * `sameDirectoryTestConvention` (Go), every test file in the same directory
+ * — real, same-package signal, but coarser than tier 1, so it's kept
+ * strictly separate from `tests` rather than merged into it. This is why
+ * `scanTestAssociations`'s `packageLevelTests` field is additive: callers
+ * that record or verify against `.tests` (`lookupTestAssociations` /
+ * `verify-tests`'s ledger and scope-matching) see zero behavior change —
+ * only `lien annotate`'s own printed text (`formatTests`/
+ * `formatTestReminder`) consults this.
+ */
+function computeGoPackageLevelFallback(
+  tests: string[],
+  filepath: string,
+  allChunks: CodeChunk[],
+  rootDir: string,
+): string[] {
+  if (tests.length > 0) return [];
+  const language = detectLanguage(filepath);
+  if (!language || !hasSameDirectoryTestConvention(language)) return [];
+
+  const cache = new Map<string, string>();
+  const normalize = (p: string): string => {
+    if (cache.has(p)) return cache.get(p)!;
+    const normalized = normalizePath(p, rootDir);
+    cache.set(p, normalized);
+    return normalized;
+  };
+
+  const candidates: GoTestCandidate[] = allChunks
+    .filter(chunk => isTestFile(chunk.metadata.file))
+    .filter(chunk => {
+      const chunkLanguage = detectLanguage(chunk.metadata.file);
+      return chunkLanguage !== null && hasSameDirectoryTestConvention(chunkLanguage);
+    })
+    .map(chunk => ({ file: chunk.metadata.file, normalized: normalize(chunk.metadata.file) }));
+
+  return findGoPackageLevelTests(normalize(filepath), buildGoTestDirIndex(candidates));
+}
+
+/** All per-file analysis `run()` needs to decide whether/how to print. */
+interface AnnotationData {
+  allChunks: CodeChunk[];
+  dependents: DependentInfo[];
+  tests: string[];
+  packageLevelTests: string[];
+  complexity: ComplexitySummary;
+  headroom: ComplexityHeadroom;
+  risk: BlastRadiusRisk;
+}
+
+type VectorDB = Awaited<ReturnType<typeof createVectorDB>>;
+
+/**
+ * Gather every analysis input the full (non-`--tests-only`) annotation
+ * needs — dependents, test associations (incl. #902's tier 1/tier 2),
+ * complexity, headroom, and blast-radius risk — in one place, so `run()`
+ * itself stays a thin decide-and-print shell.
+ */
+async function computeAnnotationData(
+  vectorDB: VectorDB,
+  filepath: RelativePath,
+  rootDir: AbsolutePath,
+): Promise<AnnotationData> {
+  const log = () => undefined;
+  // includeAllChunks=true: annotator needs the chunks for test-association
+  // and complexity lookups. The default (false) keeps the MCP path cheap.
+  const result = await findDependents(
+    vectorDB,
+    filepath,
+    log,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    true,
+  );
+  const allChunks = adaptChunkImports(result.allChunks);
+
+  const tests = findTestAssociationsFromChunks([filepath], allChunks, rootDir).get(filepath) ?? [];
+  const packageLevelTests = computeGoPackageLevelFallback(tests, filepath, allChunks, rootDir);
+  const complexity = computeComplexitySummary(allChunks, filepath);
+  // Plan-time nudge (mirrors get_files_context's complexityHeadroom): reuses
+  // the exact same computation the MCP tool uses, so a "near budget" verdict
+  // can never disagree between the read-hook annotation and get_files_context.
+  // `allChunks` spans the target file plus its dependents/dependencies, so
+  // filter down to the target file's own chunks first — other files' near-
+  // budget functions must not leak into this file's nudge (mirrors
+  // computeComplexitySummary's own `[filepath]` scoping below).
+  const headroom = computeComplexityHeadroom(allChunks.filter(c => c.metadata.file === filepath));
+  // Strict join: is any high-complexity dependent (per the core's threshold
+  // of 10) actually untested? Avoids the previous proxy that could escalate
+  // risk when uncovered/complex pairs were unrelated. Uses the
+  // core-filtered highComplexityDependents so this code never drifts from
+  // the rest of Lien's risk semantics.
+  const hasHighComplexityUncovered = anyHighComplexityUncovered(
+    result.complexityMetrics.highComplexityDependents,
+    allChunks,
+    rootDir,
+  );
+  const risk = computeBlastRadiusRisk({
+    dependentCount: result.dependents.length,
+    uncoveredDependents: result.uncoveredProductionDependents,
+    // Dependents' max complexity feeds the blast-radius risk score. The
+    // target file's own complexity (`complexity.max`) is reported
+    // separately on the display line below — different signal.
+    maxDependentComplexity: result.complexityMetrics.maxComplexity,
+    hasHighComplexityUncovered,
+  });
+
+  return {
+    allChunks,
+    dependents: result.dependents,
+    tests,
+    packageLevelTests,
+    complexity,
+    headroom,
+    risk,
+  };
+}
+
 async function run(file: string, options?: AnnotateOptions): Promise<void> {
   const paths = resolvePaths(file);
   if (!paths) return;
@@ -193,69 +321,41 @@ async function run(file: string, options?: AnnotateOptions): Promise<void> {
     const vectorDB = await createVectorDB(rootDir);
     await vectorDB.initialize();
 
-    const log = () => undefined;
-    // includeAllChunks=true: annotator needs the chunks for test-association
-    // and complexity lookups. The default (false) keeps the MCP path cheap.
-    const result = await findDependents(
-      vectorDB,
-      filepath,
-      log,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      true,
-    );
-    const allChunks = adaptChunkImports(result.allChunks);
+    const data = await computeAnnotationData(vectorDB, filepath, rootDir);
 
-    const tests =
-      findTestAssociationsFromChunks([filepath], allChunks, rootDir).get(filepath) ?? [];
-    const complexity = computeComplexitySummary(allChunks, filepath);
-    // Plan-time nudge (mirrors get_files_context's complexityHeadroom): reuses
-    // the exact same computation the MCP tool uses, so a "near budget" verdict
-    // can never disagree between the read-hook annotation and get_files_context.
-    // `allChunks` spans the target file plus its dependents/dependencies, so
-    // filter down to the target file's own chunks first — other files' near-
-    // budget functions must not leak into this file's nudge (mirrors
-    // computeComplexitySummary's own `[filepath]` scoping below).
-    const headroom = computeComplexityHeadroom(allChunks.filter(c => c.metadata.file === filepath));
-    const dependentCount = result.dependents.length;
-    const uncovered = result.uncoveredProductionDependents;
-    // Dependents' max complexity feeds the blast-radius risk score. The
-    // target file's own complexity (`complexity.max`) is reported
-    // separately on the display line below — different signal.
-    const maxDependentComplexity = result.complexityMetrics.maxComplexity;
-    // Strict join: is any high-complexity dependent (per the core's
-    // threshold of 10) actually untested? Avoids the previous proxy that
-    // could escalate risk when uncovered/complex pairs were unrelated.
-    // Uses the core-filtered highComplexityDependents so this code never
-    // drifts from the rest of Lien's risk semantics.
-    const hasHighComplexityUncovered = anyHighComplexityUncovered(
-      result.complexityMetrics.highComplexityDependents,
-      allChunks,
-      rootDir,
-    );
-
-    if (isTrivial(dependentCount, complexity.warningCount, tests.length, headroom.entries.length)) {
-      return;
-    }
-
-    const risk = computeBlastRadiusRisk({
-      dependentCount,
-      uncoveredDependents: uncovered,
-      maxDependentComplexity,
-      hasHighComplexityUncovered,
-    });
-
-    // Habituation guard's risk floor (opt-in via --min-risk; the read hook
-    // passes LIEN_ANNOTATE_MIN_RISK). No floor → current always-on behavior.
     if (
-      belowRiskFloor(risk.level, complexity.warningCount, headroom.entries.length, options?.minRisk)
+      isTrivial(
+        data.dependents.length,
+        data.complexity.warningCount,
+        data.tests.length,
+        data.headroom.entries.length,
+      )
     ) {
       return;
     }
 
-    emitAnnotation(filepath, result.dependents, tests, complexity, risk, headroom);
+    // Habituation guard's risk floor (opt-in via --min-risk; the read hook
+    // passes LIEN_ANNOTATE_MIN_RISK). No floor → current always-on behavior.
+    if (
+      belowRiskFloor(
+        data.risk.level,
+        data.complexity.warningCount,
+        data.headroom.entries.length,
+        options?.minRisk,
+      )
+    ) {
+      return;
+    }
+
+    emitAnnotation(
+      filepath,
+      data.dependents,
+      data.tests,
+      data.packageLevelTests,
+      data.complexity,
+      data.risk,
+      data.headroom,
+    );
   } finally {
     if (needsChdir) process.chdir(originalCwd);
   }
@@ -265,6 +365,15 @@ export interface FileTestAssociations {
   filepath: RelativePath;
   rootDir: AbsolutePath;
   tests: string[];
+  /**
+   * #902 tier 2, last resort: populated only when `tests` is empty and the
+   * file's language sets `sameDirectoryTestConvention` (Go). Deliberately
+   * NOT part of `tests` — `lookupTestAssociations`'s caller
+   * (`verify-tests-cmd.ts`'s ledger/scope-matching) reads only `.tests` and
+   * is unaffected; only the printed reminder (`formatTestReminder`) consults
+   * this field. See `computeGoPackageLevelFallback`.
+   */
+  packageLevelTests: string[];
 }
 
 /**
@@ -288,7 +397,8 @@ async function scanTestAssociations(paths: ResolvedPaths): Promise<FileTestAssoc
     const allChunks = adaptChunkImports(await vectorDB.scanAll());
     const tests =
       findTestAssociationsFromChunks([filepath], allChunks, rootDir).get(filepath) ?? [];
-    return { filepath, rootDir, tests };
+    const packageLevelTests = computeGoPackageLevelFallback(tests, filepath, allChunks, rootDir);
+    return { filepath, rootDir, tests, packageLevelTests };
   } finally {
     if (needsChdir) process.chdir(originalCwd);
   }
@@ -312,20 +422,38 @@ export async function lookupTestAssociations(file: string): Promise<FileTestAsso
  * no associated tests (the signal for the hook to stay silent).
  */
 async function runTestsOnly(paths: ResolvedPaths): Promise<void> {
-  const { filepath, tests } = await scanTestAssociations(paths);
-  if (tests.length === 0) return;
-  console.log(formatTestReminder(filepath, tests));
+  const { filepath, tests, packageLevelTests } = await scanTestAssociations(paths);
+  if (tests.length === 0 && packageLevelTests.length === 0) return;
+  console.log(formatTestReminder(filepath, tests, packageLevelTests));
 }
 
 /**
  * Render the one-line post-edit reminder. Pure and exported so the wording
  * and truncation are unit-testable without indexing a real project.
+ *
+ * `packageLevelTests` (#902 tier 2) is consulted only when `tests` is empty
+ * — the same honest, distinctly-worded fallback `formatTests` uses for the
+ * full annotation, applied to the shorter reminder line.
  */
-export function formatTestReminder(filepath: string, tests: string[]): string {
-  const shown = tests.slice(0, MAX_TESTS_LISTED).join(', ');
+export function formatTestReminder(
+  filepath: string,
+  tests: string[],
+  packageLevelTests: string[] = [],
+): string {
+  if (tests.length === 0 && packageLevelTests.length > 0) {
+    const shown = formatTruncatedList(packageLevelTests);
+    return `Lien: you changed ${filepath} — no dedicated test file, but its package has: ${shown}. Consider running them before completing.`;
+  }
+  const shown = formatTruncatedList(tests);
+  return `Lien: you changed ${filepath} — associated tests: ${shown}. Run them before completing.`;
+}
+
+/** Join the first `MAX_TESTS_LISTED` entries with a "(+N more)" tail. Shared by `formatTests`/`formatTestReminder`. */
+function formatTruncatedList(items: string[]): string {
+  const shown = items.slice(0, MAX_TESTS_LISTED).join(', ');
   const extra =
-    tests.length > MAX_TESTS_LISTED ? ` (+${tests.length - MAX_TESTS_LISTED} more)` : '';
-  return `Lien: you changed ${filepath} — associated tests: ${shown}${extra}. Run them before completing.`;
+    items.length > MAX_TESTS_LISTED ? ` (+${items.length - MAX_TESTS_LISTED} more)` : '';
+  return `${shown}${extra}`;
 }
 
 /** Return type of `computeComplexityHeadroom` — the plan-time nudge data. */
@@ -346,6 +474,7 @@ function emitAnnotation(
   filepath: RelativePath,
   dependents: DependentInfo[],
   tests: string[],
+  packageLevelTests: string[],
   complexity: ComplexitySummary,
   risk: BlastRadiusRisk,
   headroom: ComplexityHeadroom,
@@ -354,7 +483,7 @@ function emitAnnotation(
   if (dependents.length > 0) {
     lines.push(`  • ${formatDependents(dependents, risk.level, risk.reasoning)}`);
   }
-  lines.push(`  • ${formatTests(tests, filepath)}`);
+  lines.push(`  • ${formatTests(tests, filepath, packageLevelTests)}`);
   if (complexity.warningCount > 0) {
     lines.push(`  • ${formatComplexity(complexity)}`);
   }
@@ -438,8 +567,19 @@ export function formatDependents(
  * though C#'s *explicit* dotted usings still resolve normally (#866/#868),
  * which is why this is a separate flag checked only as this empty-array
  * fallback, not folded into `wholeModuleImports`.
+ *
+ * `packageLevelTests` (#902 tier 2) is a THIRD, distinct kind of fallback —
+ * unlike Swift/C#'s "not determinable" (zero signal at all), this case IS
+ * determinable, just coarser than a direct match: real test files exist in
+ * the same directory, but none basename-pairs with this specific file. Only
+ * consulted when `tests` is empty; never merged into `tests` itself (see
+ * `computeGoPackageLevelFallback`).
  */
-export function formatTests(tests: string[], filepath?: string): string {
+export function formatTests(
+  tests: string[],
+  filepath?: string,
+  packageLevelTests: string[] = [],
+): string {
   if (tests.length === 0) {
     const language = filepath ? detectLanguage(filepath) : null;
     if (language && hasWholeModuleImports(language)) {
@@ -448,12 +588,12 @@ export function formatTests(tests: string[], filepath?: string): string {
     if (language && hasEnclosingNamespaceAccess(language)) {
       return 'Test coverage not determinable from imports (enclosing-namespace access).';
     }
+    if (packageLevelTests.length > 0) {
+      return `Test coverage (package-level, no dedicated test file for this specific file): ${formatTruncatedList(packageLevelTests)}.`;
+    }
     return 'No test coverage.';
   }
-  const shown = tests.slice(0, MAX_TESTS_LISTED).join(', ');
-  const extra =
-    tests.length > MAX_TESTS_LISTED ? ` (+${tests.length - MAX_TESTS_LISTED} more)` : '';
-  return `Test coverage: ${shown}${extra}.`;
+  return `Test coverage: ${formatTruncatedList(tests)}.`;
 }
 
 export function formatComplexity(summary: ComplexitySummary): string {

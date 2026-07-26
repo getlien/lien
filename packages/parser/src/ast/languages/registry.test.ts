@@ -7,6 +7,7 @@ import {
   hasWholeModuleImports,
   hasEnclosingNamespaceAccess,
   hasSingleFileImports,
+  hasSameDirectoryTestConvention,
 } from './registry.js';
 import type { SupportedLanguage } from './registry.js';
 
@@ -206,6 +207,28 @@ describe('Language Registry', () => {
     it('is independent of hasWholeModuleImports/hasEnclosingNamespaceAccess', () => {
       expect(hasWholeModuleImports('ruby')).toBe(false);
       expect(hasEnclosingNamespaceAccess('ruby')).toBe(false);
+    });
+  });
+
+  describe('hasSameDirectoryTestConvention', () => {
+    it('is true for Go (#902: the dominant same-package _test.go convention)', () => {
+      expect(hasSameDirectoryTestConvention('go')).toBe(true);
+    });
+
+    it('is false for every other registered language', () => {
+      const others = getAllLanguages()
+        .map(d => d.id)
+        .filter(id => id !== 'go');
+      expect(others.length).toBeGreaterThan(0);
+      others.forEach(id => {
+        expect(hasSameDirectoryTestConvention(id)).toBe(false);
+      });
+    });
+
+    it('is independent of hasWholeModuleImports/hasEnclosingNamespaceAccess/hasSingleFileImports', () => {
+      expect(hasWholeModuleImports('go')).toBe(false);
+      expect(hasEnclosingNamespaceAccess('go')).toBe(false);
+      expect(hasSingleFileImports('go')).toBe(false);
     });
   });
 });
