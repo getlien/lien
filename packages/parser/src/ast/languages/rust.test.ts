@@ -317,6 +317,77 @@ pub static COUNTER: i32 = 0;`;
       const path = importExtractor.extractImportPath(useNode);
       expect(path).toBe('Foo');
     });
+
+    // #903: a Cargo workspace member's `tests/` integration tests are
+    // compiled as a SEPARATE crate, so they reference the crate under test by
+    // its published name (`use tokio_util::codec::Framed;`), never `crate::`.
+    // Passing a `rustCrateMap` (built by `resolveRustCrateMap`) lets the
+    // extractor tell a workspace-member crate apart from a genuinely
+    // external one, without changing any existing crate/self/super behavior.
+    describe('workspace crate-map resolution (#903)', () => {
+      const rustCrateMap = new Map([
+        ['tokio_util', 'tokio-util/src'],
+        ['tokio_test', 'tokio-test/src'],
+      ]);
+
+      it('resolves a workspace-member crate import (tokio-util repro)', () => {
+        const code = 'use tokio_util::codec::Framed;';
+        const root = mustParse(code, 'rust');
+        const useNode = root.namedChild(0)!;
+        expect(importExtractor.extractImportPath(useNode, rustCrateMap)).toBe(
+          'tokio-util/src/codec/Framed',
+        );
+      });
+
+      it('resolves a bare workspace-crate group reference (no module segment before the braces) to the crate dir itself', () => {
+        // `use tokio_test::{assert_ok, assert_err};` (tokio-test's own repro
+        // shape from #903) has no module path between the crate name and the
+        // group -- convertRustModulePath's `rest` is empty, so it resolves to
+        // the crate's src dir itself, same as a bare crate::-relative import
+        // with nothing to strip.
+        const code = 'use tokio_test::{assert_ok, assert_err};';
+        const root = mustParse(code, 'rust');
+        const useNode = root.namedChild(0)!;
+        expect(importExtractor.extractImportPath(useNode, rustCrateMap)).toBe('tokio-test/src');
+
+        const result = importExtractor.processImportSymbols(useNode, rustCrateMap);
+        expect(result).not.toBeNull();
+        expect(result!.importPath).toBe('tokio-test/src');
+        expect(result!.symbols).toContain('assert_ok');
+        expect(result!.symbols).toContain('assert_err');
+      });
+
+      it('still returns null for a genuinely external crate even with a crate map present', () => {
+        const code = 'use futures::stream::StreamExt;';
+        const root = mustParse(code, 'rust');
+        const useNode = root.namedChild(0)!;
+        expect(importExtractor.extractImportPath(useNode, rustCrateMap)).toBeNull();
+      });
+
+      it('is a no-op (returns null) for a non-crate/self/super root when no crate map is passed — zero behavior change', () => {
+        const code = 'use tokio_util::codec::Framed;';
+        const root = mustParse(code, 'rust');
+        const useNode = root.namedChild(0)!;
+        expect(importExtractor.extractImportPath(useNode)).toBeNull();
+      });
+
+      it('resolves imported symbols for a workspace-member crate the same way', () => {
+        const code = 'use tokio_util::codec::Framed;';
+        const root = mustParse(code, 'rust');
+        const useNode = root.namedChild(0)!;
+        const result = importExtractor.processImportSymbols(useNode, rustCrateMap);
+        expect(result).not.toBeNull();
+        expect(result!.importPath).toBe('tokio-util/src/codec');
+        expect(result!.symbols).toEqual(['Framed']);
+      });
+
+      it('still resolves crate::-relative imports unaffected by a populated crate map', () => {
+        const code = 'use crate::auth::AuthService;';
+        const root = mustParse(code, 'rust');
+        const useNode = root.namedChild(0)!;
+        expect(importExtractor.extractImportPath(useNode, rustCrateMap)).toBe('auth/AuthService');
+      });
+    });
   });
 
   describe('Symbol Extraction', () => {

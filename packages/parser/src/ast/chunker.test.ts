@@ -6,6 +6,7 @@ import { chunkByAST, shouldUseAST } from './chunker.js';
 import { clearWorkspacePackageCache } from '../workspace-packages.js';
 import { clearPsr4Cache } from '../php-psr4.js';
 import { clearGoModuleCache } from '../go-module.js';
+import { clearRustCrateMapCache } from '../rust-crate-map.js';
 
 describe('AST Chunker', () => {
   describe('shouldUseAST', () => {
@@ -447,6 +448,116 @@ func TestMode(t *testing.T) {
         const goChunks = chunkByAST('mode_test.go', goContent);
         const goFuncChunk = goChunks.find(c => c.metadata.symbolName === 'TestMode');
         expect(goFuncChunk?.metadata.imports).toContain('github.com/gin-gonic/gin/binding');
+      });
+    });
+
+    describe('manifest-root mapping (Rust Cargo workspace) — #903', () => {
+      let testDir: string;
+
+      beforeEach(async () => {
+        testDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-test-chunker-rust-crate-map-'));
+      });
+
+      afterEach(async () => {
+        clearRustCrateMapCache();
+        await fs.rm(testDir, { recursive: true, force: true }).catch(() => {});
+      });
+
+      async function writeFile(relPath: string, content: string): Promise<void> {
+        const abs = path.join(testDir, relPath);
+        await fs.mkdir(path.dirname(abs), { recursive: true });
+        await fs.writeFile(abs, content);
+      }
+
+      async function writeTokioWorkspace(): Promise<void> {
+        await writeFile('Cargo.toml', '[workspace]\nmembers = [\n  "tokio",\n  "tokio-util",\n]\n');
+        await writeFile('tokio/Cargo.toml', '[package]\nname = "tokio"\nversion = "1.0.0"\n');
+        await writeFile(
+          'tokio-util/Cargo.toml',
+          '[package]\nname = "tokio-util"\nversion = "0.7.0"\n',
+        );
+      }
+
+      it('resolves a sibling workspace-crate import from an integration test (tokio-util repro from #903)', async () => {
+        await writeTokioWorkspace();
+
+        const content = `use tokio_util::codec::Framed;
+
+#[test]
+fn framed_codec_roundtrips() {
+    assert!(true);
+}
+`;
+
+        const chunks = chunkByAST('tokio/tests/codec.rs', content, { workspaceRoot: testDir });
+        const funcChunk = chunks.find(c => c.metadata.symbolName === 'framed_codec_roundtrips');
+
+        expect(funcChunk?.metadata.imports).toContain('tokio-util/src/codec/Framed');
+      });
+
+      it('leaves a genuinely external crate import unresolved even with a workspace crate map present', async () => {
+        await writeTokioWorkspace();
+
+        const content = `use futures::stream::StreamExt;
+
+#[test]
+fn uses_futures() {
+    assert!(true);
+}
+`;
+
+        const chunks = chunkByAST('tokio/tests/stream.rs', content, { workspaceRoot: testDir });
+        const funcChunk = chunks.find(c => c.metadata.symbolName === 'uses_futures');
+
+        // No workspace member named "futures" — must stay dropped, exactly as
+        // it was before this fix (no guessing, #868 precedent).
+        expect(funcChunk?.metadata.imports).toEqual([]);
+      });
+
+      it('leaves Rust imports dropped when there is no Cargo.toml (zero behavior change)', () => {
+        const content = `use tokio_util::codec::Framed;
+
+#[test]
+fn framed_codec_roundtrips() {
+    assert!(true);
+}
+`;
+
+        const chunks = chunkByAST('tokio/tests/codec.rs', content, { workspaceRoot: testDir });
+        const funcChunk = chunks.find(c => c.metadata.symbolName === 'framed_codec_roundtrips');
+
+        expect(funcChunk?.metadata.imports).toEqual([]);
+      });
+
+      it('is a no-op for Rust when workspaceRoot is omitted (existing callers unaffected)', () => {
+        const content = `use tokio_util::codec::Framed;
+
+#[test]
+fn framed_codec_roundtrips() {
+    assert!(true);
+}
+`;
+
+        const chunks = chunkByAST('tokio/tests/codec.rs', content);
+        const funcChunk = chunks.find(c => c.metadata.symbolName === 'framed_codec_roundtrips');
+
+        expect(funcChunk?.metadata.imports).toEqual([]);
+      });
+
+      it('still resolves plain crate::-relative imports the same way alongside a populated crate map', async () => {
+        await writeTokioWorkspace();
+
+        const content = `use crate::runtime::Handle;
+
+fn get_handle() -> Handle {
+    todo!()
+}
+`;
+
+        const chunks = chunkByAST('tokio/src/lib.rs', content, { workspaceRoot: testDir });
+        const funcChunk = chunks.find(c => c.metadata.symbolName === 'get_handle');
+
+        expect(funcChunk?.metadata.imports).toContain('runtime/Handle');
       });
     });
 

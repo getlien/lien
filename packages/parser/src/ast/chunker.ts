@@ -13,6 +13,7 @@ import { getTraverser } from './traversers/index.js';
 import { resolveWorkspacePackageEntries } from '../workspace-packages.js';
 import { resolvePsr4Map } from '../php-psr4.js';
 import { resolveGoModulePrefix } from '../go-module.js';
+import { resolveRustCrateMap } from '../rust-crate-map.js';
 
 export interface ASTChunkOptions {
   minChunkSize?: number;
@@ -78,11 +79,12 @@ const RESOLVE_RELATIVE_IMPORTS: ReadonlySet<SupportedLanguage> = new Set([
 /**
  * Build the manifest-declared import-root mapping for a file's language, when
  * `workspaceRoot` is available. PHP resolves `composer.json`'s PSR-4 map; Go
- * resolves `go.mod`'s module prefix; every other language gets `undefined`
- * (a no-op — see `ManifestRoots` in `./symbols.ts`). Returns `undefined`
- * (rather than an object with empty/absent fields) when the manifest itself
- * declares nothing, so `resolveImportSpecifier`'s manifest-root step is
- * skipped entirely for non-PHP/Go-module projects.
+ * resolves `go.mod`'s module prefix; Rust resolves the Cargo workspace's
+ * member crate names (#903); every other language gets `undefined` (a no-op
+ * — see `ManifestRoots` in `./symbols.ts`). Returns `undefined` (rather than
+ * an object with empty/absent fields) when the manifest itself declares
+ * nothing, so the corresponding resolution step is skipped entirely for
+ * projects without that manifest.
  */
 function buildManifestRoots(
   language: SupportedLanguage,
@@ -98,6 +100,11 @@ function buildManifestRoots(
   if (language === 'go') {
     const goModulePrefix = resolveGoModulePrefix(workspaceRoot);
     return goModulePrefix ? { goModulePrefix } : undefined;
+  }
+
+  if (language === 'rust') {
+    const rustCrateMap = resolveRustCrateMap(workspaceRoot);
+    return rustCrateMap.size > 0 ? { rustCrateMap } : undefined;
   }
 
   return undefined;
@@ -119,10 +126,11 @@ function buildManifestRoots(
  * languages' import syntax could otherwise coincidentally collide with a
  * workspace package name.
  *
- * Independently, when `workspaceRoot` is provided and the file is PHP or Go,
- * `buildManifestRoots` resolves that project's manifest-declared import root
- * (composer.json PSR-4 / go.mod module prefix — see #867) so namespace- or
- * module-qualified imports resolve to real workspace-relative paths too.
+ * Independently, when `workspaceRoot` is provided and the file is PHP, Go, or
+ * Rust, `buildManifestRoots` resolves that project's manifest-declared import
+ * root (composer.json PSR-4 / go.mod module prefix — see #867; Cargo
+ * workspace member crate names — see #903) so namespace-, module-, or
+ * crate-qualified imports resolve to real workspace-relative paths too.
  */
 function prepareASTContext(
   content: string,
