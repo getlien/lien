@@ -81,12 +81,20 @@ function extractPackageName(content: string): string | undefined {
  * (possibly glob) entries, e.g. `"tokio"`, `"crates/*"`. Handles the array
  * spanning multiple lines -- Cargo's own convention once a workspace has more
  * than a couple of members (see tokio-rs/tokio's own root manifest).
+ *
+ * The `members` key is matched anchored to the start of a line (allowing only
+ * leading whitespace) rather than as a bare substring search. Cargo also
+ * supports a distinct `default-members` key in the same `[workspace]` table,
+ * and TOML formatters commonly place it first (alphabetically before
+ * `members`) -- an unanchored `/members\s*=\s*\[/` would match the "members
+ * = [" tail of "default-members = [" and silently extract THAT array
+ * instead, dropping the real workspace members.
  */
 function extractWorkspaceMemberGlobs(content: string): string[] {
   const body = extractTableBody(content, '[workspace]');
   if (!body) return [];
 
-  const arrayMatch = body.match(/members\s*=\s*\[([\s\S]*?)\]/);
+  const arrayMatch = body.match(/^[ \t]*members\s*=\s*\[([\s\S]*?)\]/m);
   if (!arrayMatch) return [];
 
   const quoted = arrayMatch[1].match(/"([^"]+)"/g) ?? [];

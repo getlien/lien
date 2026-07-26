@@ -109,6 +109,33 @@ describe('resolveRustCrateMap', () => {
     expect(map.size).toBe(2);
   });
 
+  it('reads the real `members` array, not `default-members`, when default-members is declared first', async () => {
+    // TOML formatters commonly sort keys alphabetically, which places
+    // "default-members" before "members" -- an unanchored `members = [...]`
+    // regex would match the "members = [" tail of "default-members = [" and
+    // extract that array instead, silently dropping the real workspace
+    // members (and picking up bogus/unrelated crate names).
+    await writeFile(
+      'Cargo.toml',
+      [
+        '[workspace]',
+        'default-members = ["tokio"]',
+        'members = [',
+        '  "tokio",',
+        '  "tokio-util",',
+        ']',
+      ].join('\n'),
+    );
+    await writeFile('tokio/Cargo.toml', '[package]\nname = "tokio"\nversion = "1.0.0"\n');
+    await writeFile('tokio-util/Cargo.toml', '[package]\nname = "tokio-util"\nversion = "0.7.0"\n');
+
+    const map = resolveRustCrateMap(testDir);
+
+    expect(map.get('tokio')).toBe('tokio/src');
+    expect(map.get('tokio_util')).toBe('tokio-util/src');
+    expect(map.size).toBe(2);
+  });
+
   it('caches the map per workspace root', async () => {
     await writeFile('Cargo.toml', '[package]\nname = "my-crate"\n');
     const first = resolveRustCrateMap(testDir);
