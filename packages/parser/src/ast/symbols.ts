@@ -6,6 +6,7 @@ import { getLanguage } from './languages/registry.js';
 import { resolveRelativeImport, resolveWorkspaceImport } from '../utils/path-matching.js';
 import { resolvePsr4Import } from '../php-psr4.js';
 import { resolveGoModuleImport } from '../go-module.js';
+import { resolvePythonSrcLayoutImport } from '../python-src-layout.js';
 
 /**
  * Per-project manifest-declared import-root mappings, threaded through as a
@@ -14,16 +15,27 @@ import { resolveGoModuleImport } from '../go-module.js';
  * `rustCrateMap` is threaded straight into the import extractor instead (see
  * its own doc comment below). Built once per workspace root in
  * `ast/chunker.ts`'s `prepareASTContext` — see `../php-psr4.ts`,
- * `../go-module.ts`, and `../rust-crate-map.ts` for how each map is read. At
- * most one field is ever populated for a given file (the language determines
- * which manifest, if any, applies), and all are optional so this is a no-op
- * for every language without a manifest reader.
+ * `../go-module.ts`, `../python-src-layout.ts`, and `../rust-crate-map.ts` for
+ * how each map/root is read or detected. At most one field is ever populated
+ * for a given file (the language determines which manifest, if any,
+ * applies), and all are optional so this is a no-op for every language
+ * without a manifest reader.
  */
 export interface ManifestRoots {
   /** PHP Composer PSR-4 namespace-prefix -> source-directory map. */
   psr4Map?: ReadonlyMap<string, string>;
   /** Go module's declared import-path prefix (`go.mod`'s `module` line). */
   goModulePrefix?: string;
+  /** Python src-layout root directory (`src`), when detected on disk. */
+  pythonSrcLayoutRoot?: string;
+  /**
+   * Absolute workspace root, needed only alongside `pythonSrcLayoutRoot`:
+   * `resolvePythonSrcLayoutImport` verifies each candidate path actually
+   * exists on disk (see `../python-src-layout.ts`) before rewriting a
+   * specifier, to avoid misresolving one nested Python project's own
+   * package against an unrelated, outer `src/` root.
+   */
+  workspaceRoot?: string;
   /**
    * Rust Cargo workspace crate name (underscore form) -> crate `src/` dir map
    * (#903). Unlike `psr4Map`/`goModulePrefix`, this is NOT consumed by
@@ -112,6 +124,13 @@ function resolveManifestRoot(specifier: string, manifestRoots: ManifestRoots | u
   if (manifestRoots.psr4Map) return resolvePsr4Import(specifier, manifestRoots.psr4Map);
   if (manifestRoots.goModulePrefix) {
     return resolveGoModuleImport(specifier, manifestRoots.goModulePrefix);
+  }
+  if (manifestRoots.pythonSrcLayoutRoot) {
+    return resolvePythonSrcLayoutImport(
+      specifier,
+      manifestRoots.pythonSrcLayoutRoot,
+      manifestRoots.workspaceRoot,
+    );
   }
   return specifier;
 }
