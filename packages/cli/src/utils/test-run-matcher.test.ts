@@ -269,4 +269,93 @@ describe('computeUnverifiedFiles', () => {
   it('an empty edits map yields an empty result regardless of runs', () => {
     expect(computeUnverifiedFiles(new Map(), [])).toEqual([]);
   });
+
+  // #908: Go's own idiomatic go test invocation always names a PACKAGE
+  // (directory), never a file -- `go test ./pkg/x/...` (recursive) and
+  // `go test ./pkg/x` (exact package only) previously matched nothing in
+  // isCoveredByScope's basename-only check, nagging even a correctly,
+  // narrowly-targeted run.
+  describe('directory-scoped runs (#908)', () => {
+    it('a recursive directory scope (go test ./pkg/x/...) covers a file directly in that directory', () => {
+      const edits = new Map([['pkg/cmd/label/list.go', ['pkg/cmd/label/list_test.go']]]);
+      const runs = [{ isTestRun: true, broad: false, scopeTokens: ['./pkg/cmd/label/...'] }];
+      expect(computeUnverifiedFiles(edits, runs)).toEqual([]);
+    });
+
+    it('a recursive directory scope covers a file nested in a subdirectory', () => {
+      const edits = new Map([['pkg/cmd/label/sub/deep.go', ['pkg/cmd/label/sub/deep_test.go']]]);
+      const runs = [{ isTestRun: true, broad: false, scopeTokens: ['./pkg/cmd/label/...'] }];
+      expect(computeUnverifiedFiles(edits, runs)).toEqual([]);
+    });
+
+    it('a non-recursive directory scope (go test ./pkg/x, no ...) covers a file directly in that directory', () => {
+      const edits = new Map([['pkg/cmd/label/list.go', ['pkg/cmd/label/list_test.go']]]);
+      const runs = [{ isTestRun: true, broad: false, scopeTokens: ['./pkg/cmd/label'] }];
+      expect(computeUnverifiedFiles(edits, runs)).toEqual([]);
+    });
+
+    it('a non-recursive directory scope does NOT cover a file in a subdirectory (Go: each dir is its own package)', () => {
+      const edits = new Map([['pkg/cmd/label/sub/deep.go', ['pkg/cmd/label/sub/deep_test.go']]]);
+      const runs = [{ isTestRun: true, broad: false, scopeTokens: ['./pkg/cmd/label'] }];
+      expect(computeUnverifiedFiles(edits, runs)).toEqual([
+        { file: 'pkg/cmd/label/sub/deep.go', tests: ['pkg/cmd/label/sub/deep_test.go'] },
+      ]);
+    });
+
+    it('a directory scope for a different package still nags (path-segment-aware, not string-prefix)', () => {
+      // The exact false-clear class this fix must not reopen: "label" is a
+      // text prefix of "labeler", but pkg/cmd/labeler is a real, different,
+      // unrelated package.
+      const edits = new Map([['pkg/cmd/labeler/other.go', ['pkg/cmd/labeler/other_test.go']]]);
+      const runs = [{ isTestRun: true, broad: false, scopeTokens: ['./pkg/cmd/label/...'] }];
+      expect(computeUnverifiedFiles(edits, runs)).toEqual([
+        { file: 'pkg/cmd/labeler/other.go', tests: ['pkg/cmd/labeler/other_test.go'] },
+      ]);
+    });
+
+    it('a non-recursive directory scope for a different package (no ...) also still nags', () => {
+      const edits = new Map([['pkg/cmd/labeler/other.go', ['pkg/cmd/labeler/other_test.go']]]);
+      const runs = [{ isTestRun: true, broad: false, scopeTokens: ['./pkg/cmd/label'] }];
+      expect(computeUnverifiedFiles(edits, runs)).toEqual([
+        { file: 'pkg/cmd/labeler/other.go', tests: ['pkg/cmd/labeler/other_test.go'] },
+      ]);
+    });
+
+    it('a directory scope matches via the associated test file directory too, not just the edited file', () => {
+      // Go's own same-package convention means these are usually identical,
+      // but the check is symmetric with the existing basename/stem checks,
+      // which also look at both the file and its tests.
+      const edits = new Map([['pkg/cmd/label/list.go', ['pkg/cmd/other/list_test.go']]]);
+      const runs = [{ isTestRun: true, broad: false, scopeTokens: ['./pkg/cmd/other/...'] }];
+      expect(computeUnverifiedFiles(edits, runs)).toEqual([]);
+    });
+
+    it('a scope token that names a real file (recognized extension) is NOT treated as a directory scope', () => {
+      // Unusual for `go test` in practice, but must not regress existing
+      // file-scoped matching for any other runner that DOES pass file paths.
+      const edits = new Map([['pkg/cmd/label/list.go', ['pkg/cmd/label/list_test.go']]]);
+      const runs = [{ isTestRun: true, broad: false, scopeTokens: ['pkg/cmd/label/list_test.go'] }];
+      expect(computeUnverifiedFiles(edits, runs)).toEqual([]);
+    });
+
+    it('a directory scope one level up does not cover a file two levels down without the recursive suffix', () => {
+      const edits = new Map([['pkg/cmd/label/sub/deep.go', ['pkg/cmd/label/sub/deep_test.go']]]);
+      const runs = [{ isTestRun: true, broad: false, scopeTokens: ['./pkg/cmd'] }];
+      expect(computeUnverifiedFiles(edits, runs)).toEqual([
+        { file: 'pkg/cmd/label/sub/deep.go', tests: ['pkg/cmd/label/sub/deep_test.go'] },
+      ]);
+    });
+
+    it('a directory scope one level up DOES cover a file two levels down WITH the recursive suffix', () => {
+      const edits = new Map([['pkg/cmd/label/sub/deep.go', ['pkg/cmd/label/sub/deep_test.go']]]);
+      const runs = [{ isTestRun: true, broad: false, scopeTokens: ['./pkg/cmd/...'] }];
+      expect(computeUnverifiedFiles(edits, runs)).toEqual([]);
+    });
+
+    it('a directory scope token without a leading ./ still matches (go test pkg/x/...)', () => {
+      const edits = new Map([['pkg/cmd/label/list.go', ['pkg/cmd/label/list_test.go']]]);
+      const runs = [{ isTestRun: true, broad: false, scopeTokens: ['pkg/cmd/label/...'] }];
+      expect(computeUnverifiedFiles(edits, runs)).toEqual([]);
+    });
+  });
 });

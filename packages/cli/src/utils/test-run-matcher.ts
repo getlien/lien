@@ -326,11 +326,73 @@ function stemKey(p: string): string {
 }
 
 /**
+ * Split a scope token into its directory portion and whether it carries
+ * Go's recursive `/...` suffix (`go test ./pkg/x/...`). A token with no
+ * `/...` suffix is still a directory scope, just non-recursive — matching
+ * Go's own semantics exactly: `go test ./pkg/x` runs only that package,
+ * never its subdirectories (each is a separate package); only the `/...`
+ * form recurses. A trailing slash (with or without the wildcard) is
+ * stripped first so `./pkg/x/` and `./pkg/x` parse identically.
+ */
+function parseDirectoryScope(token: string): { dir: string; recursive: boolean } {
+  const trimmed = token.replace(/\/+$/, '');
+  if (trimmed.endsWith('/...')) {
+    return { dir: trimmed.slice(0, -'/...'.length), recursive: true };
+  }
+  return { dir: trimmed, recursive: false };
+}
+
+/** Strip a leading "./" so `./pkg/x` and `pkg/x` compare equal. */
+function normalizeDirForComparison(dir: string): string {
+  return dir.replace(/^\.\//, '');
+}
+
+/**
+ * True when `token` names a directory rather than a specific file — i.e. it
+ * carries no recognized source extension once a `/...` recursive suffix is
+ * stripped. Go's own `go test` invocation ALWAYS names a package directory,
+ * never an individual file (there is no per-file `go test` form at all), so
+ * this fires for essentially every real Go scope token — but the check
+ * itself is deliberately language-agnostic, not Go-gated: `scopeTokens` are
+ * flattened across every matched run with no record of which runner
+ * produced them (tagging would need a much larger structural change than
+ * this fix warrants), and "this names a directory, not a file" is an
+ * equally valid signal for any other ecosystem's directory-scoped run
+ * (e.g. `pytest tests/unit/`).
+ */
+function isDirectoryScopeToken(token: string, extensions: ReadonlySet<string>): boolean {
+  const { dir } = parseDirectoryScope(token);
+  return ![...extensions].some(ext => dir.endsWith(ext));
+}
+
+/**
+ * Path-segment-aware directory containment: is `fileDir` the scope
+ * token's own directory (always allowed), or nested under it (only when
+ * the token's `/...` recursive suffix was present)?
+ *
+ * Deliberately NOT a string-prefix check — `./pkg/cmd/label` must not
+ * cover `./pkg/cmd/labeler`, a real, different, unrelated package that
+ * merely shares a text prefix. Comparing for exact equality, or a prefix
+ * of `scopeDir + '/'` specifically, anchors the match to a genuine
+ * path-segment boundary instead of a raw substring.
+ */
+function isDirCoveredByScopeToken(fileDir: string, scopeToken: string): boolean {
+  const { dir, recursive } = parseDirectoryScope(scopeToken);
+  const scopeDir = normalizeDirForComparison(dir);
+  const normalizedFileDir = normalizeDirForComparison(fileDir);
+  if (normalizedFileDir === scopeDir) return true;
+  return recursive && normalizedFileDir.startsWith(`${scopeDir}/`);
+}
+
+/**
  * A pending edited file is covered when a scoped run's token EXACTLY matches
  * (case-insensitive) the file's own basename or an associated test's
  * basename, or when their stems match after stripping one extension and one
  * `.test`/`.spec` segment (so a run naming `foo.test.ts` covers an edit to
- * `foo.ts`, and vice versa).
+ * `foo.ts`, and vice versa) — or when the token is a directory scope (#908,
+ * `go test ./pkg/x/...` / `./pkg/x`) whose directory contains the file's own
+ * directory or an associated test's directory (see `isDirCoveredByScopeToken`
+ * for the recursive-vs-exact distinction).
  *
  * Deliberately NOT substring/bidirectional-containment, unlike an earlier
  * version of this function — see the module doc comment and the dated
@@ -338,19 +400,29 @@ function stemKey(p: string): string {
  * matching let e.g. a `oauth.test.ts` run silently "cover" an unrelated
  * `auth.ts` edit (because "auth" is a substring of "oauth"), which is a
  * worse failure mode (a real gap goes unnoticed) than the false nag this
- * feature is otherwise biased to avoid.
+ * feature is otherwise biased to avoid. The directory-scope check above is
+ * exactly as strict, just at the directory level (`isDirCoveredByScopeToken`
+ * anchors on a real path-segment boundary, never a bare string prefix).
  */
-function isCoveredByScope(file: string, tests: string[], scopeTokens: string[]): boolean {
+function isCoveredByScope(
+  file: string,
+  tests: string[],
+  scopeTokens: string[],
+  extensions: ReadonlySet<string>,
+): boolean {
   const fileBase = baseKey(file);
   const fileStem = stemKey(file);
   const testBases = tests.map(baseKey);
   const testStems = tests.map(stemKey);
+  const candidateDirs = [file, ...tests].map(p => path.posix.dirname(p));
 
   return scopeTokens.some(token => {
     const tokenBase = baseKey(token);
     if (tokenBase === fileBase || testBases.includes(tokenBase)) return true;
     const tokenStem = stemKey(token);
-    return tokenStem === fileStem || testStems.includes(tokenStem);
+    if (tokenStem === fileStem || testStems.includes(tokenStem)) return true;
+    if (!isDirectoryScopeToken(token, extensions)) return false;
+    return candidateDirs.some(dir => isDirCoveredByScopeToken(dir, token));
   });
 }
 
@@ -369,10 +441,11 @@ export function computeUnverifiedFiles(
   if (runs.some(r => r.isTestRun && r.broad)) return [];
 
   const scopeTokens = runs.filter(r => r.isTestRun && !r.broad).flatMap(r => r.scopeTokens);
+  const extensions = sourceExtensions();
 
   const unverified: Array<{ file: string; tests: string[] }> = [];
   for (const [file, tests] of edits) {
-    if (!isCoveredByScope(file, tests, scopeTokens)) unverified.push({ file, tests });
+    if (!isCoveredByScope(file, tests, scopeTokens, extensions)) unverified.push({ file, tests });
   }
   return unverified;
 }
