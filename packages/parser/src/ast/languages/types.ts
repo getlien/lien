@@ -123,4 +123,26 @@ export interface LanguageDefinition {
    * call sites don't have a specific target to disambiguate against).
    */
   singleFileImports?: boolean;
+
+  /**
+   * True when this language's dominant test convention colocates a test file
+   * in the same directory as its subject with NO import statement connecting
+   * them at all (#902).
+   *
+   * Go confirmed: a `_test.go` file in `package foo` tests `package foo`'s
+   * other files in the same directory purely by Go's own compiler-enforced
+   * one-package-per-directory rule — no `import` is needed or even legal for
+   * a package to import itself, so `chunk.metadata.imports` carries zero
+   * signal for this, the dominant Go unit-test shape (measured at 94.4% of
+   * a real codebase's `_test.go` files basename-pairing with a same-named
+   * sibling; 100% same-directory). This is a structural gap, not a matching
+   * bug, the same category as `wholeModuleImports`/`enclosingNamespaceAccess`
+   * above — except here the directory itself IS reliable, deterministic
+   * evidence (unlike those two), so callers recover a real association from
+   * it (see `go-same-directory-tests.ts`) rather than only an honesty label.
+   * Absent/false (the default for every language except Go) means no
+   * directory-based signal is consulted; only set this where the convention
+   * has been verified against real code.
+   */
+  sameDirectoryTestConvention?: boolean;
 }

@@ -294,6 +294,64 @@ describe('handleGetFilesContext - test-association scan (scanAll fast path + cac
     });
   });
 
+  describe('Go same-package test convention, tier 1 basename pairing (#902)', () => {
+    it('associates foo.go with foo_test.go in the same directory, with no import at all', async () => {
+      const scanAll = vi
+        .fn()
+        .mockResolvedValue([
+          makeChunk('pkg/cmd/label/list.go'),
+          makeChunk('pkg/cmd/label/list_test.go'),
+        ]);
+      const ctx = makeCtx({ scanAll, indexVersion: 1 });
+
+      const result = await handleGetFilesContext(
+        { filepaths: 'pkg/cmd/label/list.go', includeRelated: false },
+        ctx,
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.testAssociations).toEqual(['pkg/cmd/label/list_test.go']);
+    });
+
+    it('does not fan out to every test file in the directory -- only the exact basename pair', async () => {
+      const scanAll = vi
+        .fn()
+        .mockResolvedValue([
+          makeChunk('internal/licenses/licenses.go'),
+          makeChunk('internal/licenses/embed_linux_amd64.go'),
+          makeChunk('internal/licenses/licenses_test.go'),
+        ]);
+      const ctx = makeCtx({ scanAll, indexVersion: 1 });
+
+      const result = await handleGetFilesContext(
+        { filepaths: 'internal/licenses/embed_linux_amd64.go', includeRelated: false },
+        ctx,
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.testAssociations).toEqual([]);
+    });
+
+    it('reports no association for a genuinely untested Go file', async () => {
+      const scanAll = vi
+        .fn()
+        .mockResolvedValue([
+          makeChunk('pkg/cmd/label/list.go'),
+          makeChunk('pkg/cmd/label/list_test.go'),
+          makeChunk('pkg/cmd/label/untested.go'),
+        ]);
+      const ctx = makeCtx({ scanAll, indexVersion: 1 });
+
+      const result = await handleGetFilesContext(
+        { filepaths: 'pkg/cmd/label/untested.go', includeRelated: false },
+        ctx,
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.testAssociations).toEqual([]);
+    });
+  });
+
   it('caches the scan across calls with the same indexVersion (no re-scan)', async () => {
     const scanAll = vi.fn().mockResolvedValue([]);
     const ctx = makeCtx({ scanAll, indexVersion: 42 });
