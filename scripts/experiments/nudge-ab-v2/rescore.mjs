@@ -33,6 +33,21 @@ const OUT = path.join(REPO, '.wip/nudge-ab-v2');
 const BLAST_TARGET = 'src/pricing/discount.ts';
 const VERIFY_TARGET = 'src/order-status.ts';
 
+// Guarded JSON read: a corrupt/empty archived file (partial write, manual edit)
+// reports the offending path and forces a non-zero exit rather than aborting the
+// whole audit with a bare SyntaxError.
+function readJson(file) {
+  let raw;
+  try {
+    raw = fs.readFileSync(file, 'utf8');
+    return JSON.parse(raw);
+  } catch (e) {
+    console.error(`CORRUPT/UNREADABLE archive file: ${file} — ${e.message}`);
+    process.exitCode = 1;
+    return null;
+  }
+}
+
 // Edit/Write ops targeting the file, from parseTranscript's already-decoded
 // tool_use blocks (no re-parsing of the raw JSONL).
 function opsFromTool(tu) {
@@ -87,7 +102,7 @@ function blastEditCompleted(replay, ops) {
 }
 
 function scoreRow(exp, dir, idx, replay) {
-  const saved = JSON.parse(fs.readFileSync(path.join(dir, `${idx}.json`), 'utf8'));
+  const saved = readJson(path.join(dir, `${idx}.json`)) || {};
   const transcript = fs.readFileSync(path.join(dir, `${idx}.jsonl`), 'utf8');
   const parsed = parseTranscript(transcript);
   const usable = !looksLoggedOut(transcript) && !saved.timedOut && !saved.failed;
@@ -135,7 +150,7 @@ function rescore(exp) {
 
 for (const exp of ['blast', 'verify']) {
   const re = rescore(exp);
-  const pub = JSON.parse(fs.readFileSync(path.join(OUT, `${exp}-summary.json`), 'utf8'));
+  const pub = readJson(path.join(OUT, `${exp}-summary.json`)) || {};
   const countsMatch = re.on === pub.on && re.off === pub.off;
   console.log(`=== ${exp} ===`);
   console.log(`  published summary : on=${pub.on}  off=${pub.off}  p=${pub.fisherOneSidedP}`);

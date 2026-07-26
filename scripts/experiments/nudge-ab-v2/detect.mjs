@@ -141,10 +141,12 @@ export function verifyTranscriptRanTest(toolUses) {
   for (const tu of toolUses) {
     if (tu.name.toLowerCase() !== 'bash') continue;
     const cmd = String(tu.input?.command || '');
-    // Each alternative is a real test-runner invocation; bare `pnpm` (which
-    // matched `pnpm install`) is narrowed to `pnpm ... test`.
+    // The runner keyword must START a command segment (^, &&, ||, |, ;), after
+    // optional `cd … &&` and leading `VAR=val` env assignments — so `pnpm test`
+    // matches but `pnpm install test` (the literal word `test` mid-command) does
+    // not. Mirrors classifyTestCommand's segment-anchored approach.
     const looksLikeRunner =
-      /\b(vitest|npm\s+(run\s+)?test|npm\s+t\b|jest|mocha|pnpm\s+(run\s+)?test|yarn\s+test)\b/.test(
+      /(?:^|&&|\|\||[|;])\s*(?:cd\s+\S+\s*&&\s*)?(?:[A-Za-z_]\w*=\S+\s+)*(vitest|npx\s+vitest|npm\s+(?:run\s+)?test|npm\s+t\b|jest|npx\s+jest|mocha|pnpm\s+(?:run\s+)?test|yarn\s+test)\b/.test(
         cmd,
       );
     if (!looksLikeRunner) continue;

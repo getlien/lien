@@ -553,10 +553,11 @@ function verdictB1(r) {
   if (!r.myHooksFire) throw new Error("PROBE(b') FAILED: my explicit hooks did NOT fire — STOP");
   const clean = !r.annotateFired && !r.sawAnnotateOutput && r.mcpInstructionLeak.length === 0;
   if (!clean) {
-    console.log(
+    // Throw (like the sibling checks) so a contaminated probe exits non-zero and
+    // automated callers can't mistake it for success; .probe-passed stays unwritten.
+    throw new Error(
       "PROBE(b') CONTAMINATED — plugin-disable override not honored. Both b'' and b' failed; STOP and report.",
     );
-    return;
   }
   fs.writeFileSync(path.join(OUT_ROOT, '.probe-passed'), new Date().toISOString());
   fs.writeFileSync(path.join(OUT_ROOT, '.auth-mode'), 'default+plugindisable+strict-mcp');
@@ -576,9 +577,14 @@ function assertNoAncestorClaudeMd(dir) {
 }
 
 // ---- run (gated arms) ----------------------------------------------------
+// `ran` (empty report ⇒ test observed run) is only meaningful when the CLI
+// itself succeeded. A failed `report` (non-zero exit, stderr, or spawn error)
+// also yields empty stdout, which would otherwise read as a false "ran"; so we
+// return cliOk and the caller marks a failed-CLI trial INVALID, never a hit.
 function verifyRanOracle(dest, sid, env) {
   const report = lien(['verify-tests', 'report', '--session', sid], dest, env);
-  return report.stdout.trim() === ''; // empty ⇒ the associated test was observed run
+  const cliOk = report.status === 0 && !report.error && !(report.stderr || '').trim();
+  return { cliOk, ran: report.stdout.trim() === '' };
 }
 
 // Reliable, deterministic oracle for "did hook <nudgeType> fire this session":
@@ -681,25 +687,30 @@ function scoreTrial({
     const m = blastMetric(parsed.toolUses, parsed.finalText);
     // SYMMETRIC: both arms require the task edit (signature change) to be valid.
     const editCompleted = blastEditCompleted(dest, env);
+    // §6a: an ON trial is valid only if the blast warning actually FIRED (a
+    // `blast` note-shown event). OFF has no warning, so the check is ON-only.
+    const nudgeFired = arm === 'on' ? nudgeShown(dest, 'blast', sid, env) : true;
     return {
       hit: m.hit,
       reasons: m.reasons,
       generic: blastGenericSentiment(parsed.finalText, m.hit),
-      valid: usable && editCompleted,
+      valid: usable && editCompleted && nudgeFired,
       editCompleted,
+      nudgeFired,
       ...base,
     };
   }
   // Verify: an empty `verify-tests report` only means "test ran" if the target
-  // was actually edited — otherwise a no-op/logged-out trial reads as a false
-  // positive. Require the edit for validity (symmetric with blast's rule).
+  // was actually edited AND the report CLI succeeded — otherwise a no-op,
+  // logged-out, or failed-CLI trial reads as a false positive.
   const edited = editedTarget(parsed.toolUses, EXPERIMENTS.verify.target);
-  const ran = verifyRanOracle(dest, sid, env);
+  const oracle = verifyRanOracle(dest, sid, env);
   return {
-    hit: ran,
+    hit: oracle.cliOk && oracle.ran,
     reasons: verifyTranscriptRanTest(parsed.toolUses).reasons,
-    valid: usable && edited,
+    valid: usable && edited && oracle.cliOk,
     edited,
+    cliOk: oracle.cliOk,
     ...base,
   };
 }
