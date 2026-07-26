@@ -261,7 +261,7 @@ by `scripts/experiments/nudge-ab-v2/hooks/silent-note-edit.sh` — the same
 adds nothing the model can see; it only holds ledger population constant so the *only*
 variable is the Stop advisory. This isolates the Stop hook (PR #843's target) rather
 than bundling it with the edit-time reminder. The fidelity trade-off is stated in
-[§8](#8-validity-caveats).
+[§8](#8-validity-caveats-carried-forward-stated-before-running).
 
 ---
 
@@ -351,10 +351,17 @@ The run aborts (no result claimed) if any holds:
 
 1. **Contamination probe fails** (§3a) — non-empty-and-clean not satisfied.
 2. **Hook-liveness check fails** (§3b) — a fixture no longer triggers its nudge.
-3. **> 20% invalid trials** in either arm of an experiment (agent never edited the
-   target, transcript unparseable, ON-arm nudge never fired). Invalid trials up to that
-   cap are re-drawn with fresh session ids; beyond it, the experiment is declared an
-   instrument failure, not a measured null.
+3. **> 20% invalid trials** in either arm of an experiment (agent never completed the
+   task edit, transcript unparseable, timed out, or came back logged-out). Validity is
+   now **symmetric across arms** — both require the task edit to have actually landed
+   (blast: `api-delta` shows `applyDiscount`'s signature changed; verify: the target was
+   edited), not the old asymmetric "control is always valid." Invalid trials up to the
+   cap (`ceil(0.2·N)` = 2 per arm at N=10) are **re-drawn with fresh session ids**, so a
+   fully-invalid-free run is exactly `2·N` counted trials while a worst-case within-cap
+   run adds up to `2·2` extra invocations per experiment (budget note: the §9 estimate
+   is the invalid-free floor; re-draws can add a handful more). Beyond the cap the
+   experiment is declared an instrument failure, not a measured null. **The 2026-07-26
+   run needed 0 re-draws (0 invalid across all 40 trials).**
 4. **Any OFF-arm contamination leak** that cannot be isolated to specific re-drawable
    trials.
 

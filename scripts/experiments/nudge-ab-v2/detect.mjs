@@ -141,8 +141,12 @@ export function verifyTranscriptRanTest(toolUses) {
   for (const tu of toolUses) {
     if (tu.name.toLowerCase() !== 'bash') continue;
     const cmd = String(tu.input?.command || '');
+    // Each alternative is a real test-runner invocation; bare `pnpm` (which
+    // matched `pnpm install`) is narrowed to `pnpm ... test`.
     const looksLikeRunner =
-      /\b(vitest|npm\s+(run\s+)?test|npm\s+t|jest|mocha|pnpm|yarn\s+test)\b/.test(cmd);
+      /\b(vitest|npm\s+(run\s+)?test|npm\s+t\b|jest|mocha|pnpm\s+(run\s+)?test|yarn\s+test)\b/.test(
+        cmd,
+      );
     if (!looksLikeRunner) continue;
     const scoped = TEST_TOKENS.some(t => cmd.includes(t));
     const broad = !/\.(test|spec)\.[tj]sx?/.test(cmd) && !cmd.includes('/');
@@ -251,4 +255,37 @@ export function collectDenials(text) {
   const objs = parseLines(text);
   const idToTool = indexToolUseIds(objs);
   return objs.flatMap(obj => denialsInObj(obj, idToTool));
+}
+
+// --- statistics -----------------------------------------------------------
+// One-sided Fisher exact (P(X >= observed a) under the null), via the
+// hypergeometric tail. Small N, so direct log-factorials are fine. Shared by
+// the runner and the offline re-scorer so both use identical math.
+function logFact(n) {
+  let s = 0;
+  for (let i = 2; i <= n; i++) s += Math.log(i);
+  return s;
+}
+function logHyper(k, n1, n2, t) {
+  return (
+    logFact(n1) +
+    logFact(n2) +
+    logFact(t) +
+    logFact(n1 + n2 - t) -
+    logFact(n1 + n2) -
+    logFact(k) -
+    logFact(n1 - k) -
+    logFact(t - k) -
+    logFact(n2 - (t - k))
+  );
+}
+export function fisherOneSided(a, n1, c, n2) {
+  const t = a + c;
+  if (n1 === 0 || n2 === 0) return 1;
+  let p = 0;
+  for (let k = a; k <= Math.min(n1, t); k++) {
+    if (t - k < 0 || t - k > n2) continue;
+    p += Math.exp(logHyper(k, n1, n2, t));
+  }
+  return Math.min(1, p);
 }

@@ -1,5 +1,12 @@
 # nudge-ab-v2 experiment kit
 
+> This file is **tool-usage documentation co-located with the runnable script it
+> describes** (how to invoke `run.mjs`), not permanent project documentation — the
+> authoritative, tracked write-up is the protocol doc and the two A/B docs under
+> `docs/development/`. It lives next to the code it documents on purpose; the repo's
+> "permanent docs live in `docs/`" rule is satisfied by the protocol doc, which this
+> README defers to.
+
 The runnable instrument for the **task-decoupled** A/B re-test of two Lien nudges
 (blast-radius warning, did-you-run-the-tests Stop advisory). The **frozen
 pre-registration** — hypotheses, scenario rationale, arms, metrics, abort criteria,

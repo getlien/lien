@@ -28,6 +28,7 @@ import {
   collectDenials,
   looksLoggedOut,
   editedTarget,
+  fisherOneSided,
 } from './detect.mjs';
 
 // ---- FROZEN CONFIG -------------------------------------------------------
@@ -372,7 +373,14 @@ function runClaude(prompt, sessionId, cwd, settingsFile, cfg, extraEnv, shimBin)
     killSignal: 'SIGKILL',
   });
   const timedOut = Boolean(res.error && res.error.code === 'ETIMEDOUT');
-  return { stdout: res.stdout || '', timedOut };
+  // Surface every OTHER spawn failure (ENOENT, buffer overflow, signal) and any
+  // non-zero exit so the trial is marked invalid rather than silently scored as
+  // a miss on empty output. status is null when killed by signal/timeout.
+  const spawnError =
+    res.error && res.error.code !== 'ETIMEDOUT' ? String(res.error.code || res.error.message) : '';
+  const nonZeroExit = !timedOut && res.status != null && res.status !== 0 ? res.status : null;
+  const failed = Boolean(spawnError) || nonZeroExit != null;
+  return { stdout: res.stdout || '', timedOut, failed, spawnError, exitStatus: res.status };
 }
 
 // Redaction: the seed's personal fields (email/org/account UUIDs) must never
@@ -382,8 +390,14 @@ function runClaude(prompt, sessionId, cwd, settingsFile, cfg, extraEnv, shimBin)
 let _redactTerms = null;
 function redactionTerms() {
   if (_redactTerms) return _redactTerms;
-  const oa =
-    JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude.json'), 'utf8')).oauthAccount || {};
+  let oa = {};
+  try {
+    oa =
+      JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude.json'), 'utf8')).oauthAccount ||
+      {};
+  } catch {
+    oa = {}; // no ~/.claude.json (or unreadable) → nothing to redact
+  }
   _redactTerms = [
     oa.emailAddress,
     oa.accountUuid,
@@ -472,17 +486,19 @@ function cmdProbeDefault() {
 // hooks still fire (nudge-events has "blast"), (c) the saved ~/.claude settings
 // on disk are byte-identical before/after. Detection is via the nudge-events
 // ledger, not transcript grep.
+const readSaved = p => (fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : null);
+
 function cmdProbeB1() {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'nudge-ab-probeb1-'));
   const savedSettings = path.join(os.homedir(), '.claude', 'settings.json');
-  const before = fs.readFileSync(savedSettings, 'utf8');
+  const before = readSaved(savedSettings);
   try {
     const shimBin = makeLienShim(tmp);
     const emptyMcp = path.join(tmp, 'empty-mcp.json');
     fs.writeFileSync(emptyMcp, JSON.stringify({ mcpServers: {} }));
     const cfg = { dir: null, emptyMcp }; // DEFAULT config dir
     const dest = path.join(tmp, 'blast');
-    materialize('blast', dest, shimBin, false);
+    const env = materialize('blast', dest, shimBin, false);
     const settingsFile = path.join(dest, '.ab-settings.json');
     const s = EXPERIMENTS.blast.settings();
     s.enabledPlugins = { 'lien@lien': false }; // disable ambient plugin, this process only
@@ -504,11 +520,11 @@ function cmdProbeB1() {
     fs.mkdirSync(OUT_ROOT, { recursive: true });
     writeArtifact(path.join(OUT_ROOT, 'probe-b1.jsonl'), transcript);
     const parsed = parseTranscript(transcript);
-    const after = fs.readFileSync(savedSettings, 'utf8');
+    const after = readSaved(savedSettings);
     const result = {
       loggedOut: looksLoggedOut(transcript),
-      myHooksFire: nudgeShown(dest, 'blast', sid),
-      annotateFired: nudgeShown(dest, 'annotate', sid),
+      myHooksFire: nudgeShown(dest, 'blast', sid, env),
+      annotateFired: nudgeShown(dest, 'annotate', sid, env),
       sawAnnotateOutput: /lien impact|files import this/i.test(parsed.finalText),
       savedSettingsUntouched: before === after,
       // Instruction-leak = the Lien PLUGIN's own MCP tool/rule vocabulary that the
@@ -525,7 +541,8 @@ function cmdProbeB1() {
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
     // Belt-and-braces: restore the saved settings if anything touched them.
-    if (fs.readFileSync(savedSettings, 'utf8') !== before) fs.writeFileSync(savedSettings, before);
+    if (before !== null && readSaved(savedSettings) !== before)
+      fs.writeFileSync(savedSettings, before);
   }
 }
 
@@ -567,9 +584,10 @@ function verifyRanOracle(dest, sid, env) {
 // Reliable, deterministic oracle for "did hook <nudgeType> fire this session":
 // the nudge-events ledger, NOT transcript grep (a hook's additionalContext does
 // not appear grep-ably in the stream-json transcript — only the model's
-// paraphrase of it does, which is unreliable).
-function nudgeShown(dest, nudgeType, sid) {
-  const store = lien(['path', '--store'], dest).stdout.trim();
+// paraphrase of it does, which is unreliable). env is threaded so `lien path
+// --store` resolves the SAME store the trial's hooks wrote to.
+function nudgeShown(dest, nudgeType, sid, env) {
+  const store = lien(['path', '--store'], dest, env).stdout.trim();
   if (!store) return false;
   const events = path.join(store, 'nudge-events.jsonl');
   if (!fs.existsSync(events)) return false;
@@ -577,8 +595,20 @@ function nudgeShown(dest, nudgeType, sid) {
   return body.includes(`"nudge":"${nudgeType}"`) && body.includes(sid);
 }
 
-function blastFired(dest, sid) {
-  return nudgeShown(dest, 'blast', sid);
+// SYMMETRIC blast validity oracle for BOTH arms: did the agent's edit actually
+// change the exported signature (the task)? `lien api-delta` runs regardless of
+// LIEN_BLAST_HOOK, so control and signal are gated identically — unlike the old
+// `fired = arm==='off' ? true : blastFired(...)`, under which a control no-op
+// scored as a MISS while a signal no-op scored as INVALID.
+function blastEditCompleted(dest, env) {
+  const r = lien(['api-delta', '--file', EXPERIMENTS.blast.target, '--format', 'json'], dest, env);
+  let d;
+  try {
+    d = JSON.parse(r.stdout);
+  } catch {
+    return false;
+  }
+  return (d.changes || []).some(c => c.kind === 'signature-changed' || c.kind === 'removed');
 }
 
 function runTrial(expName, arm, idx, tmp, shimBin, cfg) {
@@ -595,60 +625,92 @@ function runTrial(expName, arm, idx, tmp, shimBin, cfg) {
   const sid = randomUUID();
   const task = fs.readFileSync(path.join(KIT, exp.task), 'utf8');
   const armEnv = { ...exp.baseEnv, ...exp.armEnv[arm] };
-  const { stdout: transcript, timedOut } = runClaude(
-    task,
-    sid,
-    dest,
-    settingsFile,
-    cfg,
-    armEnv,
-    shimBin,
-  );
+  const {
+    stdout: transcript,
+    timedOut,
+    failed,
+    spawnError,
+    exitStatus,
+  } = runClaude(task, sid, dest, settingsFile, cfg, armEnv, shimBin);
   const parsed = parseTranscript(transcript);
-  const result = scoreTrial({ expName, arm, dest, sid, env, parsed, transcript, timedOut });
+  const result = scoreTrial({
+    expName,
+    arm,
+    dest,
+    sid,
+    env,
+    parsed,
+    transcript,
+    timedOut,
+    failed,
+    spawnError,
+    exitStatus,
+  });
   saveTrial(expName, arm, idx, transcript, result);
   fs.rmSync(dest, { recursive: true, force: true });
   return result;
 }
 
-function scoreTrial({ expName, arm, dest, sid, env, parsed, transcript, timedOut }) {
+function scoreTrial({
+  expName,
+  arm,
+  dest,
+  sid,
+  env,
+  parsed,
+  transcript,
+  timedOut,
+  failed,
+  spawnError,
+  exitStatus,
+}) {
   const contamination = arm === 'off' ? contaminationScan(transcript) : [];
   const denials = collectDenials(transcript);
   const loggedOut = looksLoggedOut(transcript);
-  const usable = !timedOut && !loggedOut;
+  const usable = !timedOut && !loggedOut && !failed;
+  const base = {
+    timedOut,
+    loggedOut,
+    failed,
+    spawnError: spawnError || '',
+    exitStatus,
+    contamination,
+    denials,
+  };
   if (expName === 'blast') {
     const m = blastMetric(parsed.toolUses, parsed.finalText);
-    const fired = arm === 'off' ? true : blastFired(dest, sid);
+    // SYMMETRIC: both arms require the task edit (signature change) to be valid.
+    const editCompleted = blastEditCompleted(dest, env);
     return {
       hit: m.hit,
       reasons: m.reasons,
       generic: blastGenericSentiment(parsed.finalText, m.hit),
-      valid: usable && fired,
-      timedOut,
-      loggedOut,
-      contamination,
-      denials,
+      valid: usable && editCompleted,
+      editCompleted,
+      ...base,
     };
   }
   // Verify: an empty `verify-tests report` only means "test ran" if the target
   // was actually edited — otherwise a no-op/logged-out trial reads as a false
-  // positive. Require the edit for validity.
+  // positive. Require the edit for validity (symmetric with blast's rule).
   const edited = editedTarget(parsed.toolUses, EXPERIMENTS.verify.target);
   const ran = verifyRanOracle(dest, sid, env);
   return {
     hit: ran,
     reasons: verifyTranscriptRanTest(parsed.toolUses).reasons,
     valid: usable && edited,
-    timedOut,
-    loggedOut,
     edited,
-    contamination,
-    denials,
+    ...base,
   };
 }
 
 function saveTrial(expName, arm, idx, transcript, result) {
-  const dir = path.join(OUT_ROOT, expName, arm);
+  // Route uncounted smoke trials to a separate _smoke/ tree so they never mix
+  // with the counted 0..N trial directories the report/audit read from.
+  const isSmoke = String(idx).startsWith('smoke');
+  const dir = isSmoke
+    ? path.join(OUT_ROOT, '_smoke', `${expName}-${arm}`)
+    : path.join(OUT_ROOT, expName, arm);
   fs.mkdirSync(dir, { recursive: true });
   writeArtifact(path.join(dir, `${idx}.jsonl`), transcript);
   writeArtifact(path.join(dir, `${idx}.json`), JSON.stringify(result, null, 2));
@@ -729,6 +791,7 @@ function invalidReasons(rows) {
   return {
     timedOut: rows.filter(r => r.timedOut).length,
     loggedOut: rows.filter(r => r.loggedOut).length,
+    failed: rows.filter(r => r.failed).length,
   };
 }
 
@@ -745,45 +808,15 @@ function report(expName, results) {
     off: `${off.hits}/${off.n}`,
     invalid: { on: on.invalid, off: off.invalid },
     invalidReasons: { on: invalidReasons(results.on), off: invalidReasons(results.off) },
-    contaminationLeaks: leaks,
+    contamination: { offTrialsScanned: results.off.length, flagged: leaks },
     denials: { on: denialSummary(results.on), off: denialSummary(results.off) },
-    fisherOneSidedP: Number(p.toFixed(4)),
+    // toExponential(3) preserves small p-values (toFixed(4) turned 5.4e-6 into 0).
+    fisherOneSidedP: Number(p.toExponential(3)),
     primarySeparated: separated,
     launchClaimPermitted: separated,
   };
   writeArtifact(path.join(OUT_ROOT, `${expName}-summary.json`), JSON.stringify(summary, null, 2));
   console.log(redactAccount(JSON.stringify(summary, null, 2)));
-}
-
-// One-sided Fisher exact (P(X >= observed on-hits) under the null), via the
-// hypergeometric tail. Small N, so direct factorials are fine.
-function logFact(n) {
-  let s = 0;
-  for (let i = 2; i <= n; i++) s += Math.log(i);
-  return s;
-}
-function logHyper(k, n1, n2, t) {
-  return (
-    logFact(n1) +
-    logFact(n2) +
-    logFact(t) +
-    logFact(n1 + n2 - t) -
-    logFact(n1 + n2) -
-    logFact(k) -
-    logFact(n1 - k) -
-    logFact(t - k) -
-    logFact(n2 - (t - k))
-  );
-}
-function fisherOneSided(a, n1, c, n2) {
-  const t = a + c;
-  if (n1 === 0 || n2 === 0) return 1;
-  let p = 0;
-  for (let k = a; k <= Math.min(n1, t); k++) {
-    if (t - k < 0 || t - k > n2) continue;
-    p += Math.exp(logHyper(k, n1, n2, t));
-  }
-  return Math.min(1, p);
 }
 
 // ---- smoke (scoped-mode viability, uncounted) ----------------------------

@@ -447,10 +447,22 @@ tool exists), scoped `acceptEdits` + explicit allowlist. 0 invalid, 0 logged-out
 timed-out, **0 tool denials** (symmetric). Recap held off in both arms, so the edit-time
 warning is the *only* blast delivery.
 
-**Contamination:** 0/20 OFF trials on a word-boundary re-scan. (The runner's raw scan
-reported 20/20 "leaks" — all the substring `lien` inside the ambient skill name
-`…client…` the default config dir exposes; symmetric across arms, outside the primary
-metric. Reported raw-and-corrected per the honesty rule.) The user's ambient
+**Contamination:** 0/10 OFF trials in this experiment on a word-boundary re-scan (0/20
+across both experiments). The runner's raw substring scan flagged all 10/10 — every hit
+the substring `lien` inside the ambient skill name `…client…` the default config dir
+exposes; symmetric across arms, outside the primary metric. Reported raw-and-corrected
+per the honesty rule.
+
+**Validity audit (post-review).** A review flagged that the runner hardcoded OFF-arm
+validity to `true`, asymmetric with the signal arm's edit-completed gate — so a control
+*no-op* would have scored as a MISS rather than INVALID. Re-scoring every blast trial in
+**both** arms under a symmetric rule — did the agent's edit actually change
+`applyDiscount`'s signature (the same `api-delta` oracle the signal arm used)? — confirms
+**all 20 trials completed the task edit, 0 no-ops in either arm**, so the counts are
+unchanged. An offline re-run of the *corrected* scoring pipeline over the archived
+transcripts reproduces the published counts exactly (10/10 vs 3/10, p = 0.001548 — the
+0.0015 above was 4-dp rounding). The runner has been fixed to gate both arms
+symmetrically. Evidence is in the PR transparency note. The user's ambient
 `~/.claude/rules/context7.md` and other non-Lien plugins' skill lists are present
 identically in both arms (unrelated to caller-checking).
 

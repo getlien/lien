@@ -424,10 +424,19 @@ trials (10/arm, seeded interleave), fixture sandboxes with no `CLAUDE.md`; defau
 dir with the ambient `lien@lien` plugin disabled per-invocation (saved settings
 untouched), `--strict-mcp-config`, scoped `acceptEdits` + allowlist; blast + edit-time
 reminder held off in both arms, `vitest` provisioned so the test command runs locally. 0
-invalid, 0 logged-out, 0 timed-out, **0 tool denials** (symmetric). Contamination: 0/20
-OFF trials on a word-boundary re-scan (the raw 20/20 "leaks" were the substring `lien` in
-the ambient `…client…` skill name — symmetric, outside the metric; reported
-raw-and-corrected).
+invalid, 0 logged-out, 0 timed-out, **0 tool denials** (symmetric). Contamination: 0/10
+OFF trials in this experiment on a word-boundary re-scan (0/20 across both experiments);
+the raw substring scan flagged all 10/10 on `lien` inside the ambient `…client…` skill
+name — symmetric, outside the metric; reported raw-and-corrected.
+
+**Validity audit (post-review).** This experiment already gated validity on the target
+being edited (symmetric across arms), so the OFF-arm asymmetry the review found in the
+blast scorer did not apply here. An offline re-run of the corrected scoring pipeline over
+the archived transcripts reproduces the published counts exactly (10/10 vs 0/10), and the
+precise Fisher p is **5.413 × 10⁻⁶** (the summary JSON's `0` was a `toFixed(4)`
+serialization bug, now fixed to preserve small p-values); the independent transcript
+cross-check agrees with the ledger oracle on all 20 trials. Evidence in the PR
+transparency note.
 
 **Validity caveats.** (1) Lower-bound environment (no CLAUDE.md/plugin/prior turns) — a
 floor for the mechanism, not a production forecast. (2) This isolates the **Stop
