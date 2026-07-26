@@ -1,0 +1,876 @@
+#!/usr/bin/env node
+// nudge-ab-v2 runner — the operational realization of the FROZEN pre-registration
+// in docs/development/nudge-ab-v2-protocol.md. Running the experiment later
+// requires ZERO design decisions: every knob below is fixed by that document.
+//
+// Subcommands:
+//   check   Zero-LLM instrument verification. Materializes both fixtures,
+//           indexes them, and asserts the real hooks render the intended
+//           nudges (blast warning + unrun-tests recap). No `claude` calls.
+//   probe   The mandatory contamination + plumbing precondition (1 `claude`
+//           call, no tools). MUST pass before any arm runs.
+//   run     The gated experiment arms. Refuses to start unless `probe` passed
+//           in this invocation first.
+//
+// Nothing here runs experiment arms unless explicitly invoked with `run`.
+import { execFileSync, spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import {
+  parseTranscript,
+  blastMetric,
+  blastGenericSentiment,
+  verifyTranscriptRanTest,
+  contaminationScan,
+  collectDenials,
+  looksLoggedOut,
+  editedTarget,
+  fisherOneSided,
+} from './detect.mjs';
+
+// ---- FROZEN CONFIG -------------------------------------------------------
+const N_PER_ARM = 10; // justified in the protocol doc (detection-oriented power)
+const TRIAL_TIMEOUT_MS = 240000; // per-trial wall clock; a timeout ⇒ invalid trial (§7)
+const MODEL = 'sonnet';
+const INTERLEAVE_SEED = 20260725; // fixed; drives the arm order
+
+// Trials run with --permission-mode acceptEdits (auto-accepts file edits in the
+// sandbox) plus this EXPLICIT allowlist — NOT bypassPermissions. The list is
+// identical in both arms, so any denial is a constant that differences out; it
+// covers exactly what a legitimate trial does (read/search/edit + run the
+// fixture's test runner) and nothing else (no rm/curl/network/install). In
+// headless -p a non-allowlisted tool call is denied-and-continues (never an
+// interactive stall); denials are logged per arm for symmetry (see report()).
+const PERMISSION_MODE = 'acceptEdits';
+const ALLOWED_TOOLS = [
+  'Read',
+  'Grep',
+  'Glob',
+  'Edit',
+  'Write',
+  'MultiEdit',
+  // read-only inspection + search — the blast metric's measured behavior
+  'Bash(grep:*)',
+  'Bash(rg:*)',
+  'Bash(git grep:*)',
+  'Bash(git diff:*)',
+  'Bash(git log:*)',
+  'Bash(git status:*)',
+  'Bash(cat:*)',
+  'Bash(head:*)',
+  'Bash(tail:*)',
+  'Bash(ls:*)',
+  'Bash(find:*)',
+  'Bash(sed:*)',
+  'Bash(awk:*)',
+  'Bash(wc:*)',
+  'Bash(pwd:*)',
+  'Bash(echo:*)',
+  // the fixture's test runner + typecheck — the verify metric's measured behavior
+  'Bash(npx vitest:*)',
+  'Bash(vitest:*)',
+  'Bash(npm test:*)',
+  'Bash(npm run test:*)',
+  'Bash(npm t:*)',
+  'Bash(node --test:*)',
+  'Bash(node --check:*)',
+  'Bash(npx tsc:*)',
+  'Bash(tsc:*)',
+  'Bash(pnpm test:*)',
+  'Bash(yarn test:*)',
+];
+
+const KIT = path.dirname(fileURLToPath(import.meta.url));
+const REPO = path.resolve(KIT, '..', '..', '..');
+const PLUGIN_HOOKS = path.join(REPO, 'plugins', 'claude', 'hooks');
+const KIT_HOOKS = path.join(KIT, 'hooks');
+const CLI_ENTRY = path.join(REPO, 'packages', 'cli', 'dist', 'index.js');
+const OUT_ROOT = path.join(REPO, '.wip', 'nudge-ab-v2');
+
+// Env deltas per arm. Anything unset here inherits the process env; the base
+// env (applied to BOTH arms of BOTH experiments) neutralizes every OTHER nudge
+// so exactly one signal varies per experiment.
+const BASE_ENV = { LIEN_DELTA_HOOK: 'off', LIEN_ANNOTATE_GUARD: 'off' };
+const EXPERIMENTS = {
+  blast: {
+    fixture: 'blast',
+    task: 'prompts/blast.task.txt',
+    target: 'src/pricing/discount.ts',
+    // recap held OFF in both arms so the ONLY delivery of the blast signal is
+    // the edit-time api-delta warning (isolates PR #841's hook).
+    baseEnv: { LIEN_RECAP: 'off', LIEN_TEST_REMINDER: 'off' },
+    armEnv: { on: {}, off: { LIEN_BLAST_HOOK: 'off' } },
+    settings: () => ({
+      hooks: {
+        PostToolUse: [
+          postTool('Edit|Write|MultiEdit', hookCmd(PLUGIN_HOOKS, 'api-delta-write.sh')),
+        ],
+      },
+    }),
+  },
+  verify: {
+    fixture: 'verify',
+    task: 'prompts/verify.task.txt',
+    target: 'src/order-status.ts',
+    // blast + edit-time reminder held OFF in both arms; the edit-time reminder
+    // would name the test and defeat the "unnamed test" discriminator, so its
+    // ledger recording is provided by the silent scaffolding hook instead.
+    baseEnv: { LIEN_BLAST_HOOK: 'off', LIEN_TEST_REMINDER: 'off' },
+    armEnv: { on: {}, off: { LIEN_RECAP: 'off' } },
+    settings: () => ({
+      hooks: {
+        PostToolUse: [
+          postTool('Edit|Write|MultiEdit', hookCmd(KIT_HOOKS, 'silent-note-edit.sh')),
+          postTool('Bash', hookCmd(PLUGIN_HOOKS, 'test-run-note.sh')),
+        ],
+        Stop: [{ hooks: [{ type: 'command', command: hookCmd(PLUGIN_HOOKS, 'recap-stop.sh') }] }],
+      },
+    }),
+  },
+};
+
+const hookCmd = (dir, name) => `bash ${path.join(dir, name)}`;
+const postTool = (matcher, command) => ({ matcher, hooks: [{ type: 'command', command }] });
+
+// ---- small utilities -----------------------------------------------------
+function lien(args, cwd, env) {
+  return spawnSync('node', [CLI_ENTRY, ...args], {
+    cwd,
+    env: env || process.env,
+    encoding: 'utf8',
+  });
+}
+
+// A `lien` shim on PATH so the plugin hooks (which call the bare `lien`
+// binary) resolve to THIS build, not whatever is globally installed.
+function makeLienShim(tmp) {
+  const bin = path.join(tmp, 'bin');
+  fs.mkdirSync(bin, { recursive: true });
+  const shim = path.join(bin, 'lien');
+  fs.writeFileSync(shim, `#!/usr/bin/env bash\nexec node ${JSON.stringify(CLI_ENTRY)} "$@"\n`);
+  fs.chmodSync(shim, 0o755);
+  return bin;
+}
+
+// Deterministic Fisher-Yates using a tiny seeded LCG (interleave order is part
+// of the frozen protocol, so it must be reproducible).
+function seededOrder(labels, seed) {
+  const a = labels.slice();
+  let s = seed >>> 0;
+  const next = () => (s = (s * 1103515245 + 12345) & 0x7fffffff);
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = next() % (i + 1);
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// One-time: install the verify fixture's devDeps (vitest) into a cache, so a
+// trial's `npx vitest run <path>` resolves LOCALLY and runs offline rather than
+// stalling on a network fetch. Symlinked into each verify trial dir.
+const VERIFY_NM_CACHE = path.join(OUT_ROOT, 'verify-nm');
+function ensureVerifyDeps() {
+  const nm = path.join(VERIFY_NM_CACHE, 'node_modules');
+  if (fs.existsSync(path.join(nm, 'vitest'))) return nm;
+  fs.mkdirSync(VERIFY_NM_CACHE, { recursive: true });
+  fs.copyFileSync(
+    path.join(KIT, 'fixtures', 'verify', 'package.json'),
+    path.join(VERIFY_NM_CACHE, 'package.json'),
+  );
+  execFileSync('npm', ['install', '--no-audit', '--no-fund', '--silent'], {
+    cwd: VERIFY_NM_CACHE,
+    stdio: 'ignore',
+  });
+  return nm;
+}
+
+// ---- materialization -----------------------------------------------------
+function materialize(fixtureName, dest, shimBin, provision) {
+  const src = path.join(KIT, 'fixtures', fixtureName);
+  fs.cpSync(src, dest, { recursive: true });
+  const env = { ...process.env, PATH: `${shimBin}:${process.env.PATH}` };
+  execFileSync('git', ['init', '-q'], { cwd: dest });
+  execFileSync('git', ['add', '-A'], { cwd: dest });
+  execFileSync(
+    'git',
+    ['-c', 'user.email=ab@lien.dev', '-c', 'user.name=ab', 'commit', '-qm', 'init'],
+    {
+      cwd: dest,
+    },
+  );
+  const r = lien(['index'], dest, env);
+  if (r.status !== 0) throw new Error(`index failed in ${dest}: ${r.stderr}`);
+  // Symlink deps AFTER indexing so the index never walks node_modules.
+  if (provision && fixtureName === 'verify') {
+    fs.symlinkSync(ensureVerifyDeps(), path.join(dest, 'node_modules'), 'dir');
+  }
+  return env;
+}
+
+// ---- check (zero-LLM instrument verification) ----------------------------
+function assert(cond, msg) {
+  if (!cond) throw new Error(`CHECK FAILED: ${msg}`);
+  console.log(`  ok: ${msg}`);
+}
+
+function checkBlast(tmp, shimBin) {
+  console.log('[check] blast fixture');
+  const dest = path.join(tmp, 'blast');
+  const env = materialize('blast', dest, shimBin, false);
+  const before = lien(
+    ['api-delta', '--file', 'src/pricing/discount.ts', '--format', 'json'],
+    dest,
+    env,
+  );
+  assert(JSON.parse(before.stdout).changes.length === 0, 'no api-delta before the edit');
+  // apply the same signature change the task induces
+  const edited =
+    'export function applyDiscount(price: number, rate: number, floor?: number): number {\n' +
+    '  const discounted = price - price * rate;\n' +
+    '  return floor !== undefined ? Math.max(discounted, floor) : discounted;\n}\n';
+  fs.writeFileSync(path.join(dest, 'src/pricing/discount.ts'), edited);
+  const stdin = JSON.stringify({
+    tool_name: 'Edit',
+    tool_input: { file_path: 'src/pricing/discount.ts' },
+    cwd: dest,
+    session_id: 'checkblast01',
+  });
+  const hook = spawnSync('bash', [path.join(PLUGIN_HOOKS, 'api-delta-write.sh')], {
+    input: stdin,
+    env,
+    encoding: 'utf8',
+  });
+  const ctx = JSON.parse(hook.stdout).hookSpecificOutput.additionalContext;
+  console.log(`  blast nudge: ${ctx}`);
+  assert(
+    ctx.includes('applyDiscount') && ctx.includes('dependents'),
+    'blast hook rendered the enriched warning',
+  );
+  assert(ctx.includes('get_dependents'), 'blast warning asks to check dependents');
+}
+
+function checkVerify(tmp, shimBin) {
+  console.log('[check] verify fixture');
+  const dest = path.join(tmp, 'verify');
+  const env = materialize('verify', dest, shimBin, false);
+  const sid = 'checkverify01';
+  const note = lien(
+    ['verify-tests', 'note-edit', '--session', sid, '--file', 'src/order-status.ts'],
+    dest,
+    env,
+  );
+  console.log(`  note-edit: ${note.stdout.trim()}`);
+  assert(
+    note.stdout.includes('regression-suite.test.ts'),
+    'associates the non-lexically-named test by import',
+  );
+  const recap = lien(['verify-tests', 'report', '--session', sid], dest, env);
+  assert(
+    recap.stdout.includes('src/order-status.ts'),
+    'recap/report raises the unrun associated test',
+  );
+  lien(
+    [
+      'verify-tests',
+      'note-run',
+      '--session',
+      sid,
+      '--command',
+      'npx vitest run test/regression-suite.test.ts',
+    ],
+    dest,
+    env,
+  );
+  const after = lien(['verify-tests', 'report', '--session', sid], dest, env);
+  assert(after.stdout.trim() === '', 'report goes silent after a covering test run');
+}
+
+function cmdCheck() {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'nudge-ab-check-'));
+  const shimBin = makeLienShim(tmp);
+  try {
+    checkBlast(tmp, shimBin);
+    checkVerify(tmp, shimBin);
+    console.log('\nINSTRUMENT CHECK PASSED');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+// ---- run/context config (the b' mechanism) -------------------------------
+// Clean context = the DEFAULT config dir (so macOS Keychain auth works — an
+// isolated CLAUDE_CONFIG_DIR reports "not logged in" because the OAuth token is
+// in the Keychain, not .claude.json) with the ambient `lien@lien` plugin
+// disabled FOR THE SPAWNED PROCESS ONLY via a per-invocation --settings
+// `enabledPlugins` override (leaves saved settings untouched — verified by
+// probe-b1), plus `--strict-mcp-config`, plus this checkout's explicit hooks.
+// Disabling the plugin is what stops the ambient annotate-read hook (no
+// off-switch) from injecting "Lien impact for … <named dependents>" into both
+// arms. cfg.dir === null tells runClaude not to override CLAUDE_CONFIG_DIR.
+const PLUGIN_DISABLE = { 'lien@lien': false };
+// Lien plugin MCP tool/rule vocabulary that the blast NUDGE never contains — so
+// its appearance in the probe's instruction self-report means plugin
+// instructions leaked (they must not, under --strict-mcp-config + plugin disable).
+const PLUGIN_INSTRUCTION_TERMS = [
+  'get_files_context',
+  'search_code',
+  'list_functions',
+  'find_similar',
+  'get_complexity',
+  'testassociations',
+  'test association',
+  'complexityheadroom',
+];
+function runConfig(tmp) {
+  const emptyMcp = path.join(tmp, 'empty-mcp.json');
+  fs.writeFileSync(emptyMcp, JSON.stringify({ mcpServers: {} }));
+  return { dir: null, emptyMcp };
+}
+
+function claudeArgs(prompt, sessionId, settingsFile, emptyMcp) {
+  return [
+    '-p',
+    prompt,
+    '--model',
+    MODEL,
+    '--session-id',
+    sessionId,
+    '--settings',
+    settingsFile,
+    '--strict-mcp-config',
+    '--mcp-config',
+    emptyMcp,
+    '--permission-mode',
+    PERMISSION_MODE,
+    '--output-format',
+    'stream-json',
+    '--verbose',
+    // variadic, kept LAST so it can't consume a following flag
+    '--allowedTools',
+    ...ALLOWED_TOOLS,
+  ];
+}
+
+function runClaude(prompt, sessionId, cwd, settingsFile, cfg, extraEnv, shimBin) {
+  const env = {
+    ...process.env,
+    ...BASE_ENV,
+    ...extraEnv,
+    PATH: `${shimBin}:${process.env.PATH}`,
+  };
+  // cfg.dir === null ⇒ use the DEFAULT config dir (auth works; ambient plugin
+  // loads — the b'' contamination probe). Otherwise isolate.
+  if (cfg.dir) env.CLAUDE_CONFIG_DIR = cfg.dir;
+  const res = spawnSync('claude', claudeArgs(prompt, sessionId, settingsFile, cfg.emptyMcp), {
+    cwd,
+    env,
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+    timeout: TRIAL_TIMEOUT_MS,
+    killSignal: 'SIGKILL',
+  });
+  const timedOut = Boolean(res.error && res.error.code === 'ETIMEDOUT');
+  // Surface every OTHER spawn failure (ENOENT, buffer overflow, signal) and any
+  // non-zero exit so the trial is marked invalid rather than silently scored as
+  // a miss on empty output. status is null when killed by signal/timeout.
+  const spawnError =
+    res.error && res.error.code !== 'ETIMEDOUT' ? String(res.error.code || res.error.message) : '';
+  const nonZeroExit = !timedOut && res.status != null && res.status !== 0 ? res.status : null;
+  const failed = Boolean(spawnError) || nonZeroExit != null;
+  return { stdout: res.stdout || '', timedOut, failed, spawnError, exitStatus: res.status };
+}
+
+// Redaction: the seed's personal fields (email/org/account UUIDs) must never
+// appear in any on-disk artifact (probe output, transcripts, summaries). Terms
+// are read from the real ~/.claude.json at runtime — never hardcoded — and
+// stripped from everything written under OUT_ROOT.
+let _redactTerms = null;
+function redactionTerms() {
+  if (_redactTerms) return _redactTerms;
+  let oa = {};
+  try {
+    oa =
+      JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude.json'), 'utf8')).oauthAccount ||
+      {};
+  } catch {
+    oa = {}; // no ~/.claude.json (or unreadable) → nothing to redact
+  }
+  _redactTerms = [
+    oa.emailAddress,
+    oa.accountUuid,
+    oa.organizationUuid,
+    oa.organizationName,
+    oa.displayName,
+  ].filter(v => typeof v === 'string' && v.length > 2);
+  return _redactTerms;
+}
+function redactAccount(text) {
+  return redactionTerms().reduce((acc, term) => acc.split(term).join('[REDACTED]'), text);
+}
+function writeArtifact(file, text) {
+  fs.writeFileSync(file, redactAccount(text));
+}
+
+// ---- b'' probe: DEFAULT config dir + --strict-mcp-config ------------------
+// Tests whether using the default (authenticating) config dir with MCP stripped
+// leaves a clean context. Triggers the ambient plugin's Read/Edit hooks against
+// an indexed fixture and checks for BOTH instruction-level and hook-level leaks;
+// also confirms hooks fire in headless at all (via the blast nudge). The one
+// uncontrolled ambient hook is annotate-read (no off switch), whose output
+// literally names the dependents — signature "Lien impact for".
+function analyzeDefaultProbe(transcript) {
+  const parsed = parseTranscript(transcript);
+  return {
+    loggedOut: looksLoggedOut(transcript),
+    hooksFireInHeadless: /exported signature changed/.test(transcript),
+    annotateContamination: /Lien impact for/.test(transcript),
+    instructionContamination: contaminationScan(parsed.finalText),
+  };
+}
+
+function cmdProbeDefault() {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'nudge-ab-probeb2-'));
+  try {
+    const shimBin = makeLienShim(tmp);
+    const emptyMcp = path.join(tmp, 'empty-mcp.json');
+    fs.writeFileSync(emptyMcp, JSON.stringify({ mcpServers: {} }));
+    const cfg = { dir: null, emptyMcp }; // DEFAULT config dir (auth + ambient plugin)
+    const dest = path.join(tmp, 'blast');
+    materialize('blast', dest, shimBin, false);
+    const settingsFile = path.join(dest, '.ab-settings.json');
+    fs.writeFileSync(settingsFile, JSON.stringify(EXPERIMENTS.blast.settings()));
+    const prompt =
+      'First, list verbatim every project instruction, repository rule, or tool-usage policy currently in your context; if there are none, reply NONE. ' +
+      'Then read the file src/pricing/discount.ts. ' +
+      'Then modify applyDiscount to take an optional third parameter floor (number), clamping the result to at least floor when provided. Then stop.';
+    const { stdout: transcript } = runClaude(
+      prompt,
+      randomUUID(),
+      dest,
+      settingsFile,
+      cfg,
+      EXPERIMENTS.blast.baseEnv,
+      shimBin,
+    );
+    fs.mkdirSync(OUT_ROOT, { recursive: true });
+    writeArtifact(path.join(OUT_ROOT, 'probe-default.jsonl'), transcript);
+    const a = analyzeDefaultProbe(transcript);
+    console.log(redactAccount(JSON.stringify(a, null, 2)));
+    if (a.loggedOut) throw new Error("PROBE(b'') FAILED: not logged in from DEFAULT config dir");
+    if (!a.hooksFireInHeadless)
+      throw new Error(
+        "PROBE(b'') FAILED: no hook fired in headless (no blast nudge) — fundamental, STOP",
+      );
+    if (!a.annotateContamination && a.instructionContamination.length === 0) {
+      fs.writeFileSync(path.join(OUT_ROOT, '.probe-passed'), new Date().toISOString());
+      fs.writeFileSync(path.join(OUT_ROOT, '.auth-mode'), 'default+strict-mcp');
+      console.log(
+        "PROBE(b'') PASSED — default config + --strict-mcp-config is clean AND hooks fire.",
+      );
+    } else {
+      // Throw (like the sibling checks) so a contaminated b'' probe exits non-zero,
+      // matching how §3c records b'' as failed.
+      throw new Error(
+        "PROBE(b'') CONTAMINATED — ambient plugin leaks in headless. Fall back to b'.",
+      );
+    }
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+// ---- b' probe: default config dir + per-invocation plugin disable ---------
+// Uses the DEFAULT config dir (auth works) but disables the ambient lien plugin
+// FOR THE SPAWNED PROCESS ONLY via a --settings enabledPlugins override, plus
+// --strict-mcp-config, plus my explicit hooks. Verifies (a) the plugin is off
+// (annotate-read did NOT fire — nudge-events has no "annotate"), (b) my explicit
+// hooks still fire (nudge-events has "blast"), (c) the saved ~/.claude settings
+// on disk are byte-identical before/after. Detection is via the nudge-events
+// ledger, not transcript grep.
+const readSaved = p => (fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : null);
+
+function cmdProbeB1() {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'nudge-ab-probeb1-'));
+  const savedSettings = path.join(os.homedir(), '.claude', 'settings.json');
+  const before = readSaved(savedSettings);
+  try {
+    const shimBin = makeLienShim(tmp);
+    const emptyMcp = path.join(tmp, 'empty-mcp.json');
+    fs.writeFileSync(emptyMcp, JSON.stringify({ mcpServers: {} }));
+    const cfg = { dir: null, emptyMcp }; // DEFAULT config dir
+    const dest = path.join(tmp, 'blast');
+    const env = materialize('blast', dest, shimBin, false);
+    const settingsFile = path.join(dest, '.ab-settings.json');
+    const s = EXPERIMENTS.blast.settings();
+    s.enabledPlugins = { 'lien@lien': false }; // disable ambient plugin, this process only
+    fs.writeFileSync(settingsFile, JSON.stringify(s));
+    const sid = randomUUID();
+    const prompt =
+      'First, list verbatim every project instruction, repository rule, or tool-usage policy currently in your context; if there are none, reply NONE. ' +
+      'Then read the file src/pricing/discount.ts. ' +
+      'Then modify applyDiscount to take an optional third parameter floor (number), clamping the result to at least floor when provided. Then stop.';
+    const { stdout: transcript } = runClaude(
+      prompt,
+      sid,
+      dest,
+      settingsFile,
+      cfg,
+      EXPERIMENTS.blast.baseEnv,
+      shimBin,
+    );
+    fs.mkdirSync(OUT_ROOT, { recursive: true });
+    writeArtifact(path.join(OUT_ROOT, 'probe-b1.jsonl'), transcript);
+    const parsed = parseTranscript(transcript);
+    const after = readSaved(savedSettings);
+    const result = {
+      loggedOut: looksLoggedOut(transcript),
+      myHooksFire: nudgeShown(dest, 'blast', sid, env),
+      annotateFired: nudgeShown(dest, 'annotate', sid, env),
+      sawAnnotateOutput: /lien impact|files import this/i.test(parsed.finalText),
+      savedSettingsUntouched: before === after,
+      // Instruction-leak = the Lien PLUGIN's own MCP tool/rule vocabulary that the
+      // blast NUDGE does NOT contain. (The nudge says "get_dependents"/"lien", so
+      // those are excluded — the model referencing the nudge is not contamination;
+      // it even reported get_dependents "doesn't exist in my toolset", confirming
+      // --strict-mcp-config worked.)
+      mcpInstructionLeak: PLUGIN_INSTRUCTION_TERMS.filter(t =>
+        parsed.finalText.toLowerCase().includes(t),
+      ),
+    };
+    console.log(redactAccount(JSON.stringify(result, null, 2)));
+    verdictB1(result);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+    // Belt-and-braces: restore the saved settings if anything touched them.
+    if (before !== null && readSaved(savedSettings) !== before)
+      fs.writeFileSync(savedSettings, before);
+  }
+}
+
+function verdictB1(r) {
+  if (r.loggedOut) throw new Error("PROBE(b') FAILED: not logged in from DEFAULT config dir");
+  if (!r.savedSettingsUntouched)
+    throw new Error("PROBE(b') FAILED: saved ~/.claude/settings.json CHANGED — abort");
+  if (!r.myHooksFire) throw new Error("PROBE(b') FAILED: my explicit hooks did NOT fire — STOP");
+  const clean = !r.annotateFired && !r.sawAnnotateOutput && r.mcpInstructionLeak.length === 0;
+  if (!clean) {
+    // Throw (like the sibling checks) so a contaminated probe exits non-zero and
+    // automated callers can't mistake it for success; .probe-passed stays unwritten.
+    throw new Error(
+      "PROBE(b') CONTAMINATED — plugin-disable override not honored. Both b'' and b' failed; STOP and report.",
+    );
+  }
+  fs.writeFileSync(path.join(OUT_ROOT, '.probe-passed'), new Date().toISOString());
+  fs.writeFileSync(path.join(OUT_ROOT, '.auth-mode'), 'default+plugindisable+strict-mcp');
+  console.log(
+    "PROBE(b') PASSED — auth works, ambient plugin off, my hooks fire, saved settings untouched.",
+  );
+}
+
+function assertNoAncestorClaudeMd(dir) {
+  let d = dir;
+  for (;;) {
+    if (fs.existsSync(path.join(d, 'CLAUDE.md'))) throw new Error(`CLAUDE.md present at ${d}`);
+    const parent = path.dirname(d);
+    if (parent === d) return;
+    d = parent;
+  }
+}
+
+// ---- run (gated arms) ----------------------------------------------------
+// `ran` (empty report ⇒ test observed run) is only meaningful when the CLI
+// itself succeeded. A failed `report` (non-zero exit, stderr, or spawn error)
+// also yields empty stdout, which would otherwise read as a false "ran"; so we
+// return cliOk and the caller marks a failed-CLI trial INVALID, never a hit.
+function verifyRanOracle(dest, sid, env) {
+  const report = lien(['verify-tests', 'report', '--session', sid], dest, env);
+  const cliOk = report.status === 0 && !report.error && !(report.stderr || '').trim();
+  return { cliOk, ran: report.stdout.trim() === '' };
+}
+
+// Reliable, deterministic oracle for "did hook <nudgeType> fire this session":
+// the nudge-events ledger, NOT transcript grep (a hook's additionalContext does
+// not appear grep-ably in the stream-json transcript — only the model's
+// paraphrase of it does, which is unreliable). env is threaded so `lien path
+// --store` resolves the SAME store the trial's hooks wrote to.
+function nudgeShown(dest, nudgeType, sid, env) {
+  const store = lien(['path', '--store'], dest, env).stdout.trim();
+  if (!store) return false;
+  const events = path.join(store, 'nudge-events.jsonl');
+  if (!fs.existsSync(events)) return false;
+  const body = fs.readFileSync(events, 'utf8');
+  return body.includes(`"nudge":"${nudgeType}"`) && body.includes(sid);
+}
+
+// SYMMETRIC blast validity oracle for BOTH arms: did the agent's edit actually
+// change the exported signature (the task)? `lien api-delta` runs regardless of
+// LIEN_BLAST_HOOK, so control and signal are gated identically — unlike the old
+// `fired = arm==='off' ? true : blastFired(...)`, under which a control no-op
+// scored as a MISS while a signal no-op scored as INVALID.
+function blastEditCompleted(dest, env) {
+  const r = lien(['api-delta', '--file', EXPERIMENTS.blast.target, '--format', 'json'], dest, env);
+  let d;
+  try {
+    d = JSON.parse(r.stdout);
+  } catch {
+    return false;
+  }
+  return (d.changes || []).some(c => c.kind === 'signature-changed' || c.kind === 'removed');
+}
+
+function runTrial(expName, arm, idx, tmp, shimBin, cfg) {
+  const exp = EXPERIMENTS[expName];
+  const dest = path.join(tmp, `${expName}-${arm}-${idx}`);
+  const env = materialize(exp.fixture, dest, shimBin, true);
+  assertNoAncestorClaudeMd(dest); // structural: no repo CLAUDE.md can load in the sandbox
+  const settingsFile = path.join(dest, '.ab-settings.json');
+  // b' mechanism: disable the ambient plugin for this process; wire our hooks.
+  fs.writeFileSync(
+    settingsFile,
+    JSON.stringify({ ...exp.settings(), enabledPlugins: PLUGIN_DISABLE }),
+  );
+  const sid = randomUUID();
+  const task = fs.readFileSync(path.join(KIT, exp.task), 'utf8');
+  const armEnv = { ...exp.baseEnv, ...exp.armEnv[arm] };
+  const {
+    stdout: transcript,
+    timedOut,
+    failed,
+    spawnError,
+    exitStatus,
+  } = runClaude(task, sid, dest, settingsFile, cfg, armEnv, shimBin);
+  const parsed = parseTranscript(transcript);
+  const result = scoreTrial({
+    expName,
+    arm,
+    dest,
+    sid,
+    env,
+    parsed,
+    transcript,
+    timedOut,
+    failed,
+    spawnError,
+    exitStatus,
+  });
+  saveTrial(expName, arm, idx, transcript, result);
+  fs.rmSync(dest, { recursive: true, force: true });
+  return result;
+}
+
+function scoreTrial({
+  expName,
+  arm,
+  dest,
+  sid,
+  env,
+  parsed,
+  transcript,
+  timedOut,
+  failed,
+  spawnError,
+  exitStatus,
+}) {
+  const contamination = arm === 'off' ? contaminationScan(transcript) : [];
+  const denials = collectDenials(transcript);
+  const loggedOut = looksLoggedOut(transcript);
+  const usable = !timedOut && !loggedOut && !failed;
+  const base = {
+    timedOut,
+    loggedOut,
+    failed,
+    spawnError: spawnError || '',
+    exitStatus,
+    contamination,
+    denials,
+  };
+  if (expName === 'blast') {
+    const m = blastMetric(parsed.toolUses, parsed.finalText);
+    // SYMMETRIC: both arms require the task edit (signature change) to be valid.
+    const editCompleted = blastEditCompleted(dest, env);
+    // §6a: an ON trial is valid only if the blast warning actually FIRED (a
+    // `blast` note-shown event). OFF has no warning, so the check is ON-only.
+    const nudgeFired = arm === 'on' ? nudgeShown(dest, 'blast', sid, env) : true;
+    return {
+      hit: m.hit,
+      reasons: m.reasons,
+      generic: blastGenericSentiment(parsed.finalText, m.hit),
+      valid: usable && editCompleted && nudgeFired,
+      editCompleted,
+      nudgeFired,
+      ...base,
+    };
+  }
+  // Verify: an empty `verify-tests report` only means "test ran" if the target
+  // was actually edited AND the report CLI succeeded — otherwise a no-op,
+  // logged-out, or failed-CLI trial reads as a false positive.
+  const edited = editedTarget(parsed.toolUses, EXPERIMENTS.verify.target);
+  const oracle = verifyRanOracle(dest, sid, env);
+  return {
+    hit: oracle.cliOk && oracle.ran,
+    reasons: verifyTranscriptRanTest(parsed.toolUses).reasons,
+    valid: usable && edited && oracle.cliOk,
+    edited,
+    cliOk: oracle.cliOk,
+    ...base,
+  };
+}
+
+function saveTrial(expName, arm, idx, transcript, result) {
+  // Route uncounted smoke trials to a separate _smoke/ tree so they never mix
+  // with the counted 0..N trial directories the report/audit read from.
+  const isSmoke = String(idx).startsWith('smoke');
+  const dir = isSmoke
+    ? path.join(OUT_ROOT, '_smoke', `${expName}-${arm}`)
+    : path.join(OUT_ROOT, expName, arm);
+  fs.mkdirSync(dir, { recursive: true });
+  writeArtifact(path.join(dir, `${idx}.jsonl`), transcript);
+  writeArtifact(path.join(dir, `${idx}.json`), JSON.stringify(result, null, 2));
+}
+
+const B1_AUTH_MODE = 'default+plugindisable+strict-mcp';
+function cmdRun(expName) {
+  const modeFile = path.join(OUT_ROOT, '.auth-mode');
+  const passed = fs.existsSync(path.join(OUT_ROOT, '.probe-passed'));
+  const mode = passed && fs.existsSync(modeFile) ? fs.readFileSync(modeFile, 'utf8').trim() : '';
+  if (mode !== B1_AUTH_MODE) {
+    throw new Error(
+      `Refusing to run: probe-b1 has not passed clean. Run \`node run.mjs probe-b1\` first (need auth-mode ${B1_AUTH_MODE}).`,
+    );
+  }
+  if (!EXPERIMENTS[expName]) throw new Error(`unknown experiment: ${expName}`);
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), `nudge-ab-${expName}-`));
+  const shimBin = makeLienShim(tmp);
+  const cfg = runConfig(tmp);
+  const labels = seededOrder(
+    Array.from({ length: N_PER_ARM }, (_, i) => [`on:${i}`, `off:${i}`]).flat(),
+    INTERLEAVE_SEED,
+  );
+  const results = { on: [], off: [] };
+  for (const label of labels) {
+    const [arm, i] = label.split(':');
+    console.log(`[run] ${expName} ${arm} #${i}`);
+    results[arm].push(runTrial(expName, arm, i, tmp, shimBin, cfg));
+  }
+  redrawInvalids(expName, results, tmp, shimBin, cfg);
+  fs.rmSync(tmp, { recursive: true, force: true });
+  report(expName, results);
+}
+
+// §7: re-draw invalid trials (with fresh session ids) until each arm has
+// N_PER_ARM VALID trials, aborting if an arm exceeds the 20% invalid cap.
+function redrawInvalids(expName, results, tmp, shimBin, cfg) {
+  const cap = Math.ceil(0.2 * N_PER_ARM);
+  for (const arm of ['on', 'off']) {
+    let invalid = results[arm].filter(r => !r.valid).length;
+    let extra = 0;
+    while (results[arm].filter(r => r.valid).length < N_PER_ARM) {
+      if (invalid > cap) {
+        throw new Error(
+          `ABORT: ${expName} ${arm} exceeded invalid cap (${invalid} > ${cap}) — instrument failure, no result claimed`,
+        );
+      }
+      const id = `${arm}-redraw-${extra++}`;
+      console.log(`[redraw] ${expName} ${id}`);
+      const r = runTrial(expName, arm, id, tmp, shimBin, cfg);
+      results[arm].push(r);
+      if (!r.valid) invalid++;
+    }
+    if (invalid > cap) {
+      throw new Error(`ABORT: ${expName} ${arm} exceeded invalid cap (${invalid} > ${cap})`);
+    }
+  }
+}
+
+// ---- reporting -----------------------------------------------------------
+function tally(rows) {
+  const valid = rows.filter(r => r.valid);
+  return {
+    n: valid.length,
+    hits: valid.filter(r => r.hit).length,
+    invalid: rows.length - valid.length,
+  };
+}
+
+function denialSummary(rows) {
+  const all = rows.flatMap(r => r.denials || []);
+  const byTool = {};
+  for (const d of all) byTool[d.tool] = (byTool[d.tool] || 0) + 1;
+  return { total: all.length, byTool };
+}
+
+function invalidReasons(rows) {
+  return {
+    timedOut: rows.filter(r => r.timedOut).length,
+    loggedOut: rows.filter(r => r.loggedOut).length,
+    failed: rows.filter(r => r.failed).length,
+  };
+}
+
+function report(expName, results) {
+  const on = tally(results.on);
+  const off = tally(results.off);
+  const leaks = [...results.on, ...results.off].filter(r => r.contamination.length > 0).length;
+  const p = fisherOneSided(on.hits, on.n, off.hits, off.n);
+  const separated = p < 0.05 && on.hits / Math.max(on.n, 1) > off.hits / Math.max(off.n, 1);
+  const summary = {
+    experiment: expName,
+    permissionMode: PERMISSION_MODE,
+    on: `${on.hits}/${on.n}`,
+    off: `${off.hits}/${off.n}`,
+    invalid: { on: on.invalid, off: off.invalid },
+    invalidReasons: { on: invalidReasons(results.on), off: invalidReasons(results.off) },
+    contamination: { offTrialsScanned: results.off.length, flagged: leaks },
+    denials: { on: denialSummary(results.on), off: denialSummary(results.off) },
+    // toExponential(3) preserves small p-values (toFixed(4) turned 5.4e-6 into 0).
+    fisherOneSidedP: Number(p.toExponential(3)),
+    primarySeparated: separated,
+    launchClaimPermitted: separated,
+  };
+  writeArtifact(path.join(OUT_ROOT, `${expName}-summary.json`), JSON.stringify(summary, null, 2));
+  console.log(redactAccount(JSON.stringify(summary, null, 2)));
+}
+
+// ---- smoke (scoped-mode viability, uncounted) ----------------------------
+// Runs one real tool-using ON trial per experiment under the exact scoped
+// permission config, so we can confirm trials COMPLETE (edits auto-accepted,
+// search + test-run allowed, no fatal denial of a measured behavior) before
+// spending on the counted arms. Not part of the frozen sample.
+function cmdSmoke() {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'nudge-ab-smoke-'));
+  const shimBin = makeLienShim(tmp);
+  const cfg = runConfig(tmp);
+  for (const expName of ['blast', 'verify']) {
+    const r = runTrial(expName, 'on', 'smoke', tmp, shimBin, cfg);
+    console.log(
+      redactAccount(
+        `[smoke] ${expName} on: hit=${r.hit} valid=${r.valid} timedOut=${r.timedOut} ` +
+          `loggedOut=${r.loggedOut} denials=${r.denials.length} reasons=${JSON.stringify(r.reasons)}`,
+      ),
+    );
+    if (r.denials.length)
+      console.log(redactAccount(`         denied: ${JSON.stringify(r.denials)}`));
+  }
+  fs.rmSync(tmp, { recursive: true, force: true });
+  console.log('SMOKE done — inspect validity/denials above before the counted run.');
+}
+
+// ---- entry ---------------------------------------------------------------
+function main() {
+  const [, , cmd, ...rest] = process.argv;
+  if (cmd === 'check') return cmdCheck();
+  if (cmd === 'probe-default') return cmdProbeDefault(); // b'' diagnostic (contaminated)
+  if (cmd === 'probe' || cmd === 'probe-b1') return cmdProbeB1(); // the run precondition
+  if (cmd === 'smoke') return cmdSmoke();
+  if (cmd === 'run') {
+    const exp = rest[0];
+    if (!exp) throw new Error('usage: run.mjs run <blast|verify>');
+    return cmdRun(exp);
+  }
+  console.log('usage: run.mjs <check|probe|probe-default|smoke|run <blast|verify>>');
+  process.exit(cmd ? 1 : 0);
+}
+main();

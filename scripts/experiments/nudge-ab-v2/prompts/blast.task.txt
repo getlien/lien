@@ -1,0 +1,1 @@
+In src/pricing/discount.ts, add an optional minimum-price floor to applyDiscount so that applying a discount can never reduce a price below the floor. When a floor is provided, clamp the result so it is at least the floor; when it is omitted, applyDiscount must behave exactly as it does today.

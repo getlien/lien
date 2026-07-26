@@ -382,3 +382,68 @@ single-turn setup here cannot reproduce.
   `.wip/ab-neutral/probes/probe-clean.txt` (gitignored, shared with A/B #1b)
 - Raw per-trial outputs:
   `.wip/ab-neutral/trials/testverify/{control,signal}-{1..8}.md` (gitignored)
+
+---
+
+## 2026-07-26: A/B v2 (task-decoupled) — the Stop advisory **separates decisively**
+
+Both prior sections returned 8/8-vs-8/8 nulls, read as "run the tests you just touched
+is close to a current model's default." But those scenarios **named the tests in the
+prompt** — task-forcing. The v2 protocol
+([nudge-ab-v2-protocol.md](nudge-ab-v2-protocol.md), frozen pre-registration) removes it:
+the associated test is linked to its source **only by an `import`**
+(`test/regression-suite.test.ts` imports `src/order-status.ts`), never by filename, so
+"which test covers this?" has **no lexical answer**; the task is a tiny feature edit
+("include the customer's name in the formatted status") that doesn't read as "test me";
+and there is no `test` script, so running the suite is a deliberate, discovery-requiring
+act. The edit-time reminder is held off in both arms (its ledger recording provided by a
+silent scaffold), so this isolates the **Stop advisory** (`recap-stop.sh` / `LIEN_RECAP`)
+alone. Primary metric: did the agent run that specific unnamed test, via the shipped
+`verify-tests` ledger oracle.
+
+**Result: the Stop advisory separates — the cleanest result in the series.**
+
+| Condition | Ran the (non-lexically-named) associated test | Rate |
+|---|---|---|
+| Signal (`LIEN_RECAP` on) | 10 / 10 | **100%** |
+| Control (`LIEN_RECAP` off) | 0 / 10 | **0%** |
+
+One-sided Fisher exact **p ≈ 5.4 × 10⁻⁶** (= 1 / C(20,10)) — far past the pre-registered
+threshold, so the launch rule **permits a lift claim**. Every signal trial, prompted by
+the Stop advisory naming the exact test file, ran
+`npx vitest run test/regression-suite.test.ts`; **not one** control trial found or ran it.
+This directly **overturns the prior "agents test by default" reading**: once the test is
+made non-obvious (not named after its source, no `test` script), a naive agent does *not*
+run it on its own — the advisory is what gets it run. The earlier nulls measured "will an
+agent run a test whose name it was handed," which the advisory can't move because the
+answer is already yes; this measures "will it run a test it has to go find," where the
+advisory is the whole difference.
+
+**Environment (mechanism b', see protocol §3).** 20 headless `claude -p --model sonnet`
+trials (10/arm, seeded interleave), fixture sandboxes with no `CLAUDE.md`; default config
+dir with the ambient `lien@lien` plugin disabled per-invocation (saved settings
+untouched), `--strict-mcp-config`, scoped `acceptEdits` + allowlist; blast + edit-time
+reminder held off in both arms, `vitest` provisioned so the test command runs locally. 0
+invalid, 0 logged-out, 0 timed-out, **0 tool denials** (symmetric). Contamination: 0/10
+OFF trials in this experiment on a word-boundary re-scan (0/20 across both experiments);
+the raw substring scan flagged all 10/10 on `lien` inside the ambient `…client…` skill
+name — symmetric, outside the metric; reported raw-and-corrected.
+
+**Validity audit (post-review).** This experiment already gated validity on the target
+being edited (symmetric across arms), so the OFF-arm asymmetry the review found in the
+blast scorer did not apply here. An offline re-run of the corrected scoring pipeline over
+the archived transcripts reproduces the published counts exactly (10/10 vs 0/10), and the
+precise Fisher p is **5.413 × 10⁻⁶** (the summary JSON's `0` was a `toFixed(4)`
+serialization bug, now fixed to preserve small p-values); the independent transcript
+cross-check agrees with the ledger oracle on all 20 trials. Evidence in the PR
+transparency note.
+
+**Validity caveats.** (1) Lower-bound environment (no CLAUDE.md/plugin/prior turns) — a
+floor for the mechanism, not a production forecast. (2) This isolates the **Stop
+advisory**; the full shipped feature also fires an edit-time reminder, so the deployed
+feature is at least this effective. A separation this large in a floor environment is
+strong evidence the advisory changes behavior.
+
+Artifacts: pre-registration `docs/development/nudge-ab-v2-protocol.md`; runner
+`scripts/experiments/nudge-ab-v2/`; raw transcripts + verdicts + summary under
+`.wip/nudge-ab-v2/verify/` (gitignored).
