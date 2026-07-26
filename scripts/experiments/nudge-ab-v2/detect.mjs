@@ -171,9 +171,16 @@ const CONTAMINATION_TERMS = [
   'test association',
   'testassociation',
 ];
+// Word-boundary matching: the short term `lien` must not match inside `client`
+// / `salient` / `alien` (the ambient skill name "…client…" the default config
+// dir exposes was the sole source of the 2026-07-26 run's raw "leaks"). Applied
+// uniformly; the counted run was re-scored offline with this same rule.
 export function contaminationScan(text) {
   const t = text.toLowerCase();
-  return CONTAMINATION_TERMS.filter(term => t.includes(term));
+  return CONTAMINATION_TERMS.filter(term => {
+    const re = new RegExp('\\b' + term.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&') + '\\b', 'i');
+    return re.test(t);
+  });
 }
 
 // A trial (or probe/warm) call that came back unauthenticated — the first call

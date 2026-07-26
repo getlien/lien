@@ -13,10 +13,15 @@ reported as a null. The runner that executes it is
 `scripts/experiments/nudge-ab-v2/run.mjs`; this document and that runner are the
 whole instrument, and running it later requires **zero further design decisions**.
 
-> **Status: designed and frozen. NOT YET RUN.** The arms cost real OpenRouter/API
-> budget (see [Cost](#cost-estimate)); they run only after the owner approves the
-> spend. The runner refuses to start an arm until the contamination probe has
-> passed in the same invocation.
+> **Status: RUN 2026-07-26 — both nudges separated.** Blast **10/10 vs 3/10**
+> (Fisher one-sided p = 0.0015); test-verification **10/10 vs 0/10** (p ≈ 5.4e-6).
+> 40/40 valid, 0 logged-out, 0 timed-out, 0 tool denials, 0 real contamination
+> (word-boundary corrected). Results are written up in
+> [blast-radius-nudge-ab.md](blast-radius-nudge-ab.md) and
+> [test-verification-nudge-ab.md](test-verification-nudge-ab.md); raw artifacts under
+> `.wip/nudge-ab-v2/`. The context mechanism that actually ran was **b'** (§3): the
+> default config dir with the ambient plugin disabled per-invocation — the isolated-dir
+> and strict-mcp-only alternatives failed (§3c).
 
 ---
 

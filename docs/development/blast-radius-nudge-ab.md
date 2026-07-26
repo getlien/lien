@@ -403,3 +403,63 @@ floor for isolating the mechanism, not a simulation of production use.
   `.wip/ab-neutral/probes/probe-clean.txt` (gitignored)
 - Raw per-trial outputs: `.wip/ab-neutral/trials/blast/{control,signal}-{1..8}.md`
   (gitignored)
+
+---
+
+## 2026-07-26: A/B v2 (task-decoupled) — the discriminating re-run **separates**
+
+Both prior sections returned nulls diagnosed as **task-forcing**: the target's callers
+were visible in-file and the task ("thread `opts` through") *required* touching them, so
+caller-checking *was* the task and the warning had no headroom. The v2 protocol —
+frozen pre-registration in
+[nudge-ab-v2-protocol.md](nudge-ab-v2-protocol.md) — removes that confound. The changed
+symbol's dependents live in **other directories** (`src/checkout/cart.ts`,
+`src/reports/invoice.ts`) with nothing in the edited file hinting at them; the task is a
+plain feature request ("add an optional minimum-price floor to `applyDiscount`") that
+never mentions callers or risk; and the primary metric is raised from *sentiment* to
+**concrete action** — the agent must actually search for / open / name a specific
+out-of-directory dependent. Generic "other callers may need updating" hedging (the prior
+run's 7/8 ceiling) explicitly does **not** count.
+
+**Result: the blast warning separates.**
+
+| Condition | Concrete beyond-file caller action | Rate |
+|---|---|---|
+| Signal (`LIEN_BLAST_HOOK` on) | 10 / 10 | **100%** |
+| Control (`LIEN_BLAST_HOOK` off) | 3 / 10 | **30%** |
+
+One-sided Fisher exact **p = 0.0015** — the pre-registered separation threshold
+(p < 0.05) is met, so this document's standing launch rule now **permits a lift claim**
+for this nudge. Every signal trial grepped for `applyDiscount` and named the specific
+out-of-directory dependents; the 3 control hits are the real, non-zero baseline (some
+agents check callers unprompted), but 7 of 10 do not when the task doesn't demand it and
+the dependents aren't visible in the edited file. This is the first clean separation in
+the series, and it confirms the prior nulls were the task-forcing artifact, not evidence
+the warning is inert.
+
+**Environment (mechanism b', see protocol §3).** 20 headless `claude -p --model sonnet`
+trials (10/arm, seeded interleave), from fixture sandboxes with no `CLAUDE.md`; the
+**default** config dir (Keychain auth) with the ambient `lien@lien` plugin disabled
+per-invocation via a `--settings enabledPlugins` override (saved settings byte-identical
+before/after), `--strict-mcp-config` (so `get_dependents` itself isn't available — the
+signal agents grepped instead, making this rate a **lower bound** vs production where the
+tool exists), scoped `acceptEdits` + explicit allowlist. 0 invalid, 0 logged-out, 0
+timed-out, **0 tool denials** (symmetric). Recap held off in both arms, so the edit-time
+warning is the *only* blast delivery.
+
+**Contamination:** 0/20 OFF trials on a word-boundary re-scan. (The runner's raw scan
+reported 20/20 "leaks" — all the substring `lien` inside the ambient skill name
+`…client…` the default config dir exposes; symmetric across arms, outside the primary
+metric. Reported raw-and-corrected per the honesty rule.) The user's ambient
+`~/.claude/rules/context7.md` and other non-Lien plugins' skill lists are present
+identically in both arms (unrelated to caller-checking).
+
+**Validity caveat (unchanged from #844).** This is a lower-bound environment — no
+CLAUDE.md, no Lien plugin, single-repo sandbox — a floor for isolating the mechanism,
+not a forecast of the effect inside a richly-contextualized production session. A clean
+separation here is strong evidence the nudge moves behavior; it does not by itself
+quantify the production lift.
+
+Artifacts: pre-registration `docs/development/nudge-ab-v2-protocol.md`; runner
+`scripts/experiments/nudge-ab-v2/`; raw per-trial transcripts + verdicts + summary under
+`.wip/nudge-ab-v2/blast/` (gitignored).
