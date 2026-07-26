@@ -2,7 +2,24 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { createGitignoreFilter } from './gitignore.js';
+
+const execFileAsync = promisify(execFile);
+
+/** Initialize a git repo with a fixed identity, for tracked-file rescue tests. */
+async function initGitRepo(dir: string): Promise<void> {
+  await execFileAsync('git', ['init', '-q'], { cwd: dir });
+  await execFileAsync('git', ['config', 'user.email', 'test@example.com'], { cwd: dir });
+  await execFileAsync('git', ['config', 'user.name', 'Test User'], { cwd: dir });
+}
+
+/** Stage and commit everything currently on disk. */
+async function gitCommitAll(dir: string, message = 'initial commit'): Promise<void> {
+  await execFileAsync('git', ['add', '-A'], { cwd: dir });
+  await execFileAsync('git', ['commit', '-q', '-m', message], { cwd: dir });
+}
 
 describe('createGitignoreFilter', () => {
   let testDir: string;
@@ -210,6 +227,94 @@ describe('createGitignoreFilter', () => {
       expect(isIgnored('.wip/report.md')).toBe(true);
       expect(isIgnored('cache.tmp')).toBe(true);
       expect(isIgnored('src/index.ts')).toBe(false);
+    });
+  });
+
+  // Regression tests for #899/#900: the watcher path (createGitignoreFilter)
+  // must apply the same git-tracked-file exemption as the full scan
+  // (scanCodebase), or a file present after `lien index -f` could
+  // mysteriously disappear once the watcher reindexes it incrementally.
+  describe('git-tracked-file rescue (#899, #900)', () => {
+    it('rescues a tracked file at depth inside a directory literally named "build" (#899)', async () => {
+      await fs.mkdir(path.join(testDir, 'internal', 'build'), { recursive: true });
+      await fs.writeFile(
+        path.join(testDir, 'internal', 'build', 'build.go'),
+        'package build\n\nvar Version = "dev"\n',
+      );
+
+      await initGitRepo(testDir);
+      await gitCommitAll(testDir);
+
+      const isIgnored = await createGitignoreFilter(testDir);
+
+      expect(isIgnored('internal/build/build.go')).toBe(false);
+      // Sibling ALWAYS_IGNORE_PATTERNS behavior is unaffected
+      expect(isIgnored('dist/bundle.js')).toBe(true);
+    });
+
+    it('rescues tracked files shadowed by a bare-name .gitignore pattern (#900)', async () => {
+      await fs.mkdir(path.join(testDir, 'cmd', 'gh'), { recursive: true });
+      await fs.writeFile(path.join(testDir, 'cmd', 'gh', 'main.go'), 'package main\n');
+      await fs.mkdir(path.join(testDir, 'internal', 'gh'), { recursive: true });
+      await fs.writeFile(path.join(testDir, 'internal', 'gh', 'gh.go'), 'package gh\n');
+
+      await initGitRepo(testDir);
+      // Commit BEFORE the .gitignore line exists -- otherwise `git add`
+      // would itself refuse to stage these paths, which wouldn't exercise
+      // the bug at all. The real-world shape (#900) is a pattern added
+      // *after* the files it now shadows were already tracked.
+      await gitCommitAll(testDir);
+      await fs.writeFile(path.join(testDir, '.gitignore'), 'gh\n');
+      await gitCommitAll(testDir, 'add stale gh ignore pattern');
+
+      const isIgnored = await createGitignoreFilter(testDir);
+
+      expect(isIgnored('cmd/gh/main.go')).toBe(false);
+      expect(isIgnored('internal/gh/gh.go')).toBe(false);
+    });
+
+    it('does not rescue untracked files under a hardcoded-ignored path (tracked-vs-untracked distinction)', async () => {
+      await fs.mkdir(path.join(testDir, 'src'), { recursive: true });
+      await fs.writeFile(path.join(testDir, 'src', 'real.ts'), 'export const real = true;\n');
+
+      await initGitRepo(testDir);
+      await gitCommitAll(testDir);
+
+      // Never added to git -- genuinely untracked generated output.
+      const isIgnored = await createGitignoreFilter(testDir);
+
+      expect(isIgnored('build/output.js')).toBe(true);
+      expect(isIgnored('src/real.ts')).toBe(false);
+    });
+
+    it('does not rescue untracked files shadowed by a bare-name .gitignore pattern', async () => {
+      await fs.writeFile(path.join(testDir, '.gitignore'), 'gh\n');
+      await fs.mkdir(path.join(testDir, 'src'), { recursive: true });
+      await fs.writeFile(path.join(testDir, 'src', 'real.ts'), 'export const real = true;\n');
+
+      await initGitRepo(testDir);
+      await gitCommitAll(testDir);
+
+      // Never added to git -- a genuine local artifact the pattern targets.
+      const isIgnored = await createGitignoreFilter(testDir);
+
+      expect(isIgnored('cmd/gh/main.go')).toBe(true);
+      expect(isIgnored('src/real.ts')).toBe(false);
+    });
+
+    it('never rescues node_modules even if git tracks it (hard non-negotiable carve-out)', async () => {
+      await fs.mkdir(path.join(testDir, 'node_modules', 'leftpad'), { recursive: true });
+      await fs.writeFile(
+        path.join(testDir, 'node_modules', 'leftpad', 'index.js'),
+        'module.exports = () => {};\n',
+      );
+
+      await initGitRepo(testDir);
+      await gitCommitAll(testDir);
+
+      const isIgnored = await createGitignoreFilter(testDir);
+
+      expect(isIgnored('node_modules/leftpad/index.js')).toBe(true);
     });
   });
 });
