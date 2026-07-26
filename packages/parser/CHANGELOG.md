@@ -1,5 +1,322 @@
 # @liendev/parser
 
+## 0.71.0
+
+### Minor Changes
+
+- 99cf7e5: Closes part of #878: after #877's PSR-4 manifest mapping, 58/67 guzzle
+  `src/*.php` files resolved real test coverage via declaration-based (`use
+...;`) import extraction. The remaining 9 files are referenced by their
+  tests only through a fully-qualified class name or a factory — `new
+\GuzzleHttp\RetryMiddleware(...)`, `\GuzzleHttp\Exception\ClientException::class`
+  — with no corresponding `use` import anywhere in the file, since PHP
+  resolves a leading-`\` name absolutely regardless of what's imported.
+  Declaration-based extraction (`namespace_use_declaration` nodes only) is
+  structurally blind to this.
+
+  `PHPImportExtractor` gains a new optional `extractReferencedFQCNs` method
+  (added to the `LanguageImportExtractor` interface as an optional member —
+  every other language simply omits it, zero behavior change) that
+  recursively scans a whole PHP file for three unambiguous expression shapes
+  whose class-name part is a fully-qualified (leading-`\`) `qualified_name`
+  node: `new \Foo\Bar\Baz(...)`, `\Foo\Bar\Baz::class` (or any other static
+  constant access), and `\Foo\Bar\Baz::method()`. A "qualified but not fully
+  qualified" name (`Foo\Bar`, no leading `\`) is deliberately excluded — PHP
+  resolves it relative to the current namespace or a `use`-imported alias,
+  which is genuinely ambiguous without cross-referencing the file's own
+  `use` imports, and is exactly the false-positive shape #868/#883 guard
+  against. A fully-qualified single-segment name (`\DateTime`, `\Exception`)
+  is also excluded: it can only ever name a PHP built-in or global-namespace
+  class, never a Composer-autoloaded project file. `ast/symbols.ts`'s
+  `extractImportPaths` merges these reference specifiers in through the
+  exact same resolution pipeline (including PSR-4) as declaration-based
+  imports, deduplicated, so `path-matching.ts`'s matcher needs no changes at
+  all.
+
+  Honest remainder, per #869/#881's precedent: the dominant shape among
+  guzzle's 9 remaining files — `Middleware::retry()` internally `new`-ing
+  `RetryMiddleware` from a _different_ file (`Middleware.php`), with zero
+  textual mention of `RetryMiddleware` anywhere in the test itself — needs
+  transitive reasoning across files that a single-file structural scan
+  cannot provide. That case is not resolved here and stays an honest "no
+  signal" rather than a guess; #878 stays open to track it.
+
+### Patch Changes
+
+- bbe0692: Honesty-only fix for #875: C# lets a nested namespace body reference an
+  _enclosing_ namespace's members unqualified, with no `using` directive at
+  all (`namespace AutoMapper.UnitTests { ... }` can reference
+  `AutoMapper.TypeMap` purely via ordinary C# name resolution). Confirmed
+  against AutoMapper/AutoMapper: 355/364 `UnitTests/` files rely on exactly
+  this and carry no relevant `using`, so import-based test-association has no
+  per-file signal for them — a structural gap, not a matching bug. `lien
+annotate`'s test-coverage line no longer claims `No test coverage.` on
+  these files; it now reports `Test coverage not determinable from imports
+(enclosing-namespace access).` instead, for any language whose new
+  `LanguageDefinition.enclosingNamespaceAccess` flag is set (only C# today,
+  checked via the new `hasEnclosingNamespaceAccess()` export).
+
+  This is deliberately a separate flag from `wholeModuleImports`: C#'s
+  _explicit_ dotted `using AutoMapper.X;` still resolves real per-file
+  associations correctly (the other 9/364 files, #866/#868) — folding this
+  into `wholeModuleImports` would make `isUnresolvableWholeModuleImport`
+  discard those working usings too (C# usings are dotted, never slashed, so
+  every one of them is "bare" by that check) and regress them. No heuristic
+  recovery (no name-proximity matching) — every other language's wording and
+  behavior is unchanged.
+
+- 6fc55ab: Fix two related bugs where lexical ignore rules silently dropped real,
+  committed source from the index (#899, #900), reproduced against a clone of
+  `cli/cli`:
+  - **#899**: the hardcoded `build/**`/`**/build/**` entries in
+    `ALWAYS_IGNORE_PATTERNS` unconditionally swallowed any directory literally
+    named `build`, with no way to distinguish generated output from real
+    source (`internal/build/build.go`, a hand-written Go file defining
+    `Version`/`Date`, was entirely absent from the manifest).
+  - **#900**: `.gitignore` was applied lexically to every file with no
+    tracked-file exemption. Real git only ever ignores UNTRACKED files, so a
+    stale bare-name pattern (a root `.gitignore` line `gh`, meant to hide a
+    locally built binary) matched — and silently dropped — the unrelated,
+    fully tracked `cmd/gh/` and `internal/gh/` source trees, including the
+    literal `func main()` entrypoint.
+
+  **Fix**: in a git repository, `scanCodebase` and `createGitignoreFilter` now
+  union the lexical scan/filter with git's tracked-file list
+  (`getGitTrackedFiles`, one `git ls-files -z` call, cached for the life of
+  one scan/filter — never a per-file subprocess). A path git tracks is
+  rescued from `ALWAYS_IGNORE_PATTERNS`, `.gitignore`, and ecosystem excludes
+  regardless, with one exception: `NEVER_INDEX_EVEN_IF_TRACKED_PATTERNS`
+  (`.git/**`, `.lien/**`, `node_modules/**`, `.claude/worktrees/**`) is a hard
+  carve-out that stays excluded even if git tracks it, since git _can_ track
+  a committed `node_modules` or a nested `.claude/worktrees` clone and
+  indexing either reproduces the 21GB-index blowup `ALWAYS_IGNORE_PATTERNS`
+  exists to prevent. Non-git directories are unaffected — the tracked-file
+  set is empty and the union is a no-op, preserving today's pure-lexical
+  behavior exactly.
+
+  New regression coverage in `gitignore.test.ts`/`scanner.test.ts`: tracked
+  source at depth inside a `build`-named directory, tracked source shadowed
+  by a bare-name `.gitignore` pattern, the tracked-vs-untracked distinction
+  (an untracked file under the same paths stays excluded), and the hard
+  carve-out (a tracked `node_modules` file is never rescued).
+
+- f65df04: Fixes #902: Go's dominant same-package unit-test convention (`foo_test.go`
+  in the same directory and `package foo` as `foo.go`, with NO import
+  statement at all — Go forbids a package importing itself) left import-based
+  test-association matching structurally blind to it. Measured against a real
+  `cli/cli` clone: 336/356 (94.4%) of `_test.go` files basename-pair with a
+  same-named sibling; applying that pairing to the 457 files the issue
+  identified as having a same-directory `_test.go` sibling closes the entire
+  previously-dark set.
+
+  Two tiers, no AST/package-clause parsing needed (Go's compiler already
+  enforces one package per directory, so same-directory is itself reliable
+  evidence):
+  - **Tier 1 — basename pairing** (`foo.go` <-> `foo_test.go`, same
+    directory): folded directly into the existing test-association signal
+    everywhere it's computed (`findTestAssociationsFromChunks`,
+    `get_files_context`'s `testAssociations`), so it flows through to
+    `lien annotate`, the MCP-mandated `get_files_context` tool,
+    `@liendev/review`'s test-coverage signals, and `verify-tests`/`recap`
+    automatically — no signature changes.
+  - **Tier 2 — package-level fallback** (every `_test.go` file in the
+    directory, only when tier 1 finds nothing for that specific file): real,
+    same-package signal but coarser, so it gets a distinct, honestly-worded
+    label scoped only to `lien annotate`'s printed text (mirroring the
+    #869/#875 Swift/C# honesty-label precedent) — deliberately not folded
+    into `get_files_context`, `@liendev/review`'s gap detection, or
+    `verify-tests`'s ledger/scope-matching.
+
+  New `LanguageDefinition.sameDirectoryTestConvention` flag (Go only) +
+  `hasSameDirectoryTestConvention()` registry predicate, and a new
+  `go-same-directory-tests.ts` module (`buildGoTestDirIndex`,
+  `pairGoBasenameTest`, `findGoPackageLevelTests`) exported from
+  `@liendev/parser`.
+
+- db565d2: Consolidate the five match-side reverse-dependency call paths
+  (`findTestAssociationsFromChunks`, `chunkImportsFrom`,
+  `collectImportedSymbolsFromSource`, `fileImportsSymbolFromAny`,
+  `findTestAssociations`) behind one guarded primitive, `importMatchesTarget`,
+  in `packages/parser/src/utils/path-matching.ts` (#886).
+
+  Each of the five used to open-code
+  `!isUnresolvableWholeModuleImport(imp, importerFile) && matchesFile(normalize(imp), target)`
+  independently — the exact two-line idiom that was forgotten at a new call
+  site three times across #885's review rounds (the #884 whole-module guard
+  missing from a freshly-added site). `importMatchesTarget(importSpecifier,
+importerFile, normalizedTarget, normalize)` couples the guard to `matchesFile`
+  so a match-side caller can no longer invoke one without the other; the two
+  build-side sites with no target in scope (`buildImportIndex`,
+  `indexImportEntry`/`addChunkToImportIndex`) still call
+  `isUnresolvableWholeModuleImport` directly, and `findDependentChunks`'s fuzzy
+  loop and `buildReExportGraph` are deliberately left on raw `matchesFile` (see
+  the #886 design comment for why those four don't fit the primitive).
+
+  No exported signature changes to any of the five migrated functions or to
+  `matchesFile`/`isUnresolvableWholeModuleImport` themselves — `importMatchesTarget`
+  is a new, additive export. Behavior-preserving by construction: verified via a
+  byte-identical before/after diff of `get_dependents`/test-association output
+  across this repo and the multi-language `lien-review-testbed` fixture (see the
+  PR body's golden-proof evidence).
+
+  Also fixes #887: a multi-segment bare `require`/import specifier (e.g. Ruby's
+  `require 'rack/protection'`) fanned out to every file nested under its own
+  directory (`rack-protection/lib/rack/protection/*`) instead of matching only
+  that directory's own entry point. The fix is language-aware, not a blanket
+  change to `matchesFile`: Ruby's bare multi-segment `require` names exactly
+  one file, but Go's `import "pkg/sub"` (normalized to the bare `pkg/sub` by
+  #877's module-prefix stripping) names a _package_ — every file in that
+  directory is a legitimate member, so the same "must reach the end of the
+  compared string" tightening would have wrongly rejected real Go dependents
+  if applied unconditionally (an earlier revision of this fix did exactly that
+  and was caught in review — see the PR body's Correction section for the
+  proof and the fix).
+
+  `matchesFile` gains an optional third parameter,
+  `requireExactTailForMultiSegment` (default `false`, preserving every
+  existing caller's behavior unchanged), and a new `LanguageDefinition`
+  flag — `singleFileImports` (set on Ruby only) — drives it via the new
+  `hasSingleFileImportSemantics` helper. `importMatchesTarget` derives the
+  flag from the importer's language for the five migrated call sites;
+  `findDependentChunks`'s fuzzy-match loop (in both `@liendev/parser` and the
+  CLI) applies the same derivation per chunk, since its import-index bucket
+  can span multiple importer files sharing one normalized specifier. Verified
+  against both a real sinatra clone (820 spurious dependent edges removed,
+  gem/library entry points unchanged) and a real gin clone (all 67 dependent
+  edges preserved, including the `internal/fs` package-directory case) — see
+  the PR body.
+
+- da1ec69: Fix Java `import static a.b.ClassName.member;` (a specific, non-wildcard
+  static-member import) never resolving to a test association or dependent for
+  its defining class file (#864). `extractImportPath` was already returning a
+  syntactically-correct path, but one segment deeper than the class's own file
+  — `com.example.Utils.method` where the file is `com/example/Utils.java`, not
+  `com/example/Utils/method` — so `matchesFile`/`matchesPythonModule` could
+  never match it.
+
+  `JavaImportExtractor.extractImportPaths` now returns the class's derived FQN
+  (the raw path with its trailing segment dropped) as a second candidate
+  alongside the original, unchanged single path from `extractImportPath`. This
+  is safe rather than a guess: Java requires every top-level type to live in a
+  file named after it, and nested types/members always live inside their
+  enclosing top-level type's file, so dropping the trailing segment always
+  yields that type's correct FQN — whether the segment names a static member
+  (the common case) or a nested class (`import static a.B.Inner;`, correct by
+  the same rule). A static import reaching two-plus levels into nested classes
+  under-matches silently (the same behavior as before the fix) rather than
+  mismatching. Wildcard static imports and ordinary (non-static) imports are
+  unaffected.
+
+  Confirmed on a real clone of google/gson: `JsonReaderTest.java` statically
+  imports 8 specific members of `JsonToken` (`STRING`, `NUMBER`, `BEGIN_ARRAY`,
+  ...) and was invisible to `lien annotate`'s test-coverage line for
+  `JsonToken.java` despite directly testing `JsonReader.peek()`'s `JsonToken`
+  return values; it now appears. A full before/after diff of every file's
+  test-association set across gson's 264 Java files shows exactly one changed
+  entry — this addition — confirming no new false positives elsewhere.
+
+  Kotlin's narrower analogous shape (`import a.b.myFunction` for a top-level
+  function/property defined in an arbitrarily-named file) is deliberately left
+  as an honest, undetermined gap rather than a guess: unlike Java, there is no
+  syntactic marker (no `static`-equivalent keyword) distinguishing a top-level
+  declaration from a class/object-member access in this grammar — both parse
+  to an identical flat `identifier` of `simple_identifier` segments — so
+  guessing risks the false-positive fan-out #868 warned against. This is
+  documented in `KotlinImportExtractor`'s class doc comment and pinned by a
+  regression test; #864 stays open for the Kotlin side.
+
+- ac0480f: Fixes #901 and #904: two Python import-resolution gaps found on
+  pallets/flask, both remainders after #859/#861.
+
+  #904 — relative imports (`from .module import X`, `from ..pkg import Y`)
+  never matched anything, because `matchesPythonModule`'s regex rejects a
+  leading dot and the generic relative-import strategy in `matchesFile` only
+  understands JS/TS's slash-based `./`/`../`. `PythonImportExtractor` now
+  converts the grammar's leading-dot form to a `./`/`../`-prefixed specifier
+  at extraction time (mirroring `RustImportExtractor`'s `super::` -> `../`
+  conversion), and `python` is added to `chunker.ts`'s
+  `RESOLVE_RELATIVE_IMPORTS` set so `filepath` is threaded through and
+  `resolveRelativeImport` resolves it against the importing file's own
+  directory — the same path JS specifiers already take. On flask,
+  `src/flask/app.py`'s `from .globals import ...` now resolves to
+  `src/flask/globals`, closing 11 of `flask.globals`'s 16 real dependents that
+  were previously invisible (5/16 reported -> full ground truth).
+
+  #901 — a bare package import (`import flask`) never matched anything:
+  `matchesPythonModule`'s regex required at least one dot, so a dot-free
+  specifier failed the gate before any of its four sub-strategies ran. The
+  gate now also accepts a bare word, but routes it through only the two
+  position-anchored sub-strategies (exact/parent-package match) — the
+  unrestricted suffix/source-prefix strategies stay reserved for genuinely
+  multi-segment dotted paths, per #883's precedent against widening
+  leniency for short bare identifiers. Separately, flask's `src/`-layout
+  (package lives at `src/flask/`, one directory below where a bare import
+  resolves) has no reliable manifest declaration to read — even flit_core,
+  flask's own build backend, only declares the package _name_, not its
+  directory — so a new `python-src-layout.ts` (mirroring `php-psr4.ts`/
+  `go-module.ts`'s manifest-root pattern from #877) detects a real on-disk
+  `src/<package>/__init__.py` and resolves `flask` -> `src/flask` before
+  `matchesFile` ever runs. Together, `import flask` now reaches
+  `src/flask/__init__.py` and (via the parent-package strategy, exactly like
+  the existing dotted `django.http` -> `django/http/*.py` behavior) every file
+  under `src/flask/` — including `app.py`, which previously reported no test
+  coverage at all despite being the package's most heavily-tested file.
+
+  `resolvePythonSrcLayoutImport` verifies each candidate path actually exists
+  on disk before rewriting a specifier — needed because a single git repo can
+  hold more than one Python project (flask's own repo does: `examples/celery/`
+  and `examples/tutorial/` each have their own nested `src/<pkg>/` or
+  flat-layout package). Without that check, a bare import in one of those
+  nested projects (`examples/celery/make_celery.py`'s `import task_app`) would
+  misresolve against the _outer_ `src/flask` root; the existence check keeps
+  that case an honest no-op instead.
+
+  Both fixes are additive and gated behind the exact shape they target (a
+  leading dot / a dot-free bare word / a detected, existence-verified `src/`
+  layout); every existing dotted-import test-association and dependent-analysis
+  behavior is unchanged (verified via a corpus-wide before/after dependents
+  diff across all 80 `.py` files in flask's repo: 0 regressions, 0 unexplained
+  new edges).
+
+- 4a863f2: Fixes #903 (the third leg of #867, alongside PHP's PSR-4 map and Go's module
+  path): `convertRustModulePath` only recognized `crate::`/`self::`/`super::`
+  as internal-path prefixes, so any Cargo workspace member crate's `tests/`
+  integration tests — which Cargo always compiles as a SEPARATE crate, and
+  which therefore reference the crate under test by its published name (`use
+tokio_util::codec::Framed;`) rather than `crate::` — were indistinguishable
+  from a genuinely external crates.io dependency and silently dropped. On
+  tokio-rs/tokio, this left 225/231 (97.4%) of the workspace's integration
+  test files with empty `imports`, blind to `get_files_context`'s
+  `testAssociations`, `verify-tests`/`recap`, and `annotate`'s test-coverage
+  line.
+
+  Adds `rust-crate-map.ts`, a manifest reader mirroring `php-psr4.ts`/
+  `go-module.ts`'s existing pattern: it parses a Cargo workspace root's
+  `Cargo.toml` `[workspace] members` (glob-expanded) plus each matched
+  member's own `[package] name` (and the root's own `[package]`, for a
+  single-crate project or a workspace root that's also a member crate) into a
+  `Map<crateName, crateSrcDir>`, normalizing hyphens to underscores to match
+  the identifier form Rust `use` paths actually use (`tokio-util` the package
+  vs. `tokio_util` the path). Unlike PHP/Go, this map is threaded straight
+  into `RustImportExtractor` (a new optional `rustCrateMap` parameter on
+  `extractImportPaths`/`processImportSymbols`, widening the
+  `LanguageImportExtractor` interface) rather than applied as post-extraction
+  string resolution in `ast/symbols.ts` — Rust's extractor has to decide
+  "internal vs. external crate" before it ever emits a specifier, which
+  happens before `resolveImportSpecifier`'s pipeline ever sees it. Only
+  workspace-member crates resolve; a genuinely external crate (`serde`,
+  `futures`, ...) is dropped exactly as before this fix, so single-crate
+  projects and true external dependencies see zero behavior change.
+
+  v1 scope (deliberately KISS/YAGNI, matching #867's PHP/Go precedent): only
+  `[workspace] members` and each matched member's `[package] name` are read.
+  Module-path resolution mirrors the existing `crate::` transform exactly
+  (`<crate>::<rest>` -> `<crateDir>/src/<rest>`), the same "first leg" the
+  issue's own suggested-fix section calls out as acceptable — full
+  `<mod>.rs`/`<mod>/mod.rs` file resolution is unchanged from the pre-existing
+  `crate::`-relative behavior. `[dependencies] path = "..."` entries and
+  workspace `exclude` are out of scope.
+
 ## 0.70.0
 
 ### Minor Changes
