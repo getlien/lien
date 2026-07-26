@@ -314,11 +314,17 @@ describe('matchesFile - Path Boundary Checking', () => {
     it('should NOT match a bare package import nested arbitrarily deep elsewhere in the repo', () => {
       // Bare identifiers deliberately skip the suffix/source-prefix strategies
       // (matchesSuffixPythonModule/matchesWithSourcePrefix) that the dotted,
-      // multi-segment case above relies on. matchesSuffixPythonModule does
-      // unbounded substring search with no leading-segment cap at all;
-      // matchesWithSourcePrefix has a loose leading-segment cap (at most one
-      // prefix segment) but no trailing word-boundary check. Either gap is
-      // safe for a specific multi-segment path but not for a short bare word.
+      // multi-segment case above relies on. matchesSuffixPythonModule IS
+      // properly boundary-checked (its `endsWith('/' + moduleAsPath)` anchors
+      // to a leading `/` and the end of the string) but places no cap at all
+      // on how many directories may precede that match -- this repro's
+      // "flask" nested under vendor/some/deep/ would otherwise match.
+      // matchesWithSourcePrefix is the opposite shape: it caps the leading
+      // side to at most one directory, but never checks what follows the
+      // match, so it would let a bare word like "flask" match purely because
+      // it's a textual prefix of an unrelated sibling like "flaskext" (see
+      // the previous test). Either gap is safe for a specific multi-segment
+      // dotted path but not for a short bare word.
       expect(testMatchesFile('flask', 'vendor/some/deep/flask/app.py')).toBe(false);
     });
 

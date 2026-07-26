@@ -498,7 +498,7 @@ def do_something():
         expect(funcChunk?.metadata.imports).toContain('src/flask/globals');
       });
 
-      it('leaves a Python relative import converted-but-unresolved when workspaceRoot is omitted', () => {
+      it('still fully resolves a Python relative import when workspaceRoot is omitted (resolution keys off filepath, not workspaceRoot)', () => {
         const content = `from .globals import g
 
 def do_something():
