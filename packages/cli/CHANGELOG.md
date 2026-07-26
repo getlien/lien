@@ -1,5 +1,111 @@
 # @liendev/lien
 
+## 0.71.0
+
+### Patch Changes
+
+- bbe0692: Honesty-only fix for #875: C# lets a nested namespace body reference an
+  _enclosing_ namespace's members unqualified, with no `using` directive at
+  all (`namespace AutoMapper.UnitTests { ... }` can reference
+  `AutoMapper.TypeMap` purely via ordinary C# name resolution). Confirmed
+  against AutoMapper/AutoMapper: 355/364 `UnitTests/` files rely on exactly
+  this and carry no relevant `using`, so import-based test-association has no
+  per-file signal for them — a structural gap, not a matching bug. `lien
+annotate`'s test-coverage line no longer claims `No test coverage.` on
+  these files; it now reports `Test coverage not determinable from imports
+(enclosing-namespace access).` instead, for any language whose new
+  `LanguageDefinition.enclosingNamespaceAccess` flag is set (only C# today,
+  checked via the new `hasEnclosingNamespaceAccess()` export).
+
+  This is deliberately a separate flag from `wholeModuleImports`: C#'s
+  _explicit_ dotted `using AutoMapper.X;` still resolves real per-file
+  associations correctly (the other 9/364 files, #866/#868) — folding this
+  into `wholeModuleImports` would make `isUnresolvableWholeModuleImport`
+  discard those working usings too (C# usings are dotted, never slashed, so
+  every one of them is "bare" by that check) and regress them. No heuristic
+  recovery (no name-proximity matching) — every other language's wording and
+  behavior is unchanged.
+
+- f65df04: Fixes #902: Go's dominant same-package unit-test convention (`foo_test.go`
+  in the same directory and `package foo` as `foo.go`, with NO import
+  statement at all — Go forbids a package importing itself) left import-based
+  test-association matching structurally blind to it. Measured against a real
+  `cli/cli` clone: 336/356 (94.4%) of `_test.go` files basename-pair with a
+  same-named sibling; applying that pairing to the 457 files the issue
+  identified as having a same-directory `_test.go` sibling closes the entire
+  previously-dark set.
+
+  Two tiers, no AST/package-clause parsing needed (Go's compiler already
+  enforces one package per directory, so same-directory is itself reliable
+  evidence):
+  - **Tier 1 — basename pairing** (`foo.go` <-> `foo_test.go`, same
+    directory): folded directly into the existing test-association signal
+    everywhere it's computed (`findTestAssociationsFromChunks`,
+    `get_files_context`'s `testAssociations`), so it flows through to
+    `lien annotate`, the MCP-mandated `get_files_context` tool,
+    `@liendev/review`'s test-coverage signals, and `verify-tests`/`recap`
+    automatically — no signature changes.
+  - **Tier 2 — package-level fallback** (every `_test.go` file in the
+    directory, only when tier 1 finds nothing for that specific file): real,
+    same-package signal but coarser, so it gets a distinct, honestly-worded
+    label scoped only to `lien annotate`'s printed text (mirroring the
+    #869/#875 Swift/C# honesty-label precedent) — deliberately not folded
+    into `get_files_context`, `@liendev/review`'s gap detection, or
+    `verify-tests`'s ledger/scope-matching.
+
+  New `LanguageDefinition.sameDirectoryTestConvention` flag (Go only) +
+  `hasSameDirectoryTestConvention()` registry predicate, and a new
+  `go-same-directory-tests.ts` module (`buildGoTestDirIndex`,
+  `pairGoBasenameTest`, `findGoPackageLevelTests`) exported from
+  `@liendev/parser`.
+
+- 0ad6608: Fixes #908: `isCoveredByScope` (the did-you-run-the-tests nudge behind
+  `lien verify-tests note-run`/`report`/`recap`) now recognizes a
+  directory-scoped test run as covering the files inside it, not just an
+  exact basename/stem match. Go's own idiomatic `go test` invocation always
+  names a package directory, never an individual file — `go test
+./pkg/x/...` (recursive) and `go test ./pkg/x` (that package only, no
+  subdirectories) previously matched nothing and left the whole package
+  nagging as unverified even after a correctly, narrowly-targeted run.
+
+  The new directory-scope check is path-segment-aware, not a string prefix:
+  `./pkg/cmd/label` (with or without the recursive `/...` suffix) does not
+  cover a different, unrelated package that merely shares a text prefix
+  (`./pkg/cmd/labeler`). The check is intentionally not Go-gated — any scope
+  token that names a directory rather than a specific file (no recognized
+  source extension) gets the same treatment, since `scopeTokens` carry no
+  record of which runner produced them and the same directory-scope
+  reasoning is valid for any other ecosystem's directory-scoped invocation
+  (e.g. `pytest tests/unit/`).
+
+  Purely additive: existing basename/stem matching, `classifyTestCommand`,
+  and every current `RUNNER_PATTERNS` entry are unchanged.
+
+- 4d1a872: Fix #905: `RUNNER_PATTERNS` in the did-you-run-the-tests nudge (`lien
+verify-tests note-run`) now sees through package-manager/environment-runner
+  wrapper prefixes — `uv run pytest`, `poetry run pytest tests/foo.py`,
+  `pipenv run pytest`, `rye run pytest`, and `pdm run pytest` all classify
+  exactly like their unwrapped form, including flags-with-values on the
+  wrapper's own invocation (`uv run --group tests pytest`). Also adds `tox`
+  (and `nox`) as recognized runners in their own right — `tox`/`tox run`/`tox
+-e py311` are broad (no file named), while a `--` passthrough naming a path
+  (`tox -e py311 -- tests/test_x.py`) is scoped, same convention already
+  supported for `npm test -- path/to/x.test.ts`. Together these recognize
+  flask's own real CI command (`uv run --locked --no-default-groups --group
+dev tox run`), which previously went completely unrecognized. Purely
+  additive recognition — `isCoveredByScope` and every existing pattern are
+  unchanged.
+- Updated dependencies [bbe0692]
+- Updated dependencies [6fc55ab]
+- Updated dependencies [f65df04]
+- Updated dependencies [db565d2]
+- Updated dependencies [da1ec69]
+- Updated dependencies [99cf7e5]
+- Updated dependencies [ac0480f]
+- Updated dependencies [4a863f2]
+  - @liendev/parser@0.71.0
+  - @liendev/core@0.71.0
+
 ## 0.70.0
 
 ### Patch Changes
