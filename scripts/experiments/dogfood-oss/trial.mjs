@@ -24,6 +24,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -164,7 +165,11 @@ const savedBefore = fs.existsSync(savedSettingsPath)
 
 gitReset(repo.dir);
 
-const sessionId = `${repoKey}-${taskId}-${repo.sha.slice(0, 8)}`.replace(/[^A-Za-z0-9-]/g, '-');
+// Claude Code requires a real UUID here. Derive it from repo+task+SHA rather than
+// randomising, so a re-run of the same trial reuses the same session id and the
+// nudge-events rows stay joinable to the trial that produced them.
+const h = crypto.createHash('sha256').update(`${repoKey}/${taskId}/${repo.sha}`).digest('hex');
+const sessionId = [h.slice(0, 8), h.slice(8, 12), '4' + h.slice(13, 16), '8' + h.slice(17, 20), h.slice(20, 32)].join('-');
 const args = [
   '-p',
   task.prompt,

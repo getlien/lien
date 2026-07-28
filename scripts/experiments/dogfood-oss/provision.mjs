@@ -271,6 +271,16 @@ for (const c of targets) {
 manifest.c1AncestorAdvisory = rootScan.advisory;
 
 const outPath = path.join(import.meta.dirname, 'corpus-manifest.json');
+// MERGE rather than overwrite: a `--only <lang>` run must refresh just that repo's
+// entry, not replace the whole manifest with a single row. Overwriting silently
+// broke every other repo's trial with "no repo <x> in manifest".
+if (only && fs.existsSync(outPath)) {
+  const prior = JSON.parse(fs.readFileSync(outPath, 'utf8'));
+  const refreshed = new Set(manifest.repos.map(r => r.repo));
+  manifest.repos = [...prior.repos.filter(r => !refreshed.has(r.repo)), ...manifest.repos].sort((a, b) =>
+    a.repo.localeCompare(b.repo),
+  );
+}
 fs.writeFileSync(outPath, JSON.stringify(manifest, null, 2));
 
 const ok = manifest.repos.filter(r => r.status === 'OK');

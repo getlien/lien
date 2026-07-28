@@ -115,3 +115,4 @@ packages/review/test/harness/fixtures/**/*.fixture.json
 !packages/review/test/harness/fixtures/doc-truth/renamed-stale-claim.fixture.json
 
 packages/cli/README.md
+scripts/experiments/dogfood-oss/trials/
