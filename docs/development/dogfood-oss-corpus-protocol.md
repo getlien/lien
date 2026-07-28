@@ -146,9 +146,32 @@ fails either assertion is **re-sited or dropped**, never run.
 
 ## 4. Frozen metrics
 
+> **Amended after the first run.** Three corrections, each found by executing this
+> protocol rather than reading it. They are stated here because each one silently
+> produces a *confident wrong answer* rather than an error.
+>
+> 1. **M1 cannot be measured from the transcript.** With `--output-format stream-json
+>    --verbose`, a headless session records only `SessionStart` hook events;
+>    PostToolUse `additionalContext` — the channel every annotator uses — never
+>    appears. A probe confirmed the annotate nudge firing and writing a `shown` row
+>    with a matching session id while leaving zero trace in the transcript. Read M1
+>    from `nudge-events.jsonl`, and reconstruct the verbatim claim text by replaying
+>    the annotation at the pinned SHA. Measuring from the transcript reports "no nudge
+>    fired" for every trial.
+> 2. **The corpus must not live under `~/.claude/`.** Claude Code treats everything
+>    beneath it as a sensitive file and denies edits, so a trial completes its whole
+>    investigation and then cannot write. Use a neutral root such as
+>    `/tmp/lien-dogfood-<id>` and assert C1 there.
+> 3. **Match every output shape the consumer surface emits.** `annotate` reports test
+>    coverage in three tiers — `Test coverage:`, `Test coverage inferred from symbol
+>    usage…` (no colon), and `Test coverage not determinable…`. The first sampler
+>    matched only the first, scored a working feature as 0%, and produced a HIGH
+>    finding that had to be retracted. A sampler that recognises one of three shapes
+>    manufactures findings.
+
 | ID | Metric | How measured |
 |---|---|---|
-| M1 | Nudge fired | Hook stdout channel present in transcript ∧ `shown` row in `nudge-events.jsonl` |
+| M1 | Nudge fired | `shown` row in `nudge-events.jsonl` (**not** the transcript — see amendment 1) |
 | M2 | Nudge **truthful** | Adversarial refutation verdict vs. the repo's real code (Phase 4) |
 | M3 | Agent acted on it | Deterministic detection: `get_dependents` call naming the symbol (T1), or an observed test run covering the associated test (T2) |
 | M4 | Hook latency | Wall time per hook invocation vs. the 5 s `hooks.json` timeout |
