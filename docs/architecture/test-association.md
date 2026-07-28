@@ -86,6 +86,47 @@ Unlike the whole-module/enclosing-namespace gaps above, this one needs no heuris
 
 Both tiers are structurally bounded to the same directory (Go's own compiler guarantee) — the worst either can produce is "attributed to the wrong file in the same package," never the cross-directory textual collisions the bare-identifier guard above protects against.
 
+## Swift symbol-usage association: a measure-gated non-import signal
+
+Swift's whole-module-import gap (above) is a genuine structural blind spot — but the SQLite chunk store already carries a DIFFERENT signal that doesn't depend on imports at all: a test chunk's own `callSites` (the AST-extracted symbols it references) versus which single source file uniquely DEFINES that symbol. Measured against real Alamofire/vapor/swift-composable-architecture clones ([#869](https://github.com/getlien/lien/issues/869)), this recovers real, individually-verified coverage for a subset of the files the whole-module gap above leaves dark.
+
+`packages/parser/src/swift-symbol-usage-signals.ts` implements the rule: test `T` associates with source `S` iff `T`'s `callSites` reference a symbol `X` such that:
+
+1. `X` passes **both** the shipped `isUnambiguousIdentifierShape` (docRefs' gate) **and** this module's own, stricter `isMultiSegmentIdentifier` — at least 2 camelCase/PascalCase/underscore segments. The shipped gate alone is insufficient here: its case-transition check is satisfied by the first two characters of ANY Capitalized word (`Ge` in `Get`, `Se` in `Session`), so it passes `Get`/`Run`/`Map`/`Session`/`Client` just as readily as `TypeMap`/`HTTPHeaders` — fine for its original prose-vs-code job, useless as a collision-resistance gate. `isMultiSegmentIdentifier` is a separate, additional helper; the shipped gate itself is untouched.
+2. `X` is defined in **exactly one** non-test Swift file project-wide.
+3. That defining file is not `T` itself.
+4. The (S, T) edge has at least one driving symbol that also passes `isTypeShapedIdentifier` — see below.
+
+The definition side excludes `extension <ForeignType> { ... }` declarations from counting as a definition, unless the type also has a real (non-extension) declaration somewhere in the project. This is one false-positive shape measured on Alamofire: `extractSwiftClasses` treats `extension HTTPURLResponse { ... }` as *defining* `HTTPURLResponse`, so every test that happens to reference that Foundation type would otherwise falsely hub onto the extending file. Because a Foundation/stdlib type is never actually declared inside the project, "every declaration of X in this corpus is an extension" already IS the foreign-type test — no hardcoded list of framework type names required.
+
+### Gate 4: a post-ship hardening after adversarial re-verification found real false positives
+
+The first shipped version of this signal (gates 1-3 only) was calibrated and measured as ~100% precision across all three repos. An adversarial re-check of the raw evidence — opening the actual call sites, not just re-confirming declaration uniqueness — found that gates 1-3 are insufficient: "unique among this project's own indexed files" does not mean "this specific call resolves to that declaration." Swift lets a bare method name collide with something the indexer never sees at all:
+
+- **A stdlib protocol witness.** Alamofire's `Tests/TestHelpers.swift` calls `decoder.singleValueContainer()` inside an `extension HTTPHeaders: Decodable` — the Swift stdlib `Decoder` protocol's own requirement, satisfied by every conforming type in existence, not Alamofire's differently-typed `URLEncodedFormEncoder.singleValueContainer()`.
+- **A stdlib type's own extension overload.** swift-composable-architecture's `Effect.swift` adds a `name:`-taking `TaskGroup.addTask` overload as a backwards-compatible shim; every test call site actually uses the plain, no-`name:` stdlib `TaskGroup.addTask(priority:operation:)`.
+- **An external package's free function.** The same repo's `withDependencies { ... }` call sites all resolve to the separate `swift-dependencies` package's own top-level function, not `TestStore.withDependencies` — the package is a `Package.swift` dependency, never part of the indexed project.
+
+Every confirmed false positive (`singleValueContainer`, `asURL`, `addTask`, `flatMap`, `withDependencies`) shared one trait: the edge's only driving symbol(s) were lowercase method names, with no PascalCase type reference alongside them. `isTypeShapedIdentifier` (leading-uppercase — allowing Swift's `_`-prefixed SPI convention, e.g. `_CancelID` — and multi-segment) requires at least one such driver per edge; a purely method-driven edge is demoted. This is a structural, method-name-agnostic shape check, not a hardcoded list of risky method names.
+
+**The trade-off, measured exhaustively (every edge in all three repos, independently re-verified) after the fix:**
+
+| Repo | Pre-hardening edges | Pre-hardening honest precision | Post-hardening edges | Post-hardening precision |
+|---|---|---|---|---|
+| Alamofire/Alamofire | 46 | 44/46 = 95.7% (2 confirmed FPs) | 26 | 26/26 = 100% |
+| vapor/vapor | 57 | 57/57 = 100% (0 FPs) | 25 | 25/25 = 100% |
+| pointfreeco/swift-composable-architecture | 49 | 41/49 = 83.7% (8 confirmed FPs) | 29 | 29/29 = 100% |
+
+Gate 4 is necessary — without it, swift-composable-architecture fails the ship bar outright — but it is costly: roughly half of all previously-good edges are lost project-wide (62 of 142 confirmed-good pre-hardening edges), including **every** edge to Alamofire's own `Request.swift`, the file that originally motivated this investigation (`Request` is single-segment and can never itself be a type-shaped driver, and none of its distinctively-named methods have a type-shaped symbol alongside them in the tests that call them). vapor loses 32 confirmed-good edges for zero precision benefit (it had none to fix). This is a real, substantial recall cost from a blunt but precision-safe rule — flagged here rather than glossed over.
+
+This is a strictly ADDITIVE, lower-confidence THIRD tier, never merged into the confident import-based association above (or Go's tier 2) — mirroring that tier's discipline exactly:
+
+```text
+Test coverage inferred from symbol usage (not import-verified): Tests/HTTPHeadersTests.swift.
+```
+
+for any Swift file whose `tests` (tier 1) came back empty but the symbol-usage signal found a hit; falls through to the existing `Test coverage not determinable from imports (whole-module import).` label when it doesn't. Scoped to `lien annotate`'s printed text only (`computeSwiftSymbolUsageFallback` in `annotate-cmd.ts`) — deliberately **not** threaded into `get_files_context`'s `testAssociations`, `@liendev/review`'s test-coverage gap detection, or `verify-tests`'s ledger/scope-matching, the same conservative call as Go's tier 2.
+
 ## Java static-member imports: a derived second candidate
 
 `import static pkg.Class.member;` (a specific, non-wildcard static-member import) extracts a path one segment deeper than the file that defines it — `com.example.Utils.method`, when the file is `com/example/Utils.java` — so it could never match via `matchesFile` on its own. `JavaImportExtractor.extractImportPaths` (`packages/parser/src/ast/languages/java.ts`) now returns the class's derived FQN (the path with its trailing segment dropped) as a second candidate alongside the unchanged original. This is safe rather than a guess: Java requires every top-level type to live in a file named after it, and nested types/members always live inside their enclosing top-level type's file, so dropping the trailing segment always yields that type's correct FQN — whether the segment names a static member or a nested class (`import static a.B.Inner;`, correct by the same rule). A static import reaching two-plus levels into nested classes under-matches silently, the same as before this fix, rather than mismatching. Wildcard static imports and ordinary (non-static) imports are unaffected. Verified on a real clone of google/gson: `JsonReaderTest.java`'s static imports of `JsonToken.STRING`/`NUMBER`/etc. now associate it with `JsonToken.java`, with zero other test-association changes across the repo's 264 Java files.
@@ -107,8 +148,8 @@ These are structural: no import-level signal exists for the case, so the honest 
 
 ## Where associations surface
 
-- `get_files_context`'s `testAssociations` field (MCP tool) — includes Go tier 1 (basename pairing), not tier 2 (package-level fallback)
-- `lien annotate` and the post-edit test-association reminder hook (`lien annotate --tests-only`, and its ledger-recording sibling `lien verify-tests note-edit`) — the only surface that also shows Go's tier 2 fallback, distinctly labeled; `verify-tests`'s ledger/scope-matching itself still only sees tier 1
+- `get_files_context`'s `testAssociations` field (MCP tool) — includes Go tier 1 (basename pairing), not tier 2 (package-level fallback) or Swift's symbol-usage signal
+- `lien annotate` and the post-edit test-association reminder hook (`lien annotate --tests-only`, and its ledger-recording sibling `lien verify-tests note-edit`) — the only surface that also shows Go's tier 2 fallback and Swift's symbol-usage signal, both distinctly labeled; `verify-tests`'s ledger/scope-matching itself still only sees tier 1
 - `@liendev/review`'s blast-radius rendering (test coverage context for a changed file) — tier 1 only, same reasoning as `get_files_context`
 
 ## Language support
@@ -124,7 +165,7 @@ These are structural: no import-level signal exists for the case, so the honest 
 | Java | generic patterns | yes (incl. static-member imports, derived class-path candidate) | none |
 | Kotlin | generic patterns | yes | none (see known gaps for top-level function/property imports) |
 | Rust | generic patterns | yes | none needed |
-| Swift | `Tests`/`Test` convention | not determinable (whole-module imports) | none |
+| Swift | `Tests`/`Test` convention | not determinable (whole-module imports); measure-gated symbol-usage fallback in `lien annotate` only (see above) | none |
 
 ## History
 

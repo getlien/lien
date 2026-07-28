@@ -271,6 +271,60 @@ describe('formatTests', () => {
       ).toBe('Test coverage: pkg/cmd/label/list_test.go.');
     });
   });
+
+  // #869 measure-gated spike, tier 4 (lowest confidence): Swift's non-import
+  // symbol-usage signal gets its own distinct "inferred" wording — never
+  // conflated with a direct match or with the honest "not determinable"
+  // label (this case has real, if lower-confidence, signal).
+  describe('Swift symbol-usage fallback (#869 measure-gated spike)', () => {
+    it('reports the distinct inferred wording when tests is empty but symbol-usage tests exist', () => {
+      expect(
+        formatTests([], 'Source/Core/HTTPHeaders.swift', [], ['Tests/HTTPHeadersTests.swift']),
+      ).toBe(
+        'Test coverage inferred from symbol usage (not import-verified): Tests/HTTPHeadersTests.swift.',
+      );
+    });
+
+    it('truncates symbol-usage fallback tests with a (+N more) suffix', () => {
+      expect(
+        formatTests(
+          [],
+          'Source/Core/Request.swift',
+          [],
+          [
+            'Tests/RequestTests.swift',
+            'Tests/RequestRetryTests.swift',
+            'Tests/RequestEventMonitorTests.swift',
+          ],
+        ),
+      ).toBe(
+        'Test coverage inferred from symbol usage (not import-verified): Tests/RequestTests.swift, Tests/RequestRetryTests.swift (+1 more).',
+      );
+    });
+
+    it('still reports the honest "not determinable" label when symbol-usage tests are also empty', () => {
+      expect(formatTests([], 'Source/Core/Untested.swift', [], [])).toBe(
+        'Test coverage not determinable from imports (whole-module import).',
+      );
+    });
+
+    it('ignores symbol-usage tests entirely once a real (tier 1) association exists', () => {
+      expect(
+        formatTests(
+          ['Tests/SessionTests.swift'],
+          'Source/Core/Session.swift',
+          [],
+          ['Tests/should-not-appear.swift'],
+        ),
+      ).toBe('Test coverage: Tests/SessionTests.swift.');
+    });
+
+    it('does not apply the Swift fallback wording on a non-whole-module-import language', () => {
+      expect(formatTests([], 'src/user.ts', [], ['src/user-inferred.test.ts'])).toBe(
+        'No test coverage.',
+      );
+    });
+  });
 });
 
 describe('formatTestReminder', () => {
@@ -313,6 +367,43 @@ describe('formatTestReminder', () => {
       formatTestReminder('src/foo.ts', ['src/foo.test.ts'], ['should-not-appear.test.ts']),
     ).toBe(
       'Lien: you changed src/foo.ts — associated tests: src/foo.test.ts. Run them before completing.',
+    );
+  });
+
+  // #869 measure-gated spike, tier 4: mirrors formatTests's inferred wording,
+  // for the shorter post-edit reminder line. Consulted only when BOTH tests
+  // and package-level tests are empty.
+  it('reports the symbol-usage fallback wording when both tests and package-level tests are empty', () => {
+    expect(
+      formatTestReminder('Source/Core/HTTPHeaders.swift', [], [], ['Tests/HTTPHeadersTests.swift']),
+    ).toBe(
+      'Lien: you changed Source/Core/HTTPHeaders.swift — no import-verified test match, but symbol usage suggests: Tests/HTTPHeadersTests.swift (inferred, not import-verified). Consider running them before completing.',
+    );
+  });
+
+  it('prefers the package-level wording over symbol-usage when both are non-empty', () => {
+    expect(
+      formatTestReminder(
+        'internal/licenses/embed_linux_amd64.go',
+        [],
+        ['internal/licenses/licenses_test.go'],
+        ['should-not-appear.swift'],
+      ),
+    ).toBe(
+      'Lien: you changed internal/licenses/embed_linux_amd64.go — no dedicated test file, but its package has: internal/licenses/licenses_test.go. Consider running them before completing.',
+    );
+  });
+
+  it('prefers the direct-tests wording over symbol-usage when both are non-empty', () => {
+    expect(
+      formatTestReminder(
+        'Source/Core/Session.swift',
+        ['Tests/SessionTests.swift'],
+        [],
+        ['should-not-appear.swift'],
+      ),
+    ).toBe(
+      'Lien: you changed Source/Core/Session.swift — associated tests: Tests/SessionTests.swift. Run them before completing.',
     );
   });
 });
@@ -553,5 +644,72 @@ describe('annotateCommand — --tests-only (integration)', () => {
     expect(errSpy).not.toHaveBeenCalled();
     expect(logSpy).not.toHaveBeenCalled();
     expect(dependencyAnalyzerModule.findDependents).not.toHaveBeenCalled();
+  });
+
+  // #869 measure-gated spike, end-to-end: a Swift source file with no import
+  // signal at all (whole-module imports carry zero per-file information)
+  // still surfaces its non-import symbol-usage fallback through the real
+  // `scanTestAssociations` -> `computeSwiftSymbolUsageFallback` ->
+  // `findSwiftSymbolUsageAssociations` -> `formatTestReminder` pipeline.
+  //
+  // `resolvePaths` requires the target to exist on disk, so this creates (and
+  // cleans up) a throwaway `.swift` fixture under the real repo root rather
+  // than mocking the filesystem — the only integration-safe way to exercise
+  // this specific path with a Swift-detected extension.
+  it('prints the symbol-usage fallback reminder for a Swift file with no import signal', async () => {
+    const fs = await import('fs/promises');
+    const repoRoot = path.resolve(process.cwd(), '..', '..');
+    const fixtureDir = path.join(repoRoot, '__annotate_swift_fixture__');
+    const swiftTarget = '__annotate_swift_fixture__/HTTPHeaders.swift';
+    await fs.mkdir(fixtureDir, { recursive: true });
+    await fs.writeFile(path.join(fixtureDir, 'HTTPHeaders.swift'), 'class HTTPHeaders {}\n');
+
+    const declChunk = {
+      content: '',
+      metadata: {
+        file: swiftTarget,
+        startLine: 1,
+        endLine: 20,
+        type: 'class',
+        language: 'swift',
+        symbolName: 'HTTPHeaders',
+        symbolType: 'class',
+        signature: 'class HTTPHeaders',
+      },
+      score: 0,
+      relevance: 'not_relevant',
+    };
+    const swiftTestChunk = {
+      content: '',
+      metadata: {
+        file: 'Tests/HTTPHeadersTests.swift',
+        startLine: 1,
+        endLine: 10,
+        type: 'function',
+        language: 'swift',
+        symbolName: 'testHeaders',
+        symbolType: 'method',
+        callSites: [{ symbol: 'HTTPHeaders', line: 5 }],
+      },
+      score: 0,
+      relevance: 'not_relevant',
+    };
+    vi.mocked(coreModule.createVectorDB).mockResolvedValueOnce({
+      initialize: vi.fn().mockResolvedValue(undefined),
+      hasData: vi.fn().mockResolvedValue(true),
+      scanAll: vi.fn().mockResolvedValue([declChunk, swiftTestChunk]),
+    } as unknown as Awaited<ReturnType<typeof coreModule.createVectorDB>>);
+
+    try {
+      await annotateCommand(swiftTarget, { testsOnly: true });
+
+      expect(errSpy).not.toHaveBeenCalled();
+      expect(logSpy).toHaveBeenCalledTimes(1);
+      expect(logSpy.mock.calls[0][0]).toBe(
+        `Lien: you changed ${swiftTarget} — no import-verified test match, but symbol usage suggests: Tests/HTTPHeadersTests.swift (inferred, not import-verified). Consider running them before completing.`,
+      );
+    } finally {
+      await fs.rm(fixtureDir, { recursive: true, force: true });
+    }
   });
 });

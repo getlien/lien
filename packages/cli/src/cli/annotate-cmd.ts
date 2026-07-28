@@ -3,6 +3,7 @@ import path from 'path';
 import { createVectorDB, ComplexityAnalyzer } from '@liendev/core';
 import {
   findTestAssociationsFromChunks,
+  findSwiftSymbolUsageAssociations,
   computeBlastRadiusRisk,
   detectLanguage,
   hasWholeModuleImports,
@@ -218,12 +219,35 @@ function computeGoPackageLevelFallback(
   return findGoPackageLevelTests(normalize(filepath), buildGoTestDirIndex(candidates));
 }
 
+/**
+ * #869 measure-gated spike, tier 3 (lowest confidence), last resort: when
+ * `tests` (tier 1, import-based) is empty and `filepath`'s language sets
+ * `wholeModuleImports` (Swift), fall back to the non-import symbol-usage
+ * signal — see `findSwiftSymbolUsageAssociations`'s module doc for the full
+ * association rule and its measured Alamofire precision. Deliberately NOT
+ * merged into `tests`, mirroring `computeGoPackageLevelFallback`'s
+ * discipline: `lookupTestAssociations`'s caller (`verify-tests-cmd.ts`)
+ * reads only `.tests` and is unaffected; only the printed annotation/
+ * reminder consults this field.
+ */
+function computeSwiftSymbolUsageFallback(
+  tests: string[],
+  filepath: string,
+  allChunks: CodeChunk[],
+): string[] {
+  if (tests.length > 0) return [];
+  const language = detectLanguage(filepath);
+  if (!language || !hasWholeModuleImports(language)) return [];
+  return findSwiftSymbolUsageAssociations([filepath], allChunks).get(filepath) ?? [];
+}
+
 /** All per-file analysis `run()` needs to decide whether/how to print. */
 interface AnnotationData {
   allChunks: CodeChunk[];
   dependents: DependentInfo[];
   tests: string[];
   packageLevelTests: string[];
+  symbolUsageTests: string[];
   complexity: ComplexitySummary;
   headroom: ComplexityHeadroom;
   risk: BlastRadiusRisk;
@@ -259,6 +283,7 @@ async function computeAnnotationData(
 
   const tests = findTestAssociationsFromChunks([filepath], allChunks, rootDir).get(filepath) ?? [];
   const packageLevelTests = computeGoPackageLevelFallback(tests, filepath, allChunks, rootDir);
+  const symbolUsageTests = computeSwiftSymbolUsageFallback(tests, filepath, allChunks);
   const complexity = computeComplexitySummary(allChunks, filepath);
   // Plan-time nudge (mirrors get_files_context's complexityHeadroom): reuses
   // the exact same computation the MCP tool uses, so a "near budget" verdict
@@ -293,6 +318,7 @@ async function computeAnnotationData(
     dependents: result.dependents,
     tests,
     packageLevelTests,
+    symbolUsageTests,
     complexity,
     headroom,
     risk,
@@ -362,6 +388,7 @@ async function run(file: string, options?: AnnotateOptions): Promise<void> {
       data.dependents,
       data.tests,
       data.packageLevelTests,
+      data.symbolUsageTests,
       data.complexity,
       data.risk,
       data.headroom,
@@ -384,6 +411,18 @@ export interface FileTestAssociations {
    * this field. See `computeGoPackageLevelFallback`.
    */
   packageLevelTests: string[];
+  /**
+   * #869 measure-gated spike, tier 3 (lowest confidence), last resort:
+   * populated only when `tests` is empty and the file's language sets
+   * `wholeModuleImports` (Swift) — see `findSwiftSymbolUsageAssociations`'s
+   * module doc for the association rule. Deliberately NOT part of `tests` —
+   * same discipline as `packageLevelTests` above: `lookupTestAssociations`'s
+   * caller (`verify-tests-cmd.ts`'s ledger/scope-matching) reads only
+   * `.tests` and is unaffected; only the printed reminder
+   * (`formatTestReminder`) consults this field. See
+   * `computeSwiftSymbolUsageFallback`.
+   */
+  symbolUsageTests: string[];
   /**
    * #894: true when `rootDir`'s index has never been built (`hasData()` is
    * false for both standalone and worktree-overlay backends — see
@@ -421,13 +460,21 @@ async function scanTestAssociations(paths: ResolvedPaths): Promise<FileTestAssoc
     // signal the MCP server's auto-index gate uses, and is worktree/overlay-
     // aware (true when either the base or the overlay has rows).
     if (!(await vectorDB.hasData())) {
-      return { filepath, rootDir, tests: [], packageLevelTests: [], indexMissing: true };
+      return {
+        filepath,
+        rootDir,
+        tests: [],
+        packageLevelTests: [],
+        symbolUsageTests: [],
+        indexMissing: true,
+      };
     }
     const allChunks = adaptChunkImports(await vectorDB.scanAll());
     const tests =
       findTestAssociationsFromChunks([filepath], allChunks, rootDir).get(filepath) ?? [];
     const packageLevelTests = computeGoPackageLevelFallback(tests, filepath, allChunks, rootDir);
-    return { filepath, rootDir, tests, packageLevelTests, indexMissing: false };
+    const symbolUsageTests = computeSwiftSymbolUsageFallback(tests, filepath, allChunks);
+    return { filepath, rootDir, tests, packageLevelTests, symbolUsageTests, indexMissing: false };
   } finally {
     if (needsChdir) process.chdir(originalCwd);
   }
@@ -451,14 +498,14 @@ export async function lookupTestAssociations(file: string): Promise<FileTestAsso
  * no associated tests (the signal for the hook to stay silent).
  */
 async function runTestsOnly(paths: ResolvedPaths): Promise<void> {
-  const { filepath, rootDir, tests, packageLevelTests, indexMissing } =
+  const { filepath, rootDir, tests, packageLevelTests, symbolUsageTests, indexMissing } =
     await scanTestAssociations(paths);
   if (indexMissing) {
     console.log(formatNoIndexWarning(rootDir));
     return;
   }
-  if (tests.length === 0 && packageLevelTests.length === 0) return;
-  console.log(formatTestReminder(filepath, tests, packageLevelTests));
+  if (tests.length === 0 && packageLevelTests.length === 0 && symbolUsageTests.length === 0) return;
+  console.log(formatTestReminder(filepath, tests, packageLevelTests, symbolUsageTests));
 }
 
 /**
@@ -485,16 +532,23 @@ export function formatNoIndexWarning(rootDir: string): string {
  *
  * `packageLevelTests` (#902 tier 2) is consulted only when `tests` is empty
  * — the same honest, distinctly-worded fallback `formatTests` uses for the
- * full annotation, applied to the shorter reminder line.
+ * full annotation, applied to the shorter reminder line. `symbolUsageTests`
+ * (#869 tier 3) is consulted only when BOTH `tests` and `packageLevelTests`
+ * are empty — the lowest-confidence fallback, checked last.
  */
 export function formatTestReminder(
   filepath: string,
   tests: string[],
   packageLevelTests: string[] = [],
+  symbolUsageTests: string[] = [],
 ): string {
   if (tests.length === 0 && packageLevelTests.length > 0) {
     const shown = formatTruncatedList(packageLevelTests);
     return `Lien: you changed ${filepath} — no dedicated test file, but its package has: ${shown}. Consider running them before completing.`;
+  }
+  if (tests.length === 0 && packageLevelTests.length === 0 && symbolUsageTests.length > 0) {
+    const shown = formatTruncatedList(symbolUsageTests);
+    return `Lien: you changed ${filepath} — no import-verified test match, but symbol usage suggests: ${shown} (inferred, not import-verified). Consider running them before completing.`;
   }
   const shown = formatTruncatedList(tests);
   return `Lien: you changed ${filepath} — associated tests: ${shown}. Run them before completing.`;
@@ -527,6 +581,7 @@ function emitAnnotation(
   dependents: DependentInfo[],
   tests: string[],
   packageLevelTests: string[],
+  symbolUsageTests: string[],
   complexity: ComplexitySummary,
   risk: BlastRadiusRisk,
   headroom: ComplexityHeadroom,
@@ -535,7 +590,7 @@ function emitAnnotation(
   if (dependents.length > 0) {
     lines.push(`  • ${formatDependents(dependents, risk.level, risk.reasoning)}`);
   }
-  lines.push(`  • ${formatTests(tests, filepath, packageLevelTests)}`);
+  lines.push(`  • ${formatTests(tests, filepath, packageLevelTests, symbolUsageTests)}`);
   if (complexity.warningCount > 0) {
     lines.push(`  • ${formatComplexity(complexity)}`);
   }
@@ -626,15 +681,28 @@ export function formatDependents(
  * the same directory, but none basename-pairs with this specific file. Only
  * consulted when `tests` is empty; never merged into `tests` itself (see
  * `computeGoPackageLevelFallback`).
+ *
+ * `symbolUsageTests` (#869 measure-gated spike, a FOURTH tier — lowest
+ * confidence of all) is consulted only for a `wholeModuleImports` language
+ * (Swift) whose `tests` came back empty: a non-import, symbol-usage-derived
+ * signal (see `findSwiftSymbolUsageAssociations`'s module doc), distinctly
+ * worded as "inferred" rather than either a confident match or the honest
+ * "not determinable" label — real signal, but not import-verified, so it
+ * gets its own label rather than silently upgrading to either of the other
+ * two.
  */
 export function formatTests(
   tests: string[],
   filepath?: string,
   packageLevelTests: string[] = [],
+  symbolUsageTests: string[] = [],
 ): string {
   if (tests.length === 0) {
     const language = filepath ? detectLanguage(filepath) : null;
     if (language && hasWholeModuleImports(language)) {
+      if (symbolUsageTests.length > 0) {
+        return `Test coverage inferred from symbol usage (not import-verified): ${formatTruncatedList(symbolUsageTests)}.`;
+      }
       return 'Test coverage not determinable from imports (whole-module import).';
     }
     if (language && hasEnclosingNamespaceAccess(language)) {
