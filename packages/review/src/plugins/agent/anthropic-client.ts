@@ -26,6 +26,8 @@ import {
   extractFindingsFromText,
   computeWrapUpReason,
   logWrapUpReason,
+  lastTurnFindingsText,
+  buildSlimRetryPrompt,
 } from './agent-client-shared.js';
 
 /** Extract the assistant's text content from an Anthropic response for trace. */
@@ -312,8 +314,7 @@ export class AnthropicAgentClient {
     if (!parsed.summary && lastResponse) {
       const remainingBudget = this.maxTokenBudget - (totalInputTokens + totalOutputTokens);
       const retry = await this.runSummaryRetry(
-        messages,
-        lastResponse,
+        lastTurnFindingsText(lastLoopTurn),
         turn,
         tools,
         remainingBudget,
@@ -447,6 +448,9 @@ export class AnthropicAgentClient {
         finishReason: response.stop_reason ?? undefined,
         inputTokens,
         outputTokens,
+        // Every call site of this method is a summary-retry attempt (issue
+        // #829's slim-context fix, see `runSummaryRetry`) — always true here.
+        slimRetry: true,
       };
       const parsed = extractResponse(response.content, this.logger);
       return { parsed, traceTurn, inputTokens, outputTokens };
@@ -473,10 +477,20 @@ export class AnthropicAgentClient {
    * useful move left is asking again, once, before surfacing `incomplete`
    * (never a silent 0-findings-as-if-clean result — see `run()`'s
    * `incomplete = !parsed.summary` computation).
+   *
+   * Builds a FRESH, minimal message list — just the last investigative
+   * turn's own findings text plus the retry instruction (issue #829's
+   * truncation remainder) — instead of appending onto the loop's full
+   * accumulated `messages`. The pre-fix version also had to satisfy any
+   * PENDING tool_use blocks from the last response with dummy tool_result
+   * entries before the API would accept the follow-up turn
+   * (`appendRetryPrompt`); a fresh message list has no pending tool_use to
+   * satisfy, so that bookkeeping is gone along with the accumulated
+   * history. See `buildSlimRetryPrompt`'s doc comment
+   * (`agent-client-shared.ts`) for the full rationale.
    */
   private async runSummaryRetry(
-    messages: Anthropic.Messages.MessageParam[],
-    lastResponse: Anthropic.Messages.Message,
+    findingsText: string,
     turn: number,
     tools: Anthropic.Messages.Tool[],
     remainingBudget: number,
@@ -486,11 +500,20 @@ export class AnthropicAgentClient {
     inputTokens: number;
     outputTokens: number;
   } | null> {
-    this.logger.info('[agent] No JSON output — requesting summary...');
+    this.logger.info(
+      "[agent] No JSON output — requesting summary via a slim retry (last turn's own analysis only, no tool-calling history)",
+    );
     await new Promise(resolve => setTimeout(resolve, 3_000));
-    appendRetryPrompt(messages, lastResponse);
+    const slimMessages: Anthropic.Messages.MessageParam[] = [
+      { role: 'user', content: buildSlimRetryPrompt(findingsText, RETRY_USER_PROMPT) },
+    ];
 
-    const first = await this.attemptVerdictCompletion(messages, tools, remainingBudget, turn + 1);
+    const first = await this.attemptVerdictCompletion(
+      slimMessages,
+      tools,
+      remainingBudget,
+      turn + 1,
+    );
     if (!first) return null;
     if (first.parsed.summary || first.parsed.findings.length > 0) {
       return { ...first, traceTurns: [first.traceTurn] };
@@ -499,7 +522,12 @@ export class AnthropicAgentClient {
     this.logger.warning(
       '[agent] Retry verdict was unparseable — attempting one more bounded retry',
     );
-    const second = await this.attemptVerdictCompletion(messages, tools, remainingBudget, turn + 2);
+    const second = await this.attemptVerdictCompletion(
+      slimMessages,
+      tools,
+      remainingBudget,
+      turn + 2,
+    );
     if (!second) return { ...first, traceTurns: [first.traceTurn] };
     return {
       parsed: second.parsed,
@@ -542,29 +570,6 @@ async function executeOneToolUse(
       content: truncate(result, TOOL_RESULT_MAX_CHARS),
     },
   };
-}
-
-/**
- * Append the dummy tool_results + retry instruction the Anthropic API
- * needs to accept the truncated conversation. If the last response had
- * pending tool_use blocks, we have to satisfy them before the user
- * turn or the API rejects the request.
- */
-function appendRetryPrompt(
-  messages: Anthropic.Messages.MessageParam[],
-  lastResponse: Anthropic.Messages.Message,
-): void {
-  messages.push({ role: 'assistant', content: lastResponse.content });
-  const pendingToolUse = lastResponse.content.filter(
-    (b): b is Anthropic.Messages.ToolUseBlock => b.type === 'tool_use',
-  );
-  const retryContent: Anthropic.Messages.ContentBlockParam[] = pendingToolUse.map(b => ({
-    type: 'tool_result' as const,
-    tool_use_id: b.id,
-    content: '[Budget exceeded — tool not executed]',
-  }));
-  retryContent.push({ type: 'text' as const, text: RETRY_USER_PROMPT });
-  messages.push({ role: 'user', content: retryContent });
 }
 
 const RETRY_SYSTEM_PROMPT =
