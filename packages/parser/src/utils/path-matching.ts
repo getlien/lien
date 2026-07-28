@@ -668,6 +668,18 @@ export function getCanonicalPath(filepath: string, workspaceRoot: string): strin
  * - latest/config.ts (contains "/test/" but isn't a test)
  * - mytest.ts (no `_` boundary before "test")
  *
+ * The directory-segment check is case-insensitive (#925): a capitalized
+ * `Tests/` directory is mainstream outside the JS/TS/Ruby/Go ecosystems that
+ * motivated the original lowercase-only pattern -- symfony/console (and the
+ * wider Symfony ecosystem) uses `Tests/` as its one and only test directory,
+ * with no lowercase `tests/` anywhere in the repo, so a case-sensitive check
+ * excluded literally every PHP test file in it from test-chunk scanning
+ * before import-matching ever ran. This is safe to broaden for every
+ * language: the check still requires an EXACT path segment (bounded by `/`
+ * or the string start/end on both sides), so `Latest/`, `Contest/`, and
+ * `Testing/` still correctly fail regardless of case -- only a segment that
+ * IS exactly `test`/`tests`/`spec`/`specs`/`__tests__` (any casing) matches.
+ *
  * Swift uses different conventions (XCTest `FooTests.swift` files and a
  * Swift Package Manager `Tests/` directory). Those checks are scoped to
  * `.swift` paths so behavior for other languages is unchanged.
@@ -687,7 +699,7 @@ export function isTestFile(filepath: string): boolean {
   return (
     /\.(test|spec)\.[^/]+$/.test(filepath) ||
     /_(test|spec)\.[^/]+$/.test(filepath) ||
-    /(^|[/\\])(test|tests|spec|specs|__tests__)[/\\]/.test(filepath) ||
+    /(^|[/\\])(test|tests|spec|specs|__tests__)[/\\]/i.test(filepath) ||
     (/\.swift$/.test(filepath) &&
       (/Tests?\.swift$/.test(filepath) || /(^|[/\\])Tests?[/\\]/.test(filepath))) ||
     (/\.cs$/.test(filepath) &&
