@@ -394,12 +394,16 @@ const JSON_STRING_LITERAL = /"(?:\\.|[^"\\])*"/g;
  * scan (the regression test below pins the 26th-position shape).
  *
  * CORRECTNESS OVER THROUGHPUT (adversarial review of the first cut of this
- * fix): an earlier version of this change hoisted `maskStringLiterals` to
- * run ONCE over the whole text, then had every candidate object's scan share
- * that one masked copy — genuinely O(text length) instead of the per-object
- * O(objects × text length) this comment used to justify a stingy 25. That
- * hoist was NOT behavior-preserving: masking the whole text in one pass lets
- * an odd number of stray/unescaped double-quote characters ANYWHERE earlier
+ * fix — HISTORICAL paragraph below: the design it describes was reverted
+ * and is NOT what the code in this file does today; see
+ * `nextBalancedObjectRange`'s own doc comment for the current, correct
+ * behavior): an earlier, since-reverted version of this change hoisted
+ * `maskStringLiterals` so every candidate object's scan shared ONE
+ * pre-computed masked copy of the whole text — genuinely O(text length)
+ * instead of the per-object O(objects × text length) this comment used to
+ * justify a stingy 25. That hoist was NOT behavior-preserving: sharing that
+ * whole-text mask across every candidate lets an odd number of
+ * stray/unescaped double-quote characters ANYWHERE earlier
  * in the text shift the regex's global quote-pairing, potentially masking
  * over the real verdict's own opening brace and losing it entirely — proven
  * by the reviewer on both a synthetic stray-quote-in-prose case and the
@@ -440,9 +444,10 @@ export const MAX_BALANCED_OBJECTS_SCANNED = 200;
  * char-by-char — braces inside a string literal (e.g. prose like "{user,
  * token}") can't skew the depth count, and offsets into the result line up
  * 1:1 with `text`. Called on each candidate's own remaining SUFFIX (see
- * `nextBalancedObjectRange`), never on the whole text at once — see
- * `MAX_BALANCED_OBJECTS_SCANNED`'s doc comment for why a whole-text mask is
- * NOT safe here (stray-quote parity can shift and hide a real verdict).
+ * `nextBalancedObjectRange`) — every candidate gets its OWN fresh mask; the
+ * whole text is never masked as a single shared unit — see
+ * `MAX_BALANCED_OBJECTS_SCANNED`'s doc comment for why that would be unsafe
+ * (stray-quote parity can shift and hide a real verdict).
  */
 function maskStringLiterals(text: string): string {
   return text.replace(JSON_STRING_LITERAL, m => '"'.repeat(m.length));
@@ -457,14 +462,16 @@ function maskStringLiterals(text: string): string {
  *
  * Re-masks `text.slice(start)` FRESH on every call, rather than sharing one
  * whole-text masked copy across every candidate — deliberately, not an
- * oversight. Masking the whole text once lets an odd number of stray,
+ * oversight (an earlier, since-reverted cut of this fix shared one mask
+ * across the whole text; see `MAX_BALANCED_OBJECTS_SCANNED`'s doc comment
+ * for that history and the adversarial-review proof of why it was wrong).
+ * Sharing a mask across the whole text lets an odd number of stray,
  * unescaped double-quote characters anywhere BEFORE `start` shift the global
  * quote-pairing the regex produces, which can mask straight over THIS
  * candidate's own opening `{` (if it lands between two quotes the regex
- * wrongly paired as a string literal) and make a real verdict invisible —
- * see `MAX_BALANCED_OBJECTS_SCANNED`'s doc comment for the adversarial-review
- * proof. Re-anchoring the mask at each candidate's own `{` makes recovering
- * THAT object immune to whatever quote parity came before it, at the cost of
+ * wrongly paired as a string literal) and make a real verdict invisible.
+ * Re-anchoring the mask at each candidate's own `{` makes recovering THAT
+ * object immune to whatever quote parity came before it, at the cost of
  * re-scanning the remaining suffix per candidate (bounded by
  * `MAX_BALANCED_OBJECTS_SCANNED`). Pulled out of `allBalancedJsonObjects` so
  * that function's own loop stays under the complexity budget.
