@@ -56,6 +56,11 @@ const MODEL = (args && args.model) || 'sonnet';
 const AUDIT_MODEL = (args && args.auditModel) || MODEL;
 
 const KIT = 'scripts/experiments/dogfood-oss';
+// Where Phase 0 cloned the corpus. Outside the Lien tree on purpose: cloning under
+// the checkout would put Lien's own tool-mandating CLAUDE.md on every clone's
+// ancestor path, which is the exact contamination C1 exists to prevent.
+const CORPUS_ROOT =
+  (args && args.corpusRoot) || '/Users/alfhenderson/.claude/jobs/460173c9/tmp/corpus';
 const PROTOCOL = 'docs/development/dogfood-oss-corpus-protocol.md';
 
 // Corpus per protocol §2. `known` repos have established ground truth from the
@@ -234,6 +239,37 @@ Report findings, not reassurance. Every finding needs a VERBATIM repro (command 
 output). "Seems to work" is not a result. If you could not reach something, say so
 explicitly in \`coverage\` — silent partial coverage reads as full coverage and is
 the failure mode this protocol most wants to avoid.
+
+## Phase 0 is DONE — use what it built, do not redo it
+
+All nine repos are cloned and indexed. Do NOT re-clone or re-index.
+
+  Corpus root: ${CORPUS_ROOT}
+  Manifest:    ${KIT}/corpus-manifest.json  (per-repo dir, pinned SHA, M6 metrics)
+  CLI:         \`node packages/cli/dist/index.js <cmd>\` — \`lien\` is NOT on PATH here.
+
+**To call an MCP tool, use the provided stdio client** — do not call handler
+functions directly (that skips the schema/envelope layer most likely to be wrong)
+and do not use this session's own MCP server (it is bound to the Lien repo, which
+C1 forbids as a measurement target):
+
+  node ${KIT}/mcp-call.mjs <repoDir> <toolName> '<jsonArgs>'
+  node ${KIT}/mcp-call.mjs <repoDir> --list
+
+It prints \`{ok, ms, tool, args, result|error}\` and refuses any repoDir inside the
+Lien checkout. A tool-level error exits 0 with \`ok:false\` — that is a successful
+measurement, not a harness fault.
+
+## Already-known findings — do not re-report these as new
+
+Phase 0 established these. Extend or contradict them with evidence if warranted,
+but they are already filed and being fixed:
+- Test-association coverage is near-zero on PHP (symfony/console 0%) and Swift
+  (Alamofire 0%), and low on Java (retrofit 8%), while TS 88% / Go 64% / Rust 60% /
+  C# 52% are healthy. Fix agents are in flight.
+- \`get_files_context\` returns \`ok:true\` with empty \`chunks\`/\`testAssociations\`
+  for a path that is not in the index, with no error — a silent-empty trust bug. A
+  fix agent is in flight.
 `;
 
 // ─────────────────────────────────────────────────────────────────────────────
