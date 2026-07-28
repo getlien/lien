@@ -366,11 +366,16 @@ describe('annotateCommand (integration)', () => {
     expect(errSpy).not.toHaveBeenCalled();
   });
 
-  it('silently exits when the index is missing (tmpHome has none)', async () => {
+  // #894: this used to be silent (an empty-but-plausible "no dependents/no
+  // test coverage" annotation, or nothing at all) — now it's a loud,
+  // one-line warning via stdout (never stderr — the read-hook pipes lien
+  // annotate's stderr to /dev/null, so stdout is the only channel that
+  // reaches the agent).
+  it('warns loudly instead of silently analyzing an unindexed root (tmpHome has no index)', async () => {
     await annotateCommand('packages/cli/src/cli/index.ts');
-    // VectorDB init against an empty tmp home should fail or return empty;
-    // either way, the command must not throw or print errors.
     expect(errSpy).not.toHaveBeenCalled();
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    expect(logSpy.mock.calls[0][0]).toContain('Lien: no index found at the resolved project root');
   });
 });
 
@@ -412,6 +417,7 @@ describe('annotateCommand — plan-time nudge (integration)', () => {
     };
     vi.mocked(coreModule.createVectorDB).mockResolvedValueOnce({
       initialize: vi.fn().mockResolvedValue(undefined),
+      hasData: vi.fn().mockResolvedValue(true),
       scanAll: vi.fn().mockResolvedValue([overBudgetChunk]),
     } as unknown as Awaited<ReturnType<typeof coreModule.createVectorDB>>);
 
@@ -446,6 +452,7 @@ describe('annotateCommand — plan-time nudge (integration)', () => {
     };
     vi.mocked(coreModule.createVectorDB).mockResolvedValueOnce({
       initialize: vi.fn().mockResolvedValue(undefined),
+      hasData: vi.fn().mockResolvedValue(true),
       scanAll: vi.fn().mockResolvedValue([quietChunk]),
     } as unknown as Awaited<ReturnType<typeof coreModule.createVectorDB>>);
 
@@ -504,6 +511,7 @@ describe('annotateCommand — --tests-only (integration)', () => {
     };
     vi.mocked(coreModule.createVectorDB).mockResolvedValueOnce({
       initialize: vi.fn().mockResolvedValue(undefined),
+      hasData: vi.fn().mockResolvedValue(true),
       scanAll: vi.fn().mockResolvedValue([testChunk]),
     } as unknown as Awaited<ReturnType<typeof coreModule.createVectorDB>>);
 
@@ -536,6 +544,7 @@ describe('annotateCommand — --tests-only (integration)', () => {
     };
     vi.mocked(coreModule.createVectorDB).mockResolvedValueOnce({
       initialize: vi.fn().mockResolvedValue(undefined),
+      hasData: vi.fn().mockResolvedValue(true),
       scanAll: vi.fn().mockResolvedValue([unrelatedChunk]),
     } as unknown as Awaited<ReturnType<typeof coreModule.createVectorDB>>);
 

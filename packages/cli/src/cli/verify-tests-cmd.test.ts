@@ -155,6 +155,7 @@ describe('verify-tests-cmd — integration', () => {
     it('records the edit and prints the byte-identical reminder line when the file has associated tests', async () => {
       vi.mocked(coreModule.createVectorDB).mockResolvedValueOnce({
         initialize: vi.fn().mockResolvedValue(undefined),
+        hasData: vi.fn().mockResolvedValue(true),
         scanAll: vi.fn().mockResolvedValue([testChunkImporting(target)]),
       } as unknown as Awaited<ReturnType<typeof coreModule.createVectorDB>>);
 
@@ -180,6 +181,7 @@ describe('verify-tests-cmd — integration', () => {
     it('prints the JSON shape in --format json', async () => {
       vi.mocked(coreModule.createVectorDB).mockResolvedValueOnce({
         initialize: vi.fn().mockResolvedValue(undefined),
+        hasData: vi.fn().mockResolvedValue(true),
         scanAll: vi.fn().mockResolvedValue([testChunkImporting(target)]),
       } as unknown as Awaited<ReturnType<typeof coreModule.createVectorDB>>);
 
@@ -192,6 +194,7 @@ describe('verify-tests-cmd — integration', () => {
     it('prints nothing and records nothing when the file has no associated tests', async () => {
       vi.mocked(coreModule.createVectorDB).mockResolvedValueOnce({
         initialize: vi.fn().mockResolvedValue(undefined),
+        hasData: vi.fn().mockResolvedValue(true),
         scanAll: vi.fn().mockResolvedValue([testChunkImporting('some/other/file.ts')]),
       } as unknown as Awaited<ReturnType<typeof coreModule.createVectorDB>>);
 
