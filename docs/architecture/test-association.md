@@ -86,6 +86,26 @@ Unlike the whole-module/enclosing-namespace gaps above, this one needs no heuris
 
 Both tiers are structurally bounded to the same directory (Go's own compiler guarantee) — the worst either can produce is "attributed to the wrong file in the same package," never the cross-directory textual collisions the bare-identifier guard above protects against.
 
+## Swift symbol-usage association: a measure-gated non-import signal
+
+Swift's whole-module-import gap (above) is a genuine structural blind spot — but the SQLite chunk store already carries a DIFFERENT signal that doesn't depend on imports at all: a test chunk's own `callSites` (the AST-extracted symbols it references) versus which single source file uniquely DEFINES that symbol. Measured against a real Alamofire/Alamofire clone ([#869](https://github.com/getlien/lien/issues/869)), this recovers real, spot-checked coverage for exactly the files the whole-module gap above leaves dark — including the named cases that motivated the investigation (`Request.swift`, `HTTPHeaders.swift`).
+
+`packages/parser/src/swift-symbol-usage-signals.ts` implements the rule: test `T` associates with source `S` iff `T`'s `callSites` reference a symbol `X` such that:
+
+1. `X` passes **both** the shipped `isUnambiguousIdentifierShape` (docRefs' gate) **and** this module's own, stricter `isMultiSegmentIdentifier` — at least 2 camelCase/PascalCase/underscore segments. The shipped gate alone is insufficient here: its case-transition check is satisfied by the first two characters of ANY Capitalized word (`Ge` in `Get`, `Se` in `Session`), so it passes `Get`/`Run`/`Map`/`Session`/`Client` just as readily as `TypeMap`/`HTTPHeaders` — fine for its original prose-vs-code job, useless as a collision-resistance gate. `isMultiSegmentIdentifier` is a separate, additional helper; the shipped gate itself is untouched.
+2. `X` is defined in **exactly one** non-test Swift file project-wide.
+3. That defining file is not `T` itself.
+
+The definition side excludes `extension <ForeignType> { ... }` declarations from counting as a definition, unless the type also has a real (non-extension) declaration somewhere in the project. This is the one false-positive shape measured on Alamofire: `extractSwiftClasses` treats `extension HTTPURLResponse { ... }` as *defining* `HTTPURLResponse`, so every test that happens to reference that Foundation type would otherwise falsely hub onto the extending file. Because a Foundation/stdlib type is never actually declared inside the project, "every declaration of X in this corpus is an extension" already IS the foreign-type test — no hardcoded list of framework type names required.
+
+This is a strictly ADDITIVE, lower-confidence THIRD tier, never merged into the confident import-based association above (or Go's tier 2) — mirroring that tier's discipline exactly:
+
+```text
+Test coverage inferred from symbol usage (not import-verified): Tests/HTTPHeadersTests.swift.
+```
+
+for any Swift file whose `tests` (tier 1) came back empty but the symbol-usage signal found a hit; falls through to the existing `Test coverage not determinable from imports (whole-module import).` label when it doesn't. Scoped to `lien annotate`'s printed text only (`computeSwiftSymbolUsageFallback` in `annotate-cmd.ts`) — deliberately **not** threaded into `get_files_context`'s `testAssociations`, `@liendev/review`'s test-coverage gap detection, or `verify-tests`'s ledger/scope-matching, the same conservative call as Go's tier 2.
+
 ## Java static-member imports: a derived second candidate
 
 `import static pkg.Class.member;` (a specific, non-wildcard static-member import) extracts a path one segment deeper than the file that defines it — `com.example.Utils.method`, when the file is `com/example/Utils.java` — so it could never match via `matchesFile` on its own. `JavaImportExtractor.extractImportPaths` (`packages/parser/src/ast/languages/java.ts`) now returns the class's derived FQN (the path with its trailing segment dropped) as a second candidate alongside the unchanged original. This is safe rather than a guess: Java requires every top-level type to live in a file named after it, and nested types/members always live inside their enclosing top-level type's file, so dropping the trailing segment always yields that type's correct FQN — whether the segment names a static member or a nested class (`import static a.B.Inner;`, correct by the same rule). A static import reaching two-plus levels into nested classes under-matches silently, the same as before this fix, rather than mismatching. Wildcard static imports and ordinary (non-static) imports are unaffected. Verified on a real clone of google/gson: `JsonReaderTest.java`'s static imports of `JsonToken.STRING`/`NUMBER`/etc. now associate it with `JsonToken.java`, with zero other test-association changes across the repo's 264 Java files.
@@ -107,8 +127,8 @@ These are structural: no import-level signal exists for the case, so the honest 
 
 ## Where associations surface
 
-- `get_files_context`'s `testAssociations` field (MCP tool) — includes Go tier 1 (basename pairing), not tier 2 (package-level fallback)
-- `lien annotate` and the post-edit test-association reminder hook (`lien annotate --tests-only`, and its ledger-recording sibling `lien verify-tests note-edit`) — the only surface that also shows Go's tier 2 fallback, distinctly labeled; `verify-tests`'s ledger/scope-matching itself still only sees tier 1
+- `get_files_context`'s `testAssociations` field (MCP tool) — includes Go tier 1 (basename pairing), not tier 2 (package-level fallback) or Swift's symbol-usage signal
+- `lien annotate` and the post-edit test-association reminder hook (`lien annotate --tests-only`, and its ledger-recording sibling `lien verify-tests note-edit`) — the only surface that also shows Go's tier 2 fallback and Swift's symbol-usage signal, both distinctly labeled; `verify-tests`'s ledger/scope-matching itself still only sees tier 1
 - `@liendev/review`'s blast-radius rendering (test coverage context for a changed file) — tier 1 only, same reasoning as `get_files_context`
 
 ## Language support
@@ -124,7 +144,7 @@ These are structural: no import-level signal exists for the case, so the honest 
 | Java | generic patterns | yes (incl. static-member imports, derived class-path candidate) | none |
 | Kotlin | generic patterns | yes | none (see known gaps for top-level function/property imports) |
 | Rust | generic patterns | yes | none needed |
-| Swift | `Tests`/`Test` convention | not determinable (whole-module imports) | none |
+| Swift | `Tests`/`Test` convention | not determinable (whole-module imports); measure-gated symbol-usage fallback in `lien annotate` only (see above) | none |
 
 ## History
 

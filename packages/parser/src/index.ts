@@ -142,6 +142,13 @@ export {
 } from './go-same-directory-tests.js';
 export type { GoTestCandidate, GoTestDirIndex } from './go-same-directory-tests.js';
 
+// #869 measure-gated spike: Swift's non-import symbol-usage test-association
+// signal (see swift-symbol-usage-signals.ts's module doc).
+export {
+  findSwiftSymbolUsageAssociations,
+  isMultiSegmentIdentifier,
+} from './swift-symbol-usage-signals.js';
+
 // =============================================================================
 // GRAPH TRAVERSAL (generic bounded BFS — domain graphs build on this)
 // =============================================================================
