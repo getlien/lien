@@ -207,10 +207,13 @@ For each of the ten hooks, feed the **real stdin shape** Claude Code sends and a
   for the annotators, `updatedInput` for `augment-explore-task.sh`, and
   `{"decision":"block","reason":…}` for `recap-stop.sh`;
 - fail-open on garbage, missing fields, empty stdin, and absent `jq`;
-- each env kill switch is honored (`LIEN_ANNOTATE_GUARD`, `LIEN_ANNOTATE_MIN_RISK`,
-  `LIEN_ANNOTATE_TTL_MIN`, `LIEN_DELTA_HOOK`, `LIEN_TEST_REMINDER`,
-  `LIEN_TEST_VERIFY`, `LIEN_BLAST_HOOK`, `LIEN_RECAP`, `LIEN_EXPLORE_INJECT`,
-  `LIEN_SUBAGENT_NUDGE`, `LIEN_NUDGE_EVENTS`, `LIEN_STRUCTURAL_RANKING`);
+- each of the eleven **hook** env kill switches is honored (`LIEN_ANNOTATE_GUARD`,
+  `LIEN_ANNOTATE_MIN_RISK`, `LIEN_ANNOTATE_TTL_MIN`, `LIEN_DELTA_HOOK`,
+  `LIEN_TEST_REMINDER`, `LIEN_TEST_VERIFY`, `LIEN_BLAST_HOOK`, `LIEN_RECAP`,
+  `LIEN_EXPLORE_INJECT`, `LIEN_SUBAGENT_NUDGE`, `LIEN_NUDGE_EVENTS`). The twelfth
+  switch, `LIEN_STRUCTURAL_RANKING`, gates `search_code`'s ranking rather than any
+  hook, so it is asserted in **Phase 1** as part of that tool's edge matrix — not
+  here;
 - the habituation guard suppresses the second annotation of the same file and
   respects the risk floor;
 - a `session_id` containing path-traversal characters is rejected;
