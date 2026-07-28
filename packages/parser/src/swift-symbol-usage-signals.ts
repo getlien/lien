@@ -22,12 +22,33 @@
  *      `buildSwiftDefinitionMap`, which also excludes `extension <ForeignType>`
  *      declarations from counting as a definition (see its doc for why).
  *   3. S !== T.
+ *   4. The (S, T) EDGE has at least one driving symbol that also passes
+ *      `isTypeShapedIdentifier` (see its doc) — a purely method-driven edge
+ *      is demoted even if every individual symbol independently passed
+ *      gates 1-3.
  *
- * Measured on a real Alamofire/Alamofire clone (#869 design comment): 52
- * edges, ~88% precision, ~96% after the extension-exclusion filter — all 6
- * residual false positives were extensions of Foundation types
- * (`HTTPURLResponse`, `URLComponents`, `OperationQueue`, `NSNumber`,
- * `JSONDecoder`).
+ * Gate 4 is a post-ship hardening, added after adversarial re-verification
+ * found that gates 1-3 alone are insufficient: "unique in this project's own
+ * indexed files" does not imply "this call resolves to that declaration",
+ * because Swift lets a bare method name collide with something the indexer
+ * never sees at all — a stdlib protocol witness, a stdlib type's own
+ * extension overload, or an external package's free function of the same
+ * name. Confirmed real false positives across Alamofire/vapor/swift-
+ * composable-architecture: `singleValueContainer`, `asURL`, `addTask`,
+ * `flatMap`, `withDependencies` — every one a lowercase-only edge with no
+ * type-shaped co-driver (see `isTypeShapedIdentifier`'s doc, and the
+ * regression tests in `swift-symbol-usage-signals.test.ts`).
+ *
+ * Measured on real clones (see #869's PR thread for the full tables,
+ * including the pre-hardening numbers and the confirmed false positives
+ * above): gate 4 brings measured precision to 100% on all three calibration
+ * repos, at a substantial recall cost — roughly half of the pre-hardening
+ * edges are lost project-wide, including EVERY edge to Alamofire's own
+ * `Request.swift` (the file that originally motivated this investigation):
+ * `Request` itself is single-segment and can never serve as a type-shaped
+ * driver, and none of its distinctively-named methods (`prepareForRetry`,
+ * `cURLDescription`, ...) have a type-shaped symbol alongside them in the
+ * tests that call them.
  *
  * This is a strictly ADDITIVE, lower-confidence THIRD tier — never merged
  * into the confident import-based association
@@ -91,6 +112,41 @@ export function isMultiSegmentIdentifier(token: string): boolean {
 /** Both distinctiveness gates the design requires, ANDed together (see module doc). */
 function isDistinctiveSwiftSymbol(token: string): boolean {
   return isUnambiguousIdentifierShape(token) && isMultiSegmentIdentifier(token);
+}
+
+/**
+ * True iff `token` reads as a TYPE reference — leading-uppercase (allowing
+ * Swift's `_`-prefixed SPI/implementation-detail naming convention, e.g.
+ * `_CancelID`, `_EffectPublisher` — the underscore itself carries no case
+ * information) AND multi-segment — rather than a method/property name.
+ *
+ * Hardening (post-#869-ship, adversarial re-verification): a bare lowercase
+ * METHOD name, even when uniquely DECLARED in-project, is not reliable
+ * evidence a given call site actually resolves to that declaration. Swift
+ * lets many independent, uninexed things share one method name — a stdlib
+ * protocol witness (`Decoder.singleValueContainer()`, satisfied by every
+ * conforming type, including ones outside this project entirely), a stdlib
+ * TYPE extension overload (`TaskGroup.addTask(name:...)` shimming the
+ * built-in `addTask`), or a same-named free function from an external
+ * package dependency (`swift-dependencies`' own top-level
+ * `withDependencies(_:operation:)`) — and the indexer only ever sees this
+ * project's own files, so "unique in this project" silently ignores every
+ * one of those. Measured on real Alamofire/vapor/swift-composable-architecture
+ * clones: every confirmed false positive (`singleValueContainer`, `asURL`,
+ * `addTask`, `flatMap`, `withDependencies`) was a lowercase-only edge with NO
+ * type-shaped co-driver. A PascalCase, multi-segment symbol referenced via a
+ * bare call (`Foo(...)`, Swift's constructor-call spelling) doesn't have this
+ * problem: it names this project's own type directly, and if a same-named
+ * external type existed unqualified in the same file the compiler would
+ * refuse to build over the ambiguity, not silently pick one.
+ *
+ * Deliberately NOT a hardcoded list of risky method names (that would be a
+ * denylist, and a new unindexed collision would always be one method name
+ * away) — this is a structural, method-name-agnostic shape check. Exposed
+ * for testing.
+ */
+export function isTypeShapedIdentifier(token: string): boolean {
+  return /^_*[A-Z]/.test(token) && isMultiSegmentIdentifier(token);
 }
 
 // ---------------------------------------------------------------------------
@@ -169,32 +225,58 @@ function uniqueOwners(defMap: Map<string, Set<string>>): Map<string, string> {
 // Usage side: test callSites -> uniquely-owned distinctive symbols
 // ---------------------------------------------------------------------------
 
-/** Record `testFile` as a match for `owner` in `result`, deduping. */
-function recordUsageMatch(result: Map<string, string[]>, owner: string, testFile: string): void {
-  const tests = result.get(owner) ?? [];
-  if (!tests.includes(testFile)) tests.push(testFile);
-  result.set(owner, tests);
+/** One candidate (source, test) pairing and every distinctive symbol driving it. */
+interface EdgeCandidate {
+  source: string;
+  test: string;
+  symbols: Set<string>;
+}
+
+/** `source test` — a key uniquely identifying one edge candidate. */
+function edgeKey(source: string, test: string): string {
+  return `${source} ${test}`;
 }
 
 /**
- * Match one test chunk's `callSites` against `owners`, recording any
- * distinctive, uniquely-owned, non-self hit into `result`. Split out of
- * `findSwiftSymbolUsageAssociations` so the per-call-site gate checks aren't
- * nested inside that function's own outer chunk loop.
+ * Match one test chunk's `callSites` against `owners`, recording every
+ * distinctive, uniquely-owned, non-self hit's DRIVING SYMBOL into
+ * `candidates` (keyed by source+test pair — a pair may be driven by several
+ * symbols, e.g. `HTTPHeaders`/`HTTPHeader` both matching `HTTPHeaders.swift`
+ * from the same test file). Split out of `collectEdgeCandidates` so the
+ * per-call-site gate checks aren't nested inside its own outer chunk loop.
  */
 function matchTestChunkCallSites(
   chunk: CodeChunk,
   owners: Map<string, string>,
   wanted: Set<string>,
-  result: Map<string, string[]>,
+  candidates: Map<string, EdgeCandidate>,
 ): void {
   const testFile = chunk.metadata.file;
   for (const call of chunk.metadata.callSites ?? []) {
     if (!isDistinctiveSwiftSymbol(call.symbol)) continue;
     const owner = owners.get(call.symbol);
     if (!owner || owner === testFile || !wanted.has(owner)) continue;
-    recordUsageMatch(result, owner, testFile);
+
+    const key = edgeKey(owner, testFile);
+    const candidate = candidates.get(key) ?? { source: owner, test: testFile, symbols: new Set() };
+    candidate.symbols.add(call.symbol);
+    candidates.set(key, candidate);
   }
+}
+
+/** Every (source, test) edge candidate, with the full set of symbols driving each. */
+function collectEdgeCandidates(
+  chunks: CodeChunk[],
+  owners: Map<string, string>,
+  wanted: Set<string>,
+): Map<string, EdgeCandidate> {
+  const candidates = new Map<string, EdgeCandidate>();
+  for (const chunk of chunks) {
+    if (detectLanguage(chunk.metadata.file) === 'swift' && isTestFile(chunk.metadata.file)) {
+      matchTestChunkCallSites(chunk, owners, wanted, candidates);
+    }
+  }
+  return candidates;
 }
 
 /**
@@ -206,6 +288,12 @@ function matchTestChunkCallSites(
  * non-Swift chunks are ignored on both the definition and usage side (the
  * design's explicit "same language" gate).
  *
+ * An edge is kept only when AT LEAST ONE of its driving symbols is
+ * `isTypeShapedIdentifier` — see that function's doc for why a purely
+ * method-driven edge isn't reliable evidence on its own (adversarial
+ * re-verification post-ship found 5 confirmed false positives across
+ * Alamofire/TCA, every one lowercase-method-only).
+ *
  * `chunks` should be the FULL project chunk set — uniqueness is a
  * project-wide property, not scoped to `filepaths`.
  */
@@ -215,12 +303,16 @@ export function findSwiftSymbolUsageAssociations(
 ): Map<string, string[]> {
   const owners = uniqueOwners(buildSwiftDefinitionMap(collectSwiftDeclarations(chunks)));
   const wanted = new Set(filepaths);
+  const candidates = collectEdgeCandidates(chunks, owners, wanted);
 
   const result = new Map<string, string[]>();
-  for (const chunk of chunks) {
-    if (detectLanguage(chunk.metadata.file) === 'swift' && isTestFile(chunk.metadata.file)) {
-      matchTestChunkCallSites(chunk, owners, wanted, result);
-    }
+  for (const { source, test, symbols } of candidates.values()) {
+    const hasTypeShapedDriver = [...symbols].some(isTypeShapedIdentifier);
+    if (!hasTypeShapedDriver) continue; // demote a purely method-driven edge
+
+    const tests = result.get(source) ?? [];
+    tests.push(test);
+    result.set(source, tests);
   }
   return result;
 }

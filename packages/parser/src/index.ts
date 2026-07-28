@@ -147,6 +147,7 @@ export type { GoTestCandidate, GoTestDirIndex } from './go-same-directory-tests.
 export {
   findSwiftSymbolUsageAssociations,
   isMultiSegmentIdentifier,
+  isTypeShapedIdentifier,
 } from './swift-symbol-usage-signals.js';
 
 // =============================================================================
