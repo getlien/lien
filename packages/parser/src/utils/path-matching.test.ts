@@ -325,12 +325,15 @@ describe('matchesFile - Path Boundary Checking', () => {
       // to a leading `/` and the end of the string) but places no cap at all
       // on how many directories may precede that match -- this repro's
       // "flask" nested under vendor/some/deep/ would otherwise match.
-      // matchesWithSourcePrefix is the opposite shape: it caps the leading
-      // side to at most one directory, but never checks what follows the
-      // match, so it would let a bare word like "flask" match purely because
-      // it's a textual prefix of an unrelated sibling like "flaskext" (see
-      // the previous test). Either gap is safe for a specific multi-segment
-      // dotted path but not for a short bare word.
+      // matchesWithSourcePrefix caps the leading side to at most one
+      // directory and, since #918, anchors its right edge too, so the
+      // "flask" vs "flaskext" textual-prefix hazard this comment used to
+      // describe (see the previous test) no longer applies to it even
+      // hypothetically. It still stays excluded from the bare-word branch
+      // regardless: matchesSuffixPythonModule's uncapped leading side above
+      // is reason enough on its own, and #883's precedent is to not widen
+      // leniency for a short bare identifier without a confirmed real-world
+      // case.
       expect(testMatchesFile('flask', 'vendor/some/deep/flask/app.py')).toBe(false);
     });
 
@@ -349,6 +352,46 @@ describe('matchesFile - Path Boundary Checking', () => {
       expect(testMatchesFile('src/flask', 'src/flask/app.py')).toBe(true);
       expect(testMatchesFile('src/flask', 'src/flask/sansio/blueprints.py')).toBe(true);
       expect(testMatchesFile('src/flask', 'src/flaskext/app.py')).toBe(false);
+    });
+  });
+
+  describe('matchesWithSourcePrefix right-edge anchoring (#918)', () => {
+    describe('repro canaries: a candidate must not match as a bare textual prefix', () => {
+      it('Utils vs UtilsHelper (the reported shape)', () => {
+        expect(testMatchesFile('com.example.Utils', 'com/example/UtilsHelper')).toBe(false);
+      });
+
+      it('Op vs OpChain', () => {
+        expect(testMatchesFile('com.example.Op', 'com/example/OpChain')).toBe(false);
+      });
+
+      it('Json vs JsonWriter', () => {
+        expect(testMatchesFile('org.example.Json', 'org/example/JsonWriter')).toBe(false);
+      });
+
+      it('still rejects the same shape with the single "src/"-style leading directory matchesWithSourcePrefix allows', () => {
+        // Confirms the fix is a right-edge check, not an accidental
+        // over-tightening of the left-edge (leading-segment) allowance.
+        expect(testMatchesFile('com.example.Utils', 'src/com/example/UtilsHelper')).toBe(false);
+      });
+    });
+
+    describe('legitimate matches survive', () => {
+      it('exact dotted module name to its own file', () => {
+        expect(testMatchesFile('com.example.Utils', 'com/example/Utils.kt')).toBe(true);
+      });
+
+      it('dotted Python module to a real file one directory below a "src/"-style prefix', () => {
+        expect(testMatchesFile('django.http', 'src/django/http/response.py')).toBe(true);
+      });
+
+      it('candidate immediately followed by an extension boundary rather than a path separator', () => {
+        // `.min` is not one of getSupportedExtensions()'s AST-supported
+        // extensions, so normalizePath's generic extension strip leaves it
+        // in place -- this exercises the '.' branch of the right-edge check
+        // directly, independent of any language's own extension-stripping.
+        expect(testMatchesFile('com.example.Utils', 'src/com/example/Utils.min')).toBe(true);
+      });
     });
   });
 
