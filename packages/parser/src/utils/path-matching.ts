@@ -417,6 +417,21 @@ function matchesSuffixPythonModule(moduleAsPath: string, targetWithoutPy: string
 
 /**
  * Check if module appears after a single source directory prefix
+ *
+ * Anchors BOTH edges of the candidate, mirroring `matchesAtBoundaryPrecise`'s
+ * discipline:
+ * - Left (pre-existing): at most one leading directory segment, at a `/`
+ *   boundary.
+ * - Right (#918): `indexOf` only guarantees `moduleAsPath` occurs somewhere
+ *   in `targetWithoutPy`, never that it ends there. Without a right-edge
+ *   check, a candidate like `com/example/Utils` matches as a bare textual
+ *   prefix of an unrelated sibling `com/example/UtilsHelper` -- the same
+ *   class of bug #868/#883 fixed on the left edge, just on the right. The
+ *   candidate must now reach the end of the string, a path separator, or an
+ *   extension boundary (`.`) -- the last of these is defense-in-depth for
+ *   any caller that reaches this function before `normalizePath`'s generic
+ *   extension strip has run; every current call path already strips
+ *   extensions upstream.
  */
 function matchesWithSourcePrefix(moduleAsPath: string, targetWithoutPy: string): boolean {
   const moduleIndex = targetWithoutPy.indexOf(moduleAsPath);
@@ -429,7 +444,12 @@ function matchesWithSourcePrefix(moduleAsPath: string, targetWithoutPy: string):
   // The check for prefix === '' || prefix.endsWith('/') ensures we're at a directory boundary:
   // - If prefix is empty, moduleIndex is 0 (start of string)
   // - If prefix ends with '/', then it's a valid directory separator
-  return prefixSlashes <= 1 && (prefix === '' || prefix.endsWith('/'));
+  if (prefixSlashes > 1 || (prefix !== '' && !prefix.endsWith('/'))) return false;
+
+  const endIndex = moduleIndex + moduleAsPath.length;
+  if (endIndex === targetWithoutPy.length) return true;
+  const charAfter = targetWithoutPy[endIndex];
+  return charAfter === '/' || charAfter === '.';
 }
 
 /**
@@ -476,14 +496,20 @@ function matchesPythonModule(importPath: string, targetPath: string): boolean {
     // directories may precede that match, so "flask" could match a
     // same-named package nested arbitrarily deep elsewhere in the repo.
     // `matchesWithSourcePrefix` caps the leading side (at most one directory)
-    // but never checks what follows the match at all, so it would let
-    // "flask" spuriously match purely because it's a textual prefix of an
-    // unrelated sibling like "flaskext". Both are safe for a multi-segment
-    // dotted path (low collision odds) but not for a bare word. Mirrors the
-    // established precedent of scoping extra leniency away from bare
-    // identifiers (see `matchesAtBoundaryPrecise`'s `maxLeadingSegments` and
-    // `matchesPHPNamespace`'s bare-importPath guard, both above) -- do not
-    // widen this without a confirmed real-world bare-package case, per #883.
+    // and, since #918, anchors the right edge too (end-of-string, `/`, or an
+    // extension boundary) -- so the "flask" spuriously-matching-"flaskext"
+    // textual-prefix hazard this comment used to describe no longer applies
+    // to it. It still stays out of this branch: `matchesSuffixPythonModule`
+    // alone is reason enough (no left-side cap at all, so a bare word could
+    // match a same-named package nested arbitrarily deep), and #883's
+    // precedent is to not widen leniency for a short bare identifier without
+    // a confirmed real-world case. Both non-anchored strategies are safe for
+    // a multi-segment dotted path (low collision odds) but excluded here.
+    // Mirrors the established precedent of scoping extra leniency away from
+    // bare identifiers (see `matchesAtBoundaryPrecise`'s `maxLeadingSegments`
+    // and `matchesPHPNamespace`'s bare-importPath guard, both above) -- do
+    // not widen this without a confirmed real-world bare-package case, per
+    // #883.
     return (
       matchesDirectPythonModule(moduleAsPath, targetWithoutPy) ||
       matchesParentPythonPackage(moduleAsPath, targetWithoutPy)
