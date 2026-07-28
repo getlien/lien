@@ -398,13 +398,20 @@ Three cases deserve specific attention:
       ),
   ];
 
-  const surface = (await parallel([...toolWork, ...hookWork])).filter(Boolean);
+  const surface = await parallel([...toolWork, ...hookWork]);
+  // Partition at the FIXED boundary, then drop falsy entries within each side.
+  // parallel() resolves a dead agent to null POSITIONALLY, so filtering the
+  // combined array first would shrink it and slide a hook report into the tool
+  // partition — mislabeling it silently, which is exactly the kind of quiet data
+  // corruption this protocol is supposed to be intolerant of.
+  const toolReports = surface.slice(0, TOOLS.length).filter(Boolean);
+  const hookReports = surface.slice(TOOLS.length).filter(Boolean);
 
   return {
     stage: 'surface',
     protocol: PROTOCOL,
-    toolReports: surface.slice(0, TOOLS.length),
-    hookReports: surface.slice(TOOLS.length),
+    toolReports,
+    hookReports,
     next: 'Fix any HIGH plumbing finding BEFORE stage "behavioral" — silent plumbing is indistinguishable from a behavioral null (protocol §7).',
   };
 }
