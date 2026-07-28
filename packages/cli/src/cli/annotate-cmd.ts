@@ -87,8 +87,11 @@ export function belowRiskFloor(
  * post-edit test-association reminder (or nothing, if the file has no
  * associated tests) — see `runTestsOnly`.
  *
- * All errors result in empty stdout and exit 0, so a missing index or
- * unknown file never breaks the hook pipeline.
+ * All THROWN errors result in empty stdout and exit 0, so an unknown/
+ * unreadable file never breaks the hook pipeline. One case is deliberately
+ * NOT silent, though: a resolved project root whose index has never been
+ * built (#894) prints a one-line warning instead of an empty-but-plausible
+ * "no dependents"/"no test coverage" annotation — see `formatNoIndexWarning`.
  */
 export async function annotateCommand(file: string, options?: AnnotateOptions): Promise<void> {
   try {
@@ -321,6 +324,13 @@ async function run(file: string, options?: AnnotateOptions): Promise<void> {
     const vectorDB = await createVectorDB(rootDir);
     await vectorDB.initialize();
 
+    // #894: warn loudly instead of silently analyzing an empty store — see
+    // `formatNoIndexWarning`.
+    if (!(await vectorDB.hasData())) {
+      console.log(formatNoIndexWarning(rootDir));
+      return;
+    }
+
     const data = await computeAnnotationData(vectorDB, filepath, rootDir);
 
     if (
@@ -374,6 +384,18 @@ export interface FileTestAssociations {
    * this field. See `computeGoPackageLevelFallback`.
    */
   packageLevelTests: string[];
+  /**
+   * #894: true when `rootDir`'s index has never been built (`hasData()` is
+   * false for both standalone and worktree-overlay backends — see
+   * `formatNoIndexWarning`). An empty `tests`/`packageLevelTests` array is
+   * ambiguous on its own — genuinely no test coverage and "wrong/unindexed
+   * root" look identical — so callers that want to tell them apart (today:
+   * only `runTestsOnly`) check this field. `verify-tests-cmd.ts`'s
+   * `lookupTestAssociations` caller ignores it and keeps its existing
+   * fail-open "no tests" handling — its hook contract is deliberately silent
+   * on any absence of tests, indexed or not.
+   */
+  indexMissing: boolean;
 }
 
 /**
@@ -394,11 +416,18 @@ async function scanTestAssociations(paths: ResolvedPaths): Promise<FileTestAssoc
   try {
     const vectorDB = await createVectorDB(rootDir);
     await vectorDB.initialize();
+    // #894: check before scanning, not after — an empty scan result is
+    // indistinguishable from "no tests" otherwise. `hasData()` is the same
+    // signal the MCP server's auto-index gate uses, and is worktree/overlay-
+    // aware (true when either the base or the overlay has rows).
+    if (!(await vectorDB.hasData())) {
+      return { filepath, rootDir, tests: [], packageLevelTests: [], indexMissing: true };
+    }
     const allChunks = adaptChunkImports(await vectorDB.scanAll());
     const tests =
       findTestAssociationsFromChunks([filepath], allChunks, rootDir).get(filepath) ?? [];
     const packageLevelTests = computeGoPackageLevelFallback(tests, filepath, allChunks, rootDir);
-    return { filepath, rootDir, tests, packageLevelTests };
+    return { filepath, rootDir, tests, packageLevelTests, indexMissing: false };
   } finally {
     if (needsChdir) process.chdir(originalCwd);
   }
@@ -422,9 +451,32 @@ export async function lookupTestAssociations(file: string): Promise<FileTestAsso
  * no associated tests (the signal for the hook to stay silent).
  */
 async function runTestsOnly(paths: ResolvedPaths): Promise<void> {
-  const { filepath, tests, packageLevelTests } = await scanTestAssociations(paths);
+  const { filepath, rootDir, tests, packageLevelTests, indexMissing } =
+    await scanTestAssociations(paths);
+  if (indexMissing) {
+    console.log(formatNoIndexWarning(rootDir));
+    return;
+  }
   if (tests.length === 0 && packageLevelTests.length === 0) return;
   console.log(formatTestReminder(filepath, tests, packageLevelTests));
+}
+
+/**
+ * #894: the resolved project root's index has never been built (see
+ * `hasData()` call sites above). Printing the normal annotation/reminder
+ * here would be actively misleading — an empty dependents list or "No test
+ * coverage" reads as a confident answer, not as "wrong root" or "never
+ * indexed". Loud on purpose, and via `console.log` (not `console.error`):
+ * the PostToolUse read-hook (`annotate-read.sh`) pipes `lien annotate`'s
+ * stderr to `/dev/null` and only stdout reaches the agent as
+ * `additionalContext`.
+ */
+export function formatNoIndexWarning(rootDir: string): string {
+  return (
+    `Lien: no index found at the resolved project root (${rootDir}). ` +
+    `Run 'lien index' there, or check that this is the right root — a ` +
+    `nested git repo or a repo-less subdirectory can resolve to the wrong ancestor.`
+  );
 }
 
 /**

@@ -72,7 +72,7 @@ export type { IndexStrategy } from './vectordb/overlay-resolution.js';
 export type { VectorDBInterface, SearchResult } from './vectordb/types.js';
 export { SYMBOL_TYPE_MATCHES } from './vectordb/types.js';
 export type { RelevanceCategory } from './vectordb/relevance.js';
-export { readVersionFile, writeVersionFile } from './vectordb/version.js';
+export { readVersionFile, writeVersionFile, VERSION_FILE } from './vectordb/version.js';
 
 // =============================================================================
 // INDEX GARBAGE COLLECTION

@@ -1,7 +1,12 @@
 import fs from 'fs/promises';
 import path from 'path';
 
-const VERSION_FILE = '.lien-index-version';
+// Exported (not just module-private) so callers that only need to know
+// "has a real index build ever completed here" — e.g. project-root
+// resolution (#894) — can check for the file's existence synchronously
+// with `fs.existsSync`, without duplicating the literal or pulling in the
+// async read/parse path `readVersionFile` needs.
+export const VERSION_FILE = '.lien-index-version';
 
 /**
  * Writes a version timestamp file to mark when the index was last updated.
