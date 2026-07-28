@@ -21,8 +21,7 @@ export const meta = {
   description:
     'Dogfood Lien MCP tools + nudge plugin on foreign OSS repos (contamination-controlled)',
   whenToUse:
-    'Extensive dogfood of the six MCP tools and the ten nudge hooks, run outside this repo so ' +
-    "Lien's own tool-mandating CLAUDE.md cannot manufacture the behavior under measurement.",
+    "Extensive dogfood of the six MCP tools and the ten nudge hooks, run outside this repo so Lien's own tool-mandating CLAUDE.md cannot manufacture the behavior under measurement.",
   phases: [
     {
       title: 'Provision',
@@ -470,37 +469,43 @@ if (STAGE === 'behavioral') {
 
 TASK — Phase 3 trials for \`${c.repo}\` (${c.lang}, ${c.tier}-tier).
 
-Run BOTH tasks from protocol §3 as SEPARATE fresh headless \`claude\` sessions with
-cwd = this repo's clone from ${KIT}/corpus-manifest.json. Drive them the way
-\`scripts/experiments/nudge-ab-v2/run.mjs\` drives its trials: per-invocation
-\`--settings\` that disables the ambient lien@lien plugin and wires the plugin hooks
-by absolute path, \`--permission-mode acceptEdits\`, a fresh session id, a timeout,
-and full transcript capture.
+The runner already exists — DO NOT write your own. Use it:
 
-  T1 signature task  — a plain feature request against an exported function that has
-                       out-of-file dependents. Under observation: api-delta-write.sh.
-  T2 test-verify task — a plain bug-fix request against a source file whose test is
-                       associated ONLY by import. Under observation: test-reminder.sh,
-                       test-run-note.sh, recap-stop.sh.
+    node ${KIT}/trial.mjs <repoKey> <taskId>
+    node ${KIT}/trial.mjs --list          # what is sited
 
-C4 is absolute: the prompts must never mention callers, dependents, tests, coverage,
-risk, complexity, or Lien. Use the frozen prompts if the provisioner wrote them; if
-you must author them, freeze and record them BEFORE running, and record their hash.
+repoKey for this repo is the clone's basename. Run every task sited for it in
+${KIT}/tasks.json. Tasks are NOT sited for every repo/shape combination: T2
+(test-verify) is deliberately absent where test-association coverage is 0%, because
+the nudge physically cannot fire there and the trial would be a guaranteed null. If
+no task is sited for this repo, say so and stop — do not invent one.
 
-Re-assert C1 and C2 for each trial and set \`contaminationAsserted\` honestly —
-including the saved-\`~/.claude/settings.json\` byte comparison after the run.
+trial.mjs already handles: the settings file (hook wiring derived from the shipped
+hooks.json), the \`lien\` shim pointing at THIS build, the MCP server pointed at the
+clone, \`--model sonnet\`, C1/C2/C4 assertions, transcript capture, event collection,
+and a git reset before and after. It writes
+\`${KIT}/trials/<repoKey>-<taskId>/result.json\`.
 
-Then extract, per trial:
-  M1 — which nudges actually emitted, with the VERBATIM claim text (Phase 4 refutes
-       that exact string, so paraphrasing it destroys the audit);
-  M3 — deterministic evidence of follow-up: a get_dependents call naming the symbol
-       (T1), or an observed run of the associated test (T2). "none" is a perfectly
-       good answer — record it, do not soften it;
-  M4 — hook latency observed in-session.
+**Read result.json — do not re-derive its contents from the transcript.**
 
-Report a trial that failed to run as a failure. Do not substitute a re-run in the
-Lien repo, do not hand-simulate the session, and do not infer what the agent
-"would have" done.`,
+CRITICAL measurement fact, established empirically before this stage ran: with
+\`--output-format stream-json --verbose\`, PostToolUse \`additionalContext\` NEVER
+appears in the transcript. Only SessionStart hook events do. A probe confirmed the
+annotate nudge fired and wrote a \`shown\` row to nudge-events.jsonl while leaving
+zero trace in the transcript.
+
+So:
+  M1 (fired)     — comes from \`nudgeEvents\` in result.json. NOT from the transcript.
+  claim text     — comes from \`reconstructedNudges\` (replayed at the same SHA).
+                   Pass it through VERBATIM; Phase 4 refutes that exact string.
+  M3 (acted on)  — comes from the transcript: look for a get_dependents call naming
+                   the symbol (T1), or a Bash test run covering the associated test
+                   (T2). "none" is a perfectly good answer — record it, do not soften
+                   it, and do not infer what the agent "would have" done.
+
+Report a trial that failed to run as a failure. Never substitute a run inside the
+Lien repo, and never hand-simulate a session.
+`,
         { label: `trial:${c.lang}`, phase: 'Trials', schema: TRIALS_SCHEMA, model: MODEL },
       ),
     (trialResult, c) => {
