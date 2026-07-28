@@ -25,6 +25,8 @@ import {
   extractFindingsWithReasoningFallback,
   computeWrapUpReason,
   logWrapUpReason,
+  lastTurnFindingsText,
+  buildSlimRetryPrompt,
 } from './agent-client-shared.js';
 
 // `envDisabled` is re-exported so its existing test import path
@@ -542,7 +544,12 @@ export class OpenAIAgentClient {
     // conversation to summarize, so skip the doomed retry (and its 3s sleep).
     if (!parsed.summary && completedTurns > 0) {
       const remainingBudget = this.maxTokenBudget - (totalInputTokens + totalOutputTokens);
-      const retry = await this.runSummaryRetry(messages, turn, remainingBudget);
+      const retry = await this.runSummaryRetry(
+        systemPrompt,
+        lastTurnFindingsText(turnTraces),
+        turn,
+        remainingBudget,
+      );
       if (retry) {
         totalInputTokens += retry.inputTokens;
         totalOutputTokens += retry.outputTokens;
@@ -671,6 +678,9 @@ export class OpenAIAgentClient {
         finishReason: choice?.finish_reason,
         inputTokens,
         outputTokens,
+        // Every call site of this method is a summary-retry attempt (issue
+        // #829's slim-context fix, see `runSummaryRetry`) — always true here.
+        slimRetry: true,
       };
       const parsed = extractResponse(
         choice?.message.content ?? null,
@@ -702,9 +712,19 @@ export class OpenAIAgentClient {
    * useful move left is asking again, once, before surfacing `incomplete`
    * (never a silent 0-findings-as-if-clean result — see `run()`'s
    * `incomplete = !parsed.summary` computation).
+   *
+   * Builds a FRESH, minimal message list — `systemPrompt` + the last
+   * investigative turn's own findings text + the retry instruction — instead
+   * of appending onto the loop's full accumulated `messages` (issue #829's
+   * truncation remainder: replaying every prior turn's tool calls/tool
+   * results made the retry's OWN input large enough that even a compliant,
+   * forced-JSON provider could truncate its output before completing a
+   * verdict object). See `buildSlimRetryPrompt`'s doc comment
+   * (`agent-client-shared.ts`) for the full rationale.
    */
   private async runSummaryRetry(
-    messages: ChatMessage[],
+    systemPrompt: string,
+    findingsText: string,
     turn: number,
     remainingBudget: number,
   ): Promise<{
@@ -713,15 +733,20 @@ export class OpenAIAgentClient {
     inputTokens: number;
     outputTokens: number;
   } | null> {
-    this.logger.info('[agent] No JSON output — requesting summary...');
+    this.logger.info(
+      "[agent] No JSON output — requesting summary via a slim retry (system prompt + last turn's own analysis only, no tool-calling history)",
+    );
     await new Promise(resolve => setTimeout(resolve, 3_000));
-    messages.push({ role: 'user', content: RETRY_NUDGE });
+    const slimMessages: ChatMessage[] = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: buildSlimRetryPrompt(findingsText, RETRY_NUDGE) },
+    ];
 
     // Computed once and reused for both attempts (parity with the Anthropic
     // client's `remainingBudget` handling) — a badly-starved pass gets a
     // small, bounded request instead of the flat 24,576-token ceiling.
     const maxTokens = retryMaxTokens(remainingBudget);
-    const first = await this.attemptVerdictCompletion(messages, turn + 1, maxTokens);
+    const first = await this.attemptVerdictCompletion(slimMessages, turn + 1, maxTokens);
     if (!first) return null;
     if (first.parsed.summary || first.parsed.findings.length > 0) {
       return { ...first, traceTurns: [first.traceTurn] };
@@ -730,7 +755,7 @@ export class OpenAIAgentClient {
     this.logger.warning(
       '[agent] Retry verdict was unparseable — attempting one more bounded retry',
     );
-    const second = await this.attemptVerdictCompletion(messages, turn + 2, maxTokens);
+    const second = await this.attemptVerdictCompletion(slimMessages, turn + 2, maxTokens);
     if (!second) return { ...first, traceTurns: [first.traceTurn] };
     return {
       parsed: second.parsed,

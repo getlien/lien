@@ -15,6 +15,10 @@ import {
   computeWrapUpReason,
   logWrapUpReason,
   NEAR_BUDGET_FRACTION,
+  MAX_BALANCED_OBJECTS_SCANNED,
+  SLIM_RETRY_CONTEXT_MAX_CHARS,
+  lastTurnFindingsText,
+  buildSlimRetryPrompt,
 } from '../src/plugins/agent/agent-client-shared.js';
 import { silentLogger } from '../src/test-helpers.js';
 import type { Logger } from '../src/logger.js';
@@ -265,10 +269,119 @@ describe('allBalancedJsonObjects', () => {
   });
 
   it('bounds the scan against a pathological run of tiny objects (no hang, no crash)', () => {
-    const text = '{}'.repeat(1000);
+    const text = '{}'.repeat(10_000);
     const objects = allBalancedJsonObjects(text);
-    expect(objects.length).toBeLessThanOrEqual(25);
+    expect(objects.length).toBeLessThanOrEqual(MAX_BALANCED_OBJECTS_SCANNED);
     expect(objects.every(o => o === '{}')).toBe(true);
+  });
+
+  // Issue #829's residual 25-object-cap gap: a verdict positioned 26th+ in
+  // JSON-dense prose was invisible to the old cap. Raising the cap (see
+  // MAX_BALANCED_OBJECTS_SCANNED's doc comment for why a higher ceiling is
+  // now safe) must actually recover it.
+  it('recovers a verdict positioned as the 26th top-level object (#829 residual cap gap)', () => {
+    const decoys = Array.from({ length: 25 }, (_, i) => `{"noise":${i}}`).join(' ');
+    const verdict = JSON.stringify({
+      findings: [],
+      summary: { riskLevel: 'low', overview: '26th object', keyChanges: [] },
+    });
+    const text = `${decoys} ${verdict}`;
+    const objects = allBalancedJsonObjects(text);
+    expect(objects).toHaveLength(26);
+    expect(objects[25]).toBe(verdict);
+  });
+
+  it('still respects MAX_BALANCED_OBJECTS_SCANNED as a hard ceiling on a huge decoy run', () => {
+    const decoys = Array.from(
+      { length: MAX_BALANCED_OBJECTS_SCANNED + 50 },
+      (_, i) => `{"n":${i}}`,
+    ).join(' ');
+    const objects = allBalancedJsonObjects(decoys);
+    expect(objects).toHaveLength(MAX_BALANCED_OBJECTS_SCANNED);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Adversarial-review finding F1 on the first cut of this fix: hoisting the
+  // string-literal mask to run ONCE over the whole text (instead of fresh per
+  // candidate object) was NOT behavior-preserving. An odd number of stray,
+  // unescaped double-quote characters ANYWHERE earlier in the text shifts the
+  // regex's global quote-pairing and can mask straight over a later verdict's
+  // own opening brace, losing it entirely. A truncated `finishReason:'length'`
+  // turn naturally ends mid-string-literal — an odd, unterminated quote is
+  // the TARGET failure class this whole fix exists for, not an edge case.
+  // Per-object re-masking (restored — see `nextBalancedObjectRange`'s doc
+  // comment) is immune to this: these must all recover regardless of the
+  // stray-quote count/parity earlier in the text.
+  // ---------------------------------------------------------------------------
+  it('case B: a single stray, unterminated quote in prose before the verdict does not hide it', () => {
+    const verdict = JSON.stringify({ findings: [finding], summary });
+    const text = `The user's config had a "weird value here.\nHere is my actual verdict:\n${verdict}`;
+    expect(allBalancedJsonObjects(text)).toContain(verdict);
+  });
+
+  it('case C: the #829 26th-object decoy shape with an added stray quote still recovers the verdict', () => {
+    const decoys = Array.from({ length: 25 }, (_, i) => `{"noise":${i}}`).join(' ');
+    const verdict = JSON.stringify({
+      findings: [],
+      summary: { riskLevel: 'low', overview: '26th object with stray quote', keyChanges: [] },
+    });
+    const text = `${decoys} some "unterminated prose here ${verdict}`;
+    expect(allBalancedJsonObjects(text)).toContain(verdict);
+  });
+
+  it.each([0, 1, 2, 3, 4])(
+    'stray-quote parity sweep: recovers the verdict with %i stray quote(s) earlier in the text',
+    count => {
+      const verdict = JSON.stringify({
+        findings: [],
+        summary: { riskLevel: 'low', overview: 'ok', keyChanges: [] },
+      });
+      const strayQuotes = '"'.repeat(count);
+      const text = `Some prose with ${strayQuotes} stray quotes in it.\n${verdict}`;
+      expect(allBalancedJsonObjects(text)).toContain(verdict);
+    },
+  );
+});
+
+describe('allBalancedJsonObjects — performance with per-object re-masking restored (#829 F1 correctness fix)', () => {
+  // Correctness (F1) requires re-masking each candidate's own remaining
+  // suffix instead of sharing one whole-text mask — genuinely
+  // O(objects × text length) again. These pin that it stays cheap in
+  // ABSOLUTE terms at the 200 cap, per the adversarial-review decision
+  // (measured locally: ~26ms/~70ms; generous multiples here to avoid CI
+  // flakiness while still catching a real regression) — see
+  // `MAX_BALANCED_OBJECTS_SCANNED`'s doc comment for the full benchmark.
+  it('stays fast on ~500K chars of realistic decoy density (200 objects)', () => {
+    const filler = 'x'.repeat(2000);
+    const text = Array.from(
+      { length: MAX_BALANCED_OBJECTS_SCANNED },
+      (_, i) => `{"n":${i}}${filler}`,
+    ).join(' ');
+
+    const start = performance.now();
+    const objects = allBalancedJsonObjects(text);
+    const elapsed = performance.now() - start;
+
+    expect(objects).toHaveLength(MAX_BALANCED_OBJECTS_SCANNED);
+    expect(elapsed).toBeLessThan(500);
+  });
+
+  it('stays cheap on the TRUE worst case: 200 decoys clustered up front + a huge brace-free tail', () => {
+    const decoysFront = Array.from(
+      { length: MAX_BALANCED_OBJECTS_SCANNED },
+      (_, i) => `{"n":${i}}`,
+    ).join(' ');
+    // ~920K chars, no braces at all — every one of the 200 calls re-masks
+    // nearly this whole tail, the algorithm's genuine worst case.
+    const hugeTail = 'the quick brown fox jumps over the lazy dog. '.repeat(20_000);
+    const text = `${decoysFront} ${hugeTail}`;
+
+    const start = performance.now();
+    const objects = allBalancedJsonObjects(text);
+    const elapsed = performance.now() - start;
+
+    expect(objects).toHaveLength(MAX_BALANCED_OBJECTS_SCANNED);
+    expect(elapsed).toBeLessThan(1000);
   });
 });
 
@@ -506,6 +619,22 @@ describe('extractFindingsFromText (fence-priority verdict recovery)', () => {
     expect(out.findings).toHaveLength(1);
   });
 
+  // #829's residual cap gap, end to end through the full extraction pipeline
+  // (not just `allBalancedJsonObjects` directly, above): a verdict quoted
+  // 26th in a JSON-dense investigation used to be invisible under the old
+  // 25-object cap — `extractFindingsFromText` returned no summary at all.
+  it('#829: recovers a verdict positioned 26th in JSON-dense prose (was invisible under the old 25-object cap)', () => {
+    const decoys = Array.from(
+      { length: 25 },
+      (_, i) => `Issue ${i + 1}: found a JSON-shaped fragment {"n":${i}} while investigating.`,
+    ).join('\n');
+    const verdict = JSON.stringify({ findings: [finding], summary });
+    const text = `${decoys}\nHere is my actual verdict:\n${verdict}`;
+    const out = extractFindingsFromText(text);
+    expect(out.summary).toEqual(summary);
+    expect(out.findings).toHaveLength(1);
+  });
+
   // The mirror-image case is a genuine, stated limitation, not a regression:
   // if the EARLIER object also fully mimics the verdict shape (a leaked
   // `<output_format>` contract example carrying its own dummy summary), a
@@ -710,5 +839,124 @@ describe('logWrapUpReason', () => {
     logWrapUpReason(logger, 'last-turn', 7, 1, 1);
     logWrapUpReason(logger, null, 1, 1, 1);
     expect(lines).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Issue #829's OTHER remainder (post-#895's require_parameters fix): even a
+// compliant, forced-JSON provider can truncate a summary-retry under its own
+// token cap, because the pre-fix retry re-sent the FULL accumulated
+// conversation (system prompt + every prior turn's tool calls/tool results)
+// as its own input. These pin the deterministic, zero-LLM construction of the
+// SLIM replacement — see each client's `runSummaryRetry` for how the wire
+// format is built from these.
+// ---------------------------------------------------------------------------
+describe('lastTurnFindingsText', () => {
+  it('returns an empty string for an empty turn history', () => {
+    expect(lastTurnFindingsText([])).toBe('');
+  });
+
+  it('prefers responseText over reasoning when both are present on the last turn', () => {
+    expect(
+      lastTurnFindingsText([{ responseText: 'the content', reasoning: 'the reasoning' }]),
+    ).toBe('the content');
+  });
+
+  it('falls back to reasoning when the last turn responseText is empty/whitespace-only', () => {
+    expect(lastTurnFindingsText([{ responseText: '   ', reasoning: 'the reasoning' }])).toBe(
+      'the reasoning',
+    );
+    expect(lastTurnFindingsText([{ reasoning: 'the reasoning' }])).toBe('the reasoning');
+  });
+
+  it('returns an empty string when every turn has nothing on either channel', () => {
+    expect(lastTurnFindingsText([{}])).toBe('');
+    expect(lastTurnFindingsText([{ responseText: '', reasoning: '' }])).toBe('');
+  });
+
+  it('trims surrounding whitespace', () => {
+    expect(lastTurnFindingsText([{ responseText: '  padded text  ' }])).toBe('padded text');
+  });
+
+  // Adversarial-review finding F3 on the first cut of this fix: the LAST turn
+  // alone can be a pure tool_calls turn with empty content AND no reasoning
+  // (a forced-finish/max-turns bail right after tool-calling, no closing
+  // prose) — reading only that one turn returned '', turning the retry into
+  // a bare instruction with zero real context (a false-clean risk: the model
+  // can fabricate a plausible empty verdict when given nothing to summarize).
+  it('falls back to an earlier turn when the LAST turn is empty on both channels (#829 F3 false-clean floor)', () => {
+    const turns = [
+      { responseText: 'Issue 1: a real concern about null handling.' },
+      { responseText: '', toolCalls: [] }, // pure tool_calls turn, no prose
+    ];
+    expect(lastTurnFindingsText(turns)).toContain('Issue 1: a real concern about null handling.');
+  });
+
+  it('walks arbitrarily far back through empty turns to find real content', () => {
+    const turns = [
+      { responseText: 'the real investigative notes' },
+      { responseText: '' },
+      { responseText: '' },
+      { responseText: '', reasoning: '' },
+    ];
+    expect(lastTurnFindingsText(turns)).toBe('the real investigative notes');
+  });
+
+  it('returns an empty string when EVERY turn in history is empty (nothing to fall back to)', () => {
+    const turns = [{ responseText: '' }, { responseText: '', reasoning: '' }, {}];
+    expect(lastTurnFindingsText(turns)).toBe('');
+  });
+
+  it('concatenates multiple recent non-empty turns, newest first, while under budget', () => {
+    const turns = [
+      { responseText: 'older investigative notes' },
+      { responseText: 'newest investigative notes' },
+    ];
+    const result = lastTurnFindingsText(turns);
+    expect(result.indexOf('newest investigative notes')).toBeLessThan(
+      result.indexOf('older investigative notes'),
+    );
+  });
+
+  it('stops accumulating once the newest turn alone already fills the budget', () => {
+    const huge = 'X'.repeat(SLIM_RETRY_CONTEXT_MAX_CHARS + 1);
+    const turns = [{ responseText: 'should not appear' }, { responseText: huge }];
+    const result = lastTurnFindingsText(turns);
+    expect(result).not.toContain('should not appear');
+  });
+});
+
+describe('buildSlimRetryPrompt', () => {
+  const instruction = 'Output ONLY the JSON verdict now.';
+
+  it('wraps the findings text with a label and the instruction', () => {
+    const prompt = buildSlimRetryPrompt('Issue 1: something looks off.', instruction);
+    expect(prompt).toContain('Issue 1: something looks off.');
+    expect(prompt).toContain(instruction);
+    // The findings text comes before the instruction — the model reads its
+    // own prior analysis, THEN the hard instruction to convert it to JSON.
+    expect(prompt.indexOf('Issue 1:')).toBeLessThan(prompt.indexOf(instruction));
+  });
+
+  it('falls back to the bare instruction when there is no findings text', () => {
+    expect(buildSlimRetryPrompt('', instruction)).toBe(instruction);
+    expect(buildSlimRetryPrompt('   ', instruction)).toBe(instruction);
+  });
+
+  it('bounds the replayed findings text to SLIM_RETRY_CONTEXT_MAX_CHARS', () => {
+    // Mirrors both #829 incidents' own derailed turn: ~227K-262K tokens of
+    // "Issue 1: … Issue 21: …" prose — a slim retry built from it must still
+    // stay small, not just avoid the OLD full-history problem.
+    const huge = 'X'.repeat(SLIM_RETRY_CONTEXT_MAX_CHARS + 5_000);
+    const prompt = buildSlimRetryPrompt(huge, instruction);
+    expect(prompt.length).toBeLessThan(huge.length);
+    expect(prompt).toContain('…[truncated');
+    expect(prompt).toContain(instruction);
+  });
+
+  it('is deterministic (same inputs, same output — no hidden randomness/state)', () => {
+    const a = buildSlimRetryPrompt('some findings', instruction);
+    const b = buildSlimRetryPrompt('some findings', instruction);
+    expect(a).toBe(b);
   });
 });

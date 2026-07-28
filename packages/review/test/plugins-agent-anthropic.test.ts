@@ -406,3 +406,187 @@ describe('AnthropicAgentClient — bounded second retry attempt for corrupted st
     expect(createMock).toHaveBeenCalledTimes(3);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Issue #829's truncation remainder (post-#895's require_parameters fix): the
+// summary-retry must send a SLIM message list — just the last investigative
+// turn's own text + the instruction — not the full accumulated tool_use/
+// tool_result history. See `buildSlimRetryPrompt` (agent-client-shared.ts)
+// for the deterministic construction these pin at the wire level.
+// ---------------------------------------------------------------------------
+describe('AnthropicAgentClient — slim summary-retry context (#829 truncation remainder)', () => {
+  it('sends only a single user message on the retry — not the accumulated tool_use/tool_result history', async () => {
+    createMock
+      .mockResolvedValueOnce(
+        msg([thinkingBlock('investigating'), toolUseBlock], 100, 0, 'tool_use'),
+      )
+      .mockResolvedValueOnce(
+        msg([thinkingBlock('more investigating'), toolUseBlock], 100, 0, 'tool_use'),
+      )
+      .mockResolvedValueOnce(
+        msg([textBlock('Issue 1: looks suspicious. No JSON yet.')], 50, 0, 'end_turn'),
+      )
+      .mockResolvedValueOnce(
+        msg(
+          [
+            textBlock(
+              '```json\n{"findings":[],"summary":{"riskLevel":"low","overview":"recovered","keyChanges":[]}}\n```',
+            ),
+          ],
+          50,
+          0,
+          'end_turn',
+        ),
+      );
+    const { logger } = capturingLogger();
+
+    const result = await makeClient(1_000_000, logger).run(
+      'sys',
+      'init',
+      TOOLS as never,
+      async () => 'ok',
+    );
+
+    expect(result.incomplete).toBe(false);
+    const retryArgs = createMock.mock.calls[3][0]; // 3 main-loop turns, retry is call 4
+    const retryMessages = retryArgs.messages as Array<{ role: string; content: unknown }>;
+    expect(retryMessages).toHaveLength(1);
+    expect(retryMessages[0].role).toBe('user');
+    // No dummy tool_result / assistant tool_use replay — the fresh list has
+    // no pending tool_use to satisfy in the first place.
+    expect((retryMessages[0].content as Array<{ type: string }> | string).toString()).not.toContain(
+      'tool_result',
+    );
+  });
+
+  it("carries the last investigative turn's own text into the retry prompt", async () => {
+    createMock
+      .mockResolvedValueOnce(
+        msg([thinkingBlock('investigating'), toolUseBlock], 100, 0, 'tool_use'),
+      )
+      .mockResolvedValueOnce(
+        msg([textBlock('Issue 1: a real concern about null handling.')], 50, 0, 'end_turn'),
+      )
+      .mockResolvedValueOnce(
+        msg(
+          [
+            textBlock(
+              '```json\n{"findings":[],"summary":{"riskLevel":"low","overview":"recovered","keyChanges":[]}}\n```',
+            ),
+          ],
+          50,
+          0,
+          'end_turn',
+        ),
+      );
+    const { logger } = capturingLogger();
+
+    await makeClient(1_000_000, logger).run('sys', 'init', TOOLS as never, async () => 'ok');
+
+    const retryArgs = createMock.mock.calls[2][0];
+    expect(retryArgs.messages[0].content).toContain('Issue 1: a real concern about null handling.');
+    expect(retryArgs.messages[0].content).toContain('You ran out of budget');
+  });
+
+  it('marks the retry-produced trace turns with slimRetry: true', async () => {
+    createMock
+      .mockResolvedValueOnce(
+        msg([thinkingBlock('investigating'), toolUseBlock], 100, 0, 'tool_use'),
+      )
+      .mockResolvedValueOnce(msg([textBlock('no verdict here')], 50, 0, 'end_turn'))
+      .mockResolvedValueOnce(
+        msg(
+          [
+            textBlock(
+              '```json\n{"findings":[],"summary":{"riskLevel":"low","overview":"recovered","keyChanges":[]}}\n```',
+            ),
+          ],
+          50,
+          0,
+          'end_turn',
+        ),
+      );
+    const { logger } = capturingLogger();
+
+    const result = await makeClient(1_000_000, logger).run(
+      'sys',
+      'init',
+      TOOLS as never,
+      async () => 'ok',
+    );
+
+    const retryTurns = result.trace!.turns.filter(t => t.slimRetry);
+    expect(retryTurns).toHaveLength(1);
+    expect(result.trace!.turns[0].slimRetry).toBeUndefined();
+  });
+
+  it('logs that the retry is slim (diagnosable in CI logs, distinct from the old flat message)', async () => {
+    createMock
+      .mockResolvedValueOnce(
+        msg([thinkingBlock('investigating'), toolUseBlock], 100, 0, 'tool_use'),
+      )
+      .mockResolvedValueOnce(msg([textBlock('no verdict here')], 50, 0, 'end_turn'))
+      .mockResolvedValueOnce(
+        msg(
+          [
+            textBlock(
+              '```json\n{"findings":[],"summary":{"riskLevel":"low","overview":"recovered","keyChanges":[]}}\n```',
+            ),
+          ],
+          50,
+          0,
+          'end_turn',
+        ),
+      );
+    const { logger, lines } = capturingLogger();
+
+    await makeClient(1_000_000, logger).run('sys', 'init', TOOLS as never, async () => 'ok');
+
+    expect(lines.some(l => l.includes('slim retry'))).toBe(true);
+  });
+
+  // Adversarial-review finding F3: the LAST loop turn alone can be bare (a
+  // pure tool_use turn with no text and no thinking) when the loop ends
+  // right at max_turns — reading only that turn used to feed the retry zero
+  // real context (false-clean risk). End-to-end proof the fix reaches back
+  // through turn history via the real client loop, not just the shared
+  // helper in isolation.
+  it("falls back to an earlier turn's own text for the retry when the turn right before max_turns is bare (#829 F3)", async () => {
+    createMock
+      .mockResolvedValueOnce(
+        msg(
+          [thinkingBlock('Issue 1: a real concern about null handling.'), toolUseBlock],
+          100,
+          0,
+          'tool_use',
+        ),
+      )
+      .mockResolvedValueOnce(msg([toolUseBlock], 100, 0, 'tool_use')) // bare: no text, no thinking
+      .mockResolvedValueOnce(
+        msg(
+          [
+            textBlock(
+              '```json\n{"findings":[],"summary":{"riskLevel":"low","overview":"recovered","keyChanges":[]}}\n```',
+            ),
+          ],
+          50,
+          0,
+          'end_turn',
+        ),
+      );
+    const { logger } = capturingLogger();
+    const client = new AnthropicAgentClient({
+      apiKey: 'test',
+      model: 'claude-test',
+      maxTurns: 2,
+      maxTokenBudget: 1_000_000,
+      logger,
+    });
+
+    const result = await client.run('sys', 'init', TOOLS as never, async () => 'ok');
+
+    expect(result.incomplete).toBe(false);
+    const retryArgs = createMock.mock.calls[2][0];
+    expect(retryArgs.messages[0].content).toContain('Issue 1: a real concern about null handling.');
+  });
+});

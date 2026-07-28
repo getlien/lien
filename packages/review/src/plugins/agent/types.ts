@@ -240,6 +240,21 @@ export interface TurnTrace {
   finishReason?: string;
   inputTokens?: number;
   outputTokens?: number;
+  /**
+   * True on a summary-retry turn built from the SLIM context (issue #829's
+   * truncation remainder): the last investigative turn's own text plus the
+   * retry instruction, NOT the full accumulated tool-calling history — see
+   * `buildSlimRetryPrompt` (`agent-client-shared.ts`) and each client's
+   * `runSummaryRetry`. Absent on every ordinary loop turn. This is the
+   * receipt that a slim (not full-context) retry happened, inspectable via
+   * `AgentResult.trace.turns` — the same mechanism the harness's `--trace`
+   * mode already reads (see PR #895's dogfood evidence). Not plumbed into
+   * `attestation.ts`'s `ProviderPassAttestation`: no existing telemetry
+   * channel carries per-pass retry-shape data from `AgentResult` to
+   * `buildRunAttestation` (`review-pr.ts`) today, and adding one is
+   * disproportionate to this fix's scope — the trace is the receipt.
+   */
+  slimRetry?: boolean;
 }
 
 /**

@@ -386,13 +386,72 @@ export function embeddedJsonObject(content: string): string | undefined {
 const JSON_STRING_LITERAL = /"(?:\\.|[^"\\])*"/g;
 
 /**
- * Safety valve on `allBalancedJsonObjects`' scan: each object found re-masks
- * the remaining text, so a pathological "{}{}{}…" essay could otherwise cost
- * O(n²). A genuine verdict is always among the first few objects in real
- * model output; this bounds worst-case work on adversarial/degenerate input
- * without affecting any real recovery.
+ * Safety valve on `allBalancedJsonObjects`'s scan: a hard ceiling on how many
+ * top-level objects it will ever return, bounding worst-case work/return size
+ * on a pathological "{}{}{}…" essay (this function processes untrusted LLM
+ * output). Raised from the original 25 — issue #829's residual gap: a
+ * genuine verdict positioned 26th+ in JSON-dense prose was invisible to the
+ * scan (the regression test below pins the 26th-position shape).
+ *
+ * CORRECTNESS OVER THROUGHPUT (adversarial review of the first cut of this
+ * fix — HISTORICAL paragraph below: the design it describes was reverted
+ * and is NOT what the code in this file does today; see
+ * `nextBalancedObjectRange`'s own doc comment for the current, correct
+ * behavior): an earlier, since-reverted version of this change hoisted
+ * `maskStringLiterals` so every candidate object's scan shared ONE
+ * pre-computed masked copy of the whole text — genuinely O(text length)
+ * instead of the per-object O(objects × text length) this comment used to
+ * justify a stingy 25. That hoist was NOT behavior-preserving: sharing that
+ * whole-text mask across every candidate lets an odd number of
+ * stray/unescaped double-quote characters ANYWHERE earlier
+ * in the text shift the regex's global quote-pairing, potentially masking
+ * over the real verdict's own opening brace and losing it entirely — proven
+ * by the reviewer on both a synthetic stray-quote-in-prose case and the
+ * #829 26th-object decoy shape with one added stray quote (a 1-of-3
+ * stray-quote parity sweep: odd counts lost the verdict, even counts didn't).
+ * A truncated `finishReason:'length'` turn — the exact shape this whole fix
+ * targets — naturally ends mid-string-literal, i.e. with an odd, unterminated
+ * quote: this is the TARGET failure class, not an edge case. So
+ * `nextBalancedObjectRange` (below) re-masks fresh from each candidate's own
+ * `{`, per the ORIGINAL design — correctness beats the throughput win on
+ * this path. See `nextBalancedObjectRange`'s own doc comment for the
+ * mechanics and the `stray quote` regression tests
+ * (`plugins-agent-client-shared.test.ts`) pinning both failure cases plus a
+ * 0-4 stray-quote parity sweep that must all recover.
+ *
+ * Re-measured with per-object re-masking restored, at the 200 cap:
+ *  - 200 tiny objects spread through ~500K chars of realistic filler: ~26ms.
+ *  - the TRUE worst case for this algorithm — 200 tiny objects clustered up
+ *    front, followed by a huge brace-free tail (every one of the 200 calls
+ *    re-masks nearly that whole tail) — at a ~900K-char tail (roughly the
+ *    size of the largest real derailed-turn text observed on this issue):
+ *    ~70ms. Even doubled to ~2.3M chars: ~160ms.
+ * A single turn's own output text is bounded well under these sizes by the
+ * per-request `max_tokens` ceiling both clients already enforce (at most
+ * `RETRY_MAX_MAX_TOKENS`/`MAX_TOKENS` tokens per completion — see
+ * `openai-client.ts`/`anthropic-client.ts`), so even the TRUE worst-case
+ * shape stays in double-digit milliseconds for any text this function will
+ * realistically ever see. The O(objects × text length) revisit is real, but
+ * at this cap it stays trivial in absolute terms, so 200 stays the cap (not
+ * reverted to 25). See `plugins-agent-client-shared.test.ts`'s perf tests for
+ * the exact benchmarked shapes.
  */
-const MAX_BALANCED_OBJECTS_SCANNED = 25;
+export const MAX_BALANCED_OBJECTS_SCANNED = 200;
+
+/**
+ * Mask every double-quoted string literal in `text` with same-length `"`
+ * filler so brace-depth scanning never has to track quotes/escapes
+ * char-by-char — braces inside a string literal (e.g. prose like "{user,
+ * token}") can't skew the depth count, and offsets into the result line up
+ * 1:1 with `text`. Called on each candidate's own remaining SUFFIX (see
+ * `nextBalancedObjectRange`) — every candidate gets its OWN fresh mask; the
+ * whole text is never masked as a single shared unit — see
+ * `MAX_BALANCED_OBJECTS_SCANNED`'s doc comment for why that would be unsafe
+ * (stray-quote parity can shift and hide a real verdict).
+ */
+function maskStringLiterals(text: string): string {
+  return text.replace(JSON_STRING_LITERAL, m => '"'.repeat(m.length));
+}
 
 /**
  * Find the single balanced JSON object starting at `text`'s first `{` at or
@@ -400,8 +459,22 @@ const MAX_BALANCED_OBJECTS_SCANNED = 25;
  * escapes) until it returns to zero. Returns its `[start, end]` (inclusive)
  * indices, or `undefined` if there's no more `{` or it never balances (e.g. a
  * genuinely truncated response) — never guesses at an unbalanced slice.
- * Pulled out of `allBalancedJsonObjects` so that function's own loop stays
- * under the complexity budget.
+ *
+ * Re-masks `text.slice(start)` FRESH on every call, rather than sharing one
+ * whole-text masked copy across every candidate — deliberately, not an
+ * oversight (an earlier, since-reverted cut of this fix shared one mask
+ * across the whole text; see `MAX_BALANCED_OBJECTS_SCANNED`'s doc comment
+ * for that history and the adversarial-review proof of why it was wrong).
+ * Sharing a mask across the whole text lets an odd number of stray,
+ * unescaped double-quote characters anywhere BEFORE `start` shift the global
+ * quote-pairing the regex produces, which can mask straight over THIS
+ * candidate's own opening `{` (if it lands between two quotes the regex
+ * wrongly paired as a string literal) and make a real verdict invisible.
+ * Re-anchoring the mask at each candidate's own `{` makes recovering THAT
+ * object immune to whatever quote parity came before it, at the cost of
+ * re-scanning the remaining suffix per candidate (bounded by
+ * `MAX_BALANCED_OBJECTS_SCANNED`). Pulled out of `allBalancedJsonObjects` so
+ * that function's own loop stays under the complexity budget.
  */
 function nextBalancedObjectRange(
   text: string,
@@ -410,12 +483,7 @@ function nextBalancedObjectRange(
   const start = text.indexOf('{', searchFrom);
   if (start === -1) return undefined;
 
-  // Mask string contents with same-length `"` filler so quotes/escapes never
-  // have to be tracked char-by-char in the scan below — braces inside a
-  // string literal (e.g. prose like "{user, token}") can't skew the depth
-  // count, and offsets into `masked` line up 1:1 with `text.slice(start)`.
-  const masked = text.slice(start).replace(JSON_STRING_LITERAL, m => '"'.repeat(m.length));
-
+  const masked = maskStringLiterals(text.slice(start));
   let depth = 0;
   for (let i = 0; i < masked.length; i++) {
     if (masked[i] === '{') depth++;
@@ -470,6 +538,111 @@ export function allBalancedJsonObjects(text: string): string[] {
  */
 export function firstBalancedJsonObject(text: string): string | undefined {
   return allBalancedJsonObjects(text)[0];
+}
+
+// ---------------------------------------------------------------------------
+// Summary-retry slim context (issue #829 — truncation-under-token-cap remainder)
+// ---------------------------------------------------------------------------
+
+/**
+ * Bound on how much of the last investigative turn's own text feeds the
+ * summary-retry's slim prompt (`buildSlimRetryPrompt`, below). That text can
+ * itself be enormous — both of #829's real incidents had their derailed turn
+ * emit ~227K-262K tokens of "Issue 1: … Issue 21: …" self-review prose — so
+ * even a "slim" retry built only from it still needs its own bound to stay
+ * meaningfully smaller than replaying the whole tool-calling history. ~20K
+ * chars ≈ 5K tokens: enough room for several concrete findings, small next
+ * to a multi-turn investigation's accumulated tool-call/tool-result history.
+ */
+export const SLIM_RETRY_CONTEXT_MAX_CHARS = 20_000;
+
+/**
+ * Pick the text carrying the model's actual investigative decisions for the
+ * summary-retry. Walks the turn history NEWEST FIRST, taking each turn's own
+ * response content — falling back to its reasoning channel when content is
+ * empty, mirroring `extractFindingsWithReasoningFallback`'s channel
+ * preference (applied here to what the retry SENDS instead of what it reads
+ * back) — and concatenating non-empty turns until
+ * `SLIM_RETRY_CONTEXT_MAX_CHARS` is reached or history is exhausted.
+ *
+ * FLOOR AGAINST FALSE-CLEAN (adversarial-review finding on the first cut of
+ * this fix): the very LAST loop turn alone can be a pure tool_calls turn
+ * with EMPTY content and no reasoning — e.g. the loop hit `max_turns`/budget
+ * right after a turn whose only output was tool calls, with no closing
+ * prose. Reading only that one turn returned `''`, so the retry became a
+ * BARE instruction ("output the verdict now") with zero real context to
+ * summarize. A model asked that with nothing to go on can fabricate a
+ * plausible-looking, entirely synthetic clean/empty verdict instead of
+ * honestly failing — a FALSE-CLEAN result, the worst failure class this
+ * codebase tracks (see `readVerdict`'s corrupted-key recovery for the same
+ * "never guess, but never go silent either" tension). Walking backward for
+ * the most recent turn that actually said something closes that gap without
+ * unbounding the retry's input: `SLIM_RETRY_CONTEXT_MAX_CHARS` still caps the
+ * concatenation as a whole, not per turn.
+ */
+export function lastTurnFindingsText(
+  turns: ReadonlyArray<{ responseText?: string; reasoning?: string }>,
+): string {
+  const parts: string[] = [];
+  let total = 0;
+  for (let i = turns.length - 1; i >= 0 && total < SLIM_RETRY_CONTEXT_MAX_CHARS; i--) {
+    const text = turns[i].responseText?.trim() || turns[i].reasoning?.trim() || '';
+    if (!text) continue;
+    parts.push(text);
+    total += text.length;
+  }
+  return parts.join('\n\n---\n\n');
+}
+
+/** Labels the replayed findings text so the model knows what it's looking at. */
+const SLIM_RETRY_CONTEXT_PREFIX =
+  'Your own analysis from the investigation so far (the rest of the conversation is omitted to keep this request small):';
+
+/**
+ * Build the summary-retry's SLIM prompt text: the recent investigative
+ * turns' own analysis (see `lastTurnFindingsText`, bounded overall — below —
+ * to `SLIM_RETRY_CONTEXT_MAX_CHARS`) plus the hard instruction to emit the
+ * verdict now. Falls back to the bare instruction when there's no findings
+ * text to replay at all (e.g. every turn in history was genuinely empty).
+ *
+ * ISSUE #829 (truncation remainder, post-#895's `require_parameters` fix):
+ * the pre-fix retry appended its instruction directly onto the FULL
+ * accumulated conversation — system prompt, initial message, and every prior
+ * turn's own tool calls/tool results — and resent that whole history as the
+ * retry's own input. On a JSON-dense diff that history is itself large
+ * enough that even a genuinely `require_parameters:true`-routed, forced-
+ * JSON-compliant provider still truncated the retry's OUTPUT before it
+ * contained a complete verdict object (`finishReason:'length'`, both real
+ * incidents named on the issue). A verdict retry doesn't need the tool-
+ * calling history at all — everything the model needs to decide the verdict
+ * already lives in its own recent turns' text (that prose IS the findings,
+ * just not yet JSON) — so both clients now build a FRESH, minimal message
+ * list for the retry instead of appending to the accumulated one (see
+ * `openai-client.ts` / `anthropic-client.ts`'s `runSummaryRetry`), dropping
+ * every earlier tool call/tool result regardless of how large the
+ * investigation's own history grew.
+ *
+ * KNOWN LIMITATION — HEAD-KEEPING TRUNCATION CAN MAKE A RECOVERED VERDICT
+ * PARTIAL (documented per adversarial-review finding, not silently accepted):
+ * `truncate` keeps the HEAD of `findingsText` and drops the tail. On the
+ * exact "Issue 1: … Issue 21: …" enumerated-findings shape this whole fix
+ * targets, that means only the FIRST couple of issues (roughly the first
+ * ~20K chars' worth, often just 1-2 of 21 on a real derailed turn) survive
+ * into the retry — the rest of the enumeration and any trailing "in
+ * conclusion…" synthesis are silently dropped. This is a genuine, real
+ * limitation: the slim retry can recover A verdict instead of none, not
+ * necessarily the FULL set of findings the model had actually found. HEAD is
+ * kept deliberately rather than the TAIL: the early items in an enumerated
+ * list are where the CONCRETE, schema-fillable specifics live (a claimed
+ * file/line/behavior an `AgentFinding` needs `filepath`/`line`/`message`
+ * for), while a trailing wrap-up tends to be generic synthesis prose with
+ * little of that concrete substance — keeping the head trades completeness
+ * for a higher chance the retry can still build at least one valid,
+ * concrete finding rather than none at all.
+ */
+export function buildSlimRetryPrompt(findingsText: string, instruction: string): string {
+  const truncated = truncate(findingsText.trim(), SLIM_RETRY_CONTEXT_MAX_CHARS);
+  return truncated ? `${SLIM_RETRY_CONTEXT_PREFIX}\n\n${truncated}\n\n${instruction}` : instruction;
 }
 
 /** Type guard to validate a summary object. */
