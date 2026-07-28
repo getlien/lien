@@ -544,4 +544,49 @@ describe('AnthropicAgentClient — slim summary-retry context (#829 truncation r
 
     expect(lines.some(l => l.includes('slim retry'))).toBe(true);
   });
+
+  // Adversarial-review finding F3: the LAST loop turn alone can be bare (a
+  // pure tool_use turn with no text and no thinking) when the loop ends
+  // right at max_turns — reading only that turn used to feed the retry zero
+  // real context (false-clean risk). End-to-end proof the fix reaches back
+  // through turn history via the real client loop, not just the shared
+  // helper in isolation.
+  it("falls back to an earlier turn's own text for the retry when the turn right before max_turns is bare (#829 F3)", async () => {
+    createMock
+      .mockResolvedValueOnce(
+        msg(
+          [thinkingBlock('Issue 1: a real concern about null handling.'), toolUseBlock],
+          100,
+          0,
+          'tool_use',
+        ),
+      )
+      .mockResolvedValueOnce(msg([toolUseBlock], 100, 0, 'tool_use')) // bare: no text, no thinking
+      .mockResolvedValueOnce(
+        msg(
+          [
+            textBlock(
+              '```json\n{"findings":[],"summary":{"riskLevel":"low","overview":"recovered","keyChanges":[]}}\n```',
+            ),
+          ],
+          50,
+          0,
+          'end_turn',
+        ),
+      );
+    const { logger } = capturingLogger();
+    const client = new AnthropicAgentClient({
+      apiKey: 'test',
+      model: 'claude-test',
+      maxTurns: 2,
+      maxTokenBudget: 1_000_000,
+      logger,
+    });
+
+    const result = await client.run('sys', 'init', TOOLS as never, async () => 'ok');
+
+    expect(result.incomplete).toBe(false);
+    const retryArgs = createMock.mock.calls[2][0];
+    expect(retryArgs.messages[0].content).toContain('Issue 1: a real concern about null handling.');
+  });
 });

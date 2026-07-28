@@ -802,6 +802,34 @@ describe('OpenAIAgentClient — slim summary-retry context (#829 truncation rema
 
     expect(lines.some(l => l.includes('slim retry'))).toBe(true);
   });
+
+  // Adversarial-review finding F3: the LAST loop turn alone can be bare (a
+  // pure tool_calls turn with no content and no reasoning) when the loop
+  // ends right at max_turns — reading only that turn used to feed the retry
+  // zero real context (false-clean risk). End-to-end proof the fix reaches
+  // back through turn history via the real client loop, not just the shared
+  // helper in isolation.
+  it("falls back to an earlier turn's reasoning for the retry when the turn right before max_turns is bare (#829 F3)", async () => {
+    const { bodies } = mockFetch([
+      toolCallTurn(100, null, 'Issue 1: a real concern about null handling.'), // turn 1: has reasoning
+      toolCallTurn(100), // turn 2: bare tool_calls (no content, no reasoning) — hits max_turns right after
+      stopTurn(CLEAN_JSON, 50), // retry: recovers
+    ]);
+    const client = new OpenAIAgentClient({
+      apiKey: 'test',
+      baseUrl: 'http://mock.local',
+      model: 'test-model',
+      maxTurns: 2,
+      maxTokenBudget: 1_000_000,
+      logger: silentLogger,
+    });
+
+    const result = await client.run('sys', 'init', [], noopTool);
+
+    expect(result.incomplete).toBe(false);
+    const retryMessages = bodies[2].messages as Array<{ role: string; content: string }>;
+    expect(retryMessages[1].content).toContain('Issue 1: a real concern about null handling.');
+  });
 });
 
 /** Shared by both the `appendIncompleteNotice` and `hasProviderFailure` suites below. */

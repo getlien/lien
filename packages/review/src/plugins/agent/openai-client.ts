@@ -546,7 +546,7 @@ export class OpenAIAgentClient {
       const remainingBudget = this.maxTokenBudget - (totalInputTokens + totalOutputTokens);
       const retry = await this.runSummaryRetry(
         systemPrompt,
-        lastTurnFindingsText(lastLoopTurn),
+        lastTurnFindingsText(turnTraces),
         turn,
         remainingBudget,
       );

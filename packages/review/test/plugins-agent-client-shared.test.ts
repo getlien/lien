@@ -299,6 +299,90 @@ describe('allBalancedJsonObjects', () => {
     const objects = allBalancedJsonObjects(decoys);
     expect(objects).toHaveLength(MAX_BALANCED_OBJECTS_SCANNED);
   });
+
+  // ---------------------------------------------------------------------------
+  // Adversarial-review finding F1 on the first cut of this fix: hoisting the
+  // string-literal mask to run ONCE over the whole text (instead of fresh per
+  // candidate object) was NOT behavior-preserving. An odd number of stray,
+  // unescaped double-quote characters ANYWHERE earlier in the text shifts the
+  // regex's global quote-pairing and can mask straight over a later verdict's
+  // own opening brace, losing it entirely. A truncated `finishReason:'length'`
+  // turn naturally ends mid-string-literal — an odd, unterminated quote is
+  // the TARGET failure class this whole fix exists for, not an edge case.
+  // Per-object re-masking (restored — see `nextBalancedObjectRange`'s doc
+  // comment) is immune to this: these must all recover regardless of the
+  // stray-quote count/parity earlier in the text.
+  // ---------------------------------------------------------------------------
+  it('case B: a single stray, unterminated quote in prose before the verdict does not hide it', () => {
+    const verdict = JSON.stringify({ findings: [finding], summary });
+    const text = `The user's config had a "weird value here.\nHere is my actual verdict:\n${verdict}`;
+    expect(allBalancedJsonObjects(text)).toContain(verdict);
+  });
+
+  it('case C: the #829 26th-object decoy shape with an added stray quote still recovers the verdict', () => {
+    const decoys = Array.from({ length: 25 }, (_, i) => `{"noise":${i}}`).join(' ');
+    const verdict = JSON.stringify({
+      findings: [],
+      summary: { riskLevel: 'low', overview: '26th object with stray quote', keyChanges: [] },
+    });
+    const text = `${decoys} some "unterminated prose here ${verdict}`;
+    expect(allBalancedJsonObjects(text)).toContain(verdict);
+  });
+
+  it.each([0, 1, 2, 3, 4])(
+    'stray-quote parity sweep: recovers the verdict with %i stray quote(s) earlier in the text',
+    count => {
+      const verdict = JSON.stringify({
+        findings: [],
+        summary: { riskLevel: 'low', overview: 'ok', keyChanges: [] },
+      });
+      const strayQuotes = '"'.repeat(count);
+      const text = `Some prose with ${strayQuotes} stray quotes in it.\n${verdict}`;
+      expect(allBalancedJsonObjects(text)).toContain(verdict);
+    },
+  );
+});
+
+describe('allBalancedJsonObjects — performance with per-object re-masking restored (#829 F1 correctness fix)', () => {
+  // Correctness (F1) requires re-masking each candidate's own remaining
+  // suffix instead of sharing one whole-text mask — genuinely
+  // O(objects × text length) again. These pin that it stays cheap in
+  // ABSOLUTE terms at the 200 cap, per the adversarial-review decision
+  // (measured locally: ~26ms/~70ms; generous multiples here to avoid CI
+  // flakiness while still catching a real regression) — see
+  // `MAX_BALANCED_OBJECTS_SCANNED`'s doc comment for the full benchmark.
+  it('stays fast on ~500K chars of realistic decoy density (200 objects)', () => {
+    const filler = 'x'.repeat(2000);
+    const text = Array.from(
+      { length: MAX_BALANCED_OBJECTS_SCANNED },
+      (_, i) => `{"n":${i}}${filler}`,
+    ).join(' ');
+
+    const start = performance.now();
+    const objects = allBalancedJsonObjects(text);
+    const elapsed = performance.now() - start;
+
+    expect(objects).toHaveLength(MAX_BALANCED_OBJECTS_SCANNED);
+    expect(elapsed).toBeLessThan(500);
+  });
+
+  it('stays cheap on the TRUE worst case: 200 decoys clustered up front + a huge brace-free tail', () => {
+    const decoysFront = Array.from(
+      { length: MAX_BALANCED_OBJECTS_SCANNED },
+      (_, i) => `{"n":${i}}`,
+    ).join(' ');
+    // ~920K chars, no braces at all — every one of the 200 calls re-masks
+    // nearly this whole tail, the algorithm's genuine worst case.
+    const hugeTail = 'the quick brown fox jumps over the lazy dog. '.repeat(20_000);
+    const text = `${decoysFront} ${hugeTail}`;
+
+    const start = performance.now();
+    const objects = allBalancedJsonObjects(text);
+    const elapsed = performance.now() - start;
+
+    expect(objects).toHaveLength(MAX_BALANCED_OBJECTS_SCANNED);
+    expect(elapsed).toBeLessThan(1000);
+  });
 });
 
 describe('readVerdict', () => {
@@ -768,30 +852,77 @@ describe('logWrapUpReason', () => {
 // format is built from these.
 // ---------------------------------------------------------------------------
 describe('lastTurnFindingsText', () => {
-  it('returns undefined turn as an empty string', () => {
-    expect(lastTurnFindingsText(undefined)).toBe('');
+  it('returns an empty string for an empty turn history', () => {
+    expect(lastTurnFindingsText([])).toBe('');
   });
 
-  it('prefers responseText over reasoning when both are present', () => {
-    expect(lastTurnFindingsText({ responseText: 'the content', reasoning: 'the reasoning' })).toBe(
-      'the content',
-    );
+  it('prefers responseText over reasoning when both are present on the last turn', () => {
+    expect(
+      lastTurnFindingsText([{ responseText: 'the content', reasoning: 'the reasoning' }]),
+    ).toBe('the content');
   });
 
-  it('falls back to reasoning when responseText is empty/whitespace-only', () => {
-    expect(lastTurnFindingsText({ responseText: '   ', reasoning: 'the reasoning' })).toBe(
+  it('falls back to reasoning when the last turn responseText is empty/whitespace-only', () => {
+    expect(lastTurnFindingsText([{ responseText: '   ', reasoning: 'the reasoning' }])).toBe(
       'the reasoning',
     );
-    expect(lastTurnFindingsText({ reasoning: 'the reasoning' })).toBe('the reasoning');
+    expect(lastTurnFindingsText([{ reasoning: 'the reasoning' }])).toBe('the reasoning');
   });
 
-  it('returns an empty string when neither channel has anything', () => {
-    expect(lastTurnFindingsText({})).toBe('');
-    expect(lastTurnFindingsText({ responseText: '', reasoning: '' })).toBe('');
+  it('returns an empty string when every turn has nothing on either channel', () => {
+    expect(lastTurnFindingsText([{}])).toBe('');
+    expect(lastTurnFindingsText([{ responseText: '', reasoning: '' }])).toBe('');
   });
 
   it('trims surrounding whitespace', () => {
-    expect(lastTurnFindingsText({ responseText: '  padded text  ' })).toBe('padded text');
+    expect(lastTurnFindingsText([{ responseText: '  padded text  ' }])).toBe('padded text');
+  });
+
+  // Adversarial-review finding F3 on the first cut of this fix: the LAST turn
+  // alone can be a pure tool_calls turn with empty content AND no reasoning
+  // (a forced-finish/max-turns bail right after tool-calling, no closing
+  // prose) — reading only that one turn returned '', turning the retry into
+  // a bare instruction with zero real context (a false-clean risk: the model
+  // can fabricate a plausible empty verdict when given nothing to summarize).
+  it('falls back to an earlier turn when the LAST turn is empty on both channels (#829 F3 false-clean floor)', () => {
+    const turns = [
+      { responseText: 'Issue 1: a real concern about null handling.' },
+      { responseText: '', toolCalls: [] }, // pure tool_calls turn, no prose
+    ];
+    expect(lastTurnFindingsText(turns)).toContain('Issue 1: a real concern about null handling.');
+  });
+
+  it('walks arbitrarily far back through empty turns to find real content', () => {
+    const turns = [
+      { responseText: 'the real investigative notes' },
+      { responseText: '' },
+      { responseText: '' },
+      { responseText: '', reasoning: '' },
+    ];
+    expect(lastTurnFindingsText(turns)).toBe('the real investigative notes');
+  });
+
+  it('returns an empty string when EVERY turn in history is empty (nothing to fall back to)', () => {
+    const turns = [{ responseText: '' }, { responseText: '', reasoning: '' }, {}];
+    expect(lastTurnFindingsText(turns)).toBe('');
+  });
+
+  it('concatenates multiple recent non-empty turns, newest first, while under budget', () => {
+    const turns = [
+      { responseText: 'older investigative notes' },
+      { responseText: 'newest investigative notes' },
+    ];
+    const result = lastTurnFindingsText(turns);
+    expect(result.indexOf('newest investigative notes')).toBeLessThan(
+      result.indexOf('older investigative notes'),
+    );
+  });
+
+  it('stops accumulating once the newest turn alone already fills the budget', () => {
+    const huge = 'X'.repeat(SLIM_RETRY_CONTEXT_MAX_CHARS + 1);
+    const turns = [{ responseText: 'should not appear' }, { responseText: huge }];
+    const result = lastTurnFindingsText(turns);
+    expect(result).not.toContain('should not appear');
   });
 });
 

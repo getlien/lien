@@ -314,7 +314,7 @@ export class AnthropicAgentClient {
     if (!parsed.summary && lastResponse) {
       const remainingBudget = this.maxTokenBudget - (totalInputTokens + totalOutputTokens);
       const retry = await this.runSummaryRetry(
-        lastTurnFindingsText(lastLoopTurn),
+        lastTurnFindingsText(turnTraces),
         turn,
         tools,
         remainingBudget,
