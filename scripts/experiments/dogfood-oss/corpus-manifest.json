@@ -14,15 +14,15 @@
       "c1Advisory": [],
       "c1": "clean",
       "sourceFileCount": 83,
-      "indexMs": 238,
+      "indexMs": 216,
       "indexOk": true,
-      "indexTail": "\u001b[2m  Completed in 96ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠹\u001b[39m Indexing your TODO comments (so many TODOs)...\u001b[32m✔\u001b[39m \u001b[32mUpdated 3 files, removed 0 (3/3)\u001b[39m",
+      "indexTail": "\u001b[2m  Completed in 73ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[32m✔\u001b[39m \u001b[32mIndex is up to date - no changes detected\u001b[39m",
       "status_json": {
         "version": "0.71.1",
         "indexPath": "/Users/alfhenderson/.lien/indices/flask-7b1419a5",
         "indexStatus": "exists",
         "indexFiles": 4,
-        "lastModified": "2026-07-28T22:32:30.666Z",
+        "lastModified": "2026-07-28T22:37:26.138Z",
         "lastReindex": "2026-07-28T22:32:30.652Z",
         "git": {
           "enabled": true,
@@ -44,7 +44,10 @@
       "associations": {
         "sampled": 25,
         "withTests": 9,
+        "inferred": 0,
+        "anyCoverage": 9,
         "pct": 36,
+        "pctIncludingInferred": 36,
         "examples": [
           {
             "file": "docs/conf.py",
@@ -74,15 +77,15 @@
       "c1Advisory": [],
       "c1": "clean",
       "sourceFileCount": 99,
-      "indexMs": 194,
+      "indexMs": 192,
       "indexOk": true,
-      "indexTail": "\u001b[2m  Completed in 57ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[32m✔\u001b[39m \u001b[32mIndex is up to date - no changes detected\u001b[39m",
+      "indexTail": "\u001b[2m  Completed in 55ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[32m✔\u001b[39m \u001b[32mIndex is up to date - no changes detected\u001b[39m",
       "status_json": {
         "version": "0.71.1",
         "indexPath": "/Users/alfhenderson/.lien/indices/gin-414c34fd",
         "indexStatus": "exists",
-        "indexFiles": 4,
-        "lastModified": "2026-07-28T22:32:35.654Z",
+        "indexFiles": 5,
+        "lastModified": "2026-07-28T22:37:31.096Z",
         "lastReindex": "2026-07-28T22:28:46.621Z",
         "git": {
           "enabled": true,
@@ -104,7 +107,10 @@
       "associations": {
         "sampled": 25,
         "withTests": 16,
+        "inferred": 0,
+        "anyCoverage": 16,
         "pct": 64,
+        "pctIncludingInferred": 64,
         "examples": [
           {
             "file": "binding/binding.go",
@@ -134,15 +140,15 @@
       "c1Advisory": [],
       "c1": "clean",
       "sourceFileCount": 790,
-      "indexMs": 271,
+      "indexMs": 263,
       "indexOk": true,
-      "indexTail": "\u001b[2m  Completed in 126ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[32m✔\u001b[39m \u001b[32mIndex is up to date - no changes detected\u001b[39m",
+      "indexTail": "\u001b[2m  Completed in 122ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[32m✔\u001b[39m \u001b[32mIndex is up to date - no changes detected\u001b[39m",
       "status_json": {
         "version": "0.71.1",
         "indexPath": "/Users/alfhenderson/.lien/indices/tokio-b45f30ed",
         "indexStatus": "exists",
         "indexFiles": 4,
-        "lastModified": "2026-07-28T22:32:40.695Z",
+        "lastModified": "2026-07-28T22:37:36.037Z",
         "lastReindex": "2026-07-28T22:28:53.484Z",
         "git": {
           "enabled": true,
@@ -164,7 +170,10 @@
       "associations": {
         "sampled": 25,
         "withTests": 15,
+        "inferred": 0,
+        "anyCoverage": 15,
         "pct": 60,
+        "pctIncludingInferred": 60,
         "examples": [
           {
             "file": "benches/copy.rs",
@@ -194,15 +203,15 @@
       "c1Advisory": [],
       "c1": "clean",
       "sourceFileCount": 98,
-      "indexMs": 243,
+      "indexMs": 238,
       "indexOk": true,
-      "indexTail": "\u001b[2m  Completed in 103ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[32m✔\u001b[39m \u001b[32mIndex is up to date - no changes detected\u001b[39m",
+      "indexTail": "\u001b[2m  Completed in 100ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[32m✔\u001b[39m \u001b[32mIndex is up to date - no changes detected\u001b[39m",
       "status_json": {
         "version": "0.71.1",
         "indexPath": "/Users/alfhenderson/.lien/indices/Alamofire-eb47b9b7",
         "indexStatus": "exists",
         "indexFiles": 4,
-        "lastModified": "2026-07-28T22:32:48.837Z",
+        "lastModified": "2026-07-28T22:37:44.029Z",
         "lastReindex": "2026-07-28T22:29:02.617Z",
         "git": {
           "enabled": true,
@@ -224,7 +233,10 @@
       "associations": {
         "sampled": 25,
         "withTests": 0,
+        "inferred": 5,
+        "anyCoverage": 5,
         "pct": 0,
+        "pctIncludingInferred": 20,
         "examples": [
           {
             "file": "Example/Source/AppDelegate.swift",
@@ -254,16 +266,16 @@
       "c1Advisory": [],
       "c1": "clean",
       "sourceFileCount": 319,
-      "indexMs": 272,
+      "indexMs": 292,
       "indexOk": true,
-      "indexTail": "\u001b[2m  Completed in 130ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[32m✔\u001b[39m \u001b[32mIndex is up to date - no changes detected\u001b[39m",
+      "indexTail": "\u001b[2m  Completed in 155ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠹\u001b[39m Indexing your TODO comments (so many TODOs)...\u001b[32m✔\u001b[39m \u001b[32mUpdated 1 file, removed 0 (1/1)\u001b[39m",
       "status_json": {
         "version": "0.71.1",
         "indexPath": "/Users/alfhenderson/.lien/indices/hono-b008d2e1",
         "indexStatus": "exists",
-        "indexFiles": 4,
-        "lastModified": "2026-07-28T22:32:54.430Z",
-        "lastReindex": "2026-07-28T22:29:09.316Z",
+        "indexFiles": 14,
+        "lastModified": "2026-07-28T22:37:49.686Z",
+        "lastReindex": "2026-07-28T22:37:49.661Z",
         "git": {
           "enabled": true,
           "branch": "main",
@@ -284,7 +296,10 @@
       "associations": {
         "sampled": 25,
         "withTests": 22,
+        "inferred": 0,
+        "anyCoverage": 22,
         "pct": 88,
+        "pctIncludingInferred": 88,
         "examples": [
           {
             "file": "benchmarks/http-server/benchmark.ts",
@@ -314,15 +329,15 @@
       "c1Advisory": [],
       "c1": "clean",
       "sourceFileCount": 306,
-      "indexMs": 420,
+      "indexMs": 415,
       "indexOk": true,
-      "indexTail": "\u001b[2m  Completed in 278ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[32m✔\u001b[39m \u001b[32mIndex is up to date - no changes detected\u001b[39m",
+      "indexTail": "\u001b[2m  Completed in 276ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[32m✔\u001b[39m \u001b[32mIndex is up to date - no changes detected\u001b[39m",
       "status_json": {
         "version": "0.71.1",
         "indexPath": "/Users/alfhenderson/.lien/indices/retrofit-a6deda25",
         "indexStatus": "exists",
         "indexFiles": 4,
-        "lastModified": "2026-07-28T22:32:59.446Z",
+        "lastModified": "2026-07-28T22:37:54.668Z",
         "lastReindex": "2026-07-28T22:29:15.351Z",
         "git": {
           "enabled": true,
@@ -344,7 +359,10 @@
       "associations": {
         "sampled": 25,
         "withTests": 2,
+        "inferred": 0,
+        "anyCoverage": 2,
         "pct": 8,
+        "pctIncludingInferred": 8,
         "examples": [
           {
             "file": "retrofit-adapters/guava/src/main/java/retrofit2/adapter/guava/GuavaCallAdapterFactory.java",
@@ -374,15 +392,15 @@
       "c1Advisory": [],
       "c1": "clean",
       "sourceFileCount": 361,
-      "indexMs": 241,
+      "indexMs": 245,
       "indexOk": true,
       "indexTail": "\u001b[2m  Completed in 102ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[32m✔\u001b[39m \u001b[32mIndex is up to date - no changes detected\u001b[39m",
       "status_json": {
         "version": "0.71.1",
         "indexPath": "/Users/alfhenderson/.lien/indices/console-50b99aa9",
         "indexStatus": "exists",
-        "indexFiles": 4,
-        "lastModified": "2026-07-28T22:33:06.977Z",
+        "indexFiles": 5,
+        "lastModified": "2026-07-28T22:38:02.996Z",
         "lastReindex": "2026-07-28T22:31:19.226Z",
         "git": {
           "enabled": true,
@@ -404,7 +422,10 @@
       "associations": {
         "sampled": 25,
         "withTests": 0,
+        "inferred": 0,
+        "anyCoverage": 0,
         "pct": 0,
+        "pctIncludingInferred": 0,
         "examples": [
           {
             "file": "Application.php",
@@ -434,15 +455,15 @@
       "c1Advisory": [],
       "c1": "clean",
       "sourceFileCount": 216,
-      "indexMs": 239,
+      "indexMs": 257,
       "indexOk": true,
-      "indexTail": "\u001b[2m  Completed in 100ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[32m✔\u001b[39m \u001b[32mIndex is up to date - no changes detected\u001b[39m",
+      "indexTail": "\u001b[2m  Completed in 103ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[32m✔\u001b[39m \u001b[32mIndex is up to date - no changes detected\u001b[39m",
       "status_json": {
         "version": "0.71.1",
         "indexPath": "/Users/alfhenderson/.lien/indices/serilog-163a5271",
         "indexStatus": "exists",
         "indexFiles": 4,
-        "lastModified": "2026-07-28T22:33:13.265Z",
+        "lastModified": "2026-07-28T22:38:09.648Z",
         "lastReindex": "2026-07-28T22:29:30.866Z",
         "git": {
           "enabled": true,
@@ -464,7 +485,10 @@
       "associations": {
         "sampled": 25,
         "withTests": 13,
+        "inferred": 0,
+        "anyCoverage": 13,
         "pct": 52,
+        "pctIncludingInferred": 52,
         "examples": [
           {
             "file": "src/Serilog/Capturing/DepthLimiter.cs",
@@ -494,15 +518,15 @@
       "c1Advisory": [],
       "c1": "clean",
       "sourceFileCount": 168,
-      "indexMs": 257,
+      "indexMs": 237,
       "indexOk": true,
-      "indexTail": "\u001b[2m  Completed in 117ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠹\u001b[39m Indexing your TODO comments (so many TODOs)...\u001b[32m✔\u001b[39m \u001b[32mUpdated 1 file, removed 0 (1/1)\u001b[39m",
+      "indexTail": "\u001b[2m  Completed in 99ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[32m✔\u001b[39m \u001b[32mIndex is up to date - no changes detected\u001b[39m",
       "status_json": {
         "version": "0.71.1",
         "indexPath": "/Users/alfhenderson/.lien/indices/sidekiq-400db6dd",
         "indexStatus": "exists",
         "indexFiles": 4,
-        "lastModified": "2026-07-28T22:33:17.864Z",
+        "lastModified": "2026-07-28T22:38:14.397Z",
         "lastReindex": "2026-07-28T22:33:17.848Z",
         "git": {
           "enabled": true,
@@ -524,7 +548,10 @@
       "associations": {
         "sampled": 25,
         "withTests": 5,
+        "inferred": 0,
+        "anyCoverage": 5,
         "pct": 20,
+        "pctIncludingInferred": 20,
         "examples": [
           {
             "file": "bare/boot.rb",

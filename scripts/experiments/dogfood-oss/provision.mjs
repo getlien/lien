@@ -155,19 +155,32 @@ function associationCoverage(dir, files) {
   const sample = [];
   for (let i = 0; i < files.length && sample.length < SAMPLE; i += step) sample.push(files[i]);
 
-  let withTests = 0;
+  // `annotate` reports coverage in THREE tiers and they must be counted separately.
+  // The first version of this sampler matched only /Test coverage:/i and therefore
+  // scored the inferred tier as zero — which produced a false "Swift is 0%" finding
+  // against a feature that was working correctly. Measuring the consumer surface is
+  // only useful if you match everything the consumer surface actually says.
+  //   confident: "Test coverage: <files>"
+  //   inferred:  "Test coverage inferred from symbol usage (not import-verified): <files>"
+  //   none:      "Test coverage not determinable ..." or no coverage line at all
+  let confident = 0;
+  let inferred = 0;
   const examples = [];
   for (const f of sample) {
     const r = sh('node', [CLI, 'annotate', f], dir, 60_000);
-    const hasTests = /Test coverage:/i.test(r.out);
-    if (hasTests) withTests++;
+    if (/Test coverage:/i.test(r.out)) confident++;
+    else if (/Test coverage inferred/i.test(r.out)) inferred++;
     if (examples.length < 3 && r.out.trim())
       examples.push({ file: f, annotation: r.out.trim().slice(0, 400) });
   }
+  const any = confident + inferred;
   return {
     sampled: sample.length,
-    withTests,
-    pct: Math.round((withTests / sample.length) * 1000) / 10,
+    withTests: confident,
+    inferred,
+    anyCoverage: any,
+    pct: Math.round((confident / sample.length) * 1000) / 10,
+    pctIncludingInferred: Math.round((any / sample.length) * 1000) / 10,
     examples,
   };
 }
