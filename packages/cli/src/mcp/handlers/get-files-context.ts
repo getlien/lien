@@ -1,6 +1,7 @@
 import { wrapToolHandler } from '../utils/tool-wrapper.js';
 import { GetFilesContextSchema } from '../schemas/index.js';
 import { shapeResults, deduplicateResults } from '../utils/metadata-shaper.js';
+import { findUnindexedPaths, formatUnindexedPathsNote } from '../utils/unindexed-paths.js';
 import type { ToolContext, MCPToolResult, LogFn } from '../types.js';
 import {
   normalizePath,
@@ -662,6 +663,16 @@ export async function handleGetFilesContext(
       workspaceRoot,
     };
 
+    // Step 0: Distinguish "path unknown to the index" from "indexed, zero
+    // results" — an empty chunks/testAssociations answer reads as "safe to
+    // edit" unless a mistyped path is called out explicitly. See
+    // unindexed-paths.ts for why the manifest (not scanAll) is the right check.
+    const unindexedPaths = await findUnindexedPaths(vectorDB, filepaths, workspaceRoot);
+    const unindexedNote = formatUnindexedPathsNote(unindexedPaths);
+    if (unindexedPaths.length > 0) {
+      log(`Path(s) not found in index: ${unindexedPaths.join(', ')}`, 'warning');
+    }
+
     // Step 1: Search for chunks belonging to each file
     const fileChunksMap = await searchFileChunks(filepaths, handlerCtx);
 
@@ -696,7 +707,7 @@ export async function handleGetFilesContext(
 
     // Step 5: Build and return response
     return isSingleFile
-      ? buildSingleFileResponse(filepaths[0], filesData, indexInfo)
-      : buildMultiFileResponse(filesData, indexInfo);
+      ? buildSingleFileResponse(filepaths[0], filesData, indexInfo, unindexedNote)
+      : buildMultiFileResponse(filesData, indexInfo, unindexedNote);
   })(args);
 }

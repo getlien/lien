@@ -27,6 +27,16 @@ vi.mock('@liendev/core', async () => {
   };
 });
 
+vi.mock('../utils/unindexed-paths.js', async importOriginal => {
+  const original = await importOriginal();
+  return {
+    ...(original as Record<string, unknown>),
+    findUnindexedPaths: vi.fn().mockResolvedValue([]),
+  };
+});
+
+import { findUnindexedPaths } from '../utils/unindexed-paths.js';
+
 describe('handleGetComplexity', () => {
   const mockVectorDB = {
     scanWithFilter: vi.fn(),
@@ -63,6 +73,7 @@ describe('handleGetComplexity', () => {
     if (mockAnalyzeFn) {
       mockAnalyzeFn.mockClear();
     }
+    vi.mocked(findUnindexedPaths).mockResolvedValue([]);
   });
 
   const getMockAnalyze = () => (globalThis as any).__mockAnalyze;
@@ -548,6 +559,69 @@ describe('handleGetComplexity', () => {
         indexVersion: 1234567890,
         indexDate: '2025-12-19',
       });
+    });
+  });
+
+  describe('unindexed path note (files param)', () => {
+    const emptyReport: ComplexityReport = {
+      summary: {
+        filesAnalyzed: 0,
+        avgComplexity: 0,
+        maxComplexity: 0,
+        totalViolations: 0,
+        bySeverity: { error: 0, warning: 0 },
+      },
+      files: {},
+    };
+
+    it('adds an unmissable note when a requested file has no manifest entry', async () => {
+      vi.mocked(findUnindexedPaths).mockResolvedValue(['src/does/not/exist.ts']);
+      getMockAnalyze().mockResolvedValue(emptyReport);
+
+      const result = await handleGetComplexity({ files: ['src/does/not/exist.ts'] }, mockCtx);
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.note).toContain('⚠ Lien:');
+      expect(parsed.note).toContain('"src/does/not/exist.ts"');
+    });
+
+    it('in a mixed batch, names only the unindexed entry — a good path never masks a bad one', async () => {
+      vi.mocked(findUnindexedPaths).mockResolvedValue(['does/not/exist.ts']);
+      getMockAnalyze().mockResolvedValue(emptyReport);
+
+      const result = await handleGetComplexity(
+        { files: ['src/file1.ts', 'does/not/exist.ts'] },
+        mockCtx,
+      );
+
+      expect(findUnindexedPaths).toHaveBeenCalledWith(
+        mockVectorDB,
+        ['src/file1.ts', 'does/not/exist.ts'],
+        expect.any(String),
+      );
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.note).toContain('"does/not/exist.ts"');
+      expect(parsed.note).not.toContain('"src/file1.ts"');
+    });
+
+    it('adds no note when every requested file is indexed', async () => {
+      vi.mocked(findUnindexedPaths).mockResolvedValue([]);
+      getMockAnalyze().mockResolvedValue(emptyReport);
+
+      const result = await handleGetComplexity({ files: ['src/file1.ts'] }, mockCtx);
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed).not.toHaveProperty('note');
+    });
+
+    it('skips the unindexed-path check entirely for a whole-codebase sweep (no files param)', async () => {
+      getMockAnalyze().mockResolvedValue(emptyReport);
+
+      const result = await handleGetComplexity({ top: 10 }, mockCtx);
+
+      expect(findUnindexedPaths).not.toHaveBeenCalled();
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed).not.toHaveProperty('note');
     });
   });
 });

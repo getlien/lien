@@ -10,6 +10,16 @@ import {
 import type { ToolContext } from '../types.js';
 import type { SearchResult } from '@liendev/core';
 
+vi.mock('../utils/unindexed-paths.js', async importOriginal => {
+  const original = await importOriginal();
+  return {
+    ...(original as Record<string, unknown>),
+    findUnindexedPaths: vi.fn().mockResolvedValue([]),
+  };
+});
+
+import { findUnindexedPaths } from '../utils/unindexed-paths.js';
+
 /** Build a function/method chunk carrying stored complexity metrics. */
 function makeFnChunk(
   symbolName: string,
@@ -699,5 +709,68 @@ describe('handleGetFilesContext — complexityHeadroom in the response', () => {
     );
     const parsed = JSON.parse(result.content![0].text);
     expect(parsed.files['src/a.ts'].complexityHeadroomWarning).toContain('extractSymbols');
+  });
+});
+describe('handleGetFilesContext — unindexed path note', () => {
+  const mockLog = vi.fn();
+
+  function ctxReturning(chunks: SearchResult[]): ToolContext {
+    return {
+      vectorDB: {
+        scanWithFilter: vi.fn().mockResolvedValue(chunks),
+        scanAll: vi.fn().mockResolvedValue([]),
+        search: vi.fn().mockResolvedValue([]),
+        dbPath: '/fake/index/path',
+      } as any,
+      rootDir: process.cwd(),
+      log: mockLog,
+      checkAndReconnect: vi.fn().mockResolvedValue(undefined),
+      getIndexMetadata: vi.fn(() => ({ indexVersion: 1, indexDate: '2026-07-01' })),
+      getReindexState: vi.fn(() => ({
+        inProgress: false,
+        pendingFiles: [],
+        lastReindexTimestamp: null,
+        lastReindexDurationMs: null,
+      })),
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearTestAssociationScanCache();
+    vi.mocked(findUnindexedPaths).mockResolvedValue([]);
+  });
+
+  it('adds an unmissable note for a single unindexed filepath, even with zero chunks', async () => {
+    vi.mocked(findUnindexedPaths).mockResolvedValue(['src/does/not/exist.ts']);
+    const ctx = ctxReturning([]);
+    const result = await handleGetFilesContext({ filepaths: 'src/does/not/exist.ts' }, ctx);
+    const parsed = JSON.parse(result.content![0].text);
+    expect(parsed.chunks).toEqual([]);
+    expect(parsed.testAssociations).toEqual([]);
+    expect(parsed.note).toContain('⚠ Lien:');
+    expect(parsed.note).toContain('"src/does/not/exist.ts"');
+  });
+
+  it('adds no note when the path is indexed, even with genuinely zero chunks', async () => {
+    vi.mocked(findUnindexedPaths).mockResolvedValue([]);
+    const ctx = ctxReturning([]);
+    const result = await handleGetFilesContext({ filepaths: 'src/empty.ts' }, ctx);
+    const parsed = JSON.parse(result.content![0].text);
+    expect(parsed).not.toHaveProperty('note');
+  });
+
+  it('in a mixed batch, names only the unindexed entry — a good path never masks a bad one', async () => {
+    vi.mocked(findUnindexedPaths).mockResolvedValue(['does/not/exist.ts']);
+    const ctx = ctxReturning([makeFnChunk('tidy', { cognitive: 4, file: 'src/a.ts' })]);
+    const result = await handleGetFilesContext(
+      { filepaths: ['src/a.ts', 'does/not/exist.ts'] },
+      ctx,
+    );
+    const parsed = JSON.parse(result.content![0].text);
+    expect(parsed.note).toContain('"does/not/exist.ts"');
+    expect(parsed.note).not.toContain('"src/a.ts"');
+    expect(parsed.files['src/a.ts'].chunks.length).toBeGreaterThan(0);
+    expect(parsed.files['does/not/exist.ts'].chunks).toEqual([]);
   });
 });
