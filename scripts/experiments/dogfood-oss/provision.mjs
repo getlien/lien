@@ -103,45 +103,28 @@ function cloneViolations(dir) {
   return { blocking: BLOCKING_FILES.filter(present), advisory: ADVISORY_FILES.filter(present) };
 }
 
-function readDirSafe(d) {
-  try {
-    return fs.readdirSync(d, { withFileTypes: true });
-  } catch {
-    return [];
-  }
-}
-
-const SKIP_DIRS = new Set(['.git', 'node_modules', 'vendor', 'target', 'dist', 'build', '.build']);
-
-/** Descendable child dirs and matching files for ONE directory. */
-function classifyEntries(d, exts) {
-  const dirs = [];
-  const files = [];
-  for (const e of readDirSafe(d)) {
-    if (e.name.startsWith('.')) continue;
-    if (e.isDirectory()) {
-      if (!SKIP_DIRS.has(e.name)) dirs.push(path.join(d, e.name));
-    } else if (exts.some(x => e.name.endsWith(x))) {
-      files.push(path.join(d, e.name));
-    }
-  }
-  return { dirs, files };
-}
-
-// Walk and classify are split because `lien delta` flagged the combined form
-// TWICE: the original nested recursive closure at cognitive 15, then a flattened
-// single-loop rewrite at 17. Separating traversal from the per-entry decision is
-// what actually brought it under — a useful data point on whether acting on the
-// nudge leads somewhere good.
+/**
+ * Source files for a repo, via `git ls-files` rather than a hand-rolled walk.
+ *
+ * The walk version silently counted BUILD ARTIFACTS: after a trial ran
+ * `dotnet build` in serilog, 30 generated `.cs` files appeared under `obj/`
+ * (AssemblyInfo.cs, GlobalUsings.g.cs, ...). They are gitignored — so the tree
+ * looked clean and `git clean -fd` left them in place — but the walk picked them
+ * up, diluted the evenly-spaced sample with files that can have no tests, and
+ * dropped measured C# coverage from 52% to 0%. That read exactly like a
+ * regression in a freshly merged PR.
+ *
+ * Asking git removes the whole class of bug: it returns tracked files only, so
+ * artifacts, vendored trees and node_modules are excluded by construction rather
+ * than by a skip-list someone has to remember to extend.
+ */
 function listSourceFiles(dir, exts) {
-  const out = [];
-  const stack = [dir];
-  while (stack.length > 0) {
-    const { dirs, files } = classifyEntries(stack.pop(), exts);
-    stack.push(...dirs);
-    out.push(...files.map(f => path.relative(dir, f)));
-  }
-  return out.sort();
+  const r = sh('git', ['ls-files', '-z'], dir, 120_000);
+  if (!r.ok) throw new Error(`git ls-files failed in ${dir}: ${r.out.slice(0, 200)}`);
+  return r.out
+    .split('\0')
+    .filter(f => f && exts.some(x => f.endsWith(x)))
+    .sort();
 }
 
 /** Evenly-spaced sample of up to SAMPLE files. */

@@ -14,15 +14,15 @@
       "c1Advisory": [],
       "c1": "clean",
       "sourceFileCount": 98,
-      "indexMs": 229,
+      "indexMs": 243,
       "indexOk": true,
-      "indexTail": "\u001b[2m  Completed in 97ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[32m✔\u001b[39m \u001b[32mIndex is up to date - no changes detected\u001b[39m",
+      "indexTail": "\u001b[2m  Completed in 104ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[32m✔\u001b[39m \u001b[32mIndex is up to date - no changes detected\u001b[39m",
       "status_json": {
         "version": "0.71.1",
         "indexPath": "/Users/alfhenderson/.lien/indices/Alamofire-eb47b9b7",
         "indexStatus": "exists",
         "indexFiles": 4,
-        "lastModified": "2026-07-29T05:32:32.637Z",
+        "lastModified": "2026-07-29T05:36:50.965Z",
         "lastReindex": "2026-07-28T22:29:02.617Z",
         "git": {
           "enabled": true,
@@ -77,16 +77,16 @@
       "c1Advisory": [],
       "c1": "clean",
       "sourceFileCount": 99,
-      "indexMs": 192,
+      "indexMs": 252,
       "indexOk": true,
-      "indexTail": "\u001b[2m  Completed in 55ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[32m✔\u001b[39m \u001b[32mIndex is up to date - no changes detected\u001b[39m",
+      "indexTail": "\u001b[2m  Completed in 114ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠹\u001b[39m Indexing your TODO comments (so many TODOs)...\u001b[32m✔\u001b[39m \u001b[32mUpdated 6 files, removed 0 (6/6)\u001b[39m",
       "status_json": {
         "version": "0.71.1",
         "indexPath": "/Users/alfhenderson/.lien/indices/gin-414c34fd",
         "indexStatus": "exists",
-        "indexFiles": 5,
-        "lastModified": "2026-07-28T22:37:31.096Z",
-        "lastReindex": "2026-07-28T22:28:46.621Z",
+        "indexFiles": 10,
+        "lastModified": "2026-07-29T05:36:37.612Z",
+        "lastReindex": "2026-07-29T05:36:37.596Z",
         "git": {
           "enabled": true,
           "branch": "master",
@@ -139,17 +139,17 @@
       "sha": "224d2f5cbf2b4bc2ebb7482d0592149a8d9f0574",
       "c1Advisory": [],
       "c1": "clean",
-      "sourceFileCount": 319,
-      "indexMs": 292,
+      "sourceFileCount": 324,
+      "indexMs": 273,
       "indexOk": true,
-      "indexTail": "\u001b[2m  Completed in 155ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠹\u001b[39m Indexing your TODO comments (so many TODOs)...\u001b[32m✔\u001b[39m \u001b[32mUpdated 1 file, removed 0 (1/1)\u001b[39m",
+      "indexTail": "\u001b[2m  Completed in 128ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[32m✔\u001b[39m \u001b[32mIndex is up to date - no changes detected\u001b[39m",
       "status_json": {
         "version": "0.71.1",
         "indexPath": "/Users/alfhenderson/.lien/indices/hono-b008d2e1",
         "indexStatus": "exists",
-        "indexFiles": 14,
-        "lastModified": "2026-07-28T22:37:49.686Z",
-        "lastReindex": "2026-07-28T22:37:49.661Z",
+        "indexFiles": 12,
+        "lastModified": "2026-07-29T05:38:44.247Z",
+        "lastReindex": "2026-07-29T05:36:56.656Z",
         "git": {
           "enabled": true,
           "branch": "main",
@@ -169,23 +169,23 @@
       },
       "associations": {
         "sampled": 25,
-        "withTests": 22,
+        "withTests": 21,
         "inferred": 0,
-        "anyCoverage": 22,
-        "pct": 88,
-        "pctIncludingInferred": 88,
+        "anyCoverage": 21,
+        "pct": 84,
+        "pctIncludingInferred": 84,
         "examples": [
           {
             "file": "benchmarks/http-server/benchmark.ts",
             "annotation": "⚠ Lien: buildVersion cognitive 21/15 (over) — avoid adding complexity here; prefer extraction.\nLien impact for benchmarks/http-server/benchmark.ts:\n  • No test coverage."
           },
           {
-            "file": "perf-measures/bundle-check/scripts/check-bundle-size.ts",
-            "annotation": "Lien impact for perf-measures/bundle-check/scripts/check-bundle-size.ts:\n  • No test coverage."
+            "file": "build/build.ts",
+            "annotation": "⚠ Lien: addExtension cognitive 12/15 — avoid adding complexity here; prefer extraction.\nLien impact for build/build.ts:\n  • No test coverage."
           },
           {
-            "file": "src/adapter/aws-lambda/handler.ts",
-            "annotation": "⚠ Lien: EventV1Processor.getHeaders cognitive 14/15, ALBProcessor.getHeaders cognitive 13/15 — avoid adding complexity here; prefer extraction.\nLien impact for src/adapter/aws-lambda/handler.ts:\n  • 14 files import this — runtime-tests/lambda/stream-mock.ts, runtime-tests/lambda/mock.ts, src/adapter/aws-lambda/index.ts, src/middleware/jwt/index.ts, +10 more; risk: medium (14 callers, max complexit"
+            "file": "runtime-tests/fastly/index.test.ts",
+            "annotation": "Lien impact for runtime-tests/fastly/index.test.ts:\n  • No test coverage."
           }
         ]
       },
@@ -203,15 +203,15 @@
       "c1Advisory": [],
       "c1": "clean",
       "sourceFileCount": 83,
-      "indexMs": 216,
+      "indexMs": 224,
       "indexOk": true,
-      "indexTail": "\u001b[2m  Completed in 73ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[32m✔\u001b[39m \u001b[32mIndex is up to date - no changes detected\u001b[39m",
+      "indexTail": "\u001b[2m  Completed in 87ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[32m✔\u001b[39m \u001b[32mIndex is up to date - no changes detected\u001b[39m",
       "status_json": {
         "version": "0.71.1",
         "indexPath": "/Users/alfhenderson/.lien/indices/flask-7b1419a5",
         "indexStatus": "exists",
         "indexFiles": 4,
-        "lastModified": "2026-07-28T22:37:26.138Z",
+        "lastModified": "2026-07-29T05:36:32.538Z",
         "lastReindex": "2026-07-28T22:32:30.652Z",
         "git": {
           "enabled": true,
@@ -266,16 +266,16 @@
       "c1Advisory": [],
       "c1": "clean",
       "sourceFileCount": 216,
-      "indexMs": 257,
+      "indexMs": 299,
       "indexOk": true,
-      "indexTail": "\u001b[2m  Completed in 103ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[32m✔\u001b[39m \u001b[32mIndex is up to date - no changes detected\u001b[39m",
+      "indexTail": "\u001b[2m  Completed in 138ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[32m✔\u001b[39m \u001b[32mIndex is up to date - no changes detected\u001b[39m",
       "status_json": {
         "version": "0.71.1",
         "indexPath": "/Users/alfhenderson/.lien/indices/serilog-163a5271",
         "indexStatus": "exists",
-        "indexFiles": 4,
-        "lastModified": "2026-07-28T22:38:09.648Z",
-        "lastReindex": "2026-07-28T22:29:30.866Z",
+        "indexFiles": 9,
+        "lastModified": "2026-07-29T05:38:37.974Z",
+        "lastReindex": "2026-07-29T05:29:28.965Z",
         "git": {
           "enabled": true,
           "branch": "dev",
@@ -295,23 +295,23 @@
       },
       "associations": {
         "sampled": 25,
-        "withTests": 13,
+        "withTests": 1,
         "inferred": 0,
-        "anyCoverage": 13,
-        "pct": 52,
-        "pctIncludingInferred": 52,
+        "anyCoverage": 1,
+        "pct": 4,
+        "pctIncludingInferred": 4,
         "examples": [
           {
             "file": "src/Serilog/Capturing/DepthLimiter.cs",
-            "annotation": "Lien impact for src/Serilog/Capturing/DepthLimiter.cs:\n  • 2 files import this — src/Serilog/GlobalUsings.cs, test/Serilog.Tests/GlobalUsings.cs; risk: medium (2 callers, 1 untested).\n  • Test coverage: test/Serilog.Tests/GlobalUsings.cs."
+            "annotation": "Lien impact for src/Serilog/Capturing/DepthLimiter.cs:\n  • Test coverage not determinable from imports (enclosing-namespace access)."
           },
           {
             "file": "src/Serilog/Configuration/LoggerDestructuringConfiguration.cs",
-            "annotation": "Lien impact for src/Serilog/Configuration/LoggerDestructuringConfiguration.cs:\n  • 3 files import this — src/Serilog/GlobalUsings.cs, test/TestDummies/GlobalUsings.cs, test/Serilog.Tests/GlobalUsings.cs; risk: medium (3 callers, 1 untested).\n  • Test coverage: test/TestDummies/GlobalUsings.cs, test/Serilog.Tests/GlobalUsings.cs."
+            "annotation": "Lien impact for src/Serilog/Configuration/LoggerDestructuringConfiguration.cs:\n  • Test coverage not determinable from imports (enclosing-namespace access)."
           },
           {
             "file": "src/Serilog/Context/LogContextEnricher.cs",
-            "annotation": "Lien impact for src/Serilog/Context/LogContextEnricher.cs:\n  • 3 files import this — src/Serilog/GlobalUsings.cs, test/Serilog.Tests/GlobalUsings.cs, test/Serilog.PerformanceTests/GlobalUsings.cs; risk: medium (3 callers, 1 untested).\n  • Test coverage: test/Serilog.Tests/GlobalUsings.cs, test/Serilog.PerformanceTests/GlobalUsings.cs."
+            "annotation": "Lien impact for src/Serilog/Context/LogContextEnricher.cs:\n  • Test coverage not determinable from imports (enclosing-namespace access)."
           }
         ]
       },
@@ -329,15 +329,15 @@
       "c1Advisory": [],
       "c1": "clean",
       "sourceFileCount": 168,
-      "indexMs": 237,
+      "indexMs": 241,
       "indexOk": true,
-      "indexTail": "\u001b[2m  Completed in 99ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[32m✔\u001b[39m \u001b[32mIndex is up to date - no changes detected\u001b[39m",
+      "indexTail": "\u001b[2m  Completed in 101ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[32m✔\u001b[39m \u001b[32mIndex is up to date - no changes detected\u001b[39m",
       "status_json": {
         "version": "0.71.1",
         "indexPath": "/Users/alfhenderson/.lien/indices/sidekiq-400db6dd",
         "indexStatus": "exists",
         "indexFiles": 4,
-        "lastModified": "2026-07-28T22:38:14.397Z",
+        "lastModified": "2026-07-29T05:37:20.957Z",
         "lastReindex": "2026-07-28T22:33:17.848Z",
         "git": {
           "enabled": true,
@@ -392,15 +392,15 @@
       "c1Advisory": [],
       "c1": "clean",
       "sourceFileCount": 306,
-      "indexMs": 415,
+      "indexMs": 420,
       "indexOk": true,
-      "indexTail": "\u001b[2m  Completed in 276ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[32m✔\u001b[39m \u001b[32mIndex is up to date - no changes detected\u001b[39m",
+      "indexTail": "\u001b[2m  Completed in 281ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[32m✔\u001b[39m \u001b[32mIndex is up to date - no changes detected\u001b[39m",
       "status_json": {
         "version": "0.71.1",
         "indexPath": "/Users/alfhenderson/.lien/indices/retrofit-a6deda25",
         "indexStatus": "exists",
         "indexFiles": 4,
-        "lastModified": "2026-07-28T22:37:54.668Z",
+        "lastModified": "2026-07-29T05:37:01.771Z",
         "lastReindex": "2026-07-28T22:29:15.351Z",
         "git": {
           "enabled": true,
@@ -421,23 +421,23 @@
       },
       "associations": {
         "sampled": 25,
-        "withTests": 2,
+        "withTests": 5,
         "inferred": 0,
-        "anyCoverage": 2,
-        "pct": 8,
-        "pctIncludingInferred": 8,
+        "anyCoverage": 5,
+        "pct": 20,
+        "pctIncludingInferred": 20,
         "examples": [
           {
-            "file": "retrofit-adapters/guava/src/main/java/retrofit2/adapter/guava/GuavaCallAdapterFactory.java",
-            "annotation": "Lien impact for retrofit-adapters/guava/src/main/java/retrofit2/adapter/guava/GuavaCallAdapterFactory.java:\n  • No test coverage."
-          },
-          {
             "file": "retrofit-adapters/rxjava/src/main/java/retrofit2/adapter/rxjava/BodyOnSubscribe.java",
-            "annotation": "Lien impact for retrofit-adapters/rxjava/src/main/java/retrofit2/adapter/rxjava/BodyOnSubscribe.java:\n  • No test coverage."
+            "annotation": "Lien impact for retrofit-adapters/rxjava/src/main/java/retrofit2/adapter/rxjava/BodyOnSubscribe.java:\n  • Test coverage (package-level, no dedicated test file for this specific file): retrofit-adapters/rxjava/src/test/java/retrofit2/adapter/rxjava/StringConverterFactory.java, retrofit-adapters/rxjava/src/test/java/retrofit2/adapter/rxjava/SingleWithSchedulerTest.java (+17 more)."
           },
           {
             "file": "retrofit-adapters/rxjava/src/test/java/retrofit2/adapter/rxjava/CompletableTest.java",
-            "annotation": "Lien impact for retrofit-adapters/rxjava/src/test/java/retrofit2/adapter/rxjava/CompletableTest.java:\n  • No test coverage."
+            "annotation": "Lien impact for retrofit-adapters/rxjava/src/test/java/retrofit2/adapter/rxjava/CompletableTest.java:\n  • Test coverage (package-level, no dedicated test file for this specific file): retrofit-adapters/rxjava/src/test/java/retrofit2/adapter/rxjava/StringConverterFactory.java, retrofit-adapters/rxjava/src/test/java/retrofit2/adapter/rxjava/SingleWithSchedulerTest.java (+16 more)."
+          },
+          {
+            "file": "retrofit-adapters/rxjava/src/test/java/retrofit2/adapter/rxjava/RxJavaPluginsResetRule.java",
+            "annotation": "Lien impact for retrofit-adapters/rxjava/src/test/java/retrofit2/adapter/rxjava/RxJavaPluginsResetRule.java:\n  • Test coverage (package-level, no dedicated test file for this specific file): retrofit-adapters/rxjava/src/test/java/retrofit2/adapter/rxjava/StringConverterFactory.java, retrofit-adapters/rxjava/src/test/java/retrofit2/adapter/rxjava/SingleWithSchedulerTest.java (+16 more)."
           }
         ]
       },
@@ -455,16 +455,16 @@
       "c1Advisory": [],
       "c1": "clean",
       "sourceFileCount": 361,
-      "indexMs": 245,
+      "indexMs": 264,
       "indexOk": true,
-      "indexTail": "\u001b[2m  Completed in 102ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[32m✔\u001b[39m \u001b[32mIndex is up to date - no changes detected\u001b[39m",
+      "indexTail": "\u001b[2m  Completed in 122ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠹\u001b[39m Indexing your TODO comments (so many TODOs)...\u001b[32m✔\u001b[39m \u001b[32mUpdated 1 file, removed 0 (1/1)\u001b[39m",
       "status_json": {
         "version": "0.71.1",
         "indexPath": "/Users/alfhenderson/.lien/indices/console-50b99aa9",
         "indexStatus": "exists",
-        "indexFiles": 5,
-        "lastModified": "2026-07-28T22:38:02.996Z",
-        "lastReindex": "2026-07-28T22:31:19.226Z",
+        "indexFiles": 7,
+        "lastModified": "2026-07-29T05:37:09.319Z",
+        "lastReindex": "2026-07-29T05:37:09.304Z",
         "git": {
           "enabled": true,
           "branch": "8.2",
@@ -484,23 +484,23 @@
       },
       "associations": {
         "sampled": 25,
-        "withTests": 0,
+        "withTests": 12,
         "inferred": 0,
-        "anyCoverage": 0,
-        "pct": 0,
-        "pctIncludingInferred": 0,
+        "anyCoverage": 12,
+        "pct": 48,
+        "pctIncludingInferred": 48,
         "examples": [
           {
             "file": "Application.php",
-            "annotation": "⚠ Lien: Application.doRunCommand cognitive 67/15 (over), Application.find cognitive 50/15 (over), Application.doRun cognitive 37/15 (over), … and 7 more at/near budget — avoid adding complexity here; prefer extraction.\nLien impact for Application.php:\n  • 33 files import this — Tests/ConsoleBundleTest.php, Tests/ConsoleEventsTest.php, Tests/ApplicationTest.php, Tester/ApplicationTester.php, +29 mo"
+            "annotation": "⚠ Lien: Application.doRunCommand cognitive 67/15 (over), Application.find cognitive 50/15 (over), Application.doRun cognitive 37/15 (over), … and 7 more at/near budget — avoid adding complexity here; prefer extraction.\nLien impact for Application.php:\n  • 33 files import this — Tester/ApplicationTester.php, Messenger/RunCommandMessageHandler.php, Descriptor/XmlDescriptor.php, Descriptor/ReStructur"
           },
           {
             "file": "ArgumentResolver/ValueResolver/UidValueResolver.php",
-            "annotation": "Lien impact for ArgumentResolver/ValueResolver/UidValueResolver.php:\n  • 3 files import this — Resources/config/console.php, Tests/ArgumentResolver/ValueResolver/UidValueResolverTest.php, ArgumentResolver/ArgumentResolver.php; risk: high (3 callers, 3 untested, max complexity 25, untested high-complexity dependent).\n  • No test coverage."
+            "annotation": "Lien impact for ArgumentResolver/ValueResolver/UidValueResolver.php:\n  • 3 files import this — Resources/config/console.php, ArgumentResolver/ArgumentResolver.php, Tests/ArgumentResolver/ValueResolver/UidValueResolverTest.php; risk: medium (3 callers, 1 untested, max complexity 25).\n  • Test coverage: Tests/ArgumentResolver/ValueResolver/UidValueResolverTest.php."
           },
           {
             "file": "Attribute/ValueResolver.php",
-            "annotation": "Lien impact for Attribute/ValueResolver.php:\n  • 1 file imports this — ArgumentResolver/ArgumentResolver.php; risk: high (1 caller, 1 untested, max complexity 25, untested high-complexity dependent).\n  • No test coverage."
+            "annotation": "Lien impact for Attribute/ValueResolver.php:\n  • 1 file imports this — ArgumentResolver/ArgumentResolver.php; risk: low (1 caller, max complexity 25).\n  • No test coverage."
           }
         ]
       },
@@ -518,15 +518,15 @@
       "c1Advisory": [],
       "c1": "clean",
       "sourceFileCount": 790,
-      "indexMs": 263,
+      "indexMs": 268,
       "indexOk": true,
-      "indexTail": "\u001b[2m  Completed in 122ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[32m✔\u001b[39m \u001b[32mIndex is up to date - no changes detected\u001b[39m",
+      "indexTail": "\u001b[2m  Completed in 128ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[32m✔\u001b[39m \u001b[32mIndex is up to date - no changes detected\u001b[39m",
       "status_json": {
         "version": "0.71.1",
         "indexPath": "/Users/alfhenderson/.lien/indices/tokio-b45f30ed",
         "indexStatus": "exists",
-        "indexFiles": 4,
-        "lastModified": "2026-07-28T22:37:36.037Z",
+        "indexFiles": 5,
+        "lastModified": "2026-07-29T05:36:42.890Z",
         "lastReindex": "2026-07-28T22:28:53.484Z",
         "git": {
           "enabled": true,
