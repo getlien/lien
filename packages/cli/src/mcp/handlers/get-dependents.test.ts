@@ -779,6 +779,22 @@ describe('handleGetDependents', () => {
       expect(parsed.depth).toBe(2);
     });
 
+    it('echoes the EFFECTIVE depth (1), not the requested one, for a symbol-scoped query', async () => {
+      // depth > 1 is documented as ignored for symbol queries (runBfsIfRequested
+      // in dependency-analyzer.ts never runs BFS when `symbol` is set) -- but
+      // the response used to echo back the requested `depth` unchanged, letting
+      // a caller believe a multi-hop symbol walk ran when it didn't.
+      vi.mocked(findDependents).mockResolvedValue(createMockAnalysis());
+
+      const result = await handleGetDependents(
+        { filepath: 'src/target.ts', symbol: 'doStuff', depth: 3 },
+        mockCtx,
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.depth).toBe(1);
+    });
+
     it('should surface truncated and totalImpacted in the response', async () => {
       vi.mocked(findDependents).mockResolvedValue(
         createMockAnalysis({

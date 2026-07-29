@@ -7,6 +7,7 @@ import { resolveRelativeImport, resolveWorkspaceImport } from '../utils/path-mat
 import { resolvePsr4Import } from '../php-psr4.js';
 import { resolveGoModuleImport } from '../go-module.js';
 import { resolvePythonSrcLayoutImport } from '../python-src-layout.js';
+import { resolveJsDirectoryIndex } from '../js-directory-index.js';
 
 /**
  * Per-project manifest-declared import-root mappings, threaded through as a
@@ -29,13 +30,25 @@ export interface ManifestRoots {
   /** Python src-layout root directory (`src`), when detected on disk. */
   pythonSrcLayoutRoot?: string;
   /**
-   * Absolute workspace root, needed only alongside `pythonSrcLayoutRoot`:
-   * `resolvePythonSrcLayoutImport` verifies each candidate path actually
-   * exists on disk (see `../python-src-layout.ts`) before rewriting a
-   * specifier, to avoid misresolving one nested Python project's own
-   * package against an unrelated, outer `src/` root.
+   * Absolute workspace root, needed alongside `pythonSrcLayoutRoot` (see its
+   * own doc comment) and `resolveDirectoryIndex` (below): both verify a
+   * candidate path actually exists on disk before rewriting a specifier.
    */
   workspaceRoot?: string;
+  /**
+   * When true, a relative import that resolves to a bare directory path
+   * (e.g. `../..` joined against its importer's directory, producing `src`)
+   * is further resolved to that directory's real `index.<ext>` entry file,
+   * when one exists on disk (#953 — see `../js-directory-index.ts`). Set
+   * only for JS/TS (`ast/chunker.ts`'s `buildManifestRoots`): a bare
+   * directory specifier left unresolved falls through to `matchesFile`'s
+   * fuzzy-matching strategies, each tuned for a DIFFERENT language's real
+   * multi-file semantics (Go's package directories, Python's package
+   * `__init__.py`) — for a JS/TS importer neither applies, so the bare
+   * specifier fabricates a dependent edge to every file under that
+   * directory instead of the one real edge.
+   */
+  resolveDirectoryIndex?: true;
   /**
    * Rust Cargo workspace crate name (underscore form) -> crate `src/` dir map
    * (#903). Unlike `psr4Map`/`goModulePrefix`, this is NOT consumed by
@@ -98,12 +111,14 @@ function collectImportNodes(rootNode: SyntaxNode, nodeTypeSet: Set<string>): Syn
 }
 
 /**
- * Resolve a single raw import specifier in three steps, each a no-op when its
+ * Resolve a single raw import specifier in four steps, each a no-op when its
  * respective input isn't provided, so behavior for existing callers is
  * unchanged:
  * 1. Relative specifiers (`./foo`, `../bar`) against the importer's directory.
- * 2. Workspace package specifiers (`@scope/pkg`) against the `workspacePackages` map.
- * 3. Manifest-declared import roots (PHP PSR-4, Go module prefix) against `manifestRoots`.
+ * 2. A relative specifier that resolved to a bare DIRECTORY (`#953`) against
+ *    that directory's real `index.<ext>` entry file, JS/TS only.
+ * 3. Workspace package specifiers (`@scope/pkg`) against the `workspacePackages` map.
+ * 4. Manifest-declared import roots (PHP PSR-4, Go module prefix) against `manifestRoots`.
  */
 function resolveImportSpecifier(
   specifier: string,
@@ -112,10 +127,31 @@ function resolveImportSpecifier(
   manifestRoots: ManifestRoots | undefined,
 ): string {
   const relResolved = filepath ? resolveRelativeImport(filepath, specifier) : specifier;
+  const dirResolved = resolveDirectoryIndexIfRelative(specifier, relResolved, manifestRoots);
   const wsResolved = workspacePackages
-    ? resolveWorkspaceImport(relResolved, workspacePackages)
-    : relResolved;
+    ? resolveWorkspaceImport(dirResolved, workspacePackages)
+    : dirResolved;
   return resolveManifestRoot(wsResolved, manifestRoots);
+}
+
+/**
+ * Apply `resolveJsDirectoryIndex` (#953) to a relative-resolved specifier,
+ * but only when it actually WAS relative (`relResolved !== originalSpecifier`
+ * -- `resolveRelativeImport` is a no-op for bare/external specifiers like
+ * `'lodash'` or `'@scope/pkg'`) and the importer's language opted in
+ * (`manifestRoots.resolveDirectoryIndex`, set for JS/TS only -- see
+ * `ast/chunker.ts`'s `buildManifestRoots`). Skipping the check entirely for
+ * non-relative specifiers avoids an unnecessary filesystem stat for every
+ * bare external package import.
+ */
+function resolveDirectoryIndexIfRelative(
+  originalSpecifier: string,
+  relResolved: string,
+  manifestRoots: ManifestRoots | undefined,
+): string {
+  if (relResolved === originalSpecifier) return relResolved;
+  if (!manifestRoots?.resolveDirectoryIndex || !manifestRoots.workspaceRoot) return relResolved;
+  return resolveJsDirectoryIndex(relResolved, manifestRoots.workspaceRoot);
 }
 
 /** Apply step 3 (manifest-root resolution) of `resolveImportSpecifier`. */

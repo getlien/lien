@@ -201,6 +201,83 @@ describe('findDependents', () => {
     });
   });
 
+  describe('#953 Python-strategy fan-out on a bare directory specifier', () => {
+    it('does not credit a TypeScript file whose resolved import is a bare directory as a dependent of an unrelated file under that directory', async () => {
+      // Simulates what resolveRelativeImport produces for a dots-only
+      // specifier like '../..' (from src/middleware/jwt/index.ts) when the
+      // directory has no index.<ext> for resolveJsDirectoryIndex to
+      // redirect to: the bare directory name 'src' is left in `imports`.
+      // Without the #953 guard, matchesFile's Python Strategy 5
+      // (matchesParentPythonPackage) fuzzy-matches this against EVERY file
+      // under src/ -- the exact hono/TypeScript repro that inflated
+      // riskLevel with fabricated edges.
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/middleware/jwt/index.ts', { imports: ['src'] }),
+        createChunk('src/utils/color.ts', { exports: ['x'] }),
+      ]);
+
+      const result = await findDependents(mockDB as any, 'src/utils/color.ts', mockLog);
+
+      expect(result.dependents.map(d => d.filepath)).not.toContain('src/middleware/jwt/index.ts');
+      expect(result.dependents).toHaveLength(0);
+    });
+
+    it('still credits a genuine Python bare-package import as a dependent (real Strategy 5 semantic preserved)', async () => {
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('app/consumer.py', { imports: ['src'] }),
+        createChunk('src/utils/helpers.py', { exports: ['x'] }),
+      ]);
+
+      const result = await findDependents(mockDB as any, 'src/utils/helpers.py', mockLog);
+
+      expect(result.dependents.map(d => d.filepath)).toContain('app/consumer.py');
+    });
+
+    it('a directory-index-resolved import ("src/index") is still a genuine, exact-match hops:1 dependent of src/index.ts', async () => {
+      // Once resolveJsDirectoryIndex has done its job (tested at the
+      // symbols.ts/js-directory-index.ts layer), the resolved specifier is
+      // an ordinary exact-match file path -- the "don't over-delete" half
+      // of #953: jwt/index.ts et al. must remain real dependents of
+      // src/index.ts, not just stop being fabricated dependents of
+      // unrelated files.
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/middleware/jwt/index.ts', { imports: ['src/index'] }),
+        createChunk('src/index.ts', { exports: ['Hono'] }),
+      ]);
+
+      const result = await findDependents(mockDB as any, 'src/index.ts', mockLog);
+
+      expect(result.dependents.map(d => d.filepath)).toContain('src/middleware/jwt/index.ts');
+      expect(result.dependents.find(d => d.filepath === 'src/middleware/jwt/index.ts')?.hops).toBe(
+        1,
+      );
+    });
+
+    it('a fabricated bare-directory seed edge does not pollute depth 2+ transitively once fixed', async () => {
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/middleware/jwt/index.ts', { imports: ['src'] }),
+        createChunk('src/utils/color.ts', { exports: ['x'] }),
+        // A genuine depth-2 dependent of jwt/index.ts -- must not
+        // transitively inherit the (now-fixed) fabricated depth-1 edge to
+        // color.ts.
+        createChunk('src/app.ts', { imports: ['src/middleware/jwt/index.ts'] }),
+      ]);
+
+      const result = await findDependents(
+        mockDB as any,
+        'src/utils/color.ts',
+        mockLog,
+        undefined,
+        undefined,
+        2,
+      );
+
+      const filepaths = result.dependents.map(d => d.filepath);
+      expect(filepaths).not.toContain('src/middleware/jwt/index.ts');
+      expect(filepaths).not.toContain('src/app.ts');
+    });
+  });
+
   describe('re-export chains / barrel files', () => {
     it('should find transitive dependents through barrel file re-exports', async () => {
       // target.ts exports Foo

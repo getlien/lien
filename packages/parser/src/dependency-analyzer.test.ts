@@ -588,6 +588,34 @@ describe('analyzeDependencies', () => {
       expect(filepaths).not.toContain('lib/pkg/consumer.rb');
     });
   });
+
+  describe('#953 Python-strategy fan-out on a bare directory specifier (addFuzzyMatchChunks)', () => {
+    it('does not credit a TypeScript file with a resolved bare-directory import as a dependent of an unrelated file under that directory', () => {
+      // Simulates what `resolveRelativeImport` produces for a dots-only
+      // specifier like `'../..'` (from src/middleware/jwt/index.ts) when the
+      // directory has no `index.<ext>` for `resolveJsDirectoryIndex` to
+      // redirect to: the bare directory name `src` is left in `imports`.
+      // Without the #953 guard, `matchesFile`'s Python Strategy 5
+      // (`matchesParentPythonPackage('src', 'src/utils/color')`) fuzzy-
+      // matches this against EVERY file under src/ -- fabricating a
+      // dependent edge with no real relationship to the target (the exact
+      // hono/TypeScript repro from `matchesFile`'s own #929 doc comment).
+      const chunks: CodeChunk[] = [createChunk('src/middleware/jwt/index.ts', ['src'])];
+
+      const result = analyzeDependencies('src/utils/color.ts', chunks, workspaceRoot);
+
+      expect(result.dependents.map(d => d.filepath)).not.toContain('src/middleware/jwt/index.ts');
+      expect(result.dependentCount).toBe(0);
+    });
+
+    it('still credits a genuine Python bare-package import as a dependent (real Strategy 5 semantic preserved)', () => {
+      const chunks: CodeChunk[] = [createChunk('app/consumer.py', ['src'])];
+
+      const result = analyzeDependencies('src/utils/helpers.py', chunks, workspaceRoot);
+
+      expect(result.dependents.map(d => d.filepath)).toContain('app/consumer.py');
+    });
+  });
 });
 
 // Direct unit coverage for the shared re-export intersection algorithm,

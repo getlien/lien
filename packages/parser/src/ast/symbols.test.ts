@@ -1,4 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import fs from 'fs/promises';
+import os from 'os';
+import path from 'path';
 import { parseAST } from './parser.js';
 import {
   extractImports,
@@ -658,6 +661,121 @@ from typing import Optional
 
       expect(imports).toContain('src/middleware/jsx-renderer');
       expect(imports).not.toContain('.');
+    });
+  });
+
+  describe('extractImports - directory-index resolution (#953)', () => {
+    let testDir: string;
+
+    beforeEach(async () => {
+      testDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-test-js-directory-index-resolve-'));
+    });
+
+    afterEach(async () => {
+      await fs.rm(testDir, { recursive: true, force: true }).catch(() => {});
+    });
+
+    async function writeFile(relPath: string, content: string): Promise<void> {
+      const abs = path.join(testDir, relPath);
+      await fs.mkdir(path.dirname(abs), { recursive: true });
+      await fs.writeFile(abs, content);
+    }
+
+    it('resolves a dots-only "../.." import to its directory entry point when index.ts exists', async () => {
+      // The real honojs/hono repro: src/middleware/jwt/index.ts has
+      // `import type {} from '../..'` -- an empty, dots-only type import
+      // that resolves (pre-#953) to the bare directory `src`, which then
+      // fuzzy-matched every file under src/ as a "dependent" (matchesFile's
+      // Python Strategy 5). #953 resolves it to src/index instead, so it
+      // participates in ordinary exact matching.
+      await writeFile('src/index.ts', 'export {};\n');
+      await writeFile('src/utils/color.ts', 'export {};\n');
+
+      const content = `import type {} from '../..';`;
+      const parseResult = parseAST(content, 'typescript');
+      const imports = extractImports(
+        parseResult.tree!.rootNode,
+        'typescript',
+        'src/middleware/jwt/index.ts',
+        undefined,
+        { resolveDirectoryIndex: true, workspaceRoot: testDir },
+      );
+
+      expect(imports).toContain('src/index');
+      expect(imports).not.toContain('src');
+    });
+
+    it('resolves a named directory import ("../utils") to its entry point when src/utils/index.ts exists', async () => {
+      await writeFile('src/utils/index.ts', 'export {};\n');
+      await writeFile('src/utils/color.ts', 'export {};\n');
+
+      const content = `import { helpers } from '../utils';`;
+      const parseResult = parseAST(content, 'typescript');
+      const imports = extractImports(
+        parseResult.tree!.rootNode,
+        'typescript',
+        'src/middleware/foo.ts',
+        undefined,
+        { resolveDirectoryIndex: true, workspaceRoot: testDir },
+      );
+
+      expect(imports).toContain('src/utils/index');
+      expect(imports).not.toContain('src/utils');
+    });
+
+    it('leaves a bare directory specifier unchanged when the directory has no index.<ext>', async () => {
+      await writeFile('src/utils/color.ts', 'export {};\n');
+      // src/ itself has no index.ts of its own.
+
+      const content = `import type {} from '../..';`;
+      const parseResult = parseAST(content, 'typescript');
+      const imports = extractImports(
+        parseResult.tree!.rootNode,
+        'typescript',
+        'src/middleware/jwt/index.ts',
+        undefined,
+        { resolveDirectoryIndex: true, workspaceRoot: testDir },
+      );
+
+      expect(imports).toContain('src');
+    });
+
+    it('still resolves a bare same-directory self-import "." (#942/#935) to its own directory entry file', async () => {
+      await writeFile('src/middleware/jsx-renderer/index.tsx', 'export const jsxRenderer = 1;\n');
+
+      const content = `import { jsxRenderer } from '.';`;
+      const parseResult = parseAST(content, 'typescript');
+      const imports = extractImports(
+        parseResult.tree!.rootNode,
+        'typescript',
+        'src/middleware/jsx-renderer/index.tsx',
+        undefined,
+        { resolveDirectoryIndex: true, workspaceRoot: testDir },
+      );
+
+      // Resolves all the way to the importer's own file -- a correct exact
+      // self-match, rather than a fuzzy one.
+      expect(imports).toContain('src/middleware/jsx-renderer/index');
+    });
+
+    it('is a no-op for a bare external package specifier even when it collides with a real directory name', async () => {
+      await writeFile('zod/index.ts', 'export {};\n');
+
+      const content = `import { z } from 'zod';`;
+      const parseResult = parseAST(content, 'typescript');
+      const imports = extractImports(
+        parseResult.tree!.rootNode,
+        'typescript',
+        'src/schema.ts',
+        undefined,
+        { resolveDirectoryIndex: true, workspaceRoot: testDir },
+      );
+
+      // 'zod' never went through resolveRelativeImport (it's not a relative
+      // specifier), so directory-index resolution must not touch it even
+      // though a same-named directory happens to exist on disk.
+      expect(imports).toContain('zod');
+      expect(imports).not.toContain('zod/index');
     });
   });
 
