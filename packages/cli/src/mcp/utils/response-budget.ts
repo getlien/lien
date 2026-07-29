@@ -152,9 +152,22 @@ function buildResult(
 
   // If items were actually dropped, this response is provably incomplete —
   // never let a stale `hasMore: false` (set upstream before this size cap
-  // ran) claim otherwise.
-  if (itemsDropped && cloned && typeof cloned === 'object' && 'hasMore' in cloned) {
-    (cloned as Record<string, unknown>).hasMore = true;
+  // ran) claim otherwise. And if a `nextOffset` pagination cursor is
+  // present, it was computed assuming the full pre-cut page was delivered
+  // (offset + limit) — correct it by the same drop count, or paging with it
+  // silently skips exactly the items this cut just dropped (verified: a
+  // dropped-by-25 response advising nextOffset:50 actually needed
+  // nextOffset:25 to avoid a gap). Tool-side prose must never bake in the
+  // OLD number here — this is the only place that can still be corrected
+  // after the fact, since arbitrary note text can't be safely rewritten.
+  if (itemsDropped && cloned && typeof cloned === 'object') {
+    const obj = cloned as Record<string, unknown>;
+    if ('hasMore' in obj) {
+      obj.hasMore = true;
+    }
+    if (typeof obj.nextOffset === 'number') {
+      obj.nextOffset -= originalItemCount - finalItemCount;
+    }
   }
 
   return {

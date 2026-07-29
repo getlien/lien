@@ -134,12 +134,15 @@ export async function handleListFunctions(args: unknown, ctx: ToolContext): Prom
         'No results for this page. The offset is beyond the available results; try reducing or resetting the offset to 0.',
       );
     } else if (hasMore) {
-      // Deliberately no item count here: the true total isn't computed (see
-      // paginateResults), and a count captured at this point can go stale if
-      // applyResponseBudget drops further items downstream for response size.
-      // hasMore/nextOffset (top-level fields) are the source of truth.
+      // Deliberately no item count OR offset number baked into this string:
+      // the true total isn't computed (see paginateResults), and BOTH a
+      // count and this nextOffset value can go stale if applyResponseBudget
+      // drops further items downstream for response size — it corrects the
+      // structured `nextOffset` field when that happens, but can't safely
+      // rewrite an arbitrary number embedded in prose. Point at the field
+      // instead of repeating its value, so the two can never disagree.
       notes.push(
-        `More matches exist beyond this page. Use offset:${nextOffset} or narrow pattern/symbolType/language to see them.`,
+        'More matches exist beyond this page. See nextOffset to continue, or narrow pattern/symbolType/language.',
       );
     }
     if (queryResult.method === 'content') {

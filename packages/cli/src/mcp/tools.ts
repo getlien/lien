@@ -129,8 +129,8 @@ Returns:
 - enclosingSymbol: "Class.method" for methods, "functionName" for standalone functions, absent for block chunks
 - method: "symbols" | "content" (query method used)
 - hasMore: boolean — true means more results exist beyond this page (never a fabricated total; there is no "total matches" number in this response — only whether more exist and where to find them)
-- nextOffset?: number (offset for next page, when hasMore=true)
-- note?: when hasMore is true, explains how to see more (offset/narrower filters) — always trust hasMore/nextOffset over any count mentioned in note, which can describe a smaller page than what's shown if the response was also trimmed for size`,
+- nextOffset?: number (offset for next page, when hasMore=true) — always reflects what THIS response actually contains, even when it was also trimmed for size (results.length items shown, none skipped). ALWAYS pass this value back verbatim rather than computing your own offset + limit — the response-size cap can shrink a page after the fact, and only this field is corrected for that.
+- note?: when hasMore is true, points at nextOffset rather than repeating its value in prose (the same size trimming above can shrink nextOffset after the note text is already written) — trust the nextOffset field, not any number in note`,
   ),
   toMCPToolSchema(
     GetDependentsSchema,

@@ -228,6 +228,41 @@ describe('applyResponseBudget', () => {
     expect((result as { hasMore: boolean }).hasMore).toBe(false);
   });
 
+  it('corrects nextOffset by the drop count so paging never skips dropped items', () => {
+    // Regression: a pagination cursor computed upstream (offset + limit)
+    // assumes the full pre-cut page was delivered. Found dogfooding
+    // list_functions against sidekiq: a 50-item page collapsed to 23 by this
+    // size cap still advised nextOffset:50 — skipping the 27 real items that
+    // were fetched but silently dropped here. nextOffset must shrink by
+    // exactly the drop count instead.
+    const input = { ...makeResultsResponse(50, 1000), hasMore: true, nextOffset: 50 };
+    const { result, truncation } = applyResponseBudget(input);
+
+    expect(truncation).toBeDefined();
+    const dropped = truncation!.originalItemCount - truncation!.finalItemCount;
+    expect(dropped).toBeGreaterThan(0);
+    const res = result as { nextOffset: number; results: unknown[] };
+    expect(res.nextOffset).toBe(50 - dropped);
+    // The corrected cursor must point exactly at the first item NOT shown.
+    expect(res.nextOffset).toBe(res.results.length);
+  });
+
+  it('does not touch nextOffset when no items are dropped', () => {
+    const input = { ...makeResultsResponse(3, 5000), hasMore: false, nextOffset: 3 };
+    const { result, truncation } = applyResponseBudget(input);
+
+    expect(truncation).toBeDefined();
+    expect(truncation!.finalItemCount).toBe(truncation!.originalItemCount);
+    expect((result as { nextOffset: number }).nextOffset).toBe(3);
+  });
+
+  it('does not add a nextOffset field where none existed', () => {
+    const input = makeResultsResponse(50, 1000);
+    const { result } = applyResponseBudget(input);
+
+    expect(result as object).not.toHaveProperty('nextOffset');
+  });
+
   it('returns unchanged for non-object results', () => {
     const out = applyResponseBudget('just a string');
     expect(out.result).toBe('just a string');
