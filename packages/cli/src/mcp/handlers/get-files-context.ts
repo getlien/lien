@@ -238,28 +238,39 @@ export function createPathCache(workspaceRoot: string): {
   return { normalize, cache };
 }
 
-/** Canonical test-file paths among `allChunks` whose imports resolve to `normalizedTarget`. */
+/**
+ * Canonical test-file paths among `allChunks` whose imports resolve to
+ * `normalizedTarget`, exact literal matches first (#929) -- mirrors
+ * `@liendev/parser`'s own `collectImportMatchedTests` (test-associations.ts;
+ * this handler is `get_files_context`'s separate implementation, so it needs
+ * the identical treatment). See that function's doc comment for why an exact
+ * direct importer must not be left to sort behind a fuzzier match once a
+ * caller truncates the list for display.
+ */
 function collectImportMatchedTestFiles(
   allChunks: Array<{ metadata: { file: string; imports?: string[] } }>,
   normalizedTarget: string,
   normalize: (path: string) => string,
   workspaceRoot: string,
 ): string[] {
-  const matched: string[] = [];
+  const exact: string[] = [];
+  const fuzzy: string[] = [];
   for (const chunk of allChunks) {
     const chunkFile = getCanonicalPath(chunk.metadata.file, workspaceRoot);
     if (!isTestFile(chunkFile)) continue;
 
     const imports = chunk.metadata.imports || [];
-    if (
-      imports.some(imp =>
-        importMatchesTarget(imp, chunk.metadata.file, normalizedTarget, normalize),
-      )
-    ) {
-      matched.push(chunkFile);
+    const isExactMatch = imports.some(imp => normalize(imp) === normalizedTarget);
+    const isFuzzyMatch = imports.some(imp =>
+      importMatchesTarget(imp, chunk.metadata.file, normalizedTarget, normalize),
+    );
+    if (isExactMatch) {
+      exact.push(chunkFile);
+    } else if (isFuzzyMatch) {
+      fuzzy.push(chunkFile);
     }
   }
-  return matched;
+  return [...exact, ...fuzzy];
 }
 
 /**

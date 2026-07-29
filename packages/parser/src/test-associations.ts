@@ -44,26 +44,45 @@ function hasJavaSamePackageConvention(filepath: string): boolean {
   return language !== null && hasSamePackageTestConvention(language);
 }
 
-/** Test files among `testChunks` whose imports resolve to `normalizedTarget`. */
+/**
+ * Test files among `testChunks` whose imports resolve to `normalizedTarget`,
+ * exact literal matches first (#929). A test whose own import specifier
+ * resolves to exactly `normalizedTarget` -- a genuine, unambiguous direct
+ * reference -- is strictly better evidence than one that only matched via
+ * `matchesFile`'s fuzzier boundary/PHP/Python strategies, but both used to
+ * come back in the same undifferentiated bag, ordered only by chunk-scan
+ * order. Downstream display (`lien annotate`'s `formatTests`) truncates to
+ * the first `MAX_TESTS_LISTED` entries, so an exact direct importer that
+ * happened to sort last was silently dropped from what an agent actually
+ * reads -- the real hono/jws.ts repro (#929) had `jwt.test.ts`'s own direct
+ * `./jws` import buried behind several other real, but less specific,
+ * matches purely due to scan order. Partitioning first (rather than
+ * re-deriving which `matchesFile` strategy fired, which would mean
+ * threading a new return shape through `importMatchesTarget`) keeps this
+ * change local to the one function that assembles the display order.
+ */
 function collectImportMatchedTests(
   testChunks: CodeChunk[],
   normalizedTarget: string,
   normalize: (p: string) => string,
 ): string[] {
-  const matched: string[] = [];
+  const exact: string[] = [];
+  const fuzzy: string[] = [];
   for (const chunk of testChunks) {
     const imports = chunk.metadata.imports || [];
+    const isExactMatch = imports.some(imp => normalize(imp) === normalizedTarget);
     // importMatchesTarget applies the #884 whole-module guard before
     // matchesFile -- see its doc comment in path-matching.ts (#886).
-    if (
-      imports.some(imp =>
-        importMatchesTarget(imp, chunk.metadata.file, normalizedTarget, normalize),
-      )
-    ) {
-      matched.push(chunk.metadata.file);
+    const isFuzzyMatch = imports.some(imp =>
+      importMatchesTarget(imp, chunk.metadata.file, normalizedTarget, normalize),
+    );
+    if (isExactMatch) {
+      exact.push(chunk.metadata.file);
+    } else if (isFuzzyMatch) {
+      fuzzy.push(chunk.metadata.file);
     }
   }
-  return matched;
+  return [...exact, ...fuzzy];
 }
 
 /**

@@ -254,6 +254,27 @@ export function isUnresolvableWholeModuleImport(
  * importer's language. Every other caller passes the default (`false`,
  * permissive/Go-safe), preserving this function's pre-#887 behavior exactly.
  *
+ * Strategy 5 has its own, narrower language fork (#929): `matchesPythonModule`'s
+ * bare-specifier branch treats a resolved single-segment specifier as a
+ * Python package import, matching every file nested anywhere underneath it
+ * (`matchesParentPythonPackage`'s unbounded `startsWith`, no depth cap at
+ * all -- unlike every other strategy here, which anchors both edges of the
+ * match). That is a real Python semantic, but `matchesFile` used to run it
+ * unconditionally for every language, and a resolved bare specifier can
+ * coincidentally look exactly like a Python identifier in any language --
+ * confirmed on a real TypeScript repo (hono), where a test's own package-root
+ * barrel import (`import { Hono } from '../..'`, resolved to the bare
+ * specifier `src`) satisfied `matchesParentPythonPackage('src', 'src/utils/
+ * jwt/jws')` for every single file under `src/`, fabricating "this test
+ * covers everything" for a bare barrel import with no real relationship to
+ * the target. See `allowPythonModuleMatching` and `importMatchesTarget`,
+ * the only caller that derives it from the importer's language. Every other
+ * caller passes the default (`true`), preserving this function's pre-#929
+ * behavior exactly -- this is deliberately scoped to `importMatchesTarget`'s
+ * match-side callers, mirroring #887's precedent, not to `matchesFile`'s
+ * direct callers (existing Python fixtures, `findDependentChunks`'s fuzzy
+ * loop, `buildReExportGraph`).
+ *
  * @param normalizedImport - Normalized import path
  * @param normalizedTarget - Normalized target file path
  * @param requireExactTailForMultiSegment - When true, a multi-segment bare
@@ -261,12 +282,17 @@ export function isUnresolvableWholeModuleImport(
  *   `require` semantics); when false (the default), a multi-segment bare
  *   pattern may also match a "child" continuing past it (Go's package-
  *   directory semantics, and the safe default for every other language).
+ * @param allowPythonModuleMatching - When false, Strategy 5 (Python module
+ *   matching) is skipped entirely. Defaults to `true` (this function's
+ *   pre-#929 behavior); `importMatchesTarget` passes `false` for any
+ *   non-Python importer -- see the doc comment above.
  * @returns True if the import matches the target file
  */
 export function matchesFile(
   normalizedImport: string,
   normalizedTarget: string,
   requireExactTailForMultiSegment = false,
+  allowPythonModuleMatching = true,
 ): boolean {
   // Exact match
   if (normalizedImport === normalizedTarget) return true;
@@ -318,7 +344,7 @@ export function matchesFile(
 
   // Strategy 5: Python module matching
   // Python imports use dotted paths like "django.http" which should match "django/http/response.py"
-  if (matchesPythonModule(normalizedImport, normalizedTarget)) {
+  if (allowPythonModuleMatching && matchesPythonModule(normalizedImport, normalizedTarget)) {
     return true;
   }
 
@@ -329,7 +355,7 @@ export function matchesFile(
  * The single guarded import-matching decision: does `importSpecifier` (as
  * written in `importerFile`) resolve to `normalizedTarget`?
  *
- * Couples two guards to `matchesFile` so neither can drift apart from a
+ * Couples three guards to `matchesFile` so neither can drift apart from a
  * match-side call site again:
  * - The #884 whole-module guard (`isUnresolvableWholeModuleImport`) --
  *   `matchesFile` is language-agnostic and cannot know the importer's
@@ -342,6 +368,12 @@ export function matchesFile(
  *   whose files are all members). This is the ONE call site with both an
  *   importer file *and* a target to compare against, so it's the only place
  *   this derivation happens.
+ * - The #929 Python-bare-module guard (`allowPythonModuleMatching`) --
+ *   `matchesFile`'s Strategy 5 is a real Python semantic, but a false hub for
+ *   any other language whose resolved bare specifier coincidentally matches
+ *   a Python identifier shape (see `matchesFile`'s doc comment for the real
+ *   hono/TypeScript repro). Derived from the importer's language the same
+ *   way as the #887 guard, at this same call site.
  *
  * Every match-side reverse-dependency call path that used to open-code
  * `!isUnresolvableWholeModuleImport(imp, f) && matchesFile(normalize(imp), t)`
@@ -357,7 +389,7 @@ export function matchesFile(
  * @param importSpecifier - The raw (pre-normalization) import specifier, or
  *   an `importedSymbols` key (same shape).
  * @param importerFile - File path of the chunk doing the importing (needed
- *   for both guards' language detection).
+ *   for all three guards' language detection).
  * @param normalizedTarget - The already-normalized target path to compare
  *   against.
  * @param normalize - The caller's own cached `normalizePath` wrapper.
@@ -373,6 +405,7 @@ export function importMatchesTarget(
     normalize(importSpecifier),
     normalizedTarget,
     hasSingleFileImportSemantics(importerFile),
+    hasPythonModuleSemantics(importerFile),
   );
 }
 
@@ -385,6 +418,22 @@ export function importMatchesTarget(
 export function hasSingleFileImportSemantics(importerFile: string): boolean {
   const language = detectLanguage(importerFile);
   return language !== null && hasSingleFileImports(language);
+}
+
+/**
+ * True when `importerFile`'s language is Python -- the only language
+ * `matchesFile`'s Strategy 5 (`matchesPythonModule`) is a confirmed real
+ * semantic for (#929). Unlike `hasSingleFileImportSemantics` above, this
+ * isn't backed by a `LanguageDefinition` flag: `matchesPythonModule` is
+ * Python-specific by construction (dotted-module parsing, `__init__.py`
+ * handling), not a generic per-language toggle other languages could
+ * legitimately opt into, so a direct language-identity check is the honest
+ * representation. Shared by `importMatchesTarget`'s `allowPythonModuleMatching`
+ * argument -- see `matchesFile`'s doc comment for the false-hub this guards
+ * against.
+ */
+export function hasPythonModuleSemantics(importerFile: string): boolean {
+  return detectLanguage(importerFile) === 'python';
 }
 
 /**

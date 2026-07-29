@@ -8,6 +8,7 @@ import {
   isUnresolvableWholeModuleImport,
   importMatchesTarget,
   hasSingleFileImportSemantics,
+  hasPythonModuleSemantics,
 } from './path-matching.js';
 
 /**
@@ -669,6 +670,53 @@ describe('importMatchesTarget (#886)', () => {
         ),
       ).toBe(true);
     });
+  });
+
+  describe('#929 Python-bare-module guard', () => {
+    // The real hono/TypeScript repro: `src/utils/jwt/jwt.test.ts` directly
+    // imports `./jws`, but `annotate`'s "Test coverage" line omitted it and
+    // instead listed several unrelated test files -- every one of which
+    // imports the package's own root barrel (`import { Hono } from '../..'`,
+    // which resolves to the bare specifier `src`). `matchesFile`'s Strategy 5
+    // (`matchesPythonModule`) treated that bare `src` as a Python package
+    // import covering every file nested under `src/`, fabricating a match
+    // against `src/utils/jwt/jws` for a test with no real relationship to it.
+    const normalizedJws = normalize('src/utils/jwt/jws.ts');
+
+    it('matchesFile alone still matches the bare-barrel pair (this function stays permissive by default)', () => {
+      expect(matchesFile('src', normalizedJws)).toBe(true);
+    });
+
+    it('suppresses the bare-barrel false hub for a non-Python (TypeScript) importer', () => {
+      expect(
+        importMatchesTarget('src', 'src/adapter/deno/websocket.test.ts', normalizedJws, normalize),
+      ).toBe(false);
+    });
+
+    it('leaves genuine Python bare-package matching alone for an actual Python importer', () => {
+      expect(
+        importMatchesTarget(
+          'flask',
+          'flask/tests/test_app.py',
+          normalize('flask/app.py'),
+          normalize,
+        ),
+      ).toBe(true);
+    });
+  });
+});
+
+describe('hasPythonModuleSemantics (#929)', () => {
+  it('is true for a Python importer file', () => {
+    expect(hasPythonModuleSemantics('flask/tests/test_app.py')).toBe(true);
+  });
+
+  it('is false for a TypeScript importer file', () => {
+    expect(hasPythonModuleSemantics('src/adapter/deno/websocket.test.ts')).toBe(false);
+  });
+
+  it('is false for an importer file in an unrecognized/undetectable language', () => {
+    expect(hasPythonModuleSemantics('README.md')).toBe(false);
   });
 });
 

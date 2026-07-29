@@ -352,6 +352,32 @@ describe('handleGetFilesContext - test-association scan (scanAll fast path + cac
     });
   });
 
+  describe('direct-importer ranking (#929)', () => {
+    // Mirrors @liendev/parser's own test-associations.test.ts coverage --
+    // this handler is get_files_context's separate implementation (see
+    // collectImportMatchedTestFiles's doc comment), so it needs the
+    // identical ranking guarantee: a test whose own import resolves to
+    // exactly the target must not sort behind a fuzzier match.
+    it('ranks an exact direct importer ahead of a fuzzy match, even when the fuzzy match is scanned first', async () => {
+      const scanAll = vi
+        .fn()
+        .mockResolvedValue([
+          makeChunk('src/auth.rs'),
+          makeChunk('tests/other_test.rs', ['auth']),
+          makeChunk('tests/auth_direct_test.rs', ['src/auth']),
+        ]);
+      const ctx = makeCtx({ scanAll, indexVersion: 1 });
+
+      const result = await handleGetFilesContext(
+        { filepaths: 'src/auth.rs', includeRelated: false },
+        ctx,
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.testAssociations).toEqual(['tests/auth_direct_test.rs', 'tests/other_test.rs']);
+    });
+  });
+
   it('caches the scan across calls with the same indexVersion (no re-scan)', async () => {
     const scanAll = vi.fn().mockResolvedValue([]);
     const ctx = makeCtx({ scanAll, indexVersion: 42 });

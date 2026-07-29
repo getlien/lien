@@ -43,6 +43,7 @@ export {
   isUnresolvableWholeModuleImport,
   importMatchesTarget,
   hasSingleFileImportSemantics,
+  hasPythonModuleSemantics,
 } from './utils/path-matching.js';
 
 export { extractRepoId } from './utils/repo-id.js';
