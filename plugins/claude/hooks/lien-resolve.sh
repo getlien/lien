@@ -49,6 +49,45 @@
 # per-repo scoping would need its own `lien` invocation (`path --store`) just
 # to find where to look, which is the exact chicken-and-egg this breaker
 # exists to avoid triggering.
+#
+# Known false-positive trigger: a stale in-flight marker is the fingerprint
+# of an untrapped kill, but it cannot tell WHY the process was killed — a
+# registry hang is only one cause. The same fingerprint is left by the lid
+# closing / the machine sleeping mid-call (wall clock jumps forward past
+# LIEN_NPX_BREAKER_STALE_SEC the moment it wakes), a Ctrl-C or session kill
+# landing on the process group (SIGINT is untrapped here too — anything that
+# terminates this process before it reaches its own cleanup line has the
+# same effect as a SIGKILL), or an OOM kill. In every one of these cases the
+# registry is actually fine and the breaker still opens, silencing nudges
+# for the full cooldown even though nothing is wrong. This isn't a new
+# failure class for this hook suite — missing `jq`, an unindexed repo, and a
+# dozen other conditions already fail this silently — and it's strictly
+# better than the 5s-stall-per-edit it replaces. It self-heals once the
+# cooldown lapses; LIEN_NPX_BREAKER_COOLDOWN_SEC lowers the wait, and
+# LIEN_NPX_BREAKER=off disables the mechanism entirely.
+#
+# Why the default cooldown is 300s and not shorter, given false positives
+# from the paragraph above are plausible: the two failure shapes have very
+# different persistence and severity profiles. A benign kill is a one-off,
+# coincidental event — it can only produce a false trip if it happens to
+# land during the narrow window a hook is actually running (measured at
+# 200-600ms end to end in normal operation), so across a whole session the
+# odds of it landing in that window at all are low, and the cost when it
+# does is just a few minutes of missing nudges (silence, not breakage,
+# self-healing, in a suite that's already advisory-only throughout). A real
+# black-holed registry, by contrast, is a standing network condition
+# (corporate proxy, VPN, firewall) that typically does NOT resolve itself
+# within a single work session — it stays down until the user changes
+# network config, so a short cooldown mostly buys nothing there (the retry
+# just hangs again) while making the *common* pattern strictly worse: every
+# cooldown expiry re-probes and re-stalls ~5s, so a 60s cooldown costs
+# roughly 5x more cumulative stall time than 300s over a long session on a
+# persistently broken network (~one 5s stall/minute vs. one every 5
+# minutes). Given the rare/low-severity profile of the false-positive case
+# against the common/high-cost profile of the true-positive case this
+# breaker exists for, 300s is kept as the default. Lower it via
+# LIEN_NPX_BREAKER_COOLDOWN_SEC if a false trip's silence is worse for a given
+# workflow than the occasional extra stall.
 if command -v lien >/dev/null 2>&1; then
   LIEN_CMD=(lien)
 elif command -v npx >/dev/null 2>&1; then

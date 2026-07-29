@@ -39,6 +39,28 @@ subsequent resolutions fast and silent for a cooldown window instead of
 re-hanging on every later edit. `LIEN_NPX_BREAKER_STALE_SEC` (default 7) and
 `LIEN_NPX_BREAKER_COOLDOWN_SEC` (default 300) tune the thresholds.
 
+**Known false-positive trigger:** a stale marker only proves the process
+that wrote it was killed before it could clean up — it can't prove *why*. A
+registry hang is one cause; the lid closing / the machine sleeping mid-call,
+a Ctrl-C or session kill landing on the process group, or an OOM kill all
+leave the same fingerprint, and in every one of those cases the registry is
+actually fine but the breaker still opens, silencing nudges for the whole
+cooldown. This isn't a new failure class — missing `jq`, an unindexed repo,
+and other conditions already fail this suite silently — and it's strictly
+better than the 5s-per-edit stall it replaces. It self-heals once the
+cooldown lapses; lower `LIEN_NPX_BREAKER_COOLDOWN_SEC` to shorten that wait,
+or set `LIEN_NPX_BREAKER=off` to disable the breaker entirely. The default
+cooldown is kept at 300s rather than something shorter (e.g. 60s) because
+the two failure shapes have different persistence: a benign kill is a rare,
+coincidental one-off (hooks normally run in 200-600ms, so the odds of an
+external kill landing in that narrow window are low), while a real
+black-holed registry is a standing network condition (corporate
+proxy/VPN/firewall) that typically doesn't resolve itself mid-session — a
+shorter cooldown mostly just re-stalls ~5s on every expiry without fixing
+anything, costing roughly 5x more cumulative stall time over a long session
+on a persistently broken network. See the fuller reasoning in
+`lien-resolve.sh`'s own comments.
+
 Every `delta-write.sh` run (and every other `lien delta` invocation, manual
 or CI) is recorded locally as one JSONL line in `delta-events.jsonl` next to
 the project's index; nothing leaves the machine. Run `lien stats` for 7/30-day
