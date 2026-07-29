@@ -44,3 +44,8 @@ Also reconciles the reported `dependentCount`/`riskReasoning` mismatch (e.g.
 production-only callers by design (test callers shouldn't weigh into risk
 the same way), just without saying so — now labeled "N production callers"
 explicitly.
+
+`targetIndexed`'s `note` defers to #927's manifest-based `note` whenever both
+would fire for the same target (the overwhelming common case — a
+nonexistent path is both "not in the manifest" and "has no chunks"): only
+one note is ever shown, never two competing explanations of the same zero.
