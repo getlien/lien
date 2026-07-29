@@ -465,8 +465,83 @@ describe('handleFindSimilar', () => {
       await handleFindSimilar({ code }, mockCtx);
 
       // The code string is passed straight to search(). limit defaults to 5,
-      // +10 overfetch.
-      expect(mockVectorDB.search).toHaveBeenCalledWith(code, 15);
+      // +10 overfetch, +1 more to detect whether the fetch window was full
+      // (see fetchCandidates' fetchWindowExhausted signal).
+      expect(mockVectorDB.search).toHaveBeenCalledWith(code, 16);
+    });
+  });
+
+  describe('hasMore signal (never a fabricated total)', () => {
+    it('is false when the fetch window was not full and results fit under limit', async () => {
+      mockVectorDB.search.mockResolvedValue([createMockResult({ metadata: { file: 'src/a.ts' } })]);
+
+      const result = await handleFindSimilar(
+        { code: 'async function fetchData() { return await db.find(); }', limit: 5 },
+        mockCtx,
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.hasMore).toBe(false);
+      expect(parsed.note).toBeUndefined();
+    });
+
+    it('is true when filtered candidates already exceed limit', async () => {
+      const mockResults = Array.from({ length: 8 }, (_, i) =>
+        createMockResult({ metadata: { file: `src/f${i}.ts` } }),
+      );
+      mockVectorDB.search.mockResolvedValue(mockResults);
+
+      const result = await handleFindSimilar(
+        { code: 'async function fetchData() { return await db.find(); }', limit: 5 },
+        mockCtx,
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.results).toHaveLength(5);
+      expect(parsed.hasMore).toBe(true);
+      expect(parsed.note).toContain("doesn't paginate");
+    });
+
+    it('is true when the raw fetch window was full, even if filtered candidates fit under limit', async () => {
+      // limit=5 -> extraLimit=15 -> search requested with 16. Returning
+      // exactly 16 raw rows means the window was NOT proven exhausted.
+      const rawResults = Array.from({ length: 16 }, (_, i) =>
+        createMockResult({
+          metadata: { file: `src/f${i}.ts`, language: i === 0 ? 'typescript' : 'python' },
+        }),
+      );
+      mockVectorDB.search.mockResolvedValue(rawResults);
+
+      const result = await handleFindSimilar(
+        {
+          code: 'async function fetchData() { return await db.find(); }',
+          limit: 5,
+          language: 'typescript',
+        },
+        mockCtx,
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      // Only 1 candidate survives the language filter — well under limit —
+      // so hasMore is true here ONLY because the fetch window wasn't
+      // proven exhausted, not because of any leftover filtered count.
+      expect(parsed.results).toHaveLength(1);
+      expect(parsed.hasMore).toBe(true);
+    });
+
+    it('never states a specific total in the note', async () => {
+      const mockResults = Array.from({ length: 8 }, (_, i) =>
+        createMockResult({ metadata: { file: `src/f${i}.ts` } }),
+      );
+      mockVectorDB.search.mockResolvedValue(mockResults);
+
+      const result = await handleFindSimilar(
+        { code: 'async function fetchData() { return await db.find(); }', limit: 5 },
+        mockCtx,
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.note ?? '').not.toMatch(/\bof \d+/);
     });
   });
 

@@ -87,6 +87,15 @@ async function queryWithFallback(
 
 /**
  * Deduplicate and paginate results.
+ *
+ * `nextOffset` is included whenever at least one result is shown —
+ * deliberately NOT gated on `hasMore`. A page that looks complete here
+ * (`hasMore: false`, e.g. exactly `limit` items fetched) can still get
+ * items dropped later by applyResponseBudget for response size, which
+ * forces `hasMore` true after the fact; that correction needs an existing
+ * `nextOffset` field to adjust (see response-budget.ts). Always offset +
+ * (what was actually returned), so it's never past the shown items even
+ * before any downstream size-cut.
  */
 function paginateResults(results: SearchResult[], offset: number, limit: number): PaginationResult {
   const dedupedResults = deduplicateResults(results);
@@ -96,7 +105,7 @@ function paginateResults(results: SearchResult[], offset: number, limit: number)
   return {
     paginatedResults,
     hasMore,
-    ...(hasMore ? { nextOffset: offset + limit } : {}),
+    ...(paginatedResults.length > 0 ? { nextOffset: offset + paginatedResults.length } : {}),
   };
 }
 
@@ -149,6 +158,17 @@ export async function handleListFunctions(args: unknown, ctx: ToolContext): Prom
     } else if (paginatedResults.length === 0 && offset > 0) {
       notes.push(
         'No results for this page. The offset is beyond the available results; try reducing or resetting the offset to 0.',
+      );
+    } else if (hasMore) {
+      // Deliberately no item count OR offset number baked into this string:
+      // the true total isn't computed (see paginateResults), and BOTH a
+      // count and this nextOffset value can go stale if applyResponseBudget
+      // drops further items downstream for response size — it corrects the
+      // structured `nextOffset` field when that happens, but can't safely
+      // rewrite an arbitrary number embedded in prose. Point at the field
+      // instead of repeating its value, so the two can never disagree.
+      notes.push(
+        'More matches exist beyond this page. See nextOffset to continue, or narrow pattern/symbolType/language.',
       );
     }
     // Only a performance nudge (content scan found real results just via the
