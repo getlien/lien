@@ -171,6 +171,88 @@ describe('recordNudgeShown / recordNudgeSignal helpers', () => {
   });
 });
 
+// The `rootDir` fake above never exists on disk, so it only exercises
+// `canonicalizePath`'s final (identity) fallback — never actual symlink
+// resolution. These use real temp directories to exercise the realpath path
+// that macOS's `/tmp` -> `/private/tmp` boundary hits in production.
+describe('toRepoRelativeFile (via recordNudgeShown/Signal) — realpath canonicalization', () => {
+  let realRoot: string;
+
+  beforeEach(async () => {
+    realRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-nudge-realpath-test-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(realRoot, { recursive: true, force: true });
+  });
+
+  it('resolves an absolute file through a symlinked root to the same repo-relative form (macOS /tmp -> /private/tmp shape)', async () => {
+    await fs.mkdir(path.join(realRoot, 'src'), { recursive: true });
+    await fs.writeFile(path.join(realRoot, 'src', 'foo.ts'), '', 'utf-8');
+
+    const linkDir = path.join(os.tmpdir(), `lien-nudge-realpath-link-${process.pid}-${Date.now()}`);
+    try {
+      await fs.symlink(realRoot, linkDir, 'dir');
+    } catch {
+      return; // platform can't create symlinks — skip cleanly rather than fail
+    }
+    try {
+      // rootDir is the CANONICAL root (as `resolveProjectRoot(process.cwd())`
+      // would produce), while `file` arrives through the symlinked route (as
+      // an MCP arg or hook `tool_input.file_path` would) — the exact mismatch
+      // that produced the `../../../../tmp/...` bug.
+      await recordNudgeShown(realRoot, {
+        sessionId: 's',
+        nudge: 'annotate',
+        file: path.join(linkDir, 'src', 'foo.ts'),
+      });
+      const [e] = await readNudgeEvents(realRoot);
+      expect(e).toMatchObject({ file: 'src/foo.ts' });
+    } finally {
+      await fs.rm(linkDir, { force: true }).catch(() => undefined);
+    }
+  });
+
+  it('resolves an absolute file with no symlink involved to the same repo-relative form (no regression)', async () => {
+    await fs.mkdir(path.join(realRoot, 'src'), { recursive: true });
+    await fs.writeFile(path.join(realRoot, 'src', 'foo.ts'), '', 'utf-8');
+
+    await recordNudgeSignal(realRoot, {
+      sessionId: 's',
+      signal: 'get_dependents',
+      file: path.join(realRoot, 'src', 'foo.ts'),
+    });
+    const [e] = await readNudgeEvents(realRoot);
+    expect(e).toMatchObject({ file: 'src/foo.ts' });
+  });
+
+  it('omits an absolute file that resolves outside the repo rather than recording a bogus in-repo path', async () => {
+    const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-nudge-outside-test-'));
+    try {
+      const outsideFile = path.join(outsideDir, 'evil.ts');
+      await fs.writeFile(outsideFile, '', 'utf-8');
+
+      await recordNudgeShown(realRoot, { sessionId: 's', nudge: 'annotate', file: outsideFile });
+      const [e] = await readNudgeEvents(realRoot);
+      expect('file' in e).toBe(false);
+    } finally {
+      await fs.rm(outsideDir, { recursive: true, force: true });
+    }
+  });
+
+  it('still relativizes correctly when the file itself no longer exists but its parent directory does', async () => {
+    await fs.mkdir(path.join(realRoot, 'src'), { recursive: true });
+
+    await recordNudgeSignal(realRoot, {
+      sessionId: 's',
+      signal: 'get_files_context',
+      file: path.join(realRoot, 'src', 'deleted.ts'),
+    });
+    const [e] = await readNudgeEvents(realRoot);
+    expect(e).toMatchObject({ file: 'src/deleted.ts' });
+  });
+});
+
 describe('validation on read', () => {
   it('skips a torn/corrupted line rather than failing the whole read', async () => {
     const good = shownEvent();

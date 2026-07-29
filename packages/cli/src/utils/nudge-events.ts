@@ -30,6 +30,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { getIndexDir } from '@liendev/parser';
+import { canonicalizePath } from './canonicalize-path.js';
 
 export const NUDGE_EVENTS_FILENAME = 'nudge-events.jsonl';
 
@@ -123,11 +124,23 @@ export async function recordNudgeEvent(rootDir: string, event: NudgeEvent): Prom
  * relativized against `rootDir`; an already-relative path is only slash-
  * normalized (relativizing it again would resolve it against cwd and corrupt
  * it). An empty/undefined path passes through as undefined.
+ *
+ * Both sides are canonicalized (`canonicalizePath`) before relativizing: an
+ * absolute `file` arriving verbatim from an MCP arg or a hook's
+ * `tool_input.file_path` won't have gone through realpath the way `rootDir`
+ * (derived from `process.cwd()`) already has, so a symlinked ancestor (macOS
+ * `/tmp` -> `/private/tmp`) would otherwise make `path.relative` straddle two
+ * different roots and produce a nonsense `../../../../tmp/...` path instead
+ * of `src/foo.ts`. An absolute path that canonicalizes to somewhere outside
+ * `rootDir` is dropped (returns undefined) rather than recorded as a bogus
+ * in-repo path.
  */
 function toRepoRelativeFile(rootDir: string, file?: string): string | undefined {
   if (!file) return undefined;
   if (!path.isAbsolute(file)) return file.replace(/\\/g, '/');
-  return path.relative(rootDir, file).replace(/\\/g, '/');
+  const rel = path.relative(canonicalizePath(rootDir), canonicalizePath(file)).replace(/\\/g, '/');
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return undefined;
+  return rel;
 }
 
 /** Stamp `now` and record a nudge-shown event. `file` is normalized to project-relative; `file`/`symbol` omitted when empty. */
