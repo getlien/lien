@@ -229,6 +229,33 @@ describe('classifyTestCommand — broad vs scoped classification table', () => {
     // a bare target name against a real file, so it lands on the same safe
     // name-filtered (not broad) outcome as a plain `cargo test <name>`.
     ['cargo test --test integration_test', true, false, []],
+    // Regression (caught in review, then corrected on direction): pnpm's own
+    // `--filter`/`-F` workspace selector (https://pnpm.io/filtering) is a
+    // FOURTH instance of the same short-flag-collision hazard class. A
+    // scoped package name routinely contains "/" (`@hono/core`), which the
+    // generic path-token scan misread as a real scope-narrowing file when
+    // `--filter` appeared AFTER the script name — flipping a genuinely broad
+    // run to falsely narrow. Both orderings (`--filter` before/after the
+    // script) and both forms (`--filter <val>` / `--filter=<val>`) must stay
+    // broad, plus the documented `-F` alias.
+    ['pnpm test --filter hono', true, true, []],
+    ['pnpm test --filter @hono/core', true, true, []],
+    ['pnpm test --filter=hono', true, true, []],
+    ['pnpm test --filter=@hono/core', true, true, []],
+    ['pnpm test -F hono', true, true, []],
+    ['pnpm test -F @hono/core', true, true, []],
+    ['pnpm --filter hono test', true, true, []],
+    ['pnpm --filter @hono/core test', true, true, []],
+    // The "=" form before the script wasn't matched by ANY runner pattern at
+    // all before this fix (isTestRun: false) — pnpm's own docs show
+    // `--filter=selector` as the canonical exclusion form
+    // (`--filter=!foo`), so this always nagged even though it's a
+    // documented, common invocation.
+    ['pnpm --filter=hono test', true, true, []],
+    ['pnpm --filter=@hono/core test', true, true, []],
+    ['pnpm -F hono test', true, true, []],
+    ['pnpm -F @hono/core test', true, true, []],
+    ['pnpm --filter=!excluded-pkg test', true, true, []],
   ])('%s -> isTestRun=%s broad=%s scopeTokens=%j', (command, isTestRun, broad, scopeTokens) => {
     expect(classifyTestCommand(command)).toEqual({ isTestRun, broad, scopeTokens });
   });

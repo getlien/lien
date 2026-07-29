@@ -135,11 +135,14 @@ function stripLeadingWrappersAndEnv(segment: string): string {
 // before scanning for path-like tokens.
 //
 // `--filter` is deliberately NOT here even though pnpm also uses it for
-// workspace scoping (`pnpm --filter my-pkg test`): that form is matched
-// whole by its own anchored RUNNER_PATTERNS entry above (the flag+value
-// never reach this remainder scan at all), whereas dotnet/swift/nx reuse
-// the same flag spelling for a test-NAME filter, which must NOT be silently
-// swallowed — see NAME_FILTER_FLAGS below.
+// workspace scoping: `pnpm --filter my-pkg test` (filter BEFORE the script)
+// is matched whole by its own anchored RUNNER_PATTERNS entry above (the
+// flag+value never reach this remainder scan at all); `pnpm test --filter
+// my-pkg` (filter AFTER) is instead handled by the pnpm-specific
+// `PNPM_TEST_VALUE_FLAGS` below, scoped to that ordering only — a global
+// entry here would also swallow dotnet/swift's unrelated test-NAME use of
+// the identical spelling, which must NOT be silently skipped (see
+// NAME_FILTER_FLAGS below).
 const WORKSPACE_SCOPE_FLAGS = new Set(['-w', '--workspace']);
 
 // Flags whose value narrows a run to specific test NAMES rather than a
@@ -167,10 +170,13 @@ const MOCHA_NAME_FILTER_FLAGS = new Set(['--grep', '-g']);
 const GO_TEST_NAME_FILTER_FLAGS = new Set(['-run']);
 // vitest and jest share the same Jest-descended CLI convention.
 const JS_TEST_NAME_FILTER_FLAGS = new Set(['-t', '--testNamePattern']);
-// dotnet and swift both spell their (unrelated-to-pnpm/nx) test-name filter
-// `--filter`; pnpm's own `--filter` is fully absorbed by its dedicated
-// anchored RUNNER_PATTERNS entry before reaching this lookup at all, so
-// there is no collision in practice despite the shared spelling.
+// dotnet and swift both spell their (unrelated-to-pnpm) test-name filter
+// `--filter`. pnpm's own `--filter` is either fully absorbed by its
+// dedicated anchored RUNNER_PATTERNS entry (filter BEFORE the script) or
+// handled by the pnpm-specific `PNPM_TEST_VALUE_FLAGS` value-skip (filter
+// AFTER) — `nameFilterFlagsFor` only returns this set for `dotnet test`/
+// `swift test` specifically, so there is no collision in practice despite
+// the shared spelling.
 const DOTNET_SWIFT_NAME_FILTER_FLAGS = new Set(['--filter']);
 const NO_NAME_FILTER_FLAGS: ReadonlySet<string> = new Set();
 
@@ -248,11 +254,30 @@ const CARGO_TEST_VALUE_FLAGS = new Set([
 ]);
 const NO_VALUE_SKIP_FLAGS: ReadonlySet<string> = new Set();
 
+// pnpm's own `--filter`/`-F` (https://pnpm.io/filtering), when it appears
+// AFTER the script name (`pnpm test --filter <selector>`) rather than before
+// it (`pnpm --filter <selector> test`, already fully absorbed by its own
+// anchored RUNNER_PATTERNS entry above). A package selector routinely
+// contains "/" (a scope, `@hono/core`) — caught in review: without this set,
+// that value was independently scanned and misread as a PATH-like scope
+// token, flipping a genuinely broad `pnpm test --filter @hono/core` to a
+// falsely narrow "scoped to ./@hono/core" — the fourth instance of the same
+// short-flag-collision hazard in this file. The `--filter=value` single-token
+// form doesn't need an entry here: it already starts with `-`, so it's
+// caught by the generic dash-prefix skip before ever reaching the path check
+// (verified: `pnpm test --filter=@hono/core` already classifies broad).
+const PNPM_TEST_VALUE_FLAGS = new Set(['--filter', '-F']);
+
+/** True for the generic `pnpm test`/`pnpm test:script` match — i.e. NOT the dedicated `pnpm --filter <pkg> test` anchored form, where `--filter` never reaches this scan at all. */
+function isPnpmTestRunner(matchedRunnerText: string): boolean {
+  return /^pnpm\s+test(:\S*)?$/.test(matchedRunnerText.trim());
+}
+
 /** Which extra flag+value pairs should be fully skipped (beyond the universal WORKSPACE_SCOPE_FLAGS/CONFIG_FLAGS) for the runner `matchedRunnerText` identified. */
 function valueSkipFlagsFor(matchedRunnerText: string): ReadonlySet<string> {
-  return isPositionalNameFilterRunner(matchedRunnerText)
-    ? CARGO_TEST_VALUE_FLAGS
-    : NO_VALUE_SKIP_FLAGS;
+  if (isPositionalNameFilterRunner(matchedRunnerText)) return CARGO_TEST_VALUE_FLAGS;
+  if (isPnpmTestRunner(matchedRunnerText)) return PNPM_TEST_VALUE_FLAGS;
+  return NO_VALUE_SKIP_FLAGS;
 }
 
 // Flags whose value is a config file path, not a test/source file —
@@ -283,7 +308,15 @@ const RUNNER_PATTERNS: RegExp[] = [
   /^npm\s+test(?=\s|$)/,
   /^npm\s+t(?=\s|$)/,
   /^yarn\s+test(:\S*)?(?=\s|$)/,
-  /^pnpm\s+--filter\s+\S+\s+test(?=\s|$)/,
+  // pnpm's own workspace selector (https://pnpm.io/filtering), `--filter` or
+  // its documented `-F` alias, BEFORE the script name. `(?:\s+\S+|=\S+)`
+  // accepts both the space-separated form (`--filter <selector>`) and the
+  // single-token `=` form pnpm's own docs also show (`--filter=selector`) —
+  // caught in review: the `=` form was previously unrecognized entirely
+  // (`pnpm --filter=@hono/core test` matched no pattern at all), always
+  // nagging even though pnpm's docs list it as the canonical way to exclude
+  // a package (`--filter=!foo`).
+  /^pnpm\s+(?:--filter|-F)(?:\s+\S+|=\S+)\s+test(?=\s|$)/,
   /^pnpm\s+test(:\S*)?(?=\s|$)/,
   /^bun\s+test(?=\s|$)/,
   /^npx\s+vitest(?=\s|$)/,

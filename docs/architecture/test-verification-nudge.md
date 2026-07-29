@@ -276,6 +276,61 @@ vs. rspec `-e`, cargo-nextest's `run` keyword vs. `cargo test`'s positional,
 and now `cargo test`'s own compile-config flags vs. its own positional. All
 three are now pinned as regression tests in `test-run-matcher.test.ts`.
 
+##### A fourth instance: pnpm's own `--filter`/`-F` workspace selector (2026-07-29)
+
+Review of the cargo fix above found one more case of the same hazard, then a
+second, independent review of *that* claim corrected its direction: `pnpm
+test --filter <selector>` (the workspace selector placed AFTER the script
+name, rather than the `pnpm --filter <selector> test` form already absorbed
+whole by its own anchored `RUNNER_PATTERNS` entry) has a selector value that
+routinely contains `/` for a scoped package name (`@hono/core`). Without a
+dedicated skip, that value was independently scanned by the generic
+path-token check and misread as a real scope-narrowing FILE — flipping a
+genuinely broad run to a falsely narrow "scoped to `./@hono/core`" (the
+review's first pass called this a suppression risk; a second, independently
+verified pass established the direction is actually the opposite — a false
+NAG, not a false silence, since a broad-run-misread-as-scoped can only ever
+*reduce* claimed coverage, never expand it). Fixed by adding
+`PNPM_TEST_VALUE_FLAGS` (`--filter`, `-F`), skipped as flag+value via
+`valueSkipFlagsFor` exactly like `CARGO_TEST_VALUE_FLAGS`, but gated on the
+generic `pnpm test`/`pnpm test:script` match specifically (`isPnpmTestRunner`)
+so dotnet/swift's unrelated test-NAME use of the identical `--filter`
+spelling is untouched.
+
+The same review also surfaced, independently of the misclassification bug,
+that the `--filter=selector` single-token form placed BEFORE the script
+(`pnpm --filter=@hono/core test`) matched no `RUNNER_PATTERNS` entry at all —
+pnpm's own docs show this `=` form as the canonical way to write an
+exclusion selector (`--filter=!foo`), so a real, documented, non-exotic
+invocation always nagged. Fixed by widening the dedicated anchored pnpm
+pattern to `(?:--filter|-F)(?:\s+\S+|=\S+)` (both the space and `=` forms,
+both the long flag and its documented short alias).
+
+A sweep of every other per-runner name-filter flag's `=` form (`pytest
+-k=`/`-m=`, `rspec -e=`/`--example=`, `mocha --grep=`/`-g=`, `go test
+-run=`, `vitest`/`jest -t=`/`--testNamePattern=`, `dotnet`/`swift
+--filter=`) found no equivalent gap: `isNameFilterFlag`'s existing
+`token.startsWith(`${flag}=`)` check already recognizes all of them —
+verified directly against `classifyTestCommand`, all still correctly
+name-filtered. A separate finding while investigating (`turbo test
+--filter=web`) is NOT a `--filter` bug at all: `turbo` is not a recognized
+runner in `RUNNER_PATTERNS` at all, so the command is simply unclassified
+and falls through to the safe fail-open default (nags because no run was
+ever recorded) — unrelated to this fix and out of scope (adding `turbo`
+support was never requested and isn't a regression).
+
+This is the **fourth** instance of the identical short-flag/value-collision
+hazard class in this file. A generalized "flag arity table" (mapping every
+recognized flag per runner to a consumes-value/semantics tag) was considered
+in place of a fourth targeted allow-list entry, but rejected for now: the
+existing per-concern, per-runner-family lookup idiom (`nameFilterFlagsFor`,
+`valueSkipFlagsFor`) already generalizes to this fourth case with one small,
+independently testable addition each, matching this module's stated
+conservative-allow-list philosophy; a unified table would be a structural
+reorganization with no additional correctness benefit over what's here,
+and would cost a larger, riskier diff for a module already this
+security-sensitive to the nudge's credibility.
+
 ## C. `lien verify-tests <subcommand>`
 
 A command group (`packages/cli/src/cli/verify-tests-cmd.ts`), like `lien
