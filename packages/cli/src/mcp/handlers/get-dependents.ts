@@ -68,6 +68,15 @@ interface DependentsResponse {
   indexInfo: IndexInfo;
   filepath: string;
   symbol?: string;
+  /**
+   * The depth that actually ran, NOT necessarily the requested `depth` arg.
+   * A symbol-scoped query (`symbol` set) always runs at depth 1 regardless
+   * of what was requested — `runBfsIfRequested` in `dependency-analyzer.ts`
+   * skips BFS entirely for symbol queries, since transitive symbol-renaming
+   * chains are out of scope. Echoing the requested value unchanged in that
+   * case would let a caller believe a multi-hop symbol walk ran when it
+   * didn't.
+   */
   depth: number;
   dependentCount: number;
   productionDependentCount: number;
@@ -296,11 +305,14 @@ function buildDependentsResponse(
   unresolvedTargetNote?: string,
 ): DependentsResponse {
   const { symbol, filepath, depth } = args;
+  // Symbol queries always run at depth 1 (see `depth`'s doc comment above) —
+  // echo the depth that actually ran, not the requested value.
+  const effectiveDepth = symbol ? 1 : depth;
 
   const response: DependentsResponse = {
     indexInfo,
     filepath,
-    depth,
+    depth: effectiveDepth,
     dependentCount: analysis.dependents.length,
     productionDependentCount: analysis.productionDependentCount,
     testDependentCount: analysis.testDependentCount,

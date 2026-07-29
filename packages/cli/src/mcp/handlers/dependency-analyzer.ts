@@ -9,6 +9,7 @@ import {
   isUnresolvableWholeModuleImport,
   importMatchesTarget,
   hasSingleFileImportSemantics,
+  hasPythonModuleSemantics,
   detectLanguage,
   hasEnclosingNamespaceAccess,
   findCSharpTypeReferenceDependents,
@@ -1246,6 +1247,19 @@ function hasTestImporter(filepath: string, ctx: ScanContext): boolean {
  * comment. `importMatchesTarget` (used by every match-side call site that
  * *does* have a single importer file) makes the same derivation once,
  * up front.
+ *
+ * #953: applies the same per-chunk treatment for `matchesFile`'s Python
+ * Strategy 5 (`matchesParentPythonPackage`'s bare-specifier matching) --
+ * see that function's own #929 doc comment for the confirmed hono/TypeScript
+ * false-hub this guards against: a resolved bare directory specifier (e.g.
+ * `src`, left over when no `index.<ext>` entry file exists for
+ * `resolveJsDirectoryIndex` to redirect to -- see
+ * `@liendev/parser`'s `js-directory-index.ts`) fuzzy-matching every file
+ * under that directory for a chunk with no Python semantics at all.
+ * `pythonOnlyMatch` is true exactly when Strategy 5 was the ONLY reason the
+ * top-of-function permissive gate matched; a genuinely Python chunk still
+ * passes (its own bare-package match IS the real semantic), same as
+ * `hasSingleFileImportSemantics` above.
  */
 function addFuzzyMatchChunks(
   normalizedImport: string,
@@ -1257,9 +1271,11 @@ function addFuzzyMatchChunks(
 
   const ambiguous =
     normalizedImport.includes('/') && !matchesFile(normalizedImport, normalizedTarget, true);
+  const pythonOnlyMatch = !matchesFile(normalizedImport, normalizedTarget, false, false);
 
   for (const chunk of chunks) {
     if (ambiguous && hasSingleFileImportSemantics(chunk.metadata.file)) continue;
+    if (pythonOnlyMatch && !hasPythonModuleSemantics(chunk.metadata.file)) continue;
     addChunk(chunk);
   }
 }

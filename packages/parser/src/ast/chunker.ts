@@ -113,6 +113,11 @@ const RESOLVE_WORKSPACE_PACKAGES: ReadonlySet<SupportedLanguage> = new Set([
  * `undefined` (rather than an object with empty/absent fields) when nothing
  * is found, so the corresponding resolution step is skipped entirely for
  * projects that don't need it.
+ *
+ * JS/TS always gets `resolveDirectoryIndex: true` (#953, no detection step
+ * needed — unlike PHP/Go/Python/Rust's manifest/filesystem detection, a
+ * directory's `index.<ext>` entry file is checked per-specifier at
+ * resolution time, in `resolveJsDirectoryIndex` itself).
  */
 function buildManifestRoots(
   language: SupportedLanguage,
@@ -138,6 +143,10 @@ function buildManifestRoots(
   if (language === 'rust') {
     const rustCrateMap = resolveRustCrateMap(workspaceRoot);
     return rustCrateMap.size > 0 ? { rustCrateMap } : undefined;
+  }
+
+  if (language === 'javascript' || language === 'typescript') {
+    return { resolveDirectoryIndex: true, workspaceRoot };
   }
 
   return undefined;
