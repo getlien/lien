@@ -14,6 +14,16 @@ vi.mock('./dependency-analyzer.js', async importOriginal => {
 
 import { findDependents } from './dependency-analyzer.js';
 
+vi.mock('../utils/unindexed-paths.js', async importOriginal => {
+  const original = await importOriginal();
+  return {
+    ...(original as Record<string, unknown>),
+    findUnindexedPaths: vi.fn().mockResolvedValue([]),
+  };
+});
+
+import { findUnindexedPaths } from '../utils/unindexed-paths.js';
+
 describe('handleGetDependents', () => {
   const mockLog = vi.fn();
   const mockCheckAndReconnect = vi.fn().mockResolvedValue(undefined);
@@ -102,6 +112,7 @@ describe('handleGetDependents', () => {
 
     // Default mock for findDependents
     vi.mocked(findDependents).mockResolvedValue(createMockAnalysis());
+    vi.mocked(findUnindexedPaths).mockResolvedValue([]);
   });
 
   describe('basic functionality', () => {
@@ -672,6 +683,29 @@ describe('handleGetDependents', () => {
       expect(result.isError).toBe(true);
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.error).toBe('Invalid parameters');
+    });
+  });
+
+  describe('unindexed path note', () => {
+    it('adds an unmissable note when the filepath has no manifest entry at all', async () => {
+      vi.mocked(findUnindexedPaths).mockResolvedValue(['src/does/not/exist.ts']);
+
+      const result = await handleGetDependents({ filepath: 'src/does/not/exist.ts' }, mockCtx);
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.note).toContain('⚠ Lien:');
+      expect(parsed.note).toContain('"src/does/not/exist.ts"');
+    });
+
+    it('adds no note when the filepath is indexed, regardless of dependentCount', async () => {
+      vi.mocked(findUnindexedPaths).mockResolvedValue([]);
+      vi.mocked(findDependents).mockResolvedValue(createMockAnalysis({ dependents: [] }));
+
+      const result = await handleGetDependents({ filepath: 'src/isolated.ts' }, mockCtx);
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.dependentCount).toBe(0);
+      expect(parsed).not.toHaveProperty('note');
     });
   });
 });

@@ -1,6 +1,7 @@
 import type { z } from 'zod';
 import { wrapToolHandler } from '../utils/tool-wrapper.js';
 import { GetDependentsSchema } from '../schemas/index.js';
+import { findUnindexedPaths, formatUnindexedPathsNote } from '../utils/unindexed-paths.js';
 import type { ToolContext, MCPToolResult } from '../types.js';
 import { computeBlastRadiusRisk, type BlastRadiusRisk } from '@liendev/parser';
 import {
@@ -44,6 +45,8 @@ interface DependentsResponse {
   riskReasoning: string[];
   dependents: DependentInfo[];
   complexityMetrics: ComplexityMetrics;
+  /** Set when `filepath` has no entry in the index manifest at all — see unindexed-paths.ts. */
+  note?: string;
 }
 
 /**
@@ -108,6 +111,7 @@ function buildDependentsResponse(
   args: ValidatedArgs,
   risk: BlastRadiusRisk,
   indexInfo: IndexInfo,
+  note?: string,
 ): DependentsResponse {
   const { symbol, filepath, depth } = args;
 
@@ -132,6 +136,9 @@ function buildDependentsResponse(
   }
   if (analysis.totalUsageCount !== undefined) {
     response.totalUsageCount = analysis.totalUsageCount;
+  }
+  if (note) {
+    response.note = note;
   }
 
   return response;
@@ -167,6 +174,16 @@ export async function handleGetDependents(args: unknown, ctx: ToolContext): Prom
     // Capture index metadata once to avoid inconsistency from concurrent reindex
     const indexInfo = getIndexMetadata();
 
+    // Distinguish "path unknown to the index" from "indexed, zero
+    // dependents" — a bare dependentCount:0/riskLevel:"low" reads as "safe to
+    // edit" unless a mistyped path is called out explicitly.
+    const workspaceRoot = process.cwd().replace(/\\/g, '/');
+    const unindexedPaths = await findUnindexedPaths(vectorDB, [filepath], workspaceRoot);
+    const unindexedNote = formatUnindexedPathsNote(unindexedPaths);
+    if (unindexedPaths.length > 0) {
+      log(`Path not found in index: ${filepath}`, 'warning');
+    }
+
     // Analyze dependencies (pass indexVersion for scan cache)
     const analysis = await findDependents(
       vectorDB,
@@ -185,6 +202,6 @@ export async function handleGetDependents(args: unknown, ctx: ToolContext): Prom
     logRiskAssessment(analysis, risk.level, symbol, log);
 
     // Build and return response
-    return buildDependentsResponse(analysis, validatedArgs, risk, indexInfo);
+    return buildDependentsResponse(analysis, validatedArgs, risk, indexInfo, unindexedNote);
   })(args);
 }

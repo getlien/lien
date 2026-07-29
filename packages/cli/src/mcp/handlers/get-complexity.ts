@@ -2,6 +2,7 @@ import collect from 'collect.js';
 import { wrapToolHandler } from '../utils/tool-wrapper.js';
 import { GetComplexitySchema } from '../schemas/index.js';
 import type { GetComplexityInput } from '../schemas/index.js';
+import { findUnindexedPaths, formatUnindexedPathsNote } from '../utils/unindexed-paths.js';
 import { ComplexityAnalyzer } from '@liendev/core';
 import type { ComplexityViolation, FileComplexityData, ComplexityReport } from '@liendev/parser';
 import type { ToolContext, MCPToolResult } from '../types.js';
@@ -97,6 +98,20 @@ export async function handleGetComplexity(args: unknown, ctx: ToolContext): Prom
     log('Analyzing complexity...');
     await checkAndReconnect();
 
+    // When `files` is given, distinguish "path unknown to the index" from
+    // "indexed, zero violations" — filesAnalyzed silently dropping a mistyped
+    // path to 0 (or, in a mixed batch, just quietly excluding it) reads as a
+    // clean bill of health unless called out explicitly.
+    let unindexedNote: string | undefined;
+    if (files && files.length > 0) {
+      const workspaceRoot = process.cwd().replace(/\\/g, '/');
+      const unindexedPaths = await findUnindexedPaths(vectorDB, files, workspaceRoot);
+      unindexedNote = formatUnindexedPathsNote(unindexedPaths);
+      if (unindexedPaths.length > 0) {
+        log(`Path(s) not found in index: ${unindexedPaths.join(', ')}`, 'warning');
+      }
+    }
+
     // Step 1: Run complexity analysis
     const analyzer = new ComplexityAnalyzer(vectorDB);
     const report = await analyzer.analyze(files);
@@ -120,6 +135,7 @@ export async function handleGetComplexity(args: unknown, ctx: ToolContext): Prom
         bySeverity,
       },
       violations: topViolations,
+      ...(unindexedNote && { note: unindexedNote }),
     };
   })(args);
 }

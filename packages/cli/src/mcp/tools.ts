@@ -98,6 +98,8 @@ Returns for each file:
 ALWAYS check testAssociations before modifying source code.
 After changes, remind the user to run the associated tests.
 
+If a filepath isn't in the index at all (typo, wrong directory prefix, wrong case), the response says so via \`note\` — empty chunks/testAssociations by themselves do NOT mean "no dependents, safe to edit"; they can also mean the path was never found. Check \`note\` for this before trusting an empty result.
+
 May include complexityHeadroom: functions already at/near their complexity budget (cyclomatic/cognitive) — steer clear of adding to them. When present, complexityHeadroomWarning is a one-line imperative summary of the same data — read it first.
 
 Batch calls are more efficient than multiple single-file calls.`,
@@ -141,7 +143,8 @@ Returns:
 - riskLevel: "low" | "medium" | "high" | "critical"
 - dependents[]: { filepath, isTestFile, usages[]? }
 - complexityMetrics: { averageComplexity, maxComplexity, highComplexityDependents[] }
-- totalUsageCount?: number (when symbol parameter provided)`,
+- totalUsageCount?: number (when symbol parameter provided)
+- note?: present and explicit when \`filepath\` has no entry in the index at all — a dependentCount of 0 / riskLevel "low" can otherwise look identical whether the file genuinely has no dependents or the path was never indexed`,
   ),
   toMCPToolSchema(
     GetComplexitySchema,
@@ -168,6 +171,7 @@ Returns:
 - summary: { filesAnalyzed, avgComplexity, maxComplexity, violationCount, bySeverity: { error, warning } }
 - violations[]: { filepath, symbolName, symbolType, complexity, metricType, threshold, severity, riskLevel, dependentCount }
 - metricType: "cyclomatic" | "cognitive" | "halstead_effort" | "halstead_bugs"
-- severity: "error" | "warning"`,
+- severity: "error" | "warning"
+- note?: present and explicit when a requested \`files\` entry has no index entry at all — filesAnalyzed silently excludes it otherwise`,
   ),
 ];
