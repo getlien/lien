@@ -28,10 +28,15 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { resolveCli, assertCliExists } from './resolve-cli.mjs';
 
 const KIT = import.meta.dirname;
 const REPO = path.resolve(KIT, '../../..');
-const CLI = path.join(REPO, 'packages/cli/dist/index.js');
+// Shared resolver: this used to hardcode the local build, so running trial.mjs from
+// a non-main worktree silently measured that worktree — and a published artifact was
+// unmeasurable, forcing a hand-patched copy mid-run. See resolve-cli.mjs.
+const CLI_RESOLVED = resolveCli(REPO);
+const CLI = CLI_RESOLVED.cli;
 const PLUGIN_HOOKS = path.join(REPO, 'plugins/claude/hooks');
 const HOOKS_JSON = path.join(PLUGIN_HOOKS, 'hooks.json');
 const MANIFEST = path.join(KIT, 'corpus-manifest.json');
@@ -108,7 +113,7 @@ function gitReset(dir) {
 
 if (!fs.existsSync(MANIFEST)) die(`no manifest at ${MANIFEST} — run provision.mjs first`);
 if (!fs.existsSync(TASKS)) die(`no tasks at ${TASKS}`);
-if (!fs.existsSync(CLI)) die(`CLI not built at ${CLI}`);
+assertCliExists(CLI_RESOLVED, 'trial');
 
 const manifest = readJson(MANIFEST);
 const tasks = readJson(TASKS);
@@ -169,7 +174,13 @@ gitReset(repo.dir);
 // randomising, so a re-run of the same trial reuses the same session id and the
 // nudge-events rows stay joinable to the trial that produced them.
 const h = crypto.createHash('sha256').update(`${repoKey}/${taskId}/${repo.sha}`).digest('hex');
-const sessionId = [h.slice(0, 8), h.slice(8, 12), '4' + h.slice(13, 16), '8' + h.slice(17, 20), h.slice(20, 32)].join('-');
+const sessionId = [
+  h.slice(0, 8),
+  h.slice(8, 12),
+  '4' + h.slice(13, 16),
+  '8' + h.slice(17, 20),
+  h.slice(20, 32),
+].join('-');
 const args = [
   '-p',
   task.prompt,
@@ -249,8 +260,17 @@ for (const f of ['nudge-events.jsonl', 'delta-events.jsonl']) {
 // against the same file at the same SHA.
 const reconstructed = [];
 for (const e of events.filter(e => e.kind === 'shown' && e.file)) {
-  const r = spawnSync('node', [CLI, 'annotate', e.file], { cwd: repo.dir, encoding: 'utf8', timeout: 60_000 });
-  reconstructed.push({ nudge: e.nudge, file: e.file, symbol: e.symbol ?? null, claimText: (r.stdout || '').trim() });
+  const r = spawnSync('node', [CLI, 'annotate', e.file], {
+    cwd: repo.dir,
+    encoding: 'utf8',
+    timeout: 60_000,
+  });
+  reconstructed.push({
+    nudge: e.nudge,
+    file: e.file,
+    symbol: e.symbol ?? null,
+    claimText: (r.stdout || '').trim(),
+  });
 }
 
 const result = {
