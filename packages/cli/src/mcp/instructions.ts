@@ -37,9 +37,11 @@ symbol:
   "unresolved-target" means filepath isn't in the index at all (never
   indexed, misspelled, or a typo'd directory prefix) — fix the path (try
   search_code or list_functions) before trusting anything else in the
-  result. "symbol-attribution-degraded" means symbol names a method or
-  constructor whose call sites couldn't be confirmed — the counts are the
-  wider file-level answer, not a verified count for symbol itself.
+  result. "symbol-attribution-degraded" means symbol isn't a top-level
+  export and its call sites couldn't be confirmed — it may be a real
+  method/constructor, or it may be a typo'd/hallucinated/removed name (the
+  note says which); either way the counts are the wider file-level answer,
+  not a verified count for symbol itself.
   "dependent-attribution-partial" means the import graph found nothing but
   a lower-confidence text-matching fallback recovered some dependents
   anyway (those entries carry confidence: "inferred") — treat the counts as

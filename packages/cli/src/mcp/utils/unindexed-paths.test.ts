@@ -1,5 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
-import { findUnindexedPaths, formatUnindexedPathsNote } from './unindexed-paths.js';
+import {
+  findUnindexedPaths,
+  formatUnindexedPathsNote,
+  formatNoIndexNote,
+} from './unindexed-paths.js';
 import type { VectorDBInterface } from '@liendev/core';
 
 const getIndexedFilesMock = vi.fn<() => Promise<string[]>>();
@@ -89,5 +93,25 @@ describe('formatUnindexedPathsNote', () => {
     expect(note).toContain('⚠ Lien:');
     expect(note).toContain('"src/Command/Command.php"');
     expect(note).toContain('"does/not/exist.php"');
+  });
+});
+
+describe('formatNoIndexNote', () => {
+  it('is unmissable (⚠ Lien: prefix) and states "no data" as an established fact, not a guess', () => {
+    const note = formatNoIndexNote();
+    expect(note).toContain('⚠ Lien:');
+    expect(note).toContain('no data');
+  });
+
+  it('frames "lien index" as a correctness prerequisite, not a speed optimization', () => {
+    const note = formatNoIndexNote();
+    expect(note).toContain('lien index');
+    expect(note).toContain('correctness prerequisite');
+    expect(note).not.toContain('faster');
+  });
+
+  it('does not assert the symbol/pattern is absent from the code', () => {
+    const note = formatNoIndexNote();
+    expect(note).toMatch(/do not conclude/i);
   });
 });

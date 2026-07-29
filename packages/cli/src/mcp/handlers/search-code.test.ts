@@ -44,6 +44,7 @@ describe('handleSearchCode', () => {
 
   let mockVectorDB: {
     search: ReturnType<typeof vi.fn>;
+    hasData: ReturnType<typeof vi.fn>;
   };
 
   let mockCtx: ToolContext;
@@ -53,6 +54,9 @@ describe('handleSearchCode', () => {
 
     mockVectorDB = {
       search: vi.fn(),
+      // Healthy-index default; individual tests override to `false` to
+      // exercise the "structural store has no data at all" path.
+      hasData: vi.fn().mockResolvedValue(true),
     };
 
     mockCtx = {
@@ -144,7 +148,7 @@ describe('handleSearchCode', () => {
       expect(parsed.indexInfo).toBeDefined();
     });
 
-    it('should include diagnostic note when search returns empty results', async () => {
+    it('should include a hedged diagnostic note (not a query-is-wrong claim) when the index is present but empty for this query', async () => {
       mockVectorDB.search.mockResolvedValue([]);
 
       const result = await handleSearchCode({ query: 'nonexistent feature' }, mockCtx);
@@ -154,6 +158,25 @@ describe('handleSearchCode', () => {
       expect(parsed.note).toContain('0 results');
       expect(parsed.note).toContain('grep');
       expect(parsed.note).toContain('lien index');
+      // Must not assert absence as fact — staleness (a recent, not-yet-
+      // reindexed edit) is just as consistent with 0 results here.
+      expect(parsed.note).toContain("doesn't confirm");
+    });
+
+    it('should escalate to the unmissable no-index warning when the structural store has no data at all', async () => {
+      mockVectorDB.search.mockResolvedValue([]);
+      mockVectorDB.hasData.mockResolvedValue(false);
+
+      const result = await handleSearchCode({ query: 'stale_probe_marker' }, mockCtx);
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.results).toHaveLength(0);
+      expect(parsed.note).toContain('⚠ Lien:');
+      expect(parsed.note).toContain('no data');
+      expect(parsed.note).toContain('correctness prerequisite');
+      // The established-fact warning replaces the query-phrasing advice
+      // rather than diluting it with an unverified alternate cause.
+      expect(parsed.note).not.toContain('query with concrete keywords');
     });
   });
 

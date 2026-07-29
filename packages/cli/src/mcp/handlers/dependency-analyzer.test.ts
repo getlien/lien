@@ -382,8 +382,18 @@ describe('findDependents', () => {
       // the structural signature of an unresolvable symbol query. Reporting
       // the symbol-scoped zero here would read as "no callers, safe to
       // change" even though QuestionHelper.php genuinely imports Cursor.php.
+      // The constructor DOES get its own chunk in the real index (methods and
+      // constructors are chunked individually) -- included here so
+      // `symbolFoundInFile` correctly reads this as a real, evidenced
+      // method/constructor rather than an absent/typo'd name.
       mockDB.scanAll.mockResolvedValue([
         createChunk('Cursor.php', { exports: ['Cursor'] }),
+        createChunk('Cursor.php', {
+          symbolName: '__construct',
+          symbolType: 'method',
+          startLine: 5,
+          endLine: 8,
+        }),
         createChunk('QuestionHelper.php', {
           imports: ['Cursor'],
           importedSymbols: { Cursor: ['Cursor'] },
@@ -393,11 +403,37 @@ describe('findDependents', () => {
       const result = await findDependents(mockDB as any, 'Cursor.php', mockLog, '__construct');
 
       expect(result.symbolAttributionDegraded).toBe(true);
+      expect(result.symbolFoundInFile).toBe(true);
       expect(result.dependents).toHaveLength(1);
       expect(result.dependents[0].filepath).toBe('QuestionHelper.php');
       expect(result.totalUsageCount).toBeUndefined();
       expect(mockLog).toHaveBeenCalledWith(
         expect.stringContaining("isn't a top-level export"),
+        'warning',
+      );
+    });
+
+    it('degrades to file-level dependents and reports symbolFoundInFile: false for a name absent from the file entirely (typo/hallucinated/removed)', async () => {
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('Cursor.php', { exports: ['Cursor'] }),
+        createChunk('QuestionHelper.php', {
+          imports: ['Cursor'],
+          importedSymbols: { Cursor: ['Cursor'] },
+        }),
+      ]);
+
+      const result = await findDependents(
+        mockDB as any,
+        'Cursor.php',
+        mockLog,
+        'totallyMadeUpSymbolXYZ123',
+      );
+
+      expect(result.symbolAttributionDegraded).toBe(true);
+      expect(result.symbolFoundInFile).toBe(false);
+      expect(result.dependents).toHaveLength(1);
+      expect(mockLog).toHaveBeenCalledWith(
+        expect.stringContaining("doesn't appear anywhere in"),
         'warning',
       );
     });

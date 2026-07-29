@@ -131,6 +131,19 @@ export interface DependencyAnalysisResult {
    */
   symbolAttributionDegraded?: boolean;
   /**
+   * Only meaningful when `symbolAttributionDegraded` is `true`. Whether
+   * `symbol` was found ANYWHERE among the target file's own indexed chunks
+   * (as a chunk's own `symbolName` -- methods, constructors, and nested
+   * functions/classes each get their own chunk -- or inside that chunk's
+   * `symbols` bag), as opposed to a top-level export specifically. `true`
+   * backs up the "likely a method or constructor" reading; `false` means the
+   * name doesn't appear in this file's indexed chunks at all, which is just
+   * as consistent with a typo, a hallucinated symbol, or one that used to
+   * exist and was removed -- a caller wording the caveat should hedge
+   * instead of asserting the method/constructor cause in that case.
+   */
+  symbolFoundInFile?: boolean;
+  /**
    * True for a FILE-level query (no `symbol` requested) that came back with
    * zero dependents for a language where `hasEnclosingNamespaceAccess` is
    * set (currently only C# -- see that flag's doc comment), EVEN AFTER
@@ -424,7 +437,12 @@ function buildDependentsList(
   filepath: string,
   log: (message: string, level?: 'warning') => void,
   reExporterPaths: string[] = [],
-): { dependents: DependentInfo[]; totalUsageCount?: number; symbolAttributionDegraded?: boolean } {
+): {
+  dependents: DependentInfo[];
+  totalUsageCount?: number;
+  symbolAttributionDegraded?: boolean;
+  symbolFoundInFile?: boolean;
+} {
   if (symbol) {
     const exportsSymbol = validateSymbolExport(targetFileChunks, symbol, filepath, log);
 
@@ -438,13 +456,21 @@ function buildDependentsList(
     );
 
     if (!exportsSymbol && symbolResult.dependents.length === 0 && chunksByFile.size > 0) {
+      const foundInFile = symbolFoundInFileChunks(targetFileChunks, symbol);
       log(
-        `Note: "${symbol}" isn't a top-level export of ${filepath} (likely a method or ` +
-          `constructor) — symbol-level usage could not be confirmed. Falling back to ` +
-          `file-level dependents.`,
+        foundInFile
+          ? `Note: "${symbol}" isn't a top-level export of ${filepath} (likely a method or ` +
+              `constructor) — symbol-level usage could not be confirmed. Falling back to ` +
+              `file-level dependents.`
+          : `Note: "${symbol}" doesn't appear anywhere in ${filepath}'s indexed chunks — ` +
+              `possibly a typo or a removed symbol. Falling back to file-level dependents.`,
         'warning',
       );
-      return { ...buildFileLevelDependents(chunksByFile), symbolAttributionDegraded: true };
+      return {
+        ...buildFileLevelDependents(chunksByFile),
+        symbolAttributionDegraded: true,
+        symbolFoundInFile: foundInFile,
+      };
     }
 
     return symbolResult;
@@ -494,6 +520,33 @@ function validateSymbolExport(
   }
 
   return exportsSymbol;
+}
+
+/**
+ * Whether `symbol` shows up anywhere among the target file's OWN chunks --
+ * as a chunk's `symbolName` (methods, constructors, and nested
+ * functions/classes each get their own chunk with `symbolName` set to their
+ * own name, not just the file-level `exports` list) or inside that chunk's
+ * `symbols` bag. `validateSymbolExport` above only answers "is this a
+ * top-level export"; this answers the different, narrower question "does
+ * this name appear in the file AT ALL" -- used to word
+ * `symbolAttributionDegraded`'s caveat honestly instead of always guessing
+ * "method or constructor". A hit here means that guess is backed by
+ * evidence; no hit means `symbol` may just as easily be a typo, a
+ * hallucinated name, or a symbol that used to exist and was removed, and the
+ * caveat should say so instead of picking one cause with false confidence.
+ */
+function symbolFoundInFileChunks(targetFileChunks: SearchResult[], symbol: string): boolean {
+  return targetFileChunks.some(chunk => {
+    const { symbolName, symbols } = chunk.metadata;
+    if (symbolName === symbol) return true;
+    if (!symbols) return false;
+    return (
+      symbols.functions.includes(symbol) ||
+      symbols.classes.includes(symbol) ||
+      symbols.interfaces.includes(symbol)
+    );
+  });
 }
 
 /**
@@ -640,6 +693,7 @@ function resolveDependents(args: {
   dependents: DependentInfo[];
   totalUsageCount?: number;
   symbolAttributionDegraded?: boolean;
+  symbolFoundInFile?: boolean;
   dependentAttributionPartial?: true;
 } {
   const {
@@ -654,16 +708,17 @@ function resolveDependents(args: {
     targetIndexed,
   } = args;
 
-  const { dependents, totalUsageCount, symbolAttributionDegraded } = buildDependentsList(
-    chunksByFile,
-    symbol,
-    normalizedTarget,
-    ctx.normalizePathCached,
-    targetFileChunks,
-    filepath,
-    ctx.log,
-    reExporterPaths,
-  );
+  const { dependents, totalUsageCount, symbolAttributionDegraded, symbolFoundInFile } =
+    buildDependentsList(
+      chunksByFile,
+      symbol,
+      normalizedTarget,
+      ctx.normalizePathCached,
+      targetFileChunks,
+      filepath,
+      ctx.log,
+      reExporterPaths,
+    );
   const dependentAttributionPartial = enrichWithCSharpTypeReferenceDependents(
     ctx,
     filepath,
@@ -674,7 +729,13 @@ function resolveDependents(args: {
   );
   stampHopsAndSort(dependents, hopsByFile);
 
-  return { dependents, totalUsageCount, symbolAttributionDegraded, dependentAttributionPartial };
+  return {
+    dependents,
+    totalUsageCount,
+    symbolAttributionDegraded,
+    symbolFoundInFile,
+    dependentAttributionPartial,
+  };
 }
 
 export async function findDependents(
@@ -724,18 +785,23 @@ export async function findDependents(
   });
 
   const targetFileChunks = symbol ? (allChunksByFile.get(normalizedTarget) ?? []) : [];
-  const { dependents, totalUsageCount, symbolAttributionDegraded, dependentAttributionPartial } =
-    resolveDependents({
-      ctx,
-      chunksByFile,
-      hopsByFile,
-      symbol,
-      normalizedTarget,
-      targetFileChunks,
-      filepath,
-      reExporterPaths,
-      targetIndexed,
-    });
+  const {
+    dependents,
+    totalUsageCount,
+    symbolAttributionDegraded,
+    symbolFoundInFile,
+    dependentAttributionPartial,
+  } = resolveDependents({
+    ctx,
+    chunksByFile,
+    hopsByFile,
+    symbol,
+    normalizedTarget,
+    targetFileChunks,
+    filepath,
+    reExporterPaths,
+    targetIndexed,
+  });
 
   // Complexity metrics must be joined against the *resolved* dependents, not
   // the broader import-graph candidate set (`chunksByFile`) considered before
@@ -780,6 +846,7 @@ export async function findDependents(
     truncated,
     uncoveredProductionDependents,
     symbolAttributionDegraded,
+    symbolFoundInFile,
     dependentAttributionIncomplete,
     dependentAttributionPartial,
     targetIndexed,

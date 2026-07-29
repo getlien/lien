@@ -2,6 +2,7 @@ import { wrapToolHandler } from '../utils/tool-wrapper.js';
 import { ListFunctionsSchema } from '../schemas/index.js';
 import type { ListFunctionsInput } from '../schemas/index.js';
 import { shapeResults, deduplicateResults } from '../utils/metadata-shaper.js';
+import { formatNoIndexNote } from '../utils/unindexed-paths.js';
 import type { ToolContext, MCPToolResult, LogFn } from '../types.js';
 import { safeRegex } from '@liendev/core';
 import type { VectorDBInterface, SearchResult } from '@liendev/core';
@@ -126,15 +127,35 @@ export async function handleListFunctions(args: unknown, ctx: ToolContext): Prom
 
     const notes: string[] = [];
     if (queryResult.results.length === 0) {
-      notes.push(
-        '0 results. Try a broader regex pattern (e.g. ".*") or omit the symbolType filter. Use search_code for behavior-based queries.',
-      );
+      // A totally empty structural store (never indexed, cleared, or moved
+      // aside) makes "0 results" look identical to a confident "genuinely not
+      // in the code" — which is exactly backwards. Only claim that harder
+      // fact when it's actually established (`hasData()`); otherwise a
+      // healthy-but-not-yet-reindexed store (the far more common case: a file
+      // was just edited and hasn't been reindexed) is just as consistent with
+      // these 0 results, so the note must not pick "your pattern is wrong" as
+      // the cause either.
+      if (!(await vectorDB.hasData())) {
+        notes.push(formatNoIndexNote());
+      } else {
+        notes.push(
+          "0 results. This doesn't confirm the symbol/pattern is absent from the code — a " +
+            'recent edit may not be reindexed yet. If this file changed recently, run "lien ' +
+            'index" and retry before concluding it\'s missing. Otherwise, try a broader regex ' +
+            'pattern (e.g. ".*"), omit the symbolType filter, or use search_code for ' +
+            'behavior-based queries.',
+        );
+      }
     } else if (paginatedResults.length === 0 && offset > 0) {
       notes.push(
         'No results for this page. The offset is beyond the available results; try reducing or resetting the offset to 0.',
       );
     }
-    if (queryResult.method === 'content') {
+    // Only a performance nudge (content scan found real results just via the
+    // slower fallback path) — the 0-results branch above already covers
+    // "run lien index" for the empty-store/stale-store cases, so don't repeat
+    // it redundantly here when there's nothing to actually show for it.
+    if (queryResult.method === 'content' && queryResult.results.length > 0) {
       notes.push('Using content search. Run "lien index" to enable faster symbol-based queries.');
     }
 

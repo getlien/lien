@@ -1,6 +1,7 @@
 import { wrapToolHandler } from '../utils/tool-wrapper.js';
 import { SearchCodeSchema } from '../schemas/index.js';
 import { shapeResults, deduplicateResults } from '../utils/metadata-shaper.js';
+import { formatNoIndexNote } from '../utils/unindexed-paths.js';
 import type { ToolContext, MCPToolResult, LogFn } from '../types.js';
 import type { VectorDBInterface, SearchResult } from '@liendev/core';
 
@@ -66,9 +67,22 @@ export async function handleSearchCode(args: unknown, ctx: ToolContext): Promise
     const shaped = shapeResults(results, 'search_code');
 
     if (shaped.length === 0) {
-      notes.push(
-        '0 results. Search is lexical: query with concrete keywords or identifiers that appear in the code (function names, domain terms), not natural-language questions. Or use grep for exact string matches. If the codebase was recently updated, run "lien index".',
-      );
+      // Same reasoning as list_functions: only assert the harder "no index at
+      // all" fact when `hasData()` actually establishes it. A healthy index
+      // that just hasn't caught up with a recent edit produces the exact same
+      // 0 results, so the fallback note below must not read as "your query
+      // phrasing is the problem" — it's one of several live possibilities.
+      if (!(await vectorDB.hasData())) {
+        notes.push(formatNoIndexNote());
+      } else {
+        notes.push(
+          "0 results. This doesn't confirm the code doesn't exist — a recent edit may not be " +
+            'reindexed yet. If this file changed recently, run "lien index" and retry first. ' +
+            'Otherwise, query with concrete keywords or identifiers that appear in the code ' +
+            '(function names, domain terms, not natural-language questions), or use grep for ' +
+            'exact string matches.',
+        );
+      }
     }
 
     return {
