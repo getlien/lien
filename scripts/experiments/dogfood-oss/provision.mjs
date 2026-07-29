@@ -144,43 +144,61 @@ function listSourceFiles(dir, exts) {
   return out.sort();
 }
 
+/** Evenly-spaced sample of up to SAMPLE files. */
+function pickSample(files) {
+  const step = Math.max(1, Math.floor(files.length / SAMPLE));
+  const out = [];
+  for (let i = 0; i < files.length && out.length < SAMPLE; i += step) out.push(files[i]);
+  return out;
+}
+
+/**
+ * Which tier `annotate` reported. There are THREE and the middle one has no
+ * colon — matching only `Test coverage:` scored Swift's working inferred tier as
+ * 0% and produced a HIGH finding that had to be retracted.
+ */
+function coverageTier(out) {
+  if (/Test coverage:/i.test(out)) return 'confident';
+  if (/Test coverage inferred/i.test(out)) return 'inferred';
+  return 'none';
+}
+
+const pctOf = (n, d) => Math.round((n / d) * 1000) / 10;
+
+const EMPTY_COVERAGE = {
+  sampled: 0,
+  withTests: 0,
+  inferred: 0,
+  anyCoverage: 0,
+  pct: 0,
+  pctIncludingInferred: 0,
+  examples: [],
+};
+
 /**
  * M6 test-association coverage, measured through `lien annotate` — the same code
  * path the nudge itself uses. A raw index count could look healthy while the
  * consumer surface reports nothing, and it is the consumer surface that matters.
  */
 function associationCoverage(dir, files) {
-  if (files.length === 0) return { sampled: 0, withTests: 0, pct: 0, examples: [] };
-  const step = Math.max(1, Math.floor(files.length / SAMPLE));
-  const sample = [];
-  for (let i = 0; i < files.length && sample.length < SAMPLE; i += step) sample.push(files[i]);
-
-  // `annotate` reports coverage in THREE tiers and they must be counted separately.
-  // The first version of this sampler matched only /Test coverage:/i and therefore
-  // scored the inferred tier as zero — which produced a false "Swift is 0%" finding
-  // against a feature that was working correctly. Measuring the consumer surface is
-  // only useful if you match everything the consumer surface actually says.
-  //   confident: "Test coverage: <files>"
-  //   inferred:  "Test coverage inferred from symbol usage (not import-verified): <files>"
-  //   none:      "Test coverage not determinable ..." or no coverage line at all
-  let confident = 0;
-  let inferred = 0;
+  if (files.length === 0) return EMPTY_COVERAGE;
+  const sample = pickSample(files);
+  const tiers = { confident: 0, inferred: 0, none: 0 };
   const examples = [];
   for (const f of sample) {
-    const r = sh('node', [CLI, 'annotate', f], dir, 60_000);
-    if (/Test coverage:/i.test(r.out)) confident++;
-    else if (/Test coverage inferred/i.test(r.out)) inferred++;
-    if (examples.length < 3 && r.out.trim())
-      examples.push({ file: f, annotation: r.out.trim().slice(0, 400) });
+    const out = sh('node', [CLI, 'annotate', f], dir, 60_000).out;
+    tiers[coverageTier(out)]++;
+    if (examples.length < 3 && out.trim())
+      examples.push({ file: f, annotation: out.trim().slice(0, 400) });
   }
-  const any = confident + inferred;
+  const any = tiers.confident + tiers.inferred;
   return {
     sampled: sample.length,
-    withTests: confident,
-    inferred,
+    withTests: tiers.confident,
+    inferred: tiers.inferred,
     anyCoverage: any,
-    pct: Math.round((confident / sample.length) * 1000) / 10,
-    pctIncludingInferred: Math.round((any / sample.length) * 1000) / 10,
+    pct: pctOf(tiers.confident, sample.length),
+    pctIncludingInferred: pctOf(any, sample.length),
     examples,
   };
 }
@@ -272,9 +290,11 @@ for (const c of targets) {
       rec.status_json_raw = st.out.slice(0, 800);
     }
     rec.associations = associationCoverage(dest, files);
+    const a = rec.associations;
+    const inferredNote = a.inferred > 0 ? ` + ${a.inferred} inferred = ${a.pctIncludingInferred}%` : '';
     console.log(
       `   ✓ ${rec.sourceFileCount} ${c.lang} files, indexed in ${rec.indexMs}ms; ` +
-        `test-association coverage ${rec.associations.pct}% (${rec.associations.withTests}/${rec.associations.sampled} sampled)`,
+        `coverage ${a.pct}% confident${inferredNote} (${a.withTests}/${a.sampled} sampled)`,
     );
   }
   rec.status = 'OK';
