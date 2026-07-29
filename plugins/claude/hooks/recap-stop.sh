@@ -22,6 +22,24 @@
 #
 # Fail-open throughout — any error, or the kill switch, allows the stop to
 # proceed silently rather than trapping the agent. Disable via LIEN_RECAP=off.
+#
+# EXPECTED, NOT A BUG: Claude Code labels a successful block as an error.
+# Alongside the delivered feedback you may see inline `Stop hook error: <reason>`
+# or a `system/notification` with `subtype: "stop-hook-error"` ("Stop hook error
+# occurred"). Observed during a foreign-repo dogfood where the block worked
+# perfectly — feedback delivered, the agent ran the get_dependents check it had
+# skipped, then stopped again and was allowed through. This is a known Claude Code
+# mislabeling of an intentional `decision:"block"`, not a fault here: see
+# anthropics/claude-code#12667 and #34600 (both closed "not planned") and #62139,
+# the open request to separate "hook execution error" from "hook objection".
+# Nothing to fix in this script — don't go looking.
+#
+# Do NOT "fix" it by switching to
+# `{"hookSpecificOutput":{"hookEventName":"Stop","additionalContext":...}}`. That
+# shape is real and current, but it CONTINUES the conversation instead of blocking,
+# and the block is the mechanism: the dogfood evidence is that being stopped is
+# what made the agent go back and check its callers. A cosmetic label is not worth
+# trading the interruption for.
 
 set -u
 
