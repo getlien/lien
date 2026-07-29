@@ -159,8 +159,9 @@ Returns:
     wrong directory prefix/case, or not indexed yet) — every count is a deliberate
     0, not a confirmed empty dependency graph. Try search_code or list_functions to
     find the real path, or run "lien index" if the file was added recently.
-  - "symbol-attribution-degraded": \`symbol\` names a method or constructor (not a
-    top-level export) and its call sites couldn't be confirmed; dependentCount/
+  - "symbol-attribution-degraded": \`symbol\` isn't a top-level export and its call
+    sites couldn't be confirmed — may be a real method/constructor, or a
+    typo'd/hallucinated/removed name (\`note\` says which); dependentCount/
     riskLevel are the file-level answer (every importer of filepath), not a
     verified count of callers of symbol itself.
   - "dependent-attribution-partial": a file-level query (no \`symbol\`) found ZERO
