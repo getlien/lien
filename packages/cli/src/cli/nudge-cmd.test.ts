@@ -68,6 +68,25 @@ describe('nudge-cmd', () => {
       await noteShownCommand({ session });
       expect(await readNudgeEvents(await currentRootDir())).toEqual([]);
     });
+
+    it("threads --hooks-dir through to the event's build stamp", async () => {
+      const hooksDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-nudge-cmd-hooks-'));
+      await fs.writeFile(path.join(hooksDir, 'nudge-signal.sh'), '#!/bin/sh\n', 'utf-8');
+      try {
+        await noteShownCommand({ session, nudge: 'annotate', hooksDir });
+        const [e] = await readNudgeEvents(await currentRootDir());
+        expect(e).toMatchObject({ build: { hooksHash: expect.any(String) } });
+      } finally {
+        await fs.rm(hooksDir, { recursive: true, force: true });
+      }
+    });
+
+    it('still stamps a build (cliVersion only) when --hooks-dir is omitted', async () => {
+      await noteShownCommand({ session, nudge: 'annotate' });
+      const [e] = await readNudgeEvents(await currentRootDir());
+      expect(e).toMatchObject({ build: { cliVersion: expect.any(String) } });
+      expect((e as { build?: { hooksHash?: string } }).build?.hooksHash).toBeUndefined();
+    });
   });
 
   describe('noteSignalCommand', () => {
@@ -96,6 +115,18 @@ describe('nudge-cmd', () => {
     it('is a fail-open no-op when --session is missing', async () => {
       await noteSignalCommand({ signal: 'test_run' });
       expect(await readNudgeEvents(await currentRootDir())).toEqual([]);
+    });
+
+    it("threads --hooks-dir through to the event's build stamp", async () => {
+      const hooksDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-nudge-cmd-hooks-'));
+      await fs.writeFile(path.join(hooksDir, 'nudge-signal.sh'), '#!/bin/sh\n', 'utf-8');
+      try {
+        await noteSignalCommand({ session, signal: 'test_run', hooksDir });
+        const [e] = await readNudgeEvents(await currentRootDir());
+        expect(e).toMatchObject({ build: { hooksHash: expect.any(String) } });
+      } finally {
+        await fs.rm(hooksDir, { recursive: true, force: true });
+      }
     });
 
     it('honors the LIEN_NUDGE_EVENTS=off kill switch', async () => {

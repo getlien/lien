@@ -136,6 +136,114 @@ signal from the tool name.
 
 ---
 
+## Build provenance — telling "instrumentation absent" from "shown but ignored" (#916)
+
+An empty `nudge-events.jsonl` window used to be ambiguous in exactly three
+ways that all render identically as zeros: nobody ever qualified for a nudge,
+a nudge fired every time and was ignored, or **recording was impossible**
+because the deployed plugin hooks predated this instrumentation entirely. The
+third case is not hypothetical: the first real telemetry read (2026-07-28)
+found an empty ledger, and forensic reconstruction found the field-deployed
+plugin was a directory-source install pinned to a stale branch, 12 days
+behind the CLI and missing the telemetry-v2 hooks outright. The read had to
+be deferred until this was understood by hand.
+
+### The stamp
+
+Every `shown`/`signal` event now carries an optional `build` field:
+
+```ts
+build?: { cliVersion: string; hooksHash?: string }
+```
+
+- `cliVersion` — the running `lien` binary's `package.json` version.
+- `hooksHash` — a short (12-char) sha256 over every regular file directly
+  inside the plugin hooks directory (name + content, sorted by name).
+
+CLI version alone is insufficient: the failure mode above was stale *hooks*
+running alongside an otherwise-current CLI (an npm install and a
+directory-pinned plugin checkout update independently). The CLI cannot
+discover the live hooks directory on its own — the whole point of the bug is
+that the plugin snapshot and the CLI installation can come from different
+places — so `hooksHash` is only ever computed from a `--hooks-dir` the
+CALLING hook script supplies (its own `$(dirname "${BASH_SOURCE[0]}")`,
+resolved once as `LIEN_HOOKS_DIR` in `lien-resolve.sh` and threaded by every
+hook that records an event: `annotate-read.sh`, `api-delta-write.sh`,
+`nudge-signal.sh`, and `recap-stop.sh`, all via `lien nudge note-shown`/
+`note-signal`/`recap --hooks-dir <path>`). A bare CLI invocation with no
+hooks-dir context still gets a stamp — just missing `hooksHash` — a
+partial-but-honest signal, never a crash.
+
+**Per-event, not a session header.** Every event carries its own stamp
+rather than one header event per session, so a reader never needs to
+reconstruct which session a header belongs to — robust to interleaved writes
+from concurrent sessions, and to the byte-cap trim dropping an old header
+while its session's later events survive.
+
+**Cost discipline.** Hashing the hooks directory is filesystem-only (a dozen
+small shell scripts, no subprocess), but doing it on every event would still
+be wasted repeat work — `nudge-signal.sh` alone fires on every
+`get_dependents`/`get_files_context` call. So the stamp is computed once per
+session and cached to `<indexDir>/nudge-build/<sessionId>.json` (mirroring
+`annotated-sessions/`'s and `test-sessions/`'s per-session state, GC'd the
+same way by `annotate-clean.sh`'s SessionStart 24h sweep). Every later event
+in that session reads the cache — one small file read — instead of
+re-hashing. A session whose first event had no `--hooks-dir` and whose later
+event does is topped up rather than staying stuck on a partial stamp for the
+rest of the session.
+
+**Back-compat.** Ledgers written before this change have no `build` field at
+all. `readNudgeEvents` treats its absence as "unknown", never as a
+known-good build — recreating that bug (silently trusting an absent/corrupt
+stamp as current) is exactly what this feature exists to prevent. A `build`
+that IS present but malformed (missing `cliVersion`) sinks the whole line
+like any other torn write, rather than being half-trusted.
+
+### Surfaced in `lien stats`
+
+`computeNudgeRecordingStatus` (`nudge-stats.ts`) answers, per 7/30-day
+window: is it empty, and if so, was a recording-capable build ever seen (and
+when)? `lien stats`' funnel section renders the three cases:
+
+| Case | What `lien stats` prints |
+| --- | --- |
+| Non-empty window (real engagement) | The funnel table, plus `Recorded by: <cliVersion> (hooks <hash>)` — the latest build stamped **inside** the window. |
+| Empty window, capable build seen elsewhere in the ledger | `Zero events in this window, but a recording-capable build was last seen <N>d ago (...)`. Zero here reads as "no qualifying edits", not disengagement. |
+| Empty window, **no** build ever stamped anywhere in the ledger | `No recording-capable build has ever been observed for this repo...` — the honest never-recorded case; never implies disengagement. |
+
+The JSON output (`--format json`) carries the same data, additively, under
+`nudgeFunnels.recording` (one `NudgeRecordingStatus` per window,
+parallel to `nudgeFunnels.windows`) — the pre-existing top-level shape is
+unchanged.
+
+### `lien nudge doctor` — the drift check
+
+`lien nudge doctor [--hooks-dir <path>] [--format text|json]` is a manual
+health check, deliberately scoped narrower than a byte-for-byte "does the
+live plugin match this CLI's exact expected hook content" comparison (that
+would need a content manifest published inside the npm package, generated at
+build time from `plugins/claude/hooks/` and shipped across a package
+boundary this repo doesn't currently cross — judged out of scope for the PR
+that shipped this file; see its follow-up issue if one is open before relying
+on this note). What it DOES check, all deterministic, no LLM involved:
+
+1. **The exact #916 fingerprint** — is `nudge-signal.sh` (the file the
+   telemetry-v2 instrumentation added) present in the live `--hooks-dir`? Its
+   absence is a direct signal that this plugin install predates the
+   instrumentation entirely — `critical`.
+2. **Hash drift** — does the live hooks directory's content hash differ from
+   the hash the ledger's last recorded session stamped? (`warn`)
+3. **Version drift** — does the CLI version that recorded the last stamp
+   differ from the one running `doctor` right now? (`warn`)
+4. **Never recorded** — has the ledger never once seen a build stamp? (`warn`)
+
+Omitting `--hooks-dir` runs only checks 3–4 (ledger-history-only; useful when
+invoked by hand with no hook context). `doctor` always exits 0 — purely
+advisory, not wired into a hook by default. Run it yourself, or from an
+agent, when telemetry output looks suspicious.
+
+---
+
 ## Deliverable 2 — the habituation guard
 
 The read-time annotator (`annotate-read.sh`) used to fire on every Read (subject
@@ -245,3 +353,17 @@ are left alone.
 - **Guard thresholds are repo-shaped.** The `medium` default was chosen from this
   repo's distribution; a very differently shaped codebase may want a different
   `LIEN_ANNOTATE_MIN_RISK`. The knob exists for exactly that.
+- **Build stamps are absent on pre-#916 events**, by construction — there is no
+  migration. A ledger written entirely before this change reports every window
+  as `neverRecorded` even though it plainly WAS recording (just not stamping
+  yet). This false-"never recorded" reading ages out on its own as the
+  unstamped events fall out of the 7/30-day windows or the byte cap trims them;
+  it is the deliberately honest direction to err in (never claim a known-good
+  build where none was recorded).
+- **`lien nudge doctor`'s live check needs `--hooks-dir`** to compare against
+  the CURRENT plugin install; without it, `doctor` only reports ledger
+  history, which can be stale relative to a plugin update that hasn't yet
+  produced a new event. It also checks only for the telemetry-instrumentation
+  canary file's presence, not byte-for-byte hook content — see the command's
+  own doc comment (`nudge-doctor-cmd.ts`) for why the stronger check is
+  deferred.

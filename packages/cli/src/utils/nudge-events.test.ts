@@ -16,6 +16,7 @@ import {
   KEEP_LINES_AFTER_TRIM,
   type NudgeEvent,
 } from './nudge-events.js';
+import { getPackageVersion } from './version.js';
 
 let originalHome: string | undefined;
 let originalKillSwitch: string | undefined;
@@ -253,6 +254,58 @@ describe('toRepoRelativeFile (via recordNudgeShown/Signal) — realpath canonica
   });
 });
 
+describe('build stamping (issue #916)', () => {
+  it('recordNudgeShown always stamps a build with at least cliVersion', async () => {
+    await recordNudgeShown(rootDir, { sessionId: 's-build-1', nudge: 'annotate' });
+    const [e] = await readNudgeEvents(rootDir);
+    expect(e).toMatchObject({ build: { cliVersion: getPackageVersion() } });
+    expect((e as Extract<NudgeEvent, { kind: 'shown' }>).build?.hooksHash).toBeUndefined();
+  });
+
+  it('recordNudgeSignal always stamps a build with at least cliVersion', async () => {
+    await recordNudgeSignal(rootDir, { sessionId: 's-build-2', signal: 'test_run' });
+    const [e] = await readNudgeEvents(rootDir);
+    expect(e).toMatchObject({ build: { cliVersion: getPackageVersion() } });
+  });
+
+  it('includes hooksHash when hooksDir is supplied', async () => {
+    const hooksDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-nudge-hooks-'));
+    await fs.writeFile(path.join(hooksDir, 'nudge-signal.sh'), '#!/bin/sh\n', 'utf-8');
+    try {
+      await recordNudgeShown(rootDir, { sessionId: 's-build-3', nudge: 'blast', hooksDir });
+      const [e] = await readNudgeEvents(rootDir);
+      const build = (e as Extract<NudgeEvent, { kind: 'shown' }>).build;
+      expect(build?.cliVersion).toBe(getPackageVersion());
+      expect(typeof build?.hooksHash).toBe('string');
+    } finally {
+      await fs.rm(hooksDir, { recursive: true, force: true });
+    }
+  });
+
+  it('caches the build stamp across events in the same session', async () => {
+    const hooksDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-nudge-hooks-'));
+    await fs.writeFile(path.join(hooksDir, 'a.sh'), 'v1', 'utf-8');
+    try {
+      await recordNudgeShown(rootDir, { sessionId: 's-build-4', nudge: 'annotate', hooksDir });
+      // Mutate the hooks dir after the first event — the second event in the
+      // same session should still read the CACHED stamp, not re-hash.
+      await fs.writeFile(path.join(hooksDir, 'a.sh'), 'v2', 'utf-8');
+      await recordNudgeSignal(rootDir, {
+        sessionId: 's-build-4',
+        signal: 'get_dependents',
+        hooksDir,
+      });
+      const events = await readNudgeEvents(rootDir);
+      const stamps = events.map(
+        e => (e as NudgeEvent & { build?: { hooksHash?: string } }).build?.hooksHash,
+      );
+      expect(stamps[0]).toBe(stamps[1]);
+    } finally {
+      await fs.rm(hooksDir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('validation on read', () => {
   it('skips a torn/corrupted line rather than failing the whole read', async () => {
     const good = shownEvent();
@@ -286,6 +339,48 @@ describe('validation on read', () => {
       'utf-8',
     );
     expect(await readNudgeEvents(rootDir)).toEqual([good]);
+  });
+
+  it('reads a legacy shown event with no `build` field at all (pre-#916 ledger, back-compat)', async () => {
+    await fs.mkdir(path.dirname(nudgeEventsFilePath(rootDir)), { recursive: true });
+    await fs.appendFile(
+      nudgeEventsFilePath(rootDir),
+      `${JSON.stringify({ kind: 'shown', timestamp: new Date().toISOString(), sessionId: 's', nudge: 'annotate' })}\n`,
+      'utf-8',
+    );
+    const [e] = await readNudgeEvents(rootDir);
+    expect(e).toBeDefined();
+    expect('build' in e).toBe(false);
+  });
+
+  it('skips a line with a malformed `build` (never half-trusts a corrupt stamp as known-good)', async () => {
+    const good = shownEvent();
+    await recordNudgeEvent(rootDir, good);
+    await fs.appendFile(
+      nudgeEventsFilePath(rootDir),
+      `${JSON.stringify({
+        kind: 'shown',
+        timestamp: new Date().toISOString(),
+        sessionId: 's',
+        nudge: 'annotate',
+        build: { hooksHash: 'abc' }, // missing required cliVersion
+      })}\n`,
+      'utf-8',
+    );
+    expect(await readNudgeEvents(rootDir)).toEqual([good]);
+  });
+
+  it('reads a well-formed `build` field back intact', async () => {
+    await fs.mkdir(path.dirname(nudgeEventsFilePath(rootDir)), { recursive: true });
+    const withBuild = {
+      kind: 'shown' as const,
+      timestamp: new Date().toISOString(),
+      sessionId: 's',
+      nudge: 'annotate' as const,
+      build: { cliVersion: '1.2.3', hooksHash: 'deadbeef1234' },
+    };
+    await fs.appendFile(nudgeEventsFilePath(rootDir), `${JSON.stringify(withBuild)}\n`, 'utf-8');
+    expect(await readNudgeEvents(rootDir)).toEqual([withBuild]);
   });
 
   it('skips a line missing sessionId (a plausible torn-write shape)', async () => {

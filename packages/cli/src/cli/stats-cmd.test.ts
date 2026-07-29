@@ -6,7 +6,12 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { recordDeltaEvent, type DeltaEvent } from '../utils/delta-events.js';
 import { recordBlastEvent, type BlastEvent } from '../utils/blast-events.js';
-import { recordNudgeShown, recordNudgeSignal } from '../utils/nudge-events.js';
+import {
+  recordNudgeShown,
+  recordNudgeSignal,
+  nudgeEventsFilePath,
+  type NudgeEvent,
+} from '../utils/nudge-events.js';
 import { statsCommand } from './stats-cmd.js';
 
 const execFileAsync = promisify(execFile);
@@ -422,5 +427,156 @@ describe('statsCommand — nudge funnels (telemetry v2) section', () => {
     const text = loggedText();
     expect(text).not.toContain('No lien delta runs recorded yet');
     expect(text).toContain('Nudge funnels (shown → acted-on)');
+  });
+});
+
+/** Directly append a raw event with a caller-chosen timestamp/build — the
+ *  three recording-status cases below need timestamps outside `record*`'s
+ *  implicit "now", which the real recording helpers don't accept. */
+async function appendRawEvent(rootDir: string, event: NudgeEvent): Promise<void> {
+  await fs.mkdir(path.dirname(nudgeEventsFilePath(rootDir)), { recursive: true });
+  await fs.appendFile(nudgeEventsFilePath(rootDir), `${JSON.stringify(event)}\n`, 'utf-8');
+}
+
+describe('statsCommand — nudge recording status (issue #916)', () => {
+  let dir: string;
+  let home: string;
+  let originalCwd: string;
+  let originalHome: string | undefined;
+  let logSpy: ReturnType<typeof vi.spyOn>;
+
+  async function git(...args: string[]): Promise<void> {
+    await execFileAsync('git', args, { cwd: dir });
+  }
+
+  async function initRepo(): Promise<void> {
+    await git('init', '-q');
+    await git('config', 'user.email', 'test@example.com');
+    await git('config', 'user.name', 'Test');
+    await git('config', 'commit.gpgsign', 'false');
+    await fs.writeFile(path.join(dir, 'README.md'), 'x', 'utf-8');
+    await git('add', '-A');
+    await git('-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'init');
+  }
+
+  function lastJsonLog(): Record<string, unknown> {
+    return JSON.parse(String(logSpy.mock.calls.at(-1)?.[0]));
+  }
+
+  function loggedText(): string {
+    return stripAnsi(logSpy.mock.calls.map((c: unknown[]) => c.join(' ')).join('\n'));
+  }
+
+  beforeEach(async () => {
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-stats-recording-cmd-'));
+    dir = await fs.realpath(dir);
+    originalCwd = process.cwd();
+    process.chdir(dir);
+
+    originalHome = process.env.LIEN_HOME;
+    home = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-stats-recording-home-'));
+    process.env.LIEN_HOME = home;
+
+    logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+  });
+
+  afterEach(async () => {
+    process.chdir(originalCwd);
+    if (originalHome === undefined) delete process.env.LIEN_HOME;
+    else process.env.LIEN_HOME = originalHome;
+    vi.restoreAllMocks();
+    await fs.rm(dir, { recursive: true, force: true });
+    await fs.rm(home, { recursive: true, force: true });
+  });
+
+  // Case 1: real engagement in-window — stats show the funnel AND the build that recorded it.
+  it('case 1 — a non-empty window reports engagement plus its build stamp', async () => {
+    await initRepo();
+    const hooksDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-stats-hooks-'));
+    await fs.writeFile(path.join(hooksDir, 'nudge-signal.sh'), '#!/bin/sh\n', 'utf-8');
+    try {
+      await recordNudgeShown(dir, { sessionId: 's1', nudge: 'blast', file: 'a.ts', hooksDir });
+      await recordNudgeSignal(dir, {
+        sessionId: 's1',
+        signal: 'get_dependents',
+        file: 'a.ts',
+        hooksDir,
+      });
+
+      await statsCommand({ format: 'text' });
+      const text = loggedText();
+      expect(text).toContain('Recorded by:');
+      expect(text).not.toContain('No recording-capable build has ever been observed');
+      expect(text).not.toContain('Zero events in this window');
+
+      await statsCommand({ format: 'json' });
+      const result = lastJsonLog() as {
+        nudgeFunnels: {
+          recording: Array<{ windowEmpty: boolean; build?: { cliVersion: string } }>;
+        };
+      };
+      expect(result.nudgeFunnels.recording[0].windowEmpty).toBe(false);
+      expect(result.nudgeFunnels.recording[0].build?.cliVersion).toBeDefined();
+    } finally {
+      await fs.rm(hooksDir, { recursive: true, force: true });
+    }
+  });
+
+  // Case 2: zero events THIS window, but a capable build was seen (just outside the 7-day window).
+  it('case 2 — zero events in the 7-day window but a capable build seen 10 days ago is NOT reported as disengagement', async () => {
+    await initRepo();
+    const tenDaysAgo = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
+    await appendRawEvent(dir, {
+      kind: 'shown',
+      timestamp: tenDaysAgo,
+      sessionId: 's-old',
+      nudge: 'annotate',
+      file: 'a.ts',
+      build: { cliVersion: '0.72.0', hooksHash: 'aaaaaaaaaaaa' },
+    });
+
+    await statsCommand({ format: 'text' });
+    const text = loggedText();
+    // 7-day window: no events fall inside it, but the ledger has a capable build.
+    expect(text).toContain(
+      'Zero events in this window, but a recording-capable build was last seen',
+    );
+    expect(text).toContain('0.72.0');
+    expect(text).not.toContain('No recording-capable build has ever been observed');
+
+    await statsCommand({ format: 'json' });
+    const result = lastJsonLog() as {
+      nudgeFunnels: {
+        recording: Array<{ windowEmpty: boolean; neverRecorded: boolean; build?: unknown }>;
+      };
+    };
+    const win7 = result.nudgeFunnels.recording[0];
+    expect(win7.windowEmpty).toBe(true);
+    expect(win7.neverRecorded).toBe(false);
+    expect(win7.build).toBeDefined();
+  });
+
+  // Case 3: zero events, and no capable build has EVER been recorded — must not read as disengagement.
+  it('case 3 — zero events and no build ever recorded says recording was impossible, not "no engagement"', async () => {
+    await initRepo();
+    // A blast-radius event exists (so the top-level "no data at all" bail-out
+    // doesn't short-circuit before the funnel section renders), but the
+    // nudge-events ledger itself has never recorded anything.
+    const { recordBlastEvent } = await import('../utils/blast-events.js');
+    await recordBlastEvent(dir, blastEvent());
+
+    await statsCommand({ format: 'text' });
+    const text = loggedText();
+    expect(text).toContain('No recording-capable build has ever been observed for this repo');
+    expect(text).not.toContain('Zero events in this window, but a recording-capable build');
+
+    await statsCommand({ format: 'json' });
+    const result = lastJsonLog() as {
+      nudgeFunnels: { recording: Array<{ windowEmpty: boolean; neverRecorded: boolean }> };
+    };
+    expect(result.nudgeFunnels.recording[0]).toEqual({ windowEmpty: true, neverRecorded: true });
+    expect(result.nudgeFunnels.recording[1]).toEqual({ windowEmpty: true, neverRecorded: true });
   });
 });

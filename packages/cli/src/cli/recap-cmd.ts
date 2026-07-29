@@ -52,6 +52,9 @@ import {
 export interface RecapOptions {
   session?: string;
   format?: string;
+  /** The calling hook script's own directory (recap-stop.sh's `BASH_SOURCE` dir),
+   *  passed through to the test-verify shown event's build stamp. See nudge-build.ts. */
+  hooksDir?: string;
 }
 
 const VALID_FORMATS = ['text', 'json'];
@@ -226,7 +229,11 @@ async function runRecap(options: RecapOptions): Promise<void> {
   // moment the old test-verify-stop.sh recorded it). blast shown events already
   // exist from edit time; the delta funnel derives from delta-events, not here.
   if (recap.tests.length > 0) {
-    await recordNudgeShown(rootDir, { sessionId: options.session, nudge: 'test-verify' });
+    await recordNudgeShown(rootDir, {
+      sessionId: options.session,
+      nudge: 'test-verify',
+      hooksDir: options.hooksDir,
+    });
   }
 
   if (format === 'json') {

@@ -26,6 +26,7 @@ export interface NoteShownOptions {
   nudge?: string;
   file?: string;
   symbol?: string;
+  hooksDir?: string;
 }
 
 export interface NoteSignalOptions {
@@ -33,6 +34,7 @@ export interface NoteSignalOptions {
   signal?: string;
   file?: string;
   symbol?: string;
+  hooksDir?: string;
 }
 
 function resolveRootDir(): string {
@@ -56,6 +58,7 @@ async function runNoteShown(options: NoteShownOptions): Promise<void> {
     nudge: options.nudge,
     file: options.file,
     symbol: options.symbol,
+    hooksDir: options.hooksDir,
   });
 }
 
@@ -71,6 +74,7 @@ async function runNoteSignal(options: NoteSignalOptions): Promise<void> {
     signal: options.signal,
     file: options.file,
     symbol: options.symbol,
+    hooksDir: options.hooksDir,
   });
 }
 

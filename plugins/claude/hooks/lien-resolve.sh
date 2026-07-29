@@ -88,6 +88,15 @@
 # breaker exists for, 300s is kept as the default. Lower it via
 # LIEN_NPX_BREAKER_COOLDOWN_SEC if a false trip's silence is worse for a given
 # workflow than the occasional extra stall.
+# This hooks directory's own absolute path — passed as `--hooks-dir` to `lien
+# nudge note-shown`/`note-signal`/`recap` so the nudge-events ledger can stamp
+# each event with a content hash of the LIVE hooks (see nudge-build.ts and
+# issue #916). Resolved once here (not duplicated per sibling script) via the
+# same BASH_SOURCE trick every hook already uses to find lien-resolve.sh
+# itself, `cd`+`pwd`'d to an absolute path since a relative one wouldn't
+# survive a sibling script's own `cd "$cwd"` before it shells out.
+LIEN_HOOKS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 if command -v lien >/dev/null 2>&1; then
   LIEN_CMD=(lien)
 elif command -v npx >/dev/null 2>&1; then

@@ -62,8 +62,9 @@ else
 fi
 
 # Build the optional flags without tripping `set -u` on empty arrays under older
-# bash: append only when present.
-set -- nudge note-signal --session "$session_id" --signal "$signal"
+# bash: append only when present. --hooks-dir stamps a build identity (see
+# nudge-build.ts / issue #916).
+set -- nudge note-signal --session "$session_id" --signal "$signal" --hooks-dir "$LIEN_HOOKS_DIR"
 [ -n "$file" ] && set -- "$@" --file "$file"
 [ -n "$symbol" ] && set -- "$@" --symbol "$symbol"
 

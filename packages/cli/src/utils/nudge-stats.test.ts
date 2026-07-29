@@ -1,7 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { computeNudgeFunnels, type NudgeFunnel } from './nudge-stats.js';
+import {
+  computeNudgeFunnels,
+  computeNudgeRecordingStatus,
+  latestBuildStampedEvent,
+  type NudgeFunnel,
+} from './nudge-stats.js';
 import type { NudgeEvent } from './nudge-events.js';
 import type { DeltaEvent } from './delta-events.js';
+import type { BuildStamp } from './nudge-build.js';
 
 const NOW = new Date('2026-07-24T12:00:00.000Z');
 
@@ -275,5 +281,98 @@ describe('unparsable timestamps', () => {
       shown: 1,
       acted: 1,
     });
+  });
+});
+
+/** Attach a build stamp to an existing event fixture, for recording-status tests. */
+function withBuild(event: NudgeEvent, build: BuildStamp): NudgeEvent {
+  return { ...event, build } as NudgeEvent;
+}
+
+const BUILD_A: BuildStamp = { cliVersion: '0.70.0', hooksHash: 'aaaaaaaaaaaa' };
+const BUILD_B: BuildStamp = { cliVersion: '0.72.0', hooksHash: 'bbbbbbbbbbbb' };
+
+describe('latestBuildStampedEvent', () => {
+  it('returns null when no event carries a build stamp', () => {
+    const events = [shown('annotate', 's1', at(5)), signal('test_run', 's1', at(4))];
+    expect(latestBuildStampedEvent(events)).toBeNull();
+  });
+
+  it('returns the build from the single stamped event', () => {
+    const events = [withBuild(shown('annotate', 's1', at(5)), BUILD_A)];
+    expect(latestBuildStampedEvent(events)?.build).toEqual(BUILD_A);
+  });
+
+  it('picks the most recent stamped event by timestamp, not array order', () => {
+    const events = [
+      withBuild(shown('annotate', 's1', at(2)), BUILD_B), // more recent (closer to NOW)
+      withBuild(shown('blast', 's1', at(10)), BUILD_A), // older, listed first
+    ];
+    expect(latestBuildStampedEvent(events)?.build).toEqual(BUILD_B);
+  });
+
+  it('ignores events with an unparsable timestamp', () => {
+    const events: NudgeEvent[] = [
+      withBuild(
+        { kind: 'shown', timestamp: 'not-a-date', sessionId: 's1', nudge: 'blast' },
+        BUILD_A,
+      ),
+    ];
+    expect(latestBuildStampedEvent(events)).toBeNull();
+  });
+});
+
+describe('computeNudgeRecordingStatus (issue #916)', () => {
+  it('never recorded: the ledger has no events at all', () => {
+    expect(computeNudgeRecordingStatus([], 7, NOW)).toEqual({
+      windowEmpty: true,
+      neverRecorded: true,
+    });
+  });
+
+  it('never recorded: events exist but none ever carried a build stamp (all legacy)', () => {
+    const events = [shown('annotate', 's1', at(200))]; // outside window too, but irrelevant here
+    expect(computeNudgeRecordingStatus(events, 7, NOW)).toEqual({
+      windowEmpty: true,
+      neverRecorded: true,
+    });
+  });
+
+  it('zero events in window, but a capable build was seen outside it (case 2 of the issue)', () => {
+    const events = [withBuild(shown('annotate', 's1', at(24 * 20)), BUILD_A)]; // 20 days ago
+    const status = computeNudgeRecordingStatus(events, 7, NOW); // 7-day window: empty
+    expect(status.windowEmpty).toBe(true);
+    expect(status.neverRecorded).toBe(false);
+    expect(status.build).toEqual(BUILD_A);
+    expect(status.seenAt).toBe(at(24 * 20));
+  });
+
+  it('non-empty window reports the latest build stamped INSIDE the window (case 1 of the issue)', () => {
+    const events = [
+      withBuild(shown('annotate', 's1', at(6)), BUILD_A),
+      withBuild(shown('blast', 's1', at(2)), BUILD_B),
+    ];
+    const status = computeNudgeRecordingStatus(events, 7, NOW);
+    expect(status.windowEmpty).toBe(false);
+    expect(status.build).toEqual(BUILD_B); // the more recent of the two
+  });
+
+  it('non-empty window whose events all predate build stamping (legacy-only in-window) reports no build', () => {
+    const events = [shown('annotate', 's1', at(5))];
+    const status = computeNudgeRecordingStatus(events, 7, NOW);
+    expect(status.windowEmpty).toBe(false);
+    expect(status.neverRecorded).toBe(false);
+    expect(status.build).toBeUndefined();
+  });
+
+  it('does not let an out-of-window stamp answer for a non-empty window', () => {
+    // In-window event is legacy (no build); a stamped event exists but is OUTSIDE the window.
+    const events = [
+      shown('annotate', 's1', at(5)), // in window (7d), no build
+      withBuild(shown('blast', 's1', at(24 * 40)), BUILD_A), // 40 days ago, has build
+    ];
+    const status = computeNudgeRecordingStatus(events, 7, NOW);
+    expect(status.windowEmpty).toBe(false);
+    expect(status.build).toBeUndefined(); // the out-of-window stamp must not leak in
   });
 });
