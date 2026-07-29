@@ -28,7 +28,16 @@ for which hook output channels actually reach the model.
 `lien-resolve.sh` is shared infra sourced by every hook above, not itself an
 entry in `hooks.json`: it resolves a global `lien` binary, falling back to
 `npx -y @liendev/lien@latest` when none is installed (the default case for a
-plugin-only install).
+plugin-only install). That npx fallback carries a circuit breaker for an
+unreachable/black-holed registry (default on; `LIEN_NPX_BREAKER=off` to
+disable): calls are routed through `lien-npx-breaker.sh`, which drops a
+timestamp marker immediately before each call and clears it immediately
+after, so a call left behind stale — the fingerprint of Claude Code's own
+5000ms hook timeout SIGKILLing a hung call, since there's no portable
+`timeout` binary on macOS bash 3.2 to bound it from the inside — fails
+subsequent resolutions fast and silent for a cooldown window instead of
+re-hanging on every later edit. `LIEN_NPX_BREAKER_STALE_SEC` (default 7) and
+`LIEN_NPX_BREAKER_COOLDOWN_SEC` (default 300) tune the thresholds.
 
 Every `delta-write.sh` run (and every other `lien delta` invocation, manual
 or CI) is recorded locally as one JSONL line in `delta-events.jsonl` next to
