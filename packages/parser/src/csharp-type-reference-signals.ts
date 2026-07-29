@@ -98,7 +98,24 @@ function identifierBoundaryRe(name: string): RegExp {
   return new RegExp(`\\b${escapeForRegex(name)}\\b`);
 }
 
-/** True iff `chunk` is a C# type declaration (class/struct/record/enum/interface). */
+/**
+ * True iff `chunk` is a C# type declaration (class/struct/record/enum/interface).
+ *
+ * Checking only `'class' | 'interface'` is NOT a narrower test than the doc says:
+ * `csharp.ts` collapses `class_declaration`, `interface_declaration`,
+ * `struct_declaration`, `record_declaration` and `enum_declaration` into one case,
+ * so all five kinds surface as `'class'` (or `'interface'`). There is no distinct
+ * `'struct'`/`'record'`/`'enum'` symbolType to miss.
+ *
+ * Verified empirically rather than assumed: serilog's `public readonly struct
+ * Alignment` reports `symbolType: 'class'`, and its dependents are recovered.
+ *
+ * The filter is load-bearing for the uniqueness gate, not decoration. In the same
+ * corpus `Alignment` ALSO appears twice with `symbolType: 'method'` (a property on
+ * `PropertyToken` and one on the struct itself). Without restricting the declaration
+ * set to types, those would break the "exactly one file declares this name" check
+ * and suppress a real recovery.
+ */
 function isCSharpTypeDeclarationChunk(chunk: CodeChunk): boolean {
   return chunk.metadata.symbolType === 'class' || chunk.metadata.symbolType === 'interface';
 }
