@@ -73,6 +73,17 @@ export class RubyTraverser implements LanguageTraverser {
     'singleton_class', // `class << self`
   ];
 
+  // `module` is transparent for the depth budget (see shouldTraverseChildren
+  // below) but must still be independently discoverable as a symbol — e.g.
+  // `module Sidekiq` at the top of a library is its root namespace, and was
+  // previously invisible to `list_functions`/`search_code` entirely (#949).
+  // See `LanguageTraverser.transparentContainerTypes`'s doc comment for why
+  // this is a separate list from `containerTypes` rather than folding module
+  // into it (that would cost it a depth level and break the common
+  // `module → class → method` shape — see the depth-budget note on
+  // `shouldTraverseChildren`).
+  transparentContainerTypes = ['module'];
+
   declarationTypes: string[] = [];
 
   functionTypes = ['method', 'singleton_method'];
@@ -214,8 +225,9 @@ export class RubyImportExtractor implements LanguageImportExtractor {
  * Handles:
  * - method (def foo)
  * - singleton_method (def self.foo)
- * - class (class Foo)
- * - module (module Foo) — mapped to the 'class' symbol type
+ * - class (class Foo) — 'class' symbol type
+ * - module (module Foo) — 'interface' symbol type (see extractModuleInfo's
+ *   doc comment for why)
  *
  * Call sites: call (foo(), obj.method())
  */
@@ -228,9 +240,9 @@ export class RubySymbolExtractor implements LanguageSymbolExtractor {
       case 'singleton_method':
         return this.extractMethodInfo(node, content, parentClass);
       case 'class':
-        return this.extractClassInfo(node, 'class');
+        return this.extractClassInfo(node, parentClass);
       case 'module':
-        return this.extractClassInfo(node, 'module');
+        return this.extractModuleInfo(node, parentClass);
       default:
         return null;
     }
@@ -269,22 +281,60 @@ export class RubySymbolExtractor implements LanguageSymbolExtractor {
     };
   }
 
-  private extractClassInfo(node: SyntaxNode, keyword: 'class' | 'module'): SymbolInfo | null {
+  private extractClassInfo(node: SyntaxNode, parentClass?: string): SymbolInfo | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
     // superclass node text includes the leading `<` (e.g. `< Base`).
     const superclass = node.childForFieldName('superclass');
     const signature = superclass
-      ? `${keyword} ${nameNode.text} ${superclass.text}`
-      : `${keyword} ${nameNode.text}`;
+      ? `class ${nameNode.text} ${superclass.text}`
+      : `class ${nameNode.text}`;
 
     return {
       name: nameNode.text,
       type: 'class',
       startLine: node.startPosition.row + 1,
       endLine: node.endPosition.row + 1,
+      parentClass,
       signature,
+    };
+  }
+
+  /**
+   * `module` maps to the 'interface' symbol type, not 'class' — a module can
+   * never be instantiated (`Foo.new` is a `NoMethodError` for a module), so
+   * `class` would misdescribe it. `interface` is an imperfect but honest
+   * fit: it's the closest of `SymbolInfo['type']`'s four existing values to
+   * how Ruby actually uses a module — as a mixin (`include`/`extend`) that
+   * contributes behavior without state of its own, the same non-instantiable
+   * "shared behavior" role `interface` already plays for Java/C#/Kotlin
+   * interfaces and Swift protocols (and, closer still, Rust traits, which are
+   * genuinely mixed into implementing types much like a Ruby module is).
+   * It's a weaker fit for a module used purely as a namespace (e.g. a
+   * library's root `module Sidekiq`), but that's still strictly more honest
+   * than `class`, which would claim instantiability the module doesn't have.
+   *
+   * A dedicated `module` symbol type would be the more precise label, but
+   * `SymbolInfo['type']`/the MCP `symbolType` filter enum is a small, closed
+   * set threaded through `list_functions`'s filter, `signature-delta.ts`,
+   * complexity/risk scoring, and every formatter — adding a fifth value for
+   * one language's gap is exactly the ripple `csharp.ts` (see
+   * `extractPropertyInfo`'s doc comment) deliberately avoided for its own
+   * single-language gap. This makes the same call: reuse the closest
+   * existing bucket rather than widen the shared enum.
+   */
+  private extractModuleInfo(node: SyntaxNode, parentClass?: string): SymbolInfo | null {
+    const nameNode = node.childForFieldName('name');
+    if (!nameNode) return null;
+
+    return {
+      name: nameNode.text,
+      type: 'interface',
+      startLine: node.startPosition.row + 1,
+      endLine: node.endPosition.row + 1,
+      parentClass,
+      signature: `module ${nameNode.text}`,
     };
   }
 }

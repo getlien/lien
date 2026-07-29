@@ -240,6 +240,29 @@ describe('Swift Language', () => {
       expect(sym.parentClass).toBe('Repo');
     });
 
+    // #949: nested types are idiomatic in Swift (a type declared directly
+    // inside another type's body), but extractClassInfo/extractProtocolInfo
+    // previously ignored the parentClass argument entirely — a nested type
+    // always reported parentClass: undefined regardless of nesting.
+    it('attaches the enclosing type as parentClass for a nested class/struct declaration', () => {
+      const src = 'struct Outer {\n  struct Inner {}\n}\n';
+      const nodes = findAllNodes(parse(src), 'class_declaration');
+      const inner = nodes[1]!;
+      const sym = symbolExtractor.extractSymbol(inner, src, 'Outer')!;
+      expect(sym.name).toBe('Inner');
+      expect(sym.type).toBe('class');
+      expect(sym.parentClass).toBe('Outer');
+    });
+
+    it('attaches the enclosing type as parentClass for a nested protocol declaration', () => {
+      const src = 'struct Outer {\n  protocol Inner {}\n}\n';
+      const proto = findNode(parse(src), 'protocol_declaration')!;
+      const sym = symbolExtractor.extractSymbol(proto, src, 'Outer')!;
+      expect(sym.name).toBe('Inner');
+      expect(sym.type).toBe('interface');
+      expect(sym.parentClass).toBe('Outer');
+    });
+
     it('extracts call sites for direct and navigation calls', () => {
       const src = 'func run() {\n  foo()\n  obj.bar.baz()\n}\n';
       const calls = findAllNodes(parse(src), 'call_expression');
@@ -334,6 +357,17 @@ func topLevelHelper(_ x: Int) -> Int { return x + 1 }
       const place = bySymbol('place', 'method');
       expect(place).toBeDefined();
       expect(place?.metadata.complexity ?? 0).toBeGreaterThan(1);
+    });
+
+    // #949: nested types are idiomatic in Swift; a nested type declaration
+    // previously reported parentClass: undefined regardless of nesting.
+    it('attaches the enclosing type as parentClass for a nested type chunk', () => {
+      const nestedSource = 'struct Outer {\n  struct Inner {\n    let x: Int\n  }\n}\n';
+      const nestedChunks = chunkByAST('Outer.swift', nestedSource);
+      const inner = nestedChunks.find(c => c.metadata.symbolName === 'Inner');
+      expect(inner).toBeDefined();
+      expect(inner?.metadata.symbolType).toBe('class');
+      expect(inner?.metadata.parentClass).toBe('Outer');
     });
   });
 });

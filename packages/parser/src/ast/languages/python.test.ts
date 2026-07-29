@@ -437,6 +437,23 @@ describe('Python Language', () => {
       expect(symbol!.signature).toBe('class Calculator');
     });
 
+    // #949: a nested class declared directly inside another class's body
+    // previously reported parentClass: undefined regardless of nesting —
+    // extractClassInfo didn't accept the parameter at all, even though
+    // PythonTraverser.findParentContainerName already resolves the enclosing
+    // class name for every top-level node, not just methods.
+    it('should attach the enclosing class as parentClass for a nested class_definition', () => {
+      const code = 'class Outer:\n    class Inner:\n        pass\n';
+      const root = mustParse(code, 'python');
+      const outerBody = root.namedChild(0)!.childForFieldName('body')!;
+      const innerNode = outerBody.namedChild(0)!;
+      const symbol = symbolExtractor.extractSymbol(innerNode, code, 'Outer');
+      expect(symbol).not.toBeNull();
+      expect(symbol!.name).toBe('Inner');
+      expect(symbol!.type).toBe('class');
+      expect(symbol!.parentClass).toBe('Outer');
+    });
+
     it('should return null for an unrecognized node type', () => {
       const code = 'x = 5\n';
       const root = mustParse(code, 'python');
@@ -562,6 +579,16 @@ describe('Python Language', () => {
       expect(addChunk).toBeDefined();
       expect(addChunk?.metadata.symbolType).toBe('method');
       expect(addChunk?.metadata.parentClass).toBe('Calculator');
+    });
+
+    it('should attach the enclosing class as parentClass for a nested class chunk (#949)', () => {
+      const content = 'class Outer:\n    class Inner:\n        pass\n';
+      const chunks = chunkByAST('outer.py', content);
+
+      const innerChunk = chunks.find(c => c.metadata.symbolName === 'Inner');
+      expect(innerChunk).toBeDefined();
+      expect(innerChunk?.metadata.symbolType).toBe('class');
+      expect(innerChunk?.metadata.parentClass).toBe('Outer');
     });
 
     describe('decorated definitions (regression: PR fixing #critical decorator chunking bug)', () => {

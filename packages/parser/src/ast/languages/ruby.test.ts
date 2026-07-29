@@ -34,6 +34,13 @@ describe('Ruby Language', () => {
       expect(traverser.shouldTraverseChildren(moduleNode)).toBe(true);
     });
 
+    it('should mark module as a transparent container (chunked, but not depth-costly)', () => {
+      // #949: module still isn't in containerTypes (see the test above — it
+      // must stay depth-free), but it must now be listed so chunker.ts emits
+      // a chunk/symbol for the module node itself.
+      expect(traverser.transparentContainerTypes).toContain('module');
+    });
+
     it('should extract children from class bodies', () => {
       const classNode = parse('class Foo\n  def bar; end\nend').namedChild(0)!;
       expect(traverser.shouldExtractChildren(classNode)).toBe(true);
@@ -229,12 +236,33 @@ describe('Ruby Language', () => {
       expect(symbol.signature).toBe('class User');
     });
 
-    it('should extract a module as a class-typed symbol', () => {
+    it('should extract a module as an interface-typed symbol (not class — a module is not instantiable)', () => {
       const code = 'module Billing\nend';
       const symbol = symbolExtractor.extractSymbol(firstNamed(code), code)!;
-      expect(symbol.type).toBe('class');
+      expect(symbol.type).toBe('interface');
       expect(symbol.name).toBe('Billing');
       expect(symbol.signature).toBe('module Billing');
+    });
+
+    it('should attach the enclosing module as parentClass for a nested module', () => {
+      const code = 'module Outer\n  module Inner\n  end\nend';
+      const root = parse(code);
+      const outerBody = root.namedChild(0)!.childForFieldName('body')!;
+      const innerModuleNode = outerBody.namedChild(0)!;
+      const symbol = symbolExtractor.extractSymbol(innerModuleNode, code, 'Outer')!;
+      expect(symbol.name).toBe('Inner');
+      expect(symbol.parentClass).toBe('Outer');
+    });
+
+    it('should attach the enclosing module as parentClass for a nested class', () => {
+      const code = 'module Billing\n  class Invoice\n  end\nend';
+      const symbol = symbolExtractor.extractSymbol(
+        firstNamed('class Invoice\nend'),
+        code,
+        'Billing',
+      )!;
+      expect(symbol.type).toBe('class');
+      expect(symbol.parentClass).toBe('Billing');
     });
 
     it('should extract a direct call site', () => {
@@ -341,6 +369,47 @@ describe('Ruby Language', () => {
     it('should chunk a standalone top-level method', () => {
       const chunks = chunkByAST('util.rb', 'def slugify(text)\n  text.downcase\nend');
       expect(chunks.some(c => c.metadata.symbolName === 'slugify')).toBe(true);
+    });
+
+    // #949: `module` was previously invisible to chunking entirely — a
+    // library's root namespace module (e.g. Sidekiq's `module Sidekiq`) was
+    // unfindable via list_functions/search_code even though everything
+    // nested inside it was chunked fine. These pin that the module itself now
+    // produces its own symbol/chunk, without breaking the nested class/method
+    // chunks the "transparent namespace" traversal already produced.
+    it('should also chunk the wrapping module itself as a symbol', () => {
+      const chunks = chunkByAST('billing.rb', RUBY_FILE);
+      const billingModule = chunks.find(c => c.metadata.symbolName === 'Billing');
+      expect(billingModule).toBeDefined();
+      expect(billingModule?.metadata.symbolType).toBe('interface');
+      expect(billingModule?.metadata.signature).toBe('module Billing');
+    });
+
+    it('should attach the wrapping module as parentClass for a directly-nested class', () => {
+      const chunks = chunkByAST('billing.rb', RUBY_FILE);
+      const creditService = chunks.find(c => c.metadata.symbolName === 'CreditService');
+      expect(creditService?.metadata.parentClass).toBe('Billing');
+    });
+
+    it('should still chunk methods nested two levels deep (module → class → method)', () => {
+      // Guards the depth-budget concern `transparentContainerTypes` exists to
+      // avoid: if `module` ever counted toward container depth, `charge`
+      // (module → class → method) would fall outside the one-container-deep
+      // budget `isTargetNode` enforces and silently disappear.
+      const chunks = chunkByAST('billing.rb', RUBY_FILE);
+      const charge = chunks.find(c => c.metadata.symbolName === 'charge');
+      expect(charge).toBeDefined();
+      expect(charge?.metadata.parentClass).toBe('CreditService');
+    });
+
+    it('should find a top-level module with no nested class', () => {
+      const chunks = chunkByAST(
+        'helpers.rb',
+        'module Helpers\n  def self.format(x)\n    x\n  end\nend',
+      );
+      const helpersModule = chunks.find(c => c.metadata.symbolName === 'Helpers');
+      expect(helpersModule).toBeDefined();
+      expect(helpersModule?.metadata.symbolType).toBe('interface');
     });
   });
 });

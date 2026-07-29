@@ -395,9 +395,9 @@ export class KotlinSymbolExtractor implements LanguageSymbolExtractor {
       case 'function_declaration':
         return this.extractFunctionInfo(node, content, parentClass);
       case 'class_declaration':
-        return this.extractClassInfo(node);
+        return this.extractClassInfo(node, parentClass);
       case 'object_declaration':
-        return this.extractObjectInfo(node);
+        return this.extractObjectInfo(node, parentClass);
       default:
         return null;
     }
@@ -444,23 +444,30 @@ export class KotlinSymbolExtractor implements LanguageSymbolExtractor {
     };
   }
 
-  private extractClassInfo(node: SyntaxNode): SymbolInfo | null {
+  /**
+   * `parentClass` is threaded through so a nested/inner class or object —
+   * idiomatic in Kotlin (`class Outer { class Nested { ... } }`,
+   * `class Outer { inner class Inner { ... } }`) — reports its enclosing
+   * type. `KotlinTraverser.findParentContainerName` already resolves this for
+   * every top-level node, not just functions (#949).
+   */
+  private extractClassInfo(node: SyntaxNode, parentClass?: string): SymbolInfo | null {
     const name = declarationName(node);
     if (!name) return null;
 
     if (hasTokenChild(node, 'interface')) {
-      return this.makeSymbol(node, name, 'interface', `interface ${name}`);
+      return this.makeSymbol(node, name, 'interface', `interface ${name}`, parentClass);
     }
     if (hasTokenChild(node, 'enum')) {
-      return this.makeSymbol(node, name, 'class', `enum class ${name}`);
+      return this.makeSymbol(node, name, 'class', `enum class ${name}`, parentClass);
     }
-    return this.makeSymbol(node, name, 'class', `class ${name}`);
+    return this.makeSymbol(node, name, 'class', `class ${name}`, parentClass);
   }
 
-  private extractObjectInfo(node: SyntaxNode): SymbolInfo | null {
+  private extractObjectInfo(node: SyntaxNode, parentClass?: string): SymbolInfo | null {
     const name = declarationName(node);
     if (!name) return null;
-    return this.makeSymbol(node, name, 'class', `object ${name}`);
+    return this.makeSymbol(node, name, 'class', `object ${name}`, parentClass);
   }
 
   private makeSymbol(
@@ -468,12 +475,14 @@ export class KotlinSymbolExtractor implements LanguageSymbolExtractor {
     name: string,
     type: SymbolInfo['type'],
     signature: string,
+    parentClass?: string,
   ): SymbolInfo {
     return {
       name,
       type,
       startLine: node.startPosition.row + 1,
       endLine: node.endPosition.row + 1,
+      parentClass,
       signature,
     };
   }

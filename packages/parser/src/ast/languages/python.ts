@@ -415,6 +415,11 @@ export class PythonImportExtractor implements LanguageImportExtractor {
  * - async_function_definition (async def foo():)
  * - class_definition (class Foo:)
  *
+ * `parentClass` is threaded into `extractClassInfo` (not just function
+ * extraction) so a nested class (`class Outer:\n    class Inner: ...`)
+ * reports its enclosing class — `PythonTraverser.findParentContainerName`
+ * already resolves this for every top-level node, not just methods (#949).
+ *
  * Call sites: call (foo(), obj.method())
  */
 export class PythonSymbolExtractor implements LanguageSymbolExtractor {
@@ -431,7 +436,7 @@ export class PythonSymbolExtractor implements LanguageSymbolExtractor {
       case 'async_function_definition':
         return this.extractFunctionInfo(node, content, parentClass);
       case 'class_definition':
-        return this.extractClassInfo(node);
+        return this.extractClassInfo(node, parentClass);
       case 'decorated_definition':
         return this.extractDecoratedInfo(node, content, parentClass);
       default:
@@ -510,7 +515,7 @@ export class PythonSymbolExtractor implements LanguageSymbolExtractor {
     };
   }
 
-  private extractClassInfo(node: SyntaxNode): SymbolInfo | null {
+  private extractClassInfo(node: SyntaxNode, parentClass?: string): SymbolInfo | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
@@ -519,6 +524,7 @@ export class PythonSymbolExtractor implements LanguageSymbolExtractor {
       type: 'class',
       startLine: node.startPosition.row + 1,
       endLine: node.endPosition.row + 1,
+      parentClass,
       signature: `class ${nameNode.text}`,
     };
   }

@@ -429,6 +429,49 @@ describe('Java Language', () => {
       expect(symbol!.signature).toBe('record Point');
     });
 
+    // #949: a nested type declaration (class/interface/enum/record declared
+    // directly inside another type) previously reported parentClass:
+    // undefined regardless of nesting — only the method/constructor handlers
+    // accepted the parameter. This is the confirmed real-world repro
+    // (Retrofit's `Retrofit.Builder`, `RequestFactory.Builder`, etc. all
+    // reported parentClass: null, making six same-named `Builder` results
+    // indistinguishable except by file path).
+    it('should attach the enclosing type as parentClass for a nested class_declaration', () => {
+      const code = 'public class Retrofit { public static final class Builder {} }';
+      const root = mustParse(code, 'java');
+      const innerNode = findAllNodes(root, 'class_declaration')[1]!;
+      const symbol = symbolExtractor.extractSymbol(innerNode, code, 'Retrofit');
+      expect(symbol!.name).toBe('Builder');
+      expect(symbol!.type).toBe('class');
+      expect(symbol!.parentClass).toBe('Retrofit');
+    });
+
+    it('should attach the enclosing type as parentClass for a nested interface/enum/record', () => {
+      const ifaceCode = 'public class Outer { public interface Inner {} }';
+      const ifaceSymbol = symbolExtractor.extractSymbol(
+        findNode(mustParse(ifaceCode, 'java'), 'interface_declaration')!,
+        ifaceCode,
+        'Outer',
+      );
+      expect(ifaceSymbol!.parentClass).toBe('Outer');
+
+      const enumCode = 'public class Outer { public enum Inner { A, B } }';
+      const enumSymbol = symbolExtractor.extractSymbol(
+        findNode(mustParse(enumCode, 'java'), 'enum_declaration')!,
+        enumCode,
+        'Outer',
+      );
+      expect(enumSymbol!.parentClass).toBe('Outer');
+
+      const recordCode = 'public class Outer { public record Inner(String name) {} }';
+      const recordSymbol = symbolExtractor.extractSymbol(
+        findNode(mustParse(recordCode, 'java'), 'record_declaration')!,
+        recordCode,
+        'Outer',
+      );
+      expect(recordSymbol!.parentClass).toBe('Outer');
+    });
+
     it('should extract return type from method', () => {
       const code = `public class Foo {
     public String getName() { return ""; }
@@ -550,6 +593,24 @@ describe('Java Language', () => {
       );
       expect(ctorChunk).toBeDefined();
       expect(ctorChunk?.metadata.parentClass).toBe('User');
+    });
+
+    // #949 end-to-end repro: a nested class (`public static final class
+    // Builder` inside `public class Retrofit`) previously reported
+    // parentClass: null via list_functions, making it indistinguishable from
+    // an unrelated same-named nested `Builder` in a different file.
+    it('should attach the enclosing class as parentClass for a nested class chunk', () => {
+      const content = `public class Retrofit {
+    public static final class Builder {
+        public Retrofit build() { return null; }
+    }
+}`;
+
+      const chunks = chunkByAST('Retrofit.java', content);
+      const builderChunk = chunks.find(c => c.metadata.symbolName === 'Builder');
+      expect(builderChunk).toBeDefined();
+      expect(builderChunk?.metadata.symbolType).toBe('class');
+      expect(builderChunk?.metadata.parentClass).toBe('Retrofit');
     });
 
     it('should chunk Java interfaces', () => {
