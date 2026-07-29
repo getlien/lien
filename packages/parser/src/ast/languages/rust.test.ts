@@ -388,6 +388,131 @@ pub static COUNTER: i32 = 0;`;
         expect(importExtractor.extractImportPath(useNode, rustCrateMap)).toBe('auth/AuthService');
       });
     });
+
+    // #928: without `importerFile`, `self::`/`super::` fell back to a
+    // directory-less (or merely `../`-prefixed) string with no knowledge of
+    // the importer's real location. `matchesFile`'s generic bare-identifier
+    // leniency (designed for the legitimate `crate::auth` -> `src/auth.rs`
+    // convention) then had to guess at match time, and could coincidentally
+    // match an unrelated same-named file elsewhere in the repo through a
+    // single leading directory — the exact tokio-rs/tokio repro from #928:
+    // `benches/copy.rs` (a leaf Rust benchmark nothing can import) fuzzy-
+    // matched `tokio/src/fs/mod.rs`'s `self::copy` and
+    // `tokio/src/io/util/copy_bidirectional.rs`'s `super::copy`, fabricating
+    // 80 dependents. Passing `importerFile` resolves both keywords to the
+    // REAL workspace-relative path up front, so the generic matcher never
+    // sees an ambiguous bare word for these two keywords at all.
+    describe('self::/super:: importer-relative resolution (#928)', () => {
+      it('resolves self:: from a module-root file (mod.rs) to a sibling in the SAME directory', () => {
+        // The tokio/src/fs/mod.rs repro: `pub use self::copy::copy;` must
+        // resolve to tokio/src/fs/copy/copy (extractImportPath returns the
+        // FULL path including the imported item name — see
+        // processImportSymbols below for the module-only form), not the
+        // directory-less bare "copy" that used to fuzzy-match an unrelated
+        // benches/copy.rs.
+        const code = 'use self::copy::copy;';
+        const root = mustParse(code, 'rust');
+        const useNode = root.namedChild(0)!;
+        expect(importExtractor.extractImportPath(useNode, undefined, 'tokio/src/fs/mod.rs')).toBe(
+          'tokio/src/fs/copy/copy',
+        );
+      });
+
+      it('resolves super:: from a LEAF file to a sibling in the SAME directory (no traversal)', () => {
+        // The tokio/src/io/util/copy_bidirectional.rs repro: `use
+        // super::copy::CopyBuffer;` must resolve to
+        // tokio/src/io/util/copy/CopyBuffer, not tokio/src/io/copy/CopyBuffer
+        // (a naive filesystem-style ".." join would incorrectly ascend past
+        // io/util/ since a leaf file's own directory already IS its parent
+        // module's location).
+        const code = 'use super::copy::CopyBuffer;';
+        const root = mustParse(code, 'rust');
+        const useNode = root.namedChild(0)!;
+        expect(
+          importExtractor.extractImportPath(
+            useNode,
+            undefined,
+            'tokio/src/io/util/copy_bidirectional.rs',
+          ),
+        ).toBe('tokio/src/io/util/copy/CopyBuffer');
+      });
+
+      it('resolves super:: from a module-root file (mod.rs) to the PARENT directory', () => {
+        // Asymmetric with the leaf case above: a mod.rs IS its directory's
+        // own module, so super:: from it genuinely ascends one level.
+        const code = 'use super::helper;';
+        const root = mustParse(code, 'rust');
+        const useNode = root.namedChild(0)!;
+        expect(importExtractor.extractImportPath(useNode, undefined, 'tokio/src/io/mod.rs')).toBe(
+          'tokio/src/helper',
+        );
+      });
+
+      it('recognizes lib.rs and main.rs as module-root files too', () => {
+        const code = 'use super::helper;';
+        const root = mustParse(code, 'rust');
+        const useNode = root.namedChild(0)!;
+        expect(importExtractor.extractImportPath(useNode, undefined, 'tokio/src/lib.rs')).toBe(
+          'tokio/helper',
+        );
+        expect(importExtractor.extractImportPath(useNode, undefined, 'tokio/src/main.rs')).toBe(
+          'tokio/helper',
+        );
+      });
+
+      it('self:: from a repo-root module-root file resolves with no leading slash', () => {
+        const code = 'use self::helper;';
+        const root = mustParse(code, 'rust');
+        const useNode = root.namedChild(0)!;
+        expect(importExtractor.extractImportPath(useNode, undefined, 'mod.rs')).toBe('helper');
+      });
+
+      it('processImportSymbols resolves self::/super:: the same way as extractImportPath', () => {
+        const code = 'use self::copy::copy;';
+        const root = mustParse(code, 'rust');
+        const useNode = root.namedChild(0)!;
+        const result = importExtractor.processImportSymbols(
+          useNode,
+          undefined,
+          'tokio/src/fs/mod.rs',
+        );
+        expect(result).not.toBeNull();
+        expect(result!.importPath).toBe('tokio/src/fs/copy');
+        expect(result!.symbols).toEqual(['copy']);
+      });
+
+      it('extractImportPaths threads importerFile through to extractImportPath', () => {
+        const code = 'use super::copy::CopyBuffer;';
+        const root = mustParse(code, 'rust');
+        const useNode = root.namedChild(0)!;
+        expect(
+          importExtractor.extractImportPaths(
+            useNode,
+            undefined,
+            'tokio/src/io/util/copy_bidirectional.rs',
+          ),
+        ).toEqual(['tokio/src/io/util/copy/CopyBuffer']);
+      });
+
+      it('crate::-relative imports are unaffected by importerFile (absolute from the crate root already)', () => {
+        const code = 'use crate::auth::AuthService;';
+        const root = mustParse(code, 'rust');
+        const useNode = root.namedChild(0)!;
+        expect(
+          importExtractor.extractImportPath(useNode, undefined, 'tokio/src/io/util/deep/mod.rs'),
+        ).toBe('auth/AuthService');
+      });
+
+      it('is a strict no-op (identical to the pre-#928 behavior) when importerFile is omitted', () => {
+        const selfCode = 'use self::config::Settings;';
+        const selfRoot = mustParse(selfCode, 'rust');
+        expect(importExtractor.extractImportPath(selfRoot.namedChild(0)!)).toBe('config/Settings');
+
+        const superCode = 'use super::utils::helper;';
+        const superRoot = mustParse(superCode, 'rust');
+        expect(importExtractor.extractImportPath(superRoot.namedChild(0)!)).toBe('../utils/helper');
+      });
+    });
   });
 
   describe('Symbol Extraction', () => {

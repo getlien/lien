@@ -122,20 +122,36 @@ export interface LanguageImportExtractor {
    *   against a workspace crate BEFORE deciding whether the import is
    *   internal or external, which (unlike PHP/Go) happens inside the
    *   extractor itself rather than as post-processing in `ast/symbols.ts`.
+   * @param importerFile - Rust-only (#928): workspace-relative path of the
+   *   file containing this `use` declaration. Rust's `self::`/`super::`
+   *   resolve relative to the IMPORTER's own location, but which directory
+   *   that means depends on Rust's file-to-module convention (a `mod.rs`
+   *   represents its own containing directory; any other file represents a
+   *   module nested one level inside it) — this can't be decided by the
+   *   generic `./`/`../` relative-import resolution every other language
+   *   uses (see `ast/chunker.ts`'s `RESOLVE_RELATIVE_IMPORTS` doc comment),
+   *   so Rust's own extractor resolves it directly instead. Every other
+   *   language's implementation ignores this parameter.
    * @returns Every import path declared by this node, in source order (empty if none)
    */
-  extractImportPaths(node: SyntaxNode, rustCrateMap?: ReadonlyMap<string, string>): string[];
+  extractImportPaths(
+    node: SyntaxNode,
+    rustCrateMap?: ReadonlyMap<string, string>,
+    importerFile?: string,
+  ): string[];
 
   /**
    * Extract imported symbols mapped to their source path.
    *
    * @param node - AST node matching one of importNodeTypes
    * @param rustCrateMap - Rust-only (#903) — see `extractImportPaths`.
+   * @param importerFile - Rust-only (#928) — see `extractImportPaths`.
    * @returns Object with importPath and symbols, or null to skip
    */
   processImportSymbols(
     node: SyntaxNode,
     rustCrateMap?: ReadonlyMap<string, string>,
+    importerFile?: string,
   ): { importPath: string; symbols: string[] } | null;
 
   /**
@@ -157,11 +173,13 @@ export interface LanguageImportExtractor {
    *
    * @param node - AST node matching one of importNodeTypes
    * @param rustCrateMap - Rust-only (#903) -- see `extractImportPaths`.
+   * @param importerFile - Rust-only (#928) -- see `extractImportPaths`.
    * @returns Every {importPath, symbols} pair declared by this node, in source order (empty if none)
    */
   processImportSymbolsList(
     node: SyntaxNode,
     rustCrateMap?: ReadonlyMap<string, string>,
+    importerFile?: string,
   ): Array<{ importPath: string; symbols: string[] }>;
 
   /**

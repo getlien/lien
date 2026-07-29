@@ -63,11 +63,17 @@ function parseAndValidate(filepath: string, content: string) {
  * resolving relative imports against the importer's path produces the correct
  * workspace-relative target.
  *
- * Deliberately excludes Rust: its extractor emits `../x` as an internal
- * storage convention for `super::x`, but that string does not describe the
- * actual filesystem target. `super::x` from `src/foo.rs` resolves to the
- * sibling module `src/x`, not to `src/../x` — so applying filesystem-style
- * `..` resolution here would produce wrong keys.
+ * Deliberately excludes Rust: `super::x` from a "leaf" file `src/foo.rs`
+ * resolves to the SIBLING module `src/x`, not to `src/../x` — Rust's
+ * `self::`/`super::` traverse the MODULE tree, which only sometimes lines up
+ * with a filesystem `..` (it depends on whether the importer is itself a
+ * `mod.rs`/`lib.rs`/`main.rs` — see `RustImportExtractor`'s doc comments), so
+ * this generic filesystem-style join would produce wrong keys for it. Rust
+ * resolves `self::`/`super::` precisely via its OWN extractor-internal
+ * mechanism instead (#928, `resolveRustRelativeModulePath` in
+ * `ast/languages/rust.ts`, threaded through via `ManifestRoots.rustCrateMap`'s
+ * sibling `importerFile` argument) — this set staying Rust-free is about
+ * which MECHANISM resolves it, not whether it's resolved at all.
  *
  * Includes Python (#904): `PythonImportExtractor` converts a relative
  * import's leading-dot form (`.foo`, `..pkg`) to a `./`/`../`-prefixed
@@ -174,6 +180,12 @@ function prepareASTContext(
       ? resolveWorkspacePackageEntries(workspaceRoot)
       : undefined;
   const manifestRoots = buildManifestRoots(language, workspaceRoot);
+  // Rust's self::/super:: resolution (#928) needs the file's real path
+  // UNCONDITIONALLY, unlike `resolutionPath` above (which is deliberately
+  // gated to skip Rust — see `RESOLVE_RELATIVE_IMPORTS`'s doc comment).
+  // `rustImporterFile` is the dedicated, ungated channel for that; every
+  // other language's extractor ignores it.
+  const rustImporterFile = language === 'rust' ? filepath : undefined;
   return {
     lines: content.split('\n'),
     fileImports: extractImports(
@@ -182,6 +194,7 @@ function prepareASTContext(
       resolutionPath,
       workspacePackages,
       manifestRoots,
+      rustImporterFile,
     ),
     importedSymbols: extractImportedSymbols(
       rootNode,
@@ -189,6 +202,7 @@ function prepareASTContext(
       resolutionPath,
       workspacePackages,
       manifestRoots,
+      rustImporterFile,
     ),
     fileExports: extractExports(rootNode, language),
     traverser: getTraverser(language),

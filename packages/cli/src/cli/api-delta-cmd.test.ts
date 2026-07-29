@@ -409,6 +409,28 @@ describe('apiDeltaCommand — enrichment when an index is present', () => {
     await fs.mkdir(realIndexDir, { recursive: true });
     await fs.writeFile(path.join(realIndexDir, 'structural.db'), '', 'utf-8');
 
+    // The target file itself must have a chunk in the stub index (#928) --
+    // get_dependents/findDependents now requires the requested target to be
+    // indexed at all before running its fuzzy dependent search, to stop an
+    // unresolvable path from silently inheriting an unrelated file's graph.
+    // A real index always has at least one chunk for a.ts itself; this stub
+    // must model that too, or the target reads as "not indexed" and
+    // dependentCount comes back 0 regardless of caller.ts below.
+    const targetChunk = {
+      content: 'export function formatUser(user) { return user.name; }',
+      metadata: {
+        file: 'a.ts',
+        startLine: 1,
+        endLine: 1,
+        type: 'function',
+        language: 'typescript',
+        symbolName: 'formatUser',
+        symbolType: 'function',
+        exports: ['formatUser'],
+      },
+      score: 0,
+      relevance: 'not_relevant',
+    };
     const callerChunk = {
       content: 'formatUser(x);',
       metadata: {
@@ -429,7 +451,7 @@ describe('apiDeltaCommand — enrichment when an index is present', () => {
     vi.mocked(coreModule.createVectorDB).mockResolvedValueOnce({
       initialize: vi.fn().mockResolvedValue(undefined),
       getCurrentVersion: vi.fn().mockReturnValue(1),
-      scanAll: vi.fn().mockResolvedValue([callerChunk]),
+      scanAll: vi.fn().mockResolvedValue([targetChunk, callerChunk]),
     } as unknown as Awaited<ReturnType<typeof coreModule.createVectorDB>>);
 
     await expect(apiDeltaCommand({ format: 'json', file: 'a.ts' })).rejects.toThrow('__exit__:0');

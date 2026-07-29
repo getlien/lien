@@ -45,7 +45,15 @@ interface DependentsResponse {
   riskReasoning: string[];
   dependents: DependentInfo[];
   complexityMetrics: ComplexityMetrics;
-  /** Set when `filepath` has no entry in the index manifest at all — see unindexed-paths.ts. */
+  /**
+   * Set either when `filepath` has no entry in the index manifest at all
+   * (see unindexed-paths.ts), or — when the manifest check doesn't already
+   * explain it — when `filepath` has zero chunks anywhere in the current
+   * scan (#928). Either way, every count above is then a deliberate `0`, not
+   * a fuzzy-matched answer: read this before trusting `dependentCount: 0` /
+   * `riskLevel: "low"` as "safe to edit". See `buildDependentsResponse` for
+   * the precedence between the two sources.
+   */
   note?: string;
   /**
    * True when `symbol` couldn't be attributed at the symbol level (it's not
@@ -130,12 +138,33 @@ function computeRisk(analysis: DependencyAnalysisResult): BlastRadiusRisk {
   // Any high-complexity dependent that is also untested escalates risk.
   const hasHighComplexityUncovered =
     uncoveredProductionDependents > 0 && maxComplexity >= HIGH_COMPLEXITY_THRESHOLD;
-  return computeBlastRadiusRisk({
+  const risk = computeBlastRadiusRisk({
     dependentCount: productionDependentCount,
     uncoveredDependents: uncoveredProductionDependents,
     maxDependentComplexity: maxComplexity > 0 ? maxComplexity : undefined,
     hasHighComplexityUncovered,
   });
+  return { ...risk, reasoning: clarifyCallerReasoning(risk.reasoning) };
+}
+
+/**
+ * Relabel the shared primitive's generic "N callers"/"N caller" reasoning
+ * entry to make explicit that it counts PRODUCTION dependents only (#928).
+ * `computeRisk` above deliberately feeds `productionDependentCount` in — a
+ * test file calling the target shouldn't weigh into risk the same way a
+ * production caller does — but the response's own top-level `dependentCount`
+ * field is the WIDER total (production + test). Left unrelabeled, a reader
+ * sees two different numbers answering what looks like the same question
+ * ("14 callers" next to `dependentCount: 80`) with nothing to indicate
+ * they're deliberately scoped differently; this makes the scoping explicit
+ * instead of changing either number. Scoped to this handler's own response
+ * rather than the shared `blast-radius-risk.ts` primitive, which the review-
+ * side blast-radius injection also consumes with its own (unrelated) scoping.
+ */
+function clarifyCallerReasoning(reasoning: string[]): string[] {
+  return reasoning.map(entry =>
+    /^\d+ callers?$/.test(entry) ? entry.replace(/ callers?$/, m => ` production${m}`) : entry,
+  );
 }
 
 /**
@@ -172,8 +201,25 @@ function buildDependentsResponse(
   if (analysis.totalUsageCount !== undefined) {
     response.totalUsageCount = analysis.totalUsageCount;
   }
+  // #927's manifest-based note takes precedence: it's the more authoritative
+  // "is this path even part of the indexed project" signal (independent of
+  // chunk count), and in the overwhelming common case (a typo'd/nonexistent
+  // path) both it and the #928 chunk-based check below would fire for the
+  // same reason -- setting both would just be two notes saying the same
+  // thing. The #928 check still adds real value on its own for the narrower
+  // gap the manifest can't see: a path the manifest lists as indexed but
+  // that produced zero chunks in this scan (e.g. a genuinely empty file).
   if (note) {
     response.note = note;
+  } else if (!analysis.targetIndexed) {
+    response.note =
+      `⚠ Lien: "${filepath}" has no chunks anywhere in the index — every count above ` +
+      'is a deliberate 0, not a confirmed empty dependency graph. This can mean the ' +
+      'path was never indexed, is misspelled (wrong directory prefix, wrong case), or ' +
+      'genuinely has no extractable content. Do not treat this as a low-risk or ' +
+      'dependency-free file; check for a typo before editing, try search_code or ' +
+      'list_functions to find the real path, or run "lien index" if the file was added ' +
+      'recently.';
   }
   if (analysis.symbolAttributionDegraded) {
     response.symbolAttributionDegraded = true;
