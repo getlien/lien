@@ -47,6 +47,17 @@ interface DependentsResponse {
   complexityMetrics: ComplexityMetrics;
   /** Set when `filepath` has no entry in the index manifest at all — see unindexed-paths.ts. */
   note?: string;
+  /**
+   * True when `symbol` couldn't be attributed at the symbol level (it's not
+   * a top-level export of `filepath` -- the shape of a method or
+   * constructor) and the response was widened to file-level dependents
+   * instead of asserting an unverifiable symbol-scoped count. When set,
+   * treat `dependentCount`/`riskLevel` as a floor over ALL of this file's
+   * dependents, not a confirmed count of callers of `symbol` specifically.
+   */
+  symbolAttributionDegraded?: boolean;
+  /** Human-readable explanation, present only when `symbolAttributionDegraded` is true. */
+  symbolAttributionNote?: string;
 }
 
 /**
@@ -60,6 +71,14 @@ function logRiskAssessment(
 ): void {
   const prodTest = `(${analysis.productionDependentCount} prod, ${analysis.testDependentCount} test)`;
   const truncatedSuffix = analysis.truncated ? ' [truncated]' : '';
+
+  if (symbol && analysis.symbolAttributionDegraded) {
+    log(
+      `Symbol-level attribution degraded for "${symbol}" — falling back to ` +
+        `${analysis.dependents.length} file-level dependents ${prodTest} - risk: ${riskLevel}${truncatedSuffix}`,
+    );
+    return;
+  }
 
   if (symbol && analysis.totalUsageCount !== undefined) {
     if (analysis.totalUsageCount > 0) {
@@ -139,6 +158,15 @@ function buildDependentsResponse(
   }
   if (note) {
     response.note = note;
+  }
+  if (analysis.symbolAttributionDegraded) {
+    response.symbolAttributionDegraded = true;
+    response.symbolAttributionNote =
+      `"${symbol}" doesn't appear in ${filepath}'s tracked top-level exports (likely a ` +
+      `method or constructor — no import statement names one of those independently of ` +
+      `its class/package). Symbol-level call sites couldn't be confirmed, so dependentCount, ` +
+      `riskLevel, and dependents below are the file-level answer (every file that imports ` +
+      `${filepath}) rather than a verified count of callers of "${symbol}" specifically.`;
   }
 
   return response;

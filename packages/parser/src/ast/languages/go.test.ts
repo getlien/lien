@@ -342,6 +342,82 @@ import (
         );
       });
     });
+
+    describe('processImportSymbolsList (plural)', () => {
+      it('should record EVERY non-stdlib spec from a grouped import, not just the first', () => {
+        // The processImportSymbols analog of #863: a grouped import block
+        // naming two distinct non-stdlib targets used to silently drop the
+        // second from chunk.metadata.importedSymbols entirely -- confirmed
+        // on real gin source (render/json.go groups `codec/json` and
+        // `internal/bytesconv`; only the first ever made it into
+        // importedSymbols, which hid every StringToBytes caller in that file
+        // from symbol-level get_dependents queries).
+        const code = `package main
+import (
+	"fmt"
+	"github.com/foo/utils"
+	"github.com/foo/models"
+)`;
+        const root = mustParse(code, 'go');
+        const importNode = root.namedChild(1)!;
+        const results = importExtractor.processImportSymbolsList(importNode);
+
+        expect(results).toEqual([
+          { importPath: 'github.com/foo/utils', symbols: ['utils'] },
+          { importPath: 'github.com/foo/models', symbols: ['models'] },
+        ]);
+      });
+
+      it('should return a single-element array for a single (non-grouped) import', () => {
+        const code = 'package main\nimport "github.com/gin-gonic/gin"';
+        const root = mustParse(code, 'go');
+        const importNode = root.namedChild(1)!;
+        const results = importExtractor.processImportSymbolsList(importNode);
+
+        expect(results).toEqual([{ importPath: 'github.com/gin-gonic/gin', symbols: ['gin'] }]);
+      });
+
+      it('should return an empty array for a stdlib-only grouped import', () => {
+        const code = 'package main\nimport (\n  "fmt"\n  "net/http"\n)';
+        const root = mustParse(code, 'go');
+        const importNode = root.namedChild(1)!;
+        const results = importExtractor.processImportSymbolsList(importNode);
+
+        expect(results).toEqual([]);
+      });
+
+      it('preserves per-spec aliases across a grouped import', () => {
+        const code = `package main
+import (
+	"fmt"
+	router "github.com/gin-gonic/gin"
+	"github.com/foo/models"
+)`;
+        const root = mustParse(code, 'go');
+        const importNode = root.namedChild(1)!;
+        const results = importExtractor.processImportSymbolsList(importNode);
+
+        expect(results).toEqual([
+          { importPath: 'github.com/gin-gonic/gin', symbols: ['router'] },
+          { importPath: 'github.com/foo/models', symbols: ['models'] },
+        ]);
+      });
+
+      it('keeps processImportSymbols (singular) agreeing with the first entry of the list', () => {
+        const code = `package main
+import (
+	"fmt"
+	"github.com/foo/utils"
+	"github.com/foo/models"
+)`;
+        const root = mustParse(code, 'go');
+        const importNode = root.namedChild(1)!;
+
+        expect(importExtractor.processImportSymbols(importNode)).toEqual(
+          importExtractor.processImportSymbolsList(importNode)[0],
+        );
+      });
+    });
   });
 
   describe('Symbol Extraction', () => {

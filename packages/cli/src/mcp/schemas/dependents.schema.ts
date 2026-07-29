@@ -37,7 +37,12 @@ export const GetDependentsSchema = z.object({
       'Optional: specific exported symbol to find usages of.\n\n' +
         'When provided, returns call sites instead of just importing files.\n\n' +
         "Example: 'validateEmail' to find where validateEmail() is called.\n\n" +
-        "Response includes 'usages' array showing which functions call this symbol.",
+        "Response includes 'usages' array showing which functions call this symbol.\n\n" +
+        "Also accepts a method or constructor name (e.g. '__construct', 'moveUp').\n" +
+        "Those aren't top-level exports, so when call sites for one can't be " +
+        'confirmed, the response sets symbolAttributionDegraded: true and widens ' +
+        'dependentCount/riskLevel to the file-level answer rather than asserting an ' +
+        'unverifiable symbol-scoped count — check that flag before trusting a low count.',
     ),
 
   depth: z

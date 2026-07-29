@@ -276,8 +276,8 @@ function extractSymbolsWithExtractor(
   const nodeTypeSet = new Set(importExtractor.importNodeTypes);
 
   for (const node of collectImportNodes(rootNode, nodeTypeSet)) {
-    const result = importExtractor.processImportSymbols(node, manifestRoots?.rustCrateMap);
-    if (result) {
+    const results = importExtractor.processImportSymbolsList(node, manifestRoots?.rustCrateMap);
+    for (const result of results) {
       const key = resolveImportSpecifier(
         result.importPath,
         filepath,

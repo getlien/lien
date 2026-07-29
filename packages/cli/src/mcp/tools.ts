@@ -144,7 +144,11 @@ Returns:
 - dependents[]: { filepath, isTestFile, usages[]? }
 - complexityMetrics: { averageComplexity, maxComplexity, highComplexityDependents[] }
 - totalUsageCount?: number (when symbol parameter provided)
-- note?: present and explicit when \`filepath\` has no entry in the index at all — a dependentCount of 0 / riskLevel "low" can otherwise look identical whether the file genuinely has no dependents or the path was never indexed`,
+- note?: present and explicit when \`filepath\` has no entry in the index at all — a dependentCount of 0 / riskLevel "low" can otherwise look identical whether the file genuinely has no dependents or the path was never indexed
+- symbolAttributionDegraded?: boolean + symbolAttributionNote?: string — set when
+  symbol names a method or constructor (not a top-level export) and call sites
+  couldn't be confirmed; dependentCount/riskLevel are then the file-level answer
+  (every importer of filepath), not a verified count of callers of symbol itself`,
   ),
   toMCPToolSchema(
     GetComplexitySchema,

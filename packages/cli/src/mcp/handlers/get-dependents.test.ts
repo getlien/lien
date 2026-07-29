@@ -62,6 +62,7 @@ describe('handleGetDependents', () => {
       totalUsageCount?: number;
       truncated?: boolean;
       uncoveredProductionDependents?: number;
+      symbolAttributionDegraded?: boolean;
     } = {},
   ) {
     const dependents = overrides.dependents ?? [{ filepath: 'src/consumer.ts', isTestFile: false }];
@@ -86,6 +87,7 @@ describe('handleGetDependents', () => {
       totalUsageCount: overrides.totalUsageCount,
       truncated: overrides.truncated ?? false,
       uncoveredProductionDependents: overrides.uncoveredProductionDependents ?? 0,
+      symbolAttributionDegraded: overrides.symbolAttributionDegraded,
     };
   }
 
@@ -590,6 +592,46 @@ describe('handleGetDependents', () => {
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.symbol).toBeUndefined();
       expect(parsed.totalUsageCount).toBeUndefined();
+    });
+  });
+
+  describe('symbolAttributionDegraded (method/constructor symbols)', () => {
+    it('surfaces symbolAttributionDegraded and a note when the analyzer degrades to file-level', async () => {
+      vi.mocked(findDependents).mockResolvedValue({
+        ...createMockAnalysis({
+          dependents: [{ filepath: 'src/QuestionHelper.php', isTestFile: false }],
+          symbolAttributionDegraded: true,
+        }),
+        totalUsageCount: undefined,
+      });
+
+      const result = await handleGetDependents(
+        { filepath: 'src/Cursor.php', symbol: '__construct' },
+        mockCtx,
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.symbolAttributionDegraded).toBe(true);
+      expect(parsed.symbolAttributionNote).toContain('__construct');
+      expect(parsed.symbolAttributionNote).toContain('top-level exports');
+      expect(parsed.dependentCount).toBe(1);
+      expect(parsed.totalUsageCount).toBeUndefined();
+    });
+
+    it('omits symbolAttributionDegraded and the note for a normal, non-degraded symbol query', async () => {
+      vi.mocked(findDependents).mockResolvedValue({
+        ...createMockAnalysis({ dependents: [{ filepath: 'src/a.ts', isTestFile: false }] }),
+        totalUsageCount: 1,
+      });
+
+      const result = await handleGetDependents(
+        { filepath: 'src/utils/validate.ts', symbol: 'validateEmail' },
+        mockCtx,
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.symbolAttributionDegraded).toBeUndefined();
+      expect(parsed.symbolAttributionNote).toBeUndefined();
     });
   });
 

@@ -6,7 +6,7 @@ import type {
   LanguageImportExtractor,
   LanguageSymbolExtractor,
 } from '../extractors/types.js';
-import { toImportPathsArray } from '../extractors/types.js';
+import { toImportPathsArray, toImportSymbolsArray } from '../extractors/types.js';
 import {
   extractSignature,
   extractParameters,
@@ -355,6 +355,13 @@ export class RustImportExtractor implements LanguageImportExtractor {
     if (!argument) return null;
 
     return this.processUseArgument(argument, rustCrateMap);
+  }
+
+  processImportSymbolsList(
+    node: SyntaxNode,
+    rustCrateMap?: ReadonlyMap<string, string>,
+  ): Array<{ importPath: string; symbols: string[] }> {
+    return toImportSymbolsArray(this.processImportSymbols(node, rustCrateMap));
   }
 
   private processUseArgument(

@@ -326,6 +326,8 @@ Is it safe to change this file?
 
 When `symbol` is provided, the response also includes `totalUsageCount` (number of tracked call sites across all files) and each dependent may include a `usages` array with `callerSymbol`, `line`, and `snippet` fields.
 
+`symbol` also accepts a method or constructor name (e.g. `__construct`, `moveUp`) — those aren't top-level exports, so when call sites for one can't be confirmed, the response sets `symbolAttributionDegraded: true` plus a `symbolAttributionNote` and widens `dependentCount`/`riskLevel` to the file-level answer (every file that imports `filepath`) rather than asserting an unverifiable symbol-scoped count. Check that flag before treating a low count as verified.
+
 ### Risk Levels
 
 | Level | Dependent Count | Meaning |

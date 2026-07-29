@@ -672,6 +672,38 @@ func run() {
     });
   });
 
+  describe('extractImportedSymbols - Go grouped imports', () => {
+    it('should record EVERY non-stdlib target from a grouped import, not just the first', () => {
+      // The extractImportedSymbols analog of #863: a grouped import naming
+      // two distinct non-stdlib packages used to leave chunk.metadata.
+      // importedSymbols missing an entry for every one after the first --
+      // confirmed on real gin source (render/json.go groups `codec/json`
+      // and `internal/bytesconv`; only `codec/json` made it into
+      // importedSymbols, hiding every bytesconv.StringToBytes call site in
+      // that file from symbol-level get_dependents queries).
+      const content = `
+package main
+
+import (
+	"fmt"
+	"github.com/foo/utils"
+	"github.com/foo/models"
+)
+
+func run() {
+	fmt.Println(utils.Format(models.Load()))
+}
+      `.trim();
+
+      const parseResult = parseAST(content, 'go');
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode, 'go');
+
+      expect(importedSymbols['github.com/foo/utils']).toEqual(['utils']);
+      expect(importedSymbols['github.com/foo/models']).toEqual(['models']);
+      expect(importedSymbols['fmt']).toBeUndefined();
+    });
+  });
+
   describe('extractImports - Java static-member class-path fallback (#864)', () => {
     it('a specific static-member import now matches its defining class file end-to-end', () => {
       // Reproduces #864: `import static a.B.member;` extracted only the raw,

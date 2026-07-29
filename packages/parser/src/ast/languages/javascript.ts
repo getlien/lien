@@ -6,7 +6,7 @@ import type {
   LanguageImportExtractor,
   LanguageSymbolExtractor,
 } from '../extractors/types.js';
-import { toImportPathsArray } from '../extractors/types.js';
+import { toImportPathsArray, toImportSymbolsArray } from '../extractors/types.js';
 import {
   extractSignature,
   extractParameters,
@@ -353,6 +353,10 @@ export class JavaScriptImportExtractor implements LanguageImportExtractor {
       return this.processBareRequire(node);
     }
     return null;
+  }
+
+  processImportSymbolsList(node: SyntaxNode): Array<{ importPath: string; symbols: string[] }> {
+    return toImportSymbolsArray(this.processImportSymbols(node));
   }
 
   private processImportStatement(

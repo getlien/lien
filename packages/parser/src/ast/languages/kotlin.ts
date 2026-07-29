@@ -6,7 +6,7 @@ import type {
   LanguageImportExtractor,
   LanguageSymbolExtractor,
 } from '../extractors/types.js';
-import { toImportPathsArray } from '../extractors/types.js';
+import { toImportPathsArray, toImportSymbolsArray } from '../extractors/types.js';
 import { calculateComplexity } from '../complexity/index.js';
 
 // =============================================================================
@@ -358,6 +358,10 @@ export class KotlinImportExtractor implements LanguageImportExtractor {
     const alias = childByType(node, 'import_alias');
     const aliasName = alias ? childByType(alias, 'type_identifier')?.text : undefined;
     return { importPath: path, symbols: [aliasName ?? lastPart] };
+  }
+
+  processImportSymbolsList(node: SyntaxNode): Array<{ importPath: string; symbols: string[] }> {
+    return toImportSymbolsArray(this.processImportSymbols(node));
   }
 
   private getImportPath(node: SyntaxNode): string | null {

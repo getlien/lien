@@ -218,11 +218,27 @@ export class GoImportExtractor implements LanguageImportExtractor {
   }
 
   processImportSymbols(node: SyntaxNode): { importPath: string; symbols: string[] } | null {
-    // Collect all import specs from the declaration
-    const specs = this.collectImportSpecs(node);
+    return this.processImportSymbolsList(node)[0] ?? null;
+  }
 
-    // Process each spec, filtering out stdlib imports
-    for (const spec of specs) {
+  /**
+   * Returns EVERY non-stdlib spec's {importPath, symbols} from this
+   * declaration, not just the first -- the same multi-target gap
+   * `extractImportPaths` already closed for the plain path list (#863).
+   * `import (...)` blocks commonly group 2+ external packages (confirmed on
+   * real gin source: `render/json.go`'s single grouped import names both
+   * `codec/json` and `internal/bytesconv`), and the pre-fix singular-return
+   * `processImportSymbols` silently dropped every one after the first,
+   * leaving `chunk.metadata.importedSymbols` missing an entry for the
+   * dropped path entirely -- not just imprecise, but ABSENT, which made
+   * every downstream symbol-level consumer (e.g. MCP's `get_dependents`)
+   * blind to real dependents whose only recorded import happened to land on
+   * a later spec in the same block.
+   */
+  processImportSymbolsList(node: SyntaxNode): Array<{ importPath: string; symbols: string[] }> {
+    const results: Array<{ importPath: string; symbols: string[] }> = [];
+
+    for (const spec of this.collectImportSpecs(node)) {
       const path = this.getSpecRawPath(spec);
       if (!path || isStdLibImport(path)) continue;
 
@@ -232,10 +248,10 @@ export class GoImportExtractor implements LanguageImportExtractor {
       const defaultSymbol = parts[parts.length - 1];
       const symbol = alias || defaultSymbol;
 
-      return { importPath: path, symbols: [symbol] };
+      results.push({ importPath: path, symbols: [symbol] });
     }
 
-    return null;
+    return results;
   }
 
   private collectImportSpecs(node: SyntaxNode): SyntaxNode[] {
