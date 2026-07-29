@@ -24,6 +24,28 @@ function bug(overrides?: Partial<ReviewFinding>): ReviewFinding {
   };
 }
 
+/** A `summary`-category finding, the shape `appendSummaryFinding` produces. */
+function summaryFinding(overrides?: {
+  riskLevel?: string;
+  overview?: string;
+  keyChanges?: string[];
+}): ReviewFinding {
+  const overview = overrides?.overview ?? 'This PR looks fine overall.';
+  return {
+    pluginId: 'agent-review',
+    filepath: '',
+    line: 0,
+    severity: 'info',
+    category: 'summary',
+    message: overview,
+    metadata: {
+      riskLevel: overrides?.riskLevel ?? 'low',
+      overview,
+      keyChanges: overrides?.keyChanges ?? [],
+    },
+  };
+}
+
 const MARKER = '<!-- lien-plugin:agent-review:';
 
 /** A PresentContext that records every posting call for assertions. */
@@ -36,6 +58,7 @@ function recordingContext(overrides?: {
   postInlineComments: ReturnType<typeof vi.fn>;
   postReviewComment: ReturnType<typeof vi.fn>;
   minimizeOutdatedComments: ReturnType<typeof vi.fn>;
+  appendDescription: ReturnType<typeof vi.fn>;
 } {
   const calls: string[] = [];
   const postInlineComments = vi.fn(async (findings: ReviewFinding[]) => {
@@ -49,6 +72,7 @@ function recordingContext(overrides?: {
     calls.push('minimizeOutdatedComments');
     return 0;
   });
+  const appendDescription = vi.fn();
 
   const pr = {
     owner: 'o',
@@ -69,13 +93,20 @@ function recordingContext(overrides?: {
     logger: silentLogger,
     addAnnotations: vi.fn(),
     appendSummary: vi.fn(),
-    appendDescription: vi.fn(),
+    appendDescription,
     postInlineComments,
     postReviewComment,
     minimizeOutdatedComments,
   } as unknown as PresentContext;
 
-  return { ctx, calls, postInlineComments, postReviewComment, minimizeOutdatedComments };
+  return {
+    ctx,
+    calls,
+    postInlineComments,
+    postReviewComment,
+    minimizeOutdatedComments,
+    appendDescription,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -299,5 +330,139 @@ describe('AgentReviewPlugin.present — promoted-body dedup across re-runs', () 
     expect(body2).toBe(body1);
     // Each run minimizes before reposting → no double-posting accumulation.
     expect(run2.minimizeOutdatedComments).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PR description — itemized findings (the "narrated, not itemised" bug:
+// the header count was already accurate, but the description carried no
+// guaranteed rendering of what the counted issues actually were — a real
+// finding could sit only in free-form overview prose, or only in a separate
+// inline/out-of-diff review comment the description never pointed to).
+// ---------------------------------------------------------------------------
+
+describe('AgentReviewPlugin.present — description itemizes bug findings', () => {
+  const plugin = new AgentReviewPlugin();
+
+  it('renders a discrete, locatable bullet for each bug finding, matching the header count', async () => {
+    const { ctx, appendDescription } = recordingContext();
+    const finding = bug({
+      filepath: 'packages/cli/src/cli/annotate-cmd.ts',
+      line: 70,
+      symbolName: 'belowRiskFloor',
+      category: 'logic_error',
+      message: 'The habituation guard does not clear the floor for dependentAttributionIncomplete.',
+      suggestion: 'Add the parameter and return false when true.',
+    });
+
+    await plugin.present([finding, summaryFinding()], ctx);
+
+    const description = appendDescription.mock.calls[0][0] as string;
+    expect(description).toContain('**1 issue found**');
+    expect(description).toContain('**Findings (1)**');
+    expect(description).toContain('🟡 **logic error** in `belowRiskFloor`');
+    expect(description).toContain('`packages/cli/src/cli/annotate-cmd.ts:70`');
+    expect(description).toContain(
+      'The habituation guard does not clear the floor for dependentAttributionIncomplete.',
+    );
+    expect(description).toContain('💡 *Add the parameter and return false when true.*');
+  });
+
+  it('omits the Findings section entirely on a clean PR — zero reads unambiguously differently from one', async () => {
+    const { ctx, appendDescription } = recordingContext();
+
+    await plugin.present([summaryFinding({ overview: 'Nothing wrong here.' })], ctx);
+
+    const description = appendDescription.mock.calls[0][0] as string;
+    expect(description).not.toContain('**Findings');
+    expect(description).not.toContain('issue found');
+    expect(description).toContain('> [!NOTE]');
+  });
+
+  it('surfaces the finding in the description even when the overview prose says nothing is wrong (the #944 shape)', async () => {
+    const { ctx, appendDescription } = recordingContext();
+    const finding = bug({
+      filepath: 'scripts/experiments/dogfood-oss/trial.mjs',
+      line: 34,
+      category: 'logic_error',
+      message: 'trial.mjs still hardcodes the CLI path the sibling script just made configurable.',
+    });
+
+    await plugin.present(
+      [
+        finding,
+        summaryFinding({
+          overview: 'No callers, exports, or runtime logic are affected.',
+          keyChanges: ['mcp-call.mjs now respects LIEN_MCP_CLI'],
+        }),
+      ],
+      ctx,
+    );
+
+    const description = appendDescription.mock.calls[0][0] as string;
+    // The prose alone never mentions the bug — this was the trap: the count
+    // was accurate (1), but nothing in the description said what it was.
+    expect(description).toContain('No callers, exports, or runtime logic are affected.');
+    expect(description).toContain('**Findings (1)**');
+    expect(description).toContain(
+      'trial.mjs still hardcodes the CLI path the sibling script just made configurable.',
+    );
+  });
+
+  it('keeps the header count and the itemized list in lockstep for multiple findings', async () => {
+    const { ctx, appendDescription } = recordingContext();
+
+    await plugin.present(
+      [
+        bug({ filepath: 'a.ts', line: 1, message: 'first finding' }),
+        bug({ filepath: 'b.ts', line: 2, message: 'second finding' }),
+        summaryFinding(),
+      ],
+      ctx,
+    );
+
+    const description = appendDescription.mock.calls[0][0] as string;
+    expect(description).toContain('**2 issues found**');
+    expect(description).toContain('**Findings (2)**');
+    expect(description).toContain('first finding');
+    expect(description).toContain('second finding');
+  });
+
+  it('does not conflate descriptive keyChanges bullets with the itemized findings bullets', async () => {
+    // The #954/#951 shape: keyChanges bullets describe the diff, not the
+    // problem. Both must render, but distinguishably — under separate,
+    // clearly labeled sections rather than one flat bullet list.
+    const { ctx, appendDescription } = recordingContext();
+    const finding = bug({
+      filepath: 'packages/cli/src/utils/test-run-matcher.ts',
+      line: 143,
+      category: 'logic_error',
+      message: 'Removing --filter from WORKSPACE_SCOPE_FLAGS regresses pnpm test --filter <pkg>.',
+    });
+
+    await plugin.present(
+      [
+        finding,
+        summaryFinding({
+          overview: 'This PR fixes a genuine bug in test-run classification.',
+          keyChanges: [
+            'Name-filtered runs now return {isTestRun: true, broad: false}.',
+            'Per-runner-family flag allow-lists avoid collisions.',
+          ],
+        }),
+      ],
+      ctx,
+    );
+
+    const description = appendDescription.mock.calls[0][0] as string;
+    const findingsIdx = description.indexOf('**Findings (1)**');
+    const keyChangeIdx = description.indexOf('Name-filtered runs now return');
+    expect(findingsIdx).toBeGreaterThan(-1);
+    expect(keyChangeIdx).toBeGreaterThan(-1);
+    // The keyChanges bullets stay inside the callout blockquote (`>` prefix);
+    // the findings section is its own block outside it — never merged into
+    // one undifferentiated bullet list.
+    expect(description).toContain('> - Name-filtered runs now return');
+    expect(description).not.toContain('> - Removing --filter');
   });
 });
