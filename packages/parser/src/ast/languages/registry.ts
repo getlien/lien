@@ -166,6 +166,20 @@ export function hasSameDirectoryTestConvention(language: SupportedLanguage): boo
 }
 
 /**
+ * True when `language`'s dominant test convention places a test file in the
+ * same package as its subject with no import statement at all, WITHOUT
+ * Go-style same-directory bounding (see
+ * `LanguageDefinition.samePackageTestConvention`, #925). Only Java sets this
+ * today. Like `hasSameDirectoryTestConvention`, a caller consulting this
+ * recovers a real association (the package-relative path is reliable
+ * evidence) rather than just an honesty label — see
+ * `java-same-package-tests.ts`.
+ */
+export function hasSamePackageTestConvention(language: SupportedLanguage): boolean {
+  return getLanguage(language).samePackageTestConvention === true;
+}
+
+/**
  * Get all registered language definitions.
  */
 export function getAllLanguages(): readonly LanguageDefinition[] {

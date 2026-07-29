@@ -833,6 +833,27 @@ describe('isTestFile - Precise Test Detection', () => {
       expect(isTestFile('src/AutoMapper/TypeMap.cs')).toBe(false);
     });
   });
+
+  describe('capitalized Tests/ directory convention, any language (#925)', () => {
+    it('matches an exact "Tests" directory segment regardless of case (symfony/console repro)', () => {
+      expect(isTestFile('Tests/Command/CommandTest.php')).toBe(true);
+      expect(isTestFile('Tests/ArgumentResolver/ValueResolver/UidValueResolverTest.php')).toBe(
+        true,
+      );
+    });
+
+    it('matches an exact "Test"/"Spec"/"Specs" directory segment in any case', () => {
+      expect(isTestFile('Test/helper.py')).toBe(true);
+      expect(isTestFile('Spec/models/user.rb')).toBe(true);
+      expect(isTestFile('Specs/models/user.rb')).toBe(true);
+    });
+
+    it('still requires an exact segment -- capitalization does not loosen the boundary guard', () => {
+      expect(isTestFile('Latest/config.ts')).toBe(false);
+      expect(isTestFile('Contest/config.ts')).toBe(false);
+      expect(isTestFile('Testing/helper.ts')).toBe(false);
+    });
+  });
 });
 
 describe('resolveRelativeImport', () => {

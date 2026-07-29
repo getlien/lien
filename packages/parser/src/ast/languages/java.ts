@@ -525,6 +525,11 @@ export const javaDefinition: LanguageDefinition = {
   importExtractor: new JavaImportExtractor(),
   symbolExtractor: new JavaSymbolExtractor(),
 
+  // #925: a same-package test class carries no import for its subject at
+  // all -- see LanguageDefinition.samePackageTestConvention's doc comment
+  // for the full rationale (and why this needs no directory bounding).
+  samePackageTestConvention: true,
+
   complexity: {
     decisionPoints: [
       'if_statement',

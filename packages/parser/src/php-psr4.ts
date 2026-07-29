@@ -52,9 +52,18 @@ function normalizeNamespacePrefix(prefix: string): string {
   return prefix.endsWith('\\') ? prefix : `${prefix}\\`;
 }
 
-/** Ensure a PSR-4 source directory has no leading `./` and exactly one trailing `/`. */
+/**
+ * Ensure a PSR-4 source directory has no leading `./` and exactly one
+ * trailing `/` -- EXCEPT the empty string, which is Composer's own way of
+ * mapping a namespace prefix directly onto the project root (no `src/`
+ * subdirectory at all). That must stay `''`, not `'/'`: `resolvePsr4Import`
+ * concatenates this directly onto the specifier's remaining path, and a
+ * literal `/` prefix would produce an absolute-looking `/Command/Command`
+ * instead of the correct workspace-relative `Command/Command`.
+ */
 function normalizeSourceDir(dir: string): string {
   const cleaned = dir.replace(/^\.\//, '');
+  if (cleaned.length === 0) return '';
   return cleaned.endsWith('/') ? cleaned : `${cleaned}/`;
 }
 
@@ -71,7 +80,12 @@ function collectPsr4Entries(section: unknown, map: Map<string, string>): void {
     const dir = Array.isArray(value)
       ? value.find((v): v is string => typeof v === 'string')
       : value;
-    if (typeof dir !== 'string' || dir.length === 0) continue;
+    // An empty string is a VALID Composer PSR-4 mapping -- "map this
+    // namespace prefix directly onto the project root", used by libraries
+    // with no `src/` subdirectory (e.g. symfony/console's own
+    // `"Symfony\\Component\\Console\\": ""`, #925). Only a genuinely
+    // non-string value (missing/malformed entry) should be skipped.
+    if (typeof dir !== 'string') continue;
     map.set(normalizeNamespacePrefix(prefix), normalizeSourceDir(dir));
   }
 }
