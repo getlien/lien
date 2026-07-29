@@ -33,4 +33,8 @@ zero result changes across a 25-file Python corpus sample).
 Additionally, `collectImportMatchedTests`/`collectImportMatchedTestFiles` now
 rank an exact, literal direct import ahead of any fuzzier match, so a real
 direct importer can no longer sort behind other real matches and be
-truncated out of the displayed list purely due to chunk-scan order.
+truncated out of the displayed list purely due to chunk-scan order. That
+exact-match check applies the same #884 whole-module guard as the fuzzy
+path, so a Swift bare `import Module` can't jump the queue into the exact
+bucket just because the target file's basename happens to equal the module
+name.
