@@ -64,6 +64,7 @@ describe('handleGetDependents', () => {
       truncated?: boolean;
       uncoveredProductionDependents?: number;
       symbolAttributionDegraded?: boolean;
+      symbolFoundInFile?: boolean;
       dependentAttributionIncomplete?: boolean;
       dependentAttributionPartial?: boolean;
       targetIndexed?: boolean;
@@ -92,6 +93,7 @@ describe('handleGetDependents', () => {
       truncated: overrides.truncated ?? false,
       uncoveredProductionDependents: overrides.uncoveredProductionDependents ?? 0,
       symbolAttributionDegraded: overrides.symbolAttributionDegraded,
+      symbolFoundInFile: overrides.symbolFoundInFile,
       dependentAttributionIncomplete: overrides.dependentAttributionIncomplete,
       dependentAttributionPartial: overrides.dependentAttributionPartial,
       targetIndexed: overrides.targetIndexed ?? true,
@@ -641,11 +643,12 @@ describe('handleGetDependents', () => {
   });
 
   describe('attributionCaveat: symbol-attribution-degraded (method/constructor symbols)', () => {
-    it('surfaces attributionCaveat when the analyzer degrades to file-level', async () => {
+    it('surfaces attributionCaveat when the analyzer degrades to file-level (symbol confirmed present, e.g. a real method/constructor)', async () => {
       vi.mocked(findDependents).mockResolvedValue({
         ...createMockAnalysis({
           dependents: [{ filepath: 'src/QuestionHelper.php', isTestFile: false }],
           symbolAttributionDegraded: true,
+          symbolFoundInFile: true,
         }),
         totalUsageCount: undefined,
       });
@@ -659,6 +662,35 @@ describe('handleGetDependents', () => {
       expect(parsed.attributionCaveat.reason).toBe('symbol-attribution-degraded');
       expect(parsed.attributionCaveat.note).toContain('__construct');
       expect(parsed.attributionCaveat.note).toContain('top-level exports');
+      expect(parsed.attributionCaveat.note).toContain('likely a method or constructor');
+      expect(parsed.dependentCount).toBe(1);
+      expect(parsed.totalUsageCount).toBeUndefined();
+    });
+
+    it('hedges instead of asserting "method or constructor" when the symbol is absent from the file entirely (typo/hallucinated/removed)', async () => {
+      vi.mocked(findDependents).mockResolvedValue({
+        ...createMockAnalysis({
+          dependents: [{ filepath: 'src/QuestionHelper.php', isTestFile: false }],
+          symbolAttributionDegraded: true,
+          symbolFoundInFile: false,
+        }),
+        totalUsageCount: undefined,
+      });
+
+      const result = await handleGetDependents(
+        { filepath: 'src/Cursor.php', symbol: 'totallyMadeUpSymbolXYZ123' },
+        mockCtx,
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.attributionCaveat.reason).toBe('symbol-attribution-degraded');
+      expect(parsed.attributionCaveat.note).toContain('totallyMadeUpSymbolXYZ123');
+      // Must NOT confidently assert the method/constructor cause when it
+      // hasn't been established.
+      expect(parsed.attributionCaveat.note).not.toContain('likely a method or constructor');
+      expect(parsed.attributionCaveat.note).toMatch(/typo|hallucinated|removed/);
+      // The file-level-answer explanation must survive intact either way.
+      expect(parsed.attributionCaveat.note).toContain('file-level answer');
       expect(parsed.dependentCount).toBe(1);
       expect(parsed.totalUsageCount).toBeUndefined();
     });

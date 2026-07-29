@@ -14,6 +14,7 @@ describe('handleListFunctions', () => {
   let mockVectorDB: {
     querySymbols: ReturnType<typeof vi.fn>;
     scanWithFilter: ReturnType<typeof vi.fn>;
+    hasData: ReturnType<typeof vi.fn>;
   };
 
   let mockCtx: ToolContext;
@@ -24,6 +25,9 @@ describe('handleListFunctions', () => {
     mockVectorDB = {
       querySymbols: vi.fn(),
       scanWithFilter: vi.fn(),
+      // Healthy-index default; individual tests override to `false` to
+      // exercise the "structural store has no data at all" path.
+      hasData: vi.fn().mockResolvedValue(true),
     };
 
     mockCtx = {
@@ -521,7 +525,7 @@ describe('handleListFunctions', () => {
   });
 
   describe('empty result diagnostics', () => {
-    it('should include diagnostic note when no results are found', async () => {
+    it('should include a hedged diagnostic note (not a query-is-wrong claim) when the index is present but empty for this query', async () => {
       mockVectorDB.querySymbols.mockResolvedValue([]);
       mockVectorDB.scanWithFilter.mockResolvedValue([]);
 
@@ -532,6 +536,40 @@ describe('handleListFunctions', () => {
       expect(parsed.note).toContain('0 results');
       expect(parsed.note).toContain('search_code');
       expect(parsed.note).toContain('symbolType');
+      // Must not assert absence as fact, and must surface staleness (a
+      // recent, not-yet-reindexed edit) as a live possibility alongside
+      // query tuning — not lead with "your pattern is wrong".
+      expect(parsed.note).toContain("doesn't confirm");
+      expect(parsed.note).toContain('lien index');
+    });
+
+    it('should escalate to the unmissable no-index warning when the structural store has no data at all', async () => {
+      mockVectorDB.querySymbols.mockResolvedValue([]);
+      mockVectorDB.scanWithFilter.mockResolvedValue([]);
+      mockVectorDB.hasData.mockResolvedValue(false);
+
+      const result = await handleListFunctions({ pattern: 'StringToBytes' }, mockCtx);
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.results).toHaveLength(0);
+      expect(parsed.note).toContain('⚠ Lien:');
+      expect(parsed.note).toContain('no data');
+      expect(parsed.note).toContain('correctness prerequisite');
+      // The stronger, established-fact warning replaces the query-tuning
+      // advice entirely — it doesn't get diluted by also suggesting the
+      // pattern might be the problem.
+      expect(parsed.note).not.toContain('Try a broader regex');
+    });
+
+    it('should not repeat the no-index warning as a redundant "enable faster queries" nudge', async () => {
+      mockVectorDB.querySymbols.mockResolvedValue([]);
+      mockVectorDB.scanWithFilter.mockResolvedValue([]);
+      mockVectorDB.hasData.mockResolvedValue(false);
+
+      const result = await handleListFunctions({ pattern: 'StringToBytes' }, mockCtx);
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.note).not.toContain('enable faster symbol-based queries');
     });
   });
 

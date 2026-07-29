@@ -58,3 +58,25 @@ export function formatUnindexedPathsNote(unindexedPaths: readonly string[]): str
     `or list_functions to find the real path, or run "lien index" if the file was added recently.`
   );
 }
+
+/**
+ * Render an unmissable note for the DIFFERENT, whole-index version of the
+ * problem `formatUnindexedPathsNote` covers: not "this one path is unknown"
+ * but "the structural store has no data at all" (never indexed, cleared, or
+ * moved aside). `search_code` and `list_functions` have no filepath to check
+ * against the manifest -- a symbol/pattern query over an empty store looks
+ * identical to a real, confident "not found in the code", which is exactly
+ * backwards. Same `⚠ Lien:`-prefixed, unmissable tone as
+ * `formatUnindexedPathsNote` and `get_dependents`'s `unresolved-target`
+ * caveat, deliberately not guessing WHY the store is empty (never indexed vs.
+ * mid-rebuild vs. wiped) since that isn't reliably knowable from here --
+ * "run lien index" is the correct next step regardless of which it is.
+ */
+export function formatNoIndexNote(): string {
+  return (
+    `⚠ Lien: this project's structural index has no data — 0 results here means "nothing ` +
+    `has been indexed", not "not found in the code". Do not conclude the symbol/pattern is ` +
+    `absent. Run "lien index" (a correctness prerequisite here, not a speed optimization) ` +
+    `and retry.`
+  );
+}

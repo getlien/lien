@@ -231,15 +231,29 @@ function buildAttributionCaveat(
     };
   }
   if (analysis.symbolAttributionDegraded) {
-    return {
-      reason: 'symbol-attribution-degraded',
-      note:
-        `"${symbol}" doesn't appear in ${filepath}'s tracked top-level exports (likely a ` +
+    // "Not a top-level export, no confirmed call sites" has more than one
+    // real cause: a genuine method/constructor and a typo'd/hallucinated/
+    // removed symbol look identical on that signal alone.
+    // `symbolFoundInFile` is the cheap, already-scanned check that tells them
+    // apart (does `symbol` match ANY chunk in the file, not just its
+    // top-level exports) — only assert the method/constructor reading when
+    // it's actually backed by a hit; otherwise hedge across the real
+    // possibilities instead of confidently naming the wrong one. The second
+    // sentence (file-level answer, not a verified per-symbol count) holds
+    // either way and stays identical.
+    const note = analysis.symbolFoundInFile
+      ? `"${symbol}" doesn't appear in ${filepath}'s tracked top-level exports (likely a ` +
         `method or constructor — no import statement names one of those independently of ` +
         `its class/package). Symbol-level call sites couldn't be confirmed, so dependentCount, ` +
         `riskLevel, and dependents below are the file-level answer (every file that imports ` +
-        `${filepath}) rather than a verified count of callers of "${symbol}" specifically.`,
-    };
+        `${filepath}) rather than a verified count of callers of "${symbol}" specifically.`
+      : `"${symbol}" doesn't appear anywhere in ${filepath} — not as a top-level export, nor in ` +
+        `any indexed chunk of the file. This may be a typo, a hallucinated name, or a symbol ` +
+        `that used to exist and was removed. Symbol-level call sites couldn't be confirmed, so ` +
+        `dependentCount, riskLevel, and dependents below are the file-level answer (every file ` +
+        `that imports ${filepath}) rather than a verified count of callers of "${symbol}" ` +
+        `specifically.`;
+    return { reason: 'symbol-attribution-degraded', note };
   }
   if (analysis.dependentAttributionPartial) {
     const inferredCount = analysis.dependents.filter(d => d.confidence === 'inferred').length;
