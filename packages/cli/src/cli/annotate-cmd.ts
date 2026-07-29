@@ -374,6 +374,7 @@ async function computeAnnotationData(
     // separately on the display line below — different signal.
     maxDependentComplexity: result.complexityMetrics.maxComplexity,
     hasHighComplexityUncovered,
+    complexityRiskBoost: result.complexityMetrics.complexityRiskBoost,
   });
 
   return {

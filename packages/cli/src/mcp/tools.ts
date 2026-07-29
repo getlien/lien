@@ -140,22 +140,31 @@ Example: get_dependents({ filepath: "src/utils/validate.ts" })
 
 Returns:
 - dependentCount / productionDependentCount / testDependentCount
-- riskLevel: "low" | "medium" | "high" | "critical"
+- riskLevel: "low" | "medium" | "high" | "critical" — a high/critical complexity
+  signal among dependents always lifts this above "low", even when every dependent
+  is fully tested (testedness lowers the chance of a *silent* break, it does not
+  shrink the blast radius). Check riskReasoning for which signal(s) drove it.
 - dependents[]: { filepath, isTestFile, usages[]? }
 - complexityMetrics: { averageComplexity, maxComplexity, highComplexityDependents[] }
 - totalUsageCount?: number (when symbol parameter provided)
-- note?: present and explicit when \`filepath\` isn't resolvable in the index at all — a dependentCount of 0 / riskLevel "low" can otherwise look identical whether the file genuinely has no dependents or the path was never found. Two independent checks can produce it (not in the index manifest; or indexed with zero chunks for this exact path), but only ONE note is ever returned — never two competing explanations of the same zero.
-- symbolAttributionDegraded?: boolean + symbolAttributionNote?: string — set when
-  symbol names a method or constructor (not a top-level export) and call sites
-  couldn't be confirmed; dependentCount/riskLevel are then the file-level answer
-  (every importer of filepath), not a verified count of callers of symbol itself
-- dependentAttributionIncomplete?: boolean + dependentAttributionNote?: string — set
-  when a file-level query returns ZERO dependents in a language whose callers need no
-  per-file import (C# today: enclosing-namespace access under a \`global using\`). When
-  this is true, treat dependentCount 0 and riskLevel "low" as a FLOOR, not a finding —
-  it means Lien could not see callers, not that none exist. Verify with grep before
-  concluding a symbol is unused. riskLevel is not adjusted for this and may still read
-  "low"; the flag is the authoritative signal.`,
+- attributionCaveat?: { reason, note } — present whenever dependentCount/riskLevel
+  can't be trusted as a verified clear. ALWAYS check for this field before treating
+  a low dependentCount (especially 0) as "safe to edit" or "unused". \`reason\` is
+  one of:
+  - "unresolved-target": \`filepath\` isn't resolvable in the index at all (typo,
+    wrong directory prefix/case, or not indexed yet) — every count is a deliberate
+    0, not a confirmed empty dependency graph. Try search_code or list_functions to
+    find the real path, or run "lien index" if the file was added recently.
+  - "symbol-attribution-degraded": \`symbol\` names a method or constructor (not a
+    top-level export) and its call sites couldn't be confirmed; dependentCount/
+    riskLevel are the file-level answer (every importer of filepath), not a
+    verified count of callers of symbol itself.
+  - "dependent-attribution-incomplete": a file-level query (no \`symbol\`) returned
+    ZERO dependents in a language whose callers need no per-file import (C# today:
+    enclosing-namespace access under a \`global using\`). Treat dependentCount 0 and
+    riskLevel "low" as a FLOOR, not a finding — verify with grep before concluding
+    the file is unused.
+  At most one reason ever fires per response.`,
   ),
   toMCPToolSchema(
     GetComplexitySchema,

@@ -326,11 +326,26 @@ Is it safe to change this file?
 
 When `symbol` is provided, the response also includes `totalUsageCount` (number of tracked call sites across all files) and each dependent may include a `usages` array with `callerSymbol`, `line`, and `snippet` fields.
 
-`symbol` also accepts a method or constructor name (e.g. `__construct`, `moveUp`) — those aren't top-level exports, so when call sites for one can't be confirmed, the response sets `symbolAttributionDegraded: true` plus a `symbolAttributionNote` and widens `dependentCount`/`riskLevel` to the file-level answer (every file that imports `filepath`) rather than asserting an unverifiable symbol-scoped count. Check that flag before treating a low count as verified.
+### `attributionCaveat`
 
-A file-level query (no `symbol`) that finds zero dependents in a language where the import graph structurally can't see every real usage — C#'s enclosing-namespace access, where a `global using` lets a real caller reach `filepath`'s exports with no per-file import at all (#930) — sets `dependentAttributionIncomplete: true` plus a `dependentAttributionNote`. `dependentCount: 0` / `riskLevel: "low"` in that case means "the import graph found nothing," not "nothing depends on this file" — check that flag too before treating a zero count as a verified all-clear.
+Three unrelated situations can each make `dependentCount`/`riskLevel` untrustworthy as a verified clear. Rather than three differently-named flags, the response carries a single optional field:
 
-When `filepath` isn't resolvable in the index at all — never indexed, misspelled, or a typo'd directory prefix — the response instead carries a `note` explaining that. `dependentCount: 0` / `riskLevel: "low"` in that case means "the path is unresolved," not "confirmed zero dependents"; the two can look identical unless you check for `note`. Two independent checks can produce it (the index manifest has no entry for the path at all; or the path resolves in the manifest but has zero chunks in the current scan), but only one `note` is ever returned for a given call — never two competing explanations of the same zero.
+```json
+{
+  "attributionCaveat": {
+    "reason": "unresolved-target",
+    "note": "..."
+  }
+}
+```
+
+`reason` is one of:
+
+- **`unresolved-target`** — `filepath` isn't resolvable in the index at all: never indexed, misspelled, or a typo'd directory prefix. `dependentCount: 0` / `riskLevel: "low"` then means "the path is unresolved," not "confirmed zero dependents." (Two independent checks can produce this — the index manifest has no entry for the path at all, or the path resolves in the manifest but has zero chunks in the current scan — but only one `attributionCaveat` is ever returned, never two competing explanations of the same zero.)
+- **`symbol-attribution-degraded`** — `symbol` also accepts a method or constructor name (e.g. `__construct`, `moveUp`); those aren't top-level exports, so when call sites for one can't be confirmed, the response widens `dependentCount`/`riskLevel` to the file-level answer (every file that imports `filepath`) rather than asserting an unverifiable symbol-scoped count.
+- **`dependent-attribution-incomplete`** — a file-level query (no `symbol`) found zero dependents in a language where the import graph structurally can't see every real usage — C#'s enclosing-namespace access, where a `global using` lets a real caller reach `filepath`'s exports with no per-file import at all (#930). `dependentCount: 0` / `riskLevel: "low"` here means "the import graph found nothing," not "nothing depends on this file."
+
+At most one reason ever applies to a given response. Always check for `attributionCaveat` before treating a low (especially zero) `dependentCount` as a verified all-clear.
 
 ### Risk Levels
 
@@ -342,7 +357,7 @@ When `filepath` isn't resolvable in the index at all — never indexed, misspell
 | `critical` | 30+ | Major impact, extensive testing required |
 
 ::: tip Complexity-Aware Risk
-Risk level is boosted if dependents have high complexity. A file with 10 dependents but complex dependent code may be rated "high" instead of "medium".
+Risk level is boosted if dependents have high complexity. A file with 10 dependents but complex dependent code may be rated "high" instead of "medium". A high/critical complexity signal among dependents always lifts the level above "low", even when every dependent is fully tested — test coverage lowers the odds of a *silent* break, it doesn't shrink the blast radius.
 :::
 
 ## get_complexity

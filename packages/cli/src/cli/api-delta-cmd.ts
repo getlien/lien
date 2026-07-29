@@ -101,6 +101,7 @@ function computeRisk(analysis: DependencyAnalysisResult): string {
     uncoveredDependents: uncoveredProductionDependents,
     maxDependentComplexity: maxComplexity > 0 ? maxComplexity : undefined,
     hasHighComplexityUncovered,
+    complexityRiskBoost: complexityMetrics.complexityRiskBoost,
   }).level;
 }
 
