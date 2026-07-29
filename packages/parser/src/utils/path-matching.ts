@@ -631,33 +631,50 @@ function matchesPHPNamespace(importPath: string, targetPath: string): boolean {
 }
 
 /**
+ * Matches a relative import specifier: `./x`, `../x`, or the bare, slash-free
+ * `.`/`..` themselves (anchored so a longer dotted specifier like `.module`
+ * or `..pkg.thing` — an un-converted Python absolute-looking import, #904's
+ * doc comment below — never qualifies).
+ */
+const RELATIVE_IMPORT_PATTERN = /^\.\.?(\/|$)/;
+
+/**
  * Resolve a relative import specifier against its importer's file path.
  *
- * Only acts on specifiers starting with `./` or `../`. Package specifiers
- * (e.g. `@liendev/core`, `lodash`), dotted Python-style *absolute* imports,
- * and absolute paths pass through unchanged. Since #904, Python's leading-dot
- * *relative* imports (`.foo`, `..pkg`) DO reach this function too —
- * `PythonImportExtractor` converts them to this same `./`/`../`-prefixed
- * shape at extraction time (see `ast/languages/python.ts`'s
- * `convertPythonRelativeImport`) before `resolveImportSpecifier` calls this.
+ * Acts on specifiers matching `RELATIVE_IMPORT_PATTERN`: `./`/`../`-prefixed,
+ * or the bare `.`/`..` themselves (#935) — Node/TS module resolution treats a
+ * bare `.` as "this directory" and a bare `..` as "the parent directory"
+ * exactly like their slash-suffixed forms (`import { x } from '.'` in a
+ * same-directory barrel re-export test is the confirmed real-world shape: a
+ * genuine self-import that used to be stored as the literal, never-matching
+ * string `"."`). Package specifiers (e.g. `@liendev/core`, `lodash`), dotted
+ * Python-style *absolute* imports, and absolute paths pass through unchanged.
+ * Since #904, Python's leading-dot *relative* imports (`.foo`, `..pkg`) DO
+ * reach this function too — `PythonImportExtractor` converts them to this
+ * same `./`/`../`-prefixed shape at extraction time (see
+ * `ast/languages/python.ts`'s `convertPythonRelativeImport`) before
+ * `resolveImportSpecifier` calls this, so the bare-dot case added here never
+ * actually fires for Python; it exists for languages (JS/TS today) whose
+ * extractor stores the raw source literal as-is.
  *
  * Returns the resolved path in the same form as `importerFile` — relative when
  * `importerFile` is relative, absolute when absolute. Any trailing slash is
- * stripped: a bare `./` or `../` specifier (Python's `from . import X` /
- * `from .. import X`, converted with an empty remainder — see
- * `convertPythonRelativeImport`) resolves to the importer's own directory
- * with nothing joined after it, and `path.posix.normalize`/`join` leave that
- * directory's trailing slash intact, which would otherwise never
- * boundary-match a target path (those never carry one). The caller's
- * downstream normalization (`normalizePath`) is what ultimately strips
- * extensions and the workspace-root prefix, so no other work is needed here.
+ * stripped: a bare `./`/`.` or `../`/`..` specifier (Python's `from . import X`
+ * / `from .. import X`, converted with an empty remainder — see
+ * `convertPythonRelativeImport` — or JS/TS's own bare `'.'`/`'..'`) resolves
+ * to the importer's own directory (or its parent) with nothing joined after
+ * it, and `path.posix.normalize`/`join` leave that directory's trailing slash
+ * intact, which would otherwise never boundary-match a target path (those
+ * never carry one). The caller's downstream normalization (`normalizePath`)
+ * is what ultimately strips extensions and the workspace-root prefix, so no
+ * other work is needed here.
  *
  * @param importerFile - File path of the chunk doing the importing
  * @param specifier - The raw import specifier from source code
  * @returns Resolved path for relative specifiers; the original string otherwise
  */
 export function resolveRelativeImport(importerFile: string, specifier: string): string {
-  if (!specifier.startsWith('./') && !specifier.startsWith('../')) {
+  if (!RELATIVE_IMPORT_PATTERN.test(specifier)) {
     return specifier;
   }
   const importerDir = path.posix.dirname(importerFile.replace(/\\/g, '/'));
