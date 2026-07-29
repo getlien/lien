@@ -1,0 +1,574 @@
+{
+  "corpusRoot": "/tmp/lien-dogfood-460173c9",
+  "cliVersion": "0.71.1",
+  "repos": [
+    {
+      "repo": "Alamofire/Alamofire",
+      "lang": "swift",
+      "tier": "known",
+      "ext": [
+        ".swift"
+      ],
+      "dir": "/tmp/lien-dogfood-460173c9/Alamofire",
+      "sha": "0455bfb650893e86ad07ace16e5f2d36dadf46f4",
+      "c1Advisory": [],
+      "c1": "clean",
+      "sourceFileCount": 98,
+      "indexMs": 243,
+      "indexOk": true,
+      "indexTail": "\u001b[2m  Completed in 104ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[32m✔\u001b[39m \u001b[32mIndex is up to date - no changes detected\u001b[39m",
+      "status_json": {
+        "version": "0.71.1",
+        "indexPath": "/Users/alfhenderson/.lien/indices/Alamofire-eb47b9b7",
+        "indexStatus": "exists",
+        "indexFiles": 4,
+        "lastModified": "2026-07-29T05:36:50.965Z",
+        "lastReindex": "2026-07-28T22:29:02.617Z",
+        "git": {
+          "enabled": true,
+          "branch": "master",
+          "commit": "0455bfb6"
+        },
+        "features": {
+          "fileWatching": true,
+          "gitDetection": true
+        },
+        "backend": "sqlite",
+        "search": "lexical",
+        "settings": {
+          "concurrency": 4,
+          "chunkSize": 75,
+          "chunkOverlap": 10
+        }
+      },
+      "associations": {
+        "sampled": 25,
+        "withTests": 0,
+        "inferred": 5,
+        "anyCoverage": 5,
+        "pct": 0,
+        "pctIncludingInferred": 20,
+        "examples": [
+          {
+            "file": "Example/Source/AppDelegate.swift",
+            "annotation": "Lien impact for Example/Source/AppDelegate.swift:\n  • Test coverage not determinable from imports (whole-module import)."
+          },
+          {
+            "file": "Package.swift",
+            "annotation": "Lien impact for Package.swift:\n  • Test coverage not determinable from imports (whole-module import)."
+          },
+          {
+            "file": "Package@swift-6.2.swift",
+            "annotation": "Lien impact for Package@swift-6.2.swift:\n  • Test coverage not determinable from imports (whole-module import)."
+          }
+        ]
+      },
+      "status": "OK"
+    },
+    {
+      "repo": "gin-gonic/gin",
+      "lang": "go",
+      "tier": "known",
+      "ext": [
+        ".go"
+      ],
+      "dir": "/tmp/lien-dogfood-460173c9/gin",
+      "sha": "34dac209ffb6ef85cc78c5d217bbb7ad001d68fd",
+      "c1Advisory": [],
+      "c1": "clean",
+      "sourceFileCount": 99,
+      "indexMs": 252,
+      "indexOk": true,
+      "indexTail": "\u001b[2m  Completed in 114ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠹\u001b[39m Indexing your TODO comments (so many TODOs)...\u001b[32m✔\u001b[39m \u001b[32mUpdated 6 files, removed 0 (6/6)\u001b[39m",
+      "status_json": {
+        "version": "0.71.1",
+        "indexPath": "/Users/alfhenderson/.lien/indices/gin-414c34fd",
+        "indexStatus": "exists",
+        "indexFiles": 10,
+        "lastModified": "2026-07-29T05:36:37.612Z",
+        "lastReindex": "2026-07-29T05:36:37.596Z",
+        "git": {
+          "enabled": true,
+          "branch": "master",
+          "commit": "34dac209"
+        },
+        "features": {
+          "fileWatching": true,
+          "gitDetection": true
+        },
+        "backend": "sqlite",
+        "search": "lexical",
+        "settings": {
+          "concurrency": 4,
+          "chunkSize": 75,
+          "chunkOverlap": 10
+        }
+      },
+      "associations": {
+        "sampled": 25,
+        "withTests": 16,
+        "inferred": 0,
+        "anyCoverage": 16,
+        "pct": 64,
+        "pctIncludingInferred": 64,
+        "examples": [
+          {
+            "file": "binding/binding.go",
+            "annotation": "Lien impact for binding/binding.go:\n  • 6 files import this — mode.go, deprecated.go, context.go, mode_test.go, +2 more; risk: medium (6 callers, 3 untested, max complexity 14).\n  • Test coverage: mode_test.go, deprecated_test.go (+2 more)."
+          },
+          {
+            "file": "binding/binding_test.go",
+            "annotation": "Lien impact for binding/binding_test.go:\n  • 6 files import this — mode.go, deprecated.go, context.go, mode_test.go, +2 more; risk: medium (6 callers, 3 untested, max complexity 14).\n  • Test coverage: mode_test.go, deprecated_test.go (+1 more)."
+          },
+          {
+            "file": "binding/default_validator_benchmark_test.go",
+            "annotation": "Lien impact for binding/default_validator_benchmark_test.go:\n  • 6 files import this — mode.go, deprecated.go, context.go, mode_test.go, +2 more; risk: medium (6 callers, 3 untested, max complexity 14).\n  • Test coverage: mode_test.go, deprecated_test.go (+1 more)."
+          }
+        ]
+      },
+      "status": "OK"
+    },
+    {
+      "repo": "honojs/hono",
+      "lang": "typescript",
+      "tier": "fresh",
+      "ext": [
+        ".ts"
+      ],
+      "dir": "/tmp/lien-dogfood-460173c9/hono",
+      "sha": "224d2f5cbf2b4bc2ebb7482d0592149a8d9f0574",
+      "c1Advisory": [],
+      "c1": "clean",
+      "sourceFileCount": 324,
+      "indexMs": 273,
+      "indexOk": true,
+      "indexTail": "\u001b[2m  Completed in 128ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[32m✔\u001b[39m \u001b[32mIndex is up to date - no changes detected\u001b[39m",
+      "status_json": {
+        "version": "0.71.1",
+        "indexPath": "/Users/alfhenderson/.lien/indices/hono-b008d2e1",
+        "indexStatus": "exists",
+        "indexFiles": 12,
+        "lastModified": "2026-07-29T05:38:44.247Z",
+        "lastReindex": "2026-07-29T05:36:56.656Z",
+        "git": {
+          "enabled": true,
+          "branch": "main",
+          "commit": "224d2f5c"
+        },
+        "features": {
+          "fileWatching": true,
+          "gitDetection": true
+        },
+        "backend": "sqlite",
+        "search": "lexical",
+        "settings": {
+          "concurrency": 4,
+          "chunkSize": 75,
+          "chunkOverlap": 10
+        }
+      },
+      "associations": {
+        "sampled": 25,
+        "withTests": 21,
+        "inferred": 0,
+        "anyCoverage": 21,
+        "pct": 84,
+        "pctIncludingInferred": 84,
+        "examples": [
+          {
+            "file": "benchmarks/http-server/benchmark.ts",
+            "annotation": "⚠ Lien: buildVersion cognitive 21/15 (over) — avoid adding complexity here; prefer extraction.\nLien impact for benchmarks/http-server/benchmark.ts:\n  • No test coverage."
+          },
+          {
+            "file": "build/build.ts",
+            "annotation": "⚠ Lien: addExtension cognitive 12/15 — avoid adding complexity here; prefer extraction.\nLien impact for build/build.ts:\n  • No test coverage."
+          },
+          {
+            "file": "runtime-tests/fastly/index.test.ts",
+            "annotation": "Lien impact for runtime-tests/fastly/index.test.ts:\n  • No test coverage."
+          }
+        ]
+      },
+      "status": "OK"
+    },
+    {
+      "repo": "pallets/flask",
+      "lang": "python",
+      "tier": "known",
+      "ext": [
+        ".py"
+      ],
+      "dir": "/tmp/lien-dogfood-460173c9/flask",
+      "sha": "36e4a824f340fdee7ed50937ba8e7f6bc7d17f81",
+      "c1Advisory": [],
+      "c1": "clean",
+      "sourceFileCount": 83,
+      "indexMs": 224,
+      "indexOk": true,
+      "indexTail": "\u001b[2m  Completed in 87ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[32m✔\u001b[39m \u001b[32mIndex is up to date - no changes detected\u001b[39m",
+      "status_json": {
+        "version": "0.71.1",
+        "indexPath": "/Users/alfhenderson/.lien/indices/flask-7b1419a5",
+        "indexStatus": "exists",
+        "indexFiles": 4,
+        "lastModified": "2026-07-29T05:36:32.538Z",
+        "lastReindex": "2026-07-28T22:32:30.652Z",
+        "git": {
+          "enabled": true,
+          "branch": "main",
+          "commit": "36e4a824"
+        },
+        "features": {
+          "fileWatching": true,
+          "gitDetection": true
+        },
+        "backend": "sqlite",
+        "search": "lexical",
+        "settings": {
+          "concurrency": 4,
+          "chunkSize": 75,
+          "chunkOverlap": 10
+        }
+      },
+      "associations": {
+        "sampled": 25,
+        "withTests": 9,
+        "inferred": 0,
+        "anyCoverage": 9,
+        "pct": 36,
+        "pctIncludingInferred": 36,
+        "examples": [
+          {
+            "file": "docs/conf.py",
+            "annotation": "Lien impact for docs/conf.py:\n  • No test coverage."
+          },
+          {
+            "file": "examples/celery/src/task_app/tasks.py",
+            "annotation": "Lien impact for examples/celery/src/task_app/tasks.py:\n  • 1 file imports this — examples/celery/src/task_app/views.py; risk: medium (1 caller, 1 untested, max complexity 3).\n  • No test coverage."
+          },
+          {
+            "file": "examples/javascript/js_example/views.py",
+            "annotation": "Lien impact for examples/javascript/js_example/views.py:\n  • 1 file imports this — examples/javascript/js_example/views.py; risk: medium (1 caller, 1 untested, max complexity 1).\n  • No test coverage."
+          }
+        ]
+      },
+      "status": "OK"
+    },
+    {
+      "repo": "serilog/serilog",
+      "lang": "csharp",
+      "tier": "fresh",
+      "ext": [
+        ".cs"
+      ],
+      "dir": "/tmp/lien-dogfood-460173c9/serilog",
+      "sha": "07d39cfb2928076ecd902a61d295f90d74fe1fa5",
+      "c1Advisory": [],
+      "c1": "clean",
+      "sourceFileCount": 216,
+      "indexMs": 299,
+      "indexOk": true,
+      "indexTail": "\u001b[2m  Completed in 138ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[32m✔\u001b[39m \u001b[32mIndex is up to date - no changes detected\u001b[39m",
+      "status_json": {
+        "version": "0.71.1",
+        "indexPath": "/Users/alfhenderson/.lien/indices/serilog-163a5271",
+        "indexStatus": "exists",
+        "indexFiles": 9,
+        "lastModified": "2026-07-29T05:38:37.974Z",
+        "lastReindex": "2026-07-29T05:29:28.965Z",
+        "git": {
+          "enabled": true,
+          "branch": "dev",
+          "commit": "07d39cfb"
+        },
+        "features": {
+          "fileWatching": true,
+          "gitDetection": true
+        },
+        "backend": "sqlite",
+        "search": "lexical",
+        "settings": {
+          "concurrency": 4,
+          "chunkSize": 75,
+          "chunkOverlap": 10
+        }
+      },
+      "associations": {
+        "sampled": 25,
+        "withTests": 1,
+        "inferred": 0,
+        "anyCoverage": 1,
+        "pct": 4,
+        "pctIncludingInferred": 4,
+        "examples": [
+          {
+            "file": "src/Serilog/Capturing/DepthLimiter.cs",
+            "annotation": "Lien impact for src/Serilog/Capturing/DepthLimiter.cs:\n  • Test coverage not determinable from imports (enclosing-namespace access)."
+          },
+          {
+            "file": "src/Serilog/Configuration/LoggerDestructuringConfiguration.cs",
+            "annotation": "Lien impact for src/Serilog/Configuration/LoggerDestructuringConfiguration.cs:\n  • Test coverage not determinable from imports (enclosing-namespace access)."
+          },
+          {
+            "file": "src/Serilog/Context/LogContextEnricher.cs",
+            "annotation": "Lien impact for src/Serilog/Context/LogContextEnricher.cs:\n  • Test coverage not determinable from imports (enclosing-namespace access)."
+          }
+        ]
+      },
+      "status": "OK"
+    },
+    {
+      "repo": "sidekiq/sidekiq",
+      "lang": "ruby",
+      "tier": "fresh",
+      "ext": [
+        ".rb"
+      ],
+      "dir": "/tmp/lien-dogfood-460173c9/sidekiq",
+      "sha": "27ec98218bfcf6a90080e1852a0bee16ff4e3c80",
+      "c1Advisory": [],
+      "c1": "clean",
+      "sourceFileCount": 168,
+      "indexMs": 241,
+      "indexOk": true,
+      "indexTail": "\u001b[2m  Completed in 101ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[32m✔\u001b[39m \u001b[32mIndex is up to date - no changes detected\u001b[39m",
+      "status_json": {
+        "version": "0.71.1",
+        "indexPath": "/Users/alfhenderson/.lien/indices/sidekiq-400db6dd",
+        "indexStatus": "exists",
+        "indexFiles": 4,
+        "lastModified": "2026-07-29T05:37:20.957Z",
+        "lastReindex": "2026-07-28T22:33:17.848Z",
+        "git": {
+          "enabled": true,
+          "branch": "main",
+          "commit": "27ec9821"
+        },
+        "features": {
+          "fileWatching": true,
+          "gitDetection": true
+        },
+        "backend": "sqlite",
+        "search": "lexical",
+        "settings": {
+          "concurrency": 4,
+          "chunkSize": 75,
+          "chunkOverlap": 10
+        }
+      },
+      "associations": {
+        "sampled": 25,
+        "withTests": 5,
+        "inferred": 0,
+        "anyCoverage": 5,
+        "pct": 20,
+        "pctIncludingInferred": 20,
+        "examples": [
+          {
+            "file": "bare/boot.rb",
+            "annotation": "Lien impact for bare/boot.rb:\n  • 1 file imports this — myapp/config/application.rb; risk: medium (1 caller, 1 untested).\n  • No test coverage."
+          },
+          {
+            "file": "lib/sidekiq.rb",
+            "annotation": "Lien impact for lib/sidekiq.rb:\n  • 15 files import this — examples/por.rb, lib/sidekiq/web.rb, lib/sidekiq/testing.rb, lib/sidekiq/test_api.rb, +11 more; risk: medium (15 callers, 4 untested, max complexity 13).\n  • Test coverage: test/sharding_test.rb, test/iterable/active_record_enumerator_test.rb (+2 more)."
+          },
+          {
+            "file": "lib/sidekiq/config.rb",
+            "annotation": "Lien impact for lib/sidekiq/config.rb:\n  • 2 files import this — lib/sidekiq.rb, lib/sidekiq/cli.rb; risk: low (2 callers, max complexity 13).\n  • No test coverage."
+          }
+        ]
+      },
+      "status": "OK"
+    },
+    {
+      "repo": "square/retrofit",
+      "lang": "java",
+      "tier": "fresh",
+      "ext": [
+        ".java"
+      ],
+      "dir": "/tmp/lien-dogfood-460173c9/retrofit",
+      "sha": "d0b112dad073b7fe49c953ebc46ff1b424cb1e51",
+      "c1Advisory": [],
+      "c1": "clean",
+      "sourceFileCount": 306,
+      "indexMs": 420,
+      "indexOk": true,
+      "indexTail": "\u001b[2m  Completed in 281ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[32m✔\u001b[39m \u001b[32mIndex is up to date - no changes detected\u001b[39m",
+      "status_json": {
+        "version": "0.71.1",
+        "indexPath": "/Users/alfhenderson/.lien/indices/retrofit-a6deda25",
+        "indexStatus": "exists",
+        "indexFiles": 4,
+        "lastModified": "2026-07-29T05:37:01.771Z",
+        "lastReindex": "2026-07-28T22:29:15.351Z",
+        "git": {
+          "enabled": true,
+          "branch": "trunk",
+          "commit": "d0b112da"
+        },
+        "features": {
+          "fileWatching": true,
+          "gitDetection": true
+        },
+        "backend": "sqlite",
+        "search": "lexical",
+        "settings": {
+          "concurrency": 4,
+          "chunkSize": 75,
+          "chunkOverlap": 10
+        }
+      },
+      "associations": {
+        "sampled": 25,
+        "withTests": 5,
+        "inferred": 0,
+        "anyCoverage": 5,
+        "pct": 20,
+        "pctIncludingInferred": 20,
+        "examples": [
+          {
+            "file": "retrofit-adapters/rxjava/src/main/java/retrofit2/adapter/rxjava/BodyOnSubscribe.java",
+            "annotation": "Lien impact for retrofit-adapters/rxjava/src/main/java/retrofit2/adapter/rxjava/BodyOnSubscribe.java:\n  • Test coverage (package-level, no dedicated test file for this specific file): retrofit-adapters/rxjava/src/test/java/retrofit2/adapter/rxjava/StringConverterFactory.java, retrofit-adapters/rxjava/src/test/java/retrofit2/adapter/rxjava/SingleWithSchedulerTest.java (+17 more)."
+          },
+          {
+            "file": "retrofit-adapters/rxjava/src/test/java/retrofit2/adapter/rxjava/CompletableTest.java",
+            "annotation": "Lien impact for retrofit-adapters/rxjava/src/test/java/retrofit2/adapter/rxjava/CompletableTest.java:\n  • Test coverage (package-level, no dedicated test file for this specific file): retrofit-adapters/rxjava/src/test/java/retrofit2/adapter/rxjava/StringConverterFactory.java, retrofit-adapters/rxjava/src/test/java/retrofit2/adapter/rxjava/SingleWithSchedulerTest.java (+16 more)."
+          },
+          {
+            "file": "retrofit-adapters/rxjava/src/test/java/retrofit2/adapter/rxjava/RxJavaPluginsResetRule.java",
+            "annotation": "Lien impact for retrofit-adapters/rxjava/src/test/java/retrofit2/adapter/rxjava/RxJavaPluginsResetRule.java:\n  • Test coverage (package-level, no dedicated test file for this specific file): retrofit-adapters/rxjava/src/test/java/retrofit2/adapter/rxjava/StringConverterFactory.java, retrofit-adapters/rxjava/src/test/java/retrofit2/adapter/rxjava/SingleWithSchedulerTest.java (+16 more)."
+          }
+        ]
+      },
+      "status": "OK"
+    },
+    {
+      "repo": "symfony/console",
+      "lang": "php",
+      "tier": "fresh",
+      "ext": [
+        ".php"
+      ],
+      "dir": "/tmp/lien-dogfood-460173c9/console",
+      "sha": "535e18a1b8925f6c01a55b171d157ab66c2ace15",
+      "c1Advisory": [],
+      "c1": "clean",
+      "sourceFileCount": 361,
+      "indexMs": 264,
+      "indexOk": true,
+      "indexTail": "\u001b[2m  Completed in 122ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠹\u001b[39m Indexing your TODO comments (so many TODOs)...\u001b[32m✔\u001b[39m \u001b[32mUpdated 1 file, removed 0 (1/1)\u001b[39m",
+      "status_json": {
+        "version": "0.71.1",
+        "indexPath": "/Users/alfhenderson/.lien/indices/console-50b99aa9",
+        "indexStatus": "exists",
+        "indexFiles": 7,
+        "lastModified": "2026-07-29T05:37:09.319Z",
+        "lastReindex": "2026-07-29T05:37:09.304Z",
+        "git": {
+          "enabled": true,
+          "branch": "8.2",
+          "commit": "535e18a1"
+        },
+        "features": {
+          "fileWatching": true,
+          "gitDetection": true
+        },
+        "backend": "sqlite",
+        "search": "lexical",
+        "settings": {
+          "concurrency": 4,
+          "chunkSize": 75,
+          "chunkOverlap": 10
+        }
+      },
+      "associations": {
+        "sampled": 25,
+        "withTests": 12,
+        "inferred": 0,
+        "anyCoverage": 12,
+        "pct": 48,
+        "pctIncludingInferred": 48,
+        "examples": [
+          {
+            "file": "Application.php",
+            "annotation": "⚠ Lien: Application.doRunCommand cognitive 67/15 (over), Application.find cognitive 50/15 (over), Application.doRun cognitive 37/15 (over), … and 7 more at/near budget — avoid adding complexity here; prefer extraction.\nLien impact for Application.php:\n  • 33 files import this — Tester/ApplicationTester.php, Messenger/RunCommandMessageHandler.php, Descriptor/XmlDescriptor.php, Descriptor/ReStructur"
+          },
+          {
+            "file": "ArgumentResolver/ValueResolver/UidValueResolver.php",
+            "annotation": "Lien impact for ArgumentResolver/ValueResolver/UidValueResolver.php:\n  • 3 files import this — Resources/config/console.php, ArgumentResolver/ArgumentResolver.php, Tests/ArgumentResolver/ValueResolver/UidValueResolverTest.php; risk: medium (3 callers, 1 untested, max complexity 25).\n  • Test coverage: Tests/ArgumentResolver/ValueResolver/UidValueResolverTest.php."
+          },
+          {
+            "file": "Attribute/ValueResolver.php",
+            "annotation": "Lien impact for Attribute/ValueResolver.php:\n  • 1 file imports this — ArgumentResolver/ArgumentResolver.php; risk: low (1 caller, max complexity 25).\n  • No test coverage."
+          }
+        ]
+      },
+      "status": "OK"
+    },
+    {
+      "repo": "tokio-rs/tokio",
+      "lang": "rust",
+      "tier": "known",
+      "ext": [
+        ".rs"
+      ],
+      "dir": "/tmp/lien-dogfood-460173c9/tokio",
+      "sha": "1a2dbbaa21389ad0b9d20f77e869698c5cab5d68",
+      "c1Advisory": [],
+      "c1": "clean",
+      "sourceFileCount": 790,
+      "indexMs": 268,
+      "indexOk": true,
+      "indexTail": "\u001b[2m  Completed in 128ms\u001b[22m\n- Starting indexing...\n\u001b[36m⠋\u001b[39m Reading your spaghetti code (no judgment)...\u001b[36m⠙\u001b[39m Reading your spaghetti code (no judgment)...\u001b[32m✔\u001b[39m \u001b[32mIndex is up to date - no changes detected\u001b[39m",
+      "status_json": {
+        "version": "0.71.1",
+        "indexPath": "/Users/alfhenderson/.lien/indices/tokio-b45f30ed",
+        "indexStatus": "exists",
+        "indexFiles": 5,
+        "lastModified": "2026-07-29T05:36:42.890Z",
+        "lastReindex": "2026-07-28T22:28:53.484Z",
+        "git": {
+          "enabled": true,
+          "branch": "master",
+          "commit": "1a2dbbaa"
+        },
+        "features": {
+          "fileWatching": true,
+          "gitDetection": true
+        },
+        "backend": "sqlite",
+        "search": "lexical",
+        "settings": {
+          "concurrency": 4,
+          "chunkSize": 75,
+          "chunkOverlap": 10
+        }
+      },
+      "associations": {
+        "sampled": 25,
+        "withTests": 15,
+        "inferred": 0,
+        "anyCoverage": 15,
+        "pct": 60,
+        "pctIncludingInferred": 60,
+        "examples": [
+          {
+            "file": "benches/copy.rs",
+            "annotation": "Lien impact for benches/copy.rs:\n  • 80 files import this — tokio/src/fs/mod.rs, tokio/src/io/util/copy_bidirectional.rs, examples/udp-codec.rs, benches/time_timeout.rs, +76 more; risk: critical (80 callers, 8 untested, max complexity 6).\n  • No test coverage."
+          },
+          {
+            "file": "examples/print_each_packet.rs",
+            "annotation": "Lien impact for examples/print_each_packet.rs:\n  • No test coverage."
+          },
+          {
+            "file": "tokio-macros/src/lib.rs",
+            "annotation": "Lien impact for tokio-macros/src/lib.rs:\n  • No test coverage."
+          }
+        ]
+      },
+      "status": "OK"
+    }
+  ],
+  "c1AncestorAdvisory": []
+}
