@@ -549,6 +549,20 @@ pub static COUNTER: i32 = 0;`;
       expect(symbol!.signature).toBe('impl UserService');
     });
 
+    // Same underlying bug as the C#/Java/Kotlin/TS/Swift fix: `signature`
+    // dropped generic type parameters and the implemented trait entirely, so
+    // `impl<T> Trait for Type<T>` came back as bare `impl Type` — losing the
+    // one fact (which trait this impl provides) that's most useful for
+    // deciding whether it's the impl you want.
+    it('should include generic type parameters and the implemented trait in an impl signature', () => {
+      const code = 'impl<T> Trait for Type<T> { fn m(&self) {} }';
+      const root = mustParse(code, 'rust');
+      const implNode = root.namedChild(0)!;
+      const symbol = symbolExtractor.extractSymbol(implNode, code);
+      expect(symbol!.name).toBe('Type<T>');
+      expect(symbol!.signature).toBe('impl<T> Trait for Type<T>');
+    });
+
     it('should extract trait_item as interface', () => {
       const code = 'trait Validate { fn validate(&self) -> bool; }';
       const root = mustParse(code, 'rust');
@@ -558,6 +572,14 @@ pub static COUNTER: i32 = 0;`;
       expect(symbol!.name).toBe('Validate');
       expect(symbol!.type).toBe('interface');
       expect(symbol!.signature).toBe('trait Validate');
+    });
+
+    it('should include generic type parameters and supertraits in a trait signature', () => {
+      const code = 'trait Foo<T>: Bar + Baz { fn m(&self); }';
+      const root = mustParse(code, 'rust');
+      const traitNode = root.namedChild(0)!;
+      const symbol = symbolExtractor.extractSymbol(traitNode, code);
+      expect(symbol!.signature).toBe('trait Foo<T>: Bar + Baz');
     });
 
     it('should extract call site from direct function call', () => {

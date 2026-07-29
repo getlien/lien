@@ -7,7 +7,12 @@ import type {
   LanguageSymbolExtractor,
 } from '../extractors/types.js';
 import { toImportPathsArray, toImportSymbolsArray } from '../extractors/types.js';
-import { extractSignature, extractReturnType } from '../extractors/symbol-helpers.js';
+import {
+  extractSignature,
+  extractReturnType,
+  clampSignatureLength,
+  collapseWhitespace,
+} from '../extractors/symbol-helpers.js';
 import { calculateComplexity } from '../complexity/index.js';
 
 // =============================================================================
@@ -48,6 +53,30 @@ function declarationKeyword(node: SyntaxNode): string {
 /** The declared name of a class/protocol declaration (handles `extension`'s `user_type`). */
 function declarationName(node: SyntaxNode): string | undefined {
   return node.childForFieldName('name')?.text;
+}
+
+/**
+ * Generic type parameters and inheritance clause, exactly as declared in
+ * source — the Swift analog of C#'s `typeParamsAndBaseList`/Java's
+ * `typeParamsAndHeritage` (same underlying bug: `signature` reported only
+ * the bare keyword and name). Covers both a class/struct/actor/enum's
+ * superclass-and-protocol list and a protocol's own supertype list — both
+ * are the same `inheritance_specifier` children in this grammar, e.g.
+ * `class Foo<T>: Bar, Baz` or `protocol IFoo: IBar, IBaz`. Neither
+ * `type_parameters` nor `inheritance_specifier` is a registered field, so
+ * both are found by node type. Each piece is passed through
+ * `collapseWhitespace` in case the clause spans multiple physical lines.
+ */
+function typeParamsAndInheritance(node: SyntaxNode): string {
+  const typeParams = collapseWhitespace(childByType(node, 'type_parameters')?.text);
+  const inheritance = node.namedChildren.filter(child => child.type === 'inheritance_specifier');
+  // No space before the colon: `Foo<T>: Bar, Baz`, matching Swift style
+  // (unlike C#/Kotlin, which conventionally do put a space there).
+  const inheritanceText =
+    inheritance.length > 0
+      ? `: ${inheritance.map(i => collapseWhitespace(i.text)).join(', ')}`
+      : '';
+  return `${typeParams}${inheritanceText}`;
 }
 
 /**
@@ -426,13 +455,15 @@ export class SwiftSymbolExtractor implements LanguageSymbolExtractor {
     const name = declarationName(node);
     if (!name) return null;
     const keyword = declarationKeyword(node);
-    return this.makeSymbol(node, name, 'class', `${keyword} ${name}`, parentClass);
+    const signature = clampSignatureLength(`${keyword} ${name}${typeParamsAndInheritance(node)}`);
+    return this.makeSymbol(node, name, 'class', signature, parentClass);
   }
 
   private extractProtocolInfo(node: SyntaxNode, parentClass?: string): SymbolInfo | null {
     const name = declarationName(node);
     if (!name) return null;
-    return this.makeSymbol(node, name, 'interface', `protocol ${name}`, parentClass);
+    const signature = clampSignatureLength(`protocol ${name}${typeParamsAndInheritance(node)}`);
+    return this.makeSymbol(node, name, 'interface', signature, parentClass);
   }
 
   private makeSymbol(

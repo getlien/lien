@@ -371,6 +371,18 @@ exports.bar = 42;`;
       expect(symbol).not.toBeNull();
       expect(symbol!.name).toBe('EventEmitter');
       expect(symbol!.type).toBe('class');
+      expect(symbol!.signature).toBe('class EventEmitter');
+    });
+
+    // Same underlying bug as the C#/Java/Kotlin fix: `signature` dropped the
+    // `extends` clause entirely, e.g. `class Foo extends Bar` came back as
+    // bare `class Foo`. Plain JS has no generics, so this only covers heritage.
+    it('should include extends heritage in a class signature', () => {
+      const code = 'class Foo extends Bar {}';
+      const root = mustParse(code, 'javascript');
+      const classNode = root.namedChild(0)!;
+      const symbol = symbolExtractor.extractSymbol(classNode, code);
+      expect(symbol!.signature).toBe('class Foo extends Bar');
     });
 
     it('should extract method info with parent class', () => {

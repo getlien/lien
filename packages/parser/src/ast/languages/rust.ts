@@ -11,6 +11,8 @@ import {
   extractSignature,
   extractParameters,
   extractReturnType,
+  clampSignatureLength,
+  collapseWhitespace,
 } from '../extractors/symbol-helpers.js';
 import { calculateComplexity } from '../complexity/index.js';
 import { resolveRustCrateImport } from '../../rust-crate-map.js';
@@ -722,29 +724,59 @@ export class RustSymbolExtractor implements LanguageSymbolExtractor {
     };
   }
 
+  /**
+   * `impl<T> Trait for Type<T>` — the trait being implemented (if any) is
+   * arguably the single most useful fact about an impl block (which
+   * behavior it provides), and the generic parameters distinguish a
+   * blanket/generic impl from a concrete one; `signature` used to report
+   * neither, just `impl Type`. `type`, `trait`, and `type_parameters` are
+   * all registered fields on `impl_item`. Deliberately excludes the
+   * trailing `where_clause` (an unnamed child, not a field) — same
+   * out-of-scope call as C#'s generic constraints. Each piece is passed
+   * through `collapseWhitespace` in case it spans multiple physical lines.
+   */
   private extractImplInfo(node: SyntaxNode): SymbolInfo | null {
     const typeNode = node.childForFieldName('type');
     if (!typeNode) return null;
+
+    const typeParams = collapseWhitespace(node.childForFieldName('type_parameters')?.text);
+    const traitNode = node.childForFieldName('trait');
+    const typeText = collapseWhitespace(typeNode.text);
+    const signature = traitNode
+      ? `impl${typeParams} ${collapseWhitespace(traitNode.text)} for ${typeText}`
+      : `impl${typeParams} ${typeText}`;
 
     return {
       name: typeNode.text,
       type: 'class',
       startLine: node.startPosition.row + 1,
       endLine: node.endPosition.row + 1,
-      signature: `impl ${typeNode.text}`,
+      signature: clampSignatureLength(signature),
     };
   }
 
+  /**
+   * `trait Foo<T>: Bar + Baz` — `bounds` (supertraits) and `type_parameters`
+   * are both registered fields on `trait_item`; `bounds.text` already
+   * includes its leading `:` (e.g. `": Bar + Baz"`). Each piece is passed
+   * through `collapseWhitespace` in case it spans multiple physical lines.
+   */
   private extractTraitInfo(node: SyntaxNode): SymbolInfo | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
+
+    const typeParams = collapseWhitespace(node.childForFieldName('type_parameters')?.text);
+    // `bounds.text` already includes its leading ": " (e.g. ": Bar + Baz"),
+    // so no extra space is added here — matches Rust style (`Foo<T>: Bar`),
+    // unlike C#/Kotlin, which conventionally put a space before the colon.
+    const bounds = collapseWhitespace(node.childForFieldName('bounds')?.text);
 
     return {
       name: nameNode.text,
       type: 'interface',
       startLine: node.startPosition.row + 1,
       endLine: node.endPosition.row + 1,
-      signature: `trait ${nameNode.text}`,
+      signature: clampSignatureLength(`trait ${nameNode.text}${typeParams}${bounds}`),
     };
   }
 }

@@ -11,6 +11,8 @@ import {
   extractSignature,
   extractParameters,
   extractReturnType,
+  clampSignatureLength,
+  collapseWhitespace,
 } from '../extractors/symbol-helpers.js';
 import { calculateComplexity } from '../complexity/index.js';
 
@@ -568,6 +570,30 @@ export class TypeScriptImportExtractor extends JavaScriptImportExtractor {}
 // =============================================================================
 
 /**
+ * Generic type parameters (TypeScript only — always absent when parsed with
+ * the plain JavaScript grammar) and extends/implements heritage, exactly as
+ * declared in source — the JS/TS analog of C#'s `typeParamsAndBaseList`/
+ * Java's `typeParamsAndHeritage` (same underlying bug: `signature` for a
+ * class/interface reported only its bare keyword and name, so `class
+ * Foo<T> extends Bar<T> implements Baz, Qux` came back as bare `class Foo`).
+ * A class's `extends`+`implements` clauses are a single `class_heritage`
+ * node (e.g. `"extends Bar<T> implements Baz, Qux"`); an interface's is a
+ * separate `extends_type_clause` (e.g. `"extends IBar<T>, IBaz"` — TS
+ * interfaces can't `implements`). Neither `type_parameters` nor either
+ * heritage node is a registered field, so all three are found by node type.
+ * Each piece is passed through `collapseWhitespace` in case the clause
+ * spans multiple physical lines.
+ */
+function typeParamsAndHeritage(node: SyntaxNode): string {
+  const typeParams = collapseWhitespace(node.childForFieldName('type_parameters')?.text);
+  const heritage = collapseWhitespace(
+    node.namedChildren.find(child => child.type === 'class_heritage')?.text ??
+      node.namedChildren.find(child => child.type === 'extends_type_clause')?.text,
+  );
+  return `${typeParams}${heritage ? ` ${heritage}` : ''}`;
+}
+
+/**
  * JavaScript/TypeScript symbol extractor
  *
  * Extracts symbol info from function declarations, arrow functions,
@@ -712,7 +738,7 @@ export class JavaScriptSymbolExtractor implements LanguageSymbolExtractor {
       type: 'class',
       startLine: node.startPosition.row + 1,
       endLine: node.endPosition.row + 1,
-      signature: `class ${nameNode.text}`,
+      signature: clampSignatureLength(`class ${nameNode.text}${typeParamsAndHeritage(node)}`),
     };
   }
 
@@ -725,7 +751,7 @@ export class JavaScriptSymbolExtractor implements LanguageSymbolExtractor {
       type: 'interface',
       startLine: node.startPosition.row + 1,
       endLine: node.endPosition.row + 1,
-      signature: `interface ${nameNode.text}`,
+      signature: clampSignatureLength(`interface ${nameNode.text}${typeParamsAndHeritage(node)}`),
     };
   }
 }

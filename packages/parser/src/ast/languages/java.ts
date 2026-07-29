@@ -7,7 +7,12 @@ import type {
   LanguageSymbolExtractor,
 } from '../extractors/types.js';
 import { toImportPathsArray, toImportSymbolsArray } from '../extractors/types.js';
-import { extractSignature, extractParameters } from '../extractors/symbol-helpers.js';
+import {
+  extractSignature,
+  extractParameters,
+  clampSignatureLength,
+  collapseWhitespace,
+} from '../extractors/symbol-helpers.js';
 import { calculateComplexity } from '../complexity/index.js';
 
 // =============================================================================
@@ -440,7 +445,7 @@ export class JavaSymbolExtractor implements LanguageSymbolExtractor {
       startLine: node.startPosition.row + 1,
       endLine: node.endPosition.row + 1,
       parentClass,
-      signature: `class ${nameNode.text}`,
+      signature: clampSignatureLength(`class ${nameNode.text}${typeParamsAndHeritage(node)}`),
     };
   }
 
@@ -454,7 +459,7 @@ export class JavaSymbolExtractor implements LanguageSymbolExtractor {
       startLine: node.startPosition.row + 1,
       endLine: node.endPosition.row + 1,
       parentClass,
-      signature: `interface ${nameNode.text}`,
+      signature: clampSignatureLength(`interface ${nameNode.text}${typeParamsAndHeritage(node)}`),
     };
   }
 
@@ -468,7 +473,10 @@ export class JavaSymbolExtractor implements LanguageSymbolExtractor {
       startLine: node.startPosition.row + 1,
       endLine: node.endPosition.row + 1,
       parentClass,
-      signature: `enum ${nameNode.text}`,
+      // Enums have no type parameters in Java, but can implement interfaces
+      // (`enum Status implements Foo`) — `typeParamsAndHeritage` still
+      // applies cleanly since it's a no-op for the type-parameters half.
+      signature: clampSignatureLength(`enum ${nameNode.text}${typeParamsAndHeritage(node)}`),
     };
   }
 
@@ -482,7 +490,7 @@ export class JavaSymbolExtractor implements LanguageSymbolExtractor {
       startLine: node.startPosition.row + 1,
       endLine: node.endPosition.row + 1,
       parentClass,
-      signature: `record ${nameNode.text}`,
+      signature: clampSignatureLength(`record ${nameNode.text}${typeParamsAndHeritage(node)}`),
     };
   }
 }
@@ -500,6 +508,33 @@ function hasPublicModifier(node: SyntaxNode): boolean {
   const modifiers = node.children.find(child => child.type === 'modifiers');
   if (!modifiers) return false;
   return modifiers.children.some(child => child.type === 'public');
+}
+
+/**
+ * Generic type parameters and extends/implements heritage, exactly as
+ * declared in source — the Java analog of C#'s `typeParamsAndBaseList`
+ * (same underlying bug: `signature` for a type declaration reported only
+ * its bare keyword and name, dropping `<T extends Comparable<T>>` and
+ * `extends Bar<T> implements Baz, Qux` entirely). `type_parameters` and
+ * `superclass`/`interfaces` (class/enum/record) are registered grammar
+ * fields, but `extends_interfaces` (an interface extending other
+ * interfaces) is NOT a field on `interface_declaration`, so it's found by
+ * scanning `namedChildren` for consistency with the fielded case.
+ *
+ * Whitespace is collapsed to a single line (`collapseWhitespace`, matching
+ * `extractSignature`'s convention) — a heritage clause can itself span
+ * multiple physical lines (long generic bounds, an interleaved comment),
+ * which would otherwise leak newlines into `signature`.
+ */
+function typeParamsAndHeritage(node: SyntaxNode): string {
+  const typeParams = collapseWhitespace(node.childForFieldName('type_parameters')?.text);
+  const superclass = collapseWhitespace(node.childForFieldName('superclass')?.text);
+  const interfaces = collapseWhitespace(
+    node.childForFieldName('interfaces')?.text ??
+      node.namedChildren.find(child => child.type === 'extends_interfaces')?.text,
+  );
+  const heritage = [superclass, interfaces].filter(Boolean).join(' ');
+  return `${typeParams}${heritage ? ` ${heritage}` : ''}`;
 }
 
 /**

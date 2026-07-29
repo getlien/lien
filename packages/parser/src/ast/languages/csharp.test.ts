@@ -418,6 +418,36 @@ using Newtonsoft.Json;
       expect(symbol!.signature).toBe('class Calculator');
     });
 
+    // Post-release audit of 0.72.0: `signature` dropped generic type
+    // parameters and the base-type/interface list entirely, e.g.
+    // `LogEventPropertyValueVisitor<TState, TResult>` and
+    // `Logger : ILogger, ILogEventSink, IDisposable` both came back as just
+    // `class Logger`/`class LogEventPropertyValueVisitor` — the single most
+    // useful fact about a class for deciding whether it's the one you want.
+    it('should include generic type parameters in a class signature', () => {
+      const code = 'public class LogEventPropertyValueVisitor<TState, TResult> {}';
+      const root = mustParse(code, 'csharp');
+      const classNode = root.namedChild(0)!;
+      const symbol = symbolExtractor.extractSymbol(classNode, code);
+      expect(symbol!.signature).toBe('class LogEventPropertyValueVisitor<TState, TResult>');
+    });
+
+    it('should include the base-type/interface list in a class signature', () => {
+      const code = 'public class Logger : ILogger, ILogEventSink, IDisposable {}';
+      const root = mustParse(code, 'csharp');
+      const classNode = root.namedChild(0)!;
+      const symbol = symbolExtractor.extractSymbol(classNode, code);
+      expect(symbol!.signature).toBe('class Logger : ILogger, ILogEventSink, IDisposable');
+    });
+
+    it('should exclude generic constraints (`where`) from a class signature', () => {
+      const code = 'public class Constrained<T> : Base where T : class, new() {}';
+      const root = mustParse(code, 'csharp');
+      const classNode = root.namedChild(0)!;
+      const symbol = symbolExtractor.extractSymbol(classNode, code);
+      expect(symbol!.signature).toBe('class Constrained<T> : Base');
+    });
+
     it('should extract interface_declaration info', () => {
       const code = 'public interface IRepository {}';
       const root = mustParse(code, 'csharp');
@@ -427,6 +457,14 @@ using Newtonsoft.Json;
       expect(symbol!.name).toBe('IRepository');
       expect(symbol!.type).toBe('interface');
       expect(symbol!.signature).toBe('interface IRepository');
+    });
+
+    it('should include generic type parameters and base interfaces in an interface signature', () => {
+      const code = 'public interface IFoo<T> : IBar<T>, IBaz {}';
+      const root = mustParse(code, 'csharp');
+      const ifaceNode = root.namedChild(0)!;
+      const symbol = symbolExtractor.extractSymbol(ifaceNode, code);
+      expect(symbol!.signature).toBe('interface IFoo<T> : IBar<T>, IBaz');
     });
 
     it('should extract struct_declaration info', () => {
@@ -440,6 +478,14 @@ using Newtonsoft.Json;
       expect(symbol!.signature).toBe('struct Point');
     });
 
+    it('should include the base-interface list in a struct signature', () => {
+      const code = 'public readonly struct Vec3 : IVec {}';
+      const root = mustParse(code, 'csharp');
+      const structNode = root.namedChild(0)!;
+      const symbol = symbolExtractor.extractSymbol(structNode, code);
+      expect(symbol!.signature).toBe('struct Vec3 : IVec');
+    });
+
     it('should extract record_declaration info', () => {
       const code = 'public record Person(string Name) {}';
       const root = mustParse(code, 'csharp');
@@ -451,6 +497,15 @@ using Newtonsoft.Json;
       expect(symbol!.signature).toBe('record Person');
     });
 
+    it('should include the base-interface list in a record signature, including record struct', () => {
+      const code = 'public record struct Point(int X, int Y) : IPoint;';
+      const root = mustParse(code, 'csharp');
+      const recordNode = root.namedChild(0)!;
+      const symbol = symbolExtractor.extractSymbol(recordNode, code);
+      expect(symbol!.name).toBe('Point');
+      expect(symbol!.signature).toBe('record Point : IPoint');
+    });
+
     it('should extract enum_declaration info', () => {
       const code = 'public enum Color { Red, Green, Blue }';
       const root = mustParse(code, 'csharp');
@@ -460,6 +515,14 @@ using Newtonsoft.Json;
       expect(symbol!.name).toBe('Color');
       expect(symbol!.type).toBe('class');
       expect(symbol!.signature).toBe('enum Color');
+    });
+
+    it('should include the base (underlying integer) type in an enum signature', () => {
+      const code = 'public enum Status : byte { A, B }';
+      const root = mustParse(code, 'csharp');
+      const enumNode = root.namedChild(0)!;
+      const symbol = symbolExtractor.extractSymbol(enumNode, code);
+      expect(symbol!.signature).toBe('enum Status : byte');
     });
 
     // #949: a nested type declaration (class/interface/struct/record/enum

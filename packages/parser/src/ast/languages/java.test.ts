@@ -396,6 +396,18 @@ describe('Java Language', () => {
       expect(symbol!.signature).toBe('class Calculator');
     });
 
+    // Same underlying bug as the C# fix: `signature` dropped generic type
+    // parameters and extends/implements heritage entirely.
+    it('should include generic type parameters and extends/implements heritage in a class signature', () => {
+      const code = 'class Foo<T extends Comparable<T>> extends Bar<T> implements Baz, Qux {}';
+      const root = mustParse(code, 'java');
+      const classNode = root.namedChild(0)!;
+      const symbol = symbolExtractor.extractSymbol(classNode, code);
+      expect(symbol!.signature).toBe(
+        'class Foo<T extends Comparable<T>> extends Bar<T> implements Baz, Qux',
+      );
+    });
+
     it('should extract interface_declaration info', () => {
       const code = 'public interface Repository {}';
       const root = mustParse(code, 'java');
@@ -405,6 +417,14 @@ describe('Java Language', () => {
       expect(symbol!.name).toBe('Repository');
       expect(symbol!.type).toBe('interface');
       expect(symbol!.signature).toBe('interface Repository');
+    });
+
+    it('should include generic type parameters and extends heritage in an interface signature', () => {
+      const code = 'interface IFoo<T> extends IBar<T>, IBaz {}';
+      const root = mustParse(code, 'java');
+      const ifaceNode = root.namedChild(0)!;
+      const symbol = symbolExtractor.extractSymbol(ifaceNode, code);
+      expect(symbol!.signature).toBe('interface IFoo<T> extends IBar<T>, IBaz');
     });
 
     it('should extract enum_declaration info', () => {
@@ -418,6 +438,14 @@ describe('Java Language', () => {
       expect(symbol!.signature).toBe('enum Color');
     });
 
+    it('should include implements heritage in an enum signature (no type parameters in Java)', () => {
+      const code = 'enum Status implements Foo {}';
+      const root = mustParse(code, 'java');
+      const enumNode = root.namedChild(0)!;
+      const symbol = symbolExtractor.extractSymbol(enumNode, code);
+      expect(symbol!.signature).toBe('enum Status implements Foo');
+    });
+
     it('should extract record_declaration info', () => {
       const code = 'public record Point(int x, int y) {}';
       const root = mustParse(code, 'java');
@@ -427,6 +455,14 @@ describe('Java Language', () => {
       expect(symbol!.name).toBe('Point');
       expect(symbol!.type).toBe('class');
       expect(symbol!.signature).toBe('record Point');
+    });
+
+    it('should include implements heritage in a record signature', () => {
+      const code = 'record Person(int x, int y) implements Foo {}';
+      const root = mustParse(code, 'java');
+      const recordNode = root.namedChild(0)!;
+      const symbol = symbolExtractor.extractSymbol(recordNode, code);
+      expect(symbol!.signature).toBe('record Person implements Foo');
     });
 
     // #949: a nested type declaration (class/interface/enum/record declared

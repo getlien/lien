@@ -10,6 +10,7 @@ import {
   extractSignature,
   extractParameters,
   clampSignatureLength,
+  collapseWhitespace,
 } from '../extractors/symbol-helpers.js';
 import { toImportPathsArray, toImportSymbolsArray } from '../extractors/types.js';
 import { calculateComplexity } from '../complexity/index.js';
@@ -520,7 +521,7 @@ export class CSharpSymbolExtractor implements LanguageSymbolExtractor {
       startLine: node.startPosition.row + 1,
       endLine: node.endPosition.row + 1,
       parentClass,
-      signature: `class ${nameNode.text}`,
+      signature: clampSignatureLength(`class ${nameNode.text}${typeParamsAndBaseList(node)}`),
     };
   }
 
@@ -534,7 +535,7 @@ export class CSharpSymbolExtractor implements LanguageSymbolExtractor {
       startLine: node.startPosition.row + 1,
       endLine: node.endPosition.row + 1,
       parentClass,
-      signature: `interface ${nameNode.text}`,
+      signature: clampSignatureLength(`interface ${nameNode.text}${typeParamsAndBaseList(node)}`),
     };
   }
 
@@ -548,7 +549,7 @@ export class CSharpSymbolExtractor implements LanguageSymbolExtractor {
       startLine: node.startPosition.row + 1,
       endLine: node.endPosition.row + 1,
       parentClass,
-      signature: `struct ${nameNode.text}`,
+      signature: clampSignatureLength(`struct ${nameNode.text}${typeParamsAndBaseList(node)}`),
     };
   }
 
@@ -562,7 +563,7 @@ export class CSharpSymbolExtractor implements LanguageSymbolExtractor {
       startLine: node.startPosition.row + 1,
       endLine: node.endPosition.row + 1,
       parentClass,
-      signature: `record ${nameNode.text}`,
+      signature: clampSignatureLength(`record ${nameNode.text}${typeParamsAndBaseList(node)}`),
     };
   }
 
@@ -576,7 +577,10 @@ export class CSharpSymbolExtractor implements LanguageSymbolExtractor {
       startLine: node.startPosition.row + 1,
       endLine: node.endPosition.row + 1,
       parentClass,
-      signature: `enum ${nameNode.text}`,
+      // Enums have no type parameters in C#, but can carry a base list — the
+      // underlying integer type (`enum Status : byte`) — so this still runs
+      // through the shared helper rather than a bespoke one-off.
+      signature: clampSignatureLength(`enum ${nameNode.text}${typeParamsAndBaseList(node)}`),
     };
   }
 }
@@ -602,6 +606,42 @@ const ACCESS_MODIFIERS = new Set(['public', 'private', 'protected', 'internal'])
  */
 function hasExplicitAccessModifier(node: SyntaxNode): boolean {
   return node.children.some(child => child.type === 'modifier' && ACCESS_MODIFIERS.has(child.text));
+}
+
+/**
+ * Generic type parameters and base-type/interface list, exactly as the
+ * source declares them (found in a post-release audit of 0.72.0: `signature`
+ * for a type declaration reported only its bare keyword and name, so
+ * `LogEventPropertyValueVisitor<TState, TResult>` lost its type parameters
+ * entirely and `Logger : ILogger, ILogEventSink, IDisposable` came back as
+ * bare `class Logger` — the single most useful fact about that class,
+ * gone). `type_parameter_list` and `base_list` are not registered grammar
+ * fields on class/struct/record/interface declarations (only
+ * `delegate_declaration` happens to expose `type_parameters` as a field), so
+ * both are found by scanning `namedChildren` instead of
+ * `childForFieldName` — this works uniformly across all four container
+ * kinds, including `record struct` (still a `record_declaration` node under
+ * the hood) and enum's base list (its underlying integer type, e.g. `enum
+ * Status : byte` — enums have no type parameters in C#, but do have this).
+ *
+ * Deliberately excludes `type_parameter_constraints_clause` (`where T :
+ * class, new()`): building the signature from just these two named pieces,
+ * rather than slicing the raw source text across the whole declaration
+ * head, means the constraint clause — which sits between the base list and
+ * the body — is never captured at all, not partially.
+ *
+ * Whitespace is collapsed to a single line (matching `extractSignature`'s
+ * convention): a base list can itself span multiple physical lines, e.g.
+ * Serilog's `Logger` class wraps a conditionally-compiled base in a
+ * preprocessor block (`class Logger : ILogger\n#if X\n, IAsyncDisposable\n#endif\n{`)
+ * — found via dogfooding against the real repo, not a hypothetical case.
+ */
+function typeParamsAndBaseList(node: SyntaxNode): string {
+  const typeParams = node.namedChildren.find(child => child.type === 'type_parameter_list');
+  const baseList = node.namedChildren.find(child => child.type === 'base_list');
+  const typeParamsText = collapseWhitespace(typeParams?.text);
+  const baseListText = collapseWhitespace(baseList?.text);
+  return `${typeParamsText}${baseListText ? ` ${baseListText}` : ''}`;
 }
 
 /**

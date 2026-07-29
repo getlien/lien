@@ -219,6 +219,29 @@ describe('Swift Language', () => {
       expect(cls).toMatchObject({ name: 'Bar', type: 'class', signature: 'class Bar' });
     });
 
+    // Same underlying bug as the C#/Java/Kotlin/TS fix: `signature` dropped
+    // generic type parameters and the inheritance clause entirely, so
+    // `class Foo<T>: Bar, Baz` came back as bare `class Foo`.
+    it('includes generic type parameters and the inheritance clause in class/struct/protocol signatures', () => {
+      const cls = symbolExtractor.extractSymbol(
+        findNode(parse('class Foo<T>: Bar, Baz {}'), 'class_declaration')!,
+        '',
+      )!;
+      expect(cls.signature).toBe('class Foo<T>: Bar, Baz');
+
+      const struct = symbolExtractor.extractSymbol(
+        findNode(parse('struct Point<T> {}'), 'class_declaration')!,
+        '',
+      )!;
+      expect(struct.signature).toBe('struct Point<T>');
+
+      const proto = symbolExtractor.extractSymbol(
+        findNode(parse('protocol IFoo: IBar, IBaz {}'), 'protocol_declaration')!,
+        '',
+      )!;
+      expect(proto.signature).toBe('protocol IFoo: IBar, IBaz');
+    });
+
     it('maps a protocol to an interface', () => {
       const proto = symbolExtractor.extractSymbol(
         findNode(parse('protocol Drawable { func draw() }'), 'protocol_declaration')!,

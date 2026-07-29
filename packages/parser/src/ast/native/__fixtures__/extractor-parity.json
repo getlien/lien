@@ -67,7 +67,7 @@
         },
         "symbolName": "Greeting",
         "symbolType": "class",
-        "signature": "class Greeting",
+        "signature": "class Greeting implements Greeter",
         "imports": ["helper"],
         "exports": ["Greeter", "Greeting"],
         "importedSymbols": {
@@ -217,7 +217,7 @@
         },
         "symbolName": "Greeter",
         "symbolType": "class",
-        "signature": "class Greeter",
+        "signature": "class Greeter: Greeting",
         "imports": [],
         "exports": ["Greeting", "message", "Greeter", "init", "add", "String"]
       }
