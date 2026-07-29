@@ -120,6 +120,11 @@ describe('findDependents', () => {
         createChunk('rack-protection/lib/rack/protection/base.rb', {
           imports: ['rack/protection'],
         }),
+        // The requested target must itself be indexed (#928) -- otherwise
+        // this test would pass vacuously (empty dependents for an
+        // unresolved target) rather than actually exercising the anti-fan-
+        // out guard it's named for.
+        createChunk('rack-protection/lib/rack/protection/xss_header.rb'),
       ]);
 
       const result = await findDependents(
@@ -138,6 +143,10 @@ describe('findDependents', () => {
         createChunk('rack-protection/lib/rack/protection/base.rb', {
           imports: ['rack/protection'],
         }),
+        // The requested target must itself be indexed (#928) for the fuzzy
+        // dependent search to run at all -- a real umbrella entry point is
+        // always its own chunk in a real index.
+        createChunk('rack-protection/lib/rack/protection.rb'),
       ]);
 
       const result = await findDependents(
@@ -159,6 +168,8 @@ describe('findDependents', () => {
       // real gin clone) by applying Ruby's stricter anchor unconditionally.
       mockDB.scanAll.mockResolvedValue([
         createChunk('render/html.go', { imports: ['internal/fs'] }),
+        // The requested target must itself be indexed (#928).
+        createChunk('internal/fs/fs.go'),
       ]);
 
       const result = await findDependents(mockDB as any, 'internal/fs/fs.go', mockLog);
@@ -174,6 +185,8 @@ describe('findDependents', () => {
       mockDB.scanAll.mockResolvedValue([
         createChunk('render/html.go', { imports: ['pkg/sub'] }),
         createChunk('lib/pkg/consumer.rb', { imports: ['pkg/sub'] }),
+        // The requested target must itself be indexed (#928).
+        createChunk('pkg/sub/child.go'),
       ]);
 
       const result = await findDependents(mockDB as any, 'pkg/sub/child.go', mockLog);
@@ -638,6 +651,71 @@ describe('findDependents', () => {
       expect(result.productionDependentCount).toBe(0);
       expect(result.testDependentCount).toBe(0);
       expect(result.complexityMetrics.complexityRiskBoost).toBe('low');
+    });
+  });
+
+  describe("#928: an unresolvable target must not inherit an unrelated file's dependent graph", () => {
+    it('a completely nonexistent path (no chunks anywhere) returns zero dependents with targetIndexed: false', async () => {
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/real.ts', { exports: ['thing'] }),
+        createChunk('src/consumer.ts', { imports: ['src/real.ts'] }),
+      ]);
+
+      const result = await findDependents(mockDB as any, 'src/totally/made/up/File.ts', mockLog);
+
+      expect(result.dependents).toHaveLength(0);
+      expect(result.targetIndexed).toBe(false);
+      expect(result.complexityMetrics.complexityRiskBoost).toBe('low');
+    });
+
+    it('a real file with genuinely zero dependents is still targetIndexed: true', async () => {
+      // Distinguishes "confirmed zero dependents" (a real, indexed, isolated
+      // file) from "unresolved target" (the case above) -- both return an
+      // empty `dependents` array, but only `targetIndexed` tells them apart.
+      mockDB.scanAll.mockResolvedValue([createChunk('src/isolated.ts', { exports: ['foo'] })]);
+
+      const result = await findDependents(mockDB as any, 'src/isolated.ts', mockLog);
+
+      expect(result.dependents).toHaveLength(0);
+      expect(result.targetIndexed).toBe(true);
+    });
+
+    it('a nonexistent path that would otherwise basename/suffix-collide with a real file does not inherit its graph (the PHP Command/Command.php repro)', async () => {
+      // Command/Command.php is a real, indexed file with a real dependent.
+      // matchesFile's generic multi-segment boundary strategy (Strategy 2)
+      // has no cap on how many extra leading directories the TARGET may
+      // carry beyond an already-resolved import specifier -- deliberately,
+      // to support e.g. PHP PSR-4 vendor prefixes ("Domain/Services/Auth"
+      // legitimately matching "web/Domain/Services/Auth"). That means a
+      // caller guessing a plausible-but-wrong "src/" prefix
+      // ("src/Command/Command.php") would, without an existence check,
+      // silently inherit the real file's entire graph purely because
+      // "Command/Command" is a suffix of "src/Command/Command" -- there is
+      // no purely textual way to tell the two shapes apart, so the existence
+      // check is load-bearing here, not merely defense in depth.
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('Application.php', { imports: ['Command/Command'] }),
+        createChunk('Command/Command.php', { exports: ['Command'] }),
+      ]);
+
+      const real = await findDependents(mockDB as any, 'Command/Command.php', mockLog);
+      expect(real.dependents.map(d => d.filepath)).toContain('Application.php');
+      expect(real.targetIndexed).toBe(true);
+
+      const fake = await findDependents(mockDB as any, 'src/Command/Command.php', mockLog);
+      expect(fake.dependents).toHaveLength(0);
+      expect(fake.targetIndexed).toBe(false);
+    });
+
+    it('logs a warning when the target is not found in the index', async () => {
+      mockDB.scanAll.mockResolvedValue([createChunk('src/real.ts')]);
+
+      await findDependents(mockDB as any, 'src/nope.ts', mockLog);
+
+      expect(mockLog).toHaveBeenCalledWith(
+        expect.stringContaining('Target not found in index'),
+        'warning',
+      );
     });
   });
 

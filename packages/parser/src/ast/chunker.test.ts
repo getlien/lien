@@ -178,11 +178,17 @@ function test() {
       });
     });
 
-    it('should NOT resolve relative-looking specifiers for non-JS/TS languages (#525 scope)', () => {
-      // Rust's extractor rewrites `super::utils::helper` as `../utils/helper`
-      // as an internal storage convention, not as a filesystem path. Resolving
-      // that against the chunk's directory would produce incorrect keys, so
-      // the gate in prepareASTContext must keep Rust imports untouched.
+    it('does NOT resolve Rust self::/super:: via the generic JS/TS-style relative-import join (#525 scope)', () => {
+      // Rust is deliberately excluded from `RESOLVE_RELATIVE_IMPORTS` (see
+      // that set's doc comment in ast/chunker.ts) because a naive filesystem-
+      // style ".." join of the extractor's `../utils/helper` storage
+      // convention would ascend past the importer's own directory when the
+      // importer is a "leaf" file (crates/app/src/foo.rs isn't a mod.rs, so
+      // its own directory already IS its parent module's location — see
+      // `resolveRustRelativeModulePath`'s doc comment). Rust instead resolves
+      // self::/super:: via its OWN module-aware mechanism (#928, threaded
+      // through `rustImporterFile`), which for this exact leaf-file shape
+      // correctly stays in the SAME directory rather than ascending.
       const rustContent = `
 use super::utils::helper;
 
@@ -195,10 +201,28 @@ pub fn run() {
       const funcChunk = chunks.find(c => c.metadata.symbolName === 'run');
 
       expect(funcChunk?.metadata.imports).toBeDefined();
-      // The Rust extractor's normalized form stays exactly as-is.
-      expect(funcChunk?.metadata.imports).toContain('../utils/helper');
-      // Explicitly NOT resolved against crates/app/src/foo.rs.
+      // Resolved precisely to the real sibling path (#928) -- NOT the old
+      // directory-less "../utils/helper" storage convention, and NOT the
+      // naive (wrong, ascends one level too far) generic join a JS/TS-style
+      // resolver would have produced.
+      expect(funcChunk?.metadata.imports).toContain('crates/app/src/utils/helper');
+      expect(funcChunk?.metadata.imports).not.toContain('../utils/helper');
       expect(funcChunk?.metadata.imports).not.toContain('crates/app/utils/helper');
+    });
+
+    it('resolves Rust self:: from a mod.rs to a sibling in the SAME directory (#928)', () => {
+      const rustContent = `
+pub use self::copy::copy;
+
+pub fn run() {
+    copy();
+}
+      `.trim();
+
+      const chunks = chunkByAST('tokio/src/fs/mod.rs', rustContent);
+      const funcChunk = chunks.find(c => c.metadata.symbolName === 'run');
+
+      expect(funcChunk?.metadata.imports).toContain('tokio/src/fs/copy/copy');
     });
 
     describe('cross-package workspace imports', () => {

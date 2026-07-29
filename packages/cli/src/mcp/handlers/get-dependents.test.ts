@@ -64,6 +64,7 @@ describe('handleGetDependents', () => {
       uncoveredProductionDependents?: number;
       symbolAttributionDegraded?: boolean;
       dependentAttributionIncomplete?: boolean;
+      targetIndexed?: boolean;
     } = {},
   ) {
     const dependents = overrides.dependents ?? [{ filepath: 'src/consumer.ts', isTestFile: false }];
@@ -90,6 +91,7 @@ describe('handleGetDependents', () => {
       uncoveredProductionDependents: overrides.uncoveredProductionDependents ?? 0,
       symbolAttributionDegraded: overrides.symbolAttributionDegraded,
       dependentAttributionIncomplete: overrides.dependentAttributionIncomplete,
+      targetIndexed: overrides.targetIndexed ?? true,
     };
   }
 
@@ -737,8 +739,12 @@ describe('handleGetDependents', () => {
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.riskLevel).toBe('medium');
+      // "production callers", not bare "callers" (#928) -- risk scoring feeds
+      // productionDependentCount in, which can differ from the response's
+      // wider top-level dependentCount (production + test); the label makes
+      // that scoping explicit instead of leaving two unexplained numbers.
       expect(parsed.riskReasoning).toEqual(
-        expect.arrayContaining(['8 callers', '3 untested', 'max complexity 12']),
+        expect.arrayContaining(['8 production callers', '3 untested', 'max complexity 12']),
       );
     });
 
@@ -759,7 +765,7 @@ describe('handleGetDependents', () => {
     });
   });
 
-  describe('unindexed path note', () => {
+  describe('unindexed path note (#927)', () => {
     it('adds an unmissable note when the filepath has no manifest entry at all', async () => {
       vi.mocked(findUnindexedPaths).mockResolvedValue(['src/does/not/exist.ts']);
 
@@ -772,13 +778,66 @@ describe('handleGetDependents', () => {
 
     it('adds no note when the filepath is indexed, regardless of dependentCount', async () => {
       vi.mocked(findUnindexedPaths).mockResolvedValue([]);
-      vi.mocked(findDependents).mockResolvedValue(createMockAnalysis({ dependents: [] }));
+      vi.mocked(findDependents).mockResolvedValue(
+        createMockAnalysis({ dependents: [], targetIndexed: true }),
+      );
 
       const result = await handleGetDependents({ filepath: 'src/isolated.ts' }, mockCtx);
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.dependentCount).toBe(0);
       expect(parsed).not.toHaveProperty('note');
+    });
+  });
+
+  describe('#928: unresolved-target note (chunk-based fallback)', () => {
+    it('adds an unmissable note when the target has no chunks in the index at all', async () => {
+      // findUnindexedPaths defaults to [] in beforeEach (manifest has no
+      // opinion here) -- this exercises the #928 chunk-based note on its own.
+      vi.mocked(findDependents).mockResolvedValue(
+        createMockAnalysis({ dependents: [], targetIndexed: false }),
+      );
+
+      const result = await handleGetDependents({ filepath: 'src/does/not/exist.ts' }, mockCtx);
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.dependentCount).toBe(0);
+      expect(parsed.riskLevel).toBe('low');
+      expect(parsed.note).toContain('⚠ Lien:');
+      expect(parsed.note).toContain('"src/does/not/exist.ts"');
+    });
+
+    it('adds no note when the target is indexed, regardless of dependentCount', async () => {
+      vi.mocked(findDependents).mockResolvedValue(
+        createMockAnalysis({ dependents: [], targetIndexed: true }),
+      );
+
+      const result = await handleGetDependents({ filepath: 'src/isolated.ts' }, mockCtx);
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.dependentCount).toBe(0);
+      expect(parsed).not.toHaveProperty('note');
+    });
+
+    it('does not duplicate or contradict the #927 manifest note when both mechanisms would fire', async () => {
+      // A genuinely nonexistent path is BOTH "not in the manifest" (#927)
+      // AND "has no chunks in this scan" (#928) -- the overwhelming common
+      // case. Only the manifest note (the more authoritative "is this path
+      // even part of the indexed project" signal) should appear; the #928
+      // note must not also append or overwrite it with a second, redundant
+      // explanation of the same zero.
+      vi.mocked(findUnindexedPaths).mockResolvedValue(['src/does/not/exist.ts']);
+      vi.mocked(findDependents).mockResolvedValue(
+        createMockAnalysis({ dependents: [], targetIndexed: false }),
+      );
+
+      const result = await handleGetDependents({ filepath: 'src/does/not/exist.ts' }, mockCtx);
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.note).toContain('⚠ Lien:');
+      // Exactly one note field, sourced from #927 (its wording, not #928's).
+      expect(parsed.note).toContain('not found in the index');
+      expect(parsed.note).not.toContain('has no chunks anywhere in the index');
     });
   });
 });

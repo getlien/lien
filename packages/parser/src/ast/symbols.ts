@@ -183,6 +183,7 @@ function extractImportPaths(
   filepath?: string,
   workspacePackages?: ReadonlyMap<string, string>,
   manifestRoots?: ManifestRoots,
+  rustImporterFile?: string,
 ): string[] {
   if (!importExtractor) return [];
 
@@ -190,7 +191,11 @@ function extractImportPaths(
   const nodeTypeSet = new Set(importExtractor.importNodeTypes);
 
   for (const node of collectImportNodes(rootNode, nodeTypeSet)) {
-    for (const result of importExtractor.extractImportPaths(node, manifestRoots?.rustCrateMap)) {
+    for (const result of importExtractor.extractImportPaths(
+      node,
+      manifestRoots?.rustCrateMap,
+      rustImporterFile,
+    )) {
       imports.push(resolveImportSpecifier(result, filepath, workspacePackages, manifestRoots));
     }
   }
@@ -215,12 +220,23 @@ function extractImportPaths(
  *
  * @param filepath - Optional path of the file being chunked. Enables resolution
  *   of `./` / `../` specifiers so they store workspace-relative paths instead
- *   of bare basenames.
+ *   of bare basenames. Deliberately gated per-language by the caller (see
+ *   `ast/chunker.ts`'s `RESOLVE_RELATIVE_IMPORTS`) — Rust is excluded here
+ *   because filesystem-style `..` resolution would misresolve `self::`/
+ *   `super::` (see `rustImporterFile` below for how Rust resolves them
+ *   instead).
  * @param workspacePackages - Optional map of workspace package name -> source
  *   entry file (see `resolveWorkspacePackageEntries`). Enables resolution of
  *   bare `@scope/pkg` specifiers that reference sibling workspace packages.
  * @param manifestRoots - Optional manifest-declared import-root mappings
  *   (PHP PSR-4, Go module prefix). See `ManifestRoots`.
+ * @param rustImporterFile - Rust-only (#928): the file's real workspace-
+ *   relative path, passed UNCONDITIONALLY (never gated by
+ *   `RESOLVE_RELATIVE_IMPORTS`, unlike `filepath` above) so
+ *   `RustImportExtractor` can resolve `self::`/`super::` against the
+ *   importer's own location via its own file-to-module-aware logic — see
+ *   `ast/languages/rust.ts`'s `resolveRustRelativeModulePath`. Every other
+ *   language's extractor ignores this parameter.
  */
 export function extractImports(
   rootNode: SyntaxNode,
@@ -228,6 +244,7 @@ export function extractImports(
   filepath?: string,
   workspacePackages?: ReadonlyMap<string, string>,
   manifestRoots?: ManifestRoots,
+  rustImporterFile?: string,
 ): string[] {
   if (!language) return [];
   return extractImportPaths(
@@ -236,6 +253,7 @@ export function extractImports(
     filepath,
     workspacePackages,
     manifestRoots,
+    rustImporterFile,
   );
 }
 
@@ -269,6 +287,7 @@ function extractSymbolsWithExtractor(
   filepath?: string,
   workspacePackages?: ReadonlyMap<string, string>,
   manifestRoots?: ManifestRoots,
+  rustImporterFile?: string,
 ): Record<string, string[]> {
   if (!importExtractor) return {};
 
@@ -276,7 +295,11 @@ function extractSymbolsWithExtractor(
   const nodeTypeSet = new Set(importExtractor.importNodeTypes);
 
   for (const node of collectImportNodes(rootNode, nodeTypeSet)) {
-    const results = importExtractor.processImportSymbolsList(node, manifestRoots?.rustCrateMap);
+    const results = importExtractor.processImportSymbolsList(
+      node,
+      manifestRoots?.rustCrateMap,
+      rustImporterFile,
+    );
     for (const result of results) {
       const key = resolveImportSpecifier(
         result.importPath,
@@ -299,11 +322,14 @@ function extractSymbolsWithExtractor(
  * legacy callers that don't pass it.
  *
  * @param filepath - Optional path of the file being chunked. Enables resolution
- *   of `./` / `../` specifiers into workspace-relative keys.
+ *   of `./` / `../` specifiers into workspace-relative keys. Gated per-language
+ *   by the caller — see `extractImports`'s doc comment for why Rust is
+ *   excluded and uses `rustImporterFile` instead.
  * @param workspacePackages - Optional map of workspace package name -> source
  *   entry file. Enables resolution of bare `@scope/pkg` keys.
  * @param manifestRoots - Optional manifest-declared import-root mappings
  *   (PHP PSR-4, Go module prefix). See `ManifestRoots`.
+ * @param rustImporterFile - Rust-only (#928) — see `extractImports`.
  */
 export function extractImportedSymbols(
   rootNode: SyntaxNode,
@@ -311,6 +337,7 @@ export function extractImportedSymbols(
   filepath?: string,
   workspacePackages?: ReadonlyMap<string, string>,
   manifestRoots?: ManifestRoots,
+  rustImporterFile?: string,
 ): Record<string, string[]> {
   if (!language) return {};
   return extractSymbolsWithExtractor(
@@ -319,6 +346,7 @@ export function extractImportedSymbols(
     filepath,
     workspacePackages,
     manifestRoots,
+    rustImporterFile,
   );
 }
 

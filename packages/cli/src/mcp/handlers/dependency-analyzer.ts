@@ -131,6 +131,23 @@ export interface DependencyAnalysisResult {
    * for the file-level answer instead.
    */
   dependentAttributionIncomplete?: boolean;
+  /**
+   * False when the requested target has zero chunks anywhere in the scanned
+   * index (#928) — i.e. it isn't a real file the indexer has seen, whether
+   * because it was never indexed, is misspelled, or genuinely has no
+   * extractable content. `matchesFile`'s fuzzy-matching strategies are tuned
+   * to resolve real ambiguous specifiers (relative imports, namespace
+   * prefixes, bare crate-root modules); they were never meant to stand in
+   * for an existence check, and running them against a target with no
+   * chunks of its own risks matching on textual coincidence alone (a
+   * fabricated path silently inheriting an unrelated real file's entire
+   * dependent graph — see the PHP `Command/Command.php` basename-collision
+   * repro in #928). When `false`, `dependents`/`symbolAttributionDegraded`/
+   * `dependentAttributionIncomplete` above are moot -- `dependents` is
+   * deliberately left empty rather than fuzzy-matched, and callers should
+   * treat the whole result as "unresolved", not "confirmed zero dependents".
+   */
+  targetIndexed: boolean;
 }
 
 /**
@@ -599,7 +616,11 @@ export async function findDependents(
   );
   const ctx: ScanContext = { importIndex, allChunksByFile, normalizePathCached, log };
 
-  const { chunksByFile, reExporterPaths } = seedDepth1Dependents(ctx, normalizedTarget);
+  const { targetIndexed, chunksByFile, reExporterPaths } = seedIfTargetIndexed(
+    ctx,
+    normalizedTarget,
+    filepath,
+  );
 
   // Stamp depth-1 files, then BFS outward if requested.
   const hopsByFile = new Map<string, number>();
@@ -653,6 +674,7 @@ export async function findDependents(
     filepath,
     symbol,
     dependents.length,
+    targetIndexed,
     log,
   );
 
@@ -670,6 +692,7 @@ export async function findDependents(
     uncoveredProductionDependents,
     symbolAttributionDegraded,
     dependentAttributionIncomplete,
+    targetIndexed,
   };
 }
 
@@ -680,14 +703,22 @@ export async function findDependents(
  * usage (see `DependencyAnalysisResult.dependentAttributionIncomplete`'s
  * doc comment). Logs a warning when it fires, matching the logging
  * `buildDependentsList` already does for its own degradation case.
+ *
+ * Skipped when `targetIndexed` is false (#928): an unresolved target's zero
+ * dependents already carries its own, more fundamental "unresolved" signal
+ * (see `seedIfTargetIndexed`) -- layering the C#-specific reasoning on top
+ * would produce two notes competing to explain the same zero, one of them
+ * describing a language nuance that's moot when the file was never found
+ * in the index at all.
  */
 function checkDependentAttributionIncomplete(
   filepath: string,
   symbol: string | undefined,
   dependentCount: number,
+  targetIndexed: boolean,
   log: (message: string, level?: 'warning') => void,
 ): true | undefined {
-  if (symbol || dependentCount !== 0) return undefined;
+  if (symbol || dependentCount !== 0 || !targetIndexed) return undefined;
 
   const targetLanguage = detectLanguage(filepath);
   if (targetLanguage === null || !hasEnclosingNamespaceAccess(targetLanguage)) return undefined;
@@ -699,6 +730,39 @@ function checkDependentAttributionIncomplete(
     'warning',
   );
   return true;
+}
+
+/**
+ * #928: only run the fuzzy dependent search against a target that's actually
+ * indexed. `allChunksByFile` is keyed by the same `normalizePathCached` used
+ * for `normalizedTarget`, so this check is free (no extra I/O) and precise
+ * for "does the index have any chunks for this file at all". Skipping the
+ * fuzzy search entirely for an unresolvable target — rather than letting it
+ * run and possibly latch onto an unrelated real file's import graph through
+ * textual coincidence — trades a possible false negative (a real but oddly-
+ * shaped match we don't find) for a guaranteed non-fabrication: an
+ * unresolvable target always comes back with zero dependents, never someone
+ * else's.
+ */
+function seedIfTargetIndexed(
+  ctx: ScanContext,
+  normalizedTarget: string,
+  filepath: string,
+): {
+  targetIndexed: boolean;
+  chunksByFile: Map<string, SearchResult[]>;
+  reExporterPaths: string[];
+} {
+  const targetIndexed = ctx.allChunksByFile.has(normalizedTarget);
+  if (!targetIndexed) {
+    ctx.log(
+      `Target not found in index: ${filepath} — returning zero dependents rather than a fuzzy-matched guess`,
+      'warning',
+    );
+    return { targetIndexed, chunksByFile: new Map(), reExporterPaths: [] };
+  }
+  const { chunksByFile, reExporterPaths } = seedDepth1Dependents(ctx, normalizedTarget);
+  return { targetIndexed, chunksByFile, reExporterPaths };
 }
 
 /** Depth-1 seed: direct importers plus barrel re-exporters. */
