@@ -41,7 +41,8 @@ symbol:
   constructor whose call sites couldn't be confirmed — the counts are the
   wider file-level answer, not a verified count for symbol itself.
   "dependent-attribution-incomplete" means Lien could not SEE real callers
-  in this language (e.g. C#) — grep before concluding the symbol is unused.
+  in this language (e.g. C#) — grep before concluding the file is unused.
+  (This reason only fires for FILE-level queries, i.e. no "symbol" argument.)
   riskLevel is not adjusted for either of the latter two and may still read
   "low"; attributionCaveat is the authoritative signal in all three cases.
 

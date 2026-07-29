@@ -1,6 +1,6 @@
 ---
-"@liendev/parser": patch
-"@liendev/lien": patch
+"@liendev/parser": minor
+"@liendev/lien": minor
 ---
 
 Fix `get_dependents`' risk verdict contradicting its own components (#933),
