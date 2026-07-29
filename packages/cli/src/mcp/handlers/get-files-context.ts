@@ -1,6 +1,7 @@
 import { wrapToolHandler } from '../utils/tool-wrapper.js';
 import { GetFilesContextSchema } from '../schemas/index.js';
 import { shapeResults, deduplicateResults } from '../utils/metadata-shaper.js';
+import { findUnindexedPaths, formatUnindexedPathsNote } from '../utils/unindexed-paths.js';
 import type { ToolContext, MCPToolResult, LogFn } from '../types.js';
 import {
   normalizePath,
@@ -11,10 +12,16 @@ import {
   hasSameDirectoryTestConvention,
   buildGoTestDirIndex,
   pairGoBasenameTest,
+  hasSamePackageTestConvention,
+  toJavaTestCandidate,
+  buildJavaTestDirIndex,
+  pairJavaBasenameTest,
   MAX_CHUNKS_PER_FILE,
   DEFAULT_COMPLEXITY_DELTA_THRESHOLDS,
   type GoTestCandidate,
   type GoTestDirIndex,
+  type JavaTestCandidate,
+  type JavaTestDirIndex,
 } from '@liendev/parser';
 import type { SearchResult, VectorDBInterface } from '@liendev/core';
 
@@ -303,6 +310,48 @@ function collectGoBasenameTestFiles(
 }
 
 /**
+ * True when `filepath`'s language sets `samePackageTestConvention` (Java
+ * today, #925) — mirrors `hasGoSameDirectoryConvention` immediately above.
+ */
+function hasJavaSamePackageConvention(filepath: string): boolean {
+  const language = detectLanguage(filepath);
+  return language !== null && hasSamePackageTestConvention(language);
+}
+
+/**
+ * #925: package-relative-directory index of same-package-test-convention
+ * (Java) test chunks, built once per `findTestAssociations` call and reused
+ * for every target file below — mirrors `buildGoTestDirIndexFromChunks`
+ * immediately above (tier 2's package-level fallback stays `lien
+ * annotate`-only, see annotate-cmd.ts).
+ */
+function buildJavaTestDirIndexFromChunks(
+  allChunks: Array<{ metadata: { file: string; imports?: string[] } }>,
+  workspaceRoot: string,
+  normalize: (path: string) => string,
+): JavaTestDirIndex {
+  const candidates: JavaTestCandidate[] = allChunks
+    .filter(chunk => isTestFile(getCanonicalPath(chunk.metadata.file, workspaceRoot)))
+    .filter(chunk => hasJavaSamePackageConvention(chunk.metadata.file))
+    .map(chunk =>
+      toJavaTestCandidate(getCanonicalPath(chunk.metadata.file, workspaceRoot), normalize),
+    )
+    .filter((c): c is JavaTestCandidate => c !== null);
+  return buildJavaTestDirIndex(candidates);
+}
+
+/** #925 tier 1: same-package basename-paired Java test(s) for `filepath`. */
+function collectJavaBasenameTestFiles(
+  filepath: string,
+  normalizedTarget: string,
+  javaTestDirIndex: JavaTestDirIndex,
+): string[] {
+  return hasJavaSamePackageConvention(filepath)
+    ? pairJavaBasenameTest(normalizedTarget, javaTestDirIndex)
+    : [];
+}
+
+/**
  * Find test files that import the given source files.
  *
  * Scans all indexed chunks to find test files that have import
@@ -316,7 +365,9 @@ function collectGoBasenameTestFiles(
  *
  * Also folds in #902 tier 1 (Go's same-directory basename-paired test
  * convention, which carries no import statement at all) — see
- * `buildGoTestDirIndexFromChunks`/`collectGoBasenameTestFiles` above.
+ * `buildGoTestDirIndexFromChunks`/`collectGoBasenameTestFiles` above — and
+ * #925 tier 1 (Java's same-package equivalent) — see
+ * `buildJavaTestDirIndexFromChunks`/`collectJavaBasenameTestFiles` above.
  *
  * @param filepaths - Array of source file paths
  * @param allChunks - All chunks from the vector database
@@ -331,12 +382,14 @@ export function findTestAssociations(
   const { workspaceRoot } = ctx;
   const { normalize } = createPathCache(workspaceRoot);
   const goTestDirIndex = buildGoTestDirIndexFromChunks(allChunks, workspaceRoot, normalize);
+  const javaTestDirIndex = buildJavaTestDirIndexFromChunks(allChunks, workspaceRoot, normalize);
 
   return filepaths.map(filepath => {
     const normalizedTarget = normalize(filepath);
     const testFiles = new Set<string>([
       ...collectImportMatchedTestFiles(allChunks, normalizedTarget, normalize, workspaceRoot),
       ...collectGoBasenameTestFiles(filepath, normalizedTarget, goTestDirIndex),
+      ...collectJavaBasenameTestFiles(filepath, normalizedTarget, javaTestDirIndex),
     ]);
 
     return Array.from(testFiles);
@@ -662,6 +715,16 @@ export async function handleGetFilesContext(
       workspaceRoot,
     };
 
+    // Step 0: Distinguish "path unknown to the index" from "indexed, zero
+    // results" — an empty chunks/testAssociations answer reads as "safe to
+    // edit" unless a mistyped path is called out explicitly. See
+    // unindexed-paths.ts for why the manifest (not scanAll) is the right check.
+    const unindexedPaths = await findUnindexedPaths(vectorDB, filepaths, workspaceRoot);
+    const unindexedNote = formatUnindexedPathsNote(unindexedPaths);
+    if (unindexedPaths.length > 0) {
+      log(`Path(s) not found in index: ${unindexedPaths.join(', ')}`, 'warning');
+    }
+
     // Step 1: Search for chunks belonging to each file
     const fileChunksMap = await searchFileChunks(filepaths, handlerCtx);
 
@@ -696,7 +759,7 @@ export async function handleGetFilesContext(
 
     // Step 5: Build and return response
     return isSingleFile
-      ? buildSingleFileResponse(filepaths[0], filesData, indexInfo)
-      : buildMultiFileResponse(filesData, indexInfo);
+      ? buildSingleFileResponse(filepaths[0], filesData, indexInfo, unindexedNote)
+      : buildMultiFileResponse(filesData, indexInfo, unindexedNote);
   })(args);
 }

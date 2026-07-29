@@ -9,13 +9,18 @@ import {
   hasWholeModuleImports,
   hasEnclosingNamespaceAccess,
   hasSameDirectoryTestConvention,
+  hasSamePackageTestConvention,
   isTestFile,
   normalizePath,
   buildGoTestDirIndex,
   findGoPackageLevelTests,
+  toJavaTestCandidate,
+  buildJavaTestDirIndex,
+  findJavaPackageLevelTests,
   type BlastRadiusRisk,
   type CodeChunk,
   type GoTestCandidate,
+  type JavaTestCandidate,
 } from '@liendev/parser';
 import { findDependents, type DependentInfo } from '../mcp/handlers/dependency-analyzer.js';
 import {
@@ -178,36 +183,29 @@ function adaptChunkImports(chunks: DependencyAnalysisChunk[]): CodeChunk[] {
 // signature honest without leaking the SearchResult import here.
 type DependencyAnalysisChunk = Awaited<ReturnType<typeof findDependents>>['allChunks'][number];
 
-/**
- * #902 tier 2, last resort: when `tests` (the core tier-1/import-based
- * result) is empty and `filepath`'s language sets
- * `sameDirectoryTestConvention` (Go), every test file in the same directory
- * — real, same-package signal, but coarser than tier 1, so it's kept
- * strictly separate from `tests` rather than merged into it. This is why
- * `scanTestAssociations`'s `packageLevelTests` field is additive: callers
- * that record or verify against `.tests` (`lookupTestAssociations` /
- * `verify-tests`'s ledger and scope-matching) see zero behavior change —
- * only `lien annotate`'s own printed text (`formatTests`/
- * `formatTestReminder`) consults this.
- */
-function computeGoPackageLevelFallback(
-  tests: string[],
-  filepath: string,
-  allChunks: CodeChunk[],
-  rootDir: string,
-): string[] {
-  if (tests.length > 0) return [];
-  const language = detectLanguage(filepath);
-  if (!language || !hasSameDirectoryTestConvention(language)) return [];
-
+/** Build the shared normalize-with-cache helper `computeGoPackageLevelTests`/`computeJavaPackageLevelTests` both need. */
+function makeCachedNormalizer(rootDir: string): (p: string) => string {
   const cache = new Map<string, string>();
-  const normalize = (p: string): string => {
+  return (p: string): string => {
     if (cache.has(p)) return cache.get(p)!;
     const normalized = normalizePath(p, rootDir);
     cache.set(p, normalized);
     return normalized;
   };
+}
 
+/**
+ * #902 tier 2: every same-directory-test-convention (Go) test file sharing
+ * `filepath`'s directory — real, same-package signal, but coarser than tier
+ * 1. Only called once `computePackageLevelFallback` has confirmed `tests` is
+ * empty and `filepath`'s language is Go.
+ */
+function computeGoPackageLevelTests(
+  filepath: string,
+  allChunks: CodeChunk[],
+  rootDir: string,
+): string[] {
+  const normalize = makeCachedNormalizer(rootDir);
   const candidates: GoTestCandidate[] = allChunks
     .filter(chunk => isTestFile(chunk.metadata.file))
     .filter(chunk => {
@@ -220,12 +218,69 @@ function computeGoPackageLevelFallback(
 }
 
 /**
+ * #925 tier 2: same story as `computeGoPackageLevelTests` above, but for
+ * Java's same-PACKAGE (not same-directory) convention — see
+ * java-same-package-tests.ts's module doc. Only called once
+ * `computePackageLevelFallback` has confirmed `tests` is empty and
+ * `filepath`'s language is Java.
+ */
+function computeJavaPackageLevelTests(
+  filepath: string,
+  allChunks: CodeChunk[],
+  rootDir: string,
+): string[] {
+  const normalize = makeCachedNormalizer(rootDir);
+  const candidates: JavaTestCandidate[] = allChunks
+    .filter(chunk => isTestFile(chunk.metadata.file))
+    .filter(chunk => {
+      const chunkLanguage = detectLanguage(chunk.metadata.file);
+      return chunkLanguage !== null && hasSamePackageTestConvention(chunkLanguage);
+    })
+    .map(chunk => toJavaTestCandidate(chunk.metadata.file, normalize))
+    .filter((c): c is JavaTestCandidate => c !== null);
+
+  return findJavaPackageLevelTests(normalize(filepath), buildJavaTestDirIndex(candidates));
+}
+
+/**
+ * Tier 2, last resort: when `tests` (the core tier-1/import-based result) is
+ * empty, dispatch to whichever no-import same-{directory,package} test
+ * convention `filepath`'s language sets (#902 Go, #925 Java) — real signal,
+ * but coarser than tier 1, so it's kept strictly separate from `tests`
+ * rather than merged into it. This is why `scanTestAssociations`'s
+ * `packageLevelTests` field is additive: callers that record or verify
+ * against `.tests` (`lookupTestAssociations` / `verify-tests`'s ledger and
+ * scope-matching) see zero behavior change — only `lien annotate`'s own
+ * printed text (`formatTests`/`formatTestReminder`) consults this. A file's
+ * language can only ever match one of the two conventions, so there's no
+ * ordering concern between them.
+ */
+function computePackageLevelFallback(
+  tests: string[],
+  filepath: string,
+  allChunks: CodeChunk[],
+  rootDir: string,
+): string[] {
+  if (tests.length > 0) return [];
+  const language = detectLanguage(filepath);
+  if (!language) return [];
+
+  if (hasSameDirectoryTestConvention(language)) {
+    return computeGoPackageLevelTests(filepath, allChunks, rootDir);
+  }
+  if (hasSamePackageTestConvention(language)) {
+    return computeJavaPackageLevelTests(filepath, allChunks, rootDir);
+  }
+  return [];
+}
+
+/**
  * #869 measure-gated spike, tier 3 (lowest confidence), last resort: when
  * `tests` (tier 1, import-based) is empty and `filepath`'s language sets
  * `wholeModuleImports` (Swift), fall back to the non-import symbol-usage
  * signal — see `findSwiftSymbolUsageAssociations`'s module doc for the full
  * association rule and its measured Alamofire precision. Deliberately NOT
- * merged into `tests`, mirroring `computeGoPackageLevelFallback`'s
+ * merged into `tests`, mirroring `computePackageLevelFallback`'s
  * discipline: `lookupTestAssociations`'s caller (`verify-tests-cmd.ts`)
  * reads only `.tests` and is unaffected; only the printed annotation/
  * reminder consults this field.
@@ -282,7 +337,7 @@ async function computeAnnotationData(
   const allChunks = adaptChunkImports(result.allChunks);
 
   const tests = findTestAssociationsFromChunks([filepath], allChunks, rootDir).get(filepath) ?? [];
-  const packageLevelTests = computeGoPackageLevelFallback(tests, filepath, allChunks, rootDir);
+  const packageLevelTests = computePackageLevelFallback(tests, filepath, allChunks, rootDir);
   const symbolUsageTests = computeSwiftSymbolUsageFallback(tests, filepath, allChunks);
   const complexity = computeComplexitySummary(allChunks, filepath);
   // Plan-time nudge (mirrors get_files_context's complexityHeadroom): reuses
@@ -403,12 +458,13 @@ export interface FileTestAssociations {
   rootDir: AbsolutePath;
   tests: string[];
   /**
-   * #902 tier 2, last resort: populated only when `tests` is empty and the
-   * file's language sets `sameDirectoryTestConvention` (Go). Deliberately
-   * NOT part of `tests` — `lookupTestAssociations`'s caller
-   * (`verify-tests-cmd.ts`'s ledger/scope-matching) reads only `.tests` and
-   * is unaffected; only the printed reminder (`formatTestReminder`) consults
-   * this field. See `computeGoPackageLevelFallback`.
+   * Tier 2, last resort: populated only when `tests` is empty and the
+   * file's language sets `sameDirectoryTestConvention` (Go, #902) or
+   * `samePackageTestConvention` (Java, #925). Deliberately NOT part of
+   * `tests` — `lookupTestAssociations`'s caller (`verify-tests-cmd.ts`'s
+   * ledger/scope-matching) reads only `.tests` and is unaffected; only the
+   * printed reminder (`formatTestReminder`) consults this field. See
+   * `computePackageLevelFallback`.
    */
   packageLevelTests: string[];
   /**
@@ -472,7 +528,7 @@ async function scanTestAssociations(paths: ResolvedPaths): Promise<FileTestAssoc
     const allChunks = adaptChunkImports(await vectorDB.scanAll());
     const tests =
       findTestAssociationsFromChunks([filepath], allChunks, rootDir).get(filepath) ?? [];
-    const packageLevelTests = computeGoPackageLevelFallback(tests, filepath, allChunks, rootDir);
+    const packageLevelTests = computePackageLevelFallback(tests, filepath, allChunks, rootDir);
     const symbolUsageTests = computeSwiftSymbolUsageFallback(tests, filepath, allChunks);
     return { filepath, rootDir, tests, packageLevelTests, symbolUsageTests, indexMissing: false };
   } finally {
@@ -530,11 +586,12 @@ export function formatNoIndexWarning(rootDir: string): string {
  * Render the one-line post-edit reminder. Pure and exported so the wording
  * and truncation are unit-testable without indexing a real project.
  *
- * `packageLevelTests` (#902 tier 2) is consulted only when `tests` is empty
- * — the same honest, distinctly-worded fallback `formatTests` uses for the
- * full annotation, applied to the shorter reminder line. `symbolUsageTests`
- * (#869 tier 3) is consulted only when BOTH `tests` and `packageLevelTests`
- * are empty — the lowest-confidence fallback, checked last.
+ * `packageLevelTests` (tier 2 -- Go #902 or Java #925, whichever the file's
+ * language sets) is consulted only when `tests` is empty — the same honest,
+ * distinctly-worded fallback `formatTests` uses for the full annotation,
+ * applied to the shorter reminder line. `symbolUsageTests` (#869 tier 3) is
+ * consulted only when BOTH `tests` and `packageLevelTests` are empty — the
+ * lowest-confidence fallback, checked last.
  */
 export function formatTestReminder(
   filepath: string,
@@ -675,12 +732,12 @@ export function formatDependents(
  * which is why this is a separate flag checked only as this empty-array
  * fallback, not folded into `wholeModuleImports`.
  *
- * `packageLevelTests` (#902 tier 2) is a THIRD, distinct kind of fallback —
- * unlike Swift/C#'s "not determinable" (zero signal at all), this case IS
- * determinable, just coarser than a direct match: real test files exist in
- * the same directory, but none basename-pairs with this specific file. Only
- * consulted when `tests` is empty; never merged into `tests` itself (see
- * `computeGoPackageLevelFallback`).
+ * `packageLevelTests` (tier 2 -- Go #902 or Java #925) is a THIRD, distinct
+ * kind of fallback — unlike Swift/C#'s "not determinable" (zero signal at
+ * all), this case IS determinable, just coarser than a direct match: real
+ * test files exist in the same directory (Go) or package (Java), but none
+ * basename-pairs with this specific file. Only consulted when `tests` is
+ * empty; never merged into `tests` itself (see `computePackageLevelFallback`).
  *
  * `symbolUsageTests` (#869 measure-gated spike, a FOURTH tier — lowest
  * confidence of all) is consulted only for a `wholeModuleImports` language

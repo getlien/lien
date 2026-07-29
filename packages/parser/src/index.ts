@@ -79,6 +79,7 @@ export {
   hasWholeModuleImports,
   hasEnclosingNamespaceAccess,
   hasSameDirectoryTestConvention,
+  hasSamePackageTestConvention,
 } from './ast/languages/registry.js';
 
 // =============================================================================
@@ -141,6 +142,17 @@ export {
   findGoPackageLevelTests,
 } from './go-same-directory-tests.js';
 export type { GoTestCandidate, GoTestDirIndex } from './go-same-directory-tests.js';
+
+// #925: Java's same-package (not same-directory) test-association signal
+// (see java-same-package-tests.ts's module doc).
+export {
+  javaPackageRelativePath,
+  toJavaTestCandidate,
+  buildJavaTestDirIndex,
+  pairJavaBasenameTest,
+  findJavaPackageLevelTests,
+} from './java-same-package-tests.js';
+export type { JavaTestCandidate, JavaTestDirIndex } from './java-same-package-tests.js';
 
 // #869 measure-gated spike: Swift's non-import symbol-usage test-association
 // signal (see swift-symbol-usage-signals.ts's module doc).

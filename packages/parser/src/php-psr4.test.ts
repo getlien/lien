@@ -76,6 +76,16 @@ describe('resolvePsr4Map', () => {
     expect(map.get('App\\')).toBe('src/');
   });
 
+  it('maps an empty-string PSR-4 dir onto the project root (symfony/console shape, #925)', async () => {
+    await writeJson('composer.json', {
+      autoload: { 'psr-4': { 'Symfony\\Component\\Console\\': '' } },
+    });
+
+    const map = resolvePsr4Map(testDir);
+
+    expect(map.get('Symfony\\Component\\Console\\')).toBe('');
+  });
+
   it('caches the map per workspace root', async () => {
     await writeJson('composer.json', {
       autoload: { 'psr-4': { 'GuzzleHttp\\': 'src/' } },
@@ -126,5 +136,12 @@ describe('resolvePsr4Import', () => {
   it('resolves a bare-prefix specifier with no remaining path segment', () => {
     const map = new Map([['App\\', 'src/']]);
     expect(resolvePsr4Import('App\\Kernel', map)).toBe('src/Kernel');
+  });
+
+  it('resolves a root-mapped namespace (empty-string dir) with no leading slash (symfony/console repro, #925)', () => {
+    const map = new Map([['Symfony\\Component\\Console\\', '']]);
+    expect(resolvePsr4Import('Symfony\\Component\\Console\\Command\\Command', map)).toBe(
+      'Command/Command',
+    );
   });
 });

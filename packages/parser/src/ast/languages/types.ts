@@ -145,4 +145,28 @@ export interface LanguageDefinition {
    * has been verified against real code.
    */
   sameDirectoryTestConvention?: boolean;
+
+  /**
+   * True when this language's dominant test convention places a test file in
+   * the SAME PACKAGE as its subject with NO import statement connecting them
+   * at all (like `sameDirectoryTestConvention` above), but where "same
+   * package" is NOT bounded to a single directory the way Go's is (#925).
+   *
+   * Java confirmed: same-package members are visible with no `import`, the
+   * same rule that motivates `sameDirectoryTestConvention` for Go -- but Java
+   * has no compiler-enforced one-package-per-directory rule, and a real
+   * multi-module Gradle/Maven build routinely puts a test class in a
+   * *different* module's source root that happens to declare the identical
+   * package (measured against a real square/retrofit clone: ALL 101 test
+   * files share a package with their subject while living in a different
+   * module's `src/<sourceSet>/java/` tree). What IS universal is the
+   * Maven/Gradle Standard Directory Layout itself
+   * (`src/<sourceSet>/java/<package/path>/...`), which makes the
+   * package-relative path (after stripping that fixed marker) an equally
+   * reliable, deterministic recovery -- see `java-same-package-tests.ts`.
+   * Absent/false (the default for every language except Java) means no
+   * package-relative signal is consulted; only set this where the
+   * convention has been verified against real code.
+   */
+  samePackageTestConvention?: boolean;
 }

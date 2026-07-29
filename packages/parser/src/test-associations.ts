@@ -4,13 +4,24 @@
  */
 
 import { isTestFile, normalizePath, importMatchesTarget } from './utils/path-matching.js';
-import { detectLanguage, hasSameDirectoryTestConvention } from './ast/languages/registry.js';
+import {
+  detectLanguage,
+  hasSameDirectoryTestConvention,
+  hasSamePackageTestConvention,
+} from './ast/languages/registry.js';
 import {
   buildGoTestDirIndex,
   pairGoBasenameTest,
   type GoTestCandidate,
   type GoTestDirIndex,
 } from './go-same-directory-tests.js';
+import {
+  toJavaTestCandidate,
+  buildJavaTestDirIndex,
+  pairJavaBasenameTest,
+  type JavaTestCandidate,
+  type JavaTestDirIndex,
+} from './java-same-package-tests.js';
 import type { CodeChunk } from './types.js';
 
 /**
@@ -22,6 +33,15 @@ import type { CodeChunk } from './types.js';
 function hasGoSameDirectoryConvention(filepath: string): boolean {
   const language = detectLanguage(filepath);
   return language !== null && hasSameDirectoryTestConvention(language);
+}
+
+/**
+ * True when `filepath`'s language sets `samePackageTestConvention` (Java
+ * today, #925) -- mirrors `hasGoSameDirectoryConvention` immediately above.
+ */
+function hasJavaSamePackageConvention(filepath: string): boolean {
+  const language = detectLanguage(filepath);
+  return language !== null && hasSamePackageTestConvention(language);
 }
 
 /** Test files among `testChunks` whose imports resolve to `normalizedTarget`. */
@@ -62,6 +82,56 @@ function collectGoBasenameTests(
 }
 
 /**
+ * #925 tier 1: same-package basename-paired Java test(s) for `filepath`, or
+ * `[]` for any non-Java target (or a Java target with no basename pair).
+ * Mirrors `collectGoBasenameTests` immediately above.
+ */
+function collectJavaBasenameTests(
+  filepath: string,
+  normalizedTarget: string,
+  javaTestDirIndex: JavaTestDirIndex,
+): string[] {
+  return hasJavaSamePackageConvention(filepath)
+    ? pairJavaBasenameTest(normalizedTarget, javaTestDirIndex)
+    : [];
+}
+
+/**
+ * #902: Go's dominant same-package test convention emits no import statement
+ * at all, so `collectImportMatchedTests` is structurally blind to it. Builds
+ * a directory index of same-directory-test-convention (Go) test chunks --
+ * tier 1 only (basename pairing); tier 2 (package-level fallback) is a
+ * `lien annotate`-only honesty fallback, see annotate-cmd.ts. Extracted from
+ * `findTestAssociationsFromChunks` to keep that function's own complexity
+ * from growing with each additional per-language tier-1 convention.
+ */
+function buildGoTestDirIndexFrom(
+  testChunks: CodeChunk[],
+  normalize: (p: string) => string,
+): GoTestDirIndex {
+  const candidates: GoTestCandidate[] = testChunks
+    .filter(chunk => hasGoSameDirectoryConvention(chunk.metadata.file))
+    .map(chunk => ({ file: chunk.metadata.file, normalized: normalize(chunk.metadata.file) }));
+  return buildGoTestDirIndex(candidates);
+}
+
+/**
+ * #925: same story as `buildGoTestDirIndexFrom` above, but for Java's
+ * same-PACKAGE (not same-directory) convention -- see
+ * java-same-package-tests.ts's module doc.
+ */
+function buildJavaTestDirIndexFrom(
+  testChunks: CodeChunk[],
+  normalize: (p: string) => string,
+): JavaTestDirIndex {
+  const candidates: JavaTestCandidate[] = testChunks
+    .filter(chunk => hasJavaSamePackageConvention(chunk.metadata.file))
+    .map(chunk => toJavaTestCandidate(chunk.metadata.file, normalize))
+    .filter((c): c is JavaTestCandidate => c !== null);
+  return buildJavaTestDirIndex(candidates);
+}
+
+/**
  * Find test files that import the given source files.
  * Works entirely from in-memory chunks — no VectorDB or filesystem needed.
  *
@@ -89,22 +159,20 @@ export function findTestAssociationsFromChunks(
   // Pre-filter to only test chunks for performance
   const testChunks = chunks.filter(chunk => isTestFile(chunk.metadata.file));
 
-  // #902: Go's dominant same-package test convention emits no import
-  // statement at all, so the import-matching loop below is structurally
-  // blind to it. Build a directory index of same-directory-test-convention
-  // (Go) test chunks once, reused for every target file below -- tier 1
-  // only (basename pairing); tier 2 (package-level fallback) is a
-  // `lien annotate`-only honesty fallback, see annotate-cmd.ts.
-  const goTestCandidates: GoTestCandidate[] = testChunks
-    .filter(chunk => hasGoSameDirectoryConvention(chunk.metadata.file))
-    .map(chunk => ({ file: chunk.metadata.file, normalized: normalize(chunk.metadata.file) }));
-  const goTestDirIndex = buildGoTestDirIndex(goTestCandidates);
+  // Directory/package indexes for the no-import same-{directory,package}
+  // test conventions (#902 Go, #925 Java) -- built once, reused for every
+  // target file below. Tier 1 only (basename pairing); each language's
+  // tier 2 (package-level fallback) is a `lien annotate`-only honesty
+  // fallback, see annotate-cmd.ts.
+  const goTestDirIndex = buildGoTestDirIndexFrom(testChunks, normalize);
+  const javaTestDirIndex = buildJavaTestDirIndexFrom(testChunks, normalize);
 
   for (const filepath of filepaths) {
     const normalizedTarget = normalize(filepath);
     const testFiles = new Set<string>([
       ...collectImportMatchedTests(testChunks, normalizedTarget, normalize),
       ...collectGoBasenameTests(filepath, normalizedTarget, goTestDirIndex),
+      ...collectJavaBasenameTests(filepath, normalizedTarget, javaTestDirIndex),
     ]);
 
     if (testFiles.size > 0) {
