@@ -29,6 +29,7 @@ import {
 } from '../mcp/handlers/get-files-context.js';
 import { resolveProjectRoot } from './project-root.js';
 import { type AbsolutePath, type RelativePath, toAbsolutePath } from '../types/paths.js';
+import { canonicalizePath } from '../utils/canonicalize-path.js';
 
 // Complexity threshold lives in @liendev/core (dependency-analyzer's
 // COMPLEXITY_THRESHOLDS.HIGH_COMPLEXITY_DEPENDENT = 10) and surfaces
@@ -164,7 +165,15 @@ function resolvePaths(file: string): ResolvedPaths | null {
   // Compute project-root-relative form from the validated abs so it
   // matches whatever Lien's indexer stored. Reject paths outside the
   // root (path.relative would produce a `..`-prefixed traversal).
-  const rel = path.relative(rootDir, abs).replace(/\\/g, '/');
+  //
+  // Canonicalize both sides first: `rootDir` is derived from `process.cwd()`
+  // (already realpath'd by the OS), but an absolute `file` passed straight
+  // through (e.g. an MCP tool's `file_path` reused from a prior Read/Edit)
+  // has not been. Under a symlinked ancestor (macOS `/tmp` -> `/private/tmp`)
+  // that mismatch makes `path.relative` straddle two different roots and
+  // return a `..`-laden path even for a file genuinely inside the project —
+  // which this function would then (wrongly) reject as "outside the root".
+  const rel = path.relative(canonicalizePath(rootDir), canonicalizePath(abs)).replace(/\\/g, '/');
   if (!rel || rel.startsWith('..')) return null;
   const filepath = rel as RelativePath;
 

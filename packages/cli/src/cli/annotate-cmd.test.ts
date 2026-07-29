@@ -483,6 +483,41 @@ describe('annotateCommand (integration)', () => {
     expect(errSpy).not.toHaveBeenCalled();
   });
 
+  // Regression: `resolvePaths` used to compute `path.relative(rootDir, abs)`
+  // without canonicalizing either side. `rootDir` (from `resolveProjectRoot`
+  // -> `process.cwd()`) is already realpath'd by the OS, but an absolute
+  // `file` arriving verbatim (an MCP tool's `file_path` reused from a prior
+  // Read/Edit) is not — so a symlinked ancestor (macOS `/tmp` -> `/private/tmp`)
+  // made `path.relative` straddle two different roots, computed a `..`-prefixed
+  // path, and made `resolvePaths` wrongly reject a file that genuinely is
+  // inside the project. Without the fix this test's `annotateCommand` call
+  // returns silently (`resolvePaths` -> null); with it, it reaches the same
+  // "no index found" branch the plain-relative-path test below hits.
+  it('resolves an absolute path through a symlinked ancestor instead of silently rejecting it', async () => {
+    const fs = await import('fs/promises');
+    const repoRoot = path.resolve(process.cwd(), '..', '..');
+    const linkPath = path.join(
+      os.tmpdir(),
+      `lien-annotate-symlink-test-${process.pid}-${Date.now()}`,
+    );
+    try {
+      await fs.symlink(repoRoot, linkPath, 'dir');
+    } catch {
+      return; // platform can't create symlinks — skip cleanly rather than fail
+    }
+    try {
+      const target = path.join(linkPath, 'packages/cli/src/cli/index.ts');
+      await annotateCommand(target);
+      expect(errSpy).not.toHaveBeenCalled();
+      expect(logSpy).toHaveBeenCalledTimes(1);
+      expect(logSpy.mock.calls[0][0]).toContain(
+        'Lien: no index found at the resolved project root',
+      );
+    } finally {
+      await fs.rm(linkPath, { force: true }).catch(() => undefined);
+    }
+  });
+
   // #894: this used to be silent (an empty-but-plausible "no dependents/no
   // test coverage" annotation, or nothing at all) — now it's a loud,
   // one-line warning via stdout (never stderr — the read-hook pipes lien
