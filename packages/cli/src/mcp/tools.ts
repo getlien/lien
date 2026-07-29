@@ -144,7 +144,11 @@ Returns:
   signal among dependents always lifts this above "low", even when every dependent
   is fully tested (testedness lowers the chance of a *silent* break, it does not
   shrink the blast radius). Check riskReasoning for which signal(s) drove it.
-- dependents[]: { filepath, isTestFile, usages[]? }
+- dependents[]: { filepath, isTestFile, usages[]?, confidence?: "inferred" }
+  \`confidence: "inferred"\` marks a dependent recovered by text-matching a
+  uniquely-declared type name (C#'s global-using gap, see
+  dependent-attribution-partial below) rather than a real import edge — absent
+  entirely on every ordinary, import-verified dependent.
 - complexityMetrics: { averageComplexity, maxComplexity, highComplexityDependents[] }
 - totalUsageCount?: number (when symbol parameter provided)
 - attributionCaveat?: { reason, note } — present whenever dependentCount/riskLevel
@@ -159,11 +163,17 @@ Returns:
     top-level export) and its call sites couldn't be confirmed; dependentCount/
     riskLevel are the file-level answer (every importer of filepath), not a
     verified count of callers of symbol itself.
+  - "dependent-attribution-partial": a file-level query (no \`symbol\`) found ZERO
+    import-based dependents, but a lower-confidence text-matching fallback
+    recovered one or more (tagged \`confidence: "inferred"\` in dependents[], see
+    above). Treat dependentCount/riskLevel as a recovered FLOOR, not a
+    verified/complete answer — the fallback can still miss a real dependent that
+    references the type via an alias, a generic type argument, or reflection.
   - "dependent-attribution-incomplete": a file-level query (no \`symbol\`) returned
-    ZERO dependents in a language whose callers need no per-file import (C# today:
-    enclosing-namespace access under a \`global using\`). Treat dependentCount 0 and
-    riskLevel "low" as a FLOOR, not a finding — verify with grep before concluding
-    the file is unused.
+    ZERO dependents even after the fallback above also found nothing, in a
+    language whose callers need no per-file import (C# today: enclosing-namespace
+    access under a \`global using\`). Treat dependentCount 0 and riskLevel "low" as
+    a FLOOR, not a finding — verify with grep before concluding the file is unused.
   At most one reason ever fires per response.`,
   ),
   toMCPToolSchema(

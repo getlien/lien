@@ -27,7 +27,7 @@ interface IndexInfo {
 /**
  * Why a `get_dependents` answer's counts can't be trusted as a verified
  * clear (#940). Exactly one reason can ever apply to a given response --
- * see `buildAttributionCaveat`'s doc comment for why these three are
+ * see `buildAttributionCaveat`'s doc comment for why these four are
  * mutually exclusive by construction:
  *
  * - `unresolved-target`: `filepath` isn't resolvable in the index at all
@@ -38,14 +38,21 @@ interface IndexInfo {
  *   `filepath` (the shape of a method or constructor -- #931), so the
  *   response was widened to file-level dependents instead of asserting an
  *   unverifiable symbol-scoped count.
+ * - `dependent-attribution-partial`: a file-level query (no `symbol`) found
+ *   zero import-based dependents, but the C# type-reference-matching
+ *   fallback recovered one or more (#930 part 2) -- those entries are
+ *   tagged `confidence: 'inferred'` in `dependents`, and the counts are a
+ *   recovered lower bound, not a verified/complete answer.
  * - `dependent-attribution-incomplete`: a file-level query (no `symbol`)
  *   came back with zero dependents in a language where the import graph
  *   structurally can't see every real usage, e.g. C#'s `global using` /
- *   implicit enclosing-namespace access (#930, #936).
+ *   implicit enclosing-namespace access (#930, #936), EVEN AFTER the
+ *   type-reference-matching fallback also found nothing.
  */
 export type AttributionCaveatReason =
   | 'unresolved-target'
   | 'symbol-attribution-degraded'
+  | 'dependent-attribution-partial'
   | 'dependent-attribution-incomplete';
 
 export interface AttributionCaveat {
@@ -77,7 +84,7 @@ interface DependentsResponse {
   complexityMetrics: ComplexityMetrics;
   /**
    * Present when this answer's counts can't be trusted as a verified clear
-   * -- read `reason` to tell which of the three ways that can happen (see
+   * -- read `reason` to tell which of the four ways that can happen (see
    * `AttributionCaveatReason`'s doc comment) and `note` for the specific
    * explanation. Absent entirely on a normal, fully-attributed answer.
    */
@@ -177,18 +184,24 @@ function clarifyCallerReasoning(reasoning: string[]): string[] {
 /**
  * Decide which (if any) attribution caveat applies, and build its note.
  *
- * The three reasons are mutually exclusive by construction, so at most one
+ * The four reasons are mutually exclusive by construction, so at most one
  * ever fires:
  * - `unresolvedTargetNote` is only non-empty when `filepath` has no chunks
  *   anywhere in the index, in which case `findDependents` returns an empty
  *   `chunksByFile` up front -- so `symbolAttributionDegraded` (which
- *   requires `chunksByFile.size > 0` to fire) and
- *   `dependentAttributionIncomplete` (which explicitly skips when
- *   `!targetIndexed`) can never also be set.
+ *   requires `chunksByFile.size > 0` to fire), `dependentAttributionPartial`,
+ *   and `dependentAttributionIncomplete` (both of which explicitly skip
+ *   when `!targetIndexed`) can never also be set.
  * - `symbolAttributionDegraded` only fires for a `symbol` query;
- *   `dependentAttributionIncomplete` only fires for a file-level query (no
- *   `symbol`) -- see `checkDependentAttributionIncomplete` in
- *   dependency-analyzer.ts. So those two can't co-occur either.
+ *   `dependentAttributionPartial`/`dependentAttributionIncomplete` only fire
+ *   for a file-level query (no `symbol`) -- see
+ *   `enrichWithCSharpTypeReferenceDependents`/
+ *   `checkDependentAttributionIncomplete` in dependency-analyzer.ts. So
+ *   those can't co-occur with `symbolAttributionDegraded` either.
+ * - `dependentAttributionPartial` requires the FINAL `dependents.length`
+ *   (after the type-reference-matching fallback runs) to be positive;
+ *   `dependentAttributionIncomplete` requires that same final count to be
+ *   zero. So those two can never both be set.
  *
  * #927's manifest-based unresolved-target note takes precedence over #928's
  * chunk-based one where both could apply (a typo'd/nonexistent path trips
@@ -226,6 +239,22 @@ function buildAttributionCaveat(
         `its class/package). Symbol-level call sites couldn't be confirmed, so dependentCount, ` +
         `riskLevel, and dependents below are the file-level answer (every file that imports ` +
         `${filepath}) rather than a verified count of callers of "${symbol}" specifically.`,
+    };
+  }
+  if (analysis.dependentAttributionPartial) {
+    const inferredCount = analysis.dependents.filter(d => d.confidence === 'inferred').length;
+    return {
+      reason: 'dependent-attribution-partial',
+      note:
+        `The import graph found zero import-based dependents for ${filepath} (its language, C#, ` +
+        `lets real callers use its exports with no per-file import naming it at all — "global ` +
+        `using" / implicit enclosing-namespace member access), but ${inferredCount} of the ` +
+        `${analysis.dependents.length} dependent(s) below were recovered by matching a ` +
+        `uniquely-declared type name against other files' source text (marked ` +
+        `"confidence": "inferred" in \`dependents\`). Treat dependentCount/riskLevel as a ` +
+        `recovered LOWER BOUND, not a verified/complete answer — this heuristic can still miss a ` +
+        `real dependent that references the type via an alias, a generic type argument, or ` +
+        `reflection.`,
     };
   }
   if (analysis.dependentAttributionIncomplete) {
