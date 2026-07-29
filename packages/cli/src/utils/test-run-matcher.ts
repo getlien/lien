@@ -210,6 +210,51 @@ function isPositionalNameFilterRunner(matchedRunnerText: string): boolean {
   return POSITIONAL_NAME_FILTER_RUNNERS.has(matchedRunnerText.trim());
 }
 
+// `cargo test`'s own build/compile-config flags that take a value — NONE of
+// these narrow which tests run at all (they configure feature flags, which
+// package/manifest/target/profile to build, or job parallelism), so the run
+// stays whatever the rest of the command implies (broad, absent any other
+// scoping). Without this set, `extractPathLikeTokens`'s bare-token tracking
+// (feeding `isPositionalNameFilterRunner` above) misread e.g. `--features
+// foo`'s value "foo" as a bare positional TEST NAME, flipping a genuinely
+// broad `cargo test --features foo` to falsely name-filtered — caught in
+// review (the same collision hazard as tox `-e`/rspec `-e`, and
+// cargo-nextest's `run` keyword, just a third instance of it). Skipped as
+// flag+value, same mechanism as WORKSPACE_SCOPE_FLAGS/CONFIG_FLAGS, but kept
+// cargo-test-specific (via `valueSkipFlagsFor`) rather than global, since
+// e.g. `-j`/`--target` aren't universally safe to blanket-skip for every
+// runner. `--test <name>` (a specific integration-test-binary target) is
+// deliberately NOT here: it doesn't configure the build, it selects which
+// tests run, so its value should keep flowing through as an ordinary bare
+// token — landing on the same name-filtered (not broad, not silently
+// "scoped") outcome as a plain positional filter, which is the safe
+// direction for a target name we don't have infrastructure to resolve
+// against real file paths.
+const CARGO_TEST_VALUE_FLAGS = new Set([
+  '-p',
+  '--package',
+  '--exclude',
+  '--manifest-path',
+  '--lockfile-path',
+  '--target',
+  '--target-dir',
+  '--profile',
+  '-j',
+  '--jobs',
+  '-F',
+  '--features',
+  '--color',
+  '--message-format',
+]);
+const NO_VALUE_SKIP_FLAGS: ReadonlySet<string> = new Set();
+
+/** Which extra flag+value pairs should be fully skipped (beyond the universal WORKSPACE_SCOPE_FLAGS/CONFIG_FLAGS) for the runner `matchedRunnerText` identified. */
+function valueSkipFlagsFor(matchedRunnerText: string): ReadonlySet<string> {
+  return isPositionalNameFilterRunner(matchedRunnerText)
+    ? CARGO_TEST_VALUE_FLAGS
+    : NO_VALUE_SKIP_FLAGS;
+}
+
 // Flags whose value is a config file path, not a test/source file —
 // `vitest --config vitest.config.ts` runs whatever the config's own
 // `include` pattern selects (typically the whole suite), not just the named
@@ -345,20 +390,25 @@ interface ScopeScanResult {
 
 /**
  * Scan the remainder of a segment after its matched runner keyword for
- * scoping arguments. Skips flags (dash-prefixed) and, for workspace-scope
- * and config flags specifically, their value too (a manual index loop is
- * required here to look ahead one token — not a tree-sitter AST walk, so the
- * codebase's array-methods-only rule for SyntaxNode iteration doesn't
- * apply). A name-filter flag's own value is deliberately NOT skipped as a
- * pair (unlike workspace-scope/config flags): the flag's mere presence is
- * enough to signal "name-filtered", and letting its value fall through the
- * ordinary path-token check for free still promotes it to a real scope
- * token on the rare occasion it happens to look like a path.
+ * scoping arguments. Skips flags (dash-prefixed) and, for workspace-scope,
+ * config, and runner-specific value-taking flags specifically, their value
+ * too (a manual index loop is required here to look ahead one token — not a
+ * tree-sitter AST walk, so the codebase's array-methods-only rule for
+ * SyntaxNode iteration doesn't apply). `valueSkipFlags` (from
+ * `valueSkipFlagsFor`) covers flags whose value would otherwise be
+ * misread as scoping evidence — e.g. `cargo test --features foo`'s "foo"
+ * looking like a bare positional test name. A name-filter flag's own value,
+ * by contrast, is deliberately NOT skipped as a pair (unlike these): the
+ * flag's mere presence is enough to signal "name-filtered", and letting its
+ * value fall through the ordinary path-token check for free still promotes
+ * it to a real scope token on the rare occasion it happens to look like a
+ * path.
  */
 function extractPathLikeTokens(
   remainder: string,
   extensions: ReadonlySet<string>,
   nameFilterFlags: ReadonlySet<string>,
+  valueSkipFlags: ReadonlySet<string>,
 ): ScopeScanResult {
   const tokens = remainder.trim().split(/\s+/).filter(Boolean);
   const pathTokens: string[] = [];
@@ -366,7 +416,7 @@ function extractPathLikeTokens(
   let sawBareToken = false;
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i];
-    if (WORKSPACE_SCOPE_FLAGS.has(token) || CONFIG_FLAGS.has(token)) {
+    if (WORKSPACE_SCOPE_FLAGS.has(token) || CONFIG_FLAGS.has(token) || valueSkipFlags.has(token)) {
       i++; // also skip the flag's value
       continue;
     }
@@ -417,6 +467,7 @@ export function classifyTestCommand(command: string): TestRunClassification {
       remainder,
       extensions,
       nameFilterFlagsFor(match[0]),
+      valueSkipFlagsFor(match[0]),
     );
     if (pathTokens.length > 0) {
       pathTokens.forEach(t => scopeTokens.add(t));

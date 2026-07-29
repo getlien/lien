@@ -245,6 +245,37 @@ absorbed by its own anchored runner pattern before this scan ever runs, so
 the shared spelling with dotnet/swift's name filter never collides in
 practice.
 
+##### A third instance of the same hazard, caught in review: `cargo test`'s own value-taking flags (2026-07-29)
+
+Review of the fix above found that `cargo test`'s bare-positional detection
+was too aggressive: `cargo test --features foo`, `-p my_crate`,
+`--manifest-path <path>`, `--target <triple>`, `--profile <name>`, and `-j
+<n>` all take a bare VALUE in the exact textual position a positional test
+name would sit, and none of them narrow which tests run — the run stays
+genuinely broad. Before this follow-up, that value was misread as a bare
+positional test name (`sawBareToken`), flipping a genuinely broad run to
+falsely name-filtered — the opposite direction from the original bug, but
+still wrong, and a real regression relative to the pre-existing behavior for
+these commands. Fixed by adding `CARGO_TEST_VALUE_FLAGS`
+(`valueSkipFlagsFor` in `test-run-matcher.ts`), skipped as flag+value the
+same way `WORKSPACE_SCOPE_FLAGS`/`CONFIG_FLAGS` already are, but kept
+cargo-test-specific rather than global (a couple of these flag spellings,
+e.g. `-j`, aren't universally safe to blanket-skip for every runner).
+
+`--test <name>` (cargo's specific-integration-test-binary-target filter) is
+deliberately excluded from that skip set: unlike the flags above, it
+genuinely narrows which tests run, so its value is left to flow through as
+an ordinary bare token — landing on the same name-filtered (not broad, not
+falsely "scoped") outcome as a plain `cargo test <name>`, the safe fallback
+for a target name this module has no infrastructure to resolve against a
+real file path.
+
+This is the **third** instance of the identical hazard class in one file
+(bare/short-flag values misread across an unrelated boundary): tox `-e`
+vs. rspec `-e`, cargo-nextest's `run` keyword vs. `cargo test`'s positional,
+and now `cargo test`'s own compile-config flags vs. its own positional. All
+three are now pinned as regression tests in `test-run-matcher.test.ts`.
+
 ## C. `lien verify-tests <subcommand>`
 
 A command group (`packages/cli/src/cli/verify-tests-cmd.ts`), like `lien

@@ -197,6 +197,38 @@ describe('classifyTestCommand — broad vs scoped classification table', () => {
     // opposite of "ran a named test" and must stay broad.
     ['./gradlew test -x integrationTest', true, true, []],
     ['./gradlew --exclude-task integrationTest test', true, true, []],
+    // Regression (caught in review): `cargo test`'s own build/compile-config
+    // flags take a bare VALUE in the exact same position a positional test
+    // name would sit (`cargo test [TESTNAME]`) — the third instance of this
+    // hazard class in this file (after tox `-e`/rspec `-e` and cargo-nextest's
+    // `run`). None of these narrow which tests run; the value must not be
+    // misread as a test name, and the run must stay `broad`.
+    ['cargo test --features foo', true, true, []],
+    ['cargo test -F foo', true, true, []],
+    ['cargo test --features=foo', true, true, []],
+    ['cargo test -p my_crate', true, true, []],
+    ['cargo test --package my_crate', true, true, []],
+    ['cargo test --exclude other_crate', true, true, []],
+    ['cargo test --manifest-path ./Cargo.toml', true, true, []],
+    ['cargo test --lockfile-path ./Cargo.lock', true, true, []],
+    ['cargo test --target x86_64-unknown-linux-gnu', true, true, []],
+    ['cargo test --target-dir ./target', true, true, []],
+    ['cargo test --profile release', true, true, []],
+    ['cargo test -j 4', true, true, []],
+    ['cargo test --jobs 4', true, true, []],
+    ['cargo test --color always', true, true, []],
+    ['cargo test --message-format json', true, true, []],
+    // A build-config flag alongside a genuine positional test name must
+    // still be recognized as name-filtered by that name — the flag-value
+    // skip must not eat the real positional too.
+    ['cargo test --features foo some_unrelated_name', true, false, []],
+    // `--test <name>` selects a specific integration-test BINARY target by
+    // name, not a file path and not a build-config value — it genuinely
+    // narrows which tests run, so (unlike the build-config flags above) it
+    // is deliberately NOT skipped. There's no infrastructure here to resolve
+    // a bare target name against a real file, so it lands on the same safe
+    // name-filtered (not broad) outcome as a plain `cargo test <name>`.
+    ['cargo test --test integration_test', true, false, []],
   ])('%s -> isTestRun=%s broad=%s scopeTokens=%j', (command, isTestRun, broad, scopeTokens) => {
     expect(classifyTestCommand(command)).toEqual({ isTestRun, broad, scopeTokens });
   });
