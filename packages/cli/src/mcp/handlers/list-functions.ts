@@ -86,6 +86,15 @@ async function queryWithFallback(
 
 /**
  * Deduplicate and paginate results.
+ *
+ * `nextOffset` is included whenever at least one result is shown —
+ * deliberately NOT gated on `hasMore`. A page that looks complete here
+ * (`hasMore: false`, e.g. exactly `limit` items fetched) can still get
+ * items dropped later by applyResponseBudget for response size, which
+ * forces `hasMore` true after the fact; that correction needs an existing
+ * `nextOffset` field to adjust (see response-budget.ts). Always offset +
+ * (what was actually returned), so it's never past the shown items even
+ * before any downstream size-cut.
  */
 function paginateResults(results: SearchResult[], offset: number, limit: number): PaginationResult {
   const dedupedResults = deduplicateResults(results);
@@ -95,7 +104,7 @@ function paginateResults(results: SearchResult[], offset: number, limit: number)
   return {
     paginatedResults,
     hasMore,
-    ...(hasMore ? { nextOffset: offset + limit } : {}),
+    ...(paginatedResults.length > 0 ? { nextOffset: offset + paginatedResults.length } : {}),
   };
 }
 

@@ -683,7 +683,7 @@ describe('handleListFunctions', () => {
       expect(parsed.nextOffset).toBe(15);
     });
 
-    it('should return hasMore=false when all results fit', async () => {
+    it('should return hasMore=false when all results fit, but still include a usable nextOffset', async () => {
       mockVectorDB.querySymbols.mockResolvedValue(makeResults(5));
 
       const result = await handleListFunctions({ limit: 10 }, mockCtx);
@@ -692,7 +692,11 @@ describe('handleListFunctions', () => {
       expect(parsed.results).toHaveLength(5);
 
       expect(parsed.hasMore).toBe(false);
-      expect(parsed.nextOffset).toBeUndefined();
+      // nextOffset is present whenever ANY result is shown, regardless of
+      // hasMore — not just when hasMore is true — so that if a size cap
+      // later forces hasMore true, there's already a field to correct (see
+      // response-budget.ts and the regression test below for why).
+      expect(parsed.nextOffset).toBe(5);
     });
 
     it('should return empty results when offset is beyond result count', async () => {
@@ -778,6 +782,45 @@ describe('handleListFunctions', () => {
       expect(parsed.hasMore).toBe(true);
       // Must equal offset(0) + what was actually shown, never offset + limit.
       expect(parsed.nextOffset).toBe(parsed.results.length);
+    });
+
+    it('adds a usable nextOffset and a note when a genuinely-final page still needs a size-cap drop', async () => {
+      // Regression (CodeRabbit finding on #948): paginateResults only
+      // included `nextOffset` when IT computed hasMore:true. If the
+      // pre-budget page looked final (exactly `limit` items fetched ->
+      // hasMore:false, no nextOffset at all) but its CONTENT is still large
+      // enough for applyResponseBudget to drop items afterward, the forced
+      // hasMore:true had no cursor to correct, because none ever existed.
+      const bigContent = 'x'.repeat(3000);
+      const limit = 20;
+      const results = Array.from({ length: limit }, (_, i) => ({
+        content: bigContent,
+        metadata: {
+          file: `s/${i}.ts`,
+          startLine: 1,
+          endLine: 5,
+          type: 'function' as const,
+          language: 'typescript',
+          symbolName: `f${i}`,
+          symbolType: 'function',
+        },
+        score: 1,
+        relevance: 'highly_relevant' as const,
+      }));
+      // Exactly `limit` items -> dedupedResults.length(20) > offset(0)+limit(20)
+      // is FALSE, so paginateResults computes hasMore:false pre-budget.
+      mockVectorDB.querySymbols.mockResolvedValue(results);
+
+      const result = await handleListFunctions({ limit }, mockCtx);
+      const parsed = JSON.parse(result.content![0].text);
+
+      // 20 * 3000 chars blows the 12K budget, so items must actually drop.
+      expect(parsed.results.length).toBeLessThan(limit);
+      expect(parsed.hasMore).toBe(true);
+      expect(parsed.nextOffset).toBe(parsed.results.length);
+      // Not just "a" note — it must actually point at the (now-present,
+      // now-corrected) cursor, not just describe the size cap in isolation.
+      expect(parsed.note).toContain('nextOffset');
     });
 
     it('should include pagination metadata in content scan fallback', async () => {

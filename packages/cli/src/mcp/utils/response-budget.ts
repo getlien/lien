@@ -127,6 +127,60 @@ function walk(node: unknown, found: Array<Array<{ content: string }>>): void {
   }
 }
 
+/**
+ * Build the truncation message.
+ *
+ * `originalItemCount` is just the size of the array THIS function was
+ * handed — already capped upstream by whatever limit/offset/over-fetch the
+ * tool applied — never the true number of matches in the index. Saying
+ * "of {originalItemCount}" reads as a total and isn't one (see the bug this
+ * fixes: list_functions/find_similar reported "of 50"/"of 200" that was
+ * really just the request's own limit echoed back). State only what this
+ * function actually knows: how many survived ITS OWN size cut, and that
+ * more may exist — never a specific total. `hasPagingCursor` adds a pointer
+ * to the (now-corrected) `nextOffset` field instead of repeating its value.
+ */
+function buildMessage(
+  itemsDropped: boolean,
+  finalItemCount: number,
+  drop: number,
+  hasPagingCursor: boolean,
+): string {
+  if (!itemsDropped) {
+    return `Showing all ${finalItemCount} results (content trimmed to fit response size). Narrow filters or lower limit for full content.`;
+  }
+  const cursorHint = hasPagingCursor ? ' See nextOffset for the next page.' : '';
+  return `Showing ${finalItemCount} results (response-size cap; ${drop} more dropped here — not the underlying match count).${cursorHint} Narrow filters or lower limit for complete results.`;
+}
+
+/**
+ * If items were actually dropped, this response is provably incomplete —
+ * never let a stale `hasMore: false` (set upstream before this size cap
+ * ran) claim otherwise. And if a `nextOffset` pagination cursor is present,
+ * it was computed assuming the full pre-cut page was delivered (offset +
+ * limit) — correct it by the same drop count, or paging with it silently
+ * skips exactly the items this cut just dropped (verified: a dropped-by-25
+ * response advising nextOffset:50 actually needed nextOffset:25 to avoid a
+ * gap). Tool-side prose must never bake in the OLD number here — this is
+ * the only place that can still be corrected after the fact, since
+ * arbitrary note text can't be safely rewritten.
+ *
+ * A page that looked genuinely complete upstream (hasMore:false, so no
+ * nextOffset was ever set) can ALSO still need items dropped here purely
+ * for byte size — list_functions now always includes nextOffset whenever it
+ * shows at least one result (see its paginateResults), specifically so this
+ * correction always has a field to adjust in that case too, instead of
+ * forcing hasMore:true with no cursor at all.
+ */
+function correctPaginationFields(obj: Record<string, unknown>, drop: number): void {
+  if ('hasMore' in obj) {
+    obj.hasMore = true;
+  }
+  if (typeof obj.nextOffset === 'number') {
+    obj.nextOffset -= drop;
+  }
+}
+
 function buildResult(
   cloned: unknown,
   originalChars: number,
@@ -137,37 +191,16 @@ function buildResult(
   const finalChars = measureSize(cloned);
   const finalItemCount = arrays.reduce((sum, arr) => sum + arr.length, 0);
   const itemsDropped = finalItemCount < originalItemCount;
+  const drop = originalItemCount - finalItemCount;
+  const obj = cloned && typeof cloned === 'object' ? (cloned as Record<string, unknown>) : null;
+  // Checked before correctPaginationFields mutates below, purely to shape
+  // the message — presence doesn't change, only the corrected value does.
+  const hasPagingCursor = itemsDropped && obj !== null && typeof obj.nextOffset === 'number';
 
-  // `originalItemCount` is just the size of the array THIS function was
-  // handed — already capped upstream by whatever limit/offset/over-fetch the
-  // tool applied — never the true number of matches in the index. Saying
-  // "of {originalItemCount}" reads as a total and isn't one (see the bug
-  // this fixes: list_functions/find_similar reported "of 50"/"of 200" that
-  // was really just the request's own limit echoed back). State only what
-  // this function actually knows: how many survived ITS OWN size cut, and
-  // that more may exist — never a specific total.
-  const message = itemsDropped
-    ? `Showing ${finalItemCount} results (response-size cap; ${originalItemCount - finalItemCount} more dropped here — not the underlying match count). Narrow filters or lower limit for complete results.`
-    : `Showing all ${finalItemCount} results (content trimmed to fit response size). Narrow filters or lower limit for full content.`;
+  const message = buildMessage(itemsDropped, finalItemCount, drop, hasPagingCursor);
 
-  // If items were actually dropped, this response is provably incomplete —
-  // never let a stale `hasMore: false` (set upstream before this size cap
-  // ran) claim otherwise. And if a `nextOffset` pagination cursor is
-  // present, it was computed assuming the full pre-cut page was delivered
-  // (offset + limit) — correct it by the same drop count, or paging with it
-  // silently skips exactly the items this cut just dropped (verified: a
-  // dropped-by-25 response advising nextOffset:50 actually needed
-  // nextOffset:25 to avoid a gap). Tool-side prose must never bake in the
-  // OLD number here — this is the only place that can still be corrected
-  // after the fact, since arbitrary note text can't be safely rewritten.
-  if (itemsDropped && cloned && typeof cloned === 'object') {
-    const obj = cloned as Record<string, unknown>;
-    if ('hasMore' in obj) {
-      obj.hasMore = true;
-    }
-    if (typeof obj.nextOffset === 'number') {
-      obj.nextOffset -= originalItemCount - finalItemCount;
-    }
+  if (itemsDropped && obj) {
+    correctPaginationFields(obj, drop);
   }
 
   return {

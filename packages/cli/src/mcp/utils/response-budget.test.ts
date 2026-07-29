@@ -247,6 +247,44 @@ describe('applyResponseBudget', () => {
     expect(res.nextOffset).toBe(res.results.length);
   });
 
+  it('mentions nextOffset in the message when a cursor is present and gets corrected', () => {
+    const input = { ...makeResultsResponse(50, 1000), hasMore: true, nextOffset: 50 };
+    const { truncation } = applyResponseBudget(input);
+
+    expect(truncation).toBeDefined();
+    expect(truncation!.message).toContain('nextOffset');
+  });
+
+  it('never mentions nextOffset in the message when no such field exists (other tools)', () => {
+    // get_files_context / get_complexity / search_code / find_similar shapes
+    // have no pagination cursor at all — the message must not reference one
+    // that isn't there.
+    const input = makeResultsResponse(50, 1000);
+    const { truncation } = applyResponseBudget(input);
+
+    expect(truncation).toBeDefined();
+    expect(truncation!.message).not.toContain('nextOffset');
+  });
+
+  it('corrects nextOffset and forces hasMore even when the page looked complete upstream', () => {
+    // A page that computed hasMore:false (e.g. exactly `limit` items) can
+    // still carry a nextOffset if the tool always includes one whenever any
+    // result is shown (see list-functions.ts's paginateResults). This is
+    // exactly the shape that reaches applyResponseBudget in that case —
+    // confirms the correction works whether hasMore started true or false.
+    const input = { ...makeResultsResponse(50, 1000), hasMore: false, nextOffset: 50 };
+    const { result, truncation } = applyResponseBudget(input);
+
+    expect(truncation).toBeDefined();
+    const dropped = truncation!.originalItemCount - truncation!.finalItemCount;
+    expect(dropped).toBeGreaterThan(0);
+    const res = result as { hasMore: boolean; nextOffset: number; results: unknown[] };
+    expect(res.hasMore).toBe(true);
+    expect(res.nextOffset).toBe(50 - dropped);
+    expect(res.nextOffset).toBe(res.results.length);
+    expect(truncation!.message).toContain('nextOffset');
+  });
+
   it('does not touch nextOffset when no items are dropped', () => {
     const input = { ...makeResultsResponse(3, 5000), hasMore: false, nextOffset: 3 };
     const { result, truncation } = applyResponseBudget(input);
