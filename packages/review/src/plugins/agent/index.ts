@@ -898,6 +898,42 @@ function formatExtraSummary(finding: ReviewFinding): string {
 }
 
 /**
+ * Render one finding as a single, discrete bullet: severity emoji, category,
+ * symbol (if present), the exact `file:line`, the message, and the
+ * suggestion (if present). Shared by the PR-description findings list and
+ * the out-of-diff promoted review so a finding reads identically wherever it
+ * surfaces.
+ */
+function formatFindingBullet(f: ReviewFinding, opts?: { outsideDiff?: boolean }): string {
+  const emoji = f.severity === 'error' ? '🔴' : f.severity === 'warning' ? '🟡' : 'ℹ️';
+  const category = f.category.replace(/_/g, ' ');
+  const symbol = f.symbolName ? ` in \`${f.symbolName}\`` : '';
+  const tag = opts?.outsideDiff ? ' *(outside this diff)*' : '';
+  const suggestion = f.suggestion ? `\n  💡 *${f.suggestion}*` : '';
+  return `- ${emoji} **${category}**${symbol} — \`${f.filepath}:${f.line}\`${tag}\n  ${f.message}${suggestion}`;
+}
+
+/**
+ * Itemize bug findings as their own PR-description section — one discrete
+ * bullet per finding, each carrying its own `file:line`. The header count
+ * (`bugFindings.length`) and this list are always the same array, so a
+ * reader is never left trusting free-form overview prose (or having to find
+ * a separate inline/out-of-diff review comment) to learn what the N counted
+ * issues actually are. Returns `[]` for a clean PR so the section is simply
+ * absent — not an empty heading — keeping the zero-finding render visually
+ * distinct from the one-finding render.
+ *
+ * Split out (rather than inlined in `buildDescription`) because
+ * `buildDescription` is already near its cyclomatic-complexity budget; a
+ * spread of this array adds no branch to that function.
+ */
+function buildFindingsSection(bugFindings: ReviewFinding[]): string[] {
+  if (bugFindings.length === 0) return [];
+  const bullets = bugFindings.map(f => formatFindingBullet(f));
+  return [`**Findings (${bugFindings.length})**\n\n${bullets.join('\n\n')}`];
+}
+
+/**
  * Build the PR description section using GitHub's callout blockquote syntax.
  * Uses > [!NOTE] for clean PRs, > [!WARNING] when issues are found. The first
  * summary drives the callout; any further summaries render as appended
@@ -938,7 +974,9 @@ function buildDescription(
     }
   }
 
-  const parts: string[] = [lines.join('\n')];
+  // The itemized findings list — see buildFindingsSection's doc comment for
+  // why the count and this list can never drift apart.
+  const parts: string[] = [lines.join('\n'), ...buildFindingsSection(bugFindings)];
 
   for (const extra of summaryFindings.slice(1)) {
     parts.push(formatExtraSummary(extra));
@@ -1010,13 +1048,7 @@ export function buildOutOfDiffReviewBody(findings: ReviewFinding[], marker: stri
   const intro =
     'Caused by changes in this PR but on lines GitHub cannot attach an inline ' +
     'comment to (outside the diff hunks):';
-  const bullets = findings.map(f => {
-    const emoji = f.severity === 'error' ? '🔴' : f.severity === 'warning' ? '🟡' : 'ℹ️';
-    const category = f.category.replace(/_/g, ' ');
-    const symbol = f.symbolName ? ` in \`${f.symbolName}\`` : '';
-    const suggestion = f.suggestion ? `\n  💡 *${f.suggestion}*` : '';
-    return `- ${emoji} **${category}**${symbol} — \`${f.filepath}:${f.line}\` *(outside this diff)*\n  ${f.message}${suggestion}`;
-  });
+  const bullets = findings.map(f => formatFindingBullet(f, { outsideDiff: true }));
   return `${marker}outside-diff -->\n${headline}\n\n${intro}\n\n${bullets.join('\n\n')}`;
 }
 
