@@ -97,6 +97,31 @@ export { foo } from './module';`;
       expect(symbol!.type).toBe('interface');
     });
 
+    // Same underlying bug as the C#/Java/Kotlin fix: `signature` dropped
+    // generic type parameters and extends/implements heritage entirely, so
+    // `class Foo<T> extends Bar<T> implements Baz, Qux` came back as bare
+    // `class Foo`.
+    it('should include generic type parameters and extends/implements heritage in a class signature', () => {
+      const code = 'class Foo<T> extends Bar<T> implements Baz, Qux {}';
+      const root = mustParse(code, 'typescript');
+      const symbol = symbolExtractor.extractSymbol(root.namedChild(0)!, code);
+      expect(symbol!.signature).toBe('class Foo<T> extends Bar<T> implements Baz, Qux');
+    });
+
+    it('should include generic type parameters and extends heritage in an interface signature', () => {
+      const code = 'interface IFoo<T> extends IBar<T>, IBaz {}';
+      const root = mustParse(code, 'typescript');
+      const symbol = symbolExtractor.extractSymbol(root.namedChild(0)!, code);
+      expect(symbol!.signature).toBe('interface IFoo<T> extends IBar<T>, IBaz');
+    });
+
+    it('should include generic type parameters and heritage in an abstract class signature', () => {
+      const code = 'abstract class AFoo<T> extends Bar<T> implements Baz {}';
+      const root = mustParse(code, 'typescript');
+      const symbol = symbolExtractor.extractSymbol(root.namedChild(0)!, code);
+      expect(symbol!.signature).toBe('class AFoo<T> extends Bar<T> implements Baz');
+    });
+
     it('should extract call sites from member expressions', () => {
       const root = mustParse('obj.method();', 'typescript');
       const callExpr = root.namedChild(0)!.namedChild(0)!;

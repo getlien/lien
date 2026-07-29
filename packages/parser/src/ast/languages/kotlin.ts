@@ -7,6 +7,7 @@ import type {
   LanguageSymbolExtractor,
 } from '../extractors/types.js';
 import { toImportPathsArray, toImportSymbolsArray } from '../extractors/types.js';
+import { collapseWhitespace } from '../extractors/symbol-helpers.js';
 import { calculateComplexity } from '../complexity/index.js';
 
 // =============================================================================
@@ -59,6 +60,28 @@ function functionName(node: SyntaxNode): string | undefined {
 /** The declared name of a class/object declaration (`type_identifier`). */
 function declarationName(node: SyntaxNode): string | undefined {
   return childByType(node, 'type_identifier')?.text;
+}
+
+/**
+ * Generic type parameters and supertype list, exactly as declared in source
+ * — the Kotlin analog of C#'s `typeParamsAndBaseList`/Java's
+ * `typeParamsAndHeritage` (same underlying bug: `signature` for a class/
+ * interface/object reported only its bare keyword and name). Kotlin
+ * supertypes are `delegation_specifier` children directly under the
+ * class/object declaration (no wrapping node), following a literal `:`
+ * token — e.g. `class Foo<T> : Bar<T>(), Baz`. Neither `type_parameters` nor
+ * `delegation_specifier` is a registered field (the fwcd grammar assigns
+ * none — see the file-level note above), so both are found by node type.
+ * Each piece is passed through `collapseWhitespace` in case a supertype
+ * list spans multiple physical lines (the same whitespace-collapsing
+ * convention `functionSignature` below applies inline).
+ */
+function typeParamsAndSupertypes(node: SyntaxNode): string {
+  const typeParams = collapseWhitespace(childByType(node, 'type_parameters')?.text);
+  const supertypes = node.namedChildren.filter(child => child.type === 'delegation_specifier');
+  const supertypesText =
+    supertypes.length > 0 ? ` : ${supertypes.map(s => collapseWhitespace(s.text)).join(', ')}` : '';
+  return `${typeParams}${supertypesText}`;
 }
 
 const SIGNATURE_MAX = 200;
@@ -454,20 +477,39 @@ export class KotlinSymbolExtractor implements LanguageSymbolExtractor {
   private extractClassInfo(node: SyntaxNode, parentClass?: string): SymbolInfo | null {
     const name = declarationName(node);
     if (!name) return null;
+    const suffix = typeParamsAndSupertypes(node);
 
     if (hasTokenChild(node, 'interface')) {
-      return this.makeSymbol(node, name, 'interface', `interface ${name}`, parentClass);
+      return this.makeSymbol(
+        node,
+        name,
+        'interface',
+        clamp(`interface ${name}${suffix}`),
+        parentClass,
+      );
     }
     if (hasTokenChild(node, 'enum')) {
-      return this.makeSymbol(node, name, 'class', `enum class ${name}`, parentClass);
+      return this.makeSymbol(
+        node,
+        name,
+        'class',
+        clamp(`enum class ${name}${suffix}`),
+        parentClass,
+      );
     }
-    return this.makeSymbol(node, name, 'class', `class ${name}`, parentClass);
+    return this.makeSymbol(node, name, 'class', clamp(`class ${name}${suffix}`), parentClass);
   }
 
   private extractObjectInfo(node: SyntaxNode, parentClass?: string): SymbolInfo | null {
     const name = declarationName(node);
     if (!name) return null;
-    return this.makeSymbol(node, name, 'class', `object ${name}`, parentClass);
+    return this.makeSymbol(
+      node,
+      name,
+      'class',
+      clamp(`object ${name}${typeParamsAndSupertypes(node)}`),
+      parentClass,
+    );
   }
 
   private makeSymbol(

@@ -50,6 +50,21 @@ export function clampSignatureLength(signature: string): string {
 }
 
 /**
+ * Collapse a node's raw text to a single line for signature-building,
+ * mirroring `extractSignature`'s `.replace(/\s+/g, ' ').trim()` convention.
+ * A grammar node's text can itself span multiple physical lines even when
+ * it's a small, single "clause" — e.g. a C# `base_list` wrapping a
+ * conditionally-compiled member in a preprocessor block (`: ILogger\n#if
+ * X\n, IAsyncDisposable\n#endif`), found via dogfooding a real class
+ * (Serilog's `Logger`) rather than a hypothetical case. Returns `''` for
+ * `undefined`/absent nodes so callers can compose pieces without a null
+ * check at every call site.
+ */
+export function collapseWhitespace(text: string | undefined): string {
+  return text ? text.replace(/\s+/g, ' ').trim() : '';
+}
+
+/**
  * Extract parameter list from function node
  *
  * Note: The `_content` parameter is unused in this function, but is kept for API consistency

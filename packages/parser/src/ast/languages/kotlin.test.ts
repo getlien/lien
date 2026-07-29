@@ -241,6 +241,28 @@ describe('Kotlin Language', () => {
       expect(obj).toMatchObject({ name: 'Registry', type: 'class', signature: 'object Registry' });
     });
 
+    // Same underlying bug as the C#/Java fix: `signature` dropped generic
+    // type parameters and the supertype list entirely.
+    it('includes generic type parameters and the supertype list in class/interface/object signatures', () => {
+      const cls = symbolExtractor.extractSymbol(
+        findNode(parse('class Foo<T> : Bar<T>(), Baz'), 'class_declaration')!,
+        '',
+      )!;
+      expect(cls.signature).toBe('class Foo<T> : Bar<T>(), Baz');
+
+      const iface = symbolExtractor.extractSymbol(
+        findNode(parse('interface IFoo<T> : IBar<T>, IBaz'), 'class_declaration')!,
+        '',
+      )!;
+      expect(iface.signature).toBe('interface IFoo<T> : IBar<T>, IBaz');
+
+      const obj = symbolExtractor.extractSymbol(
+        findNode(parse('object Singleton : Base()'), 'object_declaration')!,
+        '',
+      )!;
+      expect(obj.signature).toBe('object Singleton : Base()');
+    });
+
     // #949: nested/inner classes and objects are idiomatic in Kotlin, but
     // extractClassInfo/extractObjectInfo previously ignored the parentClass
     // argument entirely — a nested type always reported parentClass:
