@@ -109,6 +109,24 @@ describe('belowRiskFloor (habituation guard)', () => {
   it('treats an unknown risk level as the lowest rank', () => {
     expect(belowRiskFloor('mystery', 0, 0, 'medium')).toBe(true);
   });
+
+  // Closes the gap Lien Review flagged on #938: isTrivial got the
+  // dependentAttributionIncomplete carve-out, this guard sat three lines
+  // below it and didn't — so a "0 dependents" annotation caused by
+  // undeterminable attribution (not by an actual absence of dependents)
+  // could still be silenced by --min-risk, restoring exactly the
+  // false-all-clear misreading #930/#936/#938 shipped to prevent.
+  it('clears the floor when dependent attribution is incomplete, even at the lowest risk level (#938 gap)', () => {
+    expect(belowRiskFloor('low', 0, 0, 'critical', true)).toBe(false);
+  });
+
+  it('still suppresses the same below-floor case when attribution is complete', () => {
+    expect(belowRiskFloor('low', 0, 0, 'critical', false)).toBe(true);
+  });
+
+  it('defaults dependentAttributionIncomplete to false — pre-existing 4-arg callers are unaffected', () => {
+    expect(belowRiskFloor('low', 0, 0, 'medium')).toBe(true);
+  });
 });
 
 describe('withHeadroomWarning', () => {
