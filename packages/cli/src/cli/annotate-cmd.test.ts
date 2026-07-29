@@ -70,6 +70,14 @@ describe('isTrivial', () => {
   it('is trivial when headroomCount is explicitly 0', () => {
     expect(isTrivial(0, 0, 1, 0)).toBe(true);
   });
+
+  it('is never trivial when dependentAttributionIncomplete is true, even with test coverage present (#930/#936)', () => {
+    expect(isTrivial(0, 0, 1, 0, true)).toBe(false);
+  });
+
+  it('defaults dependentAttributionIncomplete to false — pre-existing 4-arg callers are unaffected', () => {
+    expect(isTrivial(0, 0, 1, 0)).toBe(true);
+  });
 });
 
 describe('belowRiskFloor (habituation guard)', () => {
