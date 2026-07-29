@@ -139,15 +139,25 @@ interface TestRunClassification { isTestRun: boolean; broad: boolean; scopeToken
    a test file shares its language's extension, so "ends in a source
    extension" already covers the test-ish case). Three token classes are
    excluded from ever counting as a scoping argument even when they'd
-   otherwise qualify: a workspace-scope flag's value
-   (`-w`/`--workspace`/`--filter`, e.g. `@liendev/core`, which contains a
-   `/`), a config-flag's value (`-c`/`--config`, e.g. `vitest.config.ts`,
-   which ends in a source extension) or any bare token matching
-   `*.config.*` even without a preceding flag, and Go's glob-all convention
-   (`./...`).
-4. A segment with no scoping tokens is `broad` (whole-suite/workspace run);
-   any `broad` segment makes the whole command's classification `broad`,
-   even if another segment in the same command also named specific files.
+   otherwise qualify: a workspace-scope flag's value (`-w`/`--workspace`,
+   e.g. `@liendev/core`, which contains a `/`), and a config-flag's value
+   (`-c`/`--config`, e.g. `vitest.config.ts`, which ends in a source
+   extension) or any bare token matching `*.config.*` even without a
+   preceding flag, and Go's glob-all convention (`./...`).
+4. Separately, the remainder is checked for a **name filter** — a flag
+   from a per-runner-family allow-list (`pytest -k`/`-m`, `dotnet
+   test`/`swift test --filter`, `rspec -e`/`--example`, `mocha
+   --grep`/`-g`, `go test -run`, `vitest`/`jest -t`/`--testNamePattern`),
+   or, for `cargo test` specifically, a bare positional argument (its own
+   `[TESTNAME]` convention — see the deviation note below for why this
+   can't just be "any bare leftover token"). A segment with a path-like
+   scoping token is `scoped` regardless of any name filter also present
+   (a path always wins). Otherwise: a name-filtered segment is neither
+   `broad` nor a `scopeTokens` contributor (see below); only a segment with
+   *no* scoping evidence of either kind is `broad`. Any `broad` segment
+   makes the whole command's classification `broad`, even if another
+   segment in the same command also named specific files or was itself
+   name-filtered.
 
 ### `computeUnverifiedFiles(edits, runs)`
 
@@ -193,6 +203,191 @@ tests (`auth.ts`/`oauth.test.ts`, `user.ts`/`superuser.test.ts`,
 naming conventions (Python's `test_foo.py`, Go's `foo_test.go`, Ruby's
 `foo_spec.rb`) fall back to exact-basename matching, which already covers
 the common case of a run naming the real associated test file.
+
+#### Name-filtered runs are neither `broad` nor `scoped` (2026-07-29)
+
+A run scoped by test **name** rather than file/directory (`pytest -k expr`,
+`dotnet test --filter expr`, `go test -run regex`, a bare `cargo test name`,
+...) has no path-like scope token at all. Before this fix, `classifyTestCommand`
+had exactly two outcomes — `scoped` (path tokens found) or `broad` (none
+found) — so every name-filtered run fell into `broad` by construction, and
+`computeUnverifiedFiles`'s any-broad-run silence rule then marked the
+*entire* session's edit set "verified" off the back of one arbitrarily-named,
+unrelated test. Confirmed on the released 0.72.0: an edit with no test run at
+all correctly nagged, but the identical edit followed by
+`pytest -k test_totally_unrelated_name` went completely silent.
+
+Fixed by adding a third classification outcome — name-filtered — reached
+when the remainder carries recognized name-filter evidence (a
+per-runner-family flag, or `cargo test`'s bare positional) but no path
+token. A name-filtered run keeps `isTestRun: true` (something genuinely ran)
+but sets neither `broad` nor a `scopeTokens` entry, so
+`computeUnverifiedFiles` treats it exactly as if no run had been observed:
+it neither silences the report nor "covers" any file. This is the same
+fail-safe bias as the substring-matching deviation above — a false nag costs
+one already-escape-hatched line of text, a false "everything is verified"
+disables the whole mechanism.
+
+The flag allow-list is deliberately **per runner family**, not one global
+set, because two runners in this same allow-list reuse an identical short
+flag spelling for unrelated purposes: tox's `-e ENV` selects which
+*configured environment* to run (still that environment's whole suite — not
+a named test), while rspec's `-e NAME` names one example. A global `-e`
+recognition would have wrongly flipped `tox -e py311` (must stay `broad`)
+into name-filtered. The same reasoning kept `cargo test <name>`'s bare
+positional special-cased to exactly that runner (`POSITIONAL_NAME_FILTER_RUNNERS`
+in `test-run-matcher.ts`) rather than "any bare leftover token" — the latter
+would also have wrongly swallowed cargo-nextest's required `run` subcommand
+keyword and Gradle's `-x <task>`/`--exclude-task <task>` exclusion value,
+both bare tokens with unrelated meaning. `--filter` also moved out of the
+workspace-scope flag set entirely: pnpm's `--filter <pkg> test` is fully
+absorbed by its own anchored runner pattern before this scan ever runs, so
+the shared spelling with dotnet/swift's name filter never collides in
+practice.
+
+##### A third instance of the same hazard, caught in review: `cargo test`'s own value-taking flags (2026-07-29)
+
+Review of the fix above found that `cargo test`'s bare-positional detection
+was too aggressive: `cargo test --features foo`, `-p my_crate`,
+`--manifest-path <path>`, `--target <triple>`, `--profile <name>`, and `-j
+<n>` all take a bare VALUE in the exact textual position a positional test
+name would sit, and none of them narrow which tests run — the run stays
+genuinely broad. Before this follow-up, that value was misread as a bare
+positional test name (`sawBareToken`), flipping a genuinely broad run to
+falsely name-filtered — the opposite direction from the original bug, but
+still wrong, and a real regression relative to the pre-existing behavior for
+these commands. Fixed by adding `CARGO_TEST_VALUE_FLAGS`
+(`valueSkipFlagsFor` in `test-run-matcher.ts`), skipped as flag+value the
+same way `WORKSPACE_SCOPE_FLAGS`/`CONFIG_FLAGS` already are, but kept
+cargo-test-specific rather than global (a couple of these flag spellings,
+e.g. `-j`, aren't universally safe to blanket-skip for every runner).
+
+`--test <name>` (cargo's specific-integration-test-binary-target filter) is
+deliberately excluded from that skip set: unlike the flags above, it
+genuinely narrows which tests run, so its value is left to flow through as
+an ordinary bare token — landing on the same name-filtered (not broad, not
+falsely "scoped") outcome as a plain `cargo test <name>`, the safe fallback
+for a target name this module has no infrastructure to resolve against a
+real file path.
+
+This is the **third** instance of the identical hazard class in one file
+(bare/short-flag values misread across an unrelated boundary): tox `-e`
+vs. rspec `-e`, cargo-nextest's `run` keyword vs. `cargo test`'s positional,
+and now `cargo test`'s own compile-config flags vs. its own positional. All
+three are now pinned as regression tests in `test-run-matcher.test.ts`.
+
+##### A fourth instance: pnpm's own `--filter`/`-F` workspace selector (2026-07-29)
+
+Review of the cargo fix above found one more case of the same hazard, then a
+second, independent review of *that* claim corrected its direction: `pnpm
+test --filter <selector>` (the workspace selector placed AFTER the script
+name, rather than the `pnpm --filter <selector> test` form already absorbed
+whole by its own anchored `RUNNER_PATTERNS` entry) has a selector value that
+routinely contains `/` for a scoped package name (`@hono/core`). Without a
+dedicated skip, that value was independently scanned by the generic
+path-token check and misread as a real scope-narrowing FILE — flipping a
+genuinely broad run to a falsely narrow "scoped to `./@hono/core`" (the
+review's first pass called this a suppression risk; a second, independently
+verified pass established the direction is actually the opposite — a false
+NAG, not a false silence, since a broad-run-misread-as-scoped can only ever
+*reduce* claimed coverage, never expand it). Fixed by adding
+`PNPM_TEST_VALUE_FLAGS` (`--filter`, `-F`), skipped as flag+value via
+`valueSkipFlagsFor` exactly like `CARGO_TEST_VALUE_FLAGS`, but gated on the
+generic `pnpm test`/`pnpm test:script` match specifically (`isPnpmTestRunner`)
+so dotnet/swift's unrelated test-NAME use of the identical `--filter`
+spelling is untouched.
+
+The same review also surfaced, independently of the misclassification bug,
+that the `--filter=selector` single-token form placed BEFORE the script
+(`pnpm --filter=@hono/core test`) matched no `RUNNER_PATTERNS` entry at all —
+pnpm's own docs show this `=` form as the canonical way to write an
+exclusion selector (`--filter=!foo`), so a real, documented, non-exotic
+invocation always nagged. Fixed by widening the dedicated anchored pnpm
+pattern to `(?:--filter|-F)(?:\s+\S+|=\S+)` (both the space and `=` forms,
+both the long flag and its documented short alias).
+
+A sweep of every other per-runner name-filter flag's `=` form (`pytest
+-k=`/`-m=`, `rspec -e=`/`--example=`, `mocha --grep=`/`-g=`, `go test
+-run=`, `vitest`/`jest -t=`/`--testNamePattern=`, `dotnet`/`swift
+--filter=`) found no equivalent gap: `isNameFilterFlag`'s existing
+`token.startsWith(`${flag}=`)` check already recognizes all of them —
+verified directly against `classifyTestCommand`, all still correctly
+name-filtered. A separate finding while investigating (`turbo test
+--filter=web`) is NOT a `--filter` bug at all: `turbo` is not a recognized
+runner in `RUNNER_PATTERNS` at all, so the command is simply unclassified
+and falls through to the safe fail-open default (nags because no run was
+ever recorded) — unrelated to this fix and out of scope (adding `turbo`
+support was never requested and isn't a regression).
+
+This is the **fourth** instance of the identical short-flag/value-collision
+hazard class in this file. A generalized "flag arity table" (mapping every
+recognized flag per runner to a consumes-value/semantics tag) was considered
+in place of a fourth targeted allow-list entry, but rejected for now: the
+existing per-concern, per-runner-family lookup idiom (`nameFilterFlagsFor`,
+`valueSkipFlagsFor`) already generalizes to this fourth case with one small,
+independently testable addition each, matching this module's stated
+conservative-allow-list philosophy; a unified table would be a structural
+reorganization with no additional correctness benefit over what's here,
+and would cost a larger, riskier diff for a module already this
+security-sensitive to the nudge's credibility.
+
+##### A scope-broadening flag does NOT make a name-filtered run `broad` — selection and scope are independent axes (2026-07-30)
+
+A review pass suggested that `go test -run TestFoo ./...` /
+`go test -run TestFoo .` and `cargo test foo --workspace` /
+`cargo test foo --all` should classify as `broad`, on the reasoning that
+`./...`/`--workspace`/`--all` are "broad-scope indicators." **This is wrong,
+and the classifier's existing behavior (no change needed) is correct** —
+verified directly against `classifyTestCommand` and independently re-verified
+against a real Go module (gin) with `internal/bytesconv` (4 test functions,
+none named `TestFoo`):
+
+```
+go test -run TestFoo ./...      => name-filtered (NAGS)  -- executes none of bytesconv's 4 tests
+go test -run TestFoo .          => name-filtered (NAGS)
+cargo test foo --workspace      => name-filtered (NAGS)
+cargo test foo --all            => name-filtered (NAGS)
+go test ./...                   => broad (SILENT)  -- no name filter, real whole-suite coverage
+cargo test --workspace          => broad (SILENT)
+cargo test --all                => broad (SILENT)
+```
+
+The reasoning: **which packages/crates get compiled and which tests within
+them actually execute are two independent axes.** `./...`/`--workspace`/
+`--all` answer the first question (compile everything reachable) — genuinely
+scope-broadening, correctly contributing no scoping restriction on their
+own. `-run TestFoo` / a bare positional test name answer the second,
+completely orthogonal question (of the tests that got compiled, run only
+ones matching this name) — and that restriction does not evaporate just
+because the first axis was maximally broadened. `go test -run TestFoo ./...`
+compiles every package in the module and then, within each one, runs only
+tests whose name matches `TestFoo` — the overwhelming majority of real test
+functions across the module (e.g. all 4 in `bytesconv`, none named `TestFoo`)
+never execute. Treating this as `broad` would make it functionally identical
+to running nothing at all while still marking every edited file in the
+session "verified" — precisely the false-"tests ran" bug this whole feature
+exists to close, just reached via a scope flag instead of a bare name.
+
+The classifier already gets this right by construction, not by any special
+case: a scope-broadening flag either lands in a genuinely orthogonal
+skip-flag set (`--workspace`/`-w` in the global `WORKSPACE_SCOPE_FLAGS`,
+consumed as flag+value and contributing nothing) or is excluded from
+path-likeness entirely (`./...` via `GLOB_ALL_TOKENS`) — in both cases it
+simply produces **no scoping evidence of its own**, neither for nor against
+name-filtering. The *separate* name-filter evidence (`-run`'s presence, or
+cargo's bare positional) is tracked independently and is what actually
+decides `broad` vs. name-filtered here; a scope flag appearing in the same
+command never suppresses that independently-collected evidence. This is
+exactly the axis-independence the `--workspace`/`--all`/`./...` case
+requires, achieved for free by not having any code path that treats "a
+scope flag is present" as license to ignore other evidence in the same
+segment. **Do not "fix" this by making a scope-broadening flag force
+`broad` regardless of a name filter also present in the same command** — that
+is, verbatim, the false-silence bug from the top of this document, just
+triggered by a different flag.
+
+Regression tests for all seven commands above are pinned in
+`test-run-matcher.test.ts`.
 
 ## C. `lien verify-tests <subcommand>`
 
@@ -416,6 +611,16 @@ each script:
   `stop_hook_active` never arrives.
 - **Fail-open**: malformed (non-JSON) stdin and a payload missing
   `session_id` both exited 0 with no output, for both new hooks.
+- **Name-filtered runs (2026-07-29)**, dogfooded end-to-end in a
+  foreign repo (flask, not this one) via `test-reminder.sh`/`test-run-note.sh`
+  with real stdin: an edit + a `tool_input.command: "pytest -k
+  test_totally_unrelated_name"` payload, on the pre-fix build, produced
+  empty `report` output (the bug); the identical sequence on the fixed
+  build produced the full advisory, matching the no-run control exactly.
+  A genuinely broad run (`python -m pytest`, no filter) still produced
+  empty `report` output on the fixed build (no regression), and a
+  file-scoped run naming an unrelated file (`pytest
+  tests/test_totally_unrelated_module.py`) still nagged.
 - **`test-reminder.sh` (rewired)**: a real `Edit` payload produced the
   identical `additionalContext` reminder text as before **and** recorded
   the edit into `test-sessions/<sessionId>.jsonl` in the same invocation —

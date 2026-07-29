@@ -16,6 +16,17 @@
  * substring containment let an unrelated run (`oauth.test.ts` covering
  * `auth.ts`) silently suppress a real nag, which is a worse failure mode
  * than an occasional false nag the escape-hatch wording already absorbs.
+ *
+ * A run scoped by test NAME rather than by file/directory (`pytest -k expr`,
+ * `dotnet test --filter expr`, `go test -run regex`, a bare `cargo test
+ * name`, ...) is neither `broad` NOR does it contribute any `scopeTokens` —
+ * see the `NAME_FILTER_FLAGS`/`POSITIONAL_NAME_FILTER_RUNNERS` handling in
+ * `classifyTestCommand` below. It tells us *some* test ran, but not which
+ * files it covered, so `computeUnverifiedFiles` must keep nagging exactly as
+ * if no run had been observed at all — the same fail-safe bias as the
+ * substring-matching deviation above: a false nag costs one line of
+ * (already-escape-hatched) text, a false "everything is verified" silently
+ * disables the whole mechanism.
  */
 
 import path from 'node:path';
@@ -122,7 +133,152 @@ function stripLeadingWrappersAndEnv(segment: string): string {
 // `npm test -w @liendev/core` must classify as broad even though
 // "@liendev/core" contains a "/". The flag and its value are both skipped
 // before scanning for path-like tokens.
-const WORKSPACE_SCOPE_FLAGS = new Set(['-w', '--workspace', '--filter']);
+//
+// `--filter` is deliberately NOT here even though pnpm also uses it for
+// workspace scoping: `pnpm --filter my-pkg test` (filter BEFORE the script)
+// is matched whole by its own anchored RUNNER_PATTERNS entry above (the
+// flag+value never reach this remainder scan at all); `pnpm test --filter
+// my-pkg` (filter AFTER) is instead handled by the pnpm-specific
+// `PNPM_TEST_VALUE_FLAGS` below, scoped to that ordering only — a global
+// entry here would also swallow dotnet/swift's unrelated test-NAME use of
+// the identical spelling, which must NOT be silently skipped (see
+// NAME_FILTER_FLAGS below).
+const WORKSPACE_SCOPE_FLAGS = new Set(['-w', '--workspace']);
+
+// Flags whose value narrows a run to specific test NAMES rather than a
+// file/directory/workspace — `pytest -k expr`, `dotnet test --filter expr`,
+// `rspec -e name`, `mocha --grep pattern`, `go test -run regex`, `vitest -t`
+// / `jest -t` (or `--testNamePattern`). Recognizing one of these flags marks
+// the run as name-filtered: some tests genuinely ran, but which files they
+// covered is unknowable from the command line alone, so (per the module doc
+// comment) the run must end up neither `broad` nor contributing a
+// `scopeTokens` entry — never silently "verified", never a hard failure
+// either. A bare `cargo test <name>` has no flag at all (see
+// `POSITIONAL_NAME_FILTER_RUNNERS` below for that positional case).
+//
+// Deliberately PER-RUNNER-FAMILY, not one global set: a couple of these
+// short flag spellings are reused with UNRELATED meaning by another runner
+// in this same file. Concretely, tox's `-e ENV` selects which configured
+// environment to run (still that environment's whole configured suite, not
+// a named test — see the `tox`/`nox` comment on RUNNER_PATTERNS), which is
+// NOT the same thing as rspec's `-e NAME` (a single named example).
+// Recognizing bare `-e` globally would wrongly flip `tox -e py311` from
+// broad (correct, must not regress) to name-filtered.
+const PYTEST_NAME_FILTER_FLAGS = new Set(['-k', '-m']);
+const RSPEC_NAME_FILTER_FLAGS = new Set(['-e', '--example']);
+const MOCHA_NAME_FILTER_FLAGS = new Set(['--grep', '-g']);
+const GO_TEST_NAME_FILTER_FLAGS = new Set(['-run']);
+// vitest and jest share the same Jest-descended CLI convention.
+const JS_TEST_NAME_FILTER_FLAGS = new Set(['-t', '--testNamePattern']);
+// dotnet and swift both spell their (unrelated-to-pnpm) test-name filter
+// `--filter`. pnpm's own `--filter` is either fully absorbed by its
+// dedicated anchored RUNNER_PATTERNS entry (filter BEFORE the script) or
+// handled by the pnpm-specific `PNPM_TEST_VALUE_FLAGS` value-skip (filter
+// AFTER) — `nameFilterFlagsFor` only returns this set for `dotnet test`/
+// `swift test` specifically, so there is no collision in practice despite
+// the shared spelling.
+const DOTNET_SWIFT_NAME_FILTER_FLAGS = new Set(['--filter']);
+const NO_NAME_FILTER_FLAGS: ReadonlySet<string> = new Set();
+
+/** Which name-filter flags apply for the runner `matchedRunnerText` (`match[0]`) identified — empty when that runner has none. */
+function nameFilterFlagsFor(matchedRunnerText: string): ReadonlySet<string> {
+  const text = matchedRunnerText.trim();
+  if (/pytest$/.test(text)) return PYTEST_NAME_FILTER_FLAGS;
+  if (/rspec$/.test(text)) return RSPEC_NAME_FILTER_FLAGS;
+  if (/^mocha$/.test(text)) return MOCHA_NAME_FILTER_FLAGS;
+  if (/^go\s+test$/.test(text)) return GO_TEST_NAME_FILTER_FLAGS;
+  if (/vitest$/.test(text) || /^jest$/.test(text)) return JS_TEST_NAME_FILTER_FLAGS;
+  if (/^dotnet\s+test$/.test(text) || /^swift\s+test$/.test(text)) {
+    return DOTNET_SWIFT_NAME_FILTER_FLAGS;
+  }
+  return NO_NAME_FILTER_FLAGS;
+}
+
+/** `token` is one of `flags`, bare or as its `--flag=value` single-token form. */
+function isNameFilterFlag(token: string, flags: ReadonlySet<string>): boolean {
+  if (flags.has(token)) return true;
+  return [...flags].some(flag => token.startsWith(`${flag}=`));
+}
+
+// Runners whose own CLI convention narrows to a named test via a BARE
+// positional argument — no flag at all — so the generic isNameFilterFlag
+// scan above can't see it. `cargo test [TESTNAME]` is the one such form
+// among RUNNER_PATTERNS; every other name-filter above is flag-driven.
+// Deliberately keyed on the exact matched runner text (`match[0]`, e.g.
+// "cargo test") rather than "any bare leftover token", which would also
+// wrongly swallow `cargo nextest run`'s required `run` subcommand keyword
+// and Gradle's `-x <task>`/`--exclude-task <task>` exclusion VALUE (both are
+// bare tokens with a completely different meaning) — see the matching
+// negative test cases in test-run-matcher.test.ts.
+const POSITIONAL_NAME_FILTER_RUNNERS = new Set(['cargo test']);
+
+function isPositionalNameFilterRunner(matchedRunnerText: string): boolean {
+  return POSITIONAL_NAME_FILTER_RUNNERS.has(matchedRunnerText.trim());
+}
+
+// `cargo test`'s own build/compile-config flags that take a value — NONE of
+// these narrow which tests run at all (they configure feature flags, which
+// package/manifest/target/profile to build, or job parallelism), so the run
+// stays whatever the rest of the command implies (broad, absent any other
+// scoping). Without this set, `extractPathLikeTokens`'s bare-token tracking
+// (feeding `isPositionalNameFilterRunner` above) misread e.g. `--features
+// foo`'s value "foo" as a bare positional TEST NAME, flipping a genuinely
+// broad `cargo test --features foo` to falsely name-filtered — caught in
+// review (the same collision hazard as tox `-e`/rspec `-e`, and
+// cargo-nextest's `run` keyword, just a third instance of it). Skipped as
+// flag+value, same mechanism as WORKSPACE_SCOPE_FLAGS/CONFIG_FLAGS, but kept
+// cargo-test-specific (via `valueSkipFlagsFor`) rather than global, since
+// e.g. `-j`/`--target` aren't universally safe to blanket-skip for every
+// runner. `--test <name>` (a specific integration-test-binary target) is
+// deliberately NOT here: it doesn't configure the build, it selects which
+// tests run, so its value should keep flowing through as an ordinary bare
+// token — landing on the same name-filtered (not broad, not silently
+// "scoped") outcome as a plain positional filter, which is the safe
+// direction for a target name we don't have infrastructure to resolve
+// against real file paths.
+const CARGO_TEST_VALUE_FLAGS = new Set([
+  '-p',
+  '--package',
+  '--exclude',
+  '--manifest-path',
+  '--lockfile-path',
+  '--target',
+  '--target-dir',
+  '--profile',
+  '-j',
+  '--jobs',
+  '-F',
+  '--features',
+  '--color',
+  '--message-format',
+]);
+const NO_VALUE_SKIP_FLAGS: ReadonlySet<string> = new Set();
+
+// pnpm's own `--filter`/`-F` (https://pnpm.io/filtering), when it appears
+// AFTER the script name (`pnpm test --filter <selector>`) rather than before
+// it (`pnpm --filter <selector> test`, already fully absorbed by its own
+// anchored RUNNER_PATTERNS entry above). A package selector routinely
+// contains "/" (a scope, `@hono/core`) — caught in review: without this set,
+// that value was independently scanned and misread as a PATH-like scope
+// token, flipping a genuinely broad `pnpm test --filter @hono/core` to a
+// falsely narrow "scoped to ./@hono/core" — the fourth instance of the same
+// short-flag-collision hazard in this file. The `--filter=value` single-token
+// form doesn't need an entry here: it already starts with `-`, so it's
+// caught by the generic dash-prefix skip before ever reaching the path check
+// (verified: `pnpm test --filter=@hono/core` already classifies broad).
+const PNPM_TEST_VALUE_FLAGS = new Set(['--filter', '-F']);
+
+/** True for the generic `pnpm test`/`pnpm test:script` match — i.e. NOT the dedicated `pnpm --filter <pkg> test` anchored form, where `--filter` never reaches this scan at all. */
+function isPnpmTestRunner(matchedRunnerText: string): boolean {
+  return /^pnpm\s+test(:\S*)?$/.test(matchedRunnerText.trim());
+}
+
+/** Which extra flag+value pairs should be fully skipped (beyond the universal WORKSPACE_SCOPE_FLAGS/CONFIG_FLAGS) for the runner `matchedRunnerText` identified. */
+function valueSkipFlagsFor(matchedRunnerText: string): ReadonlySet<string> {
+  if (isPositionalNameFilterRunner(matchedRunnerText)) return CARGO_TEST_VALUE_FLAGS;
+  if (isPnpmTestRunner(matchedRunnerText)) return PNPM_TEST_VALUE_FLAGS;
+  return NO_VALUE_SKIP_FLAGS;
+}
 
 // Flags whose value is a config file path, not a test/source file —
 // `vitest --config vitest.config.ts` runs whatever the config's own
@@ -152,7 +308,15 @@ const RUNNER_PATTERNS: RegExp[] = [
   /^npm\s+test(?=\s|$)/,
   /^npm\s+t(?=\s|$)/,
   /^yarn\s+test(:\S*)?(?=\s|$)/,
-  /^pnpm\s+--filter\s+\S+\s+test(?=\s|$)/,
+  // pnpm's own workspace selector (https://pnpm.io/filtering), `--filter` or
+  // its documented `-F` alias, BEFORE the script name. `(?:\s+\S+|=\S+)`
+  // accepts both the space-separated form (`--filter <selector>`) and the
+  // single-token `=` form pnpm's own docs also show (`--filter=selector`) —
+  // caught in review: the `=` form was previously unrecognized entirely
+  // (`pnpm --filter=@hono/core test` matched no pattern at all), always
+  // nagging even though pnpm's docs list it as the canonical way to exclude
+  // a package (`--filter=!foo`).
+  /^pnpm\s+(?:--filter|-F)(?:\s+\S+|=\S+)\s+test(?=\s|$)/,
   /^pnpm\s+test(:\S*)?(?=\s|$)/,
   /^bun\s+test(?=\s|$)/,
   /^npx\s+vitest(?=\s|$)/,
@@ -181,8 +345,9 @@ const RUNNER_PATTERNS: RegExp[] = [
   /^dotnet\s+test(?=\s|$)/,
   /^deno\s+test(?=\s|$)/,
   // Swift/SwiftPM's one canonical test-invocation form. `--filter X` names a
-  // suite, not a path; `--filter` is already a workspace-scope flag above so
-  // it and its value are skipped, leaving this broad.
+  // suite, not a path — recognized as a name filter (see
+  // DOTNET_SWIFT_NAME_FILTER_FLAGS), so this stays name-filtered (not
+  // broad, not scoped) rather than either extreme.
   /^swift\s+test(?=\s|$)/,
   /^gradle\s+test(?=\s|$)/,
   // Gradle wrapper script (the near-universal per-project convention,
@@ -211,13 +376,15 @@ const RUNNER_PATTERNS: RegExp[] = [
   /^nx\s+test(?:\s+\S+)?(?=\s|$)/,
   // #905: tox (Python's test-orchestration tool, alongside nox) had no entry
   // at all. Bare `tox`/`tox run`/`tox -e py311` run the whole configured
-  // suite for that environment — no file is named, so these stay broad (the
-  // existing scope-token scan below already treats `-e`'s value as an
-  // ordinary non-path token). tox's own convention for narrowing is the `--`
-  // passthrough (`tox -e py311 -- tests/test_x.py`), forwarding args to the
-  // env's underlying test command — the same generic path-token scan that
-  // already handles `npm test -- path/to/x.test.ts` picks up a path-like
-  // token after `--` for free, since `--` itself is skipped as a flag.
+  // suite for that environment — no file is named, so these stay broad.
+  // tox's `-e ENV` is deliberately NOT in any NAME_FILTER_FLAGS set (it
+  // selects an environment, not a named test — the value is just an
+  // ordinary non-path token the scope scan ignores). tox's own convention
+  // for narrowing is the `--` passthrough (`tox -e py311 --
+  // tests/test_x.py`), forwarding args to the env's underlying test
+  // command — the same generic path-token scan that already handles `npm
+  // test -- path/to/x.test.ts` picks up a path-like token after `--` for
+  // free, since `--` itself is skipped as a flag.
   /^tox(\s+run)?(?=\s|$)/,
   /^python[0-9.]*\s+-m\s+tox(?=\s|$)/,
   // nox: same shape and same passthrough (`nox -s test -- tests/test_x.py`).
@@ -245,27 +412,59 @@ function isPathLikeToken(token: string, extensions: ReadonlySet<string>): boolea
   return [...extensions].some(ext => token.endsWith(ext));
 }
 
+interface ScopeScanResult {
+  /** Path-like tokens found (see `isPathLikeToken`) — a genuine file/directory scope. */
+  pathTokens: string[];
+  /** A recognized name-filter flag (`NAME_FILTER_FLAGS`) was present in the remainder. */
+  sawNameFilterFlag: boolean;
+  /** A bare (non-flag, non-path) token was present — only meaningful for `POSITIONAL_NAME_FILTER_RUNNERS`. */
+  sawBareToken: boolean;
+}
+
 /**
  * Scan the remainder of a segment after its matched runner keyword for
- * scoping arguments. Skips flags (dash-prefixed) and, for workspace-scope
- * and config flags specifically, their value too (a manual index loop is
- * required here to look ahead one token — not a tree-sitter AST walk, so the
- * codebase's array-methods-only rule for SyntaxNode iteration doesn't
- * apply).
+ * scoping arguments. Skips flags (dash-prefixed) and, for workspace-scope,
+ * config, and runner-specific value-taking flags specifically, their value
+ * too (a manual index loop is required here to look ahead one token — not a
+ * tree-sitter AST walk, so the codebase's array-methods-only rule for
+ * SyntaxNode iteration doesn't apply). `valueSkipFlags` (from
+ * `valueSkipFlagsFor`) covers flags whose value would otherwise be
+ * misread as scoping evidence — e.g. `cargo test --features foo`'s "foo"
+ * looking like a bare positional test name. A name-filter flag's own value,
+ * by contrast, is deliberately NOT skipped as a pair (unlike these): the
+ * flag's mere presence is enough to signal "name-filtered", and letting its
+ * value fall through the ordinary path-token check for free still promotes
+ * it to a real scope token on the rare occasion it happens to look like a
+ * path.
  */
-function extractPathLikeTokens(remainder: string, extensions: ReadonlySet<string>): string[] {
+function extractPathLikeTokens(
+  remainder: string,
+  extensions: ReadonlySet<string>,
+  nameFilterFlags: ReadonlySet<string>,
+  valueSkipFlags: ReadonlySet<string>,
+): ScopeScanResult {
   const tokens = remainder.trim().split(/\s+/).filter(Boolean);
-  const found: string[] = [];
+  const pathTokens: string[] = [];
+  let sawNameFilterFlag = false;
+  let sawBareToken = false;
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i];
-    if (WORKSPACE_SCOPE_FLAGS.has(token) || CONFIG_FLAGS.has(token)) {
+    if (WORKSPACE_SCOPE_FLAGS.has(token) || CONFIG_FLAGS.has(token) || valueSkipFlags.has(token)) {
       i++; // also skip the flag's value
       continue;
     }
+    if (isNameFilterFlag(token, nameFilterFlags)) {
+      sawNameFilterFlag = true;
+      continue;
+    }
     if (token.startsWith('-')) continue;
-    if (isPathLikeToken(token, extensions)) found.push(token);
+    if (isPathLikeToken(token, extensions)) {
+      pathTokens.push(token);
+    } else {
+      sawBareToken = true;
+    }
   }
-  return found;
+  return { pathTokens, sawNameFilterFlag, sawBareToken };
 }
 
 /**
@@ -274,6 +473,12 @@ function extractPathLikeTokens(remainder: string, extensions: ReadonlySet<string
  * least one matching segment carries no scoping argument, the whole
  * classification is `broad` (a whole-suite run is present) even if another
  * segment in the same command also named specific files.
+ *
+ * A segment that instead carries a test-NAME filter (a `NAME_FILTER_FLAGS`
+ * flag, or a bare positional for a `POSITIONAL_NAME_FILTER_RUNNERS` runner)
+ * and no path tokens is neither `broad` nor a contributor to `scopeTokens` —
+ * see the module doc comment for why "ran, scope unknown" must not be
+ * conflated with "ran the whole suite".
  */
 export function classifyTestCommand(command: string): TestRunClassification {
   const extensions = sourceExtensions();
@@ -291,11 +496,20 @@ export function classifyTestCommand(command: string): TestRunClassification {
     if (!match) continue;
     isTestRun = true;
     const remainder = segment.slice(match[0].length);
-    const pathTokens = extractPathLikeTokens(remainder, extensions);
-    if (pathTokens.length === 0) {
-      broad = true;
-    } else {
+    const { pathTokens, sawNameFilterFlag, sawBareToken } = extractPathLikeTokens(
+      remainder,
+      extensions,
+      nameFilterFlagsFor(match[0]),
+      valueSkipFlagsFor(match[0]),
+    );
+    if (pathTokens.length > 0) {
       pathTokens.forEach(t => scopeTokens.add(t));
+      continue;
+    }
+    const nameFiltered =
+      sawNameFilterFlag || (sawBareToken && isPositionalNameFilterRunner(match[0]));
+    if (!nameFiltered) {
+      broad = true;
     }
   }
 

@@ -48,7 +48,11 @@ describe('classifyTestCommand — broad vs scoped classification table', () => {
     ['./vendor/bin/phpunit', true, true, []],
     ['composer test', true, true, []],
     ['swift test', true, true, []],
-    ['swift test --filter HTTPHeadersTests', true, true, []],
+    // 2026-07-29: `--filter` here names a suite, not a path/workspace — a
+    // name-filtered run (see the name-filter table below), NOT broad. This
+    // used to be (incorrectly) broad because `--filter` was globally
+    // skip-invisible via WORKSPACE_SCOPE_FLAGS.
+    ['swift test --filter HTTPHeadersTests', true, false, []],
     ['./gradlew test', true, true, []],
     ['./gradlew :exposed-core:test', true, true, []],
     ['gradlew test', true, true, []],
@@ -144,6 +148,131 @@ describe('classifyTestCommand — broad vs scoped classification table', () => {
     // Composed: a wrapper around tox.
     ['uv run tox run', true, true, []],
     ['uv run tox -e py311 -- tests/test_x.py', true, false, ['tests/test_x.py']],
+    // 2026-07-29: a run scoped by test NAME rather than file/directory has no
+    // path-like scope token, so before this fix it fell back to `broad`
+    // (silently marking the whole session's edits "verified"). Each of
+    // these must come back name-filtered: isTestRun, NOT broad, and no
+    // scopeTokens — see the module doc comment and computeUnverifiedFiles
+    // describe block below for what that third state means downstream.
+    ['pytest -k test_totally_unrelated_name', true, false, []],
+    ['pytest -k "some expr"', true, false, []],
+    ['pytest -m slow', true, false, []],
+    ['dotnet test --filter FullyQualifiedName~Some.Unrelated.Test', true, false, []],
+    ['dotnet test --filter=Category=Foo', true, false, []],
+    ['rspec -e "some unrelated example"', true, false, []],
+    ['rspec --example "some unrelated example"', true, false, []],
+    ['bundle exec rspec -e "some unrelated example"', true, false, []],
+    ["mocha --grep 'unrelated pattern'", true, false, []],
+    ['mocha -g unrelated', true, false, []],
+    ['go test -run TestUnrelated', true, false, []],
+    ['go test -run=TestUnrelated', true, false, []],
+    ['cargo test test_unrelated_name', true, false, []],
+    ['vitest -t "unrelated name"', true, false, []],
+    ['jest -t "unrelated name"', true, false, []],
+    ['jest --testNamePattern "unrelated name"', true, false, []],
+    ['npx vitest run -t "unrelated name"', true, false, []],
+    ['swift test --filter HTTPHeadersTests', true, false, []],
+    // Compound: a path present alongside a name filter must still scope
+    // normally by the path — the name filter must not downgrade it.
+    ['pytest -k name tests/test_helpers.py', true, false, ['tests/test_helpers.py']],
+    [
+      'dotnet test --filter FullyQualifiedName~Foo tests/FooTests.cs',
+      true,
+      false,
+      ['tests/FooTests.cs'],
+    ],
+    // Negative guards: these must NOT be swept up as name-filtered and must
+    // stay exactly as before. tox's `-e ENV` looks identical in shape to
+    // rspec's `-e NAME` but means something unrelated (which configured
+    // environment to run, not a named test) — this is the concrete
+    // collision the per-runner-family flag scoping in NAME_FILTER_FLAGS
+    // exists to avoid.
+    ['tox -e py311', true, true, []],
+    // cargo-nextest's required `run` subcommand keyword is a bare token in
+    // the same position a `cargo test <name>` filter would be, but it must
+    // not be misread as one.
+    ['cargo nextest run', true, true, []],
+    // Gradle's exclude-task flags take a bare task-name VALUE in the same
+    // position a name filter's value would sit, but excluding a task is the
+    // opposite of "ran a named test" and must stay broad.
+    ['./gradlew test -x integrationTest', true, true, []],
+    ['./gradlew --exclude-task integrationTest test', true, true, []],
+    // Regression (caught in review): `cargo test`'s own build/compile-config
+    // flags take a bare VALUE in the exact same position a positional test
+    // name would sit (`cargo test [TESTNAME]`) — the third instance of this
+    // hazard class in this file (after tox `-e`/rspec `-e` and cargo-nextest's
+    // `run`). None of these narrow which tests run; the value must not be
+    // misread as a test name, and the run must stay `broad`.
+    ['cargo test --features foo', true, true, []],
+    ['cargo test -F foo', true, true, []],
+    ['cargo test --features=foo', true, true, []],
+    ['cargo test -p my_crate', true, true, []],
+    ['cargo test --package my_crate', true, true, []],
+    ['cargo test --exclude other_crate', true, true, []],
+    ['cargo test --manifest-path ./Cargo.toml', true, true, []],
+    ['cargo test --lockfile-path ./Cargo.lock', true, true, []],
+    ['cargo test --target x86_64-unknown-linux-gnu', true, true, []],
+    ['cargo test --target-dir ./target', true, true, []],
+    ['cargo test --profile release', true, true, []],
+    ['cargo test -j 4', true, true, []],
+    ['cargo test --jobs 4', true, true, []],
+    ['cargo test --color always', true, true, []],
+    ['cargo test --message-format json', true, true, []],
+    // A build-config flag alongside a genuine positional test name must
+    // still be recognized as name-filtered by that name — the flag-value
+    // skip must not eat the real positional too.
+    ['cargo test --features foo some_unrelated_name', true, false, []],
+    // `--test <name>` selects a specific integration-test BINARY target by
+    // name, not a file path and not a build-config value — it genuinely
+    // narrows which tests run, so (unlike the build-config flags above) it
+    // is deliberately NOT skipped. There's no infrastructure here to resolve
+    // a bare target name against a real file, so it lands on the same safe
+    // name-filtered (not broad) outcome as a plain `cargo test <name>`.
+    ['cargo test --test integration_test', true, false, []],
+    // Regression (caught in review, then corrected on direction): pnpm's own
+    // `--filter`/`-F` workspace selector (https://pnpm.io/filtering) is a
+    // FOURTH instance of the same short-flag-collision hazard class. A
+    // scoped package name routinely contains "/" (`@hono/core`), which the
+    // generic path-token scan misread as a real scope-narrowing file when
+    // `--filter` appeared AFTER the script name — flipping a genuinely broad
+    // run to falsely narrow. Both orderings (`--filter` before/after the
+    // script) and both forms (`--filter <val>` / `--filter=<val>`) must stay
+    // broad, plus the documented `-F` alias.
+    ['pnpm test --filter hono', true, true, []],
+    ['pnpm test --filter @hono/core', true, true, []],
+    ['pnpm test --filter=hono', true, true, []],
+    ['pnpm test --filter=@hono/core', true, true, []],
+    ['pnpm test -F hono', true, true, []],
+    ['pnpm test -F @hono/core', true, true, []],
+    ['pnpm --filter hono test', true, true, []],
+    ['pnpm --filter @hono/core test', true, true, []],
+    // The "=" form before the script wasn't matched by ANY runner pattern at
+    // all before this fix (isTestRun: false) — pnpm's own docs show
+    // `--filter=selector` as the canonical exclusion form
+    // (`--filter=!foo`), so this always nagged even though it's a
+    // documented, common invocation.
+    ['pnpm --filter=hono test', true, true, []],
+    ['pnpm --filter=@hono/core test', true, true, []],
+    ['pnpm -F hono test', true, true, []],
+    ['pnpm -F @hono/core test', true, true, []],
+    ['pnpm --filter=!excluded-pkg test', true, true, []],
+    // Rejected review suggestion, pinned as regression (2026-07-30): a
+    // scope-broadening flag (which packages/crates get COMPILED) must NOT
+    // suppress independent name-filter evidence (which tests, among those
+    // compiled, actually EXECUTE) — selection and scope are independent
+    // axes. See the matching doc section in
+    // docs/architecture/test-verification-nudge.md. Making these `broad`
+    // instead would be the exact false-silence bug this file exists to fix,
+    // just triggered by a scope flag instead of a bare name.
+    ['go test -run TestFoo ./...', true, false, []],
+    ['go test -run TestFoo .', true, false, []],
+    ['cargo test foo --workspace', true, false, []],
+    ['cargo test foo --all', true, false, []],
+    // Contrast: the SAME scope-broadening flags, with no name filter
+    // present at all, correctly stay broad (real whole-suite coverage).
+    ['go test ./...', true, true, []],
+    ['cargo test --workspace', true, true, []],
+    ['cargo test --all', true, true, []],
   ])('%s -> isTestRun=%s broad=%s scopeTokens=%j', (command, isTestRun, broad, scopeTokens) => {
     expect(classifyTestCommand(command)).toEqual({ isTestRun, broad, scopeTokens });
   });
@@ -355,6 +484,49 @@ describe('computeUnverifiedFiles', () => {
     it('a directory scope token without a leading ./ still matches (go test pkg/x/...)', () => {
       const edits = new Map([['pkg/cmd/label/list.go', ['pkg/cmd/label/list_test.go']]]);
       const runs = [{ isTestRun: true, broad: false, scopeTokens: ['pkg/cmd/label/...'] }];
+      expect(computeUnverifiedFiles(edits, runs)).toEqual([]);
+    });
+  });
+
+  // 2026-07-29: name-filtered runs (`classifyTestCommand` returning `isTestRun:
+  // true, broad: false, scopeTokens: []`) must behave, downstream in
+  // computeUnverifiedFiles, exactly as if no run had been observed at all —
+  // neither silencing the report (that was the bug: a name-filtered run
+  // used to come back `broad: true` and clear every edited file) nor
+  // crashing on the empty scopeTokens array.
+  describe('name-filtered runs contribute no coverage', () => {
+    it('a lone name-filtered run leaves every edited file unverified, same as no run at all', () => {
+      const edits = new Map([
+        ['src/foo.ts', ['src/foo.test.ts']],
+        ['src/bar.ts', ['src/bar.test.ts']],
+      ]);
+      const runs = [{ isTestRun: true, broad: false, scopeTokens: [] }];
+      expect(computeUnverifiedFiles(edits, runs)).toEqual([
+        { file: 'src/foo.ts', tests: ['src/foo.test.ts'] },
+        { file: 'src/bar.ts', tests: ['src/bar.test.ts'] },
+      ]);
+    });
+
+    it('a name-filtered run alongside a real scoped run only clears the scoped file, not the rest', () => {
+      const edits = new Map([
+        ['src/foo.ts', ['src/foo.test.ts']],
+        ['src/bar.ts', ['src/bar.test.ts']],
+      ]);
+      const runs = [
+        { isTestRun: true, broad: false, scopeTokens: [] }, // e.g. pytest -k unrelated_name
+        { isTestRun: true, broad: false, scopeTokens: ['src/foo.test.ts'] },
+      ];
+      expect(computeUnverifiedFiles(edits, runs)).toEqual([
+        { file: 'src/bar.ts', tests: ['src/bar.test.ts'] },
+      ]);
+    });
+
+    it('a genuinely broad run alongside a name-filtered run still clears everything', () => {
+      const edits = new Map([['src/foo.ts', ['src/foo.test.ts']]]);
+      const runs = [
+        { isTestRun: true, broad: false, scopeTokens: [] }, // name-filtered
+        { isTestRun: true, broad: true, scopeTokens: [] }, // e.g. npm test
+      ];
       expect(computeUnverifiedFiles(edits, runs)).toEqual([]);
     });
   });
