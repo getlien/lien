@@ -204,7 +204,7 @@ naming conventions (Python's `test_foo.py`, Go's `foo_test.go`, Ruby's
 `foo_spec.rb`) fall back to exact-basename matching, which already covers
 the common case of a run naming the real associated test file.
 
-#### Name-filtered runs are neither `broad` nor `scoped` (2026-07-29, #946)
+#### Name-filtered runs are neither `broad` nor `scoped` (2026-07-29)
 
 A run scoped by test **name** rather than file/directory (`pytest -k expr`,
 `dotnet test --filter expr`, `go test -run regex`, a bare `cargo test name`,
@@ -467,7 +467,7 @@ each script:
   `stop_hook_active` never arrives.
 - **Fail-open**: malformed (non-JSON) stdin and a payload missing
   `session_id` both exited 0 with no output, for both new hooks.
-- **Name-filtered runs (2026-07-29, #946)**, dogfooded end-to-end in a
+- **Name-filtered runs (2026-07-29)**, dogfooded end-to-end in a
   foreign repo (flask, not this one) via `test-reminder.sh`/`test-run-note.sh`
   with real stdin: an edit + a `tool_input.command: "pytest -k
   test_totally_unrelated_name"` payload, on the pre-fix build, produced

@@ -48,7 +48,7 @@ describe('classifyTestCommand — broad vs scoped classification table', () => {
     ['./vendor/bin/phpunit', true, true, []],
     ['composer test', true, true, []],
     ['swift test', true, true, []],
-    // #946: `--filter` here names a suite, not a path/workspace — a
+    // 2026-07-29: `--filter` here names a suite, not a path/workspace — a
     // name-filtered run (see the name-filter table below), NOT broad. This
     // used to be (incorrectly) broad because `--filter` was globally
     // skip-invisible via WORKSPACE_SCOPE_FLAGS.
@@ -148,7 +148,7 @@ describe('classifyTestCommand — broad vs scoped classification table', () => {
     // Composed: a wrapper around tox.
     ['uv run tox run', true, true, []],
     ['uv run tox -e py311 -- tests/test_x.py', true, false, ['tests/test_x.py']],
-    // #946: a run scoped by test NAME rather than file/directory has no
+    // 2026-07-29: a run scoped by test NAME rather than file/directory has no
     // path-like scope token, so before this fix it fell back to `broad`
     // (silently marking the whole session's edits "verified"). Each of
     // these must come back name-filtered: isTestRun, NOT broad, and no
@@ -412,13 +412,13 @@ describe('computeUnverifiedFiles', () => {
     });
   });
 
-  // #946: name-filtered runs (`classifyTestCommand` returning `isTestRun:
+  // 2026-07-29: name-filtered runs (`classifyTestCommand` returning `isTestRun:
   // true, broad: false, scopeTokens: []`) must behave, downstream in
   // computeUnverifiedFiles, exactly as if no run had been observed at all —
   // neither silencing the report (that was the bug: a name-filtered run
   // used to come back `broad: true` and clear every edited file) nor
   // crashing on the empty scopeTokens array.
-  describe('name-filtered runs contribute no coverage (#946)', () => {
+  describe('name-filtered runs contribute no coverage', () => {
     it('a lone name-filtered run leaves every edited file unverified, same as no run at all', () => {
       const edits = new Map([
         ['src/foo.ts', ['src/foo.test.ts']],
