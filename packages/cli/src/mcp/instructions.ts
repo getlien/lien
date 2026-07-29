@@ -6,8 +6,9 @@
  */
 export const SERVER_INSTRUCTIONS = `Lien provides fast lexical code search and dependency analysis over this codebase.
 Use Lien tools proactively — they complement grep/glob rather than replace each
-other. Prefer Lien for keyword discovery and structural impact; use grep only
-for exact literals (error strings, config keys, TODOs).
+other. Prefer Lien for keyword discovery and structural impact; use grep for
+things you can name exactly: a known symbol name, an error string, a config key,
+a TODO.
 
 REQUIRED before Edit/Write on any file:
   get_files_context({ filepaths }) — returns imports, callSites, and test
@@ -53,13 +54,23 @@ symbol:
   still read "low"; attributionCaveat is the authoritative signal in all
   four cases.
 
-For discovery ("where is X?", "how does Y work?"), call search_code FIRST.
-It runs full-text BM25 keyword search over code, docstrings, and camelCase-split
-identifiers. Query with concrete KEYWORDS, identifiers, and domain terms
-("chunk overlap config", "parse import statement") — NOT natural-language
-questions. There are no embeddings, so a meaning-only paraphrase that shares no
-words with the code will not match; use vocabulary that appears in the code or
-comments. For an exact symbol name, prefer list_functions.
+For discovery ("where is X?", "how does Y work?"), choose by what you already
+know. If you know the exact name, go straight to list_functions (a symbol) or
+grep (a literal) — do not paraphrase a name you already have. If you know the
+concept but not the name, call search_code BEFORE falling back to grep/glob.
+
+search_code runs full-text BM25 keyword search over code, docstrings, and
+camelCase-split identifiers. Query with concrete KEYWORDS, identifiers, and
+domain terms ("chunk overlap config", "parse import statement") — NOT
+natural-language questions. There are no embeddings, so a meaning-only paraphrase
+that shares no words with the code will not match; use vocabulary that appears in
+the code or comments.
+
+Zero results is NOT proof of absence. The index may simply not have caught up
+with a recent edit, in which case a symbol that exists on disk is unfindable and
+the tool cannot tell you which case you are in. Before concluding something does
+not exist, grep for it, or re-run after "lien index". Same rule for a result set
+that looks plausible but omits what you asked for.
 
 Tool selection:
   search_code       — keyword/full-text discovery
