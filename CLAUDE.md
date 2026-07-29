@@ -89,6 +89,7 @@ Lien provides lexical (FTS5) code search and dependency analysis via MCP. These 
 - `search_code` is full-text (BM25) keyword search over code, docstrings, and camelCase-split identifiers — query with concrete keywords/identifiers/domain terms, not natural-language questions. There are no embeddings, so meaning-only paraphrases that share no words with the code won't match.
 - Use `search_code` for: "authenticate user session", "index codebase pipeline", "file watcher debounce" — words that appear in the code
 - Use grep/glob ONLY for: exact symbol names, literal strings, config keys, TODOs (or `list_functions` for a single exact symbol name)
+- **Zero results is not proof of absence.** If the index hasn't caught up with a recent edit, a symbol that exists on disk is unfindable and the tool cannot tell you which case you're in. Before concluding something doesn't exist — or acting on a plausible-looking result set that omits what you asked for — grep for it, or re-run after `lien index`.
 
 ### When to Use Other Tools
 
