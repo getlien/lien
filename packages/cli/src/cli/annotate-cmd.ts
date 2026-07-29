@@ -300,6 +300,14 @@ function computeSwiftSymbolUsageFallback(
 interface AnnotationData {
   allChunks: CodeChunk[];
   dependents: DependentInfo[];
+  /**
+   * True when `dependents` came back empty for a language where the import
+   * graph structurally cannot see every real usage (C#'s enclosing-
+   * namespace access -- #930/#936). A zero-dependent result in that case
+   * means "the scan found nothing," not "nothing depends on this file" --
+   * see `formatDependents`'s counterpart honesty label in `formatTests`.
+   */
+  dependentAttributionIncomplete?: boolean;
   tests: string[];
   packageLevelTests: string[];
   symbolUsageTests: string[];
@@ -371,6 +379,7 @@ async function computeAnnotationData(
   return {
     allChunks,
     dependents: result.dependents,
+    dependentAttributionIncomplete: result.dependentAttributionIncomplete,
     tests,
     packageLevelTests,
     symbolUsageTests,
@@ -420,6 +429,7 @@ async function run(file: string, options?: AnnotateOptions): Promise<void> {
         data.complexity.warningCount,
         data.tests.length,
         data.headroom.entries.length,
+        data.dependentAttributionIncomplete,
       )
     ) {
       return;
@@ -441,6 +451,7 @@ async function run(file: string, options?: AnnotateOptions): Promise<void> {
     emitAnnotation(
       filepath,
       data.dependents,
+      data.dependentAttributionIncomplete,
       data.tests,
       data.packageLevelTests,
       data.symbolUsageTests,
@@ -636,6 +647,7 @@ export function withHeadroomWarning(lines: string[], headroom: ComplexityHeadroo
 function emitAnnotation(
   filepath: RelativePath,
   dependents: DependentInfo[],
+  dependentAttributionIncomplete: boolean | undefined,
   tests: string[],
   packageLevelTests: string[],
   symbolUsageTests: string[],
@@ -646,6 +658,9 @@ function emitAnnotation(
   const lines: string[] = [`Lien impact for ${filepath}:`];
   if (dependents.length > 0) {
     lines.push(`  • ${formatDependents(dependents, risk.level, risk.reasoning)}`);
+  } else if (dependentAttributionIncomplete) {
+    // Mirrors formatTests's "not determinable" honesty label -- see #930/#936.
+    lines.push(`  • Dependents not determinable from imports (enclosing-namespace access).`);
   }
   lines.push(`  • ${formatTests(tests, filepath, packageLevelTests, symbolUsageTests)}`);
   if (complexity.warningCount > 0) {
@@ -660,7 +675,12 @@ export function isTrivial(
   complexityWarnings: number,
   testCount: number,
   headroomCount = 0,
+  dependentAttributionIncomplete = false,
 ): boolean {
+  // An incomplete-attribution zero is exactly the false-all-clear shape
+  // this annotation exists to warn about -- never let it go silent, the
+  // same way a complexity/headroom concern always clears the floor below.
+  if (dependentAttributionIncomplete) return false;
   return dependentCount <= 1 && complexityWarnings === 0 && testCount > 0 && headroomCount === 0;
 }
 
