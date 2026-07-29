@@ -136,11 +136,26 @@ function buildResult(
 ): { result: unknown; truncation: TruncationInfo } {
   const finalChars = measureSize(cloned);
   const finalItemCount = arrays.reduce((sum, arr) => sum + arr.length, 0);
+  const itemsDropped = finalItemCount < originalItemCount;
 
-  const message =
-    finalItemCount < originalItemCount
-      ? `Showing ${finalItemCount} of ${originalItemCount} results (truncated). Use narrower filters or smaller limit for complete results.`
-      : `Showing all ${finalItemCount} results (content trimmed to fit). Use narrower filters or smaller limit for complete results.`;
+  // `originalItemCount` is just the size of the array THIS function was
+  // handed — already capped upstream by whatever limit/offset/over-fetch the
+  // tool applied — never the true number of matches in the index. Saying
+  // "of {originalItemCount}" reads as a total and isn't one (see the bug
+  // this fixes: list_functions/find_similar reported "of 50"/"of 200" that
+  // was really just the request's own limit echoed back). State only what
+  // this function actually knows: how many survived ITS OWN size cut, and
+  // that more may exist — never a specific total.
+  const message = itemsDropped
+    ? `Showing ${finalItemCount} results (response-size cap; ${originalItemCount - finalItemCount} more dropped here — not the underlying match count). Narrow filters or lower limit for complete results.`
+    : `Showing all ${finalItemCount} results (content trimmed to fit response size). Narrow filters or lower limit for full content.`;
+
+  // If items were actually dropped, this response is provably incomplete —
+  // never let a stale `hasMore: false` (set upstream before this size cap
+  // ran) claim otherwise.
+  if (itemsDropped && cloned && typeof cloned === 'object' && 'hasMore' in cloned) {
+    (cloned as Record<string, unknown>).hasMore = true;
+  }
 
   return {
     result: cloned,

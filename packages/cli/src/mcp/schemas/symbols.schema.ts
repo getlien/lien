@@ -11,7 +11,11 @@ export const ListFunctionsSchema = z.object({
     .max(200)
     .optional()
     .describe(
-      'Regex pattern to match symbol names.\n\n' +
+      'Regex pattern to match symbol names. Matching is CASE-INSENSITIVE ' +
+        "(e.g. '^Job$' also matches a lowercase job method). Results are not " +
+        'relevance-ranked, so an exact-case symbol can be pushed past the ' +
+        'first page by unrelated lowercase matches; page with offset or ' +
+        "narrow the pattern/symbolType if it doesn't appear.\n\n" +
         'Examples:\n' +
         "  - '.*Controller.*' to find all Controllers\n" +
         "  - 'handle.*' to find handlers\n" +

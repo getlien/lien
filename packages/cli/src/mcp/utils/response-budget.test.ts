@@ -93,7 +93,10 @@ describe('applyResponseBudget', () => {
     expect(truncation).toBeDefined();
     expect(truncation!.originalItemCount).toBe(50);
     expect(truncation!.finalItemCount).toBeLessThan(50);
-    expect(truncation!.message).toMatch(/^Showing \d+ of 50 results \(truncated\)/);
+    expect(truncation!.message).toMatch(/^Showing \d+ results \(response-size cap;/);
+    // Never claim "of 50" as if 50 were the true match total — it's just
+    // the pre-trim array size this function was handed.
+    expect(truncation!.message).not.toMatch(/\bof 50\b/);
     const res = result as typeof input;
     expect(res.results.length).toBeLessThan(50);
   });
@@ -172,7 +175,7 @@ describe('applyResponseBudget', () => {
     expect(truncation!.finalChars).toBeLessThanOrEqual(DEFAULT_BUDGET);
     expect(truncation!.originalItemCount).toBe(10);
     expect(truncation!.finalItemCount).toBeGreaterThan(0);
-    expect(truncation!.message).toMatch(/Use narrower filters or smaller limit/);
+    expect(truncation!.message).toMatch(/Narrow filters or lower limit/);
   });
 
   it('Phase 1 message says "content trimmed" when no items are dropped', () => {
@@ -189,13 +192,40 @@ describe('applyResponseBudget', () => {
     expect(truncation!.message).toContain('content trimmed to fit');
   });
 
-  it('Phase 2 message says "Showing X of Y" when items are dropped', () => {
+  it('Phase 2 message reports a drop count, never a fabricated total', () => {
     const input = makeResultsResponse(50, 1000);
     const { truncation } = applyResponseBudget(input);
 
     expect(truncation).toBeDefined();
     expect(truncation!.finalItemCount).toBeLessThan(truncation!.originalItemCount);
-    expect(truncation!.message).toMatch(/^Showing \d+ of 50 results \(truncated\)/);
+    expect(truncation!.message).toMatch(/^Showing \d+ results \(response-size cap;/);
+    expect(truncation!.message).toContain('not the underlying match count');
+    expect(truncation!.message).not.toMatch(/\bof 50\b/);
+  });
+
+  it('forces hasMore to true when items are dropped, even if the tool had set it false', () => {
+    const input = { ...makeResultsResponse(50, 1000), hasMore: false };
+    const { result, truncation } = applyResponseBudget(input);
+
+    expect(truncation).toBeDefined();
+    expect(truncation!.finalItemCount).toBeLessThan(truncation!.originalItemCount);
+    expect((result as { hasMore: boolean }).hasMore).toBe(true);
+  });
+
+  it('does not add a hasMore field where none existed', () => {
+    const input = makeResultsResponse(50, 1000);
+    const { result } = applyResponseBudget(input);
+
+    expect(result as object).not.toHaveProperty('hasMore');
+  });
+
+  it('leaves hasMore untouched when only content is trimmed (no items dropped)', () => {
+    const input = { ...makeResultsResponse(3, 5000), hasMore: false };
+    const { result, truncation } = applyResponseBudget(input);
+
+    expect(truncation).toBeDefined();
+    expect(truncation!.finalItemCount).toBe(truncation!.originalItemCount);
+    expect((result as { hasMore: boolean }).hasMore).toBe(false);
   });
 
   it('returns unchanged for non-object results', () => {

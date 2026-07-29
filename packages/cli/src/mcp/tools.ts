@@ -54,7 +54,8 @@ Returns:
 - results[]: { content, score, relevance, metadata: { file, startLine, endLine, language?, symbolName?, signature?, enclosingSymbol? } }
 - enclosingSymbol: "Class.method" for methods, "functionName" for standalone functions, absent for block chunks
 - relevance: "highly_relevant" | "relevant" | "loosely_related" (not_relevant auto-filtered)
-- filtersApplied?: { language?, pathHint?, prunedLowRelevance: number }`,
+- filtersApplied?: { language?, pathHint?, prunedLowRelevance: number }
+- hasMore: boolean — a LOWER BOUND, not a total (this tool doesn't paginate): true means more candidates likely exist beyond what's shown; false means the underlying search was exhausted. Never a fabricated count — raise limit (max 20) or narrow with language/pathHint to see more.`,
   ),
   toMCPToolSchema(
     GetFilesContextSchema,
@@ -119,14 +120,17 @@ Filter by symbol type (function, method, class, interface) to narrow results.
 
 10x faster than search_code for structural/architectural queries. Use search_code instead when searching by what code DOES.
 
+\`pattern\` matching is CASE-INSENSITIVE — '^Job$' also matches a lowercase job method. Results are NOT relevance-ranked (declaration order), so a symbol you expect to see can be pushed past the current page by unrelated lowercase matches that simply appear earlier; page with \`offset\` or narrow \`pattern\`/\`symbolType\`/\`language\` if it doesn't appear.
+
 Results are paginated (default: 50, max: 200). Use \`offset\` to page through large result sets.
 
 Returns:
 - results[]: { content, metadata: { file, startLine, endLine, language?, symbolName?, symbolType?, signature?, enclosingSymbol? } }
 - enclosingSymbol: "Class.method" for methods, "functionName" for standalone functions, absent for block chunks
 - method: "symbols" | "content" (query method used)
-- hasMore: boolean (more results available)
-- nextOffset?: number (offset for next page, when hasMore=true)`,
+- hasMore: boolean — true means more results exist beyond this page (never a fabricated total; there is no "total matches" number in this response — only whether more exist and where to find them)
+- nextOffset?: number (offset for next page, when hasMore=true)
+- note?: when hasMore is true, explains how to see more (offset/narrower filters) — always trust hasMore/nextOffset over any count mentioned in note, which can describe a smaller page than what's shown if the response was also trimmed for size`,
   ),
   toMCPToolSchema(
     GetDependentsSchema,

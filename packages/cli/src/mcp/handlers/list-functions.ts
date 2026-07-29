@@ -133,6 +133,14 @@ export async function handleListFunctions(args: unknown, ctx: ToolContext): Prom
       notes.push(
         'No results for this page. The offset is beyond the available results; try reducing or resetting the offset to 0.',
       );
+    } else if (hasMore) {
+      // Deliberately no item count here: the true total isn't computed (see
+      // paginateResults), and a count captured at this point can go stale if
+      // applyResponseBudget drops further items downstream for response size.
+      // hasMore/nextOffset (top-level fields) are the source of truth.
+      notes.push(
+        `More matches exist beyond this page. Use offset:${nextOffset} or narrow pattern/symbolType/language to see them.`,
+      );
     }
     if (queryResult.method === 'content') {
       notes.push('Using content search. Run "lien index" to enable faster symbol-based queries.');

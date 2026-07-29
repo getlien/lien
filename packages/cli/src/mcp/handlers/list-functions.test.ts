@@ -706,6 +706,36 @@ describe('handleListFunctions', () => {
       expect(parsed.hasMore).toBe(false);
     });
 
+    it('should surface a note when genuinely truncated, without stating a fabricated total', async () => {
+      // Regression test: a full page with more results beyond it used to be
+      // completely silent (no note at all), even though hasMore/nextOffset
+      // were correctly set. See the response-budget fabricated-total bug this
+      // pairs with.
+      mockVectorDB.querySymbols.mockResolvedValue(makeResults(30));
+
+      const result = await handleListFunctions({ limit: 10 }, mockCtx);
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.results).toHaveLength(10);
+      expect(parsed.hasMore).toBe(true);
+      expect(parsed.nextOffset).toBe(10);
+      expect(parsed.note).toBeDefined();
+      expect(parsed.note).toContain('offset:10');
+      // Never assert a specific "of N" total — the true total isn't computed.
+      expect(parsed.note).not.toMatch(/\bof \d+/);
+    });
+
+    it('should not include a truncation note when all results fit (complete, no false total)', async () => {
+      mockVectorDB.querySymbols.mockResolvedValue(makeResults(5));
+
+      const result = await handleListFunctions({ limit: 10 }, mockCtx);
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.results).toHaveLength(5);
+      expect(parsed.hasMore).toBe(false);
+      expect(parsed.note).toBeUndefined();
+    });
+
     it('should include pagination metadata in content scan fallback', async () => {
       mockVectorDB.querySymbols.mockRejectedValue(new Error('fail'));
       mockVectorDB.scanWithFilter.mockResolvedValue(makeResults(30));
