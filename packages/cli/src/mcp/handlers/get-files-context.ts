@@ -8,6 +8,7 @@ import {
   getCanonicalPath,
   isTestFile,
   importMatchesTarget,
+  isUnresolvableWholeModuleImport,
   detectLanguage,
   hasSameDirectoryTestConvention,
   buildGoTestDirIndex,
@@ -239,28 +240,62 @@ export function createPathCache(workspaceRoot: string): {
   return { normalize, cache };
 }
 
-/** Canonical test-file paths among `allChunks` whose imports resolve to `normalizedTarget`. */
+/**
+ * True when `imp` (as written in `importerFile`) is a literal, exact
+ * reference to `normalizedTarget` -- the #929 direct-importer signal -- and
+ * is not merely a whole-module-import language's bare module name that
+ * happens to coincide with it. The #884 whole-module guard has to be
+ * applied here directly: this check never calls `matchesFile`/
+ * `importMatchesTarget`, so nothing else would catch a Swift `import
+ * Alamofire` against a target file named `Alamofire.swift` (the classic
+ * #884 false-hub shape) before it jumped the queue into the trusted exact
+ * bucket below. Extracted so `collectImportMatchedTestFiles`'s own loop
+ * body doesn't grow another nested condition per guard.
+ */
+function isExactDirectImport(
+  imp: string,
+  importerFile: string,
+  normalizedTarget: string,
+  normalize: (path: string) => string,
+): boolean {
+  return !isUnresolvableWholeModuleImport(imp, importerFile) && normalize(imp) === normalizedTarget;
+}
+
+/**
+ * Canonical test-file paths among `allChunks` whose imports resolve to
+ * `normalizedTarget`, exact literal matches first (#929) -- mirrors
+ * `@liendev/parser`'s own `collectImportMatchedTests` (test-associations.ts;
+ * this handler is `get_files_context`'s separate implementation, so it needs
+ * the identical treatment). See that function's doc comment for why an exact
+ * direct importer must not be left to sort behind a fuzzier match once a
+ * caller truncates the list for display.
+ */
 function collectImportMatchedTestFiles(
   allChunks: Array<{ metadata: { file: string; imports?: string[] } }>,
   normalizedTarget: string,
   normalize: (path: string) => string,
   workspaceRoot: string,
 ): string[] {
-  const matched: string[] = [];
+  const exact: string[] = [];
+  const fuzzy: string[] = [];
   for (const chunk of allChunks) {
     const chunkFile = getCanonicalPath(chunk.metadata.file, workspaceRoot);
     if (!isTestFile(chunkFile)) continue;
 
     const imports = chunk.metadata.imports || [];
-    if (
-      imports.some(imp =>
-        importMatchesTarget(imp, chunk.metadata.file, normalizedTarget, normalize),
-      )
-    ) {
-      matched.push(chunkFile);
+    const isExactMatch = imports.some(imp =>
+      isExactDirectImport(imp, chunk.metadata.file, normalizedTarget, normalize),
+    );
+    const isFuzzyMatch = imports.some(imp =>
+      importMatchesTarget(imp, chunk.metadata.file, normalizedTarget, normalize),
+    );
+    if (isExactMatch) {
+      exact.push(chunkFile);
+    } else if (isFuzzyMatch) {
+      fuzzy.push(chunkFile);
     }
   }
-  return matched;
+  return [...exact, ...fuzzy];
 }
 
 /**

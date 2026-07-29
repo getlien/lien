@@ -265,4 +265,73 @@ describe('findTestAssociationsFromChunks', () => {
       expect(result.has('src/list.ts')).toBe(false);
     });
   });
+
+  describe('direct-importer ranking (#929)', () => {
+    // The real hono repro: `src/utils/jwt/jwt.test.ts` imports `./jws`
+    // directly (an exact, unambiguous reference), but scan order alone
+    // decided display order, so this genuine direct importer sorted behind
+    // several other real-but-fuzzier matches and was truncated out of
+    // `lien annotate`'s "Test coverage" line entirely. A direct importer
+    // must be included AND ranked ahead of a fuzzy match, not merely
+    // present somewhere in the result.
+    it('ranks an exact direct importer ahead of a fuzzy match, even when the fuzzy match is scanned first', () => {
+      const chunks: CodeChunk[] = [
+        makeChunk('src/auth.rs'),
+        // Scanned FIRST: only matches via Strategy 2's bare "source
+        // directory prefix" leniency (a real match, but not a direct
+        // reference to the target's own resolved path).
+        makeChunk('tests/other_test.rs', ['auth']),
+        // Scanned SECOND: its own import resolves to exactly the target's
+        // normalized path -- the direct, unambiguous reference.
+        makeChunk('tests/auth_direct_test.rs', ['src/auth']),
+      ];
+
+      const result = findTestAssociationsFromChunks(['src/auth.rs'], chunks);
+
+      expect(result.get('src/auth.rs')).toEqual([
+        'tests/auth_direct_test.rs',
+        'tests/other_test.rs',
+      ]);
+    });
+
+    it('still finds only the fuzzy match when no exact importer exists', () => {
+      const chunks: CodeChunk[] = [
+        makeChunk('src/auth.rs'),
+        makeChunk('tests/other_test.rs', ['auth']),
+      ];
+
+      const result = findTestAssociationsFromChunks(['src/auth.rs'], chunks);
+
+      expect(result.get('src/auth.rs')).toEqual(['tests/other_test.rs']);
+    });
+
+    it('does not let a Swift whole-module bare import jump the exact-match queue ahead of a real direct importer', () => {
+      // The #884 Alamofire shape, reintroduced one layer up: a top-level
+      // Swift file whose basename equals its own module name means a bare
+      // `import Alamofire` (whole-module -- Swift's SwiftImportExtractor
+      // never emits a per-file specifier) normalizes to literally the same
+      // string as the target itself. Without the whole-module guard on the
+      // exact-match check, this satisfies `normalize(imp) ===
+      // normalizedTarget` and gets promoted straight into the trusted
+      // `exact` bucket ahead of `AlamofireTests.swift`'s genuine, qualified
+      // direct import. The guard rejects the bare whole-module "match"
+      // entirely (mirroring the existing #884 test above), not merely
+      // de-prioritizes it -- `importMatchesTarget`'s own #884 guard excludes
+      // it from the fuzzy bucket too, so it must not appear in the result
+      // at all.
+      const chunks: CodeChunk[] = [
+        makeChunk('Alamofire.swift'),
+        // Scanned FIRST: bare whole-module import, coincidentally identical
+        // to the target's own normalized path -- must NOT count as exact,
+        // and (like every other whole-module import) is rejected outright.
+        makeChunk('OtherTests.swift', ['Alamofire']),
+        // Scanned SECOND: a real, qualified direct import.
+        makeChunk('AlamofireTests.swift', ['./Alamofire']),
+      ];
+
+      const result = findTestAssociationsFromChunks(['Alamofire.swift'], chunks);
+
+      expect(result.get('Alamofire.swift')).toEqual(['AlamofireTests.swift']);
+    });
+  });
 });
