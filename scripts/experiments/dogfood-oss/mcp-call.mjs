@@ -11,7 +11,11 @@
  *   node mcp-call.mjs <repoDir> <toolName> '<jsonArgs>'
  *   node mcp-call.mjs <repoDir> --list
  *
- * Prints a JSON envelope: { ok, ms, tool, args, result?, error? }. Non-zero exit
+ * Set LIEN_MCP_CLI to measure a specific build instead of this repo's own
+ * packages/cli/dist/index.js — e.g. a published artifact:
+ *   LIEN_MCP_CLI=/tmp/probe/node_modules/@liendev/lien/dist/index.js
+ *
+ * Prints a JSON envelope: { ok, ms, cli, tool, args, result?, error? }. Non-zero exit
  * only on harness failure (spawn/connect); a tool-level error is a successful
  * measurement and exits 0 with ok:false.
  */
@@ -23,7 +27,17 @@ import path from 'node:path';
 
 const [repoDir, tool, rawArgs] = process.argv.slice(2);
 const REPO = path.resolve(import.meta.dirname, '../../..');
-const CLI = path.join(REPO, 'packages/cli/dist/index.js');
+
+// Which binary is under measurement is the single easiest thing to get wrong here:
+// this file resolves the CLI relative to ITS OWN repo root, so running one
+// worktree's copy silently measures that worktree's build. Round 1 of the dogfood
+// reported a working fix as broken twice for exactly that reason. LIEN_MCP_CLI
+// makes the target explicit (e.g. a published `npm install @liendev/lien` under
+// test), and the resolved path is echoed into every envelope so a measurement can
+// never be read without knowing which build produced it.
+const CLI = process.env.LIEN_MCP_CLI
+  ? path.resolve(process.env.LIEN_MCP_CLI)
+  : path.join(REPO, 'packages/cli/dist/index.js');
 
 function die(msg) {
   console.error(`mcp-call: ${msg}`);
@@ -32,7 +46,11 @@ function die(msg) {
 
 if (!repoDir || !tool) die("usage: mcp-call.mjs <repoDir> <toolName|--list> '<jsonArgs>'");
 if (!fs.existsSync(repoDir)) die(`repoDir does not exist: ${repoDir}`);
-if (!fs.existsSync(CLI)) die(`CLI not built at ${CLI}`);
+if (!fs.existsSync(CLI))
+  die(
+    `CLI not found at ${CLI}` +
+      (process.env.LIEN_MCP_CLI ? ' (from LIEN_MCP_CLI)' : ' — build it, or set LIEN_MCP_CLI'),
+  );
 
 // C1: refuse to measure anything inside the Lien checkout, whatever the caller asked.
 const resolved = fs.realpathSync(repoDir);
@@ -72,6 +90,7 @@ try {
         {
           ok: true,
           ms: elapsed(),
+          cli: CLI,
           serverInstructions: client.getInstructions?.() ?? null,
           tools: tools.tools.map(t => ({ name: t.name, inputSchema: t.inputSchema })),
         },
@@ -83,13 +102,14 @@ try {
     let envelope;
     try {
       const res = await client.callTool({ name: tool, arguments: args });
-      envelope = { ok: !res.isError, ms: elapsed(), tool, args, result: res };
+      envelope = { ok: !res.isError, ms: elapsed(), cli: CLI, tool, args, result: res };
     } catch (e) {
       // Protocol-level rejection (unknown tool, schema validation) — a real
       // measurement of the tool's failure mode, not a harness fault.
       envelope = {
         ok: false,
         ms: elapsed(),
+        cli: CLI,
         tool,
         args,
         error: { name: e.name, message: e.message, code: e.code },
