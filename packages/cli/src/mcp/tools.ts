@@ -144,7 +144,7 @@ Returns:
 - dependents[]: { filepath, isTestFile, usages[]? }
 - complexityMetrics: { averageComplexity, maxComplexity, highComplexityDependents[] }
 - totalUsageCount?: number (when symbol parameter provided)
-- note?: present and explicit when \`filepath\` has no entry in the index at all — a dependentCount of 0 / riskLevel "low" can otherwise look identical whether the file genuinely has no dependents or the path was never indexed
+- note?: present and explicit when \`filepath\` isn't resolvable in the index at all — a dependentCount of 0 / riskLevel "low" can otherwise look identical whether the file genuinely has no dependents or the path was never found. Two independent checks can produce it (not in the index manifest; or indexed with zero chunks for this exact path), but only ONE note is ever returned — never two competing explanations of the same zero.
 - symbolAttributionDegraded?: boolean + symbolAttributionNote?: string — set when
   symbol names a method or constructor (not a top-level export) and call sites
   couldn't be confirmed; dependentCount/riskLevel are then the file-level answer
