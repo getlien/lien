@@ -58,8 +58,15 @@ const KIT = 'scripts/experiments/dogfood-oss';
 // Where Phase 0 cloned the corpus. Outside the Lien tree on purpose: cloning under
 // the checkout would put Lien's own tool-mandating CLAUDE.md on every clone's
 // ancestor path, which is the exact contamination C1 exists to prevent.
+//
+// Resolution order matches provision.mjs so the two cannot disagree about where the
+// corpus lives. NOT hardcoded to a machine-specific path: an earlier version pinned
+// one developer's `~/.claude/jobs/<id>/tmp/corpus`, which was both unusable on any
+// other machine AND already stale — that location had to be abandoned because
+// Claude Code treats everything under `~/.claude/` as a sensitive file and denies
+// edits there.
 const CORPUS_ROOT =
-  (args && args.corpusRoot) || '/Users/alfhenderson/.claude/jobs/460173c9/tmp/corpus';
+  (args && args.corpusRoot) || process.env.LIEN_DOGFOOD_CORPUS || '/tmp/lien-dogfood-corpus';
 const PROTOCOL = 'docs/development/dogfood-oss-corpus-protocol.md';
 
 // Corpus per protocol §2. `known` repos have established ground truth from the

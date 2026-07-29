@@ -20,9 +20,12 @@ import path from 'node:path';
 
 const REPO = path.resolve(import.meta.dirname, '../../..');
 const CLI = path.join(REPO, 'packages/cli/dist/index.js');
+// Default deliberately AVOIDS $CLAUDE_JOB_DIR: that lives under `~/.claude/`, and
+// Claude Code treats everything beneath it as a sensitive file, so an agent trial in
+// a corpus there completes its whole investigation and then has its Edit DENIED.
+// Learned the slow way — one 10-minute trial and $2.40. Keep this on a neutral root.
 const CORPUS_ROOT =
-  process.env.LIEN_DOGFOOD_CORPUS ||
-  path.join(process.env.CLAUDE_JOB_DIR || os.tmpdir(), 'tmp', 'corpus');
+  process.env.LIEN_DOGFOOD_CORPUS || path.join(os.tmpdir(), 'lien-dogfood-corpus');
 
 // C1 is tiered, because contamination is about what the agent UNDER TEST reads.
 //
