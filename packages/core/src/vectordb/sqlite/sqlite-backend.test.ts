@@ -277,6 +277,53 @@ describe('SqliteBackend', () => {
     });
   });
 
+  describe('reconnect', () => {
+    // Regression test for a real, reproduced MCP-server concurrency bug:
+    // `checkAndReconnect` runs `reconnect()` on the SAME vectorDB instance
+    // concurrent tool handlers share. The original implementation was
+    // `this.close(); await this.initialize();` — `close()` runs fully
+    // synchronously, nulling `this.db` BEFORE the first `await`. Any
+    // concurrent call that read `this.db` in that window (even one already
+    // in flight, not just a new one) hit `requireDb()`'s "Vector database
+    // not initialized" — a real failure observed under load, not a
+    // hypothetical. This is a deterministic unit test on the guard itself
+    // (never leave `this.db` null mid-swap) rather than a timing-dependent
+    // integration test: JS's run-to-completion-until-first-`await` semantics
+    // make the assertion below exact, not probabilistic.
+    it('never leaves this.db null while a reconnect is in flight', async () => {
+      await insertOne(db, makeChunk().metadata, 'content');
+
+      // reconnect() is async but its body doesn't touch `this.db` until AFTER
+      // its first await resolves (inside openConnection's `fs.mkdir`). So the
+      // very next line runs while the OLD implementation would already have
+      // nulled `this.db` synchronously, and the NEW one has not yet touched it.
+      const reconnectPromise = db.reconnect();
+
+      // A concurrent read landing in that exact window must see a working
+      // connection — old data via the still-open OLD handle — never throw.
+      await expect(db.scanAll()).resolves.toHaveLength(1);
+
+      await reconnectPromise;
+
+      // And the swap actually completed: reads still work post-reconnect.
+      await expect(db.scanAll()).resolves.toHaveLength(1);
+    });
+
+    it('picks up data written to the file between initialize and reconnect', async () => {
+      // Simulate an external process writing to the same structural.db
+      // (e.g. `lien index` running concurrently) between this connection's
+      // initial open and a version-triggered reconnect.
+      const raw = new Database(path.join(db.dbPath, 'structural.db'));
+      raw.pragma('journal_mode = WAL');
+      raw.exec(`INSERT INTO chunks (file, content) VALUES ('external.ts', 'external content')`);
+      raw.close();
+
+      await db.reconnect();
+      const results = await db.scanAll();
+      expect(results.map(r => r.metadata.file)).toContain('external.ts');
+    });
+  });
+
   describe('checkVersion', () => {
     it('detects a newer version once, then throttles for 1 second', async () => {
       // updateFile writes a fresh version file (currentVersion starts at 0).

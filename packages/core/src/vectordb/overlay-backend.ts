@@ -35,6 +35,7 @@ import {
   OVERLAY_META,
   STRUCTURAL_DB_FILENAME,
 } from './sqlite/overlay-schema.js';
+import { withOpenRetry } from './sqlite/schema.js';
 
 const MANIFEST_FILE = 'manifest.json';
 
@@ -98,7 +99,9 @@ export class OverlayBackend implements VectorDBInterface {
   async initialize(): Promise<void> {
     try {
       await fs.mkdir(this.dbPath, { recursive: true });
-      this.overlayDb = openOverlayDatabase(this.overlayDbFilePath);
+      // withOpenRetry: the overlay file may be brand-new, with other worktree
+      // serves racing to create/open it at the same instant.
+      this.overlayDb = await withOpenRetry(() => openOverlayDatabase(this.overlayDbFilePath));
       this.openBase();
       this.baseHashes = await this.loadBaseHashes();
       this.currentVersion = await readVersionFile(this.dbPath);
@@ -503,12 +506,37 @@ export class OverlayBackend implements VectorDBInterface {
     }
   }
 
+  /**
+   * Reconnect WITHOUT ever leaving `overlayDb`/`baseDb` null: build both new
+   * connections first, swap them in, and only then close the retired ones.
+   * Same rationale as `SqliteBackend.reconnect()` — `checkAndReconnect` runs
+   * this on the shared instance concurrent tool handlers use, and a
+   * close-then-open order leaves a real window where `requireOverlay()`
+   * throws "Overlay database not initialized" mid-request.
+   */
   async reconnect(): Promise<void> {
+    const oldOverlayDb = this.overlayDb;
+    const oldBaseDb = this.baseDb;
     try {
-      this.close();
-      await this.initialize();
+      await fs.mkdir(this.dbPath, { recursive: true });
+      const newOverlayDb = await withOpenRetry(() => openOverlayDatabase(this.overlayDbFilePath));
+      this.overlayDb = newOverlayDb;
+      this.openBase(); // sets this.baseDb directly; own try/catch, non-fatal
+      this.baseHashes = await this.loadBaseHashes();
+      this.currentVersion = await readVersionFile(this.dbPath);
     } catch (error) {
       throw wrapError(error, 'Failed to reconnect to overlay database');
+    } finally {
+      try {
+        oldOverlayDb?.close();
+      } catch {
+        // Best-effort: already swapped away.
+      }
+      try {
+        oldBaseDb?.close();
+      } catch {
+        // Best-effort: already swapped away.
+      }
     }
   }
 

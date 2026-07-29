@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs/promises';
 import path from 'path';
 import { getIndexDir } from '@liendev/parser';
+import type { ChunkMetadata } from '@liendev/parser';
 import { createTestDir, cleanupTestDir } from '../test/helpers/test-db.js';
 import { indexCodebase } from '../indexer/index.js';
 import { buildOverlay } from '../indexer/overlay-index.js';
@@ -218,5 +219,44 @@ describe('OverlayBackend degrades gracefully when the base is unavailable', () =
     // FTS still works against the overlay alone.
     const hits = await overlay.search('onlySymbol', 10);
     expect(hits.some(h => h.metadata.file === 'only.ts')).toBe(true);
+  });
+});
+
+describe('OverlayBackend.reconnect()', () => {
+  let bogusBaseDir: string;
+  let worktreeDir: string;
+  let overlay: OverlayBackend;
+
+  beforeEach(async () => {
+    bogusBaseDir = await createTestDir();
+    worktreeDir = await createTestDir();
+    overlay = new OverlayBackend(worktreeDir, getIndexDir(bogusBaseDir));
+    await overlay.initialize();
+    const metadata: ChunkMetadata = {
+      file: 'a.ts',
+      startLine: 1,
+      endLine: 2,
+      type: 'function',
+      language: 'typescript',
+    };
+    await overlay.insertBatch([metadata], ['content']);
+  });
+
+  afterEach(async () => {
+    overlay.close();
+    await cleanupTestDir(bogusBaseDir);
+    await cleanupTestDir(worktreeDir);
+  });
+
+  // Regression test mirroring SqliteBackend's reconnect() fix: the previous
+  // `close()` (nulls overlayDb/baseDb) then `initialize()` order left a real
+  // window where a concurrent read hit "Overlay database not initialized".
+  // Deterministic because of JS's run-to-completion-until-first-`await`
+  // semantics, not because of timing luck.
+  it('never leaves overlayDb null while a reconnect is in flight', async () => {
+    const reconnectPromise = overlay.reconnect();
+    await expect(overlay.scanAll()).resolves.toHaveLength(1);
+    await reconnectPromise;
+    await expect(overlay.scanAll()).resolves.toHaveLength(1);
   });
 });

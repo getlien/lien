@@ -13,7 +13,7 @@ import {
   matchesSymbolFilter,
   buildLegacySymbols,
 } from '../filters.js';
-import { openDatabase, STRUCTURAL_DB_FILENAME } from './schema.js';
+import { openDatabase, withOpenRetry, STRUCTURAL_DB_FILENAME } from './schema.js';
 import { recordToUnscoredResult, buildSearchResultMetadata } from './row-mapping.js';
 import {
   normalizeFileFilter,
@@ -62,12 +62,25 @@ export class SqliteBackend implements VectorDBInterface {
 
   async initialize(): Promise<void> {
     try {
-      await fs.mkdir(this.dbPath, { recursive: true });
-      this.db = openDatabase(this.dbFilePath);
-      this.currentVersion = await readVersionFile(this.dbPath);
+      const { db, version } = await this.openConnection();
+      this.db = db;
+      this.currentVersion = version;
     } catch (error: unknown) {
       throw wrapError(error, 'Failed to initialize vector database', { dbPath: this.dbPath });
     }
+  }
+
+  /** Open a fresh connection + read its version stamp, without touching
+   *  `this.db`/`this.currentVersion`. Shared by `initialize()` (nothing to
+   *  swap yet) and `reconnect()` (which needs the new connection built
+   *  BEFORE it retires the old one — see `reconnect()`). */
+  private async openConnection(): Promise<{ db: DatabaseType.Database; version: number }> {
+    await fs.mkdir(this.dbPath, { recursive: true });
+    // withOpenRetry: this file may be brand-new or just-deleted, with other
+    // `lien serve` processes racing to create/open it at the same instant.
+    const db = await withOpenRetry(() => openDatabase(this.dbFilePath));
+    const version = await readVersionFile(this.dbPath);
+    return { db, version };
   }
 
   async insertBatch(metadatas: ChunkMetadata[], contents: string[]): Promise<void> {
@@ -205,7 +218,10 @@ export class SqliteBackend implements VectorDBInterface {
         fs.rm(f, { force: true }),
       ),
     );
-    this.db = openDatabase(this.dbFilePath);
+    // withOpenRetry: performFullIndex runs this on its OWN SqliteBackend
+    // instance while the MCP server's shared instance may be reconnecting
+    // onto the same (just-recreated) file at the same time.
+    this.db = await withOpenRetry(() => openDatabase(this.dbFilePath));
   }
 
   async checkVersion(): Promise<boolean> {
@@ -238,12 +254,30 @@ export class SqliteBackend implements VectorDBInterface {
     }
   }
 
+  /**
+   * Reconnect WITHOUT ever leaving `this.db` null: build the new connection
+   * first, swap it in, and only then close the old one. `checkAndReconnect`
+   * (the MCP server's version-check poll) runs this on the SAME vectorDB
+   * instance concurrent tool handlers share — the previous close-then-open
+   * order left a real (reproduced) window where a concurrent handler's
+   * `requireDb()` would throw "Vector database not initialized" mid-request.
+   * Old-handle-until-swap, never null, closes that window entirely.
+   */
   async reconnect(): Promise<void> {
+    const oldDb = this.db;
     try {
-      this.close();
-      await this.initialize();
+      const { db, version } = await this.openConnection();
+      this.db = db;
+      this.currentVersion = version;
     } catch (error) {
       throw wrapError(error, 'Failed to reconnect to vector database');
+    } finally {
+      try {
+        oldDb?.close();
+      } catch {
+        // Best-effort: `this.db` has already swapped to the new connection,
+        // so a failure closing the retired handle isn't user-visible.
+      }
     }
   }
 
