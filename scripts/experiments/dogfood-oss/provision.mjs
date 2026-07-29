@@ -17,9 +17,14 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { resolveCli, assertCliExists } from './resolve-cli.mjs';
 
 const REPO = path.resolve(import.meta.dirname, '../../..');
-const CLI = path.join(REPO, 'packages/cli/dist/index.js');
+// Shared resolver — see resolve-cli.mjs. The manifest records which build indexed
+// the corpus, because an index written by a different build is not a valid
+// substrate for measuring this one.
+const CLI_RESOLVED = resolveCli(REPO);
+const CLI = CLI_RESOLVED.cli;
 // Default deliberately AVOIDS $CLAUDE_JOB_DIR: that lives under `~/.claude/`, and
 // Claude Code treats everything beneath it as a sensitive file, so an agent trial in
 // a corpus there completes its whole investigation and then has its Edit DENIED.
@@ -191,10 +196,7 @@ function associationCoverage(dir, files) {
 
 // ─── run ──────────────────────────────────────────────────────────────────────
 
-if (!fs.existsSync(CLI)) {
-  console.error(`FATAL: CLI not built at ${CLI} — run \`npm run build\` first.`);
-  process.exit(1);
-}
+assertCliExists(CLI_RESOLVED, 'provision');
 
 const rootScan = ancestorViolations(CORPUS_ROOT);
 if (rootScan.blocking.length) {
@@ -215,6 +217,11 @@ console.log('');
 const manifest = {
   corpusRoot: CORPUS_ROOT,
   cliVersion: sh('node', [CLI, '--version'], REPO).out.trim(),
+  // Which build indexed this corpus, and how it was chosen. An index written by a
+  // different build is not a valid substrate for measuring this one, and round 1
+  // produced several false findings that way.
+  cliPath: CLI,
+  cliSource: CLI_RESOLVED.source,
   repos: [],
 };
 const targets = only ? CORPUS.filter(c => c.lang === only) : CORPUS;
@@ -277,7 +284,8 @@ for (const c of targets) {
     }
     rec.associations = associationCoverage(dest, files);
     const a = rec.associations;
-    const inferredNote = a.inferred > 0 ? ` + ${a.inferred} inferred = ${a.pctIncludingInferred}%` : '';
+    const inferredNote =
+      a.inferred > 0 ? ` + ${a.inferred} inferred = ${a.pctIncludingInferred}%` : '';
     console.log(
       `   ✓ ${rec.sourceFileCount} ${c.lang} files, indexed in ${rec.indexMs}ms; ` +
         `coverage ${a.pct}% confident${inferredNote} (${a.withTests}/${a.sampled} sampled)`,
@@ -296,8 +304,8 @@ const outPath = path.join(import.meta.dirname, 'corpus-manifest.json');
 if (only && fs.existsSync(outPath)) {
   const prior = JSON.parse(fs.readFileSync(outPath, 'utf8'));
   const refreshed = new Set(manifest.repos.map(r => r.repo));
-  manifest.repos = [...prior.repos.filter(r => !refreshed.has(r.repo)), ...manifest.repos].sort((a, b) =>
-    a.repo.localeCompare(b.repo),
+  manifest.repos = [...prior.repos.filter(r => !refreshed.has(r.repo)), ...manifest.repos].sort(
+    (a, b) => a.repo.localeCompare(b.repo),
   );
 }
 fs.writeFileSync(outPath, JSON.stringify(manifest, null, 2));

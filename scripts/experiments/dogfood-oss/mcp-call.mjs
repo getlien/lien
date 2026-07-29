@@ -24,20 +24,16 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import fs from 'node:fs';
 import path from 'node:path';
+import { resolveCli } from './resolve-cli.mjs';
 
 const [repoDir, tool, rawArgs] = process.argv.slice(2);
 const REPO = path.resolve(import.meta.dirname, '../../..');
 
-// Which binary is under measurement is the single easiest thing to get wrong here:
-// this file resolves the CLI relative to ITS OWN repo root, so running one
-// worktree's copy silently measures that worktree's build. Round 1 of the dogfood
-// reported a working fix as broken twice for exactly that reason. LIEN_MCP_CLI
-// makes the target explicit (e.g. a published `npm install @liendev/lien` under
-// test), and the resolved path is echoed into every envelope so a measurement can
-// never be read without knowing which build produced it.
-const CLI = process.env.LIEN_MCP_CLI
-  ? path.resolve(process.env.LIEN_MCP_CLI)
-  : path.join(REPO, 'packages/cli/dist/index.js');
+// Which binary is under measurement is the single easiest thing to get wrong here
+// (see resolve-cli.mjs for why this is shared rather than computed per script). The
+// resolved path is echoed into every envelope so a measurement can never be read
+// without knowing which build produced it.
+const { cli: CLI } = resolveCli(REPO);
 
 function die(msg) {
   console.error(`mcp-call: ${msg}`);
