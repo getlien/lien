@@ -46,6 +46,7 @@ describe('handleGetDependents', () => {
         isTestFile: boolean;
         usages?: Array<{ callerSymbol: string; line: number; snippet: string }>;
         hops?: number;
+        confidence?: 'inferred';
       }>;
       hitLimit?: boolean;
       complexityMetrics?: {
@@ -64,6 +65,7 @@ describe('handleGetDependents', () => {
       uncoveredProductionDependents?: number;
       symbolAttributionDegraded?: boolean;
       dependentAttributionIncomplete?: boolean;
+      dependentAttributionPartial?: boolean;
       targetIndexed?: boolean;
     } = {},
   ) {
@@ -91,6 +93,7 @@ describe('handleGetDependents', () => {
       uncoveredProductionDependents: overrides.uncoveredProductionDependents ?? 0,
       symbolAttributionDegraded: overrides.symbolAttributionDegraded,
       dependentAttributionIncomplete: overrides.dependentAttributionIncomplete,
+      dependentAttributionPartial: overrides.dependentAttributionPartial,
       targetIndexed: overrides.targetIndexed ?? true,
     };
   }
@@ -701,6 +704,52 @@ describe('handleGetDependents', () => {
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.attributionCaveat).toBeUndefined();
+    });
+  });
+
+  describe('attributionCaveat: dependent-attribution-partial (C# type-reference recovery, #930 part 2)', () => {
+    it('surfaces attributionCaveat when the type-reference fallback recovered dependents', async () => {
+      vi.mocked(findDependents).mockResolvedValue(
+        createMockAnalysis({
+          dependents: [
+            {
+              filepath: 'src/Serilog/Rendering/Padding.cs',
+              isTestFile: false,
+              confidence: 'inferred',
+            },
+          ],
+          dependentAttributionPartial: true,
+        }),
+      );
+
+      const result = await handleGetDependents(
+        { filepath: 'src/Serilog/Parsing/Alignment.cs' },
+        mockCtx,
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.dependentCount).toBe(1);
+      expect(parsed.dependents[0]).toMatchObject({
+        filepath: 'src/Serilog/Rendering/Padding.cs',
+        confidence: 'inferred',
+      });
+      expect(parsed.attributionCaveat.reason).toBe('dependent-attribution-partial');
+      expect(parsed.attributionCaveat.note).toContain('Alignment.cs');
+      expect(parsed.attributionCaveat.note).toContain('lower bound'.toUpperCase());
+    });
+
+    it('does not fire alongside dependent-attribution-incomplete', async () => {
+      vi.mocked(findDependents).mockResolvedValue(
+        createMockAnalysis({ dependents: [], dependentAttributionIncomplete: true }),
+      );
+
+      const result = await handleGetDependents(
+        { filepath: 'src/Serilog/Parsing/Alignment.cs' },
+        mockCtx,
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.attributionCaveat.reason).toBe('dependent-attribution-incomplete');
     });
   });
 

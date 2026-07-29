@@ -11,6 +11,7 @@ import {
   hasSingleFileImportSemantics,
   detectLanguage,
   hasEnclosingNamespaceAccess,
+  findCSharpTypeReferenceDependents,
   COMPLEXITY_THRESHOLDS,
 } from '@liendev/parser';
 
@@ -88,6 +89,18 @@ export interface DependentInfo {
   usages?: SymbolUsage[];
   /** Depth at which this dependent was first discovered (1 = direct). */
   hops?: number;
+  /**
+   * Present (`'inferred'`) only for a dependent recovered by the C#
+   * type-reference-matching fallback (#930's remaining half -- see
+   * `findCSharpTypeReferenceDependents`'s module doc) instead of a real
+   * import edge: a word-boundary text match against a uniquely-declared
+   * type name, not an import-verified association. Absent for every
+   * ordinary, import-verified dependent (the default, confident tier) -- a
+   * caller that needs to distinguish "verified" from "text-matched, lower
+   * confidence" should filter on this field rather than assuming every
+   * entry in `dependents` came from the import graph.
+   */
+  confidence?: 'inferred';
 }
 
 /**
@@ -120,17 +133,34 @@ export interface DependencyAnalysisResult {
   /**
    * True for a FILE-level query (no `symbol` requested) that came back with
    * zero dependents for a language where `hasEnclosingNamespaceAccess` is
-   * set (currently only C# -- see that flag's doc comment). Those languages
-   * let a real caller use `filepath`'s types with no per-file import
-   * statement naming it at all (C#'s `global using` / implicit
-   * enclosing-namespace member access -- #930), so the import-graph scan
-   * this function runs has no signal for that usage shape. `dependentCount:
-   * 0` / `riskLevel: "low"` in this case means "the import graph found
-   * nothing," not "nothing depends on this file" -- the same false-all-clear
-   * risk `symbolAttributionDegraded` guards against for symbol queries, just
-   * for the file-level answer instead.
+   * set (currently only C# -- see that flag's doc comment), EVEN AFTER
+   * attempting the type-reference-matching recovery below
+   * (`dependentAttributionPartial`). Those languages let a real caller use
+   * `filepath`'s types with no per-file import statement naming it at all
+   * (C#'s `global using` / implicit enclosing-namespace member access --
+   * #930), so the import-graph scan this function runs has no signal for
+   * that usage shape. `dependentCount: 0` / `riskLevel: "low"` in this case
+   * means "neither scan found anything," not "nothing depends on this
+   * file" -- the same false-all-clear risk `symbolAttributionDegraded`
+   * guards against for symbol queries, just for the file-level answer
+   * instead. Mutually exclusive with `dependentAttributionPartial`: this
+   * requires the final `dependents.length` to be zero; that one requires it
+   * to be positive.
    */
   dependentAttributionIncomplete?: boolean;
+  /**
+   * True for a FILE-level query (no `symbol`) where the import graph found
+   * zero dependents but the C# type-reference-matching fallback
+   * (`findCSharpTypeReferenceDependents`, #930's remaining half) recovered
+   * one or more. Those recovered entries are tagged `confidence: 'inferred'`
+   * on `DependentInfo` -- a word-boundary text match against a
+   * uniquely-declared type name, not an import-verified edge -- so
+   * `dependentCount`/`riskLevel` here are a recovered LOWER BOUND, not a
+   * verified/complete answer: the heuristic can still miss a real dependent
+   * that references the type via an alias, a generic type argument, or
+   * reflection, none of which spell the bare type name in a matchable way.
+   */
+  dependentAttributionPartial?: boolean;
   /**
    * False when the requested target has zero chunks anywhere in the scanned
    * index (#928) — i.e. it isn't a real file the indexer has seen, whether
@@ -589,6 +619,64 @@ interface ScanContext {
   log: (message: string, level?: 'warning') => void;
 }
 
+/**
+ * Resolve the final dependents list for one `findDependents` call: the
+ * import-graph answer (`buildDependentsList`), the C# type-reference
+ * recovery attempt (`enrichWithCSharpTypeReferenceDependents`, #930 part 2),
+ * and hop stamping/sorting -- grouped here so `findDependents` itself stays
+ * a thin orchestration shell rather than inlining all three steps.
+ */
+function resolveDependents(args: {
+  ctx: ScanContext;
+  chunksByFile: Map<string, SearchResult[]>;
+  hopsByFile: Map<string, number>;
+  symbol: string | undefined;
+  normalizedTarget: string;
+  targetFileChunks: SearchResult[];
+  filepath: string;
+  reExporterPaths: string[];
+  targetIndexed: boolean;
+}): {
+  dependents: DependentInfo[];
+  totalUsageCount?: number;
+  symbolAttributionDegraded?: boolean;
+  dependentAttributionPartial?: true;
+} {
+  const {
+    ctx,
+    chunksByFile,
+    hopsByFile,
+    symbol,
+    normalizedTarget,
+    targetFileChunks,
+    filepath,
+    reExporterPaths,
+    targetIndexed,
+  } = args;
+
+  const { dependents, totalUsageCount, symbolAttributionDegraded } = buildDependentsList(
+    chunksByFile,
+    symbol,
+    normalizedTarget,
+    ctx.normalizePathCached,
+    targetFileChunks,
+    filepath,
+    ctx.log,
+    reExporterPaths,
+  );
+  const dependentAttributionPartial = enrichWithCSharpTypeReferenceDependents(
+    ctx,
+    filepath,
+    normalizedTarget,
+    symbol,
+    targetIndexed,
+    dependents,
+  );
+  stampHopsAndSort(dependents, hopsByFile);
+
+  return { dependents, totalUsageCount, symbolAttributionDegraded, dependentAttributionPartial };
+}
+
 export async function findDependents(
   vectorDB: VectorDBInterface,
   filepath: string,
@@ -636,17 +724,18 @@ export async function findDependents(
   });
 
   const targetFileChunks = symbol ? (allChunksByFile.get(normalizedTarget) ?? []) : [];
-  const { dependents, totalUsageCount, symbolAttributionDegraded } = buildDependentsList(
-    chunksByFile,
-    symbol,
-    normalizedTarget,
-    normalizePathCached,
-    targetFileChunks,
-    filepath,
-    log,
-    reExporterPaths,
-  );
-  stampHopsAndSort(dependents, hopsByFile);
+  const { dependents, totalUsageCount, symbolAttributionDegraded, dependentAttributionPartial } =
+    resolveDependents({
+      ctx,
+      chunksByFile,
+      hopsByFile,
+      symbol,
+      normalizedTarget,
+      targetFileChunks,
+      filepath,
+      reExporterPaths,
+      targetIndexed,
+    });
 
   // Complexity metrics must be joined against the *resolved* dependents, not
   // the broader import-graph candidate set (`chunksByFile`) considered before
@@ -692,17 +781,94 @@ export async function findDependents(
     uncoveredProductionDependents,
     symbolAttributionDegraded,
     dependentAttributionIncomplete,
+    dependentAttributionPartial,
     targetIndexed,
   };
+}
+
+/**
+ * #930 (part 2): recover REAL production dependents for a C# file when the
+ * import graph found none, by scanning for identifier-boundary references
+ * to the target's uniquely-declared type name(s) across the corpus -- see
+ * `findCSharpTypeReferenceDependents`'s module doc for the full mechanism
+ * and why a type-declaration match (unlike a bare method-name match, #869)
+ * doesn't need Swift's extra type-shaped-driver gate.
+ *
+ * Deliberately narrower than the import-graph seed it supplements:
+ * - File-level only (`symbol` unset) -- there's no principled way to scope
+ *   a text match to one exported member.
+ * - Only attempted when the import graph found LITERALLY ZERO dependents --
+ *   avoids a corpus-wide content scan on every C# `get_dependents` call,
+ *   mirroring `checkDependentAttributionIncomplete`'s existing threshold.
+ *   A future PR could widen this to also run when the import graph found
+ *   *some* dependents (a mixed old/new-style C# project), but that's out of
+ *   scope here.
+ * - Only for `hasEnclosingNamespaceAccess` languages (currently C# only).
+ *
+ * Recovered entries are tagged `confidence: 'inferred'` (see
+ * `DependentInfo`) and deliberately NOT joined against `chunksByFile` for
+ * complexity-metrics purposes -- unlike a real import edge, there's no
+ * associated import-graph chunk set to attribute complexity to, so these
+ * dependents contribute to `dependentCount`/`productionDependentCount`/
+ * `riskLevel` but not to `complexityMetrics`. `uncoveredProductionDependents`
+ * still runs its own genuine import-based "is there a test importer of
+ * THIS dependent" check against each recovered file, so that count stays
+ * meaningful.
+ *
+ * Mutates `dependents` in place (pushes new entries); returns `true` when
+ * anything was recovered (for `dependentAttributionPartial`) or `undefined`
+ * otherwise -- matching this file's existing convention for optional
+ * boolean flags (e.g. `symbolAttributionDegraded`,
+ * `dependentAttributionIncomplete`), which are only ever `true` or absent,
+ * never an explicit `false`.
+ */
+function enrichWithCSharpTypeReferenceDependents(
+  ctx: ScanContext,
+  filepath: string,
+  normalizedTarget: string,
+  symbol: string | undefined,
+  targetIndexed: boolean,
+  dependents: DependentInfo[],
+): true | undefined {
+  if (symbol || dependents.length !== 0 || !targetIndexed) return undefined;
+
+  const targetLanguage = detectLanguage(filepath);
+  if (targetLanguage === null || !hasEnclosingNamespaceAccess(targetLanguage)) return undefined;
+
+  const targetChunks = ctx.allChunksByFile.get(normalizedTarget) ?? [];
+  const targetRawFile = targetChunks[0]?.metadata.file;
+  if (!targetRawFile) return undefined;
+
+  const allChunks = Array.from(ctx.allChunksByFile.values()).flat();
+  const inferredFiles = findCSharpTypeReferenceDependents(targetRawFile, allChunks);
+  if (inferredFiles.length === 0) return undefined;
+
+  const workspaceRoot = process.cwd().replace(/\\/g, '/');
+  for (const rawFile of inferredFiles) {
+    const canonicalFile = getCanonicalPath(rawFile, workspaceRoot);
+    dependents.push({
+      filepath: canonicalFile,
+      isTestFile: isTestFile(canonicalFile),
+      confidence: 'inferred',
+    });
+  }
+
+  ctx.log(
+    `Recovered ${inferredFiles.length} dependent(s) for ${filepath} via C# type-reference ` +
+      `matching (inferred from a uniquely-declared type name, not import-verified — #930)`,
+  );
+  return true;
 }
 
 /**
  * True for a file-level query (no `symbol` -- that case has its own
  * `symbolAttributionDegraded` handling above) that found zero dependents in
  * a language where the import graph structurally cannot see every real
- * usage (see `DependencyAnalysisResult.dependentAttributionIncomplete`'s
- * doc comment). Logs a warning when it fires, matching the logging
- * `buildDependentsList` already does for its own degradation case.
+ * usage, EVEN AFTER `enrichWithCSharpTypeReferenceDependents` above already
+ * had a chance to recover some (see
+ * `DependencyAnalysisResult.dependentAttributionIncomplete`'s doc comment).
+ * Logs a warning when it fires, matching the logging `buildDependentsList`
+ * already does for its own degradation case.
  *
  * Skipped when `targetIndexed` is false (#928): an unresolved target's zero
  * dependents already carries its own, more fundamental "unresolved" signal

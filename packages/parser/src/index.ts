@@ -163,6 +163,11 @@ export {
   isTypeShapedIdentifier,
 } from './swift-symbol-usage-signals.js';
 
+// #930 (part 2): C#'s non-import type-reference dependents signal, used by
+// `get_dependents` (not test-association) -- see
+// csharp-type-reference-signals.ts's module doc.
+export { findCSharpTypeReferenceDependents } from './csharp-type-reference-signals.js';
+
 // =============================================================================
 // GRAPH TRAVERSAL (generic bounded BFS — domain graphs build on this)
 // =============================================================================

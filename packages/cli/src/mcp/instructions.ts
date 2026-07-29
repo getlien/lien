@@ -40,11 +40,16 @@ symbol:
   result. "symbol-attribution-degraded" means symbol names a method or
   constructor whose call sites couldn't be confirmed — the counts are the
   wider file-level answer, not a verified count for symbol itself.
-  "dependent-attribution-incomplete" means Lien could not SEE real callers
-  in this language (e.g. C#) — grep before concluding the file is unused.
-  (This reason only fires for FILE-level queries, i.e. no "symbol" argument.)
-  riskLevel is not adjusted for either of the latter two and may still read
-  "low"; attributionCaveat is the authoritative signal in all three cases.
+  "dependent-attribution-partial" means the import graph found nothing but
+  a lower-confidence text-matching fallback recovered some dependents
+  anyway (those entries carry confidence: "inferred") — treat the counts as
+  a recovered floor, not a complete answer. "dependent-attribution-incomplete"
+  means Lien could not SEE real callers in this language (e.g. C#) even
+  after that fallback ran — grep before concluding the file is unused.
+  (The latter two reasons only fire for FILE-level queries, i.e. no "symbol"
+  argument.) riskLevel is not adjusted for any of the latter three and may
+  still read "low"; attributionCaveat is the authoritative signal in all
+  four cases.
 
 For discovery ("where is X?", "how does Y work?"), call search_code FIRST.
 It runs full-text BM25 keyword search over code, docstrings, and camelCase-split

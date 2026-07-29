@@ -14,14 +14,18 @@ function createChunk(
     complexity: number;
     callSites: Array<{ symbol: string; line: number }>;
     symbolName: string;
+    symbolType: 'function' | 'method' | 'class' | 'interface';
+    content: string;
     startLine: number;
     endLine: number;
   }> = {},
 ): SearchResult {
   return {
-    content: overrides.callSites
-      ? overrides.callSites.map(cs => `  ${cs.symbol}()`).join('\n')
-      : 'test content',
+    content:
+      overrides.content ??
+      (overrides.callSites
+        ? overrides.callSites.map(cs => `  ${cs.symbol}()`).join('\n')
+        : 'test content'),
     metadata: {
       file,
       startLine: overrides.startLine ?? 1,
@@ -472,6 +476,96 @@ describe('findDependents', () => {
       const result = await findDependents(mockDB as any, 'Alignment.cs', mockLog, 'Alignment');
 
       expect(result.dependentAttributionIncomplete).toBeUndefined();
+    });
+  });
+
+  describe('C# type-reference dependents recovery (#930 part 2)', () => {
+    it('recovers dependents via a uniquely-declared type name when the import graph found none', async () => {
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('Alignment.cs', {
+          exports: ['Alignment'],
+          symbolName: 'Alignment',
+          symbolType: 'class',
+          content: 'public class Alignment { }',
+        }),
+        createChunk('Padding.cs', {
+          symbolName: 'Apply',
+          symbolType: 'method',
+          content: 'Padding.Apply(output, value, in Alignment? alignment)',
+        }),
+      ]);
+
+      const result = await findDependents(mockDB as any, 'Alignment.cs', mockLog);
+
+      expect(result.dependents).toHaveLength(1);
+      expect(result.dependents[0]).toMatchObject({
+        filepath: 'Padding.cs',
+        confidence: 'inferred',
+      });
+      expect(result.productionDependentCount).toBe(1);
+      expect(result.dependentAttributionPartial).toBe(true);
+      expect(result.dependentAttributionIncomplete).toBeUndefined();
+      expect(mockLog).toHaveBeenCalledWith(expect.stringContaining('C# type-reference'));
+    });
+
+    it('still flags dependentAttributionIncomplete when the type-reference fallback also finds nothing', async () => {
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('Alignment.cs', {
+          exports: ['Alignment'],
+          symbolName: 'Alignment',
+          symbolType: 'class',
+          content: 'public class Alignment { }',
+        }),
+        createChunk('Unrelated.cs', { symbolName: 'DoStuff', symbolType: 'method' }),
+      ]);
+
+      const result = await findDependents(mockDB as any, 'Alignment.cs', mockLog);
+
+      expect(result.dependents).toHaveLength(0);
+      expect(result.dependentAttributionPartial).toBeUndefined();
+      expect(result.dependentAttributionIncomplete).toBe(true);
+    });
+
+    it('does not run the fallback for a SYMBOL-scoped query', async () => {
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('Alignment.cs', {
+          exports: ['Alignment'],
+          symbolName: 'Alignment',
+          symbolType: 'class',
+          content: 'public class Alignment { }',
+        }),
+        createChunk('Padding.cs', {
+          symbolName: 'Apply',
+          symbolType: 'method',
+          content: 'Padding.Apply(output, value, in Alignment? alignment)',
+        }),
+      ]);
+
+      const result = await findDependents(mockDB as any, 'Alignment.cs', mockLog, 'Alignment');
+
+      expect(result.dependents).toHaveLength(0);
+      expect(result.dependentAttributionPartial).toBeUndefined();
+    });
+
+    it('does not run the fallback for a non-C# file (no enclosing-namespace access)', async () => {
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/alignment.ts', {
+          exports: ['Alignment'],
+          symbolName: 'Alignment',
+          symbolType: 'class',
+          content: 'export class Alignment {}',
+        }),
+        createChunk('src/padding.ts', {
+          symbolName: 'apply',
+          symbolType: 'function',
+          content: 'Alignment.apply(output, value)',
+        }),
+      ]);
+
+      const result = await findDependents(mockDB as any, 'src/alignment.ts', mockLog);
+
+      expect(result.dependents).toHaveLength(0);
+      expect(result.dependentAttributionPartial).toBeUndefined();
     });
   });
 
