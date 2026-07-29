@@ -50,9 +50,10 @@ export interface AnnotateOptions {
   /**
    * Habituation-guard risk floor (`low` | `medium` | `high` | `critical`). When
    * set, a below-floor annotation is suppressed UNLESS it carries a complexity
-   * or headroom concern (those always fire). Unset / unknown / `low` never
-   * suppresses — the current always-on behavior. The read hook passes the
-   * `LIEN_ANNOTATE_MIN_RISK` env value here. See `belowRiskFloor`.
+   * or headroom concern, or an incomplete dependent-attribution result (those
+   * always fire). Unset / unknown / `low` never suppresses — the current
+   * always-on behavior. The read hook passes the `LIEN_ANNOTATE_MIN_RISK` env
+   * value here. See `belowRiskFloor`.
    */
   minRisk?: string;
 }
@@ -64,19 +65,28 @@ const RISK_RANK: Record<string, number> = { low: 0, medium: 1, high: 2, critical
  * Habituation guard: is this annotation below the configured risk floor and
  * therefore suppressible? A complexity or headroom concern always clears the
  * floor (those are the high-value plan-time nudges — never suppressed). An
- * unset or unrecognized floor never suppresses anything (fail-open: default =
- * current always-on behavior). Pure and exported for direct unit testing.
+ * incomplete dependent-attribution result also always clears the floor: a
+ * file with structurally-undeterminable dependents reads as "0 dependents"
+ * (i.e. low risk by construction), which is exactly the false-all-clear
+ * shape this guard must never suppress — mirrors `isTrivial`'s identical
+ * carve-out for the same flag (#930/#936/#938; this parameter closes the gap
+ * Lien Review flagged on #938: `isTrivial` got the carve-out, this guard sat
+ * three lines below it and didn't). An unset or unrecognized floor never
+ * suppresses anything (fail-open: default = current always-on behavior).
+ * Pure and exported for direct unit testing.
  */
 export function belowRiskFloor(
   riskLevel: string,
   complexityWarnings: number,
   headroomCount: number,
   minRisk?: string,
+  dependentAttributionIncomplete = false,
 ): boolean {
   if (!minRisk) return false;
   const floor = RISK_RANK[minRisk];
   if (floor === undefined) return false; // unknown floor → no suppression
-  if (complexityWarnings > 0 || headroomCount > 0) return false; // always emit high-value
+  // always emit high-value / honest-uncertainty signals
+  if (complexityWarnings > 0 || headroomCount > 0 || dependentAttributionIncomplete) return false;
   return (RISK_RANK[riskLevel] ?? 0) < floor;
 }
 
@@ -444,6 +454,7 @@ async function run(file: string, options?: AnnotateOptions): Promise<void> {
         data.complexity.warningCount,
         data.headroom.entries.length,
         options?.minRisk,
+        data.dependentAttributionIncomplete,
       )
     ) {
       return;
