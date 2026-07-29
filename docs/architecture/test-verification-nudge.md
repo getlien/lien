@@ -137,17 +137,27 @@ interface TestRunClassification { isTestRun: boolean; broad: boolean; scopeToken
    or ends in a source extension (reusing `getSupportedExtensions()` from
    `@liendev/parser` rather than hand-maintaining a second extension list —
    a test file shares its language's extension, so "ends in a source
-   extension" already covers the test-ish case). Three token classes are
+   extension" already covers the test-ish case). Two token classes are
    excluded from ever counting as a scoping argument even when they'd
-   otherwise qualify: a workspace-scope flag's value
-   (`-w`/`--workspace`/`--filter`, e.g. `@liendev/core`, which contains a
-   `/`), a config-flag's value (`-c`/`--config`, e.g. `vitest.config.ts`,
-   which ends in a source extension) or any bare token matching
-   `*.config.*` even without a preceding flag, and Go's glob-all convention
-   (`./...`).
-4. A segment with no scoping tokens is `broad` (whole-suite/workspace run);
-   any `broad` segment makes the whole command's classification `broad`,
-   even if another segment in the same command also named specific files.
+   otherwise qualify: a workspace-scope flag's value (`-w`/`--workspace`,
+   e.g. `@liendev/core`, which contains a `/`), and a config-flag's value
+   (`-c`/`--config`, e.g. `vitest.config.ts`, which ends in a source
+   extension) or any bare token matching `*.config.*` even without a
+   preceding flag, and Go's glob-all convention (`./...`).
+4. Separately, the remainder is checked for a **name filter** — a flag
+   from a per-runner-family allow-list (`pytest -k`/`-m`, `dotnet
+   test`/`swift test --filter`, `rspec -e`/`--example`, `mocha
+   --grep`/`-g`, `go test -run`, `vitest`/`jest -t`/`--testNamePattern`),
+   or, for `cargo test` specifically, a bare positional argument (its own
+   `[TESTNAME]` convention — see the deviation note below for why this
+   can't just be "any bare leftover token"). A segment with a path-like
+   scoping token is `scoped` regardless of any name filter also present
+   (a path always wins). Otherwise: a name-filtered segment is neither
+   `broad` nor a `scopeTokens` contributor (see below); only a segment with
+   *no* scoping evidence of either kind is `broad`. Any `broad` segment
+   makes the whole command's classification `broad`, even if another
+   segment in the same command also named specific files or was itself
+   name-filtered.
 
 ### `computeUnverifiedFiles(edits, runs)`
 
@@ -193,6 +203,47 @@ tests (`auth.ts`/`oauth.test.ts`, `user.ts`/`superuser.test.ts`,
 naming conventions (Python's `test_foo.py`, Go's `foo_test.go`, Ruby's
 `foo_spec.rb`) fall back to exact-basename matching, which already covers
 the common case of a run naming the real associated test file.
+
+#### Name-filtered runs are neither `broad` nor `scoped` (2026-07-29, #946)
+
+A run scoped by test **name** rather than file/directory (`pytest -k expr`,
+`dotnet test --filter expr`, `go test -run regex`, a bare `cargo test name`,
+...) has no path-like scope token at all. Before this fix, `classifyTestCommand`
+had exactly two outcomes — `scoped` (path tokens found) or `broad` (none
+found) — so every name-filtered run fell into `broad` by construction, and
+`computeUnverifiedFiles`'s any-broad-run silence rule then marked the
+*entire* session's edit set "verified" off the back of one arbitrarily-named,
+unrelated test. Confirmed on the released 0.72.0: an edit with no test run at
+all correctly nagged, but the identical edit followed by
+`pytest -k test_totally_unrelated_name` went completely silent.
+
+Fixed by adding a third classification outcome — name-filtered — reached
+when the remainder carries recognized name-filter evidence (a
+per-runner-family flag, or `cargo test`'s bare positional) but no path
+token. A name-filtered run keeps `isTestRun: true` (something genuinely ran)
+but sets neither `broad` nor a `scopeTokens` entry, so
+`computeUnverifiedFiles` treats it exactly as if no run had been observed:
+it neither silences the report nor "covers" any file. This is the same
+fail-safe bias as the substring-matching deviation above — a false nag costs
+one already-escape-hatched line of text, a false "everything is verified"
+disables the whole mechanism.
+
+The flag allow-list is deliberately **per runner family**, not one global
+set, because two runners in this same allow-list reuse an identical short
+flag spelling for unrelated purposes: tox's `-e ENV` selects which
+*configured environment* to run (still that environment's whole suite — not
+a named test), while rspec's `-e NAME` names one example. A global `-e`
+recognition would have wrongly flipped `tox -e py311` (must stay `broad`)
+into name-filtered. The same reasoning kept `cargo test <name>`'s bare
+positional special-cased to exactly that runner (`POSITIONAL_NAME_FILTER_RUNNERS`
+in `test-run-matcher.ts`) rather than "any bare leftover token" — the latter
+would also have wrongly swallowed cargo-nextest's required `run` subcommand
+keyword and Gradle's `-x <task>`/`--exclude-task <task>` exclusion value,
+both bare tokens with unrelated meaning. `--filter` also moved out of the
+workspace-scope flag set entirely: pnpm's `--filter <pkg> test` is fully
+absorbed by its own anchored runner pattern before this scan ever runs, so
+the shared spelling with dotnet/swift's name filter never collides in
+practice.
 
 ## C. `lien verify-tests <subcommand>`
 
@@ -416,6 +467,16 @@ each script:
   `stop_hook_active` never arrives.
 - **Fail-open**: malformed (non-JSON) stdin and a payload missing
   `session_id` both exited 0 with no output, for both new hooks.
+- **Name-filtered runs (2026-07-29, #946)**, dogfooded end-to-end in a
+  foreign repo (flask, not this one) via `test-reminder.sh`/`test-run-note.sh`
+  with real stdin: an edit + a `tool_input.command: "pytest -k
+  test_totally_unrelated_name"` payload, on the pre-fix build, produced
+  empty `report` output (the bug); the identical sequence on the fixed
+  build produced the full advisory, matching the no-run control exactly.
+  A genuinely broad run (`python -m pytest`, no filter) still produced
+  empty `report` output on the fixed build (no regression), and a
+  file-scoped run naming an unrelated file (`pytest
+  tests/test_totally_unrelated_module.py`) still nagged.
 - **`test-reminder.sh` (rewired)**: a real `Edit` payload produced the
   identical `additionalContext` reminder text as before **and** recorded
   the edit into `test-sessions/<sessionId>.jsonl` in the same invocation —
