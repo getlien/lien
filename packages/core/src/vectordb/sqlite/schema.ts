@@ -152,16 +152,48 @@ export function openDatabase(dbFilePath: string): Database.Database {
 
 /**
  * Attempts before `withOpenRetry` gives up on a retryable open failure.
- * Deliberately generous (well beyond what a handful of concurrent MCP tool
- * calls needs): measured under a synthetic 10-processes-racing-one-brand-new
- * -file stress test, `SQLITE_IOERR` during the WAL-mode conversion recurred
- * across several retries in a row before settling — a lower budget left a
- * small but real tail of crashes at that concurrency. Total worst-case wait
- * (sum of all backoffs, see `openRetryDelayMs`) stays well under the ~1-2s a
- * full background reindex takes anyway, so this only adds latency to the
- * unlucky first caller hitting a torn-down index, never to steady state.
+ * Sized against TWO constraints in tension with each other, not just "make
+ * the stress test pass":
+ *
+ * 1. A hard ceiling this MUST fit under: `plugins/claude/hooks/hooks.json`
+ *    gives every hook a 5000ms timeout, and several hooks (`annotate-read`,
+ *    `augment-explore-task`, `api-delta-write`) invoke a `lien` CLI command
+ *    that calls `createVectorDB().initialize()` — i.e. they run through
+ *    this exact retry ladder. A ladder whose own worst-case wait approaches
+ *    or exceeds 5000ms would get its hook process SIGKILLed mid-retry by
+ *    Claude Code, and `lien-npx-breaker.sh` cannot tell that SIGKILL apart
+ *    from an unreachable npm registry: it leaves the same stale in-flight
+ *    marker either way, tripping `lien-npx-breaker.sh`'s circuit breaker
+ *    and silencing ALL nudges for its 300s cooldown.
+ * 2. Reliability under real concurrency — a synthetic N-processes-racing-
+ *    one-brand-new-file stress test.
+ *
+ * These trade off against each other, and (1) wins: a ladder long enough to
+ * survive 20 racing processes cleanly (~6.2s worst case) cannot fit under a
+ * 5000ms hook timeout at all, let alone with headroom, so it isn't an option
+ * regardless of reliability. With the constants below, the worst-case (max
+ * +30% jitter) summed wait across all `OPEN_RETRY_ATTEMPTS - 1` backoffs
+ * computes to 3904ms — leaving real (~1.1s) but not huge headroom under the
+ * hook timeout for the actual open work, bash/npx process overhead, and node
+ * startup. schema.test.ts asserts this computed ceiling directly (not this
+ * comment's claim), so a future constant change that drifts it back toward
+ * the hook timeout fails loudly there instead of silently in production.
+ *
+ * Measured empirically at this budget (repeated trials, disposable foreign
+ * repo, index deleted before each run): the ORIGINAL reported bug's exact
+ * shape (4 concurrent `lien serve` processes) is fully clean (0 failures
+ * across repeated runs). At higher realistic-but-uncommon concurrency (6-10
+ * concurrent processes racing the same brand-new file) a SMALL residual
+ * remains — roughly 1 in 6-10 trials still hit the crash this PR exists to
+ * fix, vs. 0 in dozens of trials at the (hook-timeout-incompatible) ~6.2s
+ * budget. This is the real, disclosed tradeoff of fitting under the hook
+ * timeout, not an oversight: see the PR discussion for the full measurement
+ * and the case for a complementary fix (never `process.exit()` the MCP
+ * server on an exhausted retry ladder; degrade to an honest empty answer
+ * instead, matching the single-call case) that would close this gap without
+ * needing a longer ladder.
  */
-const OPEN_RETRY_ATTEMPTS = 20;
+const OPEN_RETRY_ATTEMPTS = 16;
 /** Backoff unit; see `openRetryDelayMs` for the jittered schedule this drives. */
 const OPEN_RETRY_BASE_DELAY_MS = 25;
 

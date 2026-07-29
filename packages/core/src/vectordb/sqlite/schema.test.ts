@@ -111,4 +111,53 @@ describe('withOpenRetry', () => {
       vi.useRealTimers();
     }
   });
+
+  it('keeps the worst-case (max jitter) total retry wait well under the 5000ms hook timeout', async () => {
+    // plugins/claude/hooks/hooks.json gives every hook a 5000ms timeout, and
+    // several hooks (annotate-read, augment-explore-task, api-delta-write)
+    // invoke a `lien` command that runs through this exact ladder
+    // (createVectorDB().initialize() -> openConnection -> withOpenRetry). If
+    // the ladder's own worst-case wait approaches that ceiling, Claude Code
+    // SIGKILLs the hook process mid-retry — a failure lien-npx-breaker.sh
+    // cannot distinguish from a hung npm registry, since both leave the same
+    // stale in-flight marker. That trips the breaker and silences every
+    // nudge for its 300s cooldown. This asserts the REAL computed worst
+    // case (recording every delay actually requested, under forced maximum
+    // jitter), not the doc comment's claim, so a future constant change that
+    // drifts back toward the hook timeout fails loudly here.
+    const originalRandom = Math.random;
+    const originalSetTimeout = global.setTimeout;
+    const delays: number[] = [];
+    Math.random = () => 1; // forces the max +30% jitter on every backoff
+
+    (global as any).setTimeout = (fn: (...args: unknown[]) => void, ms?: number) => {
+      delays.push(ms ?? 0);
+      return originalSetTimeout(fn, 0); // record the ask; don't actually wait
+    };
+
+    try {
+      const open = vi.fn(() => {
+        throw sqliteError('SQLITE_BUSY');
+      });
+      await expect(withOpenRetry(open)).rejects.toMatchObject({ code: 'SQLITE_BUSY' });
+    } finally {
+      Math.random = originalRandom;
+      global.setTimeout = originalSetTimeout;
+    }
+
+    const worstCaseTotalMs = delays.reduce((sum, d) => sum + d, 0);
+    const HOOK_TIMEOUT_MS = 5000;
+    // Real headroom for actual open work + bash/npx/node overhead, not a
+    // near-miss of the timeout. The budget was tuned to leave ~1.1s of
+    // headroom (computed worst case ~3904ms) — see the OPEN_RETRY_ATTEMPTS
+    // doc comment for why it isn't larger: a longer ladder measurably
+    // improves reliability at higher concurrency, but ~1s of headroom is
+    // judged the minimum safe margin given hooks already take 200-600ms in
+    // normal operation (lien-npx-breaker.sh), so this only leaves room to
+    // grow the budget, not shrink the margin further.
+    expect(worstCaseTotalMs).toBeLessThan(HOOK_TIMEOUT_MS - 1000);
+    // Still meaningfully retrying (this budget wasn't gutted to make the
+    // ceiling trivially true).
+    expect(delays.length).toBeGreaterThan(5);
+  });
 });
