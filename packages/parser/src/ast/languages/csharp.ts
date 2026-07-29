@@ -258,12 +258,36 @@ function isCSharpStdLib(importPath: string): boolean {
 }
 
 /**
+ * Check whether a `using_directive` node is a `global using` (issue #930).
+ * The grammar represents `global` as an unnamed leading token sibling of
+ * `using`, not a field, so it has to be found by scanning `.children`
+ * (which includes unnamed tokens) rather than `.namedChildren` or
+ * `childForFieldName`.
+ *
+ * A global using's effect isn't scoped to the file that declares it — it
+ * applies project-wide, which is the entire point of the keyword — so the
+ * declaring file (conventionally `GlobalUsings.cs`, itself typically just a
+ * list of these directives with no other code) has no real dependency
+ * relationship with the namespaces it lists. Every consumer downstream of
+ * this extractor resolves a namespace-shaped import path against every file
+ * physically under that namespace's path (see `path-matching.ts`'s
+ * `matchesPythonModule`, which C#'s dotted paths also satisfy), so without
+ * this check the declaring file becomes a spurious "importer" of, and a
+ * spurious "test coverage" association for, every file in every namespace
+ * it lists.
+ */
+function isGlobalUsingDirective(node: SyntaxNode): boolean {
+  return node.children.some(child => !child.isNamed && child.type === 'global');
+}
+
+/**
  * C# import extractor
  *
  * Handles all C# using patterns:
  * - using Newtonsoft.Json;             (regular using)
  * - using static MyLib.Utils;          (static using)
  * - using Json = Newtonsoft.Json;      (alias using)
+ * - global using Newtonsoft.Json;      (global using — see isGlobalUsingDirective)
  *
  * Standard library usings (System.*, Microsoft.*) are filtered out.
  */
@@ -297,6 +321,10 @@ export class CSharpImportExtractor implements LanguageImportExtractor {
   }
 
   private getImportPath(node: SyntaxNode): string | null {
+    // A global using has no file-scoped dependency relationship — see
+    // isGlobalUsingDirective — so it never contributes an import path.
+    if (isGlobalUsingDirective(node)) return null;
+
     // qualified_name is always the import path when present
     const qualifiedName = node.namedChildren.find(c => c.type === 'qualified_name');
     if (qualifiedName) return qualifiedName.text;

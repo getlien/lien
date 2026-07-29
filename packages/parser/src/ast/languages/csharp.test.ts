@@ -334,6 +334,49 @@ describe('C# Language', () => {
       const stdlibNode = stdlibRoot.namedChild(0)!;
       expect(importExtractor.extractImportPaths(stdlibNode)).toEqual([]);
     });
+
+    // A `global using` applies project-wide, not to the file that declares
+    // it — its declaring file has no real dependency on the namespaces it
+    // lists (issue #930). This is the same shape as GlobalUsings.cs in
+    // real-world .NET 6+ projects (e.g. serilog/serilog).
+    it('should return null for a global using (#930)', () => {
+      const code = 'global using Serilog.Parsing;';
+      const root = mustParse(code, 'csharp');
+      const importNode = root.namedChild(0)!;
+      expect(importExtractor.extractImportPath(importNode)).toBeNull();
+    });
+
+    it('should return an empty array from extractImportPaths for a global using (#930)', () => {
+      const code = 'global using Serilog.Parsing;';
+      const root = mustParse(code, 'csharp');
+      const importNode = root.namedChild(0)!;
+      expect(importExtractor.extractImportPaths(importNode)).toEqual([]);
+    });
+
+    it('should return null from processImportSymbols for a global using (#930)', () => {
+      const code = 'global using Serilog.Parsing;';
+      const root = mustParse(code, 'csharp');
+      const importNode = root.namedChild(0)!;
+      expect(importExtractor.processImportSymbols(importNode)).toBeNull();
+    });
+
+    it('should return null for a global static using of a non-stdlib namespace (#930)', () => {
+      const code = 'global using static MyLib.Utils;';
+      const root = mustParse(code, 'csharp');
+      const importNode = root.namedChild(0)!;
+      expect(importExtractor.extractImportPath(importNode)).toBeNull();
+    });
+
+    it('should still extract a regular using in the same file as a global using (#930)', () => {
+      const code = `global using Serilog.Parsing;
+using Newtonsoft.Json;
+`;
+      const root = mustParse(code, 'csharp');
+      const globalNode = root.namedChild(0)!;
+      const regularNode = root.namedChild(1)!;
+      expect(importExtractor.extractImportPath(globalNode)).toBeNull();
+      expect(importExtractor.extractImportPath(regularNode)).toBe('Newtonsoft.Json');
+    });
   });
 
   describe('Symbol Extraction', () => {
