@@ -6,7 +6,7 @@ import type {
   LanguageImportExtractor,
   LanguageSymbolExtractor,
 } from '../extractors/types.js';
-import { toImportPathsArray } from '../extractors/types.js';
+import { toImportPathsArray, toImportSymbolsArray } from '../extractors/types.js';
 import { extractSignature, extractParameters } from '../extractors/symbol-helpers.js';
 import { calculateComplexity } from '../complexity/index.js';
 
@@ -293,6 +293,10 @@ export class JavaImportExtractor implements LanguageImportExtractor {
     }
 
     return { importPath: path, symbols: [lastPart] };
+  }
+
+  processImportSymbolsList(node: SyntaxNode): Array<{ importPath: string; symbols: string[] }> {
+    return toImportSymbolsArray(this.processImportSymbols(node));
   }
 
   private getImportPath(node: SyntaxNode): string | null {

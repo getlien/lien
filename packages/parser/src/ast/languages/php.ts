@@ -6,7 +6,7 @@ import type {
   LanguageImportExtractor,
   LanguageSymbolExtractor,
 } from '../extractors/types.js';
-import { toImportPathsArray } from '../extractors/types.js';
+import { toImportPathsArray, toImportSymbolsArray } from '../extractors/types.js';
 import {
   extractSignature,
   extractParameters,
@@ -197,6 +197,10 @@ export class PHPImportExtractor implements LanguageImportExtractor {
 
     const grouped = this.firstGroupedTarget(node);
     return grouped ? { importPath: grouped.importPath, symbols: [grouped.alias] } : null;
+  }
+
+  processImportSymbolsList(node: SyntaxNode): Array<{ importPath: string; symbols: string[] }> {
+    return toImportSymbolsArray(this.processImportSymbols(node));
   }
 
   /**

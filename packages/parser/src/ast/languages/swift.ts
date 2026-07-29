@@ -6,7 +6,7 @@ import type {
   LanguageImportExtractor,
   LanguageSymbolExtractor,
 } from '../extractors/types.js';
-import { toImportPathsArray } from '../extractors/types.js';
+import { toImportPathsArray, toImportSymbolsArray } from '../extractors/types.js';
 import { extractSignature, extractReturnType } from '../extractors/symbol-helpers.js';
 import { calculateComplexity } from '../complexity/index.js';
 
@@ -301,6 +301,10 @@ export class SwiftImportExtractor implements LanguageImportExtractor {
     const parts = path.split('.');
     const lastPart = parts[parts.length - 1];
     return { importPath: path, symbols: [lastPart] };
+  }
+
+  processImportSymbolsList(node: SyntaxNode): Array<{ importPath: string; symbols: string[] }> {
+    return toImportSymbolsArray(this.processImportSymbols(node));
   }
 
   private getImportPath(node: SyntaxNode): string | null {

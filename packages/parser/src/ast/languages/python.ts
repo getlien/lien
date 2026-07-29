@@ -6,7 +6,7 @@ import type {
   LanguageImportExtractor,
   LanguageSymbolExtractor,
 } from '../extractors/types.js';
-import { toImportPathsArray } from '../extractors/types.js';
+import { toImportPathsArray, toImportSymbolsArray } from '../extractors/types.js';
 import {
   extractSignature,
   extractParameters,
@@ -311,6 +311,10 @@ export class PythonImportExtractor implements LanguageImportExtractor {
       return this.processPythonFromImport(node);
     }
     return null;
+  }
+
+  processImportSymbolsList(node: SyntaxNode): Array<{ importPath: string; symbols: string[] }> {
+    return toImportSymbolsArray(this.processImportSymbols(node));
   }
 
   private processSimpleImport(child: SyntaxNode): { importPath: string; symbols: string[] } {

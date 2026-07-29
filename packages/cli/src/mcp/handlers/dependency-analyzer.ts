@@ -106,6 +106,15 @@ export interface DependencyAnalysisResult {
   truncated: boolean;
   /** Count of production dependents that are NOT imported by any test file. */
   uncoveredProductionDependents: number;
+  /**
+   * True when `symbol` was requested but couldn't be attributed at the
+   * symbol level (it isn't a top-level export of the target file -- the
+   * signature of a method or constructor, which no import statement in any
+   * language names independently of its class -- see `buildDependentsList`),
+   * so `dependents`/`riskLevel` were widened to the full file-level answer
+   * instead of asserting an unverifiable symbol-scoped count.
+   */
+  symbolAttributionDegraded?: boolean;
 }
 
 /**
@@ -156,6 +165,23 @@ function buildReExportGraph(
  *
  * Uses `importMatchesTarget`, which applies the #884 whole-module guard
  * before `matchesFile` — see its doc comment in path-matching.ts (#886).
+ *
+ * Qualified-access fallback: no language's import statement names a class's
+ * members, or (for Go) a package's individual functions, independently of
+ * the class/package itself -- `use Ns\\Cursor;` records `Cursor`, never
+ * `__construct`; Go's `import "app/bytesconv"` records the package alias
+ * `bytesconv`, never `StringToBytes`. Requiring a literal `targetSymbol`
+ * match inside `importedSymbols` for those cases means the check can never
+ * pass, even though the call site itself (`bytesconv.StringToBytes(...)`,
+ * `$cursor->moveUp()`) is genuine, correctly-attributed evidence -- and a
+ * caller mandated to check this before touching a method/constructor/
+ * package-level function would see a false "0 dependents, low risk"
+ * all-clear on code with real callers. So once a chunk is confirmed to
+ * import from the target path at all, a real call site named
+ * `targetSymbol` in that same chunk is accepted too -- the same category of
+ * trade-off already documented on `findSymbolUsages` below for JS namespace
+ * imports (occasional same-name false positives, far better than a
+ * guaranteed false negative for every member/qualified symbol).
  */
 function fileImportsSymbolFromAny(
   chunks: SearchResult[],
@@ -167,14 +193,19 @@ function fileImportsSymbolFromAny(
     const importedSymbols = chunk.metadata.importedSymbols;
     if (!importedSymbols) return false;
 
-    return Object.entries(importedSymbols).some(([importPath, symbols]) => {
-      const pathMatches = targetPaths.some(tp =>
+    const entriesFromTarget = Object.entries(importedSymbols).filter(([importPath]) =>
+      targetPaths.some(tp =>
         importMatchesTarget(importPath, chunk.metadata.file, tp, normalizePathCached),
-      );
-      return (
-        pathMatches && (symbols.includes(targetSymbol) || symbols.some(s => s.startsWith('* as ')))
-      );
-    });
+      ),
+    );
+    if (entriesFromTarget.length === 0) return false;
+
+    const namedMatch = entriesFromTarget.some(
+      ([, symbols]) => symbols.includes(targetSymbol) || symbols.some(s => s.startsWith('* as ')),
+    );
+    if (namedMatch) return true;
+
+    return (chunk.metadata.callSites ?? []).some(cs => cs.symbol === targetSymbol);
   });
 }
 
@@ -307,6 +338,19 @@ function groupChunksByFile(chunks: SearchResult[]): Map<string, SearchResult[]> 
 
 /**
  * Build the dependents list, either file-level or symbol-level.
+ *
+ * When `symbol` doesn't resolve to any usage AND it isn't one of the target
+ * file's own top-level exports, that combination is the structural
+ * signature of a method or constructor query (#928-adjacent) -- no
+ * language's import statement names a class member independently of its
+ * class, so neither the named-import check nor its call-site fallback in
+ * `fileImportsSymbolFromAny` had anything to key off. Asserting the
+ * symbol-scoped zero in that case would read as "no callers, safe to
+ * change" on a file that may have real file-level dependents, so this
+ * degrades to the file-level answer instead (`symbolAttributionDegraded`
+ * tells the caller the count is a widened floor, not a verified
+ * per-symbol count) -- getting the failure mode right beats asserting a
+ * precise count we can't actually back up.
  */
 function buildDependentsList(
   chunksByFile: Map<string, SearchResult[]>,
@@ -317,22 +361,40 @@ function buildDependentsList(
   filepath: string,
   log: (message: string, level?: 'warning') => void,
   reExporterPaths: string[] = [],
-): { dependents: DependentInfo[]; totalUsageCount?: number } {
+): { dependents: DependentInfo[]; totalUsageCount?: number; symbolAttributionDegraded?: boolean } {
   if (symbol) {
-    // Validate that the target file exports this symbol
-    validateSymbolExport(targetFileChunks, symbol, filepath, log);
+    const exportsSymbol = validateSymbolExport(targetFileChunks, symbol, filepath, log);
 
     // Symbol-level analysis — check imports from target AND re-exporter paths
-    return findSymbolUsages(
+    const symbolResult = findSymbolUsages(
       chunksByFile,
       symbol,
       normalizedTarget,
       normalizePathCached,
       reExporterPaths,
     );
+
+    if (!exportsSymbol && symbolResult.dependents.length === 0 && chunksByFile.size > 0) {
+      log(
+        `Note: "${symbol}" isn't a top-level export of ${filepath} (likely a method or ` +
+          `constructor) — symbol-level usage could not be confirmed. Falling back to ` +
+          `file-level dependents.`,
+        'warning',
+      );
+      return { ...buildFileLevelDependents(chunksByFile), symbolAttributionDegraded: true };
+    }
+
+    return symbolResult;
   }
 
-  // File-level analysis
+  return buildFileLevelDependents(chunksByFile);
+}
+
+/** File-level dependents: every file in `chunksByFile`, regardless of symbol. */
+function buildFileLevelDependents(chunksByFile: Map<string, SearchResult[]>): {
+  dependents: DependentInfo[];
+  totalUsageCount?: number;
+} {
   const dependents = Array.from(chunksByFile.keys()).map(fp => ({
     filepath: fp,
     isTestFile: isTestFile(fp),
@@ -345,26 +407,30 @@ function buildDependentsList(
  * Validate that the target file exports the requested symbol.
  *
  * Design decision: This function only logs a warning and does NOT throw an error
- * or return false to stop execution. This is intentional because:
+ * or stop execution on a miss. This is intentional because:
  *
  * 1. The export might be dynamic or conditional (not captured by static analysis)
  * 2. False positives are better than false negatives (we want to show potential matches)
  * 3. The user can see the warning and interpret results accordingly
  *
- * The function continues to search for usages even if the symbol isn't found in exports,
- * which may reveal re-exports, dynamic exports, or help diagnose indexing issues.
+ * The caller continues to search for usages even when this returns false, which may
+ * reveal re-exports, dynamic exports, or help diagnose indexing issues. The boolean
+ * return additionally lets `buildDependentsList` distinguish "genuinely zero callers"
+ * from "not a top-level export at all" (methods/constructors) — see its doc comment.
  */
 function validateSymbolExport(
   targetFileChunks: SearchResult[],
   symbol: string,
   filepath: string,
   log: (message: string, level?: 'warning') => void,
-): void {
+): boolean {
   const exportsSymbol = targetFileChunks.some(chunk => chunk.metadata.exports?.includes(symbol));
 
   if (!exportsSymbol) {
     log(`Warning: Symbol "${symbol}" not found in exports of ${filepath}`, 'warning');
   }
+
+  return exportsSymbol;
 }
 
 /**
@@ -533,7 +599,7 @@ export async function findDependents(
   });
 
   const targetFileChunks = symbol ? (allChunksByFile.get(normalizedTarget) ?? []) : [];
-  const { dependents, totalUsageCount } = buildDependentsList(
+  const { dependents, totalUsageCount, symbolAttributionDegraded } = buildDependentsList(
     chunksByFile,
     symbol,
     normalizedTarget,
@@ -579,6 +645,7 @@ export async function findDependents(
     totalUsageCount,
     truncated,
     uncoveredProductionDependents,
+    symbolAttributionDegraded,
   };
 }
 

@@ -291,6 +291,129 @@ describe('findDependents', () => {
     });
   });
 
+  describe('qualified-access fallback (methods, constructors, package-level functions)', () => {
+    it('Go-style: a package-qualified function call is attributed via callSites even though importedSymbols only records the package alias', async () => {
+      // Go's `import "internal/bytesconv"` records the package alias
+      // ("bytesconv") in importedSymbols, never the individual function
+      // called through it -- the real evidence lives in callSites instead.
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('internal/bytesconv/bytesconv.go', { exports: ['StringToBytes'] }),
+        createChunk('auth.go', {
+          imports: ['internal/bytesconv'],
+          importedSymbols: { 'internal/bytesconv': ['bytesconv'] },
+          callSites: [{ symbol: 'StringToBytes', line: 37 }],
+          symbolName: 'basicAuth',
+        }),
+      ]);
+
+      const result = await findDependents(
+        mockDB as any,
+        'internal/bytesconv/bytesconv.go',
+        mockLog,
+        'StringToBytes',
+      );
+
+      expect(result.dependents).toHaveLength(1);
+      expect(result.dependents[0].filepath).toBe('auth.go');
+      expect(result.totalUsageCount).toBe(1);
+      expect(result.symbolAttributionDegraded).toBeUndefined();
+    });
+
+    it('does not attribute a same-named call site from a file that imports a different package', async () => {
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('internal/bytesconv/bytesconv.go', { exports: ['StringToBytes'] }),
+        createChunk('unrelated.go', {
+          imports: ['internal/other'],
+          importedSymbols: { 'internal/other': ['other'] },
+          callSites: [{ symbol: 'StringToBytes', line: 5 }],
+        }),
+      ]);
+
+      const result = await findDependents(
+        mockDB as any,
+        'internal/bytesconv/bytesconv.go',
+        mockLog,
+        'StringToBytes',
+      );
+
+      expect(result.dependents).toHaveLength(0);
+    });
+
+    it('PHP-style: a method call is attributed via callSites even though importedSymbols only records the class name', async () => {
+      // `use ...\\Cursor;` records the class name in importedSymbols, never
+      // the method invoked on an instance of it.
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('Cursor.php', { exports: ['Cursor'] }),
+        createChunk('QuestionHelper.php', {
+          imports: ['Cursor'],
+          importedSymbols: { Cursor: ['Cursor'] },
+          callSites: [{ symbol: 'moveUp', line: 265 }],
+          symbolName: 'someMethod',
+        }),
+      ]);
+
+      const result = await findDependents(mockDB as any, 'Cursor.php', mockLog, 'moveUp');
+
+      expect(result.dependents).toHaveLength(1);
+      expect(result.dependents[0].filepath).toBe('QuestionHelper.php');
+      expect(result.totalUsageCount).toBe(1);
+    });
+
+    it('degrades to file-level dependents when the symbol is not a top-level export and no call site confirms usage (constructor shape)', async () => {
+      // PHP's `new Cursor(...)` isn't tracked as a call site at all (the
+      // parser gap), and `__construct` is never a top-level PHP export --
+      // the structural signature of an unresolvable symbol query. Reporting
+      // the symbol-scoped zero here would read as "no callers, safe to
+      // change" even though QuestionHelper.php genuinely imports Cursor.php.
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('Cursor.php', { exports: ['Cursor'] }),
+        createChunk('QuestionHelper.php', {
+          imports: ['Cursor'],
+          importedSymbols: { Cursor: ['Cursor'] },
+        }),
+      ]);
+
+      const result = await findDependents(mockDB as any, 'Cursor.php', mockLog, '__construct');
+
+      expect(result.symbolAttributionDegraded).toBe(true);
+      expect(result.dependents).toHaveLength(1);
+      expect(result.dependents[0].filepath).toBe('QuestionHelper.php');
+      expect(result.totalUsageCount).toBeUndefined();
+      expect(mockLog).toHaveBeenCalledWith(
+        expect.stringContaining("isn't a top-level export"),
+        'warning',
+      );
+    });
+
+    it('does not degrade (stays a real empty result) when there are no file-level dependents at all', async () => {
+      // The structural gap distinct from the one above (see #869): a
+      // whole-module-import language can have zero import edges into a
+      // file at all, so there is no file-level answer to widen to either.
+      // Must not fabricate dependents where none can be found.
+      mockDB.scanAll.mockResolvedValue([createChunk('Session.swift', { exports: ['Session'] })]);
+
+      const result = await findDependents(mockDB as any, 'Session.swift', mockLog, 'validate');
+
+      expect(result.symbolAttributionDegraded).toBeUndefined();
+      expect(result.dependents).toHaveLength(0);
+    });
+
+    it('does not degrade when the symbol IS a top-level export with zero real usages (true negative)', async () => {
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/target.ts', { exports: ['Foo', 'Bar'] }),
+        createChunk('src/unrelated.ts', {
+          imports: ['src/target.ts'],
+          importedSymbols: { 'src/target': ['Bar'] },
+        }),
+      ]);
+
+      const result = await findDependents(mockDB as any, 'src/target.ts', mockLog, 'Foo');
+
+      expect(result.dependents).toHaveLength(0);
+      expect(result.symbolAttributionDegraded).toBeUndefined();
+    });
+  });
+
   describe('complexity metrics', () => {
     it('should calculate correct file and overall complexity metrics', async () => {
       mockDB.scanAll.mockResolvedValue([

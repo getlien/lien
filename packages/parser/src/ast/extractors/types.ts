@@ -139,6 +139,32 @@ export interface LanguageImportExtractor {
   ): { importPath: string; symbols: string[] } | null;
 
   /**
+   * Extract ALL imported-symbol mappings from a single import declaration node.
+   *
+   * Most languages have exactly one importPath per declaration, so the
+   * default shape is `processImportSymbols(node)` wrapped in an array (see
+   * `toImportSymbolsArray`). Go's grouped `import (...)` blocks can name
+   * several distinct external packages from one declaration node -- the
+   * same multi-target shape `extractImportPaths` already handles for the
+   * plain-path list (#863) -- so its implementation overrides this to
+   * return every target's symbols instead of silently dropping all but the
+   * first non-stdlib spec, which otherwise leaves `chunk.metadata.
+   * importedSymbols` missing an entry for every import after the first in
+   * the same declaration (confirmed on real gin source: `render/json.go`'s
+   * grouped import names both `codec/json` and `internal/bytesconv`, but
+   * the pre-fix singular `processImportSymbols` only ever recorded
+   * `codec/json`).
+   *
+   * @param node - AST node matching one of importNodeTypes
+   * @param rustCrateMap - Rust-only (#903) -- see `extractImportPaths`.
+   * @returns Every {importPath, symbols} pair declared by this node, in source order (empty if none)
+   */
+  processImportSymbolsList(
+    node: SyntaxNode,
+    rustCrateMap?: ReadonlyMap<string, string>,
+  ): Array<{ importPath: string; symbols: string[] }>;
+
+  /**
    * Extract additional "reference" import-like specifiers that name another
    * file's symbol WITHOUT going through this language's own import-
    * declaration syntax at all — so declaration-based extraction (the
@@ -177,4 +203,16 @@ export interface LanguageImportExtractor {
  */
 export function toImportPathsArray(path: string | null): string[] {
   return path ? [path] : [];
+}
+
+/**
+ * Default `processImportSymbolsList` shape for every language extractor that
+ * has exactly one importPath per declaration node: wrap `processImportSymbols`'s
+ * single result in an array (empty when it returns `null`). See
+ * `LanguageImportExtractor.processImportSymbolsList`.
+ */
+export function toImportSymbolsArray(
+  result: { importPath: string; symbols: string[] } | null,
+): Array<{ importPath: string; symbols: string[] }> {
+  return result ? [result] : [];
 }
