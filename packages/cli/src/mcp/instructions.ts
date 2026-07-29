@@ -29,6 +29,10 @@ symbol:
   'truncated: true' means the BFS stopped at 'maxNodes' (default 500).
   Symbol-level queries stay at depth 1 — pass depth only for file-level.
 
+  If a result carries dependentAttributionIncomplete, a dependentCount of 0 and a
+  riskLevel of "low" mean Lien could not SEE the callers, not that there are none —
+  grep before concluding the symbol is unused. riskLevel is not adjusted for it.
+
 For discovery ("where is X?", "how does Y work?"), call search_code FIRST.
 It runs full-text BM25 keyword search over code, docstrings, and camelCase-split
 identifiers. Query with concrete KEYWORDS, identifiers, and domain terms
