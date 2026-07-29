@@ -414,6 +414,54 @@ describe('findDependents', () => {
     });
   });
 
+  describe('dependentAttributionIncomplete (C# enclosing-namespace-access floor, #930)', () => {
+    it('flags a file-level query with zero dependents for a C# file', async () => {
+      // Once a `global using` exists for a namespace, a real C# caller needs
+      // no per-file `using` at all -- the import graph has no signal for
+      // that usage, so a zero-dependent result here is "nothing found," not
+      // a verified "nothing depends on this file."
+      mockDB.scanAll.mockResolvedValue([createChunk('Alignment.cs', { exports: ['Alignment'] })]);
+
+      const result = await findDependents(mockDB as any, 'Alignment.cs', mockLog);
+
+      expect(result.dependents).toHaveLength(0);
+      expect(result.dependentAttributionIncomplete).toBe(true);
+      expect(mockLog).toHaveBeenCalledWith(
+        expect.stringContaining('enclosing-namespace access'),
+        'warning',
+      );
+    });
+
+    it('does not flag a C# file that has real file-level dependents', async () => {
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('Alignment.cs', { exports: ['Alignment'] }),
+        createChunk('Consumer.cs', { imports: ['Alignment.cs'] }),
+      ]);
+
+      const result = await findDependents(mockDB as any, 'Alignment.cs', mockLog);
+
+      expect(result.dependents).toHaveLength(1);
+      expect(result.dependentAttributionIncomplete).toBeUndefined();
+    });
+
+    it('does not flag a zero-dependent TypeScript file (no enclosing-namespace access)', async () => {
+      mockDB.scanAll.mockResolvedValue([createChunk('src/target.ts', { exports: ['doStuff'] })]);
+
+      const result = await findDependents(mockDB as any, 'src/target.ts', mockLog);
+
+      expect(result.dependents).toHaveLength(0);
+      expect(result.dependentAttributionIncomplete).toBeUndefined();
+    });
+
+    it('does not flag a zero-dependent C# SYMBOL query (that is symbolAttributionDegraded/real-empty territory instead)', async () => {
+      mockDB.scanAll.mockResolvedValue([createChunk('Alignment.cs', { exports: ['Alignment'] })]);
+
+      const result = await findDependents(mockDB as any, 'Alignment.cs', mockLog, 'Alignment');
+
+      expect(result.dependentAttributionIncomplete).toBeUndefined();
+    });
+  });
+
   describe('complexity metrics', () => {
     it('should calculate correct file and overall complexity metrics', async () => {
       mockDB.scanAll.mockResolvedValue([

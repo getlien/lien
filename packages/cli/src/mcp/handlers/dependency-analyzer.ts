@@ -9,6 +9,8 @@ import {
   isUnresolvableWholeModuleImport,
   importMatchesTarget,
   hasSingleFileImportSemantics,
+  detectLanguage,
+  hasEnclosingNamespaceAccess,
   COMPLEXITY_THRESHOLDS,
 } from '@liendev/parser';
 
@@ -115,6 +117,20 @@ export interface DependencyAnalysisResult {
    * instead of asserting an unverifiable symbol-scoped count.
    */
   symbolAttributionDegraded?: boolean;
+  /**
+   * True for a FILE-level query (no `symbol` requested) that came back with
+   * zero dependents for a language where `hasEnclosingNamespaceAccess` is
+   * set (currently only C# -- see that flag's doc comment). Those languages
+   * let a real caller use `filepath`'s types with no per-file import
+   * statement naming it at all (C#'s `global using` / implicit
+   * enclosing-namespace member access -- #930), so the import-graph scan
+   * this function runs has no signal for that usage shape. `dependentCount:
+   * 0` / `riskLevel: "low"` in this case means "the import graph found
+   * nothing," not "nothing depends on this file" -- the same false-all-clear
+   * risk `symbolAttributionDegraded` guards against for symbol queries, just
+   * for the file-level answer instead.
+   */
+  dependentAttributionIncomplete?: boolean;
 }
 
 /**
@@ -633,6 +649,13 @@ export async function findDependents(
   // call.
   const allChunks = includeAllChunks ? Array.from(allChunksByFile.values()).flat() : [];
 
+  const dependentAttributionIncomplete = checkDependentAttributionIncomplete(
+    filepath,
+    symbol,
+    dependents.length,
+    log,
+  );
+
   return {
     dependents,
     productionDependentCount,
@@ -646,7 +669,36 @@ export async function findDependents(
     truncated,
     uncoveredProductionDependents,
     symbolAttributionDegraded,
+    dependentAttributionIncomplete,
   };
+}
+
+/**
+ * True for a file-level query (no `symbol` -- that case has its own
+ * `symbolAttributionDegraded` handling above) that found zero dependents in
+ * a language where the import graph structurally cannot see every real
+ * usage (see `DependencyAnalysisResult.dependentAttributionIncomplete`'s
+ * doc comment). Logs a warning when it fires, matching the logging
+ * `buildDependentsList` already does for its own degradation case.
+ */
+function checkDependentAttributionIncomplete(
+  filepath: string,
+  symbol: string | undefined,
+  dependentCount: number,
+  log: (message: string, level?: 'warning') => void,
+): true | undefined {
+  if (symbol || dependentCount !== 0) return undefined;
+
+  const targetLanguage = detectLanguage(filepath);
+  if (targetLanguage === null || !hasEnclosingNamespaceAccess(targetLanguage)) return undefined;
+
+  log(
+    `No import-based dependents found for ${filepath} -- ${targetLanguage} has enclosing-` +
+      `namespace access, so this scan has no signal for a real caller that reaches it ` +
+      `without a per-file import (#930)`,
+    'warning',
+  );
+  return true;
 }
 
 /** Depth-1 seed: direct importers plus barrel re-exporters. */

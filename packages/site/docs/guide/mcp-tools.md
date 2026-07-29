@@ -328,6 +328,8 @@ When `symbol` is provided, the response also includes `totalUsageCount` (number 
 
 `symbol` also accepts a method or constructor name (e.g. `__construct`, `moveUp`) — those aren't top-level exports, so when call sites for one can't be confirmed, the response sets `symbolAttributionDegraded: true` plus a `symbolAttributionNote` and widens `dependentCount`/`riskLevel` to the file-level answer (every file that imports `filepath`) rather than asserting an unverifiable symbol-scoped count. Check that flag before treating a low count as verified.
 
+A file-level query (no `symbol`) that finds zero dependents in a language where the import graph structurally can't see every real usage — C#'s enclosing-namespace access, where a `global using` lets a real caller reach `filepath`'s exports with no per-file import at all (#930) — sets `dependentAttributionIncomplete: true` plus a `dependentAttributionNote`. `dependentCount: 0` / `riskLevel: "low"` in that case means "the import graph found nothing," not "nothing depends on this file" — check that flag too before treating a zero count as a verified all-clear.
+
 ### Risk Levels
 
 | Level | Dependent Count | Meaning |
