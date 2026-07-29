@@ -33,6 +33,22 @@ export interface LanguageTraverser {
   containerTypes: string[];
 
   /**
+   * AST node types that should be emitted as their own chunk/symbol — like
+   * `containerTypes` — but that must NOT count toward the container-depth
+   * budget `isTargetNode` enforces (see `ast/chunker.ts`'s `findTopLevelNodes`).
+   *
+   * Ruby's `module` is the motivating case: it can wrap an arbitrary chain of
+   * classes/methods (`module Foo; class Bar; def baz; end; end; end`) and must
+   * stay "transparent" for depth purposes — exactly what `shouldTraverseChildren`
+   * already does for it — while still being independently discoverable as a
+   * symbol in its own right (previously it was invisible to `list_functions`
+   * entirely). Optional and undefined for every language without an equivalent
+   * construct, which is a complete no-op: chunker only checks this list when
+   * it is present.
+   */
+  transparentContainerTypes?: string[];
+
+  /**
    * AST node types that represent variable declarations that might contain functions
    * (e.g., 'lexical_declaration' for TypeScript const/let with arrow functions)
    */

@@ -350,9 +350,9 @@ export class SwiftSymbolExtractor implements LanguageSymbolExtractor {
       case 'subscript_declaration':
         return this.extractFunctionInfo(node, content, parentClass);
       case 'class_declaration':
-        return this.extractClassInfo(node);
+        return this.extractClassInfo(node, parentClass);
       case 'protocol_declaration':
-        return this.extractProtocolInfo(node);
+        return this.extractProtocolInfo(node, parentClass);
       default:
         return null;
     }
@@ -415,17 +415,24 @@ export class SwiftSymbolExtractor implements LanguageSymbolExtractor {
     };
   }
 
-  private extractClassInfo(node: SyntaxNode): SymbolInfo | null {
+  /**
+   * `parentClass` is threaded through so a nested type — idiomatic in Swift
+   * (a `class`/`struct`/`enum` declared directly inside another type's body,
+   * or a protocol nested inside a type) — reports its enclosing type.
+   * `SwiftTraverser.findParentContainerName` already resolves this for every
+   * top-level node, not just methods (#949).
+   */
+  private extractClassInfo(node: SyntaxNode, parentClass?: string): SymbolInfo | null {
     const name = declarationName(node);
     if (!name) return null;
     const keyword = declarationKeyword(node);
-    return this.makeSymbol(node, name, 'class', `${keyword} ${name}`);
+    return this.makeSymbol(node, name, 'class', `${keyword} ${name}`, parentClass);
   }
 
-  private extractProtocolInfo(node: SyntaxNode): SymbolInfo | null {
+  private extractProtocolInfo(node: SyntaxNode, parentClass?: string): SymbolInfo | null {
     const name = declarationName(node);
     if (!name) return null;
-    return this.makeSymbol(node, name, 'interface', `protocol ${name}`);
+    return this.makeSymbol(node, name, 'interface', `protocol ${name}`, parentClass);
   }
 
   private makeSymbol(
@@ -433,12 +440,14 @@ export class SwiftSymbolExtractor implements LanguageSymbolExtractor {
     name: string,
     type: SymbolInfo['type'],
     signature: string,
+    parentClass?: string,
   ): SymbolInfo {
     return {
       name,
       type,
       startLine: node.startPosition.row + 1,
       endLine: node.endPosition.row + 1,
+      parentClass,
       signature,
     };
   }

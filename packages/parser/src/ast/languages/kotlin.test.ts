@@ -241,6 +241,28 @@ describe('Kotlin Language', () => {
       expect(obj).toMatchObject({ name: 'Registry', type: 'class', signature: 'object Registry' });
     });
 
+    // #949: nested/inner classes and objects are idiomatic in Kotlin, but
+    // extractClassInfo/extractObjectInfo previously ignored the parentClass
+    // argument entirely — a nested type always reported parentClass:
+    // undefined regardless of nesting.
+    it('attaches the enclosing class as parentClass for a nested class declaration', () => {
+      const src = 'class Outer {\n  class Inner {}\n}\n';
+      const nodes = findAllNodes(parse(src), 'class_declaration');
+      const inner = nodes[1]!;
+      const sym = symbolExtractor.extractSymbol(inner, src, 'Outer')!;
+      expect(sym.name).toBe('Inner');
+      expect(sym.type).toBe('class');
+      expect(sym.parentClass).toBe('Outer');
+    });
+
+    it('attaches the enclosing class as parentClass for a nested object declaration', () => {
+      const src = 'class Outer {\n  object Inner {}\n}\n';
+      const objNode = findNode(parse(src), 'object_declaration')!;
+      const sym = symbolExtractor.extractSymbol(objNode, src, 'Outer')!;
+      expect(sym.name).toBe('Inner');
+      expect(sym.parentClass).toBe('Outer');
+    });
+
     it('extracts call sites for direct and navigation calls', () => {
       const src = 'fun run() {\n  foo()\n  obj.bar.baz()\n}\n';
       const calls = findAllNodes(parse(src), 'call_expression');
@@ -312,6 +334,18 @@ fun topLevelHelper(x: Int): Int = x + 1
       const place = bySymbol('place', 'method');
       expect(place).toBeDefined();
       expect(place?.metadata.complexity ?? 0).toBeGreaterThan(1);
+    });
+
+    // #949: nested/inner classes are idiomatic in Kotlin; a nested class
+    // declaration previously reported parentClass: undefined regardless of
+    // nesting.
+    it('attaches the enclosing class as parentClass for a nested class chunk', () => {
+      const nestedSource = 'class Outer {\n  class Inner {\n    val x: Int = 0\n  }\n}\n';
+      const nestedChunks = chunkByAST('Outer.kt', nestedSource);
+      const inner = nestedChunks.find(c => c.metadata.symbolName === 'Inner');
+      expect(inner).toBeDefined();
+      expect(inner?.metadata.symbolType).toBe('class');
+      expect(inner?.metadata.parentClass).toBe('Outer');
     });
   });
 });

@@ -373,6 +373,17 @@ function findTopLevelNodes(
       return;
     }
 
+    // Transparent containers (e.g. Ruby's `module`): emit a chunk for the
+    // node itself, but — unlike shouldExtractChildren above — keep
+    // traversing its children at the SAME depth instead of depth + 1. That's
+    // what makes them "transparent" for the depth budget `isTargetNode`
+    // enforces: a class (or method) nested inside one must still be found as
+    // if the transparent container weren't there. See
+    // `LanguageTraverser.transparentContainerTypes`'s doc comment.
+    if (traverser.transparentContainerTypes?.includes(node.type)) {
+      nodes.push(node);
+    }
+
     // Traverse children of traversable nodes
     if (!traverser.shouldTraverseChildren(node)) return;
     for (const child of node.namedChildren) {

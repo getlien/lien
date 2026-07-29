@@ -462,6 +462,56 @@ using Newtonsoft.Json;
       expect(symbol!.signature).toBe('enum Color');
     });
 
+    // #949: a nested type declaration (class/interface/struct/record/enum
+    // declared directly inside another type) previously reported
+    // parentClass: undefined regardless of nesting — only the
+    // method/property handlers accepted the parameter. These pin that every
+    // type-declaration handler now carries it through, the same way it
+    // already worked for methods.
+    it('should attach the enclosing type as parentClass for a nested class_declaration', () => {
+      const code = 'public class Outer { public class Inner {} }';
+      const root = mustParse(code, 'csharp');
+      const innerNode = findAllNodes(root, 'class_declaration')[1]!;
+      const symbol = symbolExtractor.extractSymbol(innerNode, code, 'Outer');
+      expect(symbol!.name).toBe('Inner');
+      expect(symbol!.type).toBe('class');
+      expect(symbol!.parentClass).toBe('Outer');
+    });
+
+    it('should attach the enclosing type as parentClass for a nested interface_declaration', () => {
+      const code = 'public class Outer { public interface IInner {} }';
+      const root = mustParse(code, 'csharp');
+      const ifaceNode = findNode(root, 'interface_declaration')!;
+      const symbol = symbolExtractor.extractSymbol(ifaceNode, code, 'Outer');
+      expect(symbol!.parentClass).toBe('Outer');
+    });
+
+    it('should attach the enclosing type as parentClass for a nested struct/record/enum', () => {
+      const structCode = 'public class Outer { public struct Inner {} }';
+      const structSymbol = symbolExtractor.extractSymbol(
+        findNode(mustParse(structCode, 'csharp'), 'struct_declaration')!,
+        structCode,
+        'Outer',
+      );
+      expect(structSymbol!.parentClass).toBe('Outer');
+
+      const recordCode = 'public class Outer { public record Inner(string Name) {} }';
+      const recordSymbol = symbolExtractor.extractSymbol(
+        findNode(mustParse(recordCode, 'csharp'), 'record_declaration')!,
+        recordCode,
+        'Outer',
+      );
+      expect(recordSymbol!.parentClass).toBe('Outer');
+
+      const enumCode = 'public class Outer { public enum Inner { A, B } }';
+      const enumSymbol = symbolExtractor.extractSymbol(
+        findNode(mustParse(enumCode, 'csharp'), 'enum_declaration')!,
+        enumCode,
+        'Outer',
+      );
+      expect(enumSymbol!.parentClass).toBe('Outer');
+    });
+
     it('should extract return type from method', () => {
       const code = `public class Foo {
     public string GetName() { return ""; }
@@ -690,6 +740,24 @@ using Newtonsoft.Json;
       );
       expect(ctorChunk).toBeDefined();
       expect(ctorChunk?.metadata.parentClass).toBe('User');
+    });
+
+    // #949 end-to-end repro: a nested class (`public static class Builder`
+    // inside `public class Retrofit`) previously reported parentClass: null,
+    // making it indistinguishable from an unrelated same-named nested
+    // `Builder` in a different file.
+    it('should attach the enclosing class as parentClass for a nested class chunk', () => {
+      const content = `public class Retrofit {
+    public static class Builder {
+        public Retrofit Build() { return null; }
+    }
+}`;
+
+      const chunks = chunkByAST('Retrofit.cs', content);
+      const builderChunk = chunks.find(c => c.metadata.symbolName === 'Builder');
+      expect(builderChunk).toBeDefined();
+      expect(builderChunk?.metadata.symbolType).toBe('class');
+      expect(builderChunk?.metadata.parentClass).toBe('Retrofit');
     });
 
     it('should chunk C# interfaces', () => {

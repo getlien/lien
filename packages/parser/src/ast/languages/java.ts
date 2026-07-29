@@ -326,6 +326,17 @@ export class JavaImportExtractor implements LanguageImportExtractor {
  * - enum_declaration (enum MyEnum {})
  * - record_declaration (record MyRecord(int x) {})
  *
+ * `parentClass` is threaded into every type-declaration handler (not just
+ * methods/constructors) so a nested type (`class Retrofit { public static
+ * final class Builder { ... } }`) reports its enclosing type — the chunker
+ * (`ast/chunker.ts`'s `processTopLevelNode`) already resolves this via
+ * `JavaTraverser.findParentContainerName` for every top-level node regardless
+ * of kind; previously only the method/constructor handlers accepted the
+ * parameter, so a nested class/interface/enum/record silently lost it (#949 —
+ * this is the confirmed repro: `Retrofit.Builder`, `RequestFactory.Builder`,
+ * etc. all reported `parentClass: null`, making six same-named `Builder`
+ * results indistinguishable except by file path).
+ *
  * Call sites: method_invocation (direct calls and object.method() calls)
  */
 export class JavaSymbolExtractor implements LanguageSymbolExtractor {
@@ -345,13 +356,13 @@ export class JavaSymbolExtractor implements LanguageSymbolExtractor {
       case 'constructor_declaration':
         return this.extractConstructorInfo(node, content, parentClass);
       case 'class_declaration':
-        return this.extractClassInfo(node);
+        return this.extractClassInfo(node, parentClass);
       case 'interface_declaration':
-        return this.extractInterfaceInfo(node);
+        return this.extractInterfaceInfo(node, parentClass);
       case 'enum_declaration':
-        return this.extractEnumInfo(node);
+        return this.extractEnumInfo(node, parentClass);
       case 'record_declaration':
-        return this.extractRecordInfo(node);
+        return this.extractRecordInfo(node, parentClass);
       default:
         return null;
     }
@@ -419,7 +430,7 @@ export class JavaSymbolExtractor implements LanguageSymbolExtractor {
     };
   }
 
-  private extractClassInfo(node: SyntaxNode): SymbolInfo | null {
+  private extractClassInfo(node: SyntaxNode, parentClass?: string): SymbolInfo | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
@@ -428,11 +439,12 @@ export class JavaSymbolExtractor implements LanguageSymbolExtractor {
       type: 'class',
       startLine: node.startPosition.row + 1,
       endLine: node.endPosition.row + 1,
+      parentClass,
       signature: `class ${nameNode.text}`,
     };
   }
 
-  private extractInterfaceInfo(node: SyntaxNode): SymbolInfo | null {
+  private extractInterfaceInfo(node: SyntaxNode, parentClass?: string): SymbolInfo | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
@@ -441,11 +453,12 @@ export class JavaSymbolExtractor implements LanguageSymbolExtractor {
       type: 'interface',
       startLine: node.startPosition.row + 1,
       endLine: node.endPosition.row + 1,
+      parentClass,
       signature: `interface ${nameNode.text}`,
     };
   }
 
-  private extractEnumInfo(node: SyntaxNode): SymbolInfo | null {
+  private extractEnumInfo(node: SyntaxNode, parentClass?: string): SymbolInfo | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
@@ -454,11 +467,12 @@ export class JavaSymbolExtractor implements LanguageSymbolExtractor {
       type: 'class',
       startLine: node.startPosition.row + 1,
       endLine: node.endPosition.row + 1,
+      parentClass,
       signature: `enum ${nameNode.text}`,
     };
   }
 
-  private extractRecordInfo(node: SyntaxNode): SymbolInfo | null {
+  private extractRecordInfo(node: SyntaxNode, parentClass?: string): SymbolInfo | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
@@ -467,6 +481,7 @@ export class JavaSymbolExtractor implements LanguageSymbolExtractor {
       type: 'class',
       startLine: node.startPosition.row + 1,
       endLine: node.endPosition.row + 1,
+      parentClass,
       signature: `record ${nameNode.text}`,
     };
   }

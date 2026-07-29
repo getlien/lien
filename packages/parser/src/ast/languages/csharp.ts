@@ -359,6 +359,17 @@ export class CSharpImportExtractor implements LanguageImportExtractor {
  * - property_declaration (public string Name { get; set; } / public int Count => …)
  * - indexer_declaration (public int this[int index] { get; set; })
  *
+ * `parentClass` is threaded into every type-declaration handler (not just
+ * methods/properties) so a nested type (`public class Retrofit { public class
+ * Builder { ... } }`) reports its enclosing type — the chunker
+ * (`ast/chunker.ts`'s `processTopLevelNode`) already resolves this via
+ * `CSharpTraverser.findParentContainerName` for every top-level node
+ * regardless of kind; previously only the method/property handlers accepted
+ * the parameter, so a nested class/interface/struct/record/enum silently lost
+ * it (#949 — surfaced as `list_functions` being unable to tell one nested
+ * `Builder` from an unrelated same-named nested `Builder` elsewhere in the
+ * codebase).
+ *
  * Call sites: invocation_expression (direct calls and obj.Method() calls)
  */
 export class CSharpSymbolExtractor implements LanguageSymbolExtractor {
@@ -381,15 +392,15 @@ export class CSharpSymbolExtractor implements LanguageSymbolExtractor {
       case 'constructor_declaration':
         return this.extractConstructorInfo(node, content, parentClass);
       case 'class_declaration':
-        return this.extractClassInfo(node);
+        return this.extractClassInfo(node, parentClass);
       case 'interface_declaration':
-        return this.extractInterfaceInfo(node);
+        return this.extractInterfaceInfo(node, parentClass);
       case 'struct_declaration':
-        return this.extractStructInfo(node);
+        return this.extractStructInfo(node, parentClass);
       case 'record_declaration':
-        return this.extractRecordInfo(node);
+        return this.extractRecordInfo(node, parentClass);
       case 'enum_declaration':
-        return this.extractEnumInfo(node);
+        return this.extractEnumInfo(node, parentClass);
       case 'property_declaration':
       case 'indexer_declaration':
         return this.extractPropertyInfo(node, content, parentClass);
@@ -499,7 +510,7 @@ export class CSharpSymbolExtractor implements LanguageSymbolExtractor {
     };
   }
 
-  private extractClassInfo(node: SyntaxNode): SymbolInfo | null {
+  private extractClassInfo(node: SyntaxNode, parentClass?: string): SymbolInfo | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
@@ -508,11 +519,12 @@ export class CSharpSymbolExtractor implements LanguageSymbolExtractor {
       type: 'class',
       startLine: node.startPosition.row + 1,
       endLine: node.endPosition.row + 1,
+      parentClass,
       signature: `class ${nameNode.text}`,
     };
   }
 
-  private extractInterfaceInfo(node: SyntaxNode): SymbolInfo | null {
+  private extractInterfaceInfo(node: SyntaxNode, parentClass?: string): SymbolInfo | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
@@ -521,11 +533,12 @@ export class CSharpSymbolExtractor implements LanguageSymbolExtractor {
       type: 'interface',
       startLine: node.startPosition.row + 1,
       endLine: node.endPosition.row + 1,
+      parentClass,
       signature: `interface ${nameNode.text}`,
     };
   }
 
-  private extractStructInfo(node: SyntaxNode): SymbolInfo | null {
+  private extractStructInfo(node: SyntaxNode, parentClass?: string): SymbolInfo | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
@@ -534,11 +547,12 @@ export class CSharpSymbolExtractor implements LanguageSymbolExtractor {
       type: 'class',
       startLine: node.startPosition.row + 1,
       endLine: node.endPosition.row + 1,
+      parentClass,
       signature: `struct ${nameNode.text}`,
     };
   }
 
-  private extractRecordInfo(node: SyntaxNode): SymbolInfo | null {
+  private extractRecordInfo(node: SyntaxNode, parentClass?: string): SymbolInfo | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
@@ -547,11 +561,12 @@ export class CSharpSymbolExtractor implements LanguageSymbolExtractor {
       type: 'class',
       startLine: node.startPosition.row + 1,
       endLine: node.endPosition.row + 1,
+      parentClass,
       signature: `record ${nameNode.text}`,
     };
   }
 
-  private extractEnumInfo(node: SyntaxNode): SymbolInfo | null {
+  private extractEnumInfo(node: SyntaxNode, parentClass?: string): SymbolInfo | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
@@ -560,6 +575,7 @@ export class CSharpSymbolExtractor implements LanguageSymbolExtractor {
       type: 'class',
       startLine: node.startPosition.row + 1,
       endLine: node.endPosition.row + 1,
+      parentClass,
       signature: `enum ${nameNode.text}`,
     };
   }
