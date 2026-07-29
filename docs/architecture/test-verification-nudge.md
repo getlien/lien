@@ -137,7 +137,7 @@ interface TestRunClassification { isTestRun: boolean; broad: boolean; scopeToken
    or ends in a source extension (reusing `getSupportedExtensions()` from
    `@liendev/parser` rather than hand-maintaining a second extension list —
    a test file shares its language's extension, so "ends in a source
-   extension" already covers the test-ish case). Two token classes are
+   extension" already covers the test-ish case). Three token classes are
    excluded from ever counting as a scoping argument even when they'd
    otherwise qualify: a workspace-scope flag's value (`-w`/`--workspace`,
    e.g. `@liendev/core`, which contains a `/`), and a config-flag's value
@@ -330,6 +330,64 @@ conservative-allow-list philosophy; a unified table would be a structural
 reorganization with no additional correctness benefit over what's here,
 and would cost a larger, riskier diff for a module already this
 security-sensitive to the nudge's credibility.
+
+##### A scope-broadening flag does NOT make a name-filtered run `broad` — selection and scope are independent axes (2026-07-30)
+
+A review pass suggested that `go test -run TestFoo ./...` /
+`go test -run TestFoo .` and `cargo test foo --workspace` /
+`cargo test foo --all` should classify as `broad`, on the reasoning that
+`./...`/`--workspace`/`--all` are "broad-scope indicators." **This is wrong,
+and the classifier's existing behavior (no change needed) is correct** —
+verified directly against `classifyTestCommand` and independently re-verified
+against a real Go module (gin) with `internal/bytesconv` (4 test functions,
+none named `TestFoo`):
+
+```
+go test -run TestFoo ./...      => name-filtered (NAGS)  -- executes none of bytesconv's 4 tests
+go test -run TestFoo .          => name-filtered (NAGS)
+cargo test foo --workspace      => name-filtered (NAGS)
+cargo test foo --all            => name-filtered (NAGS)
+go test ./...                   => broad (SILENT)  -- no name filter, real whole-suite coverage
+cargo test --workspace          => broad (SILENT)
+cargo test --all                => broad (SILENT)
+```
+
+The reasoning: **which packages/crates get compiled and which tests within
+them actually execute are two independent axes.** `./...`/`--workspace`/
+`--all` answer the first question (compile everything reachable) — genuinely
+scope-broadening, correctly contributing no scoping restriction on their
+own. `-run TestFoo` / a bare positional test name answer the second,
+completely orthogonal question (of the tests that got compiled, run only
+ones matching this name) — and that restriction does not evaporate just
+because the first axis was maximally broadened. `go test -run TestFoo ./...`
+compiles every package in the module and then, within each one, runs only
+tests whose name matches `TestFoo` — the overwhelming majority of real test
+functions across the module (e.g. all 4 in `bytesconv`, none named `TestFoo`)
+never execute. Treating this as `broad` would make it functionally identical
+to running nothing at all while still marking every edited file in the
+session "verified" — precisely the false-"tests ran" bug this whole feature
+exists to close, just reached via a scope flag instead of a bare name.
+
+The classifier already gets this right by construction, not by any special
+case: a scope-broadening flag either lands in a genuinely orthogonal
+skip-flag set (`--workspace`/`-w` in the global `WORKSPACE_SCOPE_FLAGS`,
+consumed as flag+value and contributing nothing) or is excluded from
+path-likeness entirely (`./...` via `GLOB_ALL_TOKENS`) — in both cases it
+simply produces **no scoping evidence of its own**, neither for nor against
+name-filtering. The *separate* name-filter evidence (`-run`'s presence, or
+cargo's bare positional) is tracked independently and is what actually
+decides `broad` vs. name-filtered here; a scope flag appearing in the same
+command never suppresses that independently-collected evidence. This is
+exactly the axis-independence the `--workspace`/`--all`/`./...` case
+requires, achieved for free by not having any code path that treats "a
+scope flag is present" as license to ignore other evidence in the same
+segment. **Do not "fix" this by making a scope-broadening flag force
+`broad` regardless of a name filter also present in the same command** — that
+is, verbatim, the false-silence bug from the top of this document, just
+triggered by a different flag.
+
+Regression tests for all seven commands above are pinned in
+`test-run-matcher.test.ts`.
 
 ## C. `lien verify-tests <subcommand>`
 

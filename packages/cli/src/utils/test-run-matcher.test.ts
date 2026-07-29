@@ -256,6 +256,23 @@ describe('classifyTestCommand — broad vs scoped classification table', () => {
     ['pnpm -F hono test', true, true, []],
     ['pnpm -F @hono/core test', true, true, []],
     ['pnpm --filter=!excluded-pkg test', true, true, []],
+    // Rejected review suggestion, pinned as regression (2026-07-30): a
+    // scope-broadening flag (which packages/crates get COMPILED) must NOT
+    // suppress independent name-filter evidence (which tests, among those
+    // compiled, actually EXECUTE) — selection and scope are independent
+    // axes. See the matching doc section in
+    // docs/architecture/test-verification-nudge.md. Making these `broad`
+    // instead would be the exact false-silence bug this file exists to fix,
+    // just triggered by a scope flag instead of a bare name.
+    ['go test -run TestFoo ./...', true, false, []],
+    ['go test -run TestFoo .', true, false, []],
+    ['cargo test foo --workspace', true, false, []],
+    ['cargo test foo --all', true, false, []],
+    // Contrast: the SAME scope-broadening flags, with no name filter
+    // present at all, correctly stay broad (real whole-suite coverage).
+    ['go test ./...', true, true, []],
+    ['cargo test --workspace', true, true, []],
+    ['cargo test --all', true, true, []],
   ])('%s -> isTestRun=%s broad=%s scopeTokens=%j', (command, isTestRun, broad, scopeTokens) => {
     expect(classifyTestCommand(command)).toEqual({ isTestRun, broad, scopeTokens });
   });
