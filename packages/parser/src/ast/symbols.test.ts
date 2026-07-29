@@ -641,6 +641,24 @@ from typing import Optional
       expect(imports).toContain('os');
       expect(imports).toContain('typing');
     });
+
+    it('resolves a bare same-directory self-import against the importer path (#935)', () => {
+      // `import { jsxRenderer } from '.'` -- the honojs/hono repro. The raw
+      // TS extractor stores the source text verbatim ("."), so resolution to
+      // the importer's own directory only happens when a filepath is passed
+      // through to resolveImportSpecifier/resolveRelativeImport.
+      const content = `import { jsxRenderer } from '.';`;
+
+      const parseResult = parseAST(content, 'typescript');
+      const imports = extractImports(
+        parseResult.tree!.rootNode,
+        'typescript',
+        'src/middleware/jsx-renderer/index.test.tsx',
+      );
+
+      expect(imports).toContain('src/middleware/jsx-renderer');
+      expect(imports).not.toContain('.');
+    });
   });
 
   describe('extractImports - Go grouped imports (#863)', () => {

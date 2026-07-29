@@ -997,6 +997,30 @@ describe('resolveRelativeImport', () => {
     expect(bResolved).toBe('packages/parser/src/dependency-analyzer');
     expect(aResolved).not.toBe(bResolved);
   });
+
+  it('resolves a bare same-directory self-import (#935)', () => {
+    // `import { x } from '.'` in JS/TS — the extractor stores the raw source
+    // text verbatim (unlike Python, which converts its own bare-dot form to
+    // "./" before this function ever runs), so a literal "." must resolve the
+    // same way "./" already does: to the importer's own directory, with
+    // nothing joined after it.
+    expect(resolveRelativeImport('src/middleware/jsx-renderer/index.test.tsx', '.')).toBe(
+      'src/middleware/jsx-renderer',
+    );
+  });
+
+  it('resolves a bare parent-directory self-import (#935)', () => {
+    expect(resolveRelativeImport('src/middleware/jsx-renderer/nested/foo.ts', '..')).toBe(
+      'src/middleware/jsx-renderer',
+    );
+  });
+
+  it('matches the real hono repro end-to-end via matchesFile (#935)', () => {
+    // src/middleware/jsx-renderer/index.test.tsx: `import { jsxRenderer } from '.'`
+    // must associate with src/middleware/jsx-renderer/index.ts.
+    const resolved = resolveRelativeImport('src/middleware/jsx-renderer/index.test.tsx', '.');
+    expect(matchesFile(resolved, 'src/middleware/jsx-renderer/index')).toBe(true);
+  });
 });
 
 describe('resolveWorkspaceImport', () => {
