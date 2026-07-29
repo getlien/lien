@@ -21,10 +21,16 @@
 # when the file has no associated tests. TTL-suppressed per file per session
 # (same touchfile pattern and `annotated-sessions/` directory as
 # `annotate-read.sh`, so the existing SessionStart/SessionEnd GC covers this
-# too) so an edit burst on one file only reminds once per window — the ledger
-# recording only happens on that same first-in-window call, but a file's
-# first edit in a session always passes the per-file TTL gate (no touchfile
-# yet), so recording is never skipped for a file that was actually edited.
+# too) so an edit burst on one file only reminds once per window — AND only
+# spawns the `note-edit` subprocess once per window, whether or not the file
+# turns out to have associated tests: the touchfile is written either way, so
+# a no-tests file doesn't re-pay that spawn on every repeat edit for the rest
+# of the session. The ledger recording only happens on that same
+# first-in-window call, but a file's first edit in a session always passes
+# the per-file TTL gate (no touchfile yet), so recording is never skipped for
+# a file that was actually edited — and there's nothing to skip for a
+# no-tests file, since `note-edit` never records one (see `runNoteEdit` in
+# verify-tests-cmd.ts).
 #
 # Best-effort throughout — never fails the user's edit. Disable via
 # LIEN_TEST_REMINDER=off (this hook) or LIEN_TEST_VERIFY=off (ledger
@@ -104,13 +110,23 @@ else
   reminder="$("${LIEN_CMD[@]}" verify-tests note-edit --session "$session_id" --file "$file_path" 2>/dev/null)"
 fi
 
-# No associated tests → `lien verify-tests note-edit` prints nothing → stay
-# silent (and don't mark the touchfile — nothing to suppress next time).
-[ -n "$reminder" ] || exit 0
-
+# Mark the touchfile regardless of whether there was anything to say. A file
+# with no associated tests still cost a real subprocess spawn (this
+# `verify-tests note-edit` call, on top of the `path --store` resolution
+# above) to discover that — that spawn, not the reminder text, is what the
+# TTL suppression exists to cache. Recording is unaffected either way:
+# `note-edit` only writes to the session ledger when the file actually has
+# associated tests (see `runNoteEdit` in verify-tests-cmd.ts), so a no-tests
+# file never had anything to record, and a file's first edit in a session
+# always runs this call regardless (no touchfile exists yet), so a
+# genuinely testable file's edit is never skipped.
 mkdir -p "$session_dir" 2>/dev/null || exit 0
 : > "$touchfile"
 touch "$session_dir" 2>/dev/null
+
+# No associated tests → `lien verify-tests note-edit` prints nothing → stay
+# silent.
+[ -n "$reminder" ] || exit 0
 
 # additionalContext is the channel that actually reaches the model on the
 # next turn (verified in CC 2.1.142; matches annotate-read.sh/delta-write.sh).
