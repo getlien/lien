@@ -304,5 +304,34 @@ describe('findTestAssociationsFromChunks', () => {
 
       expect(result.get('src/auth.rs')).toEqual(['tests/other_test.rs']);
     });
+
+    it('does not let a Swift whole-module bare import jump the exact-match queue ahead of a real direct importer', () => {
+      // The #884 Alamofire shape, reintroduced one layer up: a top-level
+      // Swift file whose basename equals its own module name means a bare
+      // `import Alamofire` (whole-module -- Swift's SwiftImportExtractor
+      // never emits a per-file specifier) normalizes to literally the same
+      // string as the target itself. Without the whole-module guard on the
+      // exact-match check, this satisfies `normalize(imp) ===
+      // normalizedTarget` and gets promoted straight into the trusted
+      // `exact` bucket ahead of `AlamofireTests.swift`'s genuine, qualified
+      // direct import. The guard rejects the bare whole-module "match"
+      // entirely (mirroring the existing #884 test above), not merely
+      // de-prioritizes it -- `importMatchesTarget`'s own #884 guard excludes
+      // it from the fuzzy bucket too, so it must not appear in the result
+      // at all.
+      const chunks: CodeChunk[] = [
+        makeChunk('Alamofire.swift'),
+        // Scanned FIRST: bare whole-module import, coincidentally identical
+        // to the target's own normalized path -- must NOT count as exact,
+        // and (like every other whole-module import) is rejected outright.
+        makeChunk('OtherTests.swift', ['Alamofire']),
+        // Scanned SECOND: a real, qualified direct import.
+        makeChunk('AlamofireTests.swift', ['./Alamofire']),
+      ];
+
+      const result = findTestAssociationsFromChunks(['Alamofire.swift'], chunks);
+
+      expect(result.get('Alamofire.swift')).toEqual(['AlamofireTests.swift']);
+    });
   });
 });

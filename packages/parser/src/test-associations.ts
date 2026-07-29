@@ -3,7 +3,12 @@
  * Finds test files that import given source files by analyzing chunk metadata.
  */
 
-import { isTestFile, normalizePath, importMatchesTarget } from './utils/path-matching.js';
+import {
+  isTestFile,
+  normalizePath,
+  importMatchesTarget,
+  isUnresolvableWholeModuleImport,
+} from './utils/path-matching.js';
 import {
   detectLanguage,
   hasSameDirectoryTestConvention,
@@ -60,7 +65,35 @@ function hasJavaSamePackageConvention(filepath: string): boolean {
  * re-deriving which `matchesFile` strategy fired, which would mean
  * threading a new return shape through `importMatchesTarget`) keeps this
  * change local to the one function that assembles the display order.
+ *
+ * The "exact" bucket still needs the #884 whole-module guard applied
+ * directly (it never calls `matchesFile`/`importMatchesTarget`, so nothing
+ * else applies it): a whole-module-import language (Swift) only ever emits
+ * the bare module name as its "import", so a target file whose basename
+ * happens to equal that name -- the classic #884 Alamofire shape -- would
+ * otherwise satisfy the literal `normalize(imp) === normalizedTarget` check
+ * and jump the queue into the trusted `exact` bucket, ahead of a real
+ * direct importer. See `isUnresolvableWholeModuleImport`'s doc comment.
  */
+/**
+ * True when `imp` (as written in `importerFile`) is a literal, exact
+ * reference to `normalizedTarget` -- the #929 direct-importer signal -- and
+ * is not merely a whole-module-import language's bare module name that
+ * happens to coincide with it (the #884 Alamofire shape). This check never
+ * calls `matchesFile`/`importMatchesTarget`, so the #884 whole-module guard
+ * has to be applied here directly, independently of the fuzzy path below.
+ * Extracted so `collectImportMatchedTests`'s own loop body doesn't grow
+ * another nested condition per guard.
+ */
+function isExactDirectImport(
+  imp: string,
+  importerFile: string,
+  normalizedTarget: string,
+  normalize: (p: string) => string,
+): boolean {
+  return !isUnresolvableWholeModuleImport(imp, importerFile) && normalize(imp) === normalizedTarget;
+}
+
 function collectImportMatchedTests(
   testChunks: CodeChunk[],
   normalizedTarget: string,
@@ -70,7 +103,9 @@ function collectImportMatchedTests(
   const fuzzy: string[] = [];
   for (const chunk of testChunks) {
     const imports = chunk.metadata.imports || [];
-    const isExactMatch = imports.some(imp => normalize(imp) === normalizedTarget);
+    const isExactMatch = imports.some(imp =>
+      isExactDirectImport(imp, chunk.metadata.file, normalizedTarget, normalize),
+    );
     // importMatchesTarget applies the #884 whole-module guard before
     // matchesFile -- see its doc comment in path-matching.ts (#886).
     const isFuzzyMatch = imports.some(imp =>

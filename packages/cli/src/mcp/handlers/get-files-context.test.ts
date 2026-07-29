@@ -376,6 +376,31 @@ describe('handleGetFilesContext - test-association scan (scanAll fast path + cac
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.testAssociations).toEqual(['tests/auth_direct_test.rs', 'tests/other_test.rs']);
     });
+
+    it('does not let a Swift whole-module bare import jump the exact-match queue ahead of a real direct importer', async () => {
+      // Mirrors test-associations.test.ts's identical regression pin: a
+      // top-level Swift file whose basename equals its own module name
+      // means a bare `import Alamofire` (whole-module) normalizes to
+      // literally the same string as the target itself -- the #884
+      // Alamofire shape, reintroduced one layer up via the exact-match
+      // bucket unless the whole-module guard is applied there too.
+      const scanAll = vi
+        .fn()
+        .mockResolvedValue([
+          makeChunk('Alamofire.swift'),
+          makeChunk('OtherTests.swift', ['Alamofire']),
+          makeChunk('AlamofireTests.swift', ['./Alamofire']),
+        ]);
+      const ctx = makeCtx({ scanAll, indexVersion: 1 });
+
+      const result = await handleGetFilesContext(
+        { filepaths: 'Alamofire.swift', includeRelated: false },
+        ctx,
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.testAssociations).toEqual(['AlamofireTests.swift']);
+    });
   });
 
   it('caches the scan across calls with the same indexVersion (no re-scan)', async () => {

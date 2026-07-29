@@ -7,6 +7,7 @@ import {
   getCanonicalPath,
   isTestFile,
   importMatchesTarget,
+  isUnresolvableWholeModuleImport,
   detectLanguage,
   hasSameDirectoryTestConvention,
   buildGoTestDirIndex,
@@ -239,6 +240,27 @@ export function createPathCache(workspaceRoot: string): {
 }
 
 /**
+ * True when `imp` (as written in `importerFile`) is a literal, exact
+ * reference to `normalizedTarget` -- the #929 direct-importer signal -- and
+ * is not merely a whole-module-import language's bare module name that
+ * happens to coincide with it. The #884 whole-module guard has to be
+ * applied here directly: this check never calls `matchesFile`/
+ * `importMatchesTarget`, so nothing else would catch a Swift `import
+ * Alamofire` against a target file named `Alamofire.swift` (the classic
+ * #884 false-hub shape) before it jumped the queue into the trusted exact
+ * bucket below. Extracted so `collectImportMatchedTestFiles`'s own loop
+ * body doesn't grow another nested condition per guard.
+ */
+function isExactDirectImport(
+  imp: string,
+  importerFile: string,
+  normalizedTarget: string,
+  normalize: (path: string) => string,
+): boolean {
+  return !isUnresolvableWholeModuleImport(imp, importerFile) && normalize(imp) === normalizedTarget;
+}
+
+/**
  * Canonical test-file paths among `allChunks` whose imports resolve to
  * `normalizedTarget`, exact literal matches first (#929) -- mirrors
  * `@liendev/parser`'s own `collectImportMatchedTests` (test-associations.ts;
@@ -260,7 +282,9 @@ function collectImportMatchedTestFiles(
     if (!isTestFile(chunkFile)) continue;
 
     const imports = chunk.metadata.imports || [];
-    const isExactMatch = imports.some(imp => normalize(imp) === normalizedTarget);
+    const isExactMatch = imports.some(imp =>
+      isExactDirectImport(imp, chunk.metadata.file, normalizedTarget, normalize),
+    );
     const isFuzzyMatch = imports.some(imp =>
       importMatchesTarget(imp, chunk.metadata.file, normalizedTarget, normalize),
     );
