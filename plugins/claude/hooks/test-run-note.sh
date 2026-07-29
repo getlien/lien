@@ -52,8 +52,15 @@ esac
 # match here only costs one extra `lien` invocation that then classifies the
 # command precisely and may still decide not to record it; a false NEGATIVE
 # here would silently drop a real test run, which this list is sized to avoid.
+# `tox`/`nox` are the one family whose invocation need not contain any of the
+# other substrings — `tox`, `tox run`, `tox -e py311`, `python -m tox` all lack
+# "test" entirely — so without them here the matcher's own tox/nox patterns
+# (RUNNER_PATTERNS, added in #905) were unreachable through this hook: a full
+# tox run was silently never recorded, and the recap then nagged about tests the
+# user had in fact run. Found by dogfooding the hook against a real `tox -e`
+# command rather than by reading either list.
 case "$command_str" in
-  *test*|*vitest*|*jest*|*pytest*|*rspec*|*phpunit*|*mocha*|*dotnet*|*gradle*|*mvn*|*deno*|*'npm t'*) ;;
+  *test*|*vitest*|*jest*|*pytest*|*rspec*|*phpunit*|*mocha*|*dotnet*|*gradle*|*mvn*|*deno*|*tox*|*nox*|*'npm t'*) ;;
   *) exit 0 ;;
 esac
 
