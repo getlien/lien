@@ -1,5 +1,306 @@
 # @liendev/parser
 
+## 0.72.0
+
+### Minor Changes
+
+- 7a87fac: Fix `get_dependents`' risk verdict contradicting its own components (#933),
+  and unify its three attribution-caveat flags into one field (#940).
+
+  **#933**: `computeBlastRadiusRisk` only ever factored complexity into the
+  verdict through `hasHighComplexityUncovered`, which requires an untested
+  dependent to fire at all — so a file with zero untested dependents but a
+  `critical`-complexity caller came back `riskLevel: "low"` while its own
+  `complexityMetrics.complexityRiskBoost` read `"critical"` (confirmed on
+  symfony/console's `Cursor.php`: 4 fully-tested production callers, max
+  complexity 31, `riskLevel: "low"`). `riskLevel` is the field
+  `instructions.ts` tells agents to gate on before editing an exported symbol,
+  so the wrong verdict misled even though the underlying counts were correct.
+
+  Fixed by adding an optional `complexityRiskBoost` input to
+  `computeBlastRadiusRisk`: a `high`/`critical` boost now floors the verdict
+  one tier below its own severity (`critical` → at least `high`, `high` → at
+  least `medium`), regardless of test coverage — testedness lowers the odds
+  of a _silent_ break, it doesn't shrink the blast radius. The
+  untested-and-high-complexity case (`hasHighComplexityUncovered`) already
+  reaches full severity on its own and is unaffected; verified against gin's
+  `bytesconv.StringToBytes` (1 untested, critical complexity) staying `high`,
+  not escalating to `critical`.
+
+  **#940**: `symbolAttributionDegraded`/`symbolAttributionNote`,
+  `dependentAttributionIncomplete`/`dependentAttributionNote`, and `note` all
+  meant some version of "this count isn't a verified clear," with three
+  different names and shapes for a model to learn — and were mutually
+  exclusive by construction, so a single field always sufficed. Replaced with
+  one optional `attributionCaveat: { reason, note }`, where `reason` is
+  `'unresolved-target' | 'symbol-attribution-degraded' |
+'dependent-attribution-incomplete'`. This is a breaking response-shape
+  change with no deprecation window — acceptable pre-1.0, and the fields were
+  only weeks old. `targetIndexed` stays internal, as before.
+
+  Both `tools.ts`'s tool description and `instructions.ts`'s server
+  instructions (the two surfaces a connecting model actually reads) are
+  updated accordingly, along with the `symbol` parameter's own schema
+  description and the `get_dependents` docs page.
+
+### Patch Changes
+
+- fe8160c: #935: a bare same-directory self-import specifier (`import { x } from '.'`)
+  was never resolved, so a same-directory barrel re-export test never
+  associated with the sibling file(s) it directly imports.
+
+  Root cause: `resolveRelativeImport` only recognized specifiers starting
+  with `./` or `../`. JS/TS's import extractor stores the raw source text
+  verbatim, and `import { x } from '.'`'s specifier is the literal string
+  `"."` — no leading slash, so it fell through unresolved and was stored in
+  chunk metadata exactly as written. None of `matchesFile`'s five strategies
+  can match an unresolved `"."` against anything.
+
+  Reproduced on a real indexed honojs/hono corpus:
+  `src/middleware/jsx-renderer/index.test.tsx` imports its own directory's
+  barrel via `from '.'`, and `lien annotate` reported "No test coverage" for
+  `src/middleware/jsx-renderer/index.ts` despite the test directly exercising
+  it. Same shape on `src/middleware/secure-headers/index.test.ts`.
+
+  Fix: `resolveRelativeImport` now also matches the bare, slash-free `.`/`..`
+  themselves (Node/TS module resolution treats them as "this directory" and
+  "the parent directory", exactly like their slash-suffixed forms) via a
+  single anchored regex, `RELATIVE_IMPORT_PATTERN`. This resolves to the
+  importer's own directory (or its parent) the same way an already-supported
+  `./` /`../` specifier does, so downstream matching needs no changes.
+  Python's own leading-dot relative imports (`.foo`, `..pkg`) are unaffected —
+  `PythonImportExtractor` already converts those to the `./`/`../`-prefixed
+  form before this function runs (#904), so the new bare-dot case only ever
+  fires for languages (JS/TS today) whose extractor stores the raw specifier
+  as-is.
+
+  Verified end-to-end on the real hono repro (both files now report their
+  own test file under "Test coverage") and via a 25-file coverage sample
+  across hono, gin, and flask confirming no regression.
+
+- 988b1d3: #930: `global using Namespace;` was resolved as a file-to-file import of
+  every file in that namespace, so a boilerplate `GlobalUsings.cs` (no code,
+  just a list of `global using` directives) became a false "dependent" of,
+  and false "test coverage" for, every file in every namespace it lists —
+  while the file's own `dependentCount`/`riskLevel`/`riskReasoning` were
+  computed entirely from that boilerplate. Confirmed on a real 254-file C#
+  corpus (serilog/serilog): 13 of 25 sampled files' "confident" test-coverage
+  line was driven 100% by `GlobalUsings.cs` pollution; after this fix, zero
+  files anywhere in the corpus list a `GlobalUsings.cs` as an importer or as
+  test coverage.
+
+  Fixed in `CSharpImportExtractor` (`packages/parser/src/ast/languages/csharp.ts`):
+  a `using_directive` node with a leading, unnamed `global` token now
+  contributes no import path, since a global using's effect is project-wide,
+  not scoped to the file that declares it — that file has no real dependency
+  relationship with the namespaces it lists.
+
+  This does not recover the _true_ dependents/test-coverage that a global
+  using makes invisible (C# needs no per-file `using` once a global using
+  exists for a namespace, so the import graph has no signal for those real
+  usages) — that requires a type-reference-based resolution mechanism this
+  codebase doesn't have today (unlike the directory-based same-package/
+  same-directory heuristics `test-associations.ts` already has for Go/Java),
+  and is tracked separately. This change only removes the false edges.
+
+- 6ef268f: Recover real C# `get_dependents` dependents lost to `global using` (#930,
+  part 2). #932/#936 stopped the tool from fabricating dependents out of
+  `GlobalUsings.cs` boilerplate and made the resulting zero honest
+  (`dependentAttributionIncomplete`), but a file with `global using` in scope
+  still reported `dependentCount: 0` / `riskLevel: "low"` even when it had
+  real callers — honest-and-blind, not correct. Confirmed on a fresh
+  serilog/serilog clone: `Alignment.cs` has 5 real production dependents and
+  1 real test dependent, none reachable via a per-file import.
+
+  Adds a lower-confidence recovery signal, `findCSharpTypeReferenceDependents`
+  (`@liendev/parser`): for a file whose type name is declared exactly once
+  project-wide (so a same-named reference elsewhere can't be an unrelated
+  declaration — the C# compiler itself would refuse to build over that
+  ambiguity), scan every other C# file's source text for an
+  identifier-boundary occurrence of that name. Only attempted when the import
+  graph found zero dependents for a file-level query on an
+  `enclosingNamespaceAccess` language (C# today).
+
+  Recovered dependents are tagged `confidence: "inferred"` on `DependentInfo`
+  (a new optional field, absent on every ordinary import-verified dependent)
+  and never folded in unhedged — the response also gets a new
+  `attributionCaveat` reason, `"dependent-attribution-partial"`, explaining
+  that the count is a recovered lower bound, not a verified/complete answer.
+  `dependentAttributionIncomplete` now only fires when this recovery attempt
+  _also_ finds nothing. Both are purely additive: no existing field is
+  removed, renamed, or changed shape.
+
+  Verified end-to-end via the real MCP `get_dependents` tool against a fresh
+  serilog/serilog clone: `Alignment.cs` goes from `dependentCount: 0` /
+  `"low"` to all 5 real production dependents + its test dependent (`medium`
+  risk); `PropertyToken.cs` (a file with a genuine import-verified test
+  dependent) is unaffected; a 25-file serilog sample recovered dependents for
+  21 files, left 2 honestly `dependent-attribution-incomplete` (no
+  recoverable signal), and left 2 real import-based hits untouched; a
+  TypeScript control (hono) confirmed zero cross-language impact.
+
+  `tools.ts` and `instructions.ts` (the two model-facing surfaces) are
+  updated accordingly.
+
+- 8c3b2ce: #928: `get_dependents` fabricated dependency graphs via language-blind
+  bare-module matching — a confident wrong answer, not a degraded one, since
+  the tool exists specifically to catch "is this safe to change?" before an
+  edit.
+
+  Two independent shapes, found via the foreign-repo dogfood (#917):
+  - **Rust `self::`/`super::` collapsed to a directory-less string.**
+    `RustImportExtractor` stripped these keywords down to a bare or merely
+    `../`-prefixed specifier with no knowledge of the importer's real location,
+    which `matchesFile`'s generic bare-identifier leniency (designed for the
+    legitimate `crate::auth` -> `src/auth.rs` convention) then had to guess at
+    match time — and could coincidentally match an unrelated same-named file
+    elsewhere with a single leading directory. Reproduced on tokio-rs/tokio:
+    `benches/copy.rs` (a leaf benchmark nothing can import) fuzzy-matched
+    `tokio/src/fs/mod.rs`'s `self::copy` and
+    `tokio/src/io/util/copy_bidirectional.rs`'s `super::copy`, fabricating 80
+    dependents. Fixed by resolving `self::`/`super::` precisely against the
+    importer's own file-to-module-aware location (`resolveRustRelativeModulePath`
+    in `ast/languages/rust.ts`) instead of the old lossy string convention —
+    this also makes real Rust cross-file dependency tracking MORE accurate
+    (the 79 real callers of `tokio::fs::copy` are now correctly attributed to
+    `tokio/src/fs/copy.rs`, not to the unrelated benchmark).
+  - **No existence check before the fuzzy search.** A nonexistent path that
+    collides on a namespace/directory suffix with a real file silently
+    inherited that file's entire graph — `src/Command/Command.php` (guessed,
+    doesn't exist) returned the same 93 dependents as the real
+    `Command/Command.php`, because `matchesFile`'s multi-segment boundary
+    strategy has no cap on extra leading target directories (deliberately, to
+    support e.g. PHP PSR-4 vendor prefixes) — there is no purely textual way to
+    tell a real deep path from a fabricated one with the same suffix. Fixed by
+    checking the target actually has chunks in the index before running the
+    fuzzy search at all (`get_dependents`'s new `targetIndexed` result field);
+    an unresolvable target now always comes back with zero dependents and an
+    explicit `note`, never someone else's graph.
+
+  Also reconciles the reported `dependentCount`/`riskReasoning` mismatch (e.g.
+  `dependentCount: 80` next to `"14 callers"`): the reasoning already counted
+  production-only callers by design (test callers shouldn't weigh into risk
+  the same way), just without saying so — now labeled "N production callers"
+  explicitly.
+
+  `targetIndexed`'s `note` defers to #927's manifest-based `note` whenever both
+  would fire for the same target (the overwhelming common case — a
+  nonexistent path is both "not in the manifest" and "has no chunks"): only
+  one note is ever shown, never two competing explanations of the same zero.
+
+- 1195abe: #929: a direct-importing test file could be omitted from `lien annotate`'s
+  "Test coverage" line and from `get_files_context`'s `testAssociations`,
+  crowded out by unrelated files that matched only through a false hub.
+
+  Root cause: `matchesFile`'s Strategy 5 (`matchesPythonModule`) applies
+  Python's "a bare package import covers every file nested under it" semantic
+  unconditionally, regardless of the importer's actual language. A resolved
+  bare specifier from any other language can coincidentally look exactly like
+  a Python identifier -- confirmed on a real TypeScript repo (hono), where a
+  test's own package-root barrel import (`import { Hono } from '../..'`,
+  resolved to the bare specifier `src`) matched every single file under `src/`,
+  and on a real Go repo (gin), where an ordinary whole-package import
+  (`"github.com/gin-gonic/gin/binding"`, resolved to the bare `binding` after
+  module-prefix stripping) matched every file in that package directory. Both
+  shapes fabricated "this test covers everything" for files with no real
+  relationship to the target, sometimes displacing the file's own genuine
+  direct importer once the result list was truncated for display.
+
+  Fix: `matchesFile` gains an `allowPythonModuleMatching` parameter (default
+  `true`, preserving this function's own behavior for direct callers);
+  `importMatchesTarget` -- the shared choke point behind `get_dependents`,
+  `get_files_context`, and `lien annotate`'s test-association matching --
+  now derives it from the importer's actual language via the new
+  `hasPythonModuleSemantics`, mirroring the existing `hasSingleFileImportSemantics`
+  (#887) guard. Genuine Python bare-package matching is unaffected (verified:
+  zero result changes across a 25-file Python corpus sample).
+
+  Additionally, `collectImportMatchedTests`/`collectImportMatchedTestFiles` now
+  rank an exact, literal direct import ahead of any fuzzier match, so a real
+  direct importer can no longer sort behind other real matches and be
+  truncated out of the displayed list purely due to chunk-scan order. That
+  exact-match check applies the same #884 whole-module guard as the fuzzy
+  path, so a Swift bare `import Module` can't jump the queue into the exact
+  bucket just because the target file's basename happens to equal the module
+  name.
+
+- ecf89ae: #869: a measure-gated spike recovering non-import test-association signal
+  for Swift/XCTest, where whole-module imports (`import Alamofire`) carry zero
+  per-file information (see the existing "not determinable" honesty label).
+
+  New deterministic, zero-LLM signal (`packages/parser/src/swift-symbol-usage-signals.ts`,
+  mirroring `stale-literal-signals.ts`'s template): a test chunk's own
+  `callSites` versus which single source file uniquely defines the referenced
+  symbol. Three gates keep this precise:
+  - A new, stricter `isMultiSegmentIdentifier` helper (>= 2 camelCase/
+    underscore segments) — the shipped `isUnambiguousIdentifierShape` (docRefs'
+    gate) passes every single Capitalized word trivially (`Get`, `Run`,
+    `Session`, `Client`), so it's insufficient as a collision-resistance gate
+    on its own. Both gates apply together; `isUnambiguousIdentifierShape`
+    itself is untouched.
+  - `extension <ForeignType>` declarations are excluded from the definition
+    side unless the type also has a real, non-extension declaration
+    in-project — one false-positive shape measured on Alamofire (a file
+    merely extending a Foundation type like `HTTPURLResponse` otherwise looks
+    like it "defines" that type to every test that references it).
+  - `isTypeShapedIdentifier`: an edge needs at least one leading-uppercase,
+    multi-segment driving symbol, or it's demoted. Added after adversarial
+    re-verification (opening actual call sites, not just re-confirming
+    declaration uniqueness) found real false positives where a bare method
+    name collided with something the indexer can't see at all — a stdlib
+    protocol witness (`Decoder.singleValueContainer()`), a stdlib type's own
+    extension overload (`TaskGroup.addTask(name:...)`), or an external
+    package's free function (`swift-dependencies`' `withDependencies`). This
+    gate is necessary (one calibration repo failed precision without it) but
+    costly: roughly half of all previously-good edges are lost project-wide,
+    including every edge to Alamofire's `Request.swift` — see the #869 PR for
+    the full before/after precision tables.
+
+  Calibrated on Alamofire/Alamofire plus two additional real Swift repos of
+  different shapes (vapor/vapor, pointfreeco/swift-composable-architecture);
+  see the #869 PR for the full precision tables.
+
+  Surfaced as a DISTINCT third label tier in `lien annotate` — "inferred from
+  symbol usage", never merged into the confident import-based association —
+  mirroring #902's Go same-directory tier-2 discipline. Deliberately kept out
+  of `get_files_context`, `@liendev/review`'s gap detection, and
+  `verify-tests`'s ledger/scope-matching, same conservative call as that
+  precedent.
+
+- 5a21f45: Fix `get_dependents({ filepath, symbol })` reporting `dependentCount: 0` /
+  `riskLevel: "low"` for methods, constructors, and package-qualified
+  functions that have real callers (e.g. Go's `bytesconv.StringToBytes`, PHP's
+  `Cursor::__construct`). CLAUDE.md marks this exact call **REQUIRED** before
+  any signature change, so the false zero was a confident "safe to edit"
+  verdict on code with many callers.
+
+  Two independent causes, both fixed:
+  - No language's import statement names a class member or (for Go) a
+    package's individual function independently of the class/package itself
+    (`use Ns\Cursor;` records `Cursor`, never `__construct`; `import
+"app/bytesconv"` records `bytesconv`, never `StringToBytes`). Once a
+    chunk is confirmed to import from the target path at all, `get_dependents`
+    now also accepts a real call site named `symbol` in that same chunk as
+    evidence. When neither a named import nor a call site can confirm usage
+    and `symbol` isn't a top-level export (the structural shape of a
+    method/constructor query), the response degrades to the file-level answer
+    instead of asserting an unverifiable symbol-scoped zero, and sets
+    `symbolAttributionDegraded: true` plus a `symbolAttributionNote` so
+    callers can tell a floor from a verified count.
+  - Go's grouped `import (...)` blocks only ever recorded the first non-stdlib
+    spec's symbols, silently dropping every import after it in the same
+    declaration from `chunk.metadata.importedSymbols` (confirmed on real gin
+    source: `render/json.go` groups `codec/json` and `internal/bytesconv`
+    together; only `codec/json` was ever recorded). `processImportSymbols`
+    callers now go through a new `processImportSymbolsList`, mirroring the
+    existing `extractImportPaths`/`toImportPathsArray` pattern for the plural
+    case.
+
+  Verifying the PHP case against a real symfony/console checkout also
+  surfaced a PSR-4 empty-root resolution bug that made `get_dependents`
+  return false zeros even for plain class-name and file-level queries there —
+  independently found and fixed by #926, since merged.
+
 ## 0.71.1
 
 ### Patch Changes
