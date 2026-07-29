@@ -330,6 +330,8 @@ When `symbol` is provided, the response also includes `totalUsageCount` (number 
 
 A file-level query (no `symbol`) that finds zero dependents in a language where the import graph structurally can't see every real usage — C#'s enclosing-namespace access, where a `global using` lets a real caller reach `filepath`'s exports with no per-file import at all (#930) — sets `dependentAttributionIncomplete: true` plus a `dependentAttributionNote`. `dependentCount: 0` / `riskLevel: "low"` in that case means "the import graph found nothing," not "nothing depends on this file" — check that flag too before treating a zero count as a verified all-clear.
 
+When `filepath` isn't resolvable in the index at all — never indexed, misspelled, or a typo'd directory prefix — the response instead carries a `note` explaining that. `dependentCount: 0` / `riskLevel: "low"` in that case means "the path is unresolved," not "confirmed zero dependents"; the two can look identical unless you check for `note`. Two independent checks can produce it (the index manifest has no entry for the path at all; or the path resolves in the manifest but has zero chunks in the current scan), but only one `note` is ever returned for a given call — never two competing explanations of the same zero.
+
 ### Risk Levels
 
 | Level | Dependent Count | Meaning |

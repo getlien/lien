@@ -33,6 +33,11 @@ symbol:
   riskLevel of "low" mean Lien could not SEE the callers, not that there are none —
   grep before concluding the symbol is unused. riskLevel is not adjusted for it.
 
+  If a result carries a note, filepath is not resolvable in the index at all
+  (never indexed, misspelled, or a typo'd directory prefix) — dependentCount: 0
+  and riskLevel: "low" then mean "unresolved", not "confirmed safe to change".
+  Fix the path (try search_code or list_functions) before trusting the result.
+
 For discovery ("where is X?", "how does Y work?"), call search_code FIRST.
 It runs full-text BM25 keyword search over code, docstrings, and camelCase-split
 identifiers. Query with concrete KEYWORDS, identifiers, and domain terms
