@@ -260,8 +260,14 @@ describe('handleGetDependents', () => {
       );
     });
 
-    it('should keep risk low when complexity is high but all dependents are tested', async () => {
-      // hasHighComplexityUncovered only fires when uncovered > 0.
+    it('should not report low risk when complexity is critical, even with full test coverage (#933)', async () => {
+      // Regression test for #933: a critical complexityRiskBoost must never
+      // be paired with riskLevel "low" -- being tested lowers the odds of a
+      // *silent* break, it doesn't shrink the blast radius of a
+      // critical-complexity caller. Before the fix, hasHighComplexityUncovered
+      // (the only path complexity fed into the verdict) required uncovered > 0
+      // to fire at all, so this exact shape came back "low" despite its own
+      // complexityRiskBoost reading "critical".
       vi.mocked(findDependents).mockResolvedValue(
         createMockAnalysis({
           dependents: [{ filepath: 'src/a.ts', isTestFile: false }],
@@ -281,7 +287,39 @@ describe('handleGetDependents', () => {
       const result = await handleGetDependents({ filepath: 'src/utils.ts' }, mockCtx);
 
       const parsed = JSON.parse(result.content![0].text);
-      expect(parsed.riskLevel).toBe('low');
+      expect(parsed.riskLevel).toBe('high');
+      expect(parsed.riskReasoning).toEqual(
+        expect.arrayContaining(['critical-complexity dependent regardless of test coverage']),
+      );
+    });
+
+    it('should not escalate a fully-tested untested-linked case above what an untested one already reaches (#933 regression guard)', async () => {
+      // The console/Cursor.php shape above must not overtake the "genuinely
+      // untested AND high-complexity" case -- testedness still matters, it
+      // just can no longer suppress the complexity signal entirely. A
+      // critical complexityRiskBoost paired with an actual untested
+      // high-complexity dependent stays "high", the same as before this fix
+      // (hasHighComplexityUncovered already reaches full severity on its own).
+      vi.mocked(findDependents).mockResolvedValue(
+        createMockAnalysis({
+          dependents: [{ filepath: 'src/a.ts', isTestFile: false }],
+          uncoveredProductionDependents: 1,
+          complexityMetrics: {
+            averageComplexity: 20,
+            maxComplexity: 30,
+            filesWithComplexityData: 1,
+            highComplexityDependents: [
+              { filepath: 'src/a.ts', maxComplexity: 30, avgComplexity: 20 },
+            ],
+            complexityRiskBoost: 'critical',
+          },
+        }),
+      );
+
+      const result = await handleGetDependents({ filepath: 'src/utils.ts' }, mockCtx);
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.riskLevel).toBe('high');
     });
   });
 
@@ -599,8 +637,8 @@ describe('handleGetDependents', () => {
     });
   });
 
-  describe('symbolAttributionDegraded (method/constructor symbols)', () => {
-    it('surfaces symbolAttributionDegraded and a note when the analyzer degrades to file-level', async () => {
+  describe('attributionCaveat: symbol-attribution-degraded (method/constructor symbols)', () => {
+    it('surfaces attributionCaveat when the analyzer degrades to file-level', async () => {
       vi.mocked(findDependents).mockResolvedValue({
         ...createMockAnalysis({
           dependents: [{ filepath: 'src/QuestionHelper.php', isTestFile: false }],
@@ -615,14 +653,14 @@ describe('handleGetDependents', () => {
       );
 
       const parsed = JSON.parse(result.content![0].text);
-      expect(parsed.symbolAttributionDegraded).toBe(true);
-      expect(parsed.symbolAttributionNote).toContain('__construct');
-      expect(parsed.symbolAttributionNote).toContain('top-level exports');
+      expect(parsed.attributionCaveat.reason).toBe('symbol-attribution-degraded');
+      expect(parsed.attributionCaveat.note).toContain('__construct');
+      expect(parsed.attributionCaveat.note).toContain('top-level exports');
       expect(parsed.dependentCount).toBe(1);
       expect(parsed.totalUsageCount).toBeUndefined();
     });
 
-    it('omits symbolAttributionDegraded and the note for a normal, non-degraded symbol query', async () => {
+    it('omits attributionCaveat for a normal, non-degraded symbol query', async () => {
       vi.mocked(findDependents).mockResolvedValue({
         ...createMockAnalysis({ dependents: [{ filepath: 'src/a.ts', isTestFile: false }] }),
         totalUsageCount: 1,
@@ -634,13 +672,12 @@ describe('handleGetDependents', () => {
       );
 
       const parsed = JSON.parse(result.content![0].text);
-      expect(parsed.symbolAttributionDegraded).toBeUndefined();
-      expect(parsed.symbolAttributionNote).toBeUndefined();
+      expect(parsed.attributionCaveat).toBeUndefined();
     });
   });
 
-  describe('dependentAttributionIncomplete (C# enclosing-namespace-access floor, #930)', () => {
-    it('surfaces dependentAttributionIncomplete and a note for a zero-dependent file-level query', async () => {
+  describe('attributionCaveat: dependent-attribution-incomplete (C# enclosing-namespace-access floor, #930)', () => {
+    it('surfaces attributionCaveat for a zero-dependent file-level query', async () => {
       vi.mocked(findDependents).mockResolvedValue(
         createMockAnalysis({ dependents: [], dependentAttributionIncomplete: true }),
       );
@@ -652,19 +689,18 @@ describe('handleGetDependents', () => {
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.dependentCount).toBe(0);
-      expect(parsed.dependentAttributionIncomplete).toBe(true);
-      expect(parsed.dependentAttributionNote).toContain('Alignment.cs');
-      expect(parsed.dependentAttributionNote).toContain('the scan found nothing');
+      expect(parsed.attributionCaveat.reason).toBe('dependent-attribution-incomplete');
+      expect(parsed.attributionCaveat.note).toContain('Alignment.cs');
+      expect(parsed.attributionCaveat.note).toContain('the scan found nothing');
     });
 
-    it('omits dependentAttributionIncomplete and the note for a normal query', async () => {
+    it('omits attributionCaveat for a normal query', async () => {
       vi.mocked(findDependents).mockResolvedValue(createMockAnalysis());
 
       const result = await handleGetDependents({ filepath: 'src/utils/validate.ts' }, mockCtx);
 
       const parsed = JSON.parse(result.content![0].text);
-      expect(parsed.dependentAttributionIncomplete).toBeUndefined();
-      expect(parsed.dependentAttributionNote).toBeUndefined();
+      expect(parsed.attributionCaveat).toBeUndefined();
     });
   });
 
@@ -765,18 +801,19 @@ describe('handleGetDependents', () => {
     });
   });
 
-  describe('unindexed path note (#927)', () => {
-    it('adds an unmissable note when the filepath has no manifest entry at all', async () => {
+  describe('attributionCaveat: unresolved-target, manifest-based (#927)', () => {
+    it('adds an unmissable attributionCaveat when the filepath has no manifest entry at all', async () => {
       vi.mocked(findUnindexedPaths).mockResolvedValue(['src/does/not/exist.ts']);
 
       const result = await handleGetDependents({ filepath: 'src/does/not/exist.ts' }, mockCtx);
 
       const parsed = JSON.parse(result.content![0].text);
-      expect(parsed.note).toContain('⚠ Lien:');
-      expect(parsed.note).toContain('"src/does/not/exist.ts"');
+      expect(parsed.attributionCaveat.reason).toBe('unresolved-target');
+      expect(parsed.attributionCaveat.note).toContain('⚠ Lien:');
+      expect(parsed.attributionCaveat.note).toContain('"src/does/not/exist.ts"');
     });
 
-    it('adds no note when the filepath is indexed, regardless of dependentCount', async () => {
+    it('adds no attributionCaveat when the filepath is indexed, regardless of dependentCount', async () => {
       vi.mocked(findUnindexedPaths).mockResolvedValue([]);
       vi.mocked(findDependents).mockResolvedValue(
         createMockAnalysis({ dependents: [], targetIndexed: true }),
@@ -786,12 +823,12 @@ describe('handleGetDependents', () => {
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.dependentCount).toBe(0);
-      expect(parsed).not.toHaveProperty('note');
+      expect(parsed).not.toHaveProperty('attributionCaveat');
     });
   });
 
-  describe('#928: unresolved-target note (chunk-based fallback)', () => {
-    it('adds an unmissable note when the target has no chunks in the index at all', async () => {
+  describe('attributionCaveat: unresolved-target, chunk-based fallback (#928)', () => {
+    it('adds an unmissable attributionCaveat when the target has no chunks in the index at all', async () => {
       // findUnindexedPaths defaults to [] in beforeEach (manifest has no
       // opinion here) -- this exercises the #928 chunk-based note on its own.
       vi.mocked(findDependents).mockResolvedValue(
@@ -803,11 +840,12 @@ describe('handleGetDependents', () => {
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.dependentCount).toBe(0);
       expect(parsed.riskLevel).toBe('low');
-      expect(parsed.note).toContain('⚠ Lien:');
-      expect(parsed.note).toContain('"src/does/not/exist.ts"');
+      expect(parsed.attributionCaveat.reason).toBe('unresolved-target');
+      expect(parsed.attributionCaveat.note).toContain('⚠ Lien:');
+      expect(parsed.attributionCaveat.note).toContain('"src/does/not/exist.ts"');
     });
 
-    it('adds no note when the target is indexed, regardless of dependentCount', async () => {
+    it('adds no attributionCaveat when the target is indexed, regardless of dependentCount', async () => {
       vi.mocked(findDependents).mockResolvedValue(
         createMockAnalysis({ dependents: [], targetIndexed: true }),
       );
@@ -816,7 +854,7 @@ describe('handleGetDependents', () => {
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.dependentCount).toBe(0);
-      expect(parsed).not.toHaveProperty('note');
+      expect(parsed).not.toHaveProperty('attributionCaveat');
     });
 
     it('does not duplicate or contradict the #927 manifest note when both mechanisms would fire', async () => {
@@ -834,10 +872,11 @@ describe('handleGetDependents', () => {
       const result = await handleGetDependents({ filepath: 'src/does/not/exist.ts' }, mockCtx);
 
       const parsed = JSON.parse(result.content![0].text);
-      expect(parsed.note).toContain('⚠ Lien:');
-      // Exactly one note field, sourced from #927 (its wording, not #928's).
-      expect(parsed.note).toContain('not found in the index');
-      expect(parsed.note).not.toContain('has no chunks anywhere in the index');
+      expect(parsed.attributionCaveat.reason).toBe('unresolved-target');
+      expect(parsed.attributionCaveat.note).toContain('⚠ Lien:');
+      // Exactly one caveat, sourced from #927 (its wording, not #928's).
+      expect(parsed.attributionCaveat.note).toContain('not found in the index');
+      expect(parsed.attributionCaveat.note).not.toContain('has no chunks anywhere in the index');
     });
   });
 });

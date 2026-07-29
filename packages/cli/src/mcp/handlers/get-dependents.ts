@@ -25,6 +25,36 @@ interface IndexInfo {
 }
 
 /**
+ * Why a `get_dependents` answer's counts can't be trusted as a verified
+ * clear (#940). Exactly one reason can ever apply to a given response --
+ * see `buildAttributionCaveat`'s doc comment for why these three are
+ * mutually exclusive by construction:
+ *
+ * - `unresolved-target`: `filepath` isn't resolvable in the index at all
+ *   (not in the manifest, or has zero chunks in the current scan -- #927,
+ *   #928, #937). Every count in the response is then a deliberate `0`, not
+ *   a fuzzy-matched answer.
+ * - `symbol-attribution-degraded`: `symbol` isn't a top-level export of
+ *   `filepath` (the shape of a method or constructor -- #931), so the
+ *   response was widened to file-level dependents instead of asserting an
+ *   unverifiable symbol-scoped count.
+ * - `dependent-attribution-incomplete`: a file-level query (no `symbol`)
+ *   came back with zero dependents in a language where the import graph
+ *   structurally can't see every real usage, e.g. C#'s `global using` /
+ *   implicit enclosing-namespace access (#930, #936).
+ */
+export type AttributionCaveatReason =
+  | 'unresolved-target'
+  | 'symbol-attribution-degraded'
+  | 'dependent-attribution-incomplete';
+
+export interface AttributionCaveat {
+  reason: AttributionCaveatReason;
+  /** Human-readable explanation of what happened and what to do about it. */
+  note: string;
+}
+
+/**
  * Response structure for get_dependents tool.
  */
 interface DependentsResponse {
@@ -46,36 +76,12 @@ interface DependentsResponse {
   dependents: DependentInfo[];
   complexityMetrics: ComplexityMetrics;
   /**
-   * Set either when `filepath` has no entry in the index manifest at all
-   * (see unindexed-paths.ts), or — when the manifest check doesn't already
-   * explain it — when `filepath` has zero chunks anywhere in the current
-   * scan (#928). Either way, every count above is then a deliberate `0`, not
-   * a fuzzy-matched answer: read this before trusting `dependentCount: 0` /
-   * `riskLevel: "low"` as "safe to edit". See `buildDependentsResponse` for
-   * the precedence between the two sources.
+   * Present when this answer's counts can't be trusted as a verified clear
+   * -- read `reason` to tell which of the three ways that can happen (see
+   * `AttributionCaveatReason`'s doc comment) and `note` for the specific
+   * explanation. Absent entirely on a normal, fully-attributed answer.
    */
-  note?: string;
-  /**
-   * True when `symbol` couldn't be attributed at the symbol level (it's not
-   * a top-level export of `filepath` -- the shape of a method or
-   * constructor) and the response was widened to file-level dependents
-   * instead of asserting an unverifiable symbol-scoped count. When set,
-   * treat `dependentCount`/`riskLevel` as a floor over ALL of this file's
-   * dependents, not a confirmed count of callers of `symbol` specifically.
-   */
-  symbolAttributionDegraded?: boolean;
-  /** Human-readable explanation, present only when `symbolAttributionDegraded` is true. */
-  symbolAttributionNote?: string;
-  /**
-   * True for a file-level query (no `symbol`) that found zero dependents in
-   * a language where the import graph structurally can't see every real
-   * usage (see `DependencyAnalysisResult.dependentAttributionIncomplete`).
-   * When set, `dependentCount: 0` / `riskLevel: "low"` means "nothing found,"
-   * not "nothing depends on this file" — don't treat it as a verified clear.
-   */
-  dependentAttributionIncomplete?: boolean;
-  /** Human-readable explanation, present only when `dependentAttributionIncomplete` is true. */
-  dependentAttributionNote?: string;
+  attributionCaveat?: AttributionCaveat;
 }
 
 /**
@@ -143,6 +149,7 @@ function computeRisk(analysis: DependencyAnalysisResult): BlastRadiusRisk {
     uncoveredDependents: uncoveredProductionDependents,
     maxDependentComplexity: maxComplexity > 0 ? maxComplexity : undefined,
     hasHighComplexityUncovered,
+    complexityRiskBoost: complexityMetrics.complexityRiskBoost,
   });
   return { ...risk, reasoning: clarifyCallerReasoning(risk.reasoning) };
 }
@@ -168,6 +175,74 @@ function clarifyCallerReasoning(reasoning: string[]): string[] {
 }
 
 /**
+ * Decide which (if any) attribution caveat applies, and build its note.
+ *
+ * The three reasons are mutually exclusive by construction, so at most one
+ * ever fires:
+ * - `unresolvedTargetNote` is only non-empty when `filepath` has no chunks
+ *   anywhere in the index, in which case `findDependents` returns an empty
+ *   `chunksByFile` up front -- so `symbolAttributionDegraded` (which
+ *   requires `chunksByFile.size > 0` to fire) and
+ *   `dependentAttributionIncomplete` (which explicitly skips when
+ *   `!targetIndexed`) can never also be set.
+ * - `symbolAttributionDegraded` only fires for a `symbol` query;
+ *   `dependentAttributionIncomplete` only fires for a file-level query (no
+ *   `symbol`) -- see `checkDependentAttributionIncomplete` in
+ *   dependency-analyzer.ts. So those two can't co-occur either.
+ *
+ * #927's manifest-based unresolved-target note takes precedence over #928's
+ * chunk-based one where both could apply (a typo'd/nonexistent path trips
+ * both for the same underlying reason); `unresolvedTargetNote` already
+ * encodes that precedence before this function sees it.
+ */
+function buildAttributionCaveat(
+  analysis: DependencyAnalysisResult,
+  filepath: string,
+  symbol: string | undefined,
+  unresolvedTargetNote: string | undefined,
+): AttributionCaveat | undefined {
+  if (unresolvedTargetNote) {
+    return { reason: 'unresolved-target', note: unresolvedTargetNote };
+  }
+  if (!analysis.targetIndexed) {
+    return {
+      reason: 'unresolved-target',
+      note:
+        `⚠ Lien: "${filepath}" has no chunks anywhere in the index — every count above ` +
+        'is a deliberate 0, not a confirmed empty dependency graph. This can mean the ' +
+        'path was never indexed, is misspelled (wrong directory prefix, wrong case), or ' +
+        'genuinely has no extractable content. Do not treat this as a low-risk or ' +
+        'dependency-free file; check for a typo before editing, try search_code or ' +
+        'list_functions to find the real path, or run "lien index" if the file was added ' +
+        'recently.',
+    };
+  }
+  if (analysis.symbolAttributionDegraded) {
+    return {
+      reason: 'symbol-attribution-degraded',
+      note:
+        `"${symbol}" doesn't appear in ${filepath}'s tracked top-level exports (likely a ` +
+        `method or constructor — no import statement names one of those independently of ` +
+        `its class/package). Symbol-level call sites couldn't be confirmed, so dependentCount, ` +
+        `riskLevel, and dependents below are the file-level answer (every file that imports ` +
+        `${filepath}) rather than a verified count of callers of "${symbol}" specifically.`,
+    };
+  }
+  if (analysis.dependentAttributionIncomplete) {
+    return {
+      reason: 'dependent-attribution-incomplete',
+      note:
+        `No import-based dependents were found for ${filepath}, but its language lets real ` +
+        `callers use its exports with no per-file import naming it at all (C#'s "global using" ` +
+        `/ implicit enclosing-namespace member access). The import graph has no signal for ` +
+        `that usage shape, so dependentCount: 0 and riskLevel: "low" here mean "the scan found ` +
+        `nothing," not "nothing depends on this file" — don't treat this as a verified clear.`,
+    };
+  }
+  return undefined;
+}
+
+/**
  * Build the response object from analysis results.
  */
 function buildDependentsResponse(
@@ -175,7 +250,7 @@ function buildDependentsResponse(
   args: ValidatedArgs,
   risk: BlastRadiusRisk,
   indexInfo: IndexInfo,
-  note?: string,
+  unresolvedTargetNote?: string,
 ): DependentsResponse {
   const { symbol, filepath, depth } = args;
 
@@ -194,50 +269,20 @@ function buildDependentsResponse(
     complexityMetrics: analysis.complexityMetrics,
   };
 
-  // Add optional fields
   if (symbol) {
     response.symbol = symbol;
   }
   if (analysis.totalUsageCount !== undefined) {
     response.totalUsageCount = analysis.totalUsageCount;
   }
-  // #927's manifest-based note takes precedence: it's the more authoritative
-  // "is this path even part of the indexed project" signal (independent of
-  // chunk count), and in the overwhelming common case (a typo'd/nonexistent
-  // path) both it and the #928 chunk-based check below would fire for the
-  // same reason -- setting both would just be two notes saying the same
-  // thing. The #928 check still adds real value on its own for the narrower
-  // gap the manifest can't see: a path the manifest lists as indexed but
-  // that produced zero chunks in this scan (e.g. a genuinely empty file).
-  if (note) {
-    response.note = note;
-  } else if (!analysis.targetIndexed) {
-    response.note =
-      `⚠ Lien: "${filepath}" has no chunks anywhere in the index — every count above ` +
-      'is a deliberate 0, not a confirmed empty dependency graph. This can mean the ' +
-      'path was never indexed, is misspelled (wrong directory prefix, wrong case), or ' +
-      'genuinely has no extractable content. Do not treat this as a low-risk or ' +
-      'dependency-free file; check for a typo before editing, try search_code or ' +
-      'list_functions to find the real path, or run "lien index" if the file was added ' +
-      'recently.';
-  }
-  if (analysis.symbolAttributionDegraded) {
-    response.symbolAttributionDegraded = true;
-    response.symbolAttributionNote =
-      `"${symbol}" doesn't appear in ${filepath}'s tracked top-level exports (likely a ` +
-      `method or constructor — no import statement names one of those independently of ` +
-      `its class/package). Symbol-level call sites couldn't be confirmed, so dependentCount, ` +
-      `riskLevel, and dependents below are the file-level answer (every file that imports ` +
-      `${filepath}) rather than a verified count of callers of "${symbol}" specifically.`;
-  }
-  if (analysis.dependentAttributionIncomplete) {
-    response.dependentAttributionIncomplete = true;
-    response.dependentAttributionNote =
-      `No import-based dependents were found for ${filepath}, but its language lets real ` +
-      `callers use its exports with no per-file import naming it at all (C#'s "global using" ` +
-      `/ implicit enclosing-namespace member access). The import graph has no signal for ` +
-      `that usage shape, so dependentCount: 0 and riskLevel: "low" here mean "the scan found ` +
-      `nothing," not "nothing depends on this file" — don't treat this as a verified clear.`;
+  const attributionCaveat = buildAttributionCaveat(
+    analysis,
+    filepath,
+    symbol,
+    unresolvedTargetNote,
+  );
+  if (attributionCaveat) {
+    response.attributionCaveat = attributionCaveat;
   }
 
   return response;

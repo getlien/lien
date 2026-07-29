@@ -40,9 +40,9 @@ export const GetDependentsSchema = z.object({
         "Response includes 'usages' array showing which functions call this symbol.\n\n" +
         "Also accepts a method or constructor name (e.g. '__construct', 'moveUp').\n" +
         "Those aren't top-level exports, so when call sites for one can't be " +
-        'confirmed, the response sets symbolAttributionDegraded: true and widens ' +
-        'dependentCount/riskLevel to the file-level answer rather than asserting an ' +
-        'unverifiable symbol-scoped count — check that flag before trusting a low count.',
+        "confirmed, the response sets attributionCaveat.reason: 'symbol-attribution-degraded' " +
+        'and widens dependentCount/riskLevel to the file-level answer rather than asserting an ' +
+        'unverifiable symbol-scoped count — check for attributionCaveat before trusting a low count.',
     ),
 
   depth: z

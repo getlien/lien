@@ -22,21 +22,29 @@ symbol:
   get_dependents({ filepath, symbol }) — check dependentCount and riskLevel.
   If riskLevel is "high" or "critical", list affected dependents to the user
   before editing. Read riskReasoning for the "why" (e.g. "14 callers, 3
-  untested, max complexity 18") before deciding how cautious to be.
+  untested, max complexity 18") before deciding how cautious to be. A
+  high/critical complexity signal among dependents always lifts riskLevel
+  above "low", even if every dependent is fully tested.
 
   For "what else could break?" impact analysis, pass depth: 2 (or up to 5) to
   walk the import graph transitively. Each dependent carries a 'hops' field;
   'truncated: true' means the BFS stopped at 'maxNodes' (default 500).
   Symbol-level queries stay at depth 1 — pass depth only for file-level.
 
-  If a result carries dependentAttributionIncomplete, a dependentCount of 0 and a
-  riskLevel of "low" mean Lien could not SEE the callers, not that there are none —
-  grep before concluding the symbol is unused. riskLevel is not adjusted for it.
-
-  If a result carries a note, filepath is not resolvable in the index at all
-  (never indexed, misspelled, or a typo'd directory prefix) — dependentCount: 0
-  and riskLevel: "low" then mean "unresolved", not "confirmed safe to change".
-  Fix the path (try search_code or list_functions) before trusting the result.
+  If a result carries attributionCaveat, dependentCount/riskLevel cannot be
+  trusted as a verified clear — never treat a low count (especially 0) as
+  "safe" or "unused" without checking it first. Its reason tells you why:
+  "unresolved-target" means filepath isn't in the index at all (never
+  indexed, misspelled, or a typo'd directory prefix) — fix the path (try
+  search_code or list_functions) before trusting anything else in the
+  result. "symbol-attribution-degraded" means symbol names a method or
+  constructor whose call sites couldn't be confirmed — the counts are the
+  wider file-level answer, not a verified count for symbol itself.
+  "dependent-attribution-incomplete" means Lien could not SEE real callers
+  in this language (e.g. C#) — grep before concluding the file is unused.
+  (This reason only fires for FILE-level queries, i.e. no "symbol" argument.)
+  riskLevel is not adjusted for either of the latter two and may still read
+  "low"; attributionCaveat is the authoritative signal in all three cases.
 
 For discovery ("where is X?", "how does Y work?"), call search_code FIRST.
 It runs full-text BM25 keyword search over code, docstrings, and camelCase-split
