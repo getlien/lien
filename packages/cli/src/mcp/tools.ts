@@ -148,7 +148,14 @@ Returns:
 - symbolAttributionDegraded?: boolean + symbolAttributionNote?: string — set when
   symbol names a method or constructor (not a top-level export) and call sites
   couldn't be confirmed; dependentCount/riskLevel are then the file-level answer
-  (every importer of filepath), not a verified count of callers of symbol itself`,
+  (every importer of filepath), not a verified count of callers of symbol itself
+- dependentAttributionIncomplete?: boolean + dependentAttributionNote?: string — set
+  when a file-level query returns ZERO dependents in a language whose callers need no
+  per-file import (C# today: enclosing-namespace access under a \`global using\`). When
+  this is true, treat dependentCount 0 and riskLevel "low" as a FLOOR, not a finding —
+  it means Lien could not see callers, not that none exist. Verify with grep before
+  concluding a symbol is unused. riskLevel is not adjusted for this and may still read
+  "low"; the flag is the authoritative signal.`,
   ),
   toMCPToolSchema(
     GetComplexitySchema,

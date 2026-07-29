@@ -63,6 +63,7 @@ describe('handleGetDependents', () => {
       truncated?: boolean;
       uncoveredProductionDependents?: number;
       symbolAttributionDegraded?: boolean;
+      dependentAttributionIncomplete?: boolean;
     } = {},
   ) {
     const dependents = overrides.dependents ?? [{ filepath: 'src/consumer.ts', isTestFile: false }];
@@ -88,6 +89,7 @@ describe('handleGetDependents', () => {
       truncated: overrides.truncated ?? false,
       uncoveredProductionDependents: overrides.uncoveredProductionDependents ?? 0,
       symbolAttributionDegraded: overrides.symbolAttributionDegraded,
+      dependentAttributionIncomplete: overrides.dependentAttributionIncomplete,
     };
   }
 
@@ -632,6 +634,35 @@ describe('handleGetDependents', () => {
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.symbolAttributionDegraded).toBeUndefined();
       expect(parsed.symbolAttributionNote).toBeUndefined();
+    });
+  });
+
+  describe('dependentAttributionIncomplete (C# enclosing-namespace-access floor, #930)', () => {
+    it('surfaces dependentAttributionIncomplete and a note for a zero-dependent file-level query', async () => {
+      vi.mocked(findDependents).mockResolvedValue(
+        createMockAnalysis({ dependents: [], dependentAttributionIncomplete: true }),
+      );
+
+      const result = await handleGetDependents(
+        { filepath: 'src/Serilog/Parsing/Alignment.cs' },
+        mockCtx,
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.dependentCount).toBe(0);
+      expect(parsed.dependentAttributionIncomplete).toBe(true);
+      expect(parsed.dependentAttributionNote).toContain('Alignment.cs');
+      expect(parsed.dependentAttributionNote).toContain('the scan found nothing');
+    });
+
+    it('omits dependentAttributionIncomplete and the note for a normal query', async () => {
+      vi.mocked(findDependents).mockResolvedValue(createMockAnalysis());
+
+      const result = await handleGetDependents({ filepath: 'src/utils/validate.ts' }, mockCtx);
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.dependentAttributionIncomplete).toBeUndefined();
+      expect(parsed.dependentAttributionNote).toBeUndefined();
     });
   });
 

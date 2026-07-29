@@ -58,6 +58,16 @@ interface DependentsResponse {
   symbolAttributionDegraded?: boolean;
   /** Human-readable explanation, present only when `symbolAttributionDegraded` is true. */
   symbolAttributionNote?: string;
+  /**
+   * True for a file-level query (no `symbol`) that found zero dependents in
+   * a language where the import graph structurally can't see every real
+   * usage (see `DependencyAnalysisResult.dependentAttributionIncomplete`).
+   * When set, `dependentCount: 0` / `riskLevel: "low"` means "nothing found,"
+   * not "nothing depends on this file" — don't treat it as a verified clear.
+   */
+  dependentAttributionIncomplete?: boolean;
+  /** Human-readable explanation, present only when `dependentAttributionIncomplete` is true. */
+  dependentAttributionNote?: string;
 }
 
 /**
@@ -67,7 +77,7 @@ function logRiskAssessment(
   analysis: DependencyAnalysisResult,
   riskLevel: string,
   symbol: string | undefined,
-  log: (msg: string) => void,
+  log: (msg: string, level?: 'warning') => void,
 ): void {
   const prodTest = `(${analysis.productionDependentCount} prod, ${analysis.testDependentCount} test)`;
   const truncatedSuffix = analysis.truncated ? ' [truncated]' : '';
@@ -77,6 +87,12 @@ function logRiskAssessment(
       `Symbol-level attribution degraded for "${symbol}" — falling back to ` +
         `${analysis.dependents.length} file-level dependents ${prodTest} - risk: ${riskLevel}${truncatedSuffix}`,
     );
+    return;
+  }
+
+  if (analysis.dependentAttributionIncomplete) {
+    // findDependents already logged the underlying warning (dependency-analyzer.ts);
+    // just skip the generic "Found 0 dependents" log below rather than duplicate it.
     return;
   }
 
@@ -167,6 +183,15 @@ function buildDependentsResponse(
       `its class/package). Symbol-level call sites couldn't be confirmed, so dependentCount, ` +
       `riskLevel, and dependents below are the file-level answer (every file that imports ` +
       `${filepath}) rather than a verified count of callers of "${symbol}" specifically.`;
+  }
+  if (analysis.dependentAttributionIncomplete) {
+    response.dependentAttributionIncomplete = true;
+    response.dependentAttributionNote =
+      `No import-based dependents were found for ${filepath}, but its language lets real ` +
+      `callers use its exports with no per-file import naming it at all (C#'s "global using" ` +
+      `/ implicit enclosing-namespace member access). The import graph has no signal for ` +
+      `that usage shape, so dependentCount: 0 and riskLevel: "low" here mean "the scan found ` +
+      `nothing," not "nothing depends on this file" — don't treat this as a verified clear.`;
   }
 
   return response;
