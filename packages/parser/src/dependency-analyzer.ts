@@ -152,11 +152,11 @@ function buildImportIndex(
  * Python chunk still passes (its own bare-package match IS the real
  * semantic), same as `hasSingleFileImportSemantics` above.
  */
-function addFuzzyMatchChunks(
+export function addFuzzyMatchChunks<T extends CodeChunk>(
   normalizedImport: string,
   normalizedTarget: string,
-  chunks: CodeChunk[],
-  addChunk: (chunk: CodeChunk) => void,
+  chunks: T[],
+  addChunk: (chunk: T) => void,
 ): void {
   if (!matchesFile(normalizedImport, normalizedTarget)) return;
 
@@ -178,14 +178,14 @@ function addFuzzyMatchChunks(
  * @param importIndex - Index mapping import paths to chunks
  * @returns Array of chunks that import the target file (deduplicated)
  */
-function findDependentChunks(
+export function findDependentChunks<T extends CodeChunk>(
   normalizedTarget: string,
-  importIndex: Map<string, CodeChunk[]>,
-): CodeChunk[] {
-  const dependentChunks: CodeChunk[] = [];
+  importIndex: Map<string, T[]>,
+): T[] {
+  const dependentChunks: T[] = [];
   const seenChunkIds = new Set<string>();
 
-  const addChunk = (chunk: CodeChunk): void => {
+  const addChunk = (chunk: T): void => {
     const chunkId = `${chunk.metadata.file}:${chunk.metadata.startLine}-${chunk.metadata.endLine}`;
     if (!seenChunkIds.has(chunkId)) {
       dependentChunks.push(chunk);
