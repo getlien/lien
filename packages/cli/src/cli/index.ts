@@ -17,6 +17,7 @@ import { annotateCommand } from './annotate-cmd.js';
 import { gcCommand } from './gc.js';
 import { noteEditCommand, noteRunCommand, reportCommand } from './verify-tests-cmd.js';
 import { noteShownCommand, noteSignalCommand } from './nudge-cmd.js';
+import { nudgeDoctorCommand } from './nudge-doctor-cmd.js';
 import { recapCommand } from './recap-cmd.js';
 
 // Get version from package.json dynamically
@@ -136,6 +137,10 @@ program
   )
   .option('--session <id>', 'Session ID to recap')
   .option('--format <type>', 'Output format: text, json', 'text')
+  .option(
+    '--hooks-dir <path>',
+    "The calling hook script's own directory, for the test-verify shown event's build stamp (for the plugin Stop hook)",
+  )
   .action(recapCommand);
 
 const configCmd = program
@@ -232,6 +237,10 @@ nudgeCmd
   .option('--nudge <name>', 'Which nudge fired: annotate, blast, test-verify')
   .option('--file <path>', 'File the nudge was about, when it has one')
   .option('--symbol <name>', 'Symbol the nudge was about, when known')
+  .option(
+    '--hooks-dir <path>',
+    "The calling hook script's own directory, for the event's build stamp",
+  )
   .action(noteShownCommand);
 
 nudgeCmd
@@ -241,7 +250,24 @@ nudgeCmd
   .option('--signal <name>', 'Which signal: get_dependents, get_files_context, test_run')
   .option('--file <path>', 'File the call named, when present')
   .option('--symbol <name>', 'Symbol the call named, when present')
+  .option(
+    '--hooks-dir <path>',
+    "The calling hook script's own directory, for the event's build stamp",
+  )
   .action(noteSignalCommand);
+
+nudgeCmd
+  .command('doctor')
+  .description(
+    'Drift/health check for nudge telemetry: warns when the live plugin hooks predate this ' +
+      'instrumentation, or differ from the CLI/hooks that last recorded an event',
+  )
+  .option(
+    '--hooks-dir <path>',
+    'Live plugin hooks directory to check for drift against (omit for a ledger-history-only check)',
+  )
+  .option('--format <type>', 'Output format: text, json', 'text')
+  .action(nudgeDoctorCommand);
 
 program
   .command('gc')

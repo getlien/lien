@@ -123,9 +123,11 @@ msg="$(printf '%s' "$json" | jq -r '
 # kill switch is LIEN_NUDGE_EVENTS=off). Only reached when a warning fires. Also
 # record the primary (worst-first) changed symbol so the funnel's matched join
 # can credit a later get_dependents that names the symbol even on another file.
+# --hooks-dir stamps a build identity (see nudge-build.ts / issue #916).
 if [ -n "$session_id" ]; then
   blast_symbol="$(printf '%s' "$json" | jq -r '(.changes // [])[0].symbol // empty' 2>/dev/null)"
-  set -- nudge note-shown --session "$session_id" --nudge blast --file "$file_path"
+  set -- nudge note-shown --session "$session_id" --nudge blast --file "$file_path" \
+    --hooks-dir "$LIEN_HOOKS_DIR"
   [ -n "$blast_symbol" ] && set -- "$@" --symbol "$blast_symbol"
   if [ -n "$cwd" ] && [ -d "$cwd" ]; then
     (cd "$cwd" && "${LIEN_CMD[@]}" "$@" >/dev/null 2>&1) || true

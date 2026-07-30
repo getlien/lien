@@ -25,12 +25,21 @@
  *
  * Kill switch: `LIEN_NUDGE_EVENTS=off` disables recording entirely (reading
  * still works, so history already on disk stays visible to `lien stats`).
+ *
+ * Build provenance (issue #916): every event also carries an optional `build`
+ * stamp (`{ cliVersion, hooksHash? }`, see `nudge-build.ts`) identifying which
+ * CLI + hooks build recorded it. Existing ledgers predate this field entirely
+ * — `build` is always optional on read, and its absence means "build unknown"
+ * (an old, unstamped record), never a known-good build. See `nudge-stats.ts`'s
+ * `computeNudgeRecordingStatus` for how `lien stats` uses it to tell
+ * "instrumentation absent" apart from "shown but ignored" on an empty window.
  */
 
 import fs from 'fs/promises';
 import path from 'path';
 import { getIndexDir } from '@liendev/parser';
 import { canonicalizePath } from './canonicalize-path.js';
+import { getBuildStamp, type BuildStamp } from './nudge-build.js';
 
 export const NUDGE_EVENTS_FILENAME = 'nudge-events.jsonl';
 
@@ -63,6 +72,9 @@ export interface NudgeShownEvent {
   file?: string;
   /** The specific symbol, when known (rare — most shown events are file-scoped). */
   symbol?: string;
+  /** Which CLI + hooks build recorded this event. Absent on events recorded
+   *  before issue #916 — treat a missing `build` as "unknown", not "known-good". */
+  build?: BuildStamp;
 }
 
 /** A follow-up tool call observed this session, joinable to a prior `shown`. */
@@ -73,6 +85,8 @@ export interface NudgeSignalEvent {
   signal: NudgeSignalName;
   file?: string;
   symbol?: string;
+  /** Which CLI + hooks build recorded this event. Same back-compat contract as `NudgeShownEvent.build`. */
+  build?: BuildStamp;
 }
 
 export type NudgeEvent = NudgeShownEvent | NudgeSignalEvent;
@@ -143,12 +157,25 @@ function toRepoRelativeFile(rootDir: string, file?: string): string | undefined 
   return rel;
 }
 
-/** Stamp `now` and record a nudge-shown event. `file` is normalized to project-relative; `file`/`symbol` omitted when empty. */
+/**
+ * Stamp `now` and record a nudge-shown event. `file` is normalized to
+ * project-relative; `file`/`symbol` omitted when empty. `hooksDir` — the
+ * calling hook script's own directory, when recorded by one — is hashed
+ * (once per session, then cached) into the event's `build` stamp; see
+ * `nudge-build.ts`. Omit it for a bare CLI invocation with no hook context.
+ */
 export async function recordNudgeShown(
   rootDir: string,
-  fields: { sessionId: string; nudge: NudgeName; file?: string; symbol?: string },
+  fields: {
+    sessionId: string;
+    nudge: NudgeName;
+    file?: string;
+    symbol?: string;
+    hooksDir?: string;
+  },
 ): Promise<void> {
   const file = toRepoRelativeFile(rootDir, fields.file);
+  const build = await getBuildStamp(rootDir, fields.sessionId, fields.hooksDir);
   await recordNudgeEvent(rootDir, {
     kind: 'shown',
     timestamp: new Date().toISOString(),
@@ -156,15 +183,27 @@ export async function recordNudgeShown(
     nudge: fields.nudge,
     ...(file ? { file } : {}),
     ...(fields.symbol ? { symbol: fields.symbol } : {}),
+    build,
   });
 }
 
-/** Stamp `now` and record a follow-up signal event. `file` is normalized to project-relative; `file`/`symbol` omitted when empty. */
+/**
+ * Stamp `now` and record a follow-up signal event. `file` is normalized to
+ * project-relative; `file`/`symbol` omitted when empty. Same `hooksDir` /
+ * `build`-stamping contract as `recordNudgeShown`.
+ */
 export async function recordNudgeSignal(
   rootDir: string,
-  fields: { sessionId: string; signal: NudgeSignalName; file?: string; symbol?: string },
+  fields: {
+    sessionId: string;
+    signal: NudgeSignalName;
+    file?: string;
+    symbol?: string;
+    hooksDir?: string;
+  },
 ): Promise<void> {
   const file = toRepoRelativeFile(rootDir, fields.file);
+  const build = await getBuildStamp(rootDir, fields.sessionId, fields.hooksDir);
   await recordNudgeEvent(rootDir, {
     kind: 'signal',
     timestamp: new Date().toISOString(),
@@ -172,6 +211,7 @@ export async function recordNudgeSignal(
     signal: fields.signal,
     ...(file ? { file } : {}),
     ...(fields.symbol ? { symbol: fields.symbol } : {}),
+    build,
   });
 }
 
@@ -201,6 +241,18 @@ function isOptionalString(value: unknown): boolean {
   return value === undefined || typeof value === 'string';
 }
 
+/** A recorded `build` stamp: absent (pre-#916 event, or the never-recorded
+ *  case), or a well-formed `{ cliVersion, hooksHash? }`. Absent is honest
+ *  ("build unknown"); a malformed shape is corruption and sinks the whole
+ *  line like any other torn write — it never gets a foothold as a
+ *  half-trusted "known-good" build. */
+function isOptionalBuild(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (typeof value !== 'object' || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return typeof v.cliVersion === 'string' && isOptionalString(v.hooksHash);
+}
+
 /** Common shape both variants share: an object with string timestamp + sessionId. */
 function hasValidEnvelope(v: Record<string, unknown>): boolean {
   return typeof v.timestamp === 'string' && typeof v.sessionId === 'string';
@@ -211,7 +263,8 @@ function isValidShown(v: Record<string, unknown>): boolean {
     typeof v.nudge === 'string' &&
     NUDGE_NAMES.has(v.nudge) &&
     isOptionalString(v.file) &&
-    isOptionalString(v.symbol)
+    isOptionalString(v.symbol) &&
+    isOptionalBuild(v.build)
   );
 }
 
@@ -220,7 +273,8 @@ function isValidSignal(v: Record<string, unknown>): boolean {
     typeof v.signal === 'string' &&
     NUDGE_SIGNALS.has(v.signal) &&
     isOptionalString(v.file) &&
-    isOptionalString(v.symbol)
+    isOptionalString(v.symbol) &&
+    isOptionalBuild(v.build)
   );
 }
 

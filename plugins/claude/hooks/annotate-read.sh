@@ -124,8 +124,12 @@ touch "$session_dir" 2>/dev/null
 
 # Record a nudge-shown event for the `lien stats` funnels (best-effort; its own
 # kill switch is LIEN_NUDGE_EVENTS=off). Only reached when we actually emit.
+# --hooks-dir stamps the event with a build identity (see nudge-build.ts) so a
+# later empty window in `lien stats` can tell "no engagement" apart from
+# "recording was impossible" — the exact failure mode of issue #916.
 run_lien "${LIEN_CMD[@]}" nudge note-shown \
-  --session "$session_id" --nudge annotate --file "$file_path" >/dev/null 2>&1 || true
+  --session "$session_id" --nudge annotate --file "$file_path" --hooks-dir "$LIEN_HOOKS_DIR" \
+  >/dev/null 2>&1 || true
 
 # Emit the hookSpecificOutput JSON. additionalContext is the channel that
 # actually reaches the model on the next turn (verified in CC 2.1.142).

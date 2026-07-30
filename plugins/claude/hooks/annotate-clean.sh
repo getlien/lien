@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# SessionStart hook: GC stale annotated-sessions/ dirs, and FEATURE 2's
-# test-sessions/ ledger files (test-verification-nudge.md). Keeps state from
-# concurrent sessions intact (don't wipe other-session state on startup);
-# only removes entries that haven't been touched in >24h.
+# SessionStart hook: GC stale annotated-sessions/ dirs, FEATURE 2's
+# test-sessions/ ledger files (test-verification-nudge.md), and the
+# nudge-build/ per-session build-stamp cache (issue #916, nudge-build.ts).
+# Keeps state from concurrent sessions intact (don't wipe other-session state
+# on startup); only removes entries that haven't been touched in >24h.
 
 set -u
 
@@ -33,6 +34,13 @@ fi
 test_sessions_root="$store/test-sessions"
 if [ -d "$test_sessions_root" ]; then
   find "$test_sessions_root" -mindepth 1 -maxdepth 1 -type f -mmin +1440 -exec rm -f {} + 2>/dev/null
+fi
+
+# nudge-build/: one <sessionId>.json build-stamp cache per session (files,
+# like test-sessions/ above, not directories).
+nudge_build_root="$store/nudge-build"
+if [ -d "$nudge_build_root" ]; then
+  find "$nudge_build_root" -mindepth 1 -maxdepth 1 -type f -mmin +1440 -exec rm -f {} + 2>/dev/null
 fi
 
 # Pre-warm the resolver's npx fallback in the background (detached, so this

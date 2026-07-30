@@ -69,10 +69,12 @@ case "$session_id" in
   *[!A-Za-z0-9_-]*) exit 0 ;;
 esac
 
+# --hooks-dir stamps the test-verify shown event with a build identity (see
+# nudge-build.ts / issue #916).
 if [ -n "$cwd" ] && [ -d "$cwd" ]; then
-  reason="$(cd "$cwd" && "${LIEN_CMD[@]}" recap --session "$session_id" 2>/dev/null)"
+  reason="$(cd "$cwd" && "${LIEN_CMD[@]}" recap --session "$session_id" --hooks-dir "$LIEN_HOOKS_DIR" 2>/dev/null)"
 else
-  reason="$("${LIEN_CMD[@]}" recap --session "$session_id" 2>/dev/null)"
+  reason="$("${LIEN_CMD[@]}" recap --session "$session_id" --hooks-dir "$LIEN_HOOKS_DIR" 2>/dev/null)"
 fi
 
 # Nothing unresolved (all clean/resolved), suppressed by the recent-block
