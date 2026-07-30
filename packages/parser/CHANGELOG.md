@@ -1,5 +1,155 @@
 # @liendev/parser
 
+## 0.73.0
+
+### Patch Changes
+
+- f2937c9: #953: `get_dependents` fabricated direct (`hops:1`) dependency edges for any
+  relative import that resolves to a bare DIRECTORY path instead of a real
+  file — a confident wrong answer, with no caveat, that fed straight into
+  `riskLevel`.
+
+  Confirmed via the foreign-repo dogfood on honojs/hono:
+  `src/middleware/jwt/index.ts`'s only outward-facing statement is
+  `import type {} from '../..'` (a dots-only, empty type import). This resolves
+  (correctly) to the bare directory `src`, but nothing then resolved `src` to
+  its real entry point (`src/index.ts`). Left as a bare directory name, the
+  specifier fuzzy-matched via `matchesFile`'s Python Strategy 5
+  (`matchesParentPythonPackage`) against EVERY file anywhere under `src/` — for
+  a TypeScript importer with no Python semantics at all. `get_dependents` for
+  `src/utils/color.ts` reported `dependentCount: 13` (true: 4), `riskLevel:
+"high"` (true: `"medium"`); `src/utils/url.ts` reported 3 of its 12
+  production dependents as fabricated. This is the same false-hub shape #929
+  already diagnosed (Python's own doc comment names this exact hono repro) but
+  left unguarded on the two call sites that build `get_dependents`' actual
+  result (`findDependentChunks`'s fuzzy loop in both
+  `packages/parser/src/dependency-analyzer.ts` and
+  `packages/cli/src/mcp/handlers/dependency-analyzer.ts`), rather than the
+  guarded `importMatchesTarget` primitive #929 introduced.
+
+  Two-part fix:
+  - **Root cause: resolve a directory-shaped relative import to its real entry
+    point.** A new `resolveJsDirectoryIndex` (`packages/parser/src/js-directory-index.ts`)
+    checks whether a relative-resolved specifier names a real on-disk directory
+    and, if so, redirects it to that directory's `index.<ext>` file (mirrors
+    `workspace-packages.ts`'s entry-file detection, scoped to a single
+    directory). `../..` now resolves to `src/index`, which participates in
+    ordinary EXACT matching — no fuzzy strategy involved at all. This is what
+    keeps `jwt/index.ts` et al. correctly attributed as `hops:1` dependents of
+    `src/index.ts` (the file `../..` actually names) instead of just deleting
+    the edge outright. Generalizes beyond the dots-only case: a named directory
+    import (`../utils` where `src/utils/index.ts` exists) is fixed the same
+    way.
+  - **Residual guard: gate Python Strategy 5 per chunk.** For the case where no
+    entry file exists (so the directory-index resolution is a no-op), both
+    `addFuzzyMatchChunks` implementations now re-derive the #929 guard per
+    chunk — mirroring the existing #887 per-chunk pattern — so a non-Python
+    importer's coincidental bare-word match can never count. Real Python
+    bare-package matching (`import flask` -> `flask/__init__.py` and children)
+    is untouched.
+
+  Verified the BFS depth mechanics needed no changes: once the seed (depth-1)
+  edges are correct, `depth: 2+` results clean up for free (checked live on the
+  hono corpus).
+
+  Also: `get_dependents`'s response echoed the _requested_ `depth` even for a
+  symbol-scoped query, where `depth > 1` is documented as ignored (symbol
+  queries always run at depth 1). Now echoes the depth that actually ran.
+
+- 10474a9: Two symbol-extraction gaps (#949), both reproduced against the published
+  0.72.0 artifact on foreign repos and confirmed to still repro on the
+  published binary before this fix:
+
+  **Ruby `module` declarations were invisible as symbols.** `list_functions`
+  could not find `module Sidekiq` (sidekiq's own root namespace, at
+  `lib/sidekiq.rb:42`) or `module Job` (its central job mixin) at all — a
+  regex query for either returned zero hits. Root cause: `RubyTraverser`
+  treats `module` as a transparent namespace so `module → class → method`
+  still yields method chunks (deliberately, to avoid breaking the container
+  depth budget `isTargetNode` enforces), but that meant the module's own AST
+  node was never pushed to the chunker's node list, so it never became a
+  chunk/symbol at all — the dead `case 'module'` branch in
+  `RubySymbolExtractor.extractSymbol` was structurally unreachable. Fixed by
+  adding a `transparentContainerTypes` field to `LanguageTraverser` (optional,
+  undefined for every other language — a no-op): the chunker now emits a
+  chunk for a node in this list while still traversing its children at the
+  same depth, keeping the transparency for nested content. Module contents
+  (nested classes/methods) were never the problem — they were already fully
+  indexed; only the module's own entry was missing.
+
+  `module`'s `symbolType` is `interface`, not `class` — a Ruby module can
+  never be instantiated, so `class` would misdescribe it. `interface` is an
+  imperfect but honest fit (closest of the four existing `SymbolInfo` types
+  to a mixin contributing shared behavior, similar to a Rust trait), chosen
+  over adding a fifth `module` type to avoid rippling into the `symbolType`
+  filter, MCP schemas, and every consumer of the closed four-value enum — the
+  same tradeoff `csharp.ts` made mapping properties to `method` rather than
+  adding a `property` type.
+
+  **Nested type declarations never reported a `parentClass`.** A type
+  declared directly inside another type (Java/C#'s `public static class
+Builder` nested in `Retrofit`, `RequestFactory`, etc. — confirmed on
+  square/retrofit; C#'s `ContextStackBookmark` nested in `LogContext`,
+  `SelfLogFailureListener` nested in `SelfLog` — confirmed on
+  serilog/serilog) always reported `parentClass: null`, making
+  same-named nested types (six `Builder` results) indistinguishable except
+  by file path. Root cause: the chunker already resolves the enclosing
+  type's name for every top-level node via `findParentContainerName` (not
+  just methods), but each language's `extractClassInfo`/`extractInterfaceInfo`/
+  etc. either didn't accept the parameter at all or silently dropped it.
+  Fixed for C#, Java, Python, Swift, and Kotlin (all of which support real
+  nested type declarations) by threading `parentClass` through every
+  type-declaration handler, the same way it already worked for methods. The
+  existing `enclosingSymbol` MCP metadata field is derived from `parentClass`
+  - `symbolName`, so it's fixed for free with no separate change.
+
+  Not fixed (no repro path, confirmed by traverser inspection): JavaScript/
+  TypeScript (no `class_declaration`-in-`class_declaration` construct — a TS
+  namespace nesting classes is a related, separate, still-open gap), PHP (no
+  nested class-declaration construct), Go (flat structure by design, no
+  containers at all), Rust (`impl`/`trait` blocks cannot nest in valid Rust;
+  a `mod` nested in another `mod` doesn't interact with `parentClass` since
+  `mod` isn't a class-like container — though Rust's `mod` shares Ruby's
+  Bug 1 shape, invisible as its own symbol, which is out of scope here and
+  left as a follow-up).
+
+- 48767ca: `signature` for a class/interface/struct/record/enum (and Rust's
+  impl/trait) dropped generic type parameters and the base-type/interface
+  list entirely — found in a post-release audit of the published 0.72.0
+  artifact. `list_functions` on serilog reported `LogEventPropertyValueVisitor<TState,
+TResult>` as bare `class LogEventPropertyValueVisitor` and `Logger :
+ILogger, ILogEventSink, IDisposable` as bare `class Logger`, discarding
+  exactly the information a model needs to tell one symbol from another and
+  to judge blast radius before changing it (`signature` is what
+  `list_functions`/`get_dependents` show, not the source).
+
+  Confirmed the same gap and fixed it in six languages: **C#**
+  (`class`/`interface`/`struct`/`record`, including `record struct`, plus
+  `enum`'s base type, e.g. `enum Status : byte`), **Java**
+  (`class`/`interface`/`enum`/`record`), **Kotlin**
+  (`class`/`interface`/`object`), **TypeScript** (`class`/`interface`, plus
+  plain JavaScript's `extends` clause, which shares the same code path),
+  **Swift** (`class`/`struct`/`actor`/`enum`/`extension`/`protocol`), and
+  **Rust** (`impl`/`trait` — an `impl` block's `signature` now names the
+  trait it implements, e.g. `impl<T> Trait for Type<T>`, previously just
+  `impl Type`, silently losing the single most useful fact about an impl
+  block). Generic constraints (`where T : class, new()` / Rust's
+  `where`-clauses) are deliberately excluded, not truncated — out of scope,
+  since a "some constraints, some not" signature would be worse than none.
+
+  Also fixed as a direct consequence, found via dogfooding against Serilog's
+  actual `Logger` class: a base/heritage list that itself spans multiple
+  physical lines (e.g. a base wrapped in a C# `#if`/`#endif` preprocessor
+  block) previously leaked raw newlines into `signature`; all six languages
+  now collapse it to a single line via a new shared `collapseWhitespace`
+  helper, matching the existing `extractSignature` convention.
+
+  Checked but left unchanged (already correct, not touched): Ruby's `class …
+< Base` already includes its superclass. Checked and found to share the
+  same gap but out of scope for this fix (no generics/heritage list in the
+  task's brief, left as a follow-up): PHP and Python's `class` declarations,
+  and Go's generic `type Foo[T any] struct`.
+
 ## 0.72.0
 
 ### Minor Changes
