@@ -69,7 +69,10 @@ function runHook(
   payload: Record<string, unknown>,
   extraEnv: Record<string, string> = {},
 ): { stdout: string; status: number | null } {
-  const storeDir = mkdtempSync(path.join(os.tmpdir(), 'lien-nudge-hooksdir-store-'));
+  // Nested under shimDir (not a fresh top-level os.tmpdir() entry) so the
+  // existing afterEach's `rmSync(shimDir, ...)` cleans this up too, instead
+  // of leaking one store dir per call.
+  const storeDir = mkdtempSync(path.join(shimDir, 'store-'));
   writeFileSync(path.join(storeDir, 'structural.db'), '', 'utf-8');
   const res = spawnSync('bash', [hookFile], {
     input: JSON.stringify(payload),

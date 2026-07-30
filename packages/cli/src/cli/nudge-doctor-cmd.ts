@@ -128,11 +128,32 @@ function checkVersionDrift(latest: LatestStamp | null, currentCliVersion: string
   };
 }
 
+/**
+ * The live-hooks clause for the OK message — only claims a match when a hash
+ * comparison actually ran. `okMessage` is reached only when `checkHashDrift`
+ * produced no finding, which happens for TWO different reasons: a real
+ * match, or no comparison being possible at all (missing `live.hash` or
+ * `latest.build.hooksHash`). Collapsing both into ", matches the live hooks
+ * directory" would be the doctor asserting a check it never ran — precisely
+ * the failure class this tool exists to catch, so each case gets its own
+ * honest wording instead.
+ */
+function liveHooksNote(latest: LatestStamp, live: LiveHooks | null): string {
+  if (!live) return '';
+  if (!live.hash) return '; could not read the live hooks directory, so no comparison was made';
+  if (!latest.build.hooksHash) {
+    return '; the last recorded stamp has no hooks hash, so no comparison was made';
+  }
+  // Reached only when live.hash === latest.build.hooksHash: had they differed,
+  // checkHashDrift would have produced a finding, and okMessage only runs
+  // when there are none.
+  return ', matches the live hooks directory';
+}
+
 function okMessage(latest: LatestStamp, live: LiveHooks | null): string {
-  const liveNote = live ? ', matches the live hooks directory' : '';
   return (
     `Nudge telemetry looks current: last recorded build ${latest.build.cliVersion} ` +
-    `(hooks ${latest.build.hooksHash ?? 'unknown'})${liveNote}.`
+    `(hooks ${latest.build.hooksHash ?? 'unknown'})${liveHooksNote(latest, live)}.`
   );
 }
 

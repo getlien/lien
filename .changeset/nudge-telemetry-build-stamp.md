@@ -2,7 +2,7 @@
 "@liendev/lien": patch
 ---
 
-#916: an empty `nudge-events.jsonl` window in `lien stats` used to render
+Issue `#916`: an empty `nudge-events.jsonl` window in `lien stats` used to render
 identically whether nobody ever qualified for a nudge, a nudge fired and got
 ignored every time, or the deployed plugin hooks predated this
 instrumentation entirely and recording was never possible. That third case

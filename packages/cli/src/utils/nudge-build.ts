@@ -56,9 +56,28 @@ export interface BuildStamp {
 
 const BUILD_CACHE_DIRNAME = 'nudge-build';
 
-/** Where this session's cached stamp lives, mirroring annotated-sessions/'s per-session shape. */
-export function nudgeBuildCachePath(rootDir: string, sessionId: string): string {
-  return path.join(getIndexDir(rootDir), BUILD_CACHE_DIRNAME, `${sessionId}.json`);
+// Defense-in-depth: sessionId is interpolated into a filesystem path (the
+// per-session cache file below), so it must be validated the same way the
+// shell hooks already gate it (`case "$session_id" in *[!A-Za-z0-9_-]*) exit
+// 0`) — the CLI is a directly-invokable public surface and must not depend
+// on its caller for that guarantee. Mirrors test-ledger.ts's identical
+// SESSION_ID_RE guard, for the same reason.
+const SESSION_ID_RE = /^[A-Za-z0-9_-]+$/;
+
+/**
+ * Where this session's cached stamp lives, mirroring annotated-sessions/'s
+ * per-session shape — or null when `sessionId` fails validation, so an unsafe
+ * id never gets a cache path at all. Validate-then-assert-containment: even a
+ * gap in `SESSION_ID_RE` couldn't escape `nudge-build/`, since the resolved
+ * path is also checked against it before being returned.
+ */
+export function nudgeBuildCachePath(rootDir: string, sessionId: string): string | null {
+  if (!SESSION_ID_RE.test(sessionId)) return null;
+  const dir = path.join(getIndexDir(rootDir), BUILD_CACHE_DIRNAME);
+  const filePath = path.join(dir, `${sessionId}.json`);
+  const rel = path.relative(dir, filePath);
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return null;
+  return filePath;
 }
 
 /**
@@ -125,8 +144,10 @@ async function writeCachedStamp(cachePath: string, stamp: BuildStamp): Promise<v
  * A cached stamp that already has `hooksHash` is reused as-is. A cached
  * stamp that lacks one (an earlier call in this session had no `hooksDir`)
  * is topped up when THIS call supplies one, rather than permanently locking
- * the session into a partial stamp. Never throws — worst case returns
- * `{ cliVersion }` alone.
+ * the session into a partial stamp. An unsafe `sessionId` (see
+ * `nudgeBuildCachePath`) simply skips caching — the stamp is still computed
+ * and returned correctly every time, just never persisted. Never throws —
+ * worst case returns `{ cliVersion }` alone.
  */
 export async function getBuildStamp(
   rootDir: string,
@@ -134,12 +155,12 @@ export async function getBuildStamp(
   hooksDir?: string,
 ): Promise<BuildStamp> {
   const cachePath = nudgeBuildCachePath(rootDir, sessionId);
-  const cached = await readCachedStamp(cachePath);
+  const cached = cachePath ? await readCachedStamp(cachePath) : null;
   if (cached && (cached.hooksHash || !hooksDir)) return cached;
 
   const cliVersion = getPackageVersion();
   const hooksHash = hooksDir ? await hashHooksDir(hooksDir) : undefined;
   const stamp: BuildStamp = { cliVersion, ...(hooksHash ? { hooksHash } : {}) };
-  await writeCachedStamp(cachePath, stamp);
+  if (cachePath) await writeCachedStamp(cachePath, stamp);
   return stamp;
 }

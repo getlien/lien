@@ -77,12 +77,14 @@ describe('hashHooksDir', () => {
 
   it('ignores subdirectories (only hashes regular files)', async () => {
     const dir = await makeHooksDir({ 'a.sh': 'echo a' });
+    const flatDir = await makeHooksDir({ 'a.sh': 'echo a' });
     await fs.mkdir(path.join(dir, 'subdir'));
     await fs.writeFile(path.join(dir, 'subdir', 'nested.sh'), 'ignored', 'utf-8');
     const withSubdir = await hashHooksDir(dir);
-    const flatOnly = await hashHooksDir(await makeHooksDir({ 'a.sh': 'echo a' }));
+    const flatOnly = await hashHooksDir(flatDir);
     expect(withSubdir).toBe(flatOnly);
     await fs.rm(dir, { recursive: true, force: true });
+    await fs.rm(flatDir, { recursive: true, force: true });
   });
 });
 
@@ -133,7 +135,8 @@ describe('getBuildStamp', () => {
     const dir = await makeHooksDir({ 'a.sh': 'echo a' });
     await getBuildStamp(rootDir, 'sess-5', dir);
     const cachePath = nudgeBuildCachePath(rootDir, 'sess-5');
-    const cached = JSON.parse(await fs.readFile(cachePath, 'utf-8'));
+    expect(cachePath).not.toBeNull();
+    const cached = JSON.parse(await fs.readFile(cachePath as string, 'utf-8'));
     expect(cached.cliVersion).toBe(getPackageVersion());
     expect(typeof cached.hooksHash).toBe('string');
     await fs.rm(dir, { recursive: true, force: true });
@@ -146,5 +149,43 @@ describe('getBuildStamp', () => {
     await expect(getBuildStamp(rootDir, 'sess-6')).resolves.toMatchObject({
       cliVersion: getPackageVersion(),
     });
+  });
+
+  it('still returns a correct stamp for a path-traversal sessionId, without ever caching it (security)', async () => {
+    const dir = await makeHooksDir({ 'a.sh': 'echo a' });
+    const evil = '../../../../etc/evil';
+    const stamp = await getBuildStamp(rootDir, evil, dir);
+    expect(stamp.cliVersion).toBe(getPackageVersion());
+    expect(typeof stamp.hooksHash).toBe('string');
+    expect(nudgeBuildCachePath(rootDir, evil)).toBeNull();
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+});
+
+describe('nudgeBuildCachePath — sessionId validation (path-traversal hardening)', () => {
+  it('accepts an ordinary alphanumeric/dash/underscore session id', () => {
+    expect(nudgeBuildCachePath(rootDir, 'sess-1_ABC')).not.toBeNull();
+  });
+
+  it('rejects a session id containing path-traversal segments', () => {
+    expect(nudgeBuildCachePath(rootDir, '../../../../etc/passwd')).toBeNull();
+  });
+
+  it('rejects a session id containing a path separator', () => {
+    expect(nudgeBuildCachePath(rootDir, 'a/b')).toBeNull();
+  });
+
+  it('rejects a session id that is itself an absolute path', () => {
+    expect(nudgeBuildCachePath(rootDir, '/etc/passwd')).toBeNull();
+  });
+
+  it('rejects an empty session id', () => {
+    expect(nudgeBuildCachePath(rootDir, '')).toBeNull();
+  });
+
+  it('the resolved path for a valid id stays inside the nudge-build cache directory', () => {
+    const cachePath = nudgeBuildCachePath(rootDir, 'sess-1');
+    expect(cachePath).not.toBeNull();
+    expect(path.basename(path.dirname(cachePath as string))).toBe('nudge-build');
   });
 });

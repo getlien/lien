@@ -84,6 +84,42 @@ describe('nudge doctor (issue #916, part 3)', () => {
     expect(report.status).toBe('ok');
     expect(report.canaryMissing).toBe(false);
     expect(report.lastKnownBuild).toMatchObject({ cliVersion: getPackageVersion() });
+    // A real comparison DID run and DID match, so the "matches" claim is honest here.
+    expect(report.findings.join(' ')).toContain('matches the live hooks directory');
+  });
+
+  it('ok, but does NOT claim a match it never ran: live hash could not be computed', async () => {
+    await initRepo();
+    const recordHooksDir = await makeHooksDir({ 'nudge-signal.sh': 'echo hi' });
+    await recordNudgeShown(dir, { sessionId: 's1', nudge: 'annotate', hooksDir: recordHooksDir });
+
+    // `nudge-signal.sh` as a DIRECTORY (not a file): `fs.access` (existence
+    // only) still finds it, so the canary check passes — but hashHooksDir's
+    // `e.isFile()` filter excludes it, so with no OTHER entries the hooks
+    // directory hashes to undefined. Portable (no reliance on permission
+    // bits, which root-run CI containers can bypass) way to reproduce
+    // "canary present, hash uncomputable".
+    const liveHooksDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-doctor-hooks-'));
+    await fs.mkdir(path.join(liveHooksDir, 'nudge-signal.sh'));
+
+    const report = await computeNudgeDoctorReport({ hooksDir: liveHooksDir });
+    expect(report.canaryMissing).toBe(false);
+    expect(report.liveHooksHash).toBeNull();
+    expect(report.findings.join(' ')).not.toContain('matches the live hooks directory');
+    expect(report.findings.join(' ')).toContain('no comparison was made');
+  });
+
+  it('ok, but does NOT claim a match it never ran: the last recorded stamp has no hooks hash', async () => {
+    await initRepo();
+    // Recorded with NO --hooks-dir, so the stamp has cliVersion only.
+    await recordNudgeShown(dir, { sessionId: 's1', nudge: 'annotate' });
+
+    const liveHooksDir = await makeHooksDir({ 'nudge-signal.sh': 'echo hi' });
+    const report = await computeNudgeDoctorReport({ hooksDir: liveHooksDir });
+    expect(report.canaryMissing).toBe(false);
+    expect(report.lastKnownBuild?.hooksHash).toBeUndefined();
+    expect(report.findings.join(' ')).not.toContain('matches the live hooks directory');
+    expect(report.findings.join(' ')).toContain('no comparison was made');
   });
 
   it('warn: never recorded — the ledger has no build-stamped event at all', async () => {
