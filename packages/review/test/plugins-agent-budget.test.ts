@@ -1489,6 +1489,7 @@ describe('AgentReviewPlugin.present — multiple summary findings', () => {
 
     expect(appendDescription.mock.calls[0][0]).toBe(
       '> [!NOTE]\n> **Low Risk**\n>\n> All good\n\n' +
+        '✅ *Trust: **Delivered** — The review ran to completion within budget.*\n\n' +
         '<sup>Reviewed by [Lien Review](https://lien.dev). Updates automatically on new commits.</sup>',
     );
     expect(appendSummary.mock.calls[0][0]).toBe('### Agent Review\n\n**Low Risk** — All good');
