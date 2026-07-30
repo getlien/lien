@@ -1,8 +1,21 @@
 import { describe, it, expect, vi } from 'vitest';
-import { AgentReviewPlugin } from '../src/plugins/agent/index.js';
+import { AgentReviewPlugin, derivePresentTimeVerdict } from '../src/plugins/agent/index.js';
+import { computeVerdict } from '../src/attestation.js';
+import type { ProviderPassAttestation } from '../src/attestation.js';
 import { silentLogger } from '../src/test-helpers.js';
 import type { PresentContext, ReviewFinding } from '../src/plugin-types.js';
 import type { PRContext } from '../src/types.js';
+
+/** A clean delivery — no dropped comments, no write failures — so `computeVerdict`'s
+ * verdict is driven purely by `passes`, the one dimension `derivePresentTimeVerdict`
+ * can also see. */
+function cleanDelivery() {
+  return {
+    inlineComments: { attempted: 0, posted: 0, dropped: 0, deduped: 0, citationGated: 0 },
+    descriptionBadgeUpdated: null,
+    outOfDiffReviewPosted: null,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Fixtures — mirror the exact shapes appendSummaryFinding/appendIncompleteNotice/
@@ -193,5 +206,119 @@ describe('AgentReviewPlugin.present — trust verdict line', () => {
 
     const description = appendDescription.mock.calls[0][0] as string;
     expect(description).not.toContain('Trust:');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// derivePresentTimeVerdict — consistency with computeVerdict
+//
+// Two independent derivations of "is this run trustworthy" now exist:
+// computeVerdict (post-hoc, attestation.ts, 7 verdicts) and
+// derivePresentTimeVerdict (render-time, this file, a reduced 4). Nothing
+// structurally stops them from drifting apart — a future change to one
+// taxonomy could silently leave the other behind, which is exactly the kind
+// of gap this PR exists to close, one level up. These tests pin every input
+// state both functions can see: either they must agree, or the mismatch is
+// asserted and explained (never a silent, unpinned divergence).
+// ---------------------------------------------------------------------------
+
+describe('derivePresentTimeVerdict — consistency with computeVerdict', () => {
+  const mainPass = (overrides?: Partial<ProviderPassAttestation>): ProviderPassAttestation => ({
+    name: 'main',
+    ran: true,
+    stopReason: 'completed',
+    neverRan: false,
+    candidatesDeferred: 0,
+    ...overrides,
+  });
+
+  it('agree on a clean, completed run: delivered', () => {
+    const present = derivePresentTimeVerdict([summaryFinding()]);
+    const full = computeVerdict({
+      pipelineFailed: false,
+      providerFailure: false,
+      passes: [mainPass()],
+      ...cleanDelivery(),
+    });
+    expect(present).toBe('delivered');
+    expect(full).toBe('delivered');
+    expect(present).toBe(full);
+  });
+
+  it('agree when every provider request failed: failed:provider_never_ran', () => {
+    const present = derivePresentTimeVerdict([neverRanFinding()]);
+    const full = computeVerdict({
+      pipelineFailed: false,
+      providerFailure: true,
+      passes: [mainPass({ stopReason: 'error', neverRan: true })],
+      ...cleanDelivery(),
+    });
+    expect(present).toBe('failed:provider_never_ran');
+    expect(full).toBe('failed:provider_never_ran');
+    expect(present).toBe(full);
+  });
+
+  it('agree when the main pass stopped on budget: degraded:budget_starved', () => {
+    const present = derivePresentTimeVerdict([incompleteMainFinding('budget')]);
+    const full = computeVerdict({
+      pipelineFailed: false,
+      providerFailure: false,
+      passes: [mainPass({ stopReason: 'budget' })],
+      ...cleanDelivery(),
+    });
+    expect(present).toBe('degraded:budget_starved');
+    expect(full).toBe('degraded:budget_starved');
+    expect(present).toBe(full);
+  });
+
+  it('agree when the main pass stopped for a non-budget reason: degraded:provider_partial', () => {
+    const present = derivePresentTimeVerdict([incompleteMainFinding('max_turns')]);
+    const full = computeVerdict({
+      pipelineFailed: false,
+      providerFailure: false,
+      passes: [mainPass({ stopReason: 'max_turns' })],
+      ...cleanDelivery(),
+    });
+    expect(present).toBe('degraded:provider_partial');
+    expect(full).toBe('degraded:provider_partial');
+    expect(present).toBe(full);
+  });
+
+  it('agree when only an extra pass (not main) stalled on budget: degraded:budget_starved', () => {
+    // Mirrors attestation.test.ts's own computeVerdict case for this shape
+    // (a doc-truth-only budget starvation folded into the overall verdict).
+    const present = derivePresentTimeVerdict([
+      summaryFinding(),
+      incompleteExtraPassFinding('budget'),
+    ]);
+    const full = computeVerdict({
+      pipelineFailed: false,
+      providerFailure: false,
+      passes: [mainPass(), { ...mainPass({ stopReason: 'budget' }), name: 'doc-truth' }],
+      ...cleanDelivery(),
+    });
+    expect(present).toBe('degraded:budget_starved');
+    expect(full).toBe('degraded:budget_starved');
+    expect(present).toBe(full);
+  });
+
+  it('DIVERGES (documented) when the plugin never ran: present is null, full is delivered', () => {
+    // The one pinned, deliberate mismatch — see derivePresentTimeVerdict's own
+    // doc comment. `computeVerdict` fed `agentAttempted: false` calls a no-op
+    // review "delivered" (nothing could have gone wrong). Rendering that same
+    // label here would falsely claim a review happened, so this function
+    // returns `null` (buildTrustSection renders nothing) instead. If a future
+    // change makes `computeVerdict` stop mapping this case to `'delivered'`,
+    // this assertion — not just the PR description — is what should catch it.
+    const present = derivePresentTimeVerdict([]);
+    const full = computeVerdict({
+      pipelineFailed: false,
+      providerFailure: false,
+      passes: [], // buildPassesAndBudget's agentAttempted: false shape
+      ...cleanDelivery(),
+    });
+    expect(present).toBeNull();
+    expect(full).toBe('delivered');
+    expect(present).not.toBe(full);
   });
 });

@@ -945,7 +945,7 @@ function buildFindingsSection(bugFindings: ReviewFinding[]): string[] {
  * orthogonal to this plugin. Nothing here is a NEW classification — it's a
  * narrower read of the exact same ground truth `computeVerdict` uses.
  */
-type PresentTimeVerdict = Extract<
+export type PresentTimeVerdict = Extract<
   AttestationVerdict,
   | 'delivered'
   | 'degraded:budget_starved'
@@ -973,9 +973,25 @@ type PresentTimeVerdict = Extract<
  * headline already tracks via `hasIncompleteMainPass`).
  *
  * Returns `null` when the agent-review plugin didn't run this review at all
- * (no summary finding of any kind) — nothing to attest to.
+ * (no summary finding of any kind) — nothing to attest to. This is a
+ * DELIBERATE, documented divergence from `computeVerdict`: fed the
+ * equivalent `agentAttempted: false` input, `computeVerdict` returns
+ * `'delivered'` (an early-exit review — e.g. zero analyzable files — that
+ * trivially had nothing go wrong is a fair "delivered"). Rendering `null`
+ * here instead of borrowing that same label avoids stamping a "Trust:
+ * Delivered" line onto a plugin that never actually reviewed anything —
+ * the two functions read "delivered" differently on purpose in exactly
+ * this one case, and `plugins-agent-trust-badge.test.ts`'s consistency
+ * suite pins both sides so a future change to either taxonomy fails a test
+ * instead of silently drifting.
+ *
+ * Exported (alongside `PresentTimeVerdict`) solely so that consistency
+ * suite can call this function directly rather than re-deriving it from
+ * rendered markdown.
  */
-function derivePresentTimeVerdict(summaryFindings: ReviewFinding[]): PresentTimeVerdict | null {
+export function derivePresentTimeVerdict(
+  summaryFindings: ReviewFinding[],
+): PresentTimeVerdict | null {
   if (summaryFindings.length === 0) return null;
   if (hasProviderFailure(summaryFindings)) return 'failed:provider_never_ran';
   const incompleteFinding = summaryFindings.find(
