@@ -255,29 +255,47 @@ export class SqliteBackend implements VectorDBInterface {
   }
 
   /**
-   * Reconnect WITHOUT ever leaving `this.db` null: build the new connection
-   * first, swap it in, and only then close the old one. `checkAndReconnect`
+   * Reconnect WITHOUT ever leaving `this.db` null OR closed-but-still-
+   * referenced: build the new connection first, swap it in, and only THEN
+   * close the old one — and only on the success path. `checkAndReconnect`
    * (the MCP server's version-check poll) runs this on the SAME vectorDB
-   * instance concurrent tool handlers share — the previous close-then-open
-   * order left a real (reproduced) window where a concurrent handler's
-   * `requireDb()` would throw "Vector database not initialized" mid-request.
-   * Old-handle-until-swap, never null, closes that window entirely.
+   * instance concurrent tool handlers share, so both failure modes are
+   * user-visible, not internal bookkeeping:
+   *  - close-then-open (the original bug): a null window where a concurrent
+   *    handler's `requireDb()` throws "Vector database not initialized".
+   *  - closing the old handle unconditionally in a `finally` (a regression
+   *    introduced while fixing the first one): when `openConnection()`
+   *    itself throws — e.g. the retry ladder in `withOpenRetry` is
+   *    exhausted — the swap above never runs, so `oldDb` still IS `this.db`.
+   *    Closing it anyway poisons `this.db` with a closed handle for the
+   *    rest of the process; every later call sees a closed-connection error
+   *    instead of continuing on the still-valid old connection. The fix:
+   *    the close only happens after `this.db = db` — i.e. only once the new
+   *    connection has actually taken over — never in a path where the swap
+   *    didn't happen.
    */
   async reconnect(): Promise<void> {
     const oldDb = this.db;
+    let db: DatabaseType.Database;
+    let version: number;
     try {
-      const { db, version } = await this.openConnection();
-      this.db = db;
-      this.currentVersion = version;
+      ({ db, version } = await this.openConnection());
     } catch (error) {
+      // openConnection() failed (including an exhausted withOpenRetry
+      // ladder) — `this.db` is untouched, still the valid old connection.
       throw wrapError(error, 'Failed to reconnect to vector database');
-    } finally {
-      try {
-        oldDb?.close();
-      } catch {
-        // Best-effort: `this.db` has already swapped to the new connection,
-        // so a failure closing the retired handle isn't user-visible.
-      }
+    }
+
+    this.db = db;
+    this.currentVersion = version;
+
+    // Only reachable once the swap above succeeded, so `oldDb` is genuinely
+    // retired — safe to close.
+    try {
+      oldDb?.close();
+    } catch {
+      // Best-effort: `this.db` already points at the new connection, so a
+      // failure closing the retired handle isn't user-visible.
     }
   }
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
@@ -321,6 +321,34 @@ describe('SqliteBackend', () => {
       await db.reconnect();
       const results = await db.scanAll();
       expect(results.map(r => r.metadata.file)).toContain('external.ts');
+    });
+
+    it('leaves this.db as the still-usable OLD connection when the new one fails to open', async () => {
+      // Regression test for a real bug introduced by the very fix above:
+      // the first version closed `oldDb` unconditionally in a `finally`
+      // block. On the FAILURE path (openConnection() throws — e.g. an
+      // exhausted withOpenRetry ladder), the swap to `this.db = db` never
+      // runs, so `oldDb` still IS `this.db` — closing it there poisons
+      // `this.db` with a closed handle for the rest of the process, instead
+      // of leaving the still-valid old connection in place. Deterministic:
+      // forces the private `openConnection()` to reject, no timing involved.
+      await insertOne(db, makeChunk().metadata, 'content');
+
+      const spy = vi
+        .spyOn(db as any, 'openConnection')
+        .mockRejectedValueOnce(new Error('simulated exhausted retry ladder'));
+
+      await expect(db.reconnect()).rejects.toThrow(/Failed to reconnect/);
+
+      // this.db must still be the OLD connection, open and usable — NOT a
+      // closed handle. A read must still succeed with the old data intact.
+      await expect(db.scanAll()).resolves.toHaveLength(1);
+
+      spy.mockRestore();
+
+      // A subsequent, successful reconnect still works normally afterward.
+      await db.reconnect();
+      await expect(db.scanAll()).resolves.toHaveLength(1);
     });
   });
 
