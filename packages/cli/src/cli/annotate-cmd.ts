@@ -4,6 +4,7 @@ import { createVectorDB, ComplexityAnalyzer } from '@liendev/core';
 import {
   findTestAssociationsFromChunks,
   findSwiftSymbolUsageAssociations,
+  findCSharpTypeReferenceDependents,
   computeBlastRadiusRisk,
   detectLanguage,
   hasWholeModuleImports,
@@ -315,6 +316,29 @@ function computeSwiftSymbolUsageFallback(
   return findSwiftSymbolUsageAssociations([filepath], allChunks).get(filepath) ?? [];
 }
 
+/**
+ * A fifth, C#-specific tier mirroring `computeSwiftSymbolUsageFallback`
+ * immediately above: when `tests` (tier 1, import-based) is empty and
+ * `filepath`'s language sets `enclosingNamespaceAccess` (C#), reuse
+ * `findCSharpTypeReferenceDependents` -- the SAME namespace-scoped signal
+ * `get_dependents`'s file-level recovery already relies on (#930/#943) --
+ * filtered down to the TEST-file subset of `filepath`'s recovered
+ * dependents. Measured on serilog/serilog: 116/216 (54%) of files gain a
+ * recovered test-file dependent this way, cutting the previous 100%
+ * "test coverage not determinable" figure roughly in half. Deliberately NOT
+ * merged into `tests` itself, mirroring every other fallback tier here.
+ */
+function computeCSharpTypeReferenceTestFallback(
+  tests: string[],
+  filepath: string,
+  allChunks: CodeChunk[],
+): string[] {
+  if (tests.length > 0) return [];
+  const language = detectLanguage(filepath);
+  if (!language || !hasEnclosingNamespaceAccess(language)) return [];
+  return findCSharpTypeReferenceDependents(filepath, allChunks).filter(isTestFile);
+}
+
 /** All per-file analysis `run()` needs to decide whether/how to print. */
 interface AnnotationData {
   allChunks: CodeChunk[];
@@ -330,6 +354,7 @@ interface AnnotationData {
   tests: string[];
   packageLevelTests: string[];
   symbolUsageTests: string[];
+  csharpTypeReferenceTests: string[];
   complexity: ComplexitySummary;
   headroom: ComplexityHeadroom;
   risk: BlastRadiusRisk;
@@ -366,6 +391,11 @@ async function computeAnnotationData(
   const tests = findTestAssociationsFromChunks([filepath], allChunks, rootDir).get(filepath) ?? [];
   const packageLevelTests = computePackageLevelFallback(tests, filepath, allChunks, rootDir);
   const symbolUsageTests = computeSwiftSymbolUsageFallback(tests, filepath, allChunks);
+  const csharpTypeReferenceTests = computeCSharpTypeReferenceTestFallback(
+    tests,
+    filepath,
+    allChunks,
+  );
   const complexity = computeComplexitySummary(allChunks, filepath);
   // Plan-time nudge (mirrors get_files_context's complexityHeadroom): reuses
   // the exact same computation the MCP tool uses, so a "near budget" verdict
@@ -403,6 +433,7 @@ async function computeAnnotationData(
     tests,
     packageLevelTests,
     symbolUsageTests,
+    csharpTypeReferenceTests,
     complexity,
     headroom,
     risk,
@@ -476,6 +507,7 @@ async function run(file: string, options?: AnnotateOptions): Promise<void> {
       data.tests,
       data.packageLevelTests,
       data.symbolUsageTests,
+      data.csharpTypeReferenceTests,
       data.complexity,
       data.risk,
       data.headroom,
@@ -511,6 +543,15 @@ export interface FileTestAssociations {
    * `computeSwiftSymbolUsageFallback`.
    */
   symbolUsageTests: string[];
+  /**
+   * C#'s counterpart to `symbolUsageTests` immediately above (a FIFTH tier,
+   * same confidence bracket): populated only when `tests` is empty and the
+   * file's language sets `enclosingNamespaceAccess` (C#) — see
+   * `computeCSharpTypeReferenceTestFallback`. Same non-merging discipline:
+   * `lookupTestAssociations`'s caller reads only `.tests`; only the printed
+   * reminder (`formatTestReminder`) consults this field.
+   */
+  csharpTypeReferenceTests: string[];
   /**
    * #894: true when `rootDir`'s index has never been built (`hasData()` is
    * false for both standalone and worktree-overlay backends — see
@@ -554,6 +595,7 @@ async function scanTestAssociations(paths: ResolvedPaths): Promise<FileTestAssoc
         tests: [],
         packageLevelTests: [],
         symbolUsageTests: [],
+        csharpTypeReferenceTests: [],
         indexMissing: true,
       };
     }
@@ -562,7 +604,20 @@ async function scanTestAssociations(paths: ResolvedPaths): Promise<FileTestAssoc
       findTestAssociationsFromChunks([filepath], allChunks, rootDir).get(filepath) ?? [];
     const packageLevelTests = computePackageLevelFallback(tests, filepath, allChunks, rootDir);
     const symbolUsageTests = computeSwiftSymbolUsageFallback(tests, filepath, allChunks);
-    return { filepath, rootDir, tests, packageLevelTests, symbolUsageTests, indexMissing: false };
+    const csharpTypeReferenceTests = computeCSharpTypeReferenceTestFallback(
+      tests,
+      filepath,
+      allChunks,
+    );
+    return {
+      filepath,
+      rootDir,
+      tests,
+      packageLevelTests,
+      symbolUsageTests,
+      csharpTypeReferenceTests,
+      indexMissing: false,
+    };
   } finally {
     if (needsChdir) process.chdir(originalCwd);
   }
@@ -586,14 +641,36 @@ export async function lookupTestAssociations(file: string): Promise<FileTestAsso
  * no associated tests (the signal for the hook to stay silent).
  */
 async function runTestsOnly(paths: ResolvedPaths): Promise<void> {
-  const { filepath, rootDir, tests, packageLevelTests, symbolUsageTests, indexMissing } =
-    await scanTestAssociations(paths);
+  const {
+    filepath,
+    rootDir,
+    tests,
+    packageLevelTests,
+    symbolUsageTests,
+    csharpTypeReferenceTests,
+    indexMissing,
+  } = await scanTestAssociations(paths);
   if (indexMissing) {
     console.log(formatNoIndexWarning(rootDir));
     return;
   }
-  if (tests.length === 0 && packageLevelTests.length === 0 && symbolUsageTests.length === 0) return;
-  console.log(formatTestReminder(filepath, tests, packageLevelTests, symbolUsageTests));
+  if (
+    tests.length === 0 &&
+    packageLevelTests.length === 0 &&
+    symbolUsageTests.length === 0 &&
+    csharpTypeReferenceTests.length === 0
+  ) {
+    return;
+  }
+  console.log(
+    formatTestReminder(
+      filepath,
+      tests,
+      packageLevelTests,
+      symbolUsageTests,
+      csharpTypeReferenceTests,
+    ),
+  );
 }
 
 /**
@@ -630,14 +707,23 @@ export function formatTestReminder(
   tests: string[],
   packageLevelTests: string[] = [],
   symbolUsageTests: string[] = [],
+  csharpTypeReferenceTests: string[] = [],
 ): string {
-  if (tests.length === 0 && packageLevelTests.length > 0) {
+  if (tests.length > 0) {
+    const shown = formatTruncatedList(tests);
+    return `Lien: you changed ${filepath} — associated tests: ${shown}. Run them before completing.`;
+  }
+  if (packageLevelTests.length > 0) {
     const shown = formatTruncatedList(packageLevelTests);
     return `Lien: you changed ${filepath} — no dedicated test file, but its package has: ${shown}. Consider running them before completing.`;
   }
-  if (tests.length === 0 && packageLevelTests.length === 0 && symbolUsageTests.length > 0) {
+  if (symbolUsageTests.length > 0) {
     const shown = formatTruncatedList(symbolUsageTests);
     return `Lien: you changed ${filepath} — no import-verified test match, but symbol usage suggests: ${shown} (inferred, not import-verified). Consider running them before completing.`;
+  }
+  if (csharpTypeReferenceTests.length > 0) {
+    const shown = formatTruncatedList(csharpTypeReferenceTests);
+    return `Lien: you changed ${filepath} — no import-verified test match, but type-reference matching suggests: ${shown} (inferred, not import-verified). Consider running them before completing.`;
   }
   const shown = formatTruncatedList(tests);
   return `Lien: you changed ${filepath} — associated tests: ${shown}. Run them before completing.`;
@@ -672,6 +758,7 @@ function emitAnnotation(
   tests: string[],
   packageLevelTests: string[],
   symbolUsageTests: string[],
+  csharpTypeReferenceTests: string[],
   complexity: ComplexitySummary,
   risk: BlastRadiusRisk,
   headroom: ComplexityHeadroom,
@@ -683,7 +770,9 @@ function emitAnnotation(
     // Mirrors formatTests's "not determinable" honesty label -- see #930/#936.
     lines.push(`  • Dependents not determinable from imports (enclosing-namespace access).`);
   }
-  lines.push(`  • ${formatTests(tests, filepath, packageLevelTests, symbolUsageTests)}`);
+  lines.push(
+    `  • ${formatTests(tests, filepath, packageLevelTests, symbolUsageTests, csharpTypeReferenceTests)}`,
+  );
   if (complexity.warningCount > 0) {
     lines.push(`  • ${formatComplexity(complexity)}`);
   }
@@ -788,30 +877,51 @@ export function formatDependents(
  * "not determinable" label — real signal, but not import-verified, so it
  * gets its own label rather than silently upgrading to either of the other
  * two.
+ *
+ * `csharpTypeReferenceTests` is C#'s counterpart to `symbolUsageTests` (a
+ * FIFTH tier, same confidence bracket): consulted only for an
+ * `enclosingNamespaceAccess` language (C#) whose `tests` came back empty,
+ * reusing `get_dependents`' own namespace-scoped type-reference signal
+ * (`findCSharpTypeReferenceDependents`, #930/#943) filtered to the TEST-file
+ * subset of the recovered dependents. Same "inferred, not import-verified"
+ * wording and same non-merging discipline as `symbolUsageTests`.
  */
+/** Tier 4 (Swift, `wholeModuleImports`): see `formatTests`'s doc comment. */
+function formatWholeModuleImportTests(symbolUsageTests: string[]): string {
+  if (symbolUsageTests.length > 0) {
+    return `Test coverage inferred from symbol usage (not import-verified): ${formatTruncatedList(symbolUsageTests)}.`;
+  }
+  return 'Test coverage not determinable from imports (whole-module import).';
+}
+
+/** Tier 5 (C#, `enclosingNamespaceAccess`): see `formatTests`'s doc comment. */
+function formatEnclosingNamespaceAccessTests(csharpTypeReferenceTests: string[]): string {
+  if (csharpTypeReferenceTests.length > 0) {
+    return `Test coverage inferred from type-reference matching (not import-verified): ${formatTruncatedList(csharpTypeReferenceTests)}.`;
+  }
+  return 'Test coverage not determinable from imports (enclosing-namespace access).';
+}
+
 export function formatTests(
   tests: string[],
   filepath?: string,
   packageLevelTests: string[] = [],
   symbolUsageTests: string[] = [],
+  csharpTypeReferenceTests: string[] = [],
 ): string {
-  if (tests.length === 0) {
-    const language = filepath ? detectLanguage(filepath) : null;
-    if (language && hasWholeModuleImports(language)) {
-      if (symbolUsageTests.length > 0) {
-        return `Test coverage inferred from symbol usage (not import-verified): ${formatTruncatedList(symbolUsageTests)}.`;
-      }
-      return 'Test coverage not determinable from imports (whole-module import).';
-    }
-    if (language && hasEnclosingNamespaceAccess(language)) {
-      return 'Test coverage not determinable from imports (enclosing-namespace access).';
-    }
-    if (packageLevelTests.length > 0) {
-      return `Test coverage (package-level, no dedicated test file for this specific file): ${formatTruncatedList(packageLevelTests)}.`;
-    }
-    return 'No test coverage.';
+  if (tests.length > 0) return `Test coverage: ${formatTruncatedList(tests)}.`;
+
+  const language = filepath ? detectLanguage(filepath) : null;
+  if (language && hasWholeModuleImports(language)) {
+    return formatWholeModuleImportTests(symbolUsageTests);
   }
-  return `Test coverage: ${formatTruncatedList(tests)}.`;
+  if (language && hasEnclosingNamespaceAccess(language)) {
+    return formatEnclosingNamespaceAccessTests(csharpTypeReferenceTests);
+  }
+  if (packageLevelTests.length > 0) {
+    return `Test coverage (package-level, no dedicated test file for this specific file): ${formatTruncatedList(packageLevelTests)}.`;
+  }
+  return 'No test coverage.';
 }
 
 export function formatComplexity(summary: ComplexitySummary): string {

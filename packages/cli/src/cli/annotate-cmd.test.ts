@@ -351,6 +351,68 @@ describe('formatTests', () => {
       );
     });
   });
+
+  // #930/#943's C# type-reference signal, reused as a FIFTH test-association
+  // tier mirroring Swift's symbol-usage fallback immediately above — same
+  // "inferred, not import-verified" wording and same precedence (only
+  // consulted once tier 1's `tests` is empty).
+  describe('C# type-reference fallback (#930/#943 reused for test-association)', () => {
+    it('reports the distinct inferred wording when tests is empty but type-reference tests exist', () => {
+      expect(
+        formatTests(
+          [],
+          'src/Serilog/Policies/ProjectedDestructuringPolicy.cs',
+          [],
+          [],
+          ['test/Serilog.Tests/Configuration/LoggerConfigurationTests.cs'],
+        ),
+      ).toBe(
+        'Test coverage inferred from type-reference matching (not import-verified): test/Serilog.Tests/Configuration/LoggerConfigurationTests.cs.',
+      );
+    });
+
+    it('truncates type-reference fallback tests with a (+N more) suffix', () => {
+      expect(
+        formatTests(
+          [],
+          'src/Serilog/Core/Logger.cs',
+          [],
+          [],
+          [
+            'test/Serilog.Tests/Core/LoggerTests.cs',
+            'test/Serilog.Tests/Core/AuditSinkTests.cs',
+            'test/Serilog.Tests/Core/FailureListenerTests.cs',
+          ],
+        ),
+      ).toBe(
+        'Test coverage inferred from type-reference matching (not import-verified): test/Serilog.Tests/Core/LoggerTests.cs, test/Serilog.Tests/Core/AuditSinkTests.cs (+1 more).',
+      );
+    });
+
+    it('still reports the honest "not determinable" label when type-reference tests are also empty', () => {
+      expect(formatTests([], 'src/Serilog/Untested.cs', [], [], [])).toBe(
+        'Test coverage not determinable from imports (enclosing-namespace access).',
+      );
+    });
+
+    it('ignores type-reference tests entirely once a real (tier 1) association exists', () => {
+      expect(
+        formatTests(
+          ['test/Serilog.Tests/Core/LoggerTests.cs'],
+          'src/Serilog/Core/Logger.cs',
+          [],
+          [],
+          ['test/should-not-appear.cs'],
+        ),
+      ).toBe('Test coverage: test/Serilog.Tests/Core/LoggerTests.cs.');
+    });
+
+    it('does not apply the C# fallback wording on a non-enclosing-namespace-access language', () => {
+      expect(formatTests([], 'src/user.ts', [], [], ['src/user-inferred.test.ts'])).toBe(
+        'No test coverage.',
+      );
+    });
+  });
 });
 
 describe('formatTestReminder', () => {
@@ -430,6 +492,52 @@ describe('formatTestReminder', () => {
       ),
     ).toBe(
       'Lien: you changed Source/Core/Session.swift — associated tests: Tests/SessionTests.swift. Run them before completing.',
+    );
+  });
+
+  // #930/#943's C# type-reference signal, reused as a FIFTH test-association
+  // tier — mirrors the symbol-usage fallback wording above, for the shorter
+  // post-edit reminder line. Consulted only when tests, package-level tests,
+  // AND symbol-usage tests are all empty.
+  it('reports the type-reference fallback wording when tests, package-level, and symbol-usage tests are all empty', () => {
+    expect(
+      formatTestReminder(
+        'src/Serilog/Policies/ProjectedDestructuringPolicy.cs',
+        [],
+        [],
+        [],
+        ['test/Serilog.Tests/Configuration/LoggerConfigurationTests.cs'],
+      ),
+    ).toBe(
+      'Lien: you changed src/Serilog/Policies/ProjectedDestructuringPolicy.cs — no import-verified test match, but type-reference matching suggests: test/Serilog.Tests/Configuration/LoggerConfigurationTests.cs (inferred, not import-verified). Consider running them before completing.',
+    );
+  });
+
+  it('prefers the symbol-usage wording over type-reference when both are non-empty', () => {
+    expect(
+      formatTestReminder(
+        'Source/Core/HTTPHeaders.swift',
+        [],
+        [],
+        ['Tests/HTTPHeadersTests.swift'],
+        ['should-not-appear.cs'],
+      ),
+    ).toBe(
+      'Lien: you changed Source/Core/HTTPHeaders.swift — no import-verified test match, but symbol usage suggests: Tests/HTTPHeadersTests.swift (inferred, not import-verified). Consider running them before completing.',
+    );
+  });
+
+  it('prefers the direct-tests wording over type-reference when both are non-empty', () => {
+    expect(
+      formatTestReminder(
+        'src/Serilog/Core/Logger.cs',
+        ['test/Serilog.Tests/Core/LoggerTests.cs'],
+        [],
+        [],
+        ['should-not-appear.cs'],
+      ),
+    ).toBe(
+      'Lien: you changed src/Serilog/Core/Logger.cs — associated tests: test/Serilog.Tests/Core/LoggerTests.cs. Run them before completing.',
     );
   });
 });
@@ -768,6 +876,71 @@ describe('annotateCommand — --tests-only (integration)', () => {
       expect(logSpy).toHaveBeenCalledTimes(1);
       expect(logSpy.mock.calls[0][0]).toBe(
         `Lien: you changed ${swiftTarget} — no import-verified test match, but symbol usage suggests: Tests/HTTPHeadersTests.swift (inferred, not import-verified). Consider running them before completing.`,
+      );
+    } finally {
+      await fs.rm(fixtureDir, { recursive: true, force: true });
+    }
+  });
+
+  // #930/#943, end-to-end: a C# source file reachable only via implicit
+  // enclosing-namespace access (no `using` names it at all) still surfaces
+  // its non-import type-reference fallback through the real
+  // `scanTestAssociations` -> `computeCSharpTypeReferenceTestFallback` ->
+  // `findCSharpTypeReferenceDependents` -> `formatTestReminder` pipeline --
+  // mirrors the Swift symbol-usage integration test immediately above.
+  it('prints the type-reference fallback reminder for a C# file with no import signal', async () => {
+    const fs = await import('fs/promises');
+    const repoRoot = path.resolve(process.cwd(), '..', '..');
+    const fixtureDir = path.join(repoRoot, '__annotate_csharp_fixture__');
+    const csharpTarget = '__annotate_csharp_fixture__/CollectingSink.cs';
+    await fs.mkdir(fixtureDir, { recursive: true });
+    await fs.writeFile(
+      path.join(fixtureDir, 'CollectingSink.cs'),
+      'namespace Serilog.Tests.Support;\n\npublic class CollectingSink { }\n',
+    );
+
+    const declChunk = {
+      content: 'public class CollectingSink { }',
+      metadata: {
+        file: csharpTarget,
+        startLine: 3,
+        endLine: 3,
+        type: 'class',
+        language: 'csharp',
+        symbolName: 'CollectingSink',
+        symbolType: 'class',
+        signature: 'class CollectingSink',
+      },
+      score: 0,
+      relevance: 'not_relevant',
+    };
+    const csharpTestChunk = {
+      content: 'var sink = new CollectingSink();',
+      metadata: {
+        file: 'Serilog.Tests/Configuration/LoggerConfigurationTests.cs',
+        startLine: 1,
+        endLine: 10,
+        type: 'function',
+        language: 'csharp',
+        symbolName: 'TestMethod',
+        symbolType: 'method',
+      },
+      score: 0,
+      relevance: 'not_relevant',
+    };
+    vi.mocked(coreModule.createVectorDB).mockResolvedValueOnce({
+      initialize: vi.fn().mockResolvedValue(undefined),
+      hasData: vi.fn().mockResolvedValue(true),
+      scanAll: vi.fn().mockResolvedValue([declChunk, csharpTestChunk]),
+    } as unknown as Awaited<ReturnType<typeof coreModule.createVectorDB>>);
+
+    try {
+      await annotateCommand(csharpTarget, { testsOnly: true });
+
+      expect(errSpy).not.toHaveBeenCalled();
+      expect(logSpy).toHaveBeenCalledTimes(1);
+      expect(logSpy.mock.calls[0][0]).toBe(
+        `Lien: you changed ${csharpTarget} — no import-verified test match, but type-reference matching suggests: Serilog.Tests/Configuration/LoggerConfigurationTests.cs (inferred, not import-verified). Consider running them before completing.`,
       );
     } finally {
       await fs.rm(fixtureDir, { recursive: true, force: true });
