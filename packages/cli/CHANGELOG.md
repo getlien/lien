@@ -1,5 +1,497 @@
 # @liendev/lien
 
+## 0.73.0
+
+### Minor Changes
+
+- 76a42bc: `list_functions` and `find_similar` reported result counts that could not be
+  trusted, and — worse — hid real truncation. **This changes the response
+  contract for `nextOffset`, so callers that computed their own offsets should
+  read the note below.**
+
+  Three distinct defects, all in `applyResponseBudget`
+  (`packages/cli/src/mcp/utils/response-budget.ts`), which builds its note from an
+  array the handler had _already_ capped by the request's own `limit`:
+  1. **A total that tracked the request, not reality.** On sidekiq (true total:
+     703 symbols) the same `pattern: ".*"` query reported `Showing 23 of 50` at
+     `limit: 50` and `Showing 23 of 200` at `limit: 200`. Literally true — 23 of
+     the N fetched — but any reader takes the denominator as the total, so it
+     understated 703 by more than an order of magnitude. The note no longer states
+     a total at all; it reports only what the size cap itself dropped.
+  2. **Silent truncation.** At `limit: 10` the page genuinely _was_ cut off and
+     the tool said nothing. `hasMore` is now forced true whenever items are
+     dropped, so a stale upstream `hasMore: false` cannot survive a trim, and
+     `list_functions` emits a note for the previously-silent case.
+  3. **A pagination cursor that skipped items.** `nextOffset` was computed as
+     `offset + limit` _before_ the size cap ran, so following the tool's own advice
+     after a trimmed page silently skipped the dropped entries. Verified on an
+     isolated sidekiq clone: page 0 returned 24 items and advised `offset: 50`,
+     losing 26 real symbols. `nextOffset` is now corrected by the same drop count
+     and always equals `offset + items actually delivered`.
+
+  **Contract change:** `nextOffset` is now present whenever `results` is non-empty,
+  **regardless of `hasMore`** — previously it appeared only when `hasMore` was true,
+  which meant a final page that the size cap then trimmed ended up `hasMore: true`
+  with no cursor at all and no way to reach the rest. `hasMore` now answers "is it
+  worth paging?" and `nextOffset` answers "where would I resume?". Always pass
+  `nextOffset` back verbatim rather than computing `offset + limit` yourself; the
+  size cap can shrink a page after the fact and only that field is corrected for it.
+  `tools.ts` documents this.
+
+  Also documented (behaviour unchanged): `list_functions` pattern matching is
+  case-insensitive and unranked, which was previously undocumented and interacted
+  badly with the bogus totals — a real `class Request` in Alamofire didn't surface
+  until `offset: 50`, behind lowercase test-method matches, while the "total" was
+  misleading throughout.
+
+### Patch Changes
+
+- 76a42bc: The read-time impact nudge was **completely silent** for any project whose path
+  resolves through a symlink — which includes every macOS project under `/tmp` or
+  `/var`, and any repo reached via a symlinked ancestor.
+
+  Claude Code sends an **absolute** `tool_input.file_path`, while `rootDir` comes
+  from `process.cwd()`, which the OS returns already realpath-resolved. Two
+  `path.relative` sites compared one against the other without canonicalizing:
+  - `toRepoRelativeFile` (`nudge-events.ts`) logged
+    `"file": "../../../../tmp/lien-dogfood-460173c9/hono/src/context.ts"` instead of
+    `"src/context.ts"`, corrupting the paths the `lien stats` funnel joins on.
+  - `resolvePaths` (`annotate-cmd.ts`) — the worse one. There a `..`-prefixed result
+    trips an "outside the project root" rejection, so `lien annotate` produced **no
+    output at all** for a real in-repo file. Confirmed on the released build:
+
+  ```console
+  $ lien annotate /abs/path/behind/symlink/src/utils/url.ts
+  (nothing)
+  $ lien annotate src/utils/url.ts
+  ⚠ Lien: _getQueryParam cognitive 45/15 (over) ...
+  Lien impact for src/utils/url.ts: • 11 files import this ...
+  ```
+
+  Since `annotate-read.sh` only emits when the annotation is non-empty, the entire
+  read-time nudge — and its shown-event recording — vanished for affected users,
+  with nothing to indicate it. A nudge that fails by not appearing is
+  indistinguishable from a nudge with nothing to say.
+
+  Both sites now canonicalize `rootDir` and the file argument through a shared
+  `canonicalizePath` (`fs.realpathSync`, falling back to the parent directory for a
+  path that no longer exists, then to identity — it never throws, because these run
+  inside hooks on every edit), and reject a result that still escapes the root rather
+  than recording it.
+
+  Other `path.relative(process.cwd(), …)` sites were audited and ruled out:
+  `delta-git.ts` already had its own equivalent fix (the pattern this mirrors),
+  `agent-tools.ts` realpaths `rootDir` once up front, and the indexer paths take
+  `rootDir` from the same construction as their file arguments. The review harness's
+  `toRepoRelative` is offline tooling, not runtime telemetry, and was left alone.
+
+- 76a42bc: `SERVER_INSTRUCTIONS` — the always-on guidance every MCP client receives on
+  `initialize` — told models to "call `search_code` FIRST" for discovery,
+  unconditionally, while its own opening paragraph reserved grep for "exact
+  literals" and omitted exact symbol names entirely. So an agent that already knew
+  the identifier it wanted was being instructed to paraphrase it into a BM25 query
+  first.
+
+  CLAUDE.md already carried the correct split ("Use grep/glob ONLY for: exact symbol
+  names, literal strings, config keys, TODOs"), so this was one-directional drift —
+  and the surface a **model** actually reads was the wrong half.
+
+  Reframed around what the caller already knows: an exact symbol name goes to
+  `list_functions`, an exact literal to grep — _don't paraphrase a name you already
+  have_ — and a concept without a name goes to `search_code` before falling back to
+  grep/glob. Same tools, same BM25 / camelCase-split / no-embeddings caveats, no new
+  policy.
+
+  Both texts also now state that **zero results is not proof of absence**: an index
+  that hasn't caught up with a recent edit makes a symbol that exists on disk
+  unfindable, and the tool cannot tell you which case you're in. Observed during the
+  post-release dogfood — a search for a symbol added after the last index returned
+  five results ranked `"highly_relevant"`, none of which contained it, and grep found
+  it immediately. The tool-side half of that honesty is in the same release; this is
+  the always-on guidance half.
+
+  The hand-sync between these two documents is guarded by
+  `instructions.claude-md-sync.test.ts`, which requires both to carry the discovery
+  framing and all three search caveats.
+
+- f2937c9: #953: `get_dependents` fabricated direct (`hops:1`) dependency edges for any
+  relative import that resolves to a bare DIRECTORY path instead of a real
+  file — a confident wrong answer, with no caveat, that fed straight into
+  `riskLevel`.
+
+  Confirmed via the foreign-repo dogfood on honojs/hono:
+  `src/middleware/jwt/index.ts`'s only outward-facing statement is
+  `import type {} from '../..'` (a dots-only, empty type import). This resolves
+  (correctly) to the bare directory `src`, but nothing then resolved `src` to
+  its real entry point (`src/index.ts`). Left as a bare directory name, the
+  specifier fuzzy-matched via `matchesFile`'s Python Strategy 5
+  (`matchesParentPythonPackage`) against EVERY file anywhere under `src/` — for
+  a TypeScript importer with no Python semantics at all. `get_dependents` for
+  `src/utils/color.ts` reported `dependentCount: 13` (true: 4), `riskLevel:
+"high"` (true: `"medium"`); `src/utils/url.ts` reported 3 of its 12
+  production dependents as fabricated. This is the same false-hub shape #929
+  already diagnosed (Python's own doc comment names this exact hono repro) but
+  left unguarded on the two call sites that build `get_dependents`' actual
+  result (`findDependentChunks`'s fuzzy loop in both
+  `packages/parser/src/dependency-analyzer.ts` and
+  `packages/cli/src/mcp/handlers/dependency-analyzer.ts`), rather than the
+  guarded `importMatchesTarget` primitive #929 introduced.
+
+  Two-part fix:
+  - **Root cause: resolve a directory-shaped relative import to its real entry
+    point.** A new `resolveJsDirectoryIndex` (`packages/parser/src/js-directory-index.ts`)
+    checks whether a relative-resolved specifier names a real on-disk directory
+    and, if so, redirects it to that directory's `index.<ext>` file (mirrors
+    `workspace-packages.ts`'s entry-file detection, scoped to a single
+    directory). `../..` now resolves to `src/index`, which participates in
+    ordinary EXACT matching — no fuzzy strategy involved at all. This is what
+    keeps `jwt/index.ts` et al. correctly attributed as `hops:1` dependents of
+    `src/index.ts` (the file `../..` actually names) instead of just deleting
+    the edge outright. Generalizes beyond the dots-only case: a named directory
+    import (`../utils` where `src/utils/index.ts` exists) is fixed the same
+    way.
+  - **Residual guard: gate Python Strategy 5 per chunk.** For the case where no
+    entry file exists (so the directory-index resolution is a no-op), both
+    `addFuzzyMatchChunks` implementations now re-derive the #929 guard per
+    chunk — mirroring the existing #887 per-chunk pattern — so a non-Python
+    importer's coincidental bare-word match can never count. Real Python
+    bare-package matching (`import flask` -> `flask/__init__.py` and children)
+    is untouched.
+
+  Verified the BFS depth mechanics needed no changes: once the seed (depth-1)
+  edges are correct, `depth: 2+` results clean up for free (checked live on the
+  hono corpus).
+
+  Also: `get_dependents`'s response echoed the _requested_ `depth` even for a
+  symbol-scoped query, where `depth > 1` is documented as ignored (symbol
+  queries always run at depth 1). Now echoes the depth that actually ran.
+
+- 76a42bc: Two MCP notes asserted a cause they had not established — plausible, specific,
+  and wrong, which is the failure mode a consuming model cannot detect.
+
+  **`list_functions` / `search_code` blamed your query for a missing index.** With
+  gin's index moved aside, a search for `StringToBytes` — which unquestionably
+  exists — returned:
+
+  ```json
+  "results": [], "note": "0 results. Try a broader regex pattern (e.g. \".*\")
+  or omit the symbolType filter. ... Run \"lien index\" to enable faster
+  symbol-based queries."
+  ```
+
+  Three compounding problems: the advice asserted the search had _run_ and the
+  query was at fault; "to enable **faster** queries" framed indexing as a
+  performance upgrade when it was a correctness prerequisite; and `indexInfo` in the
+  same payload advertised an index dated _today_ with `pendingFileCount: 0`, so
+  nothing contradicted a "fresh index, symbol absent" reading.
+
+  Both tools now call `vectorDB.hasData()` on a zero-result response. A genuinely
+  empty index escalates to an unmissable `⚠ Lien:` warning (new
+  `formatNoIndexNote()`, reusing the pattern `get_dependents` already had from
+  #927). An index that is present but has no match for this query hedges instead of
+  blaming the query — which also covers the far more common case found during the
+  dogfood: **an index that simply hasn't caught up with a recent edit.** Appending a
+  function to flask's `helpers.py` and searching for it immediately returned zero
+  results with the query-tuning advice, while `indexInfo` reported a 2.7-second-old
+  reindex and `pendingFileCount: 0`. An agent that writes a function and cannot then
+  find it will conclude it misnamed something.
+
+  **`get_dependents` claimed a symbol was "likely a method or constructor" when it
+  had never existed.** The `symbol-attribution-degraded` caveat emitted one
+  hardcoded explanation for at least three distinct causes — a real
+  method/constructor, a typo'd or hallucinated name, and a symbol that was removed.
+  Byte-identical wording for `totallyMadeUpSymbolXYZ123` (which appears nowhere in
+  the repo) and for a genuine constructor. Those readings warrant opposite next
+  actions: "proceed with the file-level answer" versus "check the name". The caveat
+  now checks whether the symbol appears anywhere in the target file's indexed chunks
+  and words each case honestly, keeping the genuinely useful part — that the numbers
+  below are file-level, not verified symbol callers — unchanged either way.
+
+  Both `SERVER_INSTRUCTIONS` and the `tools.ts` tool descriptions carried the same
+  overclaim and were corrected. The `tools.ts` half was itself caught by Lien Review
+  on the first pass of this fix, which had updated only `instructions.ts` — the two
+  surfaces a model reads must move together.
+
+- 76a42bc: A single unrelated test run silently disabled the did-you-run-the-tests nudge for
+  an entire session.
+
+  `classifyTestCommand` had only two outcomes: `scoped` (a path-like token was
+  found) or `broad` (none was). A run scoped by test **name** carries no path-like
+  token, so it fell into `broad` by construction, and `computeUnverifiedFiles`
+  treats any broad run as evidence the whole edit set was exercised. Reproduced
+  end-to-end on the published 0.72.0 binary against pallets/flask:
+
+  ```text
+  # edit recorded, no test run — correctly nags
+  • src/flask/helpers.py → tests/test_helpers.py (+35 more)
+
+  # same edit, then: pytest -k test_totally_unrelated_name
+  (completely silent)
+  ```
+
+  Verified reproducing on all eight runners checked, plus one found while
+  investigating (`swift test --filter`, invisible through a different path):
+  `pytest -k`, `dotnet test --filter`, `rspec -e`, `mocha --grep`, `go test -run`,
+  `cargo test <name>`, `vitest -t`, `jest -t`.
+
+  This is the false-"tests ran" direction, and it invisibly switches off the
+  mechanism a foreign-repo trial showed actually changes agent behaviour — the Stop
+  recap blocking a finish is what sent that agent back to run the check it had
+  skipped.
+
+  Adds a third classification outcome — name-filtered — that is neither `broad` nor
+  a `scopeTokens` contributor, so a name-filtered run no longer licenses "everything
+  is verified". The fail-safe direction is to keep nagging: the nudge already carries
+  its own escape hatch ("if you already ran them, disregard and stop again"), so a
+  false nag costs one line while a false silence costs the whole mechanism.
+
+  Recognition uses **per-runner-family flag allow-lists rather than one global set**,
+  because the same spelling means different things per ecosystem — `tox -e py311`
+  selects an environment while `rspec -e NAME` selects a test, and a global set would
+  have wrongly un-broadened tox. Runner-specific value-skip sets keep build-config
+  flags from being misread as positional test names (`cargo test --features foo`,
+  `-p`, `--manifest-path`) and keep pnpm's workspace `--filter` broad (including the
+  `--filter=@scope/pkg` form, and the `pnpm --filter=<sel> test` ordering which
+  previously matched no runner pattern at all). Both collisions are pinned by
+  regression tests.
+
+  Documented explicitly, with tests, because a review raised it twice: **a
+  scope-broadening flag does not make a name-filtered run broad.** `./...`,
+  `.`, `--workspace` and `--all` broaden which _packages_ compile; `-run Foo` and a
+  bare positional still filter which _tests execute_. `go test -run TestFoo ./...`
+  runs none of an unrelated file's tests, so it correctly nags — treating it as broad
+  would reintroduce this very bug.
+
+- c4203e8: Issue `#916`: an empty `nudge-events.jsonl` window in `lien stats` used to render
+  identically whether nobody ever qualified for a nudge, a nudge fired and got
+  ignored every time, or the deployed plugin hooks predated this
+  instrumentation entirely and recording was never possible. That third case
+  actually happened on a real machine: a directory-source plugin install
+  pinned to a stale branch produced a silently empty ledger, and the resulting
+  telemetry read had to be forensically reconstructed before a product
+  decision could be made.
+
+  Every recorded `shown`/`signal` event now carries a `build` stamp
+  (`{ cliVersion, hooksHash? }`) — the running CLI's version plus a content
+  hash of the plugin hooks directory the recording hook script lives in. CLI
+  version alone isn't enough: the failure mode is stale _hooks_ running
+  alongside an otherwise-current CLI install. The hash is computed once per
+  session and cached (`nudge-build/<sessionId>.json` next to the other
+  per-session state, GC'd the same way), so the hooks directory is never
+  re-hashed per event.
+
+  `lien stats` now tells the three cases apart: a non-empty window reports the
+  build that recorded it (`Recorded by: ...`); a window with zero events but a
+  capable build seen elsewhere in the ledger says so and reports when
+  (`Zero events in this window, but a recording-capable build was last seen
+...`); a ledger that has never once seen a build-stamped event says
+  recording may never have been possible, rather than implying disengagement.
+  Existing (pre-#916) ledger entries have no `build` field — they're read as
+  "build unknown", never as a known-good build.
+
+  New `lien nudge doctor [--hooks-dir <path>]` command: a manual drift check
+  that flags the exact fingerprint of the incident above (the telemetry
+  instrumentation's signal-recording hook missing from a live plugin hooks
+  directory entirely), plus CLI-version/hooks-hash drift against the ledger's
+  own history.
+
+- 76a42bc: The habituation guard's risk floor silenced the "Dependents not determinable
+  from imports" annotation — the exact message #938/#939 shipped to prevent an
+  agent reading an unknown as a zero — **in the default plugin configuration**.
+
+  `annotate-cmd.ts` runs two suppression gates back to back. #938 taught
+  `isTrivial` about `dependentAttributionIncomplete`; `belowRiskFloor`, three
+  lines below it, never learned. A file whose dependents are indeterminable has
+  low risk _by construction_ (zero **known** dependents), so it fell below a
+  `medium` floor and was dropped. This was not opt-in: `annotate-read.sh:68` sets
+  `min_risk="${LIEN_ANNOTATE_MIN_RISK:-medium}"` and passes `--min-risk` on every
+  read-time annotation.
+
+  Reproduced on the published 0.72.0 binary against serilog/serilog:
+
+  ```console
+  $ lien annotate src/Serilog/Capturing/PropertyBinder.cs
+  Lien impact for src/Serilog/Capturing/PropertyBinder.cs:
+    • Dependents not determinable from imports (enclosing-namespace access).
+    • Test coverage not determinable from imports (enclosing-namespace access).
+
+  $ lien annotate src/Serilog/Capturing/PropertyBinder.cs --min-risk medium
+  (no output — suppressed)
+  ```
+
+  Not an edge case: an exhaustive pass found **114 of 216** serilog `.cs` files
+  (53%) carry that note. Serilog is one hierarchical namespace tree, so C#'s
+  enclosing-namespace access lets the whole library reference its own members
+  with zero `using` directives — `ILogger.cs`, the central interface, genuinely
+  has no import-determinable dependents. For C# of this shape, suppression was
+  the common path.
+
+  `belowRiskFloor` now takes `dependentAttributionIncomplete` as a defaulted
+  trailing parameter (matching #938's own approach for `isTrivial`) and treats it
+  as high-value, clearing the floor exactly as `complexityWarnings` and
+  `headroomCount` already do.
+
+  Deliberately **not** extended to the sibling "Test coverage not determinable"
+  flag, measured across four freshly re-indexed corpora: coverage-indeterminable
+  is 100% of serilog's C# files and 83% of Alamofire's Swift files, because
+  `wholeModuleImports` (Swift) and `enclosingNamespaceAccess` (C#) make coverage
+  structurally undecidable from imports. Clearing the floor for it would
+  blanket-annotate two entire language ecosystems — precisely what the
+  habituation guard exists to prevent. Dependents-indeterminable is the rarer,
+  higher-signal flag and the right one to promote.
+
+  This was reported by Lien Review on #938 itself, correctly and specifically,
+  and shipped anyway because the finding was stated in summary prose rather than
+  as an addressable item — see #958 and #960.
+
+- 10474a9: Two symbol-extraction gaps (#949), both reproduced against the published
+  0.72.0 artifact on foreign repos and confirmed to still repro on the
+  published binary before this fix:
+
+  **Ruby `module` declarations were invisible as symbols.** `list_functions`
+  could not find `module Sidekiq` (sidekiq's own root namespace, at
+  `lib/sidekiq.rb:42`) or `module Job` (its central job mixin) at all — a
+  regex query for either returned zero hits. Root cause: `RubyTraverser`
+  treats `module` as a transparent namespace so `module → class → method`
+  still yields method chunks (deliberately, to avoid breaking the container
+  depth budget `isTargetNode` enforces), but that meant the module's own AST
+  node was never pushed to the chunker's node list, so it never became a
+  chunk/symbol at all — the dead `case 'module'` branch in
+  `RubySymbolExtractor.extractSymbol` was structurally unreachable. Fixed by
+  adding a `transparentContainerTypes` field to `LanguageTraverser` (optional,
+  undefined for every other language — a no-op): the chunker now emits a
+  chunk for a node in this list while still traversing its children at the
+  same depth, keeping the transparency for nested content. Module contents
+  (nested classes/methods) were never the problem — they were already fully
+  indexed; only the module's own entry was missing.
+
+  `module`'s `symbolType` is `interface`, not `class` — a Ruby module can
+  never be instantiated, so `class` would misdescribe it. `interface` is an
+  imperfect but honest fit (closest of the four existing `SymbolInfo` types
+  to a mixin contributing shared behavior, similar to a Rust trait), chosen
+  over adding a fifth `module` type to avoid rippling into the `symbolType`
+  filter, MCP schemas, and every consumer of the closed four-value enum — the
+  same tradeoff `csharp.ts` made mapping properties to `method` rather than
+  adding a `property` type.
+
+  **Nested type declarations never reported a `parentClass`.** A type
+  declared directly inside another type (Java/C#'s `public static class
+Builder` nested in `Retrofit`, `RequestFactory`, etc. — confirmed on
+  square/retrofit; C#'s `ContextStackBookmark` nested in `LogContext`,
+  `SelfLogFailureListener` nested in `SelfLog` — confirmed on
+  serilog/serilog) always reported `parentClass: null`, making
+  same-named nested types (six `Builder` results) indistinguishable except
+  by file path. Root cause: the chunker already resolves the enclosing
+  type's name for every top-level node via `findParentContainerName` (not
+  just methods), but each language's `extractClassInfo`/`extractInterfaceInfo`/
+  etc. either didn't accept the parameter at all or silently dropped it.
+  Fixed for C#, Java, Python, Swift, and Kotlin (all of which support real
+  nested type declarations) by threading `parentClass` through every
+  type-declaration handler, the same way it already worked for methods. The
+  existing `enclosingSymbol` MCP metadata field is derived from `parentClass`
+  - `symbolName`, so it's fixed for free with no separate change.
+
+  Not fixed (no repro path, confirmed by traverser inspection): JavaScript/
+  TypeScript (no `class_declaration`-in-`class_declaration` construct — a TS
+  namespace nesting classes is a related, separate, still-open gap), PHP (no
+  nested class-declaration construct), Go (flat structure by design, no
+  containers at all), Rust (`impl`/`trait` blocks cannot nest in valid Rust;
+  a `mod` nested in another `mod` doesn't interact with `parentClass` since
+  `mod` isn't a class-like container — though Rust's `mod` shares Ruby's
+  Bug 1 shape, invisible as its own symbol, which is out of scope here and
+  left as a follow-up).
+
+- 21c5d55: Concurrent MCP tool calls against a cold or rebuilding index could kill the
+  server connection outright, surfacing to the client as
+  `MCP error -32000: Connection closed` rather than a tool-level error. Observed
+  at roughly a 50% failure rate with four servers racing on one brand-new
+  `structural.db`.
+
+  Root cause: `openDatabase()` set the `busy_timeout` pragma _after_
+  `journal_mode`/`synchronous`. `busy_timeout` only governs pragmas issued after
+  it, so a process losing the create/open race hit an uncaught
+  `SQLITE_BUSY: database is locked` inside `initializeComponents()` and called
+  `process.exit(1)` — **before the MCP transport had connected**, which is why the
+  client lost the whole server instead of one call. At higher concurrency a second
+  error class appeared during WAL-mode conversion (`SQLITE_IOERR`/`SQLITE_CANTOPEN`)
+  that `busy_timeout`'s internal retry does not cover at all.
+
+  `busy_timeout` now goes first, and every cross-process-racy open is wrapped in
+  `withOpenRetry` — a jittered linear backoff (the jitter matters: without it,
+  processes that started racing together retry in lockstep and keep re-colliding).
+
+  **The retry budget is deliberately bounded by the plugin's hook timeout.** Three
+  hooks (`annotate-read`, `augment-explore-task`, `api-delta-write`) invoke CLI
+  commands that call `createVectorDB().initialize()`, and Claude Code kills a hook
+  at 5000 ms with an unmaskable SIGKILL. A ladder that outlived that would leave the
+  stale in-flight marker that the npx circuit breaker reads as an unreachable
+  registry, silencing every nudge for its 300-second cooldown. The budget is
+  therefore 16 attempts × 25 ms — a computed 3904 ms worst case with max jitter,
+  about 1.1 s of headroom — and a regression test forces max jitter, sums the real
+  requested delays, and fails if a future constant change breaks that ceiling.
+
+  Disclosed honestly: this bound leaves a small residual. The originally reported
+  shape (N=4) is clean across 14 trials, but N=6 is 9/10 and N=10 is 5/6. Tighter
+  budgets were measured and are _worse_ (1730 ms / 2153 ms / 2579 ms configurations
+  all showed 15–33% failure at N=6, so base-delay size matters independently of
+  total time). Closing that residual properly means degrading to an honest
+  empty-index answer instead of exiting when the ladder is exhausted, which is
+  tracked separately.
+
+  Also fixes a latent bug in `SqliteBackend.reconnect()` and
+  `OverlayBackend.reconnect()`, and a worse one introduced while fixing it: both
+  closed the _old_ handle in a `finally`, so on the failure path — where the swap
+  never happened and the "old" handle still **was** `this.db` — the live connection
+  was closed, leaving the backend holding a closed database for the rest of the
+  process instead of continuing on the still-valid old one. The close now happens
+  only after a successful swap, in both backends (`OverlayBackend` retires two
+  handles), with a deterministic regression test per backend that forces the open to
+  fail and asserts the backend still works.
+
+- 48767ca: `signature` for a class/interface/struct/record/enum (and Rust's
+  impl/trait) dropped generic type parameters and the base-type/interface
+  list entirely — found in a post-release audit of the published 0.72.0
+  artifact. `list_functions` on serilog reported `LogEventPropertyValueVisitor<TState,
+TResult>` as bare `class LogEventPropertyValueVisitor` and `Logger :
+ILogger, ILogEventSink, IDisposable` as bare `class Logger`, discarding
+  exactly the information a model needs to tell one symbol from another and
+  to judge blast radius before changing it (`signature` is what
+  `list_functions`/`get_dependents` show, not the source).
+
+  Confirmed the same gap and fixed it in six languages: **C#**
+  (`class`/`interface`/`struct`/`record`, including `record struct`, plus
+  `enum`'s base type, e.g. `enum Status : byte`), **Java**
+  (`class`/`interface`/`enum`/`record`), **Kotlin**
+  (`class`/`interface`/`object`), **TypeScript** (`class`/`interface`, plus
+  plain JavaScript's `extends` clause, which shares the same code path),
+  **Swift** (`class`/`struct`/`actor`/`enum`/`extension`/`protocol`), and
+  **Rust** (`impl`/`trait` — an `impl` block's `signature` now names the
+  trait it implements, e.g. `impl<T> Trait for Type<T>`, previously just
+  `impl Type`, silently losing the single most useful fact about an impl
+  block). Generic constraints (`where T : class, new()` / Rust's
+  `where`-clauses) are deliberately excluded, not truncated — out of scope,
+  since a "some constraints, some not" signature would be worse than none.
+
+  Also fixed as a direct consequence, found via dogfooding against Serilog's
+  actual `Logger` class: a base/heritage list that itself spans multiple
+  physical lines (e.g. a base wrapped in a C# `#if`/`#endif` preprocessor
+  block) previously leaked raw newlines into `signature`; all six languages
+  now collapse it to a single line via a new shared `collapseWhitespace`
+  helper, matching the existing `extractSignature` convention.
+
+  Checked but left unchanged (already correct, not touched): Ruby's `class …
+< Base` already includes its superclass. Checked and found to share the
+  same gap but out of scope for this fix (no generics/heritage list in the
+  task's brief, left as a follow-up): PHP and Python's `class` declarations,
+  and Go's generic `type Foo[T any] struct`.
+
+- Updated dependencies [f2937c9]
+- Updated dependencies [10474a9]
+- Updated dependencies [21c5d55]
+- Updated dependencies [48767ca]
+  - @liendev/parser@0.73.0
+  - @liendev/core@0.73.0
+
 ## 0.72.0
 
 ### Minor Changes
