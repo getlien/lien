@@ -11,7 +11,7 @@ token, so it fell into `broad` by construction, and `computeUnverifiedFiles`
 treats any broad run as evidence the whole edit set was exercised. Reproduced
 end-to-end on the published 0.72.0 binary against pallets/flask:
 
-```
+```text
 # edit recorded, no test run — correctly nags
 • src/flask/helpers.py → tests/test_helpers.py (+35 more)
 

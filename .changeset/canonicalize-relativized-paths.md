@@ -17,7 +17,7 @@ from `process.cwd()`, which the OS returns already realpath-resolved. Two
   trips an "outside the project root" rejection, so `lien annotate` produced **no
   output at all** for a real in-repo file. Confirmed on the released build:
 
-```
+```console
 $ lien annotate /abs/path/behind/symlink/src/utils/url.ts
 (nothing)
 $ lien annotate src/utils/url.ts

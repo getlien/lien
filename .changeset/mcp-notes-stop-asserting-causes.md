@@ -9,7 +9,7 @@ and wrong, which is the failure mode a consuming model cannot detect.
 gin's index moved aside, a search for `StringToBytes` — which unquestionably
 exists — returned:
 
-```
+```json
 "results": [], "note": "0 results. Try a broader regex pattern (e.g. \".*\")
 or omit the symbolType filter. ... Run \"lien index\" to enable faster
 symbol-based queries."

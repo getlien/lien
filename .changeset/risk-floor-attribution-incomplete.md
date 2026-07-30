@@ -16,7 +16,7 @@ read-time annotation.
 
 Reproduced on the published 0.72.0 binary against serilog/serilog:
 
-```
+```console
 $ lien annotate src/Serilog/Capturing/PropertyBinder.cs
 Lien impact for src/Serilog/Capturing/PropertyBinder.cs:
   • Dependents not determinable from imports (enclosing-namespace access).
