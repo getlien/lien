@@ -35,6 +35,7 @@ import {
   OVERLAY_META,
   STRUCTURAL_DB_FILENAME,
 } from './sqlite/overlay-schema.js';
+import { withOpenRetry } from './sqlite/schema.js';
 
 const MANIFEST_FILE = 'manifest.json';
 
@@ -98,7 +99,9 @@ export class OverlayBackend implements VectorDBInterface {
   async initialize(): Promise<void> {
     try {
       await fs.mkdir(this.dbPath, { recursive: true });
-      this.overlayDb = openOverlayDatabase(this.overlayDbFilePath);
+      // withOpenRetry: the overlay file may be brand-new, with other worktree
+      // serves racing to create/open it at the same instant.
+      this.overlayDb = await withOpenRetry(() => openOverlayDatabase(this.overlayDbFilePath));
       this.openBase();
       this.baseHashes = await this.loadBaseHashes();
       this.currentVersion = await readVersionFile(this.dbPath);
@@ -503,12 +506,55 @@ export class OverlayBackend implements VectorDBInterface {
     }
   }
 
+  /**
+   * Reconnect WITHOUT ever leaving `overlayDb`/`baseDb` null OR closed-but-
+   * still-referenced: build the new overlay connection first, swap it in,
+   * and only THEN close the retired ones — and only on the success path.
+   * Same rationale as `SqliteBackend.reconnect()` — `checkAndReconnect` runs
+   * this on the shared instance concurrent tool handlers use, so both
+   * failure modes are user-visible, not internal bookkeeping:
+   *  - close-then-open (the original bug): a null window where
+   *    `requireOverlay()` throws "Overlay database not initialized".
+   *  - closing the old handles unconditionally in a `finally` (a regression
+   *    introduced while fixing the first one): when opening the new overlay
+   *    connection itself throws — e.g. the retry ladder in `withOpenRetry`
+   *    is exhausted — the swap below never runs, so `oldOverlayDb`/
+   *    `oldBaseDb` still ARE `this.overlayDb`/`this.baseDb`. Closing them
+   *    anyway poisons both for the rest of the process instead of leaving
+   *    the still-valid old connections in place. The fix: the closes only
+   *    happen after `this.overlayDb = newOverlayDb` — i.e. only once the
+   *    new connection has actually taken over.
+   */
   async reconnect(): Promise<void> {
+    const oldOverlayDb = this.overlayDb;
+    const oldBaseDb = this.baseDb;
+    let newOverlayDb: DatabaseType.Database;
     try {
-      this.close();
-      await this.initialize();
+      await fs.mkdir(this.dbPath, { recursive: true });
+      newOverlayDb = await withOpenRetry(() => openOverlayDatabase(this.overlayDbFilePath));
     } catch (error) {
+      // Opening the new overlay connection failed (including an exhausted
+      // withOpenRetry ladder) — `this.overlayDb`/`this.baseDb` are
+      // untouched, still the valid old connections.
       throw wrapError(error, 'Failed to reconnect to overlay database');
+    }
+
+    this.overlayDb = newOverlayDb;
+    this.openBase(); // sets this.baseDb directly; own try/catch, non-fatal
+    this.baseHashes = await this.loadBaseHashes();
+    this.currentVersion = await readVersionFile(this.dbPath);
+
+    // Only reachable once the swap above succeeded, so the old handles are
+    // genuinely retired — safe to close.
+    try {
+      oldOverlayDb?.close();
+    } catch {
+      // Best-effort: already swapped away.
+    }
+    try {
+      oldBaseDb?.close();
+    } catch {
+      // Best-effort: already swapped away.
     }
   }
 

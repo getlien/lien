@@ -118,12 +118,144 @@ END;
  * Open (creating if needed) the structural store and ensure schema exists.
  * busy_timeout lets the MCP server watcher and a concurrent CLI index run
  * both hold write handles without immediate SQLITE_BUSY failures.
+ *
+ * busy_timeout MUST be the first pragma set on the connection. It only
+ * applies to statements issued after it: on a brand-new/just-deleted index
+ * file, several `lien serve` processes can race to open + schema-create the
+ * same file (e.g. an agent firing multiple MCP tool calls in parallel right
+ * after the index was wiped). If `journal_mode`/`synchronous` run first with
+ * no busy_timeout yet configured, one loser gets an immediate uncaught
+ * `SQLITE_BUSY: database is locked` instead of a bounded wait+retry — which
+ * crashes that process before it ever reaches `server.connect()`, and the
+ * MCP client sees the whole connection drop (`-32000`), not a tool-level
+ * error.
+ *
+ * busy_timeout alone does NOT close the whole race, though: at higher
+ * concurrency (several processes truly creating the file for the first time
+ * at once, not just contending for a lock on an existing one), the WAL-mode
+ * conversion itself can throw `SQLITE_IOERR`/`SQLITE_CANTOPEN` — a different
+ * error class busy_timeout's internal retry does not cover. Callers that open
+ * this file from a context where cross-process races are plausible (the MCP
+ * server's own connection, a background reindex) MUST wrap the call in
+ * `withOpenRetry` below rather than call this directly. See
+ * `SqliteBackend.openConnection`/`clear` and `OverlayBackend.initialize`/
+ * `reconnect` for the call sites, and schema.test.ts for the reproduction.
  */
 export function openDatabase(dbFilePath: string): Database.Database {
   const db = new Database(dbFilePath);
+  db.pragma('busy_timeout = 5000');
   db.pragma('journal_mode = WAL');
   db.pragma('synchronous = NORMAL');
-  db.pragma('busy_timeout = 5000');
   db.exec(SCHEMA_SQL);
   return db;
+}
+
+/**
+ * Attempts before `withOpenRetry` gives up on a retryable open failure.
+ * Sized against TWO constraints in tension with each other, not just "make
+ * the stress test pass":
+ *
+ * 1. A hard ceiling this MUST fit under: `plugins/claude/hooks/hooks.json`
+ *    gives every hook a 5000ms timeout, and several hooks (`annotate-read`,
+ *    `augment-explore-task`, `api-delta-write`) invoke a `lien` CLI command
+ *    that calls `createVectorDB().initialize()` — i.e. they run through
+ *    this exact retry ladder. A ladder whose own worst-case wait approaches
+ *    or exceeds 5000ms would get its hook process SIGKILLed mid-retry by
+ *    Claude Code, and `lien-npx-breaker.sh` cannot tell that SIGKILL apart
+ *    from an unreachable npm registry: it leaves the same stale in-flight
+ *    marker either way, tripping `lien-npx-breaker.sh`'s circuit breaker
+ *    and silencing ALL nudges for its 300s cooldown.
+ * 2. Reliability under real concurrency — a synthetic N-processes-racing-
+ *    one-brand-new-file stress test.
+ *
+ * These trade off against each other, and (1) wins: a ladder long enough to
+ * survive 20 racing processes cleanly (~6.2s worst case) cannot fit under a
+ * 5000ms hook timeout at all, let alone with headroom, so it isn't an option
+ * regardless of reliability. With the constants below, the worst-case (max
+ * +30% jitter) summed wait across all `OPEN_RETRY_ATTEMPTS - 1` backoffs
+ * computes to 3904ms — leaving real (~1.1s) but not huge headroom under the
+ * hook timeout for the actual open work, bash/npx process overhead, and node
+ * startup. schema.test.ts asserts this computed ceiling directly (not this
+ * comment's claim), so a future constant change that drifts it back toward
+ * the hook timeout fails loudly there instead of silently in production.
+ *
+ * Measured empirically at this budget (repeated trials, disposable foreign
+ * repo, index deleted before each run): the ORIGINAL reported bug's exact
+ * shape (4 concurrent `lien serve` processes) is fully clean (0 failures
+ * across repeated runs). At higher realistic-but-uncommon concurrency (6-10
+ * concurrent processes racing the same brand-new file) a SMALL residual
+ * remains — roughly 1 in 6-10 trials still hit the crash this PR exists to
+ * fix, vs. 0 in dozens of trials at the (hook-timeout-incompatible) ~6.2s
+ * budget. This is the real, disclosed tradeoff of fitting under the hook
+ * timeout, not an oversight: see the PR discussion for the full measurement
+ * and the case for a complementary fix (never `process.exit()` the MCP
+ * server on an exhausted retry ladder; degrade to an honest empty answer
+ * instead, matching the single-call case) that would close this gap without
+ * needing a longer ladder.
+ */
+const OPEN_RETRY_ATTEMPTS = 16;
+/** Backoff unit; see `openRetryDelayMs` for the jittered schedule this drives. */
+const OPEN_RETRY_BASE_DELAY_MS = 25;
+
+/**
+ * Backoff for retry attempt N (1-indexed): linear growth plus up to ±30%
+ * jitter. The jitter matters here specifically — without it, several
+ * processes that started racing at nearly the same instant also retry in
+ * near-lockstep, so they keep re-colliding on the same schedule instead of
+ * spreading out and letting one of them win.
+ */
+function openRetryDelayMs(attempt: number): number {
+  const base = OPEN_RETRY_BASE_DELAY_MS * attempt;
+  const jitter = base * 0.3 * (Math.random() * 2 - 1);
+  return Math.max(1, Math.round(base + jitter));
+}
+
+/**
+ * True for the SQLite error codes multiple processes racing to create/open
+ * the SAME database file — most often one that's brand-new or was just
+ * deleted — can throw. `busy_timeout` already covers ordinary lock waits on
+ * an EXISTING file; these extra codes are the lower-level I/O races specific
+ * to concurrent first-time creation, which busy_timeout's built-in retry does
+ * not reach.
+ */
+function isTransientSqliteOpenError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return false;
+  const code = (error as { code: unknown }).code;
+  return (
+    code === 'SQLITE_BUSY' ||
+    code === 'SQLITE_BUSY_SNAPSHOT' ||
+    code === 'SQLITE_LOCKED' ||
+    code === 'SQLITE_IOERR' ||
+    code === 'SQLITE_CANTOPEN'
+  );
+}
+
+/**
+ * Run `open` — a function that opens/creates a fresh SQLite connection to a
+ * file other processes might be racing to open/create at the same moment —
+ * retrying with a short backoff on `isTransientSqliteOpenError`. Each retry
+ * calls `open` again from scratch (never reuses a handle from a failed
+ * attempt: a half-succeeded pragma/exec can leave that `Database` object
+ * unusable), so by the time all processes have settled on who created the
+ * file, every caller converges on a working connection instead of the first
+ * unlucky one crashing its whole process.
+ *
+ * Non-transient errors (bad path, permissions, disk full) rethrow
+ * immediately — this is scoped to the specific "several processes just
+ * raced to touch the same file" window, not a general-purpose DB-open retry.
+ */
+export async function withOpenRetry<T>(open: () => T): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < OPEN_RETRY_ATTEMPTS; attempt++) {
+    if (attempt > 0) {
+      await new Promise(resolve => setTimeout(resolve, openRetryDelayMs(attempt)));
+    }
+    try {
+      return open();
+    } catch (error) {
+      lastError = error;
+      if (!isTransientSqliteOpenError(error)) throw error;
+    }
+  }
+  throw lastError;
 }

@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'fs/promises';
 import path from 'path';
 import { getIndexDir } from '@liendev/parser';
+import type { ChunkMetadata } from '@liendev/parser';
 import { createTestDir, cleanupTestDir } from '../test/helpers/test-db.js';
 import { indexCodebase } from '../indexer/index.js';
 import { buildOverlay } from '../indexer/overlay-index.js';
@@ -218,5 +219,70 @@ describe('OverlayBackend degrades gracefully when the base is unavailable', () =
     // FTS still works against the overlay alone.
     const hits = await overlay.search('onlySymbol', 10);
     expect(hits.some(h => h.metadata.file === 'only.ts')).toBe(true);
+  });
+});
+
+describe('OverlayBackend.reconnect()', () => {
+  let bogusBaseDir: string;
+  let worktreeDir: string;
+  let overlay: OverlayBackend;
+
+  beforeEach(async () => {
+    bogusBaseDir = await createTestDir();
+    worktreeDir = await createTestDir();
+    overlay = new OverlayBackend(worktreeDir, getIndexDir(bogusBaseDir));
+    await overlay.initialize();
+    const metadata: ChunkMetadata = {
+      file: 'a.ts',
+      startLine: 1,
+      endLine: 2,
+      type: 'function',
+      language: 'typescript',
+    };
+    await overlay.insertBatch([metadata], ['content']);
+  });
+
+  afterEach(async () => {
+    overlay.close();
+    await cleanupTestDir(bogusBaseDir);
+    await cleanupTestDir(worktreeDir);
+  });
+
+  // Regression test mirroring SqliteBackend's reconnect() fix: the previous
+  // `close()` (nulls overlayDb/baseDb) then `initialize()` order left a real
+  // window where a concurrent read hit "Overlay database not initialized".
+  // Deterministic because of JS's run-to-completion-until-first-`await`
+  // semantics, not because of timing luck.
+  it('never leaves overlayDb null while a reconnect is in flight', async () => {
+    const reconnectPromise = overlay.reconnect();
+    await expect(overlay.scanAll()).resolves.toHaveLength(1);
+    await reconnectPromise;
+    await expect(overlay.scanAll()).resolves.toHaveLength(1);
+  });
+
+  it('leaves overlayDb/baseDb as the still-usable OLD connections when the new one fails to open', async () => {
+    // Regression test for a real bug introduced by the fix above: the first
+    // version closed `oldOverlayDb`/`oldBaseDb` unconditionally in a
+    // `finally` block. On the FAILURE path (opening the new overlay
+    // connection throws — e.g. an exhausted withOpenRetry ladder — via
+    // fs.mkdir here, the first step inside reconnect()'s try block), the
+    // swap to `this.overlayDb = newOverlayDb` never runs, so the "old"
+    // handles still ARE `this.overlayDb`/`this.baseDb` — closing them
+    // anyway poisons both for the rest of the process instead of leaving
+    // the still-valid old connections in place. Deterministic: forces
+    // fs.mkdir to reject once, no timing involved.
+    const mkdirSpy = vi.spyOn(fs, 'mkdir').mockRejectedValueOnce(new Error('simulated failure'));
+
+    await expect(overlay.reconnect()).rejects.toThrow(/Failed to reconnect/);
+
+    mkdirSpy.mockRestore();
+
+    // Still usable: the pre-existing overlay data must still be readable —
+    // NOT a closed handle.
+    await expect(overlay.scanAll()).resolves.toHaveLength(1);
+
+    // And a subsequent, successful reconnect still works normally.
+    await overlay.reconnect();
+    await expect(overlay.scanAll()).resolves.toHaveLength(1);
   });
 });
