@@ -17,8 +17,9 @@ import type {
 import { buildDependencyGraph } from '../../dependency-graph.js';
 import { computeBlastRadius } from '../../blast-radius.js';
 import type { Logger } from '../../logger.js';
+import type { AttestationVerdict } from '../../attestation.js';
 
-import type { AgentConfig, AgentFinding, AgentResult } from './types.js';
+import type { AgentConfig, AgentFinding, AgentResult, AgentStopReason } from './types.js';
 import { AnthropicAgentClient } from './anthropic-client.js';
 import { OpenAIAgentClient, toOpenAITools } from './openai-client.js';
 import { buildSystemPrompt, buildInitialMessage } from './system-prompt.js';
@@ -934,6 +935,133 @@ function buildFindingsSection(bugFindings: ReviewFinding[]): string[] {
 }
 
 /**
+ * The subset of `AttestationVerdict` derivable from `findings` alone, at
+ * `present()` time — before delivery (inline comments landing, the
+ * description write itself) has happened. `degraded:comments_dropped` and
+ * `degraded:delivery_incomplete` depend on that delivery outcome and can't
+ * be known yet; they stay the job of the separate, post-hoc attestation
+ * badge (`syncAttestationBadge` in review-pr.ts, posted after `present()`
+ * returns). `failed:analysis_error` is a pre-engine pipeline concern,
+ * orthogonal to this plugin. Nothing here is a NEW classification — it's a
+ * narrower read of the exact same ground truth `computeVerdict` uses.
+ */
+export type PresentTimeVerdict = Extract<
+  AttestationVerdict,
+  | 'delivered'
+  | 'degraded:budget_starved'
+  | 'degraded:provider_partial'
+  | 'failed:provider_never_ran'
+>;
+
+/**
+ * Derive the deterministic trust verdict from the same ground-truth signals
+ * the delivery attestation uses — `hasProviderFailure` and the
+ * `incomplete`/`stopReason` metadata `appendNeverRanNotice`/
+ * `appendIncompleteNotice` stamp onto a summary finding — NEVER from the
+ * model's own free-form overview prose. That distinction is the whole point:
+ * a PR (#954) once shipped a review whose prose claimed "budget exhaustion"
+ * while the main pass had actually completed cleanly at 48% spend — the
+ * attestation said `delivered` throughout, but nothing in the rendered PR
+ * said so, so the false claim went unchallenged. This function is what lets
+ * `buildTrustSection` render a line the reader can check the prose against.
+ *
+ * Scans EVERY summary finding, not just the first — a doc-truth-only stall
+ * still degrades the result here, matching `computeVerdict`'s own precedent
+ * of folding an extra pass's stop reason into the whole run's health (see
+ * that function's doc comment) even though it does NOT compromise the main
+ * pass's own bug-finding coverage (a separate concern `buildDescription`'s
+ * headline already tracks via `hasIncompleteMainPass`).
+ *
+ * Returns `null` when the agent-review plugin didn't run this review at all
+ * (no summary finding of any kind) — nothing to attest to. This is a
+ * DELIBERATE, documented divergence from `computeVerdict`: fed the
+ * equivalent `agentAttempted: false` input, `computeVerdict` returns
+ * `'delivered'` (an early-exit review — e.g. zero analyzable files — that
+ * trivially had nothing go wrong is a fair "delivered"). Rendering `null`
+ * here instead of borrowing that same label avoids stamping a "Trust:
+ * Delivered" line onto a plugin that never actually reviewed anything —
+ * the two functions read "delivered" differently on purpose in exactly
+ * this one case, and `plugins-agent-trust-badge.test.ts`'s consistency
+ * suite pins both sides so a future change to either taxonomy fails a test
+ * instead of silently drifting.
+ *
+ * Exported (alongside `PresentTimeVerdict`) solely so that consistency
+ * suite can call this function directly rather than re-deriving it from
+ * rendered markdown.
+ */
+export function derivePresentTimeVerdict(
+  summaryFindings: ReviewFinding[],
+): PresentTimeVerdict | null {
+  if (summaryFindings.length === 0) return null;
+  if (hasProviderFailure(summaryFindings)) return 'failed:provider_never_ran';
+  const incompleteFinding = summaryFindings.find(
+    f => (f.metadata as { incomplete?: boolean } | undefined)?.incomplete === true,
+  );
+  if (!incompleteFinding) return 'delivered';
+  const stopReason = (incompleteFinding.metadata as { stopReason?: AgentStopReason } | undefined)
+    ?.stopReason;
+  return stopReason === 'budget' ? 'degraded:budget_starved' : 'degraded:provider_partial';
+}
+
+/** Copy for each `PresentTimeVerdict` bucket — label, emoji, and the actionable detail. */
+const TRUST_COPY: Record<PresentTimeVerdict, { emoji: string; label: string; detail: string }> = {
+  delivered: {
+    emoji: '✅',
+    label: 'Delivered',
+    detail: 'The review ran to completion within budget.',
+  },
+  'degraded:budget_starved': {
+    emoji: '🟡',
+    label: 'Degraded — budget-starved',
+    detail:
+      'The review stopped after exhausting its token budget before finishing. Treat the findings above as partial.',
+  },
+  'degraded:provider_partial': {
+    emoji: '🟡',
+    label: 'Degraded — partial',
+    detail:
+      'The review stopped early (turn limit, or ended without a parseable verdict) before finishing. Treat the findings above as partial.',
+  },
+  'failed:provider_never_ran': {
+    emoji: '🔴',
+    label: 'Failed — provider never ran',
+    detail: 'Every provider request failed. No code was analyzed this run.',
+  },
+};
+
+/**
+ * Render the deterministic trust verdict as its own PR-description block —
+ * the answer to "is this review trustworthy?" at a glance, independent of
+ * whatever the model's own overview prose says. Silent on a clean run: a
+ * `delivered` line still renders (see `derivePresentTimeVerdict`'s doc
+ * comment for why silence alone doesn't fix the motivating bug), but as one
+ * quiet, uncalloutted line rather than a shouting box — a healthy run is the
+ * common case, and this block is read on every PR. A `degraded`/`failed`
+ * verdict instead renders as its own GitHub alert callout — `CAUTION` (the
+ * most severe callout GitHub supports) for a total provider failure,
+ * `WARNING` for a degraded-but-partial run — so it cannot be mistaken for
+ * ordinary prose. Returns `[]` when the plugin never ran this review (see
+ * `derivePresentTimeVerdict`), matching `buildFindingsSection`'s
+ * absent-not-empty convention.
+ *
+ * Deliberately excluded: raw token counts and `filesAnalyzed`. The verdict
+ * label already asserts "not budget-starved" or "budget-starved" on its own;
+ * a reader doesn't need the raw numbers to act on it, and neither figure is
+ * available yet at `present()` time without new plumbing (see the PR
+ * description for that follow-up call).
+ */
+function buildTrustSection(summaryFindings: ReviewFinding[]): string[] {
+  const verdict = derivePresentTimeVerdict(summaryFindings);
+  if (!verdict) return [];
+  const { emoji, label, detail } = TRUST_COPY[verdict];
+  if (verdict === 'delivered') {
+    return [`${emoji} *Trust: **${label}** — ${detail}*`];
+  }
+  const calloutType = verdict === 'failed:provider_never_ran' ? 'CAUTION' : 'WARNING';
+  return [`> [!${calloutType}]\n> ${emoji} **Trust: ${label}**\n>\n> ${detail}`];
+}
+
+/**
  * Build the PR description section using GitHub's callout blockquote syntax.
  * Uses > [!NOTE] for clean PRs, > [!WARNING] when issues are found. The first
  * summary drives the callout; any further summaries render as appended
@@ -974,9 +1102,15 @@ function buildDescription(
     }
   }
 
+  // The deterministic trust line — see buildTrustSection's doc comment for
+  // why it renders independent of (and right alongside) the prose above.
   // The itemized findings list — see buildFindingsSection's doc comment for
   // why the count and this list can never drift apart.
-  const parts: string[] = [lines.join('\n'), ...buildFindingsSection(bugFindings)];
+  const parts: string[] = [
+    lines.join('\n'),
+    ...buildTrustSection(summaryFindings),
+    ...buildFindingsSection(bugFindings),
+  ];
 
   for (const extra of summaryFindings.slice(1)) {
     parts.push(formatExtraSummary(extra));
