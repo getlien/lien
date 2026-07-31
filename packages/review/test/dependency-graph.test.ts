@@ -1,59 +1,16 @@
 import { describe, it, expect } from 'vitest';
-import { buildDependencyGraph, resolveImportPath } from '../src/dependency-graph.js';
+import { buildDependencyGraph } from '../src/dependency-graph.js';
 import { createTestChunk } from '../src/test-helpers.js';
 
 // ---------------------------------------------------------------------------
-// resolveImportPath
-// ---------------------------------------------------------------------------
-
-describe('resolveImportPath', () => {
-  const fileSet = new Set([
-    'src/utils/validate.ts',
-    'src/utils/format.ts',
-    'src/services/auth.ts',
-    'src/lib/index.ts',
-    'src/helpers.js',
-  ]);
-
-  it('resolves relative import with extension match', () => {
-    expect(resolveImportPath('./validate', 'src/utils/format.ts', fileSet)).toBe(
-      'src/utils/validate.ts',
-    );
-  });
-
-  it('resolves relative import with .js -> .ts remap', () => {
-    expect(resolveImportPath('./validate.js', 'src/utils/format.ts', fileSet)).toBe(
-      'src/utils/validate.ts',
-    );
-  });
-
-  it('resolves parent directory import', () => {
-    expect(resolveImportPath('../services/auth', 'src/utils/format.ts', fileSet)).toBe(
-      'src/services/auth.ts',
-    );
-  });
-
-  it('resolves directory with index file', () => {
-    expect(resolveImportPath('../lib', 'src/utils/format.ts', fileSet)).toBe('src/lib/index.ts');
-  });
-
-  it('returns null for non-relative (bare) imports', () => {
-    expect(resolveImportPath('lodash', 'src/utils/format.ts', fileSet)).toBeNull();
-  });
-
-  it('returns null for unresolvable import', () => {
-    expect(resolveImportPath('./nonexistent', 'src/utils/format.ts', fileSet)).toBeNull();
-  });
-
-  it('resolves exact match (file already has extension)', () => {
-    expect(resolveImportPath('../helpers.js', 'src/services/auth.ts', fileSet)).toBe(
-      'src/helpers.js',
-    );
-  });
-});
-
-// ---------------------------------------------------------------------------
 // buildDependencyGraph
+//
+// Import resolution itself (formerly this module's own `resolveImportPath`,
+// JS/TS-only with a hardcoded 6-extension list) is now @liendev/parser's
+// `importMatchesTarget` — see `packages/parser/src/utils/path-matching.test.ts`
+// for that primitive's own coverage (133 cases across every AST-supported
+// language). The tests below stay at `buildDependencyGraph`'s level: do the
+// caller-graph edges come out right end-to-end, not the path-matching detail.
 // ---------------------------------------------------------------------------
 
 describe('buildDependencyGraph', () => {
@@ -96,6 +53,7 @@ describe('buildDependencyGraph', () => {
     expect(callers[0].caller.filepath).toBe('src/services/auth.ts');
     expect(callers[0].caller.symbolName).toBe('register');
     expect(callers[0].callSiteLine).toBe(8);
+    expect(callers[0].provenance).toBe('import-verified');
   });
 
   it('finds same-file callers (no import needed)', () => {
@@ -131,6 +89,7 @@ describe('buildDependencyGraph', () => {
     expect(callers).toHaveLength(1);
     expect(callers[0].caller.symbolName).toBe('main');
     expect(callers[0].callSiteLine).toBe(9);
+    expect(callers[0].provenance).toBe('same-file');
   });
 
   it('finds multiple callers from different files', () => {
@@ -454,8 +413,12 @@ describe('buildDependencyGraph — cross-package fallback', () => {
     });
 
     const graph = buildDependencyGraph([def1, def2, caller]);
-    expect(graph.getCallers('src/utils/format.ts', 'format')).toHaveLength(1);
-    expect(graph.getCallers('src/helpers/format.ts', 'format')).toHaveLength(1);
+    const utilsCallers = graph.getCallers('src/utils/format.ts', 'format');
+    const helpersCallers = graph.getCallers('src/helpers/format.ts', 'format');
+    expect(utilsCallers).toHaveLength(1);
+    expect(helpersCallers).toHaveLength(1);
+    expect(utilsCallers[0].provenance).toBe('symbol-name-match');
+    expect(helpersCallers[0].provenance).toBe('symbol-name-match');
   });
 
   it('resolves OOP method call through class import (step 3b)', () => {
@@ -493,6 +456,7 @@ describe('buildDependencyGraph — cross-package fallback', () => {
     expect(callers[0].caller.filepath).toBe('app/Repositories/OrderRepository.php');
     expect(callers[0].caller.symbolName).toBe('findOrder');
     expect(callers[0].callSiteLine).toBe(5);
+    expect(callers[0].provenance).toBe('oop-method-import');
   });
 
   it('resolves same-namespace method call for PHP (step 3c)', () => {
@@ -528,6 +492,7 @@ describe('buildDependencyGraph — cross-package fallback', () => {
     expect(callers).toHaveLength(1);
     expect(callers[0].caller.filepath).toBe('app/Services/OrderService.php');
     expect(callers[0].caller.symbolName).toBe('processOrder');
+    expect(callers[0].provenance).toBe('namespace-inferred');
   });
 
   it('does NOT apply same-namespace fallback for TypeScript (step 3c)', () => {
@@ -822,5 +787,245 @@ describe('getCallersTransitive', () => {
     const result = graph.getCallersTransitive('nonexistent.ts', 'noSuchSymbol', { depth: 2 });
     expect(result.callers).toEqual([]);
     expect(result.truncated).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Import-only fallback (#994 Phase 5) — a class-shaped seed with real,
+// verified dependents that never literally call it by name (e.g. a
+// constructor-injected property, never `new PricingService()` or any other
+// call site named `PricingService`). Mirrors the real PHP `PricingService`
+// case measured in `pr1003-php-pricingservice-guard.blast-radius.ts`.
+// ---------------------------------------------------------------------------
+
+describe('buildDependencyGraph — import-only fallback', () => {
+  it('recovers a dependent whose import is verified but no call site names the class', () => {
+    const classChunk = createTestChunk({
+      metadata: {
+        file: 'app/Services/PricingService.php',
+        startLine: 1,
+        endLine: 50,
+        type: 'class',
+        symbolName: 'PricingService',
+        symbolType: 'class',
+        language: 'php',
+        exports: ['PricingService'],
+      },
+    });
+
+    // Constructor-injected property — genuinely depends on PricingService,
+    // but only ever calls its METHODS, never a call site literally named
+    // 'PricingService'.
+    const callerChunk = createTestChunk({
+      content:
+        'function formatTotal($total) { return $this->pricingService->formatPrice($total); }',
+      metadata: {
+        file: 'app/Http/Controllers/ProductController.php',
+        startLine: 1,
+        endLine: 30,
+        type: 'class',
+        symbolName: 'ProductController',
+        symbolType: 'class',
+        language: 'php',
+        exports: ['ProductController'],
+        importedSymbols: { 'App\\Services\\PricingService': ['PricingService'] },
+        callSites: [{ symbol: 'formatPrice', line: 10 }],
+      },
+    });
+
+    const graph = buildDependencyGraph([classChunk, callerChunk]);
+    const callers = graph.getCallers('app/Services/PricingService.php', 'PricingService');
+
+    expect(callers).toHaveLength(1);
+    expect(callers[0].caller.filepath).toBe('app/Http/Controllers/ProductController.php');
+    expect(callers[0].caller.symbolName).toBe('ProductController');
+    expect(callers[0].provenance).toBe('import-only');
+  });
+
+  it('does not fabricate an edge when no chunk in the file verifiably imports the class', () => {
+    const classChunk = createTestChunk({
+      metadata: {
+        file: 'app/Services/PricingService.php',
+        startLine: 1,
+        endLine: 50,
+        type: 'class',
+        symbolName: 'PricingService',
+        symbolType: 'class',
+        language: 'php',
+        exports: ['PricingService'],
+      },
+    });
+
+    const unrelatedChunk = createTestChunk({
+      metadata: {
+        file: 'app/Http/Controllers/UnrelatedController.php',
+        startLine: 1,
+        endLine: 10,
+        type: 'class',
+        symbolName: 'UnrelatedController',
+        symbolType: 'class',
+        language: 'php',
+        exports: ['UnrelatedController'],
+      },
+    });
+
+    const graph = buildDependencyGraph([classChunk, unrelatedChunk]);
+    expect(graph.getCallers('app/Services/PricingService.php', 'PricingService')).toHaveLength(0);
+  });
+
+  it('deduplicates to one edge per importing FILE, not one per chunk', () => {
+    // importedSymbols is deliberately duplicated onto every chunk in a file
+    // (see chunker.ts's own doc comment on createChunk) — a multi-method
+    // class must still produce exactly one import-only dependent per file.
+    const classChunk = createTestChunk({
+      metadata: {
+        file: 'app/Services/PricingService.php',
+        startLine: 1,
+        endLine: 50,
+        type: 'class',
+        symbolName: 'PricingService',
+        symbolType: 'class',
+        language: 'php',
+        exports: ['PricingService'],
+      },
+    });
+
+    const sharedImport = { 'App\\Services\\PricingService': ['PricingService'] };
+    const callerClassChunk = createTestChunk({
+      metadata: {
+        file: 'app/Http/Controllers/ProductController.php',
+        startLine: 1,
+        endLine: 40,
+        type: 'class',
+        symbolName: 'ProductController',
+        symbolType: 'class',
+        language: 'php',
+        exports: ['ProductController'],
+        importedSymbols: sharedImport,
+      },
+    });
+    const method1 = createTestChunk({
+      content: 'function show() { return $this->pricingService->formatPrice(1); }',
+      metadata: {
+        file: 'app/Http/Controllers/ProductController.php',
+        startLine: 10,
+        endLine: 15,
+        type: 'function',
+        symbolName: 'show',
+        symbolType: 'method',
+        parentClass: 'ProductController',
+        language: 'php',
+        importedSymbols: sharedImport,
+        callSites: [{ symbol: 'formatPrice', line: 12 }],
+      },
+    });
+    const method2 = createTestChunk({
+      content: 'function index() { return $this->pricingService->calculateOrderTotal([]); }',
+      metadata: {
+        file: 'app/Http/Controllers/ProductController.php',
+        startLine: 20,
+        endLine: 25,
+        type: 'function',
+        symbolName: 'index',
+        symbolType: 'method',
+        parentClass: 'ProductController',
+        language: 'php',
+        importedSymbols: sharedImport,
+        callSites: [{ symbol: 'calculateOrderTotal', line: 22 }],
+      },
+    });
+
+    const graph = buildDependencyGraph([classChunk, callerClassChunk, method1, method2]);
+    const callers = graph.getCallers('app/Services/PricingService.php', 'PricingService');
+
+    expect(callers).toHaveLength(1);
+    expect(callers[0].caller.filepath).toBe('app/Http/Controllers/ProductController.php');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// C# same-namespace gating fix (#994 Phase 5) — `addSameNamespaceEdges`'s
+// crude same-directory heuristic must NOT apply to C#, which has a REAL
+// namespace/enclosing-access model (`findCSharpTypeReferenceDependents`).
+// The old denylist (`!['typescript','javascript'].includes(lang)`) let C#
+// fall through to same-directory matching despite the comment naming only
+// PHP/Python/Rust as the intended targets.
+// ---------------------------------------------------------------------------
+
+describe('buildDependencyGraph — C# namespace gating fix', () => {
+  it('does NOT apply the same-directory fallback for C# (unlike PHP)', () => {
+    const methodChunk = createTestChunk({
+      metadata: {
+        file: 'App/Services/PaymentService.cs',
+        startLine: 1,
+        endLine: 10,
+        type: 'function',
+        symbolName: 'Charge',
+        symbolType: 'method',
+        language: 'csharp',
+        exports: ['PaymentService'],
+      },
+    });
+
+    // Same directory as PaymentService.cs, calls a method with the same
+    // name, but with NO verified import — the pre-Phase-5 behavior would
+    // have matched this via the same-directory heuristic.
+    const callerChunk = createTestChunk({
+      content: 'void ProcessOrder() { paymentService.Charge(); }',
+      metadata: {
+        file: 'App/Services/OrderService.cs',
+        startLine: 1,
+        endLine: 10,
+        type: 'function',
+        symbolName: 'ProcessOrder',
+        language: 'csharp',
+        callSites: [{ symbol: 'Charge', line: 10 }],
+      },
+    });
+
+    const graph = buildDependencyGraph([methodChunk, callerChunk]);
+    const callers = graph.getCallers('App/Services/PaymentService.cs', 'Charge');
+
+    expect(callers).toHaveLength(0);
+  });
+
+  it('recovers a C# dependent via the #930/#971 type-reference fallback instead', () => {
+    // A globally-unique type name with NO import and NO call site at all —
+    // only recoverable via findCSharpTypeReferenceDependents's word-boundary
+    // text match (see that module's own test suite for its full behavior;
+    // this test only checks that dependency-graph.ts wires it in correctly).
+    const declChunk = createTestChunk({
+      content: 'namespace App.Services;\n\npublic class PricingService { }',
+      metadata: {
+        file: 'App/Services/PricingService.cs',
+        startLine: 1,
+        endLine: 3,
+        type: 'class',
+        symbolName: 'PricingService',
+        symbolType: 'class',
+        language: 'csharp',
+        exports: ['PricingService'],
+      },
+    });
+
+    const usageChunk = createTestChunk({
+      content: 'namespace App.Services;\n\nPricingService.Apply(order);',
+      metadata: {
+        file: 'App/Services/OrderService.cs',
+        startLine: 1,
+        endLine: 3,
+        type: 'function',
+        symbolName: 'Process',
+        symbolType: 'method',
+        language: 'csharp',
+      },
+    });
+
+    const graph = buildDependencyGraph([declChunk, usageChunk]);
+    const callers = graph.getCallers('App/Services/PricingService.cs', 'PricingService');
+
+    expect(callers).toHaveLength(1);
+    expect(callers[0].caller.filepath).toBe('App/Services/OrderService.cs');
+    expect(callers[0].provenance).toBe('namespace-inferred');
   });
 });

@@ -8,7 +8,7 @@
 
 import type { CodeChunk, RiskLevel, BlastRadiusRisk } from '@liendev/parser';
 import { findTestAssociationsFromChunks, computeBlastRadiusRisk } from '@liendev/parser';
-import type { DependencyGraph } from './dependency-graph.js';
+import type { DependencyGraph, EdgeProvenance } from './dependency-graph.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -34,6 +34,17 @@ export interface BlastRadiusDependent {
   complexity?: number;
   /** True when a test file imports the dependent's source file. */
   hasTestCoverage: boolean;
+  /**
+   * How this dependent edge was resolved — carried through from
+   * `dependency-graph.ts`'s `CallerEdge.provenance` (#994 Phase 5) so the
+   * reviewing agent can weight a verified import/call-site edge above a
+   * name-matched guess or an inferred, no-import structural signal, instead
+   * of treating every row in `<blast_radius>` as equally solid. See
+   * `EdgeProvenance`'s doc comment for what each tier means. Optional only
+   * so hand-built test fixtures don't all need one; every dependent produced
+   * by `computeBlastRadius` itself always sets it.
+   */
+  provenance?: EdgeProvenance;
 }
 
 export interface BlastRadiusEntry {
@@ -184,6 +195,7 @@ function buildDependent(
     callSiteLine: edge.callSiteLine,
     complexity: complexity && complexity > 0 ? complexity : undefined,
     hasTestCoverage: coveredFiles.has(edge.caller.filepath),
+    provenance: edge.provenance,
   };
 }
 
