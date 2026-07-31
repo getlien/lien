@@ -21,6 +21,7 @@ import {
 } from '@liendev/parser';
 
 import type { AgentToolContext } from './types.js';
+import type { CallerEdge } from '../../dependency-graph.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -190,6 +191,7 @@ export function getDependents(input: Record<string, unknown>, ctx: AgentToolCont
           filepath: c.caller.filepath,
           symbolName: c.caller.symbolName,
           callSiteLine: c.callSiteLine,
+          provenance: c.provenance,
         })),
       });
     }
@@ -210,6 +212,7 @@ export function getDependents(input: Record<string, unknown>, ctx: AgentToolCont
       filepath: string;
       symbolName: string;
       callSiteLine: number;
+      provenance: CallerEdge['provenance'];
     }> = [];
 
     for (const sym of exportedSymbols) {
@@ -220,6 +223,7 @@ export function getDependents(input: Record<string, unknown>, ctx: AgentToolCont
           filepath: c.caller.filepath,
           symbolName: c.caller.symbolName,
           callSiteLine: c.callSiteLine,
+          provenance: c.provenance,
         });
       }
     }

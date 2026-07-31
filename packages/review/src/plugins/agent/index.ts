@@ -215,7 +215,7 @@ export class AgentReviewPlugin implements ReviewPlugin {
     }
 
     // Build dependency graph from in-memory chunks (no embeddings needed)
-    const graph = buildDependencyGraph(context.repoChunks!);
+    const graph = buildDependencyGraph(context.repoChunks!, context.repoRootDir ?? '');
 
     const toolExecutor = (name: string, input: Record<string, unknown>) =>
       dispatchTool(name, input, {
@@ -359,7 +359,7 @@ export class AgentReviewPlugin implements ReviewPlugin {
     provider: string,
     logger: Logger,
   ): Promise<ReviewFinding[]> {
-    const graph = buildDependencyGraph(context.repoChunks ?? []);
+    const graph = buildDependencyGraph(context.repoChunks ?? [], context.repoRootDir ?? '');
     const toolExecutor = (name: string, input: Record<string, unknown>) =>
       dispatchTool(name, input, {
         repoChunks: context.repoChunks ?? [],

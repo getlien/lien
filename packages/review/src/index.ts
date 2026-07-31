@@ -69,9 +69,11 @@ export {
 // Dependency graph
 export {
   buildDependencyGraph,
+  isPreciseProvenance,
   type DependencyGraph,
   type SymbolNode,
   type CallerEdge,
+  type EdgeProvenance,
 } from './dependency-graph.js';
 
 // Output adapters

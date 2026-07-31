@@ -6,6 +6,7 @@
  */
 
 import type { BlastRadiusReport, BlastRadiusEntry, BlastRadiusDependent } from './blast-radius.js';
+import { isPreciseProvenance } from './dependency-graph.js';
 
 const LEVEL_LABEL: Record<string, string> = {
   low: 'LOW',
@@ -26,7 +27,9 @@ const NON_SUBSTITUTION_NOTE =
   'Tests column = a test file exists for that dependent, NOT that it covers ' +
   "this PR's change; Complexity = a static metric, not a correctness check. " +
   'This table does not substitute for get_files_context / read_file on a ' +
-  'dependent when you need to confirm the change is actually handled there.';
+  'dependent when you need to confirm the change is actually handled there. ' +
+  'Confidence: verified = a real import/call-site edge; inferred = a ' +
+  'name-matched, same-namespace, or text-matched guess — weight it lower.';
 
 /**
  * Render a blast-radius report as markdown wrapped in a `<blast_radius>` XML tag.
@@ -67,8 +70,8 @@ function renderSummary(report: BlastRadiusReport): string {
 
 function renderTable(entries: BlastRadiusEntry[]): string[] {
   const rows: string[] = [];
-  rows.push('| Seed (changed) | Hops | Dependent | Tests | Complexity |');
-  rows.push('|---|---|---|---|---|');
+  rows.push('| Seed (changed) | Hops | Dependent | Tests | Complexity | Confidence |');
+  rows.push('|---|---|---|---|---|---|');
 
   for (const entry of entries) {
     const seedLabel = formatSeed(entry);
@@ -79,12 +82,23 @@ function renderTable(entries: BlastRadiusEntry[]): string[] {
     });
     for (const dep of deps) {
       rows.push(
-        `| \`${seedLabel}\` | ${dep.hops} | ${formatDependent(dep)} | ${dep.hasTestCoverage ? '✓' : '✗'} | ${formatComplexity(dep)} |`,
+        `| \`${seedLabel}\` | ${dep.hops} | ${formatDependent(dep)} | ${dep.hasTestCoverage ? '✓' : '✗'} | ${formatComplexity(dep)} | ${formatConfidence(dep)} |`,
       );
     }
   }
 
   return rows;
+}
+
+/**
+ * `provenance` is absent only for hand-built test fixtures that predate
+ * #994 Phase 5 (see `BlastRadiusDependent.provenance`'s doc comment) —
+ * rendered as "verified" rather than surfacing that gap to the agent, since
+ * every real `computeBlastRadius` output always sets it.
+ */
+function formatConfidence(dep: BlastRadiusDependent): string {
+  if (!dep.provenance || isPreciseProvenance(dep.provenance)) return 'verified';
+  return 'inferred';
 }
 
 function formatSeed(entry: BlastRadiusEntry): string {
