@@ -21,5 +21,5 @@ and re-exports the single implementation from `@liendev/parser`.
 
 No output change for any existing caller (`lien complexity`, `get_complexity`,
 `lien annotate`, `lien delta`) — verified byte-identical on this repo except
-for `ComplexityAnalyzer.ts` itself, which naturally drops the complexity
+for `complexity-analyzer.ts` itself, which naturally drops the complexity
 violation it used to report on its own now-deleted 350-line implementation.
