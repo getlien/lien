@@ -264,9 +264,15 @@ export class SwiftExportExtractor implements LanguageExportExtractor {
     const body = container.childForFieldName('body');
     if (!body) return;
 
-    // Protocol members are implicitly part of the protocol's surface.
-    const isProtocol = container.type === 'protocol_declaration';
-
+    // `isExported`'s "part of the surface unless explicitly private/
+    // fileprivate" rule already matches protocol-member visibility exactly
+    // (a `private`/`fileprivate` protocol requirement isn't valid Swift, but
+    // the grammar still parses it, and Swift only forbids restricting below
+    // the protocol's own access level — it doesn't forbid a requirement from
+    // carrying its own explicit, non-restrictive modifier), so no separate
+    // protocol bypass is needed here (#974 — Java's and this file's prior
+    // `isProtocol ||` bypass unconditionally exported every protocol member,
+    // including explicitly `private`/`fileprivate` ones).
     body.namedChildren.forEach(member => {
       switch (member.type) {
         case 'function_declaration':
@@ -274,11 +280,11 @@ export class SwiftExportExtractor implements LanguageExportExtractor {
         case 'init_declaration':
         case 'deinit_declaration':
         case 'subscript_declaration':
-          if (isProtocol || isExported(member)) addExport(functionLikeName(member));
+          if (isExported(member)) addExport(functionLikeName(member));
           break;
         case 'property_declaration':
         case 'protocol_property_declaration':
-          if (isProtocol || isExported(member)) addExport(propertyName(member));
+          if (isExported(member)) addExport(propertyName(member));
           break;
         case 'class_declaration':
         case 'protocol_declaration':

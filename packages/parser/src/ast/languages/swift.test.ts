@@ -112,6 +112,16 @@ describe('Swift Language', () => {
       expect(exports).toContain('find');
     });
 
+    it('should not export explicitly non-public protocol members', () => {
+      // `private`/`fileprivate` aren't valid on a real protocol requirement,
+      // but the grammar still parses them — the extractor must not export
+      // them regardless (#974).
+      const root = parse('protocol Repo {\n  func find() -> String\n  private func helper()\n}\n');
+      const exports = exportExtractor.extractExports(root);
+      expect(exports).toContain('find');
+      expect(exports).not.toContain('helper');
+    });
+
     it('does not export members of a private container', () => {
       const root = parse('private struct Secret {\n  func internalApi() {}\n}\n');
       const exports = exportExtractor.extractExports(root);
