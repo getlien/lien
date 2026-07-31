@@ -7,6 +7,7 @@ import {
   GetDependentsSchema,
   GetComplexitySchema,
 } from './schemas/index.js';
+import { ATTRIBUTION_CAVEAT_REASON_TEXT } from './attribution-caveat-reasons.js';
 
 /**
  * MCP tool definitions with Zod-generated schemas.
@@ -159,26 +160,10 @@ Returns:
   can't be trusted as a verified clear. ALWAYS check for this field before treating
   a low dependentCount (especially 0) as "safe to edit" or "unused". \`reason\` is
   one of:
-  - "unresolved-target": \`filepath\` isn't resolvable in the index at all (typo,
-    wrong directory prefix/case, or not indexed yet) — every count is a deliberate
-    0, not a confirmed empty dependency graph. Try search_code or list_functions to
-    find the real path, or run "lien index" if the file was added recently.
-  - "symbol-attribution-degraded": \`symbol\` isn't a top-level export and its call
-    sites couldn't be confirmed — may be a real method/constructor, or a
-    typo'd/hallucinated/removed name (\`note\` says which); dependentCount/
-    riskLevel are the file-level answer (every importer of filepath), not a
-    verified count of callers of symbol itself.
-  - "dependent-attribution-partial": a file-level query (no \`symbol\`) found ZERO
-    import-based dependents, but a lower-confidence text-matching fallback
-    recovered one or more (tagged \`confidence: "inferred"\` in dependents[], see
-    above). Treat dependentCount/riskLevel as a recovered FLOOR, not a
-    verified/complete answer — the fallback can still miss a real dependent that
-    references the type via an alias, a generic type argument, or reflection.
-  - "dependent-attribution-incomplete": a file-level query (no \`symbol\`) returned
-    ZERO dependents even after the fallback above also found nothing, in a
-    language whose callers need no per-file import (C# today: enclosing-namespace
-    access under a \`global using\`). Treat dependentCount 0 and riskLevel "low" as
-    a FLOOR, not a finding — verify with grep before concluding the file is unused.
+  - "unresolved-target": ${ATTRIBUTION_CAVEAT_REASON_TEXT['unresolved-target']}
+  - "symbol-attribution-degraded": ${ATTRIBUTION_CAVEAT_REASON_TEXT['symbol-attribution-degraded']}
+  - "dependent-attribution-partial": ${ATTRIBUTION_CAVEAT_REASON_TEXT['dependent-attribution-partial']}
+  - "dependent-attribution-incomplete": ${ATTRIBUTION_CAVEAT_REASON_TEXT['dependent-attribution-incomplete']}
   At most one reason ever fires per response.`,
   ),
   toMCPToolSchema(

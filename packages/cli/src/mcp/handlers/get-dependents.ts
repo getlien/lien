@@ -4,6 +4,7 @@ import { GetDependentsSchema } from '../schemas/index.js';
 import { findUnindexedPaths, formatUnindexedPathsNote } from '../utils/unindexed-paths.js';
 import type { ToolContext, MCPToolResult } from '../types.js';
 import { computeBlastRadiusRisk, type BlastRadiusRisk } from '@liendev/parser';
+import type { AttributionCaveatReason } from '../attribution-caveat-reasons.js';
 import {
   findDependents,
   type DependencyAnalysisResult,
@@ -24,36 +25,12 @@ interface IndexInfo {
   indexDate: string;
 }
 
-/**
- * Why a `get_dependents` answer's counts can't be trusted as a verified
- * clear (#940). Exactly one reason can ever apply to a given response --
- * see `buildAttributionCaveat`'s doc comment for why these four are
- * mutually exclusive by construction:
- *
- * - `unresolved-target`: `filepath` isn't resolvable in the index at all
- *   (not in the manifest, or has zero chunks in the current scan -- #927,
- *   #928, #937). Every count in the response is then a deliberate `0`, not
- *   a fuzzy-matched answer.
- * - `symbol-attribution-degraded`: `symbol` isn't a top-level export of
- *   `filepath` (the shape of a method or constructor -- #931), so the
- *   response was widened to file-level dependents instead of asserting an
- *   unverifiable symbol-scoped count.
- * - `dependent-attribution-partial`: a file-level query (no `symbol`) found
- *   zero import-based dependents, but the C# type-reference-matching
- *   fallback recovered one or more (#930 part 2) -- those entries are
- *   tagged `confidence: 'inferred'` in `dependents`, and the counts are a
- *   recovered lower bound, not a verified/complete answer.
- * - `dependent-attribution-incomplete`: a file-level query (no `symbol`)
- *   came back with zero dependents in a language where the import graph
- *   structurally can't see every real usage, e.g. C#'s `global using` /
- *   implicit enclosing-namespace access (#930, #936), EVEN AFTER the
- *   type-reference-matching fallback also found nothing.
- */
-export type AttributionCaveatReason =
-  | 'unresolved-target'
-  | 'symbol-attribution-degraded'
-  | 'dependent-attribution-partial'
-  | 'dependent-attribution-incomplete';
+// `AttributionCaveatReason` and its doc comment (which four reasons exist,
+// what triggers each, and why they're mutually exclusive) now live in
+// `../attribution-caveat-reasons.js` -- the single source that every
+// model/user-facing prose surface interpolates from (#980). Re-exported here
+// for callers that already import the type from this handler.
+export type { AttributionCaveatReason };
 
 export interface AttributionCaveat {
   reason: AttributionCaveatReason;

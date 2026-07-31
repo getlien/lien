@@ -1,3 +1,5 @@
+import { ATTRIBUTION_CAVEAT_REASON_TEXT } from './attribution-caveat-reasons.js';
+
 /**
  * MCP server instructions returned on `initialize`.
  *
@@ -35,20 +37,10 @@ symbol:
   If a result carries attributionCaveat, dependentCount/riskLevel cannot be
   trusted as a verified clear — never treat a low count (especially 0) as
   "safe" or "unused" without checking it first. Its reason tells you why:
-  "unresolved-target" means filepath isn't in the index at all (never
-  indexed, misspelled, or a typo'd directory prefix) — fix the path (try
-  search_code or list_functions) before trusting anything else in the
-  result. "symbol-attribution-degraded" means symbol isn't a top-level
-  export and its call sites couldn't be confirmed — it may be a real
-  method/constructor, or it may be a typo'd/hallucinated/removed name (the
-  note says which); either way the counts are the wider file-level answer,
-  not a verified count for symbol itself.
-  "dependent-attribution-partial" means the import graph found nothing but
-  a lower-confidence text-matching fallback recovered some dependents
-  anyway (those entries carry confidence: "inferred") — treat the counts as
-  a recovered floor, not a complete answer. "dependent-attribution-incomplete"
-  means Lien could not SEE real callers in this language (e.g. C#) even
-  after that fallback ran — grep before concluding the file is unused.
+  "unresolved-target" means ${ATTRIBUTION_CAVEAT_REASON_TEXT['unresolved-target']}
+  "symbol-attribution-degraded" means ${ATTRIBUTION_CAVEAT_REASON_TEXT['symbol-attribution-degraded']}
+  "dependent-attribution-partial" means ${ATTRIBUTION_CAVEAT_REASON_TEXT['dependent-attribution-partial']}
+  "dependent-attribution-incomplete" means ${ATTRIBUTION_CAVEAT_REASON_TEXT['dependent-attribution-incomplete']}
   (The latter two reasons only fire for FILE-level queries, i.e. no "symbol"
   argument.) riskLevel is not adjusted for any of the latter three and may
   still read "low"; attributionCaveat is the authoritative signal in all
