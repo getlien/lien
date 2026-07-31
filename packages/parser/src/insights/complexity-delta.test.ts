@@ -10,6 +10,7 @@ import {
   type FunctionComplexityDelta,
   type MetricComplexityDelta,
 } from './complexity-delta.js';
+import { DEFAULT_COMPLEXITY_THRESHOLDS } from './chunk-complexity.js';
 
 // Fixture bodies with known metrics (measured against the real chunker):
 //   trivial   cyclo 1  cog 0
@@ -221,6 +222,19 @@ describe('thresholds', () => {
       ...DEFAULT_COMPLEXITY_DELTA_THRESHOLDS,
       mentalLoad: 3,
     });
+  });
+
+  it("DEFAULT_COMPLEXITY_DELTA_THRESHOLDS is the SAME object as chunk-complexity.ts's DEFAULT_COMPLEXITY_THRESHOLDS (#988: no independent copy)", () => {
+    // `lien delta` (this module) and `analyzeComplexityFromChunks`
+    // (chunk-complexity.ts) used to each hardcode their own copy of the same
+    // defaults, with only a comment ("mirror DEFAULT_THRESHOLDS in
+    // chunk-complexity.ts") asking a human to keep them in sync by hand. A
+    // drift here would mean `lien delta` silently enforces a threshold
+    // different from the one `analyzeComplexityFromChunks`/the user-facing
+    // config default use. Asserting reference equality (not just deep
+    // equality) makes a future re-introduction of an independent literal
+    // fail immediately, rather than only failing once someone edits a value.
+    expect(DEFAULT_COMPLEXITY_DELTA_THRESHOLDS).toBe(DEFAULT_COMPLEXITY_THRESHOLDS);
   });
 
   it('default thresholds gate cognitive at 15 (the motivating incident)', () => {

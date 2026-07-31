@@ -1,3 +1,5 @@
+import { DEFAULT_COMPLEXITY_THRESHOLDS } from '@liendev/parser';
+
 /**
  * Per-project Lien configuration (`.lien.config.json`).
  *
@@ -22,14 +24,19 @@ export interface LienConfig {
   };
 }
 
-/** Default per-project configuration. */
+/**
+ * Default per-project configuration.
+ *
+ * #988: `complexity.thresholds` values are derived from `DEFAULT_COMPLEXITY_THRESHOLDS`
+ * (`@liendev/parser`, defined once in `packages/parser/src/insights/chunk-complexity.ts`)
+ * rather than a hand-copied literal — this is the USER-FACING default that
+ * `lien delta` (via `ConfigService`) reads, so a drift from the gate's own
+ * defaults would silently enforce a threshold nobody chose. `LienConfig`'s
+ * type stays distinct (two keys optional, to allow a partial user override
+ * merged in `deepMergeConfig`) — only the values are shared.
+ */
 export const defaultConfig: LienConfig = {
   complexity: {
-    thresholds: {
-      testPaths: 15, // 🔀 Max test paths per function
-      mentalLoad: 15, // 🧠 Max mental load score
-      timeToUnderstandMinutes: 60, // ⏱️ Functions taking >1 hour to understand
-      estimatedBugs: 1.5, // 🐛 Functions estimated to have >1.5 bugs
-    },
+    thresholds: { ...DEFAULT_COMPLEXITY_THRESHOLDS },
   },
 };
