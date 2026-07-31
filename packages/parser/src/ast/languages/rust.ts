@@ -221,16 +221,27 @@ function basenameNoExt(p: string): string {
 }
 
 /**
- * The directory a FILE-BACKED `mod_item` (`mod x;`, no body) resolves its
- * sibling file against — Rust's file-to-module convention (#1000):
+ * The (extensionless) directory a FILE-BACKED `mod_item` (`mod x;`, no body)
+ * resolves its sibling module against — Rust's file-to-module convention
+ * (#1000). This returns the directory only; `extractModImportPath` joins
+ * the mod's own name onto it and returns THAT unresolved-extension
+ * specifier as-is — it never appends `.rs`, and it doesn't need to choose
+ * between the `x.rs` and `x/mod.rs` on-disk conventions. Downstream
+ * matching (`matchesFile`) normalizes both the specifier and every
+ * candidate target path by stripping extensions before comparing, so the
+ * extensionless specifier exact-matches whichever convention the sibling
+ * module actually uses on disk:
  *
  * - A module-root file (`mod.rs`/`lib.rs`/`main.rs`) owns its OWN directory:
- *   `src/main.rs`'s `mod reporter;` -> `src/reporter.rs`.
+ *   `src/main.rs`'s `mod reporter;` -> directory `src`, giving the resolved
+ *   specifier `src/reporter` (which normalizes-matches `src/reporter.rs` or
+ *   `src/reporter/mod.rs` on disk).
  * - A "leaf" file (any other name, e.g. `src/foo.rs`) owns a SUBDIRECTORY
- *   named after itself: `src/foo.rs`'s `mod bar;` -> `src/foo/bar.rs` — the
- *   same 2018+-edition file-plus-sibling-directory split already documented
- *   on `resolveRustRelativeModulePath` for `self::`/`super::`, but resolved
- *   precisely here rather than approximated.
+ *   named after itself: `src/foo.rs`'s `mod bar;` -> directory `src/foo`,
+ *   giving `src/foo/bar` — the same 2018+-edition file-plus-sibling-
+ *   directory split already documented on `resolveRustRelativeModulePath`
+ *   for `self::`/`super::`, but resolved precisely here rather than
+ *   approximated.
  * - Each INLINE ancestor `mod` block (`mod outer { mod inner; }` — itself
  *   not file-backed, see `isInlineModDeclaration`) folds its own name in as
  *   a further directory segment, since Rust's directory-ownership rule
@@ -314,17 +325,21 @@ function extractPathAttributeValue(attributeItem: SyntaxNode): string | null {
 }
 
 /**
- * Resolve a FILE-BACKED `mod_item` (`mod x;`, no body) to the concrete
- * sibling path it declares.
+ * Resolve a FILE-BACKED `mod_item` (`mod x;`, no body) to the
+ * directory-anchored, extensionless module path it declares (e.g.
+ * `src/reporter` for `src/main.rs`'s `mod reporter;` — see
+ * `rustModOwningDirectory`'s doc comment for exactly what that specifier
+ * does and doesn't resolve to on disk).
  *
- * The trap this deliberately avoids (#1000, closed against #928/#884): a
- * bare specifier like `reporter` requires downstream fuzzy bare-module
- * matching to guess which file it means, which is exactly the
- * language-blind fabrication #928 was closed to prevent. A Rust `mod x;` is
- * NOT ambiguous like that — it's a declaration that resolves deterministically
- * to one specific sibling path relative to the declaring file — so this
- * resolves the concrete path up front (`rustModOwningDirectory` +
- * `#[path]` override) and returns it complete, the same way
+ * The trap this deliberately avoids (#1000, closed against #928/#884): an
+ * UNANCHORED bare specifier like `reporter` (no directory prefix at all)
+ * requires downstream fuzzy bare-module matching to guess which file it
+ * means, which is exactly the language-blind fabrication #928 was closed to
+ * prevent. A Rust `mod x;` is NOT ambiguous like that — it's a declaration
+ * that resolves deterministically to one specific sibling module relative
+ * to the declaring file — so this anchors it to that module's real
+ * directory up front (`rustModOwningDirectory` + `#[path]` override) and
+ * returns the result directly, the same way
  * `resolveRustRelativeModulePath` already resolves `self::`/`super::`
  * precisely instead of leaving them for the generic bare-word matcher.
  *
@@ -558,8 +573,8 @@ function extractUseListSymbols(useList: SyntaxNode): string[] {
  * #1000): the idiomatic Rust pattern of `mod x;` at the crate root plus
  * qualified calls (`x::func()`) with no `use` at all otherwise produces no
  * edge whatsoever. See `extractModImportPath` for how a `mod` declaration is
- * resolved to a concrete sibling path rather than an ambiguous bare
- * specifier. An INLINE `mod x { ... }` (has a body) is a namespace, not an
+ * resolved to a directory-anchored, extensionless module path rather than
+ * an ambiguous bare specifier. An INLINE `mod x { ... }` (has a body) is a namespace, not an
  * import, and correctly produces no edge for itself — see
  * `isInlineModDeclaration`.
  *

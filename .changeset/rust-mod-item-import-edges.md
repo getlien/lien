@@ -11,17 +11,22 @@ zero import edges. `get_dependents` on the child module returned a
 confident, wrong `[]` (or an undercount when the file also happened to gain
 one edge via an unrelated `use crate::x` elsewhere).
 
-A `mod x;` declaration is resolved to the CONCRETE sibling path it names
-(`x.rs`/`x/mod.rs` relative to the declaring file, honoring the leaf-file
-2018+-edition directory-split convention, inline-mod nesting, and a
-`#[path = "..."]` override) rather than emitted as a bare specifier for
-downstream fuzzy bare-module matching to guess at — the bare-specifier shape
-is exactly what #928/#884's `isUnresolvableWholeModuleImport` guard exists to
-reject, so resolving deterministically up front avoids reintroducing that
-fabrication bug. An inline `mod x { ... }` (has a body, e.g. `#[cfg(test)]
-mod tests { ... }`) is a namespace, not an import, and correctly produces no
-edge for itself; `collectImportNodes` now recurses into such a body so any
-`use`/nested `mod` declared inside it is still discovered.
+A `mod x;` declaration is resolved to a directory-anchored, extensionless
+module path (e.g. `src/reporter` for `src/main.rs`'s `mod reporter;`,
+honoring the leaf-file 2018+-edition directory-split convention, inline-mod
+nesting, and a `#[path = "..."]` override) rather than emitted as an
+unanchored bare specifier for downstream fuzzy bare-module matching to
+guess at. The extractor itself doesn't choose between the `x.rs` and
+`x/mod.rs` on-disk conventions — it leaves the specifier extensionless, and
+downstream matching (which already normalizes every candidate file path by
+stripping extensions) resolves it to whichever one is actually on disk. The
+unanchored-bare-specifier shape is exactly what #928/#884's
+`isUnresolvableWholeModuleImport` guard exists to reject, so resolving to a
+directory-anchored path up front avoids reintroducing that fabrication bug.
+An inline `mod x { ... }` (has a body, e.g. `#[cfg(test)] mod tests { ... }`)
+is a namespace, not an import, and correctly produces no edge for itself;
+`collectImportNodes` now recurses into such a body so any `use`/nested `mod`
+declared inside it is still discovered.
 
 Verified on the tracked `lien-review-testbed/rust` fixture (reporter.rs
 0 -> 1 dependent, formatter.rs and parser.rs each gain the previously-missing

@@ -518,11 +518,11 @@ pub static COUNTER: i32 = 0;`;
     // with no `use` at all is the idiomatic Rust pattern — before this, it
     // produced NO import edge whatsoever (mod_item wasn't in
     // importNodeTypes), so `get_dependents` on the child module returned a
-    // confident, wrong `[]`. The fix resolves `mod` to a concrete sibling
-    // path up front (see `extractModImportPath`'s doc comment) rather than
-    // emitting a bare specifier for downstream fuzzy matching to guess at —
-    // the exact #928/#884 trap this issue explicitly warns against
-    // reintroducing.
+    // confident, wrong `[]`. The fix resolves `mod` to a directory-anchored,
+    // extensionless module path up front (see `extractModImportPath`'s doc
+    // comment) rather than emitting an unanchored bare specifier for
+    // downstream fuzzy matching to guess at — the exact #928/#884 trap this
+    // issue explicitly warns against reintroducing.
     describe('mod_item file-backed import resolution (#1000)', () => {
       it('includes mod_item in importNodeTypes', () => {
         expect(importExtractor.importNodeTypes).toContain('mod_item');
