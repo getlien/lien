@@ -5,6 +5,7 @@ import { configSetCommand, configGetCommand, configListCommand } from './config.
 vi.mock('@liendev/core', () => ({
   loadGlobalConfig: vi.fn(),
   mergeGlobalConfig: vi.fn(),
+  getLienHome: vi.fn().mockReturnValue('/mock/home'),
 }));
 
 import { loadGlobalConfig, mergeGlobalConfig } from '@liendev/core';

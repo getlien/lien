@@ -25,7 +25,7 @@
 
 import fs from 'fs/promises';
 import path from 'path';
-import { getIndexDir } from '@liendev/parser';
+import { getIndexDir } from '@liendev/core';
 
 export const TEST_SESSIONS_DIRNAME = 'test-sessions';
 

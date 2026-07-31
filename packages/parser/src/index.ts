@@ -1,4 +1,5 @@
-// @liendev/parser - AST parsing, complexity analysis, and semantic chunking
+// @liendev/parser - static analysis over source code: parsing, chunking,
+// complexity, and dependency resolution
 
 // =============================================================================
 // TYPES
@@ -45,12 +46,6 @@ export {
   hasSingleFileImportSemantics,
   hasPythonModuleSemantics,
 } from './utils/path-matching.js';
-
-export { extractRepoId } from './utils/repo-id.js';
-
-export { getLienHome } from './utils/lien-home.js';
-
-export { getIndexDir } from './utils/index-dir.js';
 
 // =============================================================================
 // AST

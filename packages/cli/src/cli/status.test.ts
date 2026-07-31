@@ -19,13 +19,6 @@ vi.mock('@liendev/core', async () => {
     loadGlobalConfig: vi.fn().mockResolvedValue({ backend: 'sqlite' }),
     detectLinkedWorktree: vi.fn().mockResolvedValue({ isLinkedWorktree: false, mainRoot: null }),
     resolveIndexStrategy: vi.fn().mockResolvedValue({ mode: 'standalone' }),
-  };
-});
-
-vi.mock('@liendev/parser', async () => {
-  const actual = await vi.importActual<typeof import('@liendev/parser')>('@liendev/parser');
-  return {
-    ...actual,
     extractRepoId: vi.fn().mockReturnValue('test-repo-id'),
   };
 });

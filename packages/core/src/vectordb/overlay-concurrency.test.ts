@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs/promises';
 import path from 'path';
-import { getIndexDir } from '@liendev/parser';
+import { getIndexDir } from '../utils/index-dir.js';
 import { createTestDir, cleanupTestDir } from '../test/helpers/test-db.js';
 import { indexCodebase } from '../indexer/index.js';
 import { buildOverlay } from '../indexer/overlay-index.js';

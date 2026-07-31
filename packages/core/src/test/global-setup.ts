@@ -6,7 +6,7 @@ import path from 'path';
  * Vitest globalSetup: redirect Lien's global store for the whole test run.
  *
  * Every code path that resolves `~/.lien/` (VectorDB indices, global config)
- * goes through `getLienHome()` in `@liendev/parser`, which honors the
+ * goes through `getLienHome()` in `@liendev/core`, which honors the
  * `LIEN_HOME` environment variable. Setting it once here — before any test
  * file or worker starts — means no individual test needs to remember to
  * isolate or clean up its index directory: everything created during this

@@ -5,9 +5,8 @@ import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
 import { execSync } from 'child_process';
-import { createVectorDB } from '@liendev/core';
+import { createVectorDB, getLienHome } from '@liendev/core';
 import type { VectorDBInterface } from '@liendev/core';
-import { getLienHome } from '@liendev/parser';
 
 /**
  * E2E Tests with Real Open Source Projects
@@ -193,7 +192,7 @@ function getIndexPath(projectDir: string): string {
   const projectName = path.basename(realPath);
   const pathHash = crypto.createHash('md5').update(realPath).digest('hex').substring(0, 8);
 
-  // Matches getLienHome() from @liendev/parser: honors LIEN_HOME (set by
+  // Matches getLienHome() from @liendev/core: honors LIEN_HOME (set by
   // vitest globalSetup during tests) so this never touches the real
   // ~/.lien/indices/ store. The CLI subprocess spawned below inherits
   // LIEN_HOME from process.env, so it writes to the same isolated location.

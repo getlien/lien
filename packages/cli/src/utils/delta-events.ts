@@ -2,7 +2,7 @@
  * Local, append-only JSONL event log for `lien delta` runs — the raw material
  * behind `lien stats`. Strictly local: one line is appended to
  * `<indexDir>/delta-events.jsonl` (the same per-repo directory the structural
- * index lives in, resolved via `getIndexDir` from `@liendev/parser`) on every
+ * index lives in, resolved via `getIndexDir` from `@liendev/core`) on every
  * `lien delta` invocation — manual, plugin-hook-driven (`delta-write.sh`), or
  * CI `--base` runs. There is no network call anywhere in this file, no
  * telemetry, nothing phones home. See docs/architecture/lien-delta.md
@@ -14,7 +14,7 @@
 
 import fs from 'fs/promises';
 import path from 'path';
-import { getIndexDir } from '@liendev/parser';
+import { getIndexDir } from '@liendev/core';
 import type { ComplexityMetricType } from '@liendev/parser';
 
 export const DELTA_EVENTS_FILENAME = 'delta-events.jsonl';

@@ -234,7 +234,9 @@ export {
 export { Result, Ok, Err, isOk, isErr, unwrap, unwrapOr } from './utils/result.js';
 export { normalizePath, matchesFile, getCanonicalPath, isTestFile } from '@liendev/parser';
 export { safeRegex } from './utils/safe-regex.js';
-export { extractRepoId } from '@liendev/parser';
+export { extractRepoId } from './utils/repo-id.js';
+export { getLienHome } from './utils/lien-home.js';
+export { getIndexDir } from './utils/index-dir.js';
 
 // =============================================================================
 // AST LANGUAGE REGISTRY (re-export from parser)

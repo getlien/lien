@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { getIndexDir } from '@liendev/parser';
+import { getIndexDir } from '@liendev/core';
 import {
   recordNudgeEvent,
   recordNudgeShown,

@@ -1,7 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { getIndexDir } from '@liendev/parser';
-import { VERSION_FILE } from '@liendev/core';
+import { getIndexDir, VERSION_FILE } from '@liendev/core';
 import { type AbsolutePath, toAbsolutePath } from '../types/paths.js';
 
 /**

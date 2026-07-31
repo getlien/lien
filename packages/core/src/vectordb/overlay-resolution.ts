@@ -1,6 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { getIndexDir } from '@liendev/parser';
+import { getIndexDir } from '../utils/index-dir.js';
 import { INDEX_FORMAT_VERSION } from '../constants.js';
 import { detectLinkedWorktree } from '../git/worktree.js';
 import { STRUCTURAL_DB_FILENAME } from './sqlite/schema.js';

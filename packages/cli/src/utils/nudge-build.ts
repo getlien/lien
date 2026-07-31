@@ -43,7 +43,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
-import { getIndexDir } from '@liendev/parser';
+import { getIndexDir } from '@liendev/core';
 import { getPackageVersion } from './version.js';
 
 export interface BuildStamp {

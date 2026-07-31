@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import path from 'path';
-import { extractRepoId, getLienHome } from '@liendev/parser';
+import { extractRepoId, getLienHome } from '@liendev/core';
 import { pathCommand } from './path-cmd.js';
 import { resolveProjectRoot } from './project-root.js';
 

@@ -9,8 +9,8 @@
 import chalk from 'chalk';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { createVectorDB } from '@liendev/core';
-import { getIndexDir, computeBlastRadiusRisk, type FileContentChange } from '@liendev/parser';
+import { createVectorDB, getIndexDir } from '@liendev/core';
+import { computeBlastRadiusRisk, type FileContentChange } from '@liendev/parser';
 import { getRepoRoot, collectFileChanges, collectFileChange } from './delta-git.js';
 import {
   findDependents,

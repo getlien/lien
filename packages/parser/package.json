@@ -1,7 +1,7 @@
 {
   "name": "@liendev/parser",
   "version": "0.73.0",
-  "description": "AST parsing, complexity analysis, and semantic chunking for Lien",
+  "description": "Static analysis over source code: parsing, chunking, complexity, and dependency resolution for Lien",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

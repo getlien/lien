@@ -20,7 +20,7 @@
 
 import fs from 'fs/promises';
 import path from 'path';
-import { getIndexDir } from '@liendev/parser';
+import { getIndexDir } from '@liendev/core';
 import type { ExportedSymbolChangeKind } from './signature-delta.js';
 
 export const BLAST_EVENTS_FILENAME = 'blast-events.jsonl';

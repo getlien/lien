@@ -1,5 +1,5 @@
 import path from 'path';
-import { extractRepoId, getLienHome } from '@liendev/parser';
+import { extractRepoId, getLienHome } from '@liendev/core';
 import { resolveProjectRoot } from './project-root.js';
 
 /**

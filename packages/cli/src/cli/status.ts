@@ -14,14 +14,11 @@ import {
   resolveIndexStrategy,
   DEFAULT_CONCURRENCY,
   DEFAULT_GIT_POLL_INTERVAL_MS,
-} from '@liendev/core';
-import {
   extractRepoId,
   getLienHome,
   getIndexDir,
-  DEFAULT_CHUNK_SIZE,
-  DEFAULT_CHUNK_OVERLAP,
-} from '@liendev/parser';
+} from '@liendev/core';
+import { DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP } from '@liendev/parser';
 import { showCompactBanner } from '../utils/banner.js';
 
 const VALID_FORMATS = ['text', 'json'];
