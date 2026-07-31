@@ -23,8 +23,13 @@ import { resolveJsDirectoryIndex } from '../js-directory-index.js';
  * without a manifest reader.
  */
 export interface ManifestRoots {
-  /** PHP Composer PSR-4 namespace-prefix -> source-directory map. */
-  psr4Map?: ReadonlyMap<string, string>;
+  /**
+   * PHP Composer PSR-4 namespace-prefix -> candidate source-directories map.
+   * A prefix can have more than one candidate (#1002 — declared in both
+   * `autoload` and `autoload-dev`, or a fallback-dir array); disambiguated in
+   * `resolveManifestRoot` using `workspaceRoot` below.
+   */
+  psr4Map?: ReadonlyMap<string, string[]>;
   /** Go module's declared import-path prefix (`go.mod`'s `module` line). */
   goModulePrefix?: string;
   /** Python src-layout root directory (`src`), when detected on disk. */
@@ -157,7 +162,9 @@ function resolveDirectoryIndexIfRelative(
 /** Apply step 3 (manifest-root resolution) of `resolveImportSpecifier`. */
 function resolveManifestRoot(specifier: string, manifestRoots: ManifestRoots | undefined): string {
   if (!manifestRoots) return specifier;
-  if (manifestRoots.psr4Map) return resolvePsr4Import(specifier, manifestRoots.psr4Map);
+  if (manifestRoots.psr4Map) {
+    return resolvePsr4Import(specifier, manifestRoots.psr4Map, manifestRoots.workspaceRoot);
+  }
   if (manifestRoots.goModulePrefix) {
     return resolveGoModuleImport(specifier, manifestRoots.goModulePrefix);
   }
