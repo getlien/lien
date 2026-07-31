@@ -12,7 +12,13 @@ import fs from 'fs/promises';
 import type { Dirent } from 'fs';
 import path from 'path';
 
-import { analyzeComplexityFromChunks, createGitignoreFilter } from '@liendev/parser';
+import type { BlastRadiusRisk, CodeChunk } from '@liendev/parser';
+import {
+  analyzeComplexityFromChunks,
+  createGitignoreFilter,
+  computeBlastRadiusRisk,
+  findTestAssociationsFromChunks,
+} from '@liendev/parser';
 
 import type { AgentToolContext } from './types.js';
 
@@ -70,6 +76,96 @@ export function getFilesContext(input: Record<string, unknown>, ctx: AgentToolCo
 // get_dependents
 // ---------------------------------------------------------------------------
 
+/**
+ * Complexity threshold above which an uncovered dependent escalates risk.
+ * Matches the review-side blast-radius default (`blast-radius.ts`'s
+ * DEFAULT_HIGH_COMPLEXITY_THRESHOLD) and the MCP get_dependents handler's
+ * own constant (cli's get-dependents.ts) — every consumer of
+ * `computeBlastRadiusRisk` agrees on this number.
+ */
+const HIGH_COMPLEXITY_THRESHOLD = 15;
+
+/** A caller's identity, independent of whether it came from a symbol- or file-scoped lookup. */
+interface DependentIdentity {
+  filepath: string;
+  symbolName: string;
+}
+
+function chunkComplexity(chunk: CodeChunk): number {
+  return chunk.metadata.cognitiveComplexity ?? chunk.metadata.complexity ?? 0;
+}
+
+/**
+ * Index chunks by file::symbolName, keeping the highest-complexity chunk for
+ * a given key. Mirrors `blast-radius.ts`'s `buildChunkIndex` (same key shape,
+ * same tie-break) so overload/partial-class duplicates resolve identically to
+ * the review-side `<blast_radius>` injection.
+ */
+function buildChunkIndex(chunks: CodeChunk[]): Map<string, CodeChunk> {
+  const index = new Map<string, CodeChunk>();
+  for (const chunk of chunks) {
+    const key = `${chunk.metadata.file}::${chunk.metadata.symbolName ?? ''}`;
+    const existing = index.get(key);
+    if (!existing || chunkComplexity(chunk) > chunkComplexity(existing)) {
+      index.set(key, chunk);
+    }
+  }
+  return index;
+}
+
+/**
+ * Compose blast-radius risk for a set of dependents, overlaying complexity
+ * and test coverage from `ctx.repoChunks` — the same overlay `blast-
+ * radius.ts`'s `buildEntry` runs for the review-side `<blast_radius>`
+ * injection, and the primitive's own module doc names as an intended
+ * consumer alongside that injection. Before this, `getDependents` fed only a
+ * raw dependent count into a local count-only threshold ladder, so the same
+ * PR could get a "high" risk signal from the blast-radius injection and a
+ * "low" one from this tool for the very same symbol (#977).
+ */
+function computeDependentsRisk(
+  callers: DependentIdentity[],
+  ctx: AgentToolContext,
+): BlastRadiusRisk {
+  const dependentFiles = Array.from(new Set(callers.map(c => c.filepath)));
+  const coveredFiles =
+    dependentFiles.length === 0
+      ? new Set<string>()
+      : new Set(
+          Array.from(
+            findTestAssociationsFromChunks(
+              dependentFiles,
+              ctx.repoChunks,
+              ctx.repoRootDir,
+            ).entries(),
+          )
+            .filter(([, tests]) => tests.length > 0)
+            .map(([file]) => file),
+        );
+
+  const chunkIndex = buildChunkIndex(ctx.repoChunks);
+  let maxDependentComplexity = 0;
+  let uncoveredDependents = 0;
+  let hasHighComplexityUncovered = false;
+
+  for (const caller of callers) {
+    const chunk = chunkIndex.get(`${caller.filepath}::${caller.symbolName}`);
+    const complexity = chunk ? chunkComplexity(chunk) : 0;
+    if (complexity > maxDependentComplexity) maxDependentComplexity = complexity;
+    if (!coveredFiles.has(caller.filepath)) {
+      uncoveredDependents += 1;
+      if (complexity >= HIGH_COMPLEXITY_THRESHOLD) hasHighComplexityUncovered = true;
+    }
+  }
+
+  return computeBlastRadiusRisk({
+    dependentCount: callers.length,
+    uncoveredDependents,
+    maxDependentComplexity: maxDependentComplexity > 0 ? maxDependentComplexity : undefined,
+    hasHighComplexityUncovered,
+  });
+}
+
 export function getDependents(input: Record<string, unknown>, ctx: AgentToolContext): string {
   try {
     const filepath = input.filepath as string;
@@ -79,13 +175,17 @@ export function getDependents(input: Record<string, unknown>, ctx: AgentToolCont
 
     if (symbol) {
       const callers = ctx.graph.getCallers(filepath, symbol);
-      const riskLevel = getRiskLevel(callers.length);
+      const risk = computeDependentsRisk(
+        callers.map(c => ({ filepath: c.caller.filepath, symbolName: c.caller.symbolName })),
+        ctx,
+      );
 
       return JSON.stringify({
         filepath,
         symbol,
         dependentCount: callers.length,
-        riskLevel,
+        riskLevel: risk.level,
+        riskReasoning: risk.reasoning,
         callers: callers.map(c => ({
           filepath: c.caller.filepath,
           symbolName: c.caller.symbolName,
@@ -124,24 +224,18 @@ export function getDependents(input: Record<string, unknown>, ctx: AgentToolCont
       }
     }
 
-    const riskLevel = getRiskLevel(allCallers.length);
+    const risk = computeDependentsRisk(allCallers, ctx);
 
     return JSON.stringify({
       filepath,
       dependentCount: allCallers.length,
-      riskLevel,
+      riskLevel: risk.level,
+      riskReasoning: risk.reasoning,
       callers: allCallers,
     });
   } catch (err) {
     return JSON.stringify({ error: `get_dependents failed: ${(err as Error).message}` });
   }
-}
-
-function getRiskLevel(count: number): 'low' | 'medium' | 'high' | 'critical' {
-  if (count >= 20) return 'critical';
-  if (count >= 10) return 'high';
-  if (count >= 5) return 'medium';
-  return 'low';
 }
 
 // ---------------------------------------------------------------------------
