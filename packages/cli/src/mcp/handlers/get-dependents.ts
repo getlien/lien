@@ -48,9 +48,10 @@ interface DependentsResponse {
   /**
    * The depth that actually ran, NOT necessarily the requested `depth` arg.
    * A symbol-scoped query (`symbol` set) always runs at depth 1 regardless
-   * of what was requested — `runBfsIfRequested` in `dependency-analyzer.ts`
-   * skips BFS entirely for symbol queries, since transitive symbol-renaming
-   * chains are out of scope. Echoing the requested value unchanged in that
+   * of what was requested — `@liendev/parser`'s `runBfsIfRequested`
+   * (in its `dependency-analyzer.ts`) skips BFS entirely for symbol queries,
+   * since transitive symbol-renaming chains are out of scope. Echoing the
+   * requested value unchanged in that
    * case would let a caller believe a multi-hop symbol walk ran when it
    * didn't.
    */
@@ -98,8 +99,9 @@ function logRiskAssessment(
   }
 
   if (analysis.dependentAttributionIncomplete) {
-    // findDependents already logged the underlying warning (dependency-analyzer.ts);
-    // just skip the generic "Found 0 dependents" log below rather than duplicate it.
+    // findDependents already logged the underlying warning (@liendev/parser's
+    // dependency-analyzer.ts); just skip the generic "Found 0 dependents" log
+    // below rather than duplicate it.
     return;
   }
 
@@ -182,8 +184,9 @@ function clarifyCallerReasoning(reasoning: string[]): string[] {
  *   `dependentAttributionPartial`/`dependentAttributionIncomplete` only fire
  *   for a file-level query (no `symbol`) -- see
  *   `enrichWithCSharpTypeReferenceDependents`/
- *   `checkDependentAttributionIncomplete` in dependency-analyzer.ts. So
- *   those can't co-occur with `symbolAttributionDegraded` either.
+ *   `checkDependentAttributionIncomplete` in `@liendev/parser`'s
+ *   `dependency-analyzer.ts`. So those can't co-occur with
+ *   `symbolAttributionDegraded` either.
  * - `dependentAttributionPartial` requires the FINAL `dependents.length`
  *   (after the type-reference-matching fallback runs) to be positive;
  *   `dependentAttributionIncomplete` requires that same final count to be

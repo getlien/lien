@@ -119,8 +119,8 @@
  * path -- again a fail-safe direction (a missed recovery, never a fabricated
  * one). Residual risk is accepted and hedged, not eliminated -- callers must
  * surface this as a lower-confidence, non-import-verified signal (see
- * `DependentInfo.confidence` in the CLI's dependency-analyzer.ts), never
- * fold it in unhedged next to a real import edge.
+ * `DependentInfo.confidence` in `dependency-analyzer.ts`), never fold it in
+ * unhedged next to a real import edge.
  *
  * Verified against a real clone (serilog/serilog, the corpus that motivated
  * #930): word-boundary matching for `Alignment` and `Padding` -- both
@@ -131,8 +131,8 @@
  * `grep -rlw` across the entire `src`+`test` tree, not just the 5 known
  * files).
  *
- * Deliberately scoped to file-level `get_dependents` recovery (via the CLI's
- * `dependency-analyzer.ts`), NOT test-association -- unlike Go/Java/Swift's
+ * Deliberately scoped to file-level `get_dependents` recovery (via this
+ * package's `dependency-analyzer.ts`), NOT test-association -- unlike Go/Java/Swift's
  * same-shaped signals, which stay confined to `lien annotate`'s test-
  * coverage line. #930's remaining gap is specifically that `get_dependents`
  * itself reports a false `dependentCount: 0` / `riskLevel: "low"` "all
