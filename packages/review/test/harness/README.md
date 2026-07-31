@@ -168,6 +168,44 @@ npx tsx packages/review/test/harness/capture-pr.ts 574 "$ROOT/error-swallowing/s
 npx tsx packages/review/test/harness/capture-pr.ts 575 "$ROOT/error-swallowing/harness-gitignore-convention-fp.fixture.json" --sha b1e36fc
 ```
 
+## Deterministic blast-radius fixtures (no LLM, `.blast-radius.ts`)
+
+`computeBlastRadius` (`src/blast-radius.ts`) runs BEFORE the agent is ever
+invoked — it's a pre-computed signal injected into the initial message, not
+part of the agent's LLM-driven output. Fixtures that pin its answer are
+authored as `<scenario>.blast-radius.ts` siblings, **not** `.assertions.ts`:
+they read the captured fixture directly (synchronous `JSON.parse`, no
+`loadFixture` needed since `chunks`/`repoChunks` carry no Map/Set-tagged
+fields) and call `buildDependencyGraph` + `computeBlastRadius` themselves, so
+they run with `npx tsx <file>` and need zero `OPENROUTER_API_KEY` / real
+money. The `.blast-radius.ts` naming is deliberate: `run.ts`'s fixture
+discovery pairs `*.fixture.json` with a sibling `*.assertions.ts` only, so
+these can never be swept into a paid `--calibrate` run by accident.
+
+Use this shape when you want a baseline for the dependency-resolution
+tiers themselves (which callers a seed symbol resolves to), not for what
+the agent says about them — e.g. measuring a resolution refactor's
+before/after impact on a language the precise (JS/TS-only) tier can't
+reach.
+
+| Fixture | PR | Seed | What it pins |
+|---|---|---|---|
+| `blast-radius/pr981-python-check-required-fields` | #981 | `check_required_fields` (Python, `lien-review-testbed/`) | 3 direct dependents resolved via the cross-package symbol-match fallback (`addCrossPackageEdges`) — hand-verified correct for this import shape (`from module import name`); says nothing about the OOP-method or same-namespace fallback strategies |
+
+Regenerate:
+
+```bash
+npx tsx packages/review/test/harness/capture-pr.ts 981 \
+  packages/review/test/harness/fixtures/blast-radius/pr981-python-check-required-fields.fixture.json \
+  --sha 51c32d23f08a84ab195bc85d6f366594229f96aa
+```
+
+Run the check:
+
+```bash
+npx tsx packages/review/test/harness/fixtures/blast-radius/pr981-python-check-required-fields.blast-radius.ts
+```
+
 ## Documented-miss fixtures (real bugs, not yet reliably caught)
 
 These capture a real bug from a merged PR that another reviewer (CodeRabbit)
