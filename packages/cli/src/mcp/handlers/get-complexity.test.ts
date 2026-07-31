@@ -624,4 +624,90 @@ describe('handleGetComplexity', () => {
       expect(parsed).not.toHaveProperty('note');
     });
   });
+
+  describe('testAssociations passthrough (#979)', () => {
+    it('surfaces the file-level testAssociations on each violation', async () => {
+      const mockReport: ComplexityReport = {
+        summary: {
+          filesAnalyzed: 1,
+          avgComplexity: 25,
+          maxComplexity: 25,
+          totalViolations: 1,
+          bySeverity: { error: 0, warning: 1 },
+        },
+        files: {
+          'src/utils.ts': {
+            violations: [
+              {
+                filepath: 'src/utils.ts',
+                symbolName: 'complex',
+                symbolType: 'function',
+                startLine: 1,
+                endLine: 10,
+                complexity: 20,
+                metricType: 'cyclomatic',
+                threshold: 15,
+                severity: 'warning',
+                language: 'typescript',
+                message: 'Complexity 20 exceeds threshold 15',
+              },
+            ],
+            dependents: [],
+            testAssociations: ['src/utils.test.ts'],
+            dependentCount: 0,
+            riskLevel: 'low',
+          },
+        },
+      };
+
+      getMockAnalyze().mockResolvedValue(mockReport);
+
+      const result = await handleGetComplexity({ top: 10 }, mockCtx);
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.violations[0].testAssociations).toEqual(['src/utils.test.ts']);
+    });
+
+    it('surfaces an empty testAssociations array when the file has no associated tests', async () => {
+      const mockReport: ComplexityReport = {
+        summary: {
+          filesAnalyzed: 1,
+          avgComplexity: 25,
+          maxComplexity: 25,
+          totalViolations: 1,
+          bySeverity: { error: 0, warning: 1 },
+        },
+        files: {
+          'src/untested.ts': {
+            violations: [
+              {
+                filepath: 'src/untested.ts',
+                symbolName: 'risky',
+                symbolType: 'function',
+                startLine: 1,
+                endLine: 10,
+                complexity: 20,
+                metricType: 'cyclomatic',
+                threshold: 15,
+                severity: 'warning',
+                language: 'typescript',
+                message: 'Complexity 20 exceeds threshold 15',
+              },
+            ],
+            dependents: [],
+            testAssociations: [],
+            dependentCount: 0,
+            riskLevel: 'low',
+          },
+        },
+      };
+
+      getMockAnalyze().mockResolvedValue(mockReport);
+
+      const result = await handleGetComplexity({ top: 10 }, mockCtx);
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.violations[0].testAssociations).toEqual([]);
+    });
+  });
 });

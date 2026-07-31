@@ -11,6 +11,7 @@ import type {
 import { RISK_ORDER } from '@liendev/parser';
 import { analyzeDependencies } from '@liendev/parser';
 import { analyzeComplexityFromChunks } from '@liendev/parser';
+import { findTestAssociationsFromChunks } from '@liendev/parser';
 
 /**
  * Hardcoded severity multipliers:
@@ -56,6 +57,9 @@ export class ComplexityAnalyzer {
 
     // 5. Enrich files with violations with dependency data
     this.enrichWithDependencies(report, allChunks as SearchResult[]);
+
+    // 6. Enrich files with violations with test association data
+    this.enrichWithTestAssociations(report, allChunks);
 
     return report;
   }
@@ -462,6 +466,27 @@ export class ComplexityAnalyzer {
           maxComplexity: depAnalysis.complexityMetrics.maxComplexity,
           filesWithComplexityData: depAnalysis.complexityMetrics.filesWithComplexityData,
         };
+      }
+    }
+  }
+
+  /**
+   * Enrich files with violations with test association data (#979).
+   * Mirrors the parser twin's inline enrichment in
+   * `analyzeComplexityFromChunks` (packages/parser/src/insights/chunk-complexity.ts)
+   * so both the persisted-index path (here) and the in-memory-chunks path
+   * report the same testAssociations for the same input.
+   */
+  private enrichWithTestAssociations(report: ComplexityReport, allChunks: SearchResult[]): void {
+    const filesWithViolations = Object.keys(report.files).filter(
+      f => report.files[f].violations.length > 0,
+    );
+    if (filesWithViolations.length === 0) return;
+
+    const testMap = findTestAssociationsFromChunks(filesWithViolations, allChunks);
+    for (const [filepath, testFiles] of testMap) {
+      if (report.files[filepath]) {
+        report.files[filepath].testAssociations = testFiles;
       }
     }
   }
