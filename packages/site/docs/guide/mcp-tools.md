@@ -328,7 +328,7 @@ When `symbol` is provided, the response also includes `totalUsageCount` (number 
 
 ### `attributionCaveat`
 
-Three unrelated situations can each make `dependentCount`/`riskLevel` untrustworthy as a verified clear. Rather than three differently-named flags, the response carries a single optional field:
+Four unrelated situations can each make `dependentCount`/`riskLevel` untrustworthy as a verified clear. Rather than four differently-named flags, the response carries a single optional field:
 
 ```json
 {
@@ -342,8 +342,9 @@ Three unrelated situations can each make `dependentCount`/`riskLevel` untrustwor
 `reason` is one of:
 
 - **`unresolved-target`** — `filepath` isn't resolvable in the index at all: never indexed, misspelled, or a typo'd directory prefix. `dependentCount: 0` / `riskLevel: "low"` then means "the path is unresolved," not "confirmed zero dependents." (Two independent checks can produce this — the index manifest has no entry for the path at all, or the path resolves in the manifest but has zero chunks in the current scan — but only one `attributionCaveat` is ever returned, never two competing explanations of the same zero.)
-- **`symbol-attribution-degraded`** — `symbol` also accepts a method or constructor name (e.g. `__construct`, `moveUp`); those aren't top-level exports, so when call sites for one can't be confirmed, the response widens `dependentCount`/`riskLevel` to the file-level answer (every file that imports `filepath`) rather than asserting an unverifiable symbol-scoped count.
-- **`dependent-attribution-incomplete`** — a file-level query (no `symbol`) found zero dependents in a language where the import graph structurally can't see every real usage — C#'s enclosing-namespace access, where a `global using` lets a real caller reach `filepath`'s exports with no per-file import at all (#930). `dependentCount: 0` / `riskLevel: "low"` here means "the import graph found nothing," not "nothing depends on this file."
+- **`symbol-attribution-degraded`** — `symbol` also accepts a method or constructor name (e.g. `__construct`, `moveUp`); those aren't top-level exports, so when call sites for one can't be confirmed, the response widens `dependentCount`/`riskLevel` to the file-level answer (every file that imports `filepath`) rather than asserting an unverifiable symbol-scoped count. The unconfirmed symbol may genuinely be a method/constructor, or it may be a typo'd/hallucinated/removed name — the `note` field says which.
+- **`dependent-attribution-partial`** — a file-level query (no `symbol`) found zero import-based dependents, but a lower-confidence text-matching fallback (matching a uniquely-declared type name against other files' source text — today only for C#) recovered one or more dependents anyway. Those entries carry `confidence: "inferred"` in `dependents[]`. Treat `dependentCount`/`riskLevel` as a recovered floor, not a verified/complete answer — the fallback can still miss a real dependent reached via an alias, a generic type argument, or reflection.
+- **`dependent-attribution-incomplete`** — a file-level query (no `symbol`) found zero dependents in a language where the import graph structurally can't see every real usage — C#'s enclosing-namespace access, where a `global using` lets a real caller reach `filepath`'s exports with no per-file import at all (#930) — even after the `dependent-attribution-partial` fallback above also found nothing. `dependentCount: 0` / `riskLevel: "low"` here means "the import graph found nothing," not "nothing depends on this file."
 
 At most one reason ever applies to a given response. Always check for `attributionCaveat` before treating a low (especially zero) `dependentCount` as a verified all-clear.
 
