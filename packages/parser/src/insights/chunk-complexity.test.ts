@@ -14,6 +14,7 @@ import {
   buildReport,
   enrichWithDependencies,
   analyzeComplexityFromChunks,
+  DEFAULT_COMPLEXITY_THRESHOLDS,
 } from './chunk-complexity.js';
 import type { ChunkMetadata, CodeChunk } from '../types.js';
 
@@ -59,14 +60,39 @@ describe('normalizeFilePath', () => {
     expect(normalizeFilePath('src/foo.ts')).toBe('src/foo.ts');
   });
 
-  it('strips the root even without a trailing slash boundary', () => {
-    // NOTE: this branch strips `normalizedRoot` with no separator check, so a
-    // path that merely starts with the same characters as cwd (not an actual
-    // path-boundary match) would also be stripped. Not exercised by real
-    // callers today (paths always come from the same workspace), but it's a
-    // looser check than the `+ '/'` branch above it.
+  it('does NOT strip the root without a trailing slash boundary (#988 fix)', () => {
+    // Fixed in #988: normalizeFilePath used to have a second, unguarded
+    // `startsWith(normalizedRoot)` branch with no separator check, so any
+    // string merely starting with the same characters as cwd — not an actual
+    // path-boundary match — was stripped too. It now delegates entirely to
+    // `getCanonicalPath` (../utils/path-matching.ts), which only strips at a
+    // real `/` boundary, so a non-boundary "match" like this passes through
+    // unchanged instead of being mangled.
     const abs = process.cwd() + 'x/weird.ts';
-    expect(normalizeFilePath(abs)).toBe('x/weird.ts');
+    expect(normalizeFilePath(abs)).toBe(abs);
+  });
+
+  it('does not mangle a sibling directory sharing the root name as a prefix (#988)', () => {
+    // The real-world shape #988 reported: workspace root `.../lien` and a
+    // sibling `.../lien-review-testbed` — the old unguarded branch stripped
+    // `.../lien` off the front regardless of the missing `/` boundary,
+    // producing a leading-`-` path ("-review-testbed/x.py") that matches
+    // nothing downstream, silently dropping the chunk from complexity
+    // reporting. The fix (delegating to getCanonicalPath) leaves any path
+    // that isn't actually under the root unchanged.
+    const root = process.cwd();
+    const sibling = `${root}-review-testbed/x.py`;
+    expect(normalizeFilePath(sibling)).toBe(sibling);
+
+    const otherSibling = `${root}-other/y.ts`;
+    expect(normalizeFilePath(otherSibling)).toBe(otherSibling);
+  });
+
+  it('still strips a real path under the root sharing a sibling-like suffix', () => {
+    // Sanity check alongside the sibling-prefix case above: an actual file
+    // under the root is still stripped correctly.
+    const abs = `${process.cwd()}/lien-review-testbed/x.py`;
+    expect(normalizeFilePath(abs)).toBe('lien-review-testbed/x.py');
   });
 });
 
@@ -546,11 +572,22 @@ describe('analyzeComplexityFromChunks — entry point', () => {
     expect(report.files['src/a.ts'].violations[0].symbolName).toBe('complex');
   });
 
-  it('DEFAULT_THRESHOLDS gate at testPaths=15, mentalLoad=15, timeToUnderstandMinutes=60, estimatedBugs=1.5', () => {
-    const chunks = [chunk({ file: 'src/a.ts', complexity: 14 })]; // just under default
+  it('DEFAULT_COMPLEXITY_THRESHOLDS gates at testPaths=15, mentalLoad=15, timeToUnderstandMinutes=60, estimatedBugs=1.5', () => {
+    expect(DEFAULT_COMPLEXITY_THRESHOLDS).toEqual({
+      testPaths: 15,
+      mentalLoad: 15,
+      timeToUnderstandMinutes: 60,
+      estimatedBugs: 1.5,
+    });
+
+    // Reads the threshold from the canonical constant rather than a
+    // hardcoded literal (#988), so this fails if analyzeComplexityFromChunks
+    // ever stops actually gating at DEFAULT_COMPLEXITY_THRESHOLDS.testPaths.
+    const t = DEFAULT_COMPLEXITY_THRESHOLDS.testPaths;
+    const chunks = [chunk({ file: 'src/a.ts', complexity: t - 1 })]; // just under default
     expect(analyzeComplexityFromChunks(chunks).summary.totalViolations).toBe(0);
 
-    const chunks2 = [chunk({ file: 'src/a.ts', complexity: 15 })]; // at default
+    const chunks2 = [chunk({ file: 'src/a.ts', complexity: t })]; // at default
     expect(analyzeComplexityFromChunks(chunks2).summary.totalViolations).toBe(1);
   });
 
@@ -577,8 +614,8 @@ describe('analyzeComplexityFromChunks — entry point', () => {
   // maps a single CLI `--threshold` flag onto testPaths+mentalLoad, so in
   // practice Halstead thresholds are permanently pinned to the defaults.
   // Additionally, the restriction is TYPE-ONLY: the implementation does a plain
-  // object spread (`{ ...DEFAULT_THRESHOLDS, ...thresholdOverrides }`) with no
-  // runtime validation, so a caller that defeats the type (via `as any`) CAN
+  // object spread (`{ ...DEFAULT_COMPLEXITY_THRESHOLDS, ...thresholdOverrides }`)
+  // with no runtime validation, so a caller that defeats the type (via `as any`) CAN
   // still override the Halstead thresholds too, as this test demonstrates. This
   // looks like an unintentionally narrow public type rather than a deliberate
   // guard — worth filing separately.

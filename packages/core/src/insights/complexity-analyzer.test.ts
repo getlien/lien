@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ComplexityAnalyzer } from './complexity-analyzer.js';
 import type { ChunkMetadata, CodeChunk } from '@liendev/parser';
+import { DEFAULT_COMPLEXITY_THRESHOLDS } from '@liendev/parser';
 import type { SearchResult, VectorDBInterface } from '../vectordb/types.js';
 
 describe('ComplexityAnalyzer', () => {
@@ -973,6 +974,102 @@ describe('ComplexityAnalyzer', () => {
         mentalLoad: 10,
       });
       expect(customReport.summary.totalViolations).toBe(2); // cyclomatic + cognitive
+    });
+  });
+
+  describe('normalizeFilePath sibling-directory fix (#988)', () => {
+    it('does not mangle a chunk file in a sibling directory sharing the workspace root as a name prefix', async () => {
+      // #988: normalizeFilePath used to have an unguarded second branch
+      // (`startsWith(normalizedRoot)` with no separator check) that stripped
+      // the root off any path merely starting with the same characters —
+      // including a sibling directory like `<root>-review-testbed`, which
+      // produced a leading-`-` path matching nothing downstream and silently
+      // dropping the file from the report. Now delegates to getCanonicalPath,
+      // which requires the boundary, so an out-of-root sibling passes through
+      // unchanged (still reported, under its own full path) instead of being
+      // mangled.
+      const root = process.cwd();
+      const siblingFile = `${root}-review-testbed/x.py`;
+
+      const chunks = [
+        {
+          content: 'def f(): pass',
+          metadata: {
+            file: siblingFile,
+            startLine: 1,
+            endLine: 5,
+            type: 'function',
+            language: 'python',
+            symbolName: 'f',
+            symbolType: 'function',
+            complexity: 20,
+          } as ChunkMetadata,
+          score: 1.0,
+          relevance: 'highly_relevant' as const,
+        },
+      ];
+      vi.mocked(mockVectorDB.scanAll).mockResolvedValue(chunks);
+
+      const report = await new ComplexityAnalyzer(mockVectorDB).analyze();
+
+      const reportedPaths = Object.keys(report.files);
+      expect(reportedPaths).toEqual([siblingFile]);
+      expect(reportedPaths.some(p => p.startsWith('-'))).toBe(false);
+    });
+  });
+
+  describe('threshold single source of truth (#988)', () => {
+    it('analyze() gates exactly at DEFAULT_COMPLEXITY_THRESHOLDS.testPaths, not an independent hardcoded copy', async () => {
+      // ComplexityAnalyzer.thresholds used to be its own hardcoded
+      // `{ testPaths: 15, ... }` literal, duplicated from (and only kept in
+      // sync with) chunk-complexity.ts's DEFAULT_THRESHOLDS by convention.
+      // This test derives the expected gate value from the canonical
+      // DEFAULT_COMPLEXITY_THRESHOLDS constant at run time, so it fails if
+      // ComplexityAnalyzer's private `thresholds` field is ever
+      // re-hardcoded to a different, independent value.
+      const t = DEFAULT_COMPLEXITY_THRESHOLDS.testPaths;
+
+      const belowThreshold = [
+        {
+          content: 'function f() { }',
+          metadata: {
+            file: 'src/t.ts',
+            startLine: 1,
+            endLine: 5,
+            type: 'function',
+            language: 'typescript',
+            symbolName: 'f',
+            symbolType: 'function',
+            complexity: t - 1,
+          } as ChunkMetadata,
+          score: 1.0,
+          relevance: 'highly_relevant' as const,
+        },
+      ];
+      vi.mocked(mockVectorDB.scanAll).mockResolvedValue(belowThreshold);
+      const belowReport = await new ComplexityAnalyzer(mockVectorDB).analyze();
+      expect(belowReport.summary.totalViolations).toBe(0);
+
+      const atThreshold = [
+        {
+          content: 'function f() { }',
+          metadata: {
+            file: 'src/t.ts',
+            startLine: 1,
+            endLine: 5,
+            type: 'function',
+            language: 'typescript',
+            symbolName: 'f',
+            symbolType: 'function',
+            complexity: t,
+          } as ChunkMetadata,
+          score: 1.0,
+          relevance: 'highly_relevant' as const,
+        },
+      ];
+      vi.mocked(mockVectorDB.scanAll).mockResolvedValue(atThreshold);
+      const atReport = await new ComplexityAnalyzer(mockVectorDB).analyze();
+      expect(atReport.summary.totalViolations).toBe(1);
     });
   });
 });

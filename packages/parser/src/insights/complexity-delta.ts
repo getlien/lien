@@ -19,30 +19,31 @@
 import { chunkFile } from '../chunker.js';
 import type { ChunkMetadata } from '../types.js';
 import type { ComplexityMetricType } from './types.js';
-import { effortToMinutes } from './chunk-complexity.js';
+import {
+  effortToMinutes,
+  DEFAULT_COMPLEXITY_THRESHOLDS,
+  type ComplexityThresholds,
+} from './chunk-complexity.js';
 
 /**
  * Complexity thresholds — same shape and defaults as the config
  * `complexity.thresholds` block that `analyzeComplexityFromChunks` reads.
+ *
+ * #988: kept as a distinct exported name (many call sites/tests import
+ * `ComplexityDeltaThresholds` by name) but is now a plain alias of the
+ * canonical `ComplexityThresholds` shape (chunk-complexity.ts) rather than an
+ * independent duplicate.
  */
-export interface ComplexityDeltaThresholds {
-  /** Cyclomatic complexity (config: testPaths). */
-  testPaths: number;
-  /** Cognitive complexity (config: mentalLoad). */
-  mentalLoad: number;
-  /** Halstead effort, expressed as minutes-to-understand (config: timeToUnderstandMinutes). */
-  timeToUnderstandMinutes: number;
-  /** Halstead estimated bugs (config: estimatedBugs). */
-  estimatedBugs: number;
-}
+export type ComplexityDeltaThresholds = ComplexityThresholds;
 
-/** Default thresholds — mirror `DEFAULT_THRESHOLDS` in chunk-complexity.ts. */
-export const DEFAULT_COMPLEXITY_DELTA_THRESHOLDS: ComplexityDeltaThresholds = {
-  testPaths: 15,
-  mentalLoad: 15,
-  timeToUnderstandMinutes: 60,
-  estimatedBugs: 1.5,
-};
+/**
+ * Default thresholds — the canonical `DEFAULT_COMPLEXITY_THRESHOLDS`
+ * (chunk-complexity.ts). #988: this used to be an independent hardcoded copy
+ * that this file's own comment admitted was meant to "mirror" the other one —
+ * nothing enforced that. Now the same object, so it structurally can't drift.
+ */
+export const DEFAULT_COMPLEXITY_DELTA_THRESHOLDS: ComplexityDeltaThresholds =
+  DEFAULT_COMPLEXITY_THRESHOLDS;
 
 export type ComplexityDeltaVerdict =
   /** FAILS gate: function added and already over threshold. */

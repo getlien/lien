@@ -9,6 +9,7 @@ import { RISK_ORDER } from './types.js';
 import type { ChunkMetadata, CodeChunk } from '../types.js';
 import { analyzeDependencies } from '../dependency-analyzer.js';
 import { findTestAssociationsFromChunks } from '../test-associations.js';
+import { getCanonicalPath } from '../utils/path-matching.js';
 
 /**
  * Hardcoded severity multipliers:
@@ -17,30 +18,58 @@ import { findTestAssociationsFromChunks } from '../test-associations.js';
  */
 const SEVERITY = { warning: 1.0, error: 2.0 } as const;
 
-/** Default complexity thresholds */
-const DEFAULT_THRESHOLDS = {
+/**
+ * Complexity thresholds shape shared by chunk-based analysis (`findViolations`
+ * below), `lien delta`'s complexity gate (`complexity-delta.ts`), and the
+ * user-facing config default (`@liendev/core`'s `LienConfig.complexity.thresholds`).
+ *
+ * #988: these four sites used to each hardcode their own copy of the same
+ * `{ testPaths: 15, mentalLoad: 15, timeToUnderstandMinutes: 60, estimatedBugs: 1.5 }`
+ * object with nothing enforcing agreement. This file is the single source of
+ * truth now (this is the reference `analyzeComplexityFromChunks` already read,
+ * and the one `complexity-delta.ts`'s own comment already pointed to) — export
+ * via `index.ts`, import everywhere else, same pattern as `COMPLEXITY_THRESHOLDS`
+ * in `../dependency-analyzer.ts`.
+ */
+export interface ComplexityThresholds {
+  testPaths: number;
+  mentalLoad: number;
+  timeToUnderstandMinutes: number;
+  estimatedBugs: number;
+}
+
+/** Default complexity thresholds — the single source of truth (#988). */
+export const DEFAULT_COMPLEXITY_THRESHOLDS: ComplexityThresholds = {
   testPaths: 15,
   mentalLoad: 15,
   timeToUnderstandMinutes: 60,
   estimatedBugs: 1.5,
-} as const;
+};
 
 /**
  * Normalize a file path to a consistent relative format.
  * Converts absolute paths to relative paths from workspace root.
+ *
+ * Delegates to `getCanonicalPath` (`../utils/path-matching.ts`) — the module
+ * that already owns this exact decision for dependency analysis. #988: this
+ * function used to have its own second, unguarded `startsWith(normalizedRoot)`
+ * fallback (no separator check), which silently mangled any sibling directory
+ * sharing the workspace root's name prefix (e.g. root `/x/lien` mangling
+ * `/x/lien-other/y.ts` into `-other/y.ts`, a leading-`-` path that matches
+ * nothing downstream, so the chunk was silently dropped from complexity
+ * reporting). `getCanonicalPath` has only the boundary-safe branch, fixing the
+ * bug and removing the duplicate implementation in the same move.
+ *
+ * The one behavioral difference: the old unguarded branch also mapped a path
+ * EXACTLY equal to the workspace root (no trailing separator) to `''`.
+ * `getCanonicalPath` does not special-case that (it requires the `/`
+ * separator), so such a path now passes through unchanged. No real caller
+ * hits this: `metadata.file`/`violation.filepath` always name an actual file
+ * under the root, never the bare root directory itself.
  */
 export function normalizeFilePath(filepath: string): string {
-  const workspaceRoot = process.cwd();
-  const normalized = filepath.replace(/\\/g, '/');
-  const normalizedRoot = workspaceRoot.replace(/\\/g, '/');
-
-  if (normalized.startsWith(normalizedRoot + '/')) {
-    return normalized.slice(normalizedRoot.length + 1);
-  }
-  if (normalized.startsWith(normalizedRoot)) {
-    return normalized.slice(normalizedRoot.length);
-  }
-  return normalized;
+  const workspaceRoot = process.cwd().replace(/\\/g, '/');
+  return getCanonicalPath(filepath, workspaceRoot);
 }
 
 /**
@@ -257,13 +286,6 @@ export function getUniqueFunctionChunks(
   return result;
 }
 
-interface ComplexityThresholds {
-  testPaths: number;
-  mentalLoad: number;
-  timeToUnderstandMinutes: number;
-  estimatedBugs: number;
-}
-
 /**
  * Find all complexity violations based on thresholds.
  */
@@ -410,7 +432,7 @@ export function analyzeComplexityFromChunks(
   files?: string[],
   thresholdOverrides?: { testPaths?: number; mentalLoad?: number },
 ): ComplexityReport {
-  const thresholds = { ...DEFAULT_THRESHOLDS, ...thresholdOverrides };
+  const thresholds = { ...DEFAULT_COMPLEXITY_THRESHOLDS, ...thresholdOverrides };
 
   // Filter to specified files if provided
   const filtered = files ? chunks.filter(c => matchesAnyFile(c.metadata.file, files)) : chunks;

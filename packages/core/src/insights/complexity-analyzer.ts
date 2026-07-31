@@ -12,6 +12,7 @@ import { RISK_ORDER } from '@liendev/parser';
 import { analyzeDependencies } from '@liendev/parser';
 import { analyzeComplexityFromChunks } from '@liendev/parser';
 import { findTestAssociationsFromChunks } from '@liendev/parser';
+import { getCanonicalPath, DEFAULT_COMPLEXITY_THRESHOLDS } from '@liendev/parser';
 
 /**
  * Hardcoded severity multipliers:
@@ -24,13 +25,10 @@ const SEVERITY = { warning: 1.0, error: 2.0 } as const;
  * Analyzer for code complexity based on indexed codebase
  */
 export class ComplexityAnalyzer {
-  // Default complexity thresholds (no config needed)
-  private readonly thresholds = {
-    testPaths: 15,
-    mentalLoad: 15,
-    timeToUnderstandMinutes: 60,
-    estimatedBugs: 1.5,
-  };
+  // Default complexity thresholds (no config needed). #988: single source of
+  // truth is `DEFAULT_COMPLEXITY_THRESHOLDS` (packages/parser/src/insights/chunk-complexity.ts) —
+  // this used to be an independent hardcoded copy.
+  private readonly thresholds = DEFAULT_COMPLEXITY_THRESHOLDS;
 
   constructor(private vectorDB: VectorDBInterface) {}
 
@@ -77,23 +75,18 @@ export class ComplexityAnalyzer {
   }
 
   /**
-   * Normalize a file path to a consistent relative format
-   * Converts absolute paths to relative paths from workspace root
+   * Normalize a file path to a consistent relative format.
+   * Converts absolute paths to relative paths from workspace root.
+   *
+   * Delegates to `getCanonicalPath` (`@liendev/parser`) — see the parser
+   * twin's identical delegation in `chunk-complexity.ts`'s `normalizeFilePath`
+   * for the full #988 rationale (this method used to have its own unguarded
+   * second branch that mangled sibling directories sharing the workspace
+   * root's name prefix).
    */
   private normalizeFilePath(filepath: string): string {
-    const workspaceRoot = process.cwd();
-    // Convert to forward slashes first
-    const normalized = filepath.replace(/\\/g, '/');
-    const normalizedRoot = workspaceRoot.replace(/\\/g, '/');
-
-    // Convert absolute paths to relative
-    if (normalized.startsWith(normalizedRoot + '/')) {
-      return normalized.slice(normalizedRoot.length + 1);
-    }
-    if (normalized.startsWith(normalizedRoot)) {
-      return normalized.slice(normalizedRoot.length);
-    }
-    return normalized;
+    const workspaceRoot = process.cwd().replace(/\\/g, '/');
+    return getCanonicalPath(filepath, workspaceRoot);
   }
 
   /**

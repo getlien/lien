@@ -196,7 +196,11 @@ export type { FileComplexityInfo, DependencyAnalysisResult } from './dependency-
 // COMPLEXITY ANALYSIS (chunk-based, no VectorDB)
 // =============================================================================
 
-export { analyzeComplexityFromChunks } from './insights/chunk-complexity.js';
+export {
+  analyzeComplexityFromChunks,
+  DEFAULT_COMPLEXITY_THRESHOLDS,
+} from './insights/chunk-complexity.js';
+export type { ComplexityThresholds } from './insights/chunk-complexity.js';
 
 // Complexity delta (before/after content → per-function verdicts) — shared by
 // the `lien delta` CLI and (as a follow-up) the PR-review engine.
