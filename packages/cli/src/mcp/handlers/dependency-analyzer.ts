@@ -1,6 +1,7 @@
 import type { SearchResult, VectorDBInterface } from '@liendev/core';
 import {
   findTransitiveDependents,
+  findDependentChunks,
   findReExportedSymbolsForFile,
   normalizePath,
   matchesFile,
@@ -8,8 +9,6 @@ import {
   isTestFile,
   isUnresolvableWholeModuleImport,
   importMatchesTarget,
-  hasSingleFileImportSemantics,
-  hasPythonModuleSemantics,
   detectLanguage,
   hasEnclosingNamespaceAccess,
   findCSharpTypeReferenceDependents,
@@ -1005,7 +1004,7 @@ function seedDepth1Dependents(
   normalizedTarget: string,
 ): { chunksByFile: Map<string, SearchResult[]>; reExporterPaths: string[] } {
   const { importIndex, allChunksByFile, normalizePathCached, log } = ctx;
-  const dependentChunks = findDependentChunks(importIndex, normalizedTarget);
+  const dependentChunks = findDependentChunks(normalizedTarget, importIndex);
   const chunksByFile = groupChunksByFile(dependentChunks);
   const reExporters = resolveTransitiveDependents(
     allChunksByFile,
@@ -1152,7 +1151,7 @@ function discoverFrontierDependents(
   ctx: ScanContext,
   normalizedFrontier: string,
 ): Map<string, SearchResult[]> {
-  const dependentChunks = findDependentChunks(ctx.importIndex, normalizedFrontier);
+  const dependentChunks = findDependentChunks(normalizedFrontier, ctx.importIndex);
   if (dependentChunks.length === 0) return new Map();
   const grouped = groupChunksByFile(dependentChunks);
   resolveTransitiveDependents(
@@ -1222,7 +1221,7 @@ function countUncoveredProductionDependents(dependents: DependentInfo[], ctx: Sc
 }
 
 function hasTestImporter(filepath: string, ctx: ScanContext): boolean {
-  const importers = findDependentChunks(ctx.importIndex, ctx.normalizePathCached(filepath));
+  const importers = findDependentChunks(ctx.normalizePathCached(filepath), ctx.importIndex);
   for (const chunk of importers) {
     if (isTestFile(chunk.metadata.file)) return true;
   }
@@ -1261,60 +1260,6 @@ function hasTestImporter(filepath: string, ctx: ScanContext): boolean {
  * passes (its own bare-package match IS the real semantic), same as
  * `hasSingleFileImportSemantics` above.
  */
-function addFuzzyMatchChunks(
-  normalizedImport: string,
-  normalizedTarget: string,
-  chunks: SearchResult[],
-  addChunk: (chunk: SearchResult) => void,
-): void {
-  if (!matchesFile(normalizedImport, normalizedTarget)) return;
-
-  const ambiguous =
-    normalizedImport.includes('/') && !matchesFile(normalizedImport, normalizedTarget, true);
-  const pythonOnlyMatch = !matchesFile(normalizedImport, normalizedTarget, false, false);
-
-  for (const chunk of chunks) {
-    if (ambiguous && hasSingleFileImportSemantics(chunk.metadata.file)) continue;
-    if (pythonOnlyMatch && !hasPythonModuleSemantics(chunk.metadata.file)) continue;
-    addChunk(chunk);
-  }
-}
-
-/**
- * Find dependent chunks using direct lookup and fuzzy matching.
- */
-function findDependentChunks(
-  importIndex: Map<string, SearchResult[]>,
-  normalizedTarget: string,
-): SearchResult[] {
-  const dependentChunks: SearchResult[] = [];
-  const seenChunkIds = new Set<string>();
-
-  const addChunk = (chunk: SearchResult) => {
-    const chunkId = `${chunk.metadata.file}:${chunk.metadata.startLine}-${chunk.metadata.endLine}`;
-    if (!seenChunkIds.has(chunkId)) {
-      dependentChunks.push(chunk);
-      seenChunkIds.add(chunkId);
-    }
-  };
-
-  // Direct index lookup (fastest path)
-  if (importIndex.has(normalizedTarget)) {
-    for (const chunk of importIndex.get(normalizedTarget)!) {
-      addChunk(chunk);
-    }
-  }
-
-  // Fuzzy match for relative imports and path variations
-  for (const [normalizedImport, chunks] of importIndex.entries()) {
-    if (normalizedImport !== normalizedTarget) {
-      addFuzzyMatchChunks(normalizedImport, normalizedTarget, chunks, addChunk);
-    }
-  }
-
-  return dependentChunks;
-}
-
 /**
  * Restrict a file-level chunk map down to exactly the resolved dependent
  * filepaths. Used to join complexity metrics against `dependents` rather

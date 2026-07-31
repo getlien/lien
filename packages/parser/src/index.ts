@@ -187,6 +187,8 @@ export {
   analyzeDependencies,
   findTransitiveDependents,
   groupChunksByNormalizedPath,
+  addFuzzyMatchChunks,
+  findDependentChunks,
   chunkImportsFrom,
   fileIsReExporter,
   findReExportedSymbolsForFile,
