@@ -728,6 +728,138 @@ describe('ComplexityAnalyzer', () => {
     });
   });
 
+  describe('test association enrichment (#979)', () => {
+    it('should populate testAssociations for a violation with an importing test file', async () => {
+      const chunks: SearchResult[] = [
+        {
+          content: 'function complex() { }',
+          metadata: {
+            file: 'src/utils.ts',
+            startLine: 1,
+            endLine: 10,
+            type: 'function',
+            language: 'typescript',
+            symbolName: 'complex',
+            symbolType: 'function',
+            complexity: 20, // Above threshold
+          } as ChunkMetadata,
+          score: 1.0,
+          relevance: 'highly_relevant' as const,
+        },
+        {
+          content: "import { complex } from './utils';",
+          metadata: {
+            file: 'src/utils.test.ts',
+            startLine: 1,
+            endLine: 5,
+            type: 'function',
+            language: 'typescript',
+            imports: ['src/utils.ts'],
+          } as ChunkMetadata,
+          score: 1.0,
+          relevance: 'highly_relevant' as const,
+        },
+      ];
+
+      vi.mocked(mockVectorDB.scanAll).mockResolvedValue(chunks);
+
+      const analyzer = new ComplexityAnalyzer(mockVectorDB);
+      const report = await analyzer.analyze();
+
+      expect(report.files['src/utils.ts'].testAssociations).toEqual(['src/utils.test.ts']);
+    });
+
+    it('should not enrich files without violations', async () => {
+      const chunks: SearchResult[] = [
+        {
+          content: 'function simple() { }',
+          metadata: {
+            file: 'src/simple.ts',
+            startLine: 1,
+            endLine: 5,
+            type: 'function',
+            language: 'typescript',
+            symbolName: 'simple',
+            symbolType: 'function',
+            complexity: 5, // Below threshold
+          } as ChunkMetadata,
+          score: 1.0,
+          relevance: 'highly_relevant' as const,
+        },
+        {
+          content: "import { simple } from './simple';",
+          metadata: {
+            file: 'src/simple.test.ts',
+            startLine: 1,
+            endLine: 5,
+            type: 'function',
+            language: 'typescript',
+            imports: ['src/simple.ts'],
+          } as ChunkMetadata,
+          score: 1.0,
+          relevance: 'highly_relevant' as const,
+        },
+      ];
+
+      vi.mocked(mockVectorDB.scanAll).mockResolvedValue(chunks);
+
+      const analyzer = new ComplexityAnalyzer(mockVectorDB);
+      const report = await analyzer.analyze();
+
+      expect(report.files['src/simple.ts'].testAssociations).toEqual([]);
+    });
+
+    it('analyze() (SearchResult[] / persisted-index path) and analyzeFromChunks() (CodeChunk[] / in-memory path) must agree on testAssociations for the same input — the parity check whose absence let #979 ship', async () => {
+      const rawChunks = [
+        {
+          content: 'function complex() { }',
+          metadata: {
+            file: 'src/shared.ts',
+            startLine: 1,
+            endLine: 10,
+            type: 'function',
+            language: 'typescript',
+            symbolName: 'complex',
+            symbolType: 'function',
+            complexity: 20, // Above threshold
+          } as ChunkMetadata,
+        },
+        {
+          content: "import { complex } from './shared';",
+          metadata: {
+            file: 'src/shared.test.ts',
+            startLine: 1,
+            endLine: 5,
+            type: 'function',
+            language: 'typescript',
+            imports: ['src/shared.ts'],
+          } as ChunkMetadata,
+        },
+      ];
+
+      // analyze(): SearchResult[] off a persisted index (adds score/relevance)
+      const searchResultChunks: SearchResult[] = rawChunks.map(c => ({
+        ...c,
+        score: 1.0,
+        relevance: 'highly_relevant' as const,
+      }));
+      vi.mocked(mockVectorDB.scanAll).mockResolvedValue(searchResultChunks);
+      const analyzer = new ComplexityAnalyzer(mockVectorDB);
+      const instanceReport = await analyzer.analyze();
+
+      // analyzeFromChunks(): plain in-memory CodeChunk[]
+      const codeChunks: CodeChunk[] = rawChunks;
+      const staticReport = ComplexityAnalyzer.analyzeFromChunks(codeChunks);
+
+      expect(instanceReport.files['src/shared.ts'].testAssociations).toEqual(
+        staticReport.files['src/shared.ts'].testAssociations,
+      );
+      expect(instanceReport.files['src/shared.ts'].testAssociations).toEqual([
+        'src/shared.test.ts',
+      ]);
+    });
+  });
+
   describe('analyzeFromChunks', () => {
     it('should find violations from in-memory chunks', () => {
       const chunks: CodeChunk[] = [

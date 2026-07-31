@@ -204,7 +204,7 @@ Examples:
 
 Returns:
 - summary: { filesAnalyzed, avgComplexity, maxComplexity, violationCount, bySeverity: { error, warning } }
-- violations[]: { filepath, symbolName, symbolType, complexity, metricType, threshold, severity, riskLevel, dependentCount }
+- violations[]: { filepath, symbolName, symbolType, complexity, metricType, threshold, severity, riskLevel, dependentCount, testAssociations }
 - metricType: "cyclomatic" | "cognitive" | "halstead_effort" | "halstead_bugs"
 - severity: "error" | "warning"
 - note?: present and explicit when a requested \`files\` entry has no index entry at all — filesAnalyzed silently excludes it otherwise`,

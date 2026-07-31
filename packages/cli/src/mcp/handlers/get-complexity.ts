@@ -41,6 +41,7 @@ function transformViolation(v: ComplexityViolation, fileData: FileComplexityData
     message: v.message,
     dependentCount: fileData.dependentCount || 0,
     riskLevel: fileData.riskLevel,
+    testAssociations: fileData.testAssociations,
     ...(v.halsteadDetails && { halsteadDetails: v.halsteadDetails }),
   };
 }
