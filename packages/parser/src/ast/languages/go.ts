@@ -6,7 +6,12 @@ import type {
   LanguageImportExtractor,
   LanguageSymbolExtractor,
 } from '../extractors/types.js';
-import { extractSignature, extractParameters } from '../extractors/symbol-helpers.js';
+import {
+  extractSignature,
+  extractParameters,
+  collapseWhitespace,
+  clampSignatureLength,
+} from '../extractors/symbol-helpers.js';
 import { calculateComplexity } from '../complexity/index.js';
 
 // =============================================================================
@@ -379,17 +384,18 @@ export class GoSymbolExtractor implements LanguageSymbolExtractor {
     if (!nameNode) return null;
 
     const symbolType = typeNode?.type === 'interface_type' ? 'interface' : 'class';
+    const typeParams = typeParamsClause(typeSpec);
 
     // Use concise keyword for struct/interface, actual type text for aliases/maps/etc.
     let signature: string;
     if (typeNode?.type === 'struct_type') {
-      signature = `type ${nameNode.text} struct`;
+      signature = clampSignatureLength(`type ${nameNode.text}${typeParams} struct`);
     } else if (typeNode?.type === 'interface_type') {
-      signature = `type ${nameNode.text} interface`;
+      signature = clampSignatureLength(`type ${nameNode.text}${typeParams} interface`);
     } else if (typeNode) {
-      signature = `type ${nameNode.text} ${typeNode.text}`;
+      signature = clampSignatureLength(`type ${nameNode.text}${typeParams} ${typeNode.text}`);
     } else {
-      signature = `type ${nameNode.text}`;
+      signature = clampSignatureLength(`type ${nameNode.text}${typeParams}`);
     }
 
     return {
@@ -405,6 +411,28 @@ export class GoSymbolExtractor implements LanguageSymbolExtractor {
 // =============================================================================
 // HELPERS
 // =============================================================================
+
+/**
+ * Generic type parameters, exactly as declared in source — the Go analog of
+ * C#'s `typeParamsAndBaseList`/Java's `typeParamsAndHeritage` (same
+ * underlying bug: `signature` for a type declaration reported only its bare
+ * keyword and name, dropping `[T any]` entirely — #976, #965 recurring).
+ * Unlike the C#/Java/Kotlin/Swift/JS analogs this only extracts the
+ * type-parameters half: Go structs/interfaces have no heritage clause
+ * (`extends`/`implements`) — composition is via embedded fields/interfaces,
+ * a structural concept distinct from the nominal inheritance those
+ * languages express as part of a type's declaration head. `type_parameters`
+ * is a registered field on `type_spec` (Go 1.18+ generics), concatenated
+ * directly onto the name with no separator since that matches the source
+ * exactly (`Stack[T any]`, no space before `[`).
+ *
+ * Whitespace is collapsed to a single line (matching `extractSignature`'s
+ * convention, see `collapseWhitespace`) in case it spans multiple physical
+ * lines.
+ */
+function typeParamsClause(typeSpec: SyntaxNode): string {
+  return collapseWhitespace(typeSpec.childForFieldName('type_parameters')?.text);
+}
 
 /**
  * Check if a Go identifier is exported (starts with uppercase).

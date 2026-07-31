@@ -11,6 +11,7 @@ import {
   extractSignature,
   extractParameters,
   clampSignatureLength,
+  collapseWhitespace,
 } from '../extractors/symbol-helpers.js';
 import { calculateComplexity } from '../complexity/index.js';
 
@@ -525,9 +526,38 @@ export class PythonSymbolExtractor implements LanguageSymbolExtractor {
       startLine: node.startPosition.row + 1,
       endLine: node.endPosition.row + 1,
       parentClass,
-      signature: `class ${nameNode.text}`,
+      signature: clampSignatureLength(`class ${nameNode.text}${typeParamsAndBases(node)}`),
     };
   }
+}
+
+// =============================================================================
+// HELPERS
+// =============================================================================
+
+/**
+ * Generic type parameters and base-class list, exactly as declared in
+ * source — the Python analog of C#'s `typeParamsAndBaseList`/Java's
+ * `typeParamsAndHeritage` (same underlying bug: `signature` for a class
+ * reported only its bare keyword and name, dropping `(Animal, Serializable)`
+ * entirely — #976, #965 recurring). Both pieces are registered grammar
+ * fields on `class_definition`: `type_parameters` (PEP 695, `class Box[T]:`,
+ * Python 3.12+) and `superclasses` (the parenthesized base/metaclass-keyword
+ * list, e.g. `(Animal, Serializable)` or `(Base, metaclass=Meta)`).
+ *
+ * Unlike the C#/Java/Kotlin/Swift/JS analogs, no separator is inserted
+ * between the pieces: Python's own grammar never puts whitespace between
+ * the class name, `[T]`, and `(Bases)` (`class Box[T](Base):`), so
+ * concatenating verbatim reproduces the source exactly.
+ *
+ * Whitespace is collapsed to a single line (matching `extractSignature`'s
+ * convention, see `collapseWhitespace`) in case either piece spans multiple
+ * physical lines.
+ */
+function typeParamsAndBases(node: SyntaxNode): string {
+  const typeParams = collapseWhitespace(node.childForFieldName('type_parameters')?.text);
+  const bases = collapseWhitespace(node.childForFieldName('superclasses')?.text);
+  return `${typeParams}${bases}`;
 }
 
 // =============================================================================

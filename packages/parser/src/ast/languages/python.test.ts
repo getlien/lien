@@ -437,6 +437,26 @@ describe('Python Language', () => {
       expect(symbol!.signature).toBe('class Calculator');
     });
 
+    // #976 (#965 recurring): `signature` dropped the base-class list
+    // entirely — `class Dog(Animal, Serializable):` came back as bare
+    // `class Dog`, the single most useful fact about the class.
+    it('should include the base-class list in a class signature', () => {
+      const code = 'class Dog(Animal, Serializable):\n    pass\n';
+      const root = mustParse(code, 'python');
+      const classNode = root.namedChild(0)!;
+      const symbol = symbolExtractor.extractSymbol(classNode, code);
+      expect(symbol!.signature).toBe('class Dog(Animal, Serializable)');
+    });
+
+    // PEP 695 (Python 3.12+) generic class syntax.
+    it('should include generic type parameters and base classes in a class signature', () => {
+      const code = 'class Box[T](Base, Serializable):\n    pass\n';
+      const root = mustParse(code, 'python');
+      const classNode = root.namedChild(0)!;
+      const symbol = symbolExtractor.extractSymbol(classNode, code);
+      expect(symbol!.signature).toBe('class Box[T](Base, Serializable)');
+    });
+
     // #949: a nested class declared directly inside another class's body
     // previously reported parentClass: undefined regardless of nesting —
     // extractClassInfo didn't accept the parameter at all, even though
