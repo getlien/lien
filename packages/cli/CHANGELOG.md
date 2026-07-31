@@ -1,5 +1,246 @@
 # @liendev/lien
 
+## 0.74.0
+
+### Patch Changes
+
+- d5cc178: Fix the Claude Code read-hook's per-session annotation dedup silently
+  bypassing the #938 never-suppress policy for an incomplete
+  dependent-attribution result, a complexity warning, or a headroom concern
+  (#978).
+
+  `isTrivial` and `belowRiskFloor` (`annotate-cmd.ts`) both already guarantee
+  those signals are never silenced, but a THIRD gate — `annotate-read.sh`'s
+  per-session dedup — ran _before_ `lien annotate` on a file's second Read this
+  session and exited unconditionally once its touchfile existed, with no way to
+  know whether the annotation it was suppressing carried one of those signals.
+  `lien annotate` now exits `2` (instead of the default `0`) whenever the
+  annotation it just printed carries a never-suppress signal
+  (`hasNeverSuppressSignal`, the single predicate `isTrivial`/`belowRiskFloor`
+  both gate on), and the hook records that in the touchfile's _content_ — `1`
+  means "never dedup-skip this file again this session," so a signal-carrying
+  file re-invokes `lien annotate` on every read for the rest of the session,
+  while an ordinary file keeps the existing, cheap existence-only dedup.
+
+  `annotateCommand` now returns whether the printed annotation carried that
+  signal (previously `void`); the CLI's `process.exit` wiring moved to a new
+  `annotateCli` wrapper so tests can keep calling `annotateCommand` directly.
+
+- 10806a7: Fix `get_dependents`'s `attributionCaveat.reason` prose, which had drifted
+  out of sync across its five model-facing surfaces (#980). `#941` wrote the
+  explanation into three surfaces at once; `#951` fixed two of them and
+  needed a second sub-commit for the third; two surfaces were never revisited
+  and were still wrong at HEAD:
+  - The `symbol` parameter's JSON Schema description (read by every MCP
+    client on connect) still had the pre-`#951` unhedged wording — it didn't
+    mention that an unconfirmed symbol may simply be a typo, a hallucinated
+    name, or a removed one, rather than always a real method/constructor.
+  - The `AttributionCaveatReason` type's JSDoc (dev-facing) had the same gap.
+
+  Both now carry the same hedge already present in the tool description and
+  server instructions.
+
+  Consolidated all four reasons' explanatory text into one exported record
+  (`ATTRIBUTION_CAVEAT_REASON_TEXT` in `packages/cli/src/mcp/attribution-caveat-reasons.ts`,
+  keyed by `AttributionCaveatReason` so the compiler rejects a stale entry
+  count), and had the tool description, server instructions, and JSON Schema
+  description all interpolate it instead of hand-writing the explanation
+  again — closing off the exact drift pattern that caused this bug three
+  times in a row.
+
+  Also fixes the public docs page
+  (`packages/site/docs/guide/mcp-tools.md`), which asserted `reason` is "one
+  of" a list of exactly three names — `dependent-attribution-partial`
+  (added by `#930`) appeared zero times in the file, leaving no documented
+  way to interpret the `confidence: "inferred"` entries that reason implies.
+  Added a test (`attribution-caveat-reasons.test.ts`) asserting the docs
+  page, the server instructions, and the tool description each mention
+  every member of the `AttributionCaveatReason` union, so a future fifth
+  reason fails CI on any surface that isn't updated, rather than shipping
+  silently incomplete.
+
+- e95429f: Fix `ComplexityAnalyzer.analyze()` (the persisted-index path used by `lien
+complexity` and the `get_complexity` MCP tool) always reporting
+  `testAssociations: []` for every violation, even when a real test file
+  imports the offending code (#979).
+
+  `packages/core/src/insights/complexity-analyzer.ts` set `testAssociations: []`
+  with a "will be enriched later" comment and never enriched it — the only
+  occurrence of `testAssociations` in the file. Its in-memory-chunks twin,
+  `analyzeComplexityFromChunks` (`@liendev/parser`, used by the static
+  `ComplexityAnalyzer.analyzeFromChunks()` and reached via `lien annotate`),
+  already ran `findTestAssociationsFromChunks` and enriched the report
+  correctly — a half-finished migration where the static delegating method
+  was pointed at the parser implementation but the instance method's own copy
+  was left behind. `get_complexity` is the tool CLAUDE.md-style agent
+  instructions point at before refactoring to find hotspots; it was silently
+  claiming none of them had tests.
+
+  Fixed by calling the same `findTestAssociationsFromChunks` from `analyze()`
+  after dependency enrichment, mirroring the parser twin. `SearchResult[]`
+  (what `analyze()` has, off the persisted index) is a structural superset of
+  `CodeChunk[]` (what the parser function's signature expects), so no type
+  changes were needed — verified via `tsc`, not assumed.
+
+  Also threaded `testAssociations` through the `get_complexity` MCP tool's
+  `transformViolation()` response shape, which previously omitted the field
+  from its output entirely regardless of what `analyze()` returned — without
+  this, the fix would be invisible through the exact tool named in the bug
+  report; the CLI's `--format json` output already included it as a
+  pass-through of the whole report.
+
+  Added a same-input parity test between `analyze()` (`SearchResult[]`) and
+  `analyzeFromChunks()` (`CodeChunk[]`) asserting they agree on
+  `testAssociations` — the check whose absence let this divergence ship
+  silently (a prior commit, 93191c41, had to hand-sync an unrelated one-line
+  dedup-key change across both files; nothing enforced that these two
+  `testAssociations` implementations stayed in sync).
+
+  Does NOT move the canonical implementation into `@liendev/parser` (the
+  larger duplication-layering fix suggested in #979) — `chunk-complexity.ts`
+  has no dedicated test file today and feeds `lien delta`'s complexity gate,
+  so that refactor needs characterization tests first and is left for
+  separate follow-up work.
+
+- 231855a: Widen C# `get_dependents`/test-coverage recovery to test-declared types and
+  real namespace-scoped disambiguation (#930/#943's remaining gap). Measured
+  on a fresh serilog/serilog clone (216 `.cs` files, same corpus that
+  motivated #930/#943): despite that prior fix, 114/216 (53%) still reported
+  `dependentAttributionIncomplete` ("not determinable") and 216/216 (100%)
+  reported test coverage as not determinable — because the recovery's
+  uniqueness gate excluded test-declared types as candidate declarations
+  entirely, and dropped any name declared in more than one file with no
+  attempt at disambiguation.
+
+  `findCSharpTypeReferenceDependents` (`@liendev/parser`) now has two tiers:
+  - Tier 1 (widened): the existing global-uniqueness check now also accepts
+    test files as declaring files — a type declared ONLY in a test helper
+    (e.g. `DummyRollingFileSink.cs`) is a legitimate, real dependency target
+    for other tests that reference it, and excluding it was an unjustified
+    asymmetry (a test file was already an accepted _dependent_, just never a
+    _declarer_). Excludes NESTED types declared in a test file specifically
+    from candidacy (a nested type's bare name is resolved by containing-type
+    membership, not namespace membership, and is disproportionately likely to
+    be a throwaway same-named local double — measured regression, see below),
+    while still recovering a nested PRODUCTION type declared in its own
+    `partial`-continuation file.
+  - Tier 2 (new): for a type name that's ambiguous project-wide, real C#
+    namespace-enclosure + shadowing rules (innermost enclosing declaration
+    wins) resolve it per-referencer instead of dropping it outright — e.g.
+    `Serilog.Core.Sinks` code referencing bare `Logger` resolves to
+    `Serilog.Core.Logger` (the closer namespace), not a same-named
+    `Serilog.Logger` or a test's own local `Logger`. Costs no schema change:
+    each file's own namespace is derived from its own already-indexed chunk
+    content (95% hit rate measured), not a new persisted column.
+
+  A referencer that itself declares a competing same-named type is excluded
+  entirely from being counted as a reference to either tier's target — a
+  word-boundary text match can't tell which declaration a given occurrence
+  resolves to once there's a local competitor, so the only safe answer is
+  "don't guess" (caught via a real regression during testing: a test file
+  constructing its own local double of a production class's name was
+  initially still counted as referencing the unrelated production type).
+
+  The exact same recovered signal, filtered to its test-file dependents, is
+  now also reused as a fifth `lien annotate` test-association tier (mirroring
+  Swift's existing symbol-usage tier) — closing the companion
+  100%-not-determinable test-coverage gap the same way, not left for
+  follow-up work.
+
+  Measured impact (serilog/serilog, 216 files): `dependentAttributionIncomplete`
+  114 (53%) → 63 (29%); test coverage not-determinable 216 (100%) → 100 (46%).
+  Zero regressions against the pre-widening baseline once the nested-type and
+  same-file-competing-declaration exclusions above were added (verified via a
+  full before/after diff of every file's recovered dependents, not just the
+  aggregate counts) — one pre-existing false positive from #943 itself
+  (a production class getting a spurious test dependent via exactly this
+  same-file-competitor shape) was found and fixed as a side effect. A 8-file
+  precision spot-check via `grep` confirmed every newly-recovered dependent
+  genuinely references its target. Index time and `get_dependents` query
+  latency are unaffected (both run entirely at query time; measured
+  before/after within noise, ~9ms mean per file on this corpus).
+
+  Does NOT fix: `ILogger.cs` and `PropertyBinder.cs` (the two files this
+  round's dogfood evidence specifically checks) still report
+  `dependentAttributionIncomplete` — for an unrelated, pre-existing reason
+  found while measuring this change, not this recovery mechanism. Both
+  contain a method declaration whose signature is split mid-token across an
+  `#if`/`#else`/`#endif` preprocessor boundary, which the tree-sitter C#
+  grammar cannot represent and recovers from by rooting the entire file in an
+  `ERROR` node — no chunk, no symbol, nothing for any recovery signal to work
+  with. Affects 2/216 files in this corpus; a related but more tractable
+  preprocessor-transparency gap (a declaration wholly inside one `#if` block,
+  affecting ~8/216 more files) is filed as
+  https://github.com/getlien/lien/issues/970, separate from this fix.
+
+- d7eed3a: Fix `normalizeFilePath` mangling sibling directories that share the workspace
+  root's name as a prefix, and collapse the four independent copies of the
+  default complexity thresholds into one (#988).
+
+  **The bug:** `normalizeFilePath` (duplicated in
+  `packages/parser/src/insights/chunk-complexity.ts` and
+  `packages/core/src/insights/complexity-analyzer.ts`) had a second,
+  unguarded `startsWith(normalizedRoot)` fallback with no path-separator check.
+  Any sibling directory whose name happened to start with the workspace root's
+  name — e.g. root `/x/lien` and sibling `/x/lien-review-testbed` — was
+  stripped down to a leading-`-` path (`-review-testbed/x.py`) that matches
+  nothing downstream, silently dropping the chunk from complexity reporting
+  instead of erroring. Both copies now delegate to `getCanonicalPath`
+  (`@liendev/parser`'s `utils/path-matching.ts`), which already had only the
+  boundary-safe branch — this removes the duplicate implementation and the bug
+  in the same move.
+
+  **The duplication:** the same
+  `{ testPaths: 15, mentalLoad: 15, timeToUnderstandMinutes: 60, estimatedBugs: 1.5 }`
+  threshold table was hardcoded independently in four places: `chunk-complexity.ts`'s
+  `DEFAULT_THRESHOLDS`, `complexity-analyzer.ts`'s private `thresholds` field,
+  `complexity-delta.ts`'s `DEFAULT_COMPLEXITY_DELTA_THRESHOLDS` (which powers
+  `lien delta`'s gate), and `@liendev/core`'s `defaultConfig.complexity.thresholds`
+  (the user-facing config default) — with nothing enforcing they stayed equal. A
+  drift between the config default and the delta gate's own default would have
+  silently enforced a threshold nobody chose. `chunk-complexity.ts` now exports
+  a single `DEFAULT_COMPLEXITY_THRESHOLDS` constant (and `ComplexityThresholds`
+  type); the other three sites import/alias it instead of hardcoding their own
+  copy, and tests assert they stay equal.
+
+- de5fef0: Move `findDependents` (the `get_dependents` MCP tool's engine) from the CLI into `@liendev/parser`, decoupled from `@liendev/core`'s `VectorDBInterface`
+
+  `findDependents` was the hardened, actively-maintained dependency analysis, but it lived in `cli` — the top of the package dependency stack (`parser` ← `core` ← `cli`) — so `packages/review` (which depends on `parser` only) couldn't reuse it and had grown its own weaker, independently-drifting dependency graph.
+
+  The `VectorDBInterface` dependency was an illusion: the CLI file only ever called `vectorDB.scanAll()` and used `import type` for everything else from `@liendev/core`. `SearchResult` is a structural superset of `CodeChunk`, so making `findDependents` and its helpers generic over `<T extends CodeChunk>` (the same technique `#973` applied to `addFuzzyMatchChunks`/`findDependentChunks`) let the whole algorithm move to `@liendev/parser` unchanged in behavior, taking `Iterable<T>` chunks instead of a database handle.
+
+  `@liendev/parser`'s `dependency-analyzer.ts` already held the simpler `analyzeDependencies` (used by `get_complexity`); `findDependents` was merged into the same file rather than a sibling module so the two algorithms could share their low-level helpers (path normalization, file grouping, complexity aggregation, re-export graph building) for real instead of drifting apart in two places — five of the six duplicate-named functions across the two former files are now single, generic implementations.
+
+  The CLI's `dependency-analyzer.ts` is now a thin wrapper: it fetches (and caches) chunks via `vectorDB.scanAll()` and calls `@liendev/parser`'s `findDependents`. The `scanCache` deliberately stays in the CLI (the caller is what knows its `indexVersion`); `@liendev/parser` has no mutable module state.
+
+  No behavioral change — `get_dependents` MCP tool output (`dependentCount`, `productionDependentCount`, `riskLevel`, `attributionCaveat`, and the full dependent-filepath set, for both file-level and symbol-level queries) is byte-identical before and after, verified against this repo's own index.
+
+- 14a34a2: Share the dependent-chunk matching helpers instead of keeping two copies
+
+  `addFuzzyMatchChunks` and `findDependentChunks` existed twice — once in
+  `@liendev/parser`'s `dependency-analyzer.ts` and once, copied, in the CLI's MCP
+  handler. The bodies were logically identical; the only real difference was the
+  chunk type (`CodeChunk` vs `core`'s `SearchResult`).
+
+  That copy is why the `'../..'` fuzzy-match fix had to be applied twice, and why
+  one copy could be fixed while the other kept the bug.
+
+  Both helpers are now generic over `<T extends CodeChunk>` and exported from
+  `@liendev/parser`, and the CLI imports them. `SearchResult` already satisfies
+  `CodeChunk` structurally, so this is a type-level change only — no behavioural
+  change to `get_dependents`.
+
+- Updated dependencies [e95429f]
+- Updated dependencies [231855a]
+- Updated dependencies [d7eed3a]
+- Updated dependencies [7f3e85d]
+- Updated dependencies [de5fef0]
+- Updated dependencies [4b5efb6]
+- Updated dependencies [14a34a2]
+- Updated dependencies [56bcd9c]
+  - @liendev/core@0.74.0
+  - @liendev/parser@0.74.0
+
 ## 0.73.0
 
 ### Minor Changes

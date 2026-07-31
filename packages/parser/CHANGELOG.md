@@ -1,5 +1,248 @@
 # @liendev/parser
 
+## 0.74.0
+
+### Minor Changes
+
+- d7eed3a: Fix `normalizeFilePath` mangling sibling directories that share the workspace
+  root's name as a prefix, and collapse the four independent copies of the
+  default complexity thresholds into one (#988).
+
+  **The bug:** `normalizeFilePath` (duplicated in
+  `packages/parser/src/insights/chunk-complexity.ts` and
+  `packages/core/src/insights/complexity-analyzer.ts`) had a second,
+  unguarded `startsWith(normalizedRoot)` fallback with no path-separator check.
+  Any sibling directory whose name happened to start with the workspace root's
+  name — e.g. root `/x/lien` and sibling `/x/lien-review-testbed` — was
+  stripped down to a leading-`-` path (`-review-testbed/x.py`) that matches
+  nothing downstream, silently dropping the chunk from complexity reporting
+  instead of erroring. Both copies now delegate to `getCanonicalPath`
+  (`@liendev/parser`'s `utils/path-matching.ts`), which already had only the
+  boundary-safe branch — this removes the duplicate implementation and the bug
+  in the same move.
+
+  **The duplication:** the same
+  `{ testPaths: 15, mentalLoad: 15, timeToUnderstandMinutes: 60, estimatedBugs: 1.5 }`
+  threshold table was hardcoded independently in four places: `chunk-complexity.ts`'s
+  `DEFAULT_THRESHOLDS`, `complexity-analyzer.ts`'s private `thresholds` field,
+  `complexity-delta.ts`'s `DEFAULT_COMPLEXITY_DELTA_THRESHOLDS` (which powers
+  `lien delta`'s gate), and `@liendev/core`'s `defaultConfig.complexity.thresholds`
+  (the user-facing config default) — with nothing enforcing they stayed equal. A
+  drift between the config default and the delta gate's own default would have
+  silently enforced a threshold nobody chose. `chunk-complexity.ts` now exports
+  a single `DEFAULT_COMPLEXITY_THRESHOLDS` constant (and `ComplexityThresholds`
+  type); the other three sites import/alias it instead of hardcoding their own
+  copy, and tests assert they stay equal.
+
+- de5fef0: Move `findDependents` (the `get_dependents` MCP tool's engine) from the CLI into `@liendev/parser`, decoupled from `@liendev/core`'s `VectorDBInterface`
+
+  `findDependents` was the hardened, actively-maintained dependency analysis, but it lived in `cli` — the top of the package dependency stack (`parser` ← `core` ← `cli`) — so `packages/review` (which depends on `parser` only) couldn't reuse it and had grown its own weaker, independently-drifting dependency graph.
+
+  The `VectorDBInterface` dependency was an illusion: the CLI file only ever called `vectorDB.scanAll()` and used `import type` for everything else from `@liendev/core`. `SearchResult` is a structural superset of `CodeChunk`, so making `findDependents` and its helpers generic over `<T extends CodeChunk>` (the same technique `#973` applied to `addFuzzyMatchChunks`/`findDependentChunks`) let the whole algorithm move to `@liendev/parser` unchanged in behavior, taking `Iterable<T>` chunks instead of a database handle.
+
+  `@liendev/parser`'s `dependency-analyzer.ts` already held the simpler `analyzeDependencies` (used by `get_complexity`); `findDependents` was merged into the same file rather than a sibling module so the two algorithms could share their low-level helpers (path normalization, file grouping, complexity aggregation, re-export graph building) for real instead of drifting apart in two places — five of the six duplicate-named functions across the two former files are now single, generic implementations.
+
+  The CLI's `dependency-analyzer.ts` is now a thin wrapper: it fetches (and caches) chunks via `vectorDB.scanAll()` and calls `@liendev/parser`'s `findDependents`. The `scanCache` deliberately stays in the CLI (the caller is what knows its `indexVersion`); `@liendev/parser` has no mutable module state.
+
+  No behavioral change — `get_dependents` MCP tool output (`dependentCount`, `productionDependentCount`, `riskLevel`, `attributionCaveat`, and the full dependent-filepath set, for both file-level and symbol-level queries) is byte-identical before and after, verified against this repo's own index.
+
+- 4b5efb6: **Breaking:** `getLienHome`, `getIndexDir`, and `extractRepoId` have moved from
+  `@liendev/parser` to `@liendev/core`.
+
+  These three utilities resolve `~/.lien` (honoring `LIEN_HOME`), the per-repo
+  index directory (`<LIEN_HOME>/.lien/indices/<repoId>`), and the repo-id hash
+  respectively — none of them depend on anything about the source code being
+  analyzed, only on decisions Lien itself makes about where its own state
+  lives. `parser` is meant to be a pure function of the files in front of it
+  (parsing, chunking, complexity, dependency resolution); these three utilities
+  had nothing to do with that and had drifted into the wrong package. `core` —
+  storage, config, git, "where the database lives" — is where they belong.
+
+  Removed with no deprecation window (acceptable pre-1.0, per this repo's own
+  precedent for the `node-tree-sitter` legacy-backend removal): `parser` and
+  `core` are versioned in lockstep by changesets (`linked` in
+  `.changeset/config.json`) and consumed only inside this monorepo — no
+  external caller can ever see a `@liendev/core` or `@liendev/lien` published
+  without the matching `@liendev/parser` these three functions moved to. A
+  repo-wide sweep (including test files, `.github/`, `scripts/`, `plugins/`)
+  found zero consumers outside `packages/cli` and `packages/core` itself, and
+  zero consumers in `@liendev/review` or `@liendev/action` (both of which
+  depend only on `@liendev/parser`, not `@liendev/core`).
+
+  Import `getLienHome`, `getIndexDir`, and `extractRepoId` from `@liendev/core`
+  going forward.
+
+- 14a34a2: Share the dependent-chunk matching helpers instead of keeping two copies
+
+  `addFuzzyMatchChunks` and `findDependentChunks` existed twice — once in
+  `@liendev/parser`'s `dependency-analyzer.ts` and once, copied, in the CLI's MCP
+  handler. The bodies were logically identical; the only real difference was the
+  chunk type (`CodeChunk` vs `core`'s `SearchResult`).
+
+  That copy is why the `'../..'` fuzzy-match fix had to be applied twice, and why
+  one copy could be fixed while the other kept the bug.
+
+  Both helpers are now generic over `<T extends CodeChunk>` and exported from
+  `@liendev/parser`, and the CLI imports them. `SearchResult` already satisfies
+  `CodeChunk` structurally, so this is a type-level change only — no behavioural
+  change to `get_dependents`.
+
+### Patch Changes
+
+- 231855a: Widen C# `get_dependents`/test-coverage recovery to test-declared types and
+  real namespace-scoped disambiguation (#930/#943's remaining gap). Measured
+  on a fresh serilog/serilog clone (216 `.cs` files, same corpus that
+  motivated #930/#943): despite that prior fix, 114/216 (53%) still reported
+  `dependentAttributionIncomplete` ("not determinable") and 216/216 (100%)
+  reported test coverage as not determinable — because the recovery's
+  uniqueness gate excluded test-declared types as candidate declarations
+  entirely, and dropped any name declared in more than one file with no
+  attempt at disambiguation.
+
+  `findCSharpTypeReferenceDependents` (`@liendev/parser`) now has two tiers:
+  - Tier 1 (widened): the existing global-uniqueness check now also accepts
+    test files as declaring files — a type declared ONLY in a test helper
+    (e.g. `DummyRollingFileSink.cs`) is a legitimate, real dependency target
+    for other tests that reference it, and excluding it was an unjustified
+    asymmetry (a test file was already an accepted _dependent_, just never a
+    _declarer_). Excludes NESTED types declared in a test file specifically
+    from candidacy (a nested type's bare name is resolved by containing-type
+    membership, not namespace membership, and is disproportionately likely to
+    be a throwaway same-named local double — measured regression, see below),
+    while still recovering a nested PRODUCTION type declared in its own
+    `partial`-continuation file.
+  - Tier 2 (new): for a type name that's ambiguous project-wide, real C#
+    namespace-enclosure + shadowing rules (innermost enclosing declaration
+    wins) resolve it per-referencer instead of dropping it outright — e.g.
+    `Serilog.Core.Sinks` code referencing bare `Logger` resolves to
+    `Serilog.Core.Logger` (the closer namespace), not a same-named
+    `Serilog.Logger` or a test's own local `Logger`. Costs no schema change:
+    each file's own namespace is derived from its own already-indexed chunk
+    content (95% hit rate measured), not a new persisted column.
+
+  A referencer that itself declares a competing same-named type is excluded
+  entirely from being counted as a reference to either tier's target — a
+  word-boundary text match can't tell which declaration a given occurrence
+  resolves to once there's a local competitor, so the only safe answer is
+  "don't guess" (caught via a real regression during testing: a test file
+  constructing its own local double of a production class's name was
+  initially still counted as referencing the unrelated production type).
+
+  The exact same recovered signal, filtered to its test-file dependents, is
+  now also reused as a fifth `lien annotate` test-association tier (mirroring
+  Swift's existing symbol-usage tier) — closing the companion
+  100%-not-determinable test-coverage gap the same way, not left for
+  follow-up work.
+
+  Measured impact (serilog/serilog, 216 files): `dependentAttributionIncomplete`
+  114 (53%) → 63 (29%); test coverage not-determinable 216 (100%) → 100 (46%).
+  Zero regressions against the pre-widening baseline once the nested-type and
+  same-file-competing-declaration exclusions above were added (verified via a
+  full before/after diff of every file's recovered dependents, not just the
+  aggregate counts) — one pre-existing false positive from #943 itself
+  (a production class getting a spurious test dependent via exactly this
+  same-file-competitor shape) was found and fixed as a side effect. A 8-file
+  precision spot-check via `grep` confirmed every newly-recovered dependent
+  genuinely references its target. Index time and `get_dependents` query
+  latency are unaffected (both run entirely at query time; measured
+  before/after within noise, ~9ms mean per file on this corpus).
+
+  Does NOT fix: `ILogger.cs` and `PropertyBinder.cs` (the two files this
+  round's dogfood evidence specifically checks) still report
+  `dependentAttributionIncomplete` — for an unrelated, pre-existing reason
+  found while measuring this change, not this recovery mechanism. Both
+  contain a method declaration whose signature is split mid-token across an
+  `#if`/`#else`/`#endif` preprocessor boundary, which the tree-sitter C#
+  grammar cannot represent and recovers from by rooting the entire file in an
+  `ERROR` node — no chunk, no symbol, nothing for any recovery signal to work
+  with. Affects 2/216 files in this corpus; a related but more tractable
+  preprocessor-transparency gap (a declaration wholly inside one `#if` block,
+  affecting ~8/216 more files) is filed as
+  https://github.com/getlien/lien/issues/970, separate from this fix.
+
+- 7f3e85d: Fix `extractExports()` exporting explicitly non-public interface/protocol
+  members in Java and Kotlin, and dropping a redundant, buggy bypass with the
+  same shape in Swift (#974).
+
+  `java.ts`'s `extractMemberExport` used `if (isInterface || hasPublicModifier(member))`
+  — when `isInterface` is true the `||` short-circuits, so `hasPublicModifier`
+  is never evaluated and every `method_declaration`/`constructor_declaration`
+  in an interface body was exported, including explicitly `private` ones.
+  Java 9+ permits `private` interface methods (helpers backing a `default`
+  method), so this was reachable in real code:
+  `public interface Repository { void save(); private void helper() {} }`
+  returned `['Repository', 'save', 'helper']` — `helper` should not be there.
+
+  `csharp.ts` already had the correct guard (`hasExplicitAccessModifier`,
+  gating an "implicitly public" fallback to only apply when the member carries
+  no explicit access modifier). Ported the same shape to `java.ts` (Java's
+  modifiers are `public`/`private`/`protected` — no `internal`, unlike C#).
+
+  Swept every other language whose extractor handles interfaces/protocols for
+  the same defect shape ("one decision, N language files, fixed at fewer than
+  N"):
+  - **Kotlin**: same bug (`isInterface || isExported(member)`), reachable —
+    Kotlin 1.4+ allows `private` interface members. Fixed by dropping the
+    `isInterface` bypass entirely: `isExported`'s existing "public unless
+    explicitly private/internal" rule already matches interface-member
+    visibility exactly, so the bypass was both redundant for the correct case
+    (no modifier) and wrong for the explicitly-private case — no separate
+    C#-style helper was needed.
+  - **Swift**: same shape (`isProtocol || isExported(member)`). `private`/
+    `fileprivate` aren't valid Swift on a real protocol requirement, but the
+    `tree-sitter-swift` grammar still parses them, so the extractor could still
+    mis-export one from malformed/non-compiling input. Fixed the same way as
+    Kotlin (dropped the bypass, relying on `isExported`) for defense in depth
+    and consistency, even though it's not reachable from valid, compiling
+    Swift.
+  - **C#**: already correct (the reference implementation for this fix).
+  - **Go, Rust, PHP, TypeScript/JavaScript, Python, Ruby**: verified
+    architecturally unaffected — none of them export interface/trait/protocol
+    members individually via an `isInterface`-style bypass at all. Go and Rust
+    gate purely on identifier capitalization / a `pub`/visibility-modifier
+    check at the container level and never dig into interface/trait bodies to
+    export member names separately; PHP and TypeScript/JavaScript only export
+    whole top-level declarations (PHP also can't have non-public interface
+    methods at all); Python has no interface-like construct in the export
+    extractor; Ruby's `private`/`protected` are runtime calls, not per-
+    declaration modifiers the extractor inspects.
+
+  Added the C#-style regression test ("should not export explicitly non-public
+  interface members") to `java.test.ts` and `kotlin.test.ts`, and the protocol
+  equivalent to `swift.test.ts` — confirmed each fails on the pre-fix code and
+  passes after.
+
+- 56bcd9c: Fix `signature` for Python/PHP/Go type declarations dropping generic type
+  parameters and the heritage clause (base class / interface list) — #965
+  recurring in the three languages that fix missed (#976).
+  - Python: `class Dog(Animal, Serializable):` reported `signature: "class Dog"`;
+    now `"class Dog(Animal, Serializable)"`. PEP 695 generics are also
+    covered — a generic class with a base class keeps both its type
+    parameter and its base in the signature.
+  - PHP: `class Dog extends Animal implements Serializable {}` reported
+    `"class Dog"`; now `"class Dog extends Animal implements Serializable"`.
+  - Go: `type Stack[T any] struct { items []T }` reported `"type Stack struct"`;
+    now `"type Stack[T any] struct"`.
+
+  Six languages (C#, Java, Kotlin, Swift, JS/TS, Rust's impl/trait blocks)
+  already had this via their own `typeParamsAndX`-shaped helper, each
+  explicitly documented as "the <language> analog of C#'s
+  `typeParamsAndBaseList`" — the clearest possible signal the underlying rule
+  should be asserted once. A new cross-language test
+  (`type-declaration-signature.test.ts`) now asserts, for every language with
+  a type-level symbol extractor, that a declaration exercising whichever of
+  {generics, heritage} its grammar supports round-trips into `signature` —
+  so a future language can't silently reintroduce this gap.
+
+  Verified against real OSS source (not just synthetic snippets): Monolog's
+  `FilterHandler` (PHP, 3-interface `implements` clause), Requests' `Session`
+  (Python, mixin base class), and samber/lo's `switchCase[T comparable, R any]`
+  (Go, two-parameter generic struct) all now report their full signature.
+
+  Out of scope: Rust's `struct_item`/`enum_item` aren't symbol-extracted at
+  all yet (only `impl_item`/`trait_item`, via the differently-shaped
+  `extractImplInfo`) — a bigger gap tracked separately, not fixed here.
+
 ## 0.73.0
 
 ### Patch Changes
