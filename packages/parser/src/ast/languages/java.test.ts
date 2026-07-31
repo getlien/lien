@@ -154,6 +154,22 @@ describe('Java Language', () => {
       expect(exports).toContain('delete');
     });
 
+    it('should not export explicitly non-public interface members', () => {
+      // Java 9+ allows `private` interface methods (helper methods backing a
+      // `default` method); `protected` is not legal on an interface member
+      // (JLS 9.4) so it isn't exercised here.
+      const code = `public interface Repository {
+    void save();
+    private void helper() {}
+    private static void staticHelper() {}
+}`;
+      const root = mustParse(code, 'java');
+      const exports = exportExtractor.extractExports(root);
+      expect(exports).toContain('save');
+      expect(exports).not.toContain('helper');
+      expect(exports).not.toContain('staticHelper');
+    });
+
     it('should extract public enum', () => {
       const code = 'public enum Status { ACTIVE, INACTIVE }';
       const root = mustParse(code, 'java');

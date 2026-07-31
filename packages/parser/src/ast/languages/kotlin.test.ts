@@ -106,6 +106,16 @@ describe('Kotlin Language', () => {
       expect(exports).toContain('find');
     });
 
+    it('should not export explicitly non-public interface members', () => {
+      // Kotlin 1.4+ allows `private` interface members (helper functions
+      // backing a default implementation) — only export those that are
+      // public or have no explicit visibility modifier (#974).
+      const root = parse('interface Repo {\n  fun find(): String\n  private fun helper() {}\n}\n');
+      const exports = exportExtractor.extractExports(root);
+      expect(exports).toContain('find');
+      expect(exports).not.toContain('helper');
+    });
+
     it('does not export members of a private container', () => {
       const root = parse('private class Secret {\n  fun internalApi() {}\n}\n');
       const exports = exportExtractor.extractExports(root);

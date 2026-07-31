@@ -164,7 +164,12 @@ export class JavaExportExtractor implements LanguageExportExtractor {
     addExport: (name: string) => void,
   ): void {
     if (member.type === 'method_declaration' || member.type === 'constructor_declaration') {
-      if (isInterface || hasPublicModifier(member)) {
+      // Interface members without explicit modifiers are implicitly public.
+      // Java 9+ allows private interface methods (helpers for `default` methods)
+      // — only export those that are public or have no explicit visibility
+      // modifier (#974).
+      const isImplicitlyPublic = isInterface && !hasExplicitAccessModifier(member);
+      if (isImplicitlyPublic || hasPublicModifier(member)) {
         const nameNode = member.childForFieldName('name');
         if (nameNode) addExport(nameNode.text);
       }
@@ -508,6 +513,20 @@ function hasPublicModifier(node: SyntaxNode): boolean {
   const modifiers = node.children.find(child => child.type === 'modifiers');
   if (!modifiers) return false;
   return modifiers.children.some(child => child.type === 'public');
+}
+
+const ACCESS_MODIFIER_TYPES = new Set(['public', 'private', 'protected']);
+
+/**
+ * Check if a node has any explicit access modifier (public, private, protected).
+ * Java has no `internal` modifier (unlike C#). Used to distinguish implicit
+ * public interface members from explicitly non-public ones (Java 9+ private
+ * interface methods).
+ */
+function hasExplicitAccessModifier(node: SyntaxNode): boolean {
+  const modifiers = node.children.find(child => child.type === 'modifiers');
+  if (!modifiers) return false;
+  return modifiers.children.some(child => ACCESS_MODIFIER_TYPES.has(child.type));
 }
 
 /**

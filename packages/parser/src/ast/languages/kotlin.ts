@@ -269,13 +269,18 @@ export class KotlinExportExtractor implements LanguageExportExtractor {
     const body = childByType(container, 'class_body') ?? childByType(container, 'enum_class_body');
     if (!body) return;
 
-    const isInterface = hasTokenChild(container, 'interface');
-
+    // `isExported`'s "public unless explicitly private/internal" rule already
+    // matches interface-member visibility exactly (Kotlin interface members
+    // support only `public` (implicit or explicit) and `private` — Kotlin 1.4+
+    // allows `private` helper functions backing a default implementation), so
+    // no separate interface bypass is needed here (#974 — Java's and this
+    // file's prior `isInterface ||` bypass unconditionally exported every
+    // interface member, including explicitly `private` ones).
     body.namedChildren.forEach(member => {
       if (member.type === 'function_declaration') {
-        if (isInterface || isExported(member)) addExport(functionName(member));
+        if (isExported(member)) addExport(functionName(member));
       } else if (member.type === 'property_declaration') {
-        if (isInterface || isExported(member)) addExport(this.propertyName(member));
+        if (isExported(member)) addExport(this.propertyName(member));
       } else if (member.type === 'companion_object') {
         // Companion members are reached via the enclosing class name → part of its API.
         member.namedChildren
