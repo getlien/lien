@@ -45,7 +45,7 @@ import {
  *   importing file names the symbol — e.g. a PHP `new Order()` construction,
  *   a type hint, or a static/property access that never surfaces as a
  *   `callSite`. Without this tier the dependent would silently vanish (see
- *   the module doc on `resolveImportOnlyEdges`); the caller identity attached
+ *   the module doc on `buildImportOnlyEdges`); the caller identity attached
  *   is the file's best-effort representative chunk, not a verified call site.
  * - `symbol-name-match`: the caller imports a same-named symbol from some
  *   non-relative (package) path, but the specific source file was never
