@@ -257,21 +257,38 @@ selective, in a data-honest way.
 The annotator already kept a per-`(session, file)` touchfile under
 `annotated-sessions/<id>/`, suppressing re-annotation for `LIEN_ANNOTATE_TTL_MIN`
 minutes (default 5). The guard **integrates with that same touchfile** rather
-than stacking a second mechanism: when the guard is on, the touchfile's mere
-existence (any age) means "already annotated this file this session" → stay
-silent. The dirs are already GC'd by the SessionStart/SessionEnd hooks, so this
-is naturally session-scoped with no new cross-session state. Guard **off**
-restores the old TTL-windowed behavior.
+than stacking a second mechanism: when the guard is on, the touchfile means
+"already annotated this file this session" → stay silent — **unless** the
+touchfile's *content* says otherwise (see below). The dirs are already GC'd by
+the SessionStart/SessionEnd hooks, so this is naturally session-scoped with no
+new cross-session state. Guard **off** restores the old TTL-windowed behavior.
+
+**Not fully independent of (b) (#978).** `lien annotate` itself never silences
+a never-suppress signal (see (b) below), but this dedup gate runs *before*
+`lien annotate` — it has to, that's the whole point of skipping the invocation
+on a repeat Read. That makes it structurally content-blind: without more,
+it would suppress a file's second Read even if a fresh `lien annotate` call
+would have printed a never-suppress signal, silently defeating (b)'s
+guarantee on every read after the first. The fix: `lien annotate` exits `2`
+(instead of the default `0`) whenever the annotation it just printed carried
+a never-suppress signal (`hasNeverSuppressSignal` in `annotate-cmd.ts`), and
+the hook records that in the touchfile's **content**, not just its
+existence — `1` means "never dedup-skip this file again this session," so a
+signal-carrying file re-invokes `lien annotate` (and re-applies its own
+carve-outs) on every read for the rest of the session, while an ordinary
+file keeps the cheap existence-only dedup unchanged.
 
 ### (b) Risk floor
 
 The annotation now passes `--min-risk <level>` to `lien annotate`
 (`LIEN_ANNOTATE_MIN_RISK`, default `medium`). Below-floor files stay silent
-**unless** they carry a complexity or headroom concern — those are the
-high-value plan-time nudges and always fire. The floor is a pure, unit-tested
-predicate (`belowRiskFloor`): `complexity/headroom present → emit`, else `risk
-rank < floor rank → suppress`. An unset or unrecognized floor never suppresses
-(fail-open), so the default (no floor) is byte-for-byte the old behavior.
+**unless** they carry a complexity or headroom concern, or an incomplete
+dependent-attribution result — those are the high-value, honest-uncertainty
+signals and always fire (`hasNeverSuppressSignal`). The floor is a pure,
+unit-tested predicate (`belowRiskFloor`): `hasNeverSuppressSignal → emit`,
+else `risk rank < floor rank → suppress`. An unset or unrecognized floor never
+suppresses (fail-open), so the default (no floor) is byte-for-byte the old
+behavior. `isTrivial` gates on the exact same predicate.
 
 #### Why `medium`, from this repo's distribution
 
