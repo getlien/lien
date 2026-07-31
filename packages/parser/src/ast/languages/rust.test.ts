@@ -513,6 +513,122 @@ pub static COUNTER: i32 = 0;`;
         expect(importExtractor.extractImportPath(superRoot.namedChild(0)!)).toBe('../utils/helper');
       });
     });
+
+    // #1000: `mod X;` at the crate root plus qualified calls (`X::func()`)
+    // with no `use` at all is the idiomatic Rust pattern — before this, it
+    // produced NO import edge whatsoever (mod_item wasn't in
+    // importNodeTypes), so `get_dependents` on the child module returned a
+    // confident, wrong `[]`. The fix resolves `mod` to a concrete sibling
+    // path up front (see `extractModImportPath`'s doc comment) rather than
+    // emitting a bare specifier for downstream fuzzy matching to guess at —
+    // the exact #928/#884 trap this issue explicitly warns against
+    // reintroducing.
+    describe('mod_item file-backed import resolution (#1000)', () => {
+      it('includes mod_item in importNodeTypes', () => {
+        expect(importExtractor.importNodeTypes).toContain('mod_item');
+      });
+
+      it('resolves `mod x;` at a module-root file (main.rs) to a sibling in the SAME directory', () => {
+        const code = 'mod reporter;';
+        const root = mustParse(code, 'rust');
+        const modNode = root.namedChild(0)!;
+        expect(importExtractor.extractImportPath(modNode, undefined, 'src/main.rs')).toBe(
+          'src/reporter',
+        );
+      });
+
+      it('resolves `pub mod x;` the same way — visibility does not affect whether the sibling file is a real dependency', () => {
+        const code = 'pub mod reporter;';
+        const root = mustParse(code, 'rust');
+        const modNode = root.namedChild(0)!;
+        expect(importExtractor.extractImportPath(modNode, undefined, 'src/main.rs')).toBe(
+          'src/reporter',
+        );
+      });
+
+      it('resolves `mod x;` from a LEAF file to a subdirectory named after that file (2018+-edition split)', () => {
+        const code = 'mod bar;';
+        const root = mustParse(code, 'rust');
+        const modNode = root.namedChild(0)!;
+        expect(importExtractor.extractImportPath(modNode, undefined, 'src/foo.rs')).toBe(
+          'src/foo/bar',
+        );
+      });
+
+      it('resolves a nested inline mod (`mod outer { mod inner; }`) — the outer name becomes a directory segment', () => {
+        const code = 'mod outer {\n  mod inner;\n}';
+        const root = mustParse(code, 'rust');
+        const outerNode = root.namedChild(0)!;
+        const innerNode = outerNode.childForFieldName('body')!.namedChild(0)!;
+        expect(innerNode.type).toBe('mod_item');
+        expect(importExtractor.extractImportPath(innerNode, undefined, 'src/main.rs')).toBe(
+          'src/outer/inner',
+        );
+      });
+
+      it('returns null for an INLINE mod (has a body) — a namespace, not an import, has no separate file', () => {
+        const code = 'mod tests {\n  fn it_works() {}\n}';
+        const root = mustParse(code, 'rust');
+        const modNode = root.namedChild(0)!;
+        expect(importExtractor.extractImportPath(modNode, undefined, 'src/main.rs')).toBeNull();
+      });
+
+      it('returns null without an importerFile — cannot resolve deterministically', () => {
+        const code = 'mod reporter;';
+        const root = mustParse(code, 'rust');
+        const modNode = root.namedChild(0)!;
+        expect(importExtractor.extractImportPath(modNode)).toBeNull();
+      });
+
+      it('honors a #[path = "..."] override, relative to the declaring file\'s own directory', () => {
+        const code = '#[path = "custom_path.rs"]\nmod aliased;';
+        const root = mustParse(code, 'rust');
+        const modNode = root.namedChildren.find(n => n.type === 'mod_item')!;
+        expect(importExtractor.extractImportPath(modNode, undefined, 'src/main.rs')).toBe(
+          'src/custom_path',
+        );
+      });
+
+      it('does not crash on multiple stacked attributes, finding #[path] among them regardless of order', () => {
+        const adjacent = mustParse('#[cfg(test)]\n#[path = "other.rs"]\nmod combo;', 'rust');
+        const adjacentMod = adjacent.namedChildren.find(n => n.type === 'mod_item')!;
+        expect(importExtractor.extractImportPath(adjacentMod, undefined, 'src/main.rs')).toBe(
+          'src/other',
+        );
+
+        const reversed = mustParse('#[path = "other.rs"]\n#[cfg(test)]\nmod combo;', 'rust');
+        const reversedMod = reversed.namedChildren.find(n => n.type === 'mod_item')!;
+        expect(importExtractor.extractImportPath(reversedMod, undefined, 'src/main.rs')).toBe(
+          'src/other',
+        );
+      });
+
+      it('processImportSymbols reports the whole-module wildcard, like a use_wildcard', () => {
+        const code = 'mod reporter;';
+        const root = mustParse(code, 'rust');
+        const modNode = root.namedChild(0)!;
+        const result = importExtractor.processImportSymbols(modNode, undefined, 'src/main.rs');
+        expect(result).not.toBeNull();
+        expect(result!.importPath).toBe('src/reporter');
+        expect(result!.symbols).toEqual(['*']);
+      });
+
+      it('processImportSymbols returns null for an inline mod (no separate file to attribute symbols to)', () => {
+        const code = 'mod tests {\n  fn it_works() {}\n}';
+        const root = mustParse(code, 'rust');
+        const modNode = root.namedChild(0)!;
+        expect(importExtractor.processImportSymbols(modNode, undefined, 'src/main.rs')).toBeNull();
+      });
+
+      it('extractImportPaths wraps the mod_item result the same as use_declaration', () => {
+        const code = 'mod reporter;';
+        const root = mustParse(code, 'rust');
+        const modNode = root.namedChild(0)!;
+        expect(importExtractor.extractImportPaths(modNode, undefined, 'src/main.rs')).toEqual([
+          'src/reporter',
+        ]);
+      });
+    });
   });
 
   describe('Symbol Extraction', () => {
@@ -815,6 +931,47 @@ pub fn authenticate() -> bool {
       expect(funcChunk).toBeDefined();
       expect(funcChunk?.metadata.imports).toBeDefined();
       expect(funcChunk?.metadata.imports?.length).toBeGreaterThan(0);
+    });
+
+    // #1000 end-to-end: main.rs's `mod reporter;` (no `use` at all) must
+    // surface in chunk.metadata.imports exactly like an explicit `use` would
+    // — this is what get_dependents actually reads.
+    it('surfaces a file-backed `mod x;` declaration in chunk.metadata.imports', () => {
+      const content = `mod reporter;
+
+fn main() {
+    reporter::report();
+}`;
+
+      const chunks = chunkByAST('src/main.rs', content);
+      const funcChunk = chunks.find(c => c.metadata.symbolName === 'main');
+      expect(funcChunk).toBeDefined();
+      expect(funcChunk?.metadata.imports).toContain('src/reporter');
+    });
+
+    // An inline `mod tests { ... }` (e.g. `#[cfg(test)] mod tests`) has no
+    // separate file and must NOT fabricate an import edge for itself — but
+    // `collectImportNodes` must still recurse into its body to find further
+    // import nodes nested inside it (here, a real `use crate::...;`), which
+    // was invisible before mod_item was added to the type set at all.
+    it('does not fabricate an edge for an inline `mod tests { ... }`, but still surfaces a nested use_declaration inside it', () => {
+      const content = `#[cfg(test)]
+mod tests {
+    use crate::helper::assert_helper;
+
+    fn it_works() {
+        assert_helper();
+    }
+}`;
+
+      const chunks = chunkByAST('src/lib.rs', content);
+      const testChunk = chunks.find(c => c.metadata.symbolName === 'it_works');
+      expect(testChunk).toBeDefined();
+      // "tests" itself must never appear as an import path (no such file).
+      expect(testChunk?.metadata.imports ?? []).not.toContain('tests');
+      // The nested `use crate::helper::assert_helper;` — invisible before
+      // mod_item was added to collectImportNodes's recursion — must surface.
+      expect(testChunk?.metadata.imports ?? []).toContain('helper/assert_helper');
     });
   });
 });

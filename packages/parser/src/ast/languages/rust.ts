@@ -211,6 +211,142 @@ function joinFromDir(dir: string, rest: string): string {
 }
 
 /**
+ * Basename of a forward-slash path with its `.rs` extension removed --
+ * e.g. `src/foo.rs` -> `foo`. Used only for Rust's leaf-file submodule
+ * directory convention (see `rustModOwningDirectory`).
+ */
+function basenameNoExt(p: string): string {
+  const base = p.slice(p.lastIndexOf('/') + 1);
+  return base.replace(/\.rs$/, '');
+}
+
+/**
+ * The directory a FILE-BACKED `mod_item` (`mod x;`, no body) resolves its
+ * sibling file against — Rust's file-to-module convention (#1000):
+ *
+ * - A module-root file (`mod.rs`/`lib.rs`/`main.rs`) owns its OWN directory:
+ *   `src/main.rs`'s `mod reporter;` -> `src/reporter.rs`.
+ * - A "leaf" file (any other name, e.g. `src/foo.rs`) owns a SUBDIRECTORY
+ *   named after itself: `src/foo.rs`'s `mod bar;` -> `src/foo/bar.rs` — the
+ *   same 2018+-edition file-plus-sibling-directory split already documented
+ *   on `resolveRustRelativeModulePath` for `self::`/`super::`, but resolved
+ *   precisely here rather than approximated.
+ * - Each INLINE ancestor `mod` block (`mod outer { mod inner; }` — itself
+ *   not file-backed, see `isInlineModDeclaration`) folds its own name in as
+ *   a further directory segment, since Rust's directory-ownership rule
+ *   treats inline nesting exactly like a subdirectory.
+ */
+function rustModOwningDirectory(importerFile: string, modNode: SyntaxNode): string {
+  const normalizedImporter = importerFile.replace(/\\/g, '/');
+  const fileDir = isRustModuleRootFile(normalizedImporter)
+    ? dirnameOf(normalizedImporter)
+    : joinFromDir(dirnameOf(normalizedImporter), basenameNoExt(normalizedImporter));
+
+  return collectInlineAncestorModNames(modNode).reduce(joinFromDir, fileDir);
+}
+
+/**
+ * Names of every INLINE `mod_item` ancestor (outermost first) enclosing
+ * `node` within the SAME file — i.e. `mod_item`s with a `body`, which
+ * `RustTraverser.shouldTraverseChildren` already treats as pass-through
+ * containers for symbol extraction. A file-backed ancestor (no body) can't
+ * occur here: its content lives in a different file entirely, parsed as its
+ * own chunk, so this never walks across a file boundary.
+ */
+function collectInlineAncestorModNames(node: SyntaxNode): string[] {
+  const names: string[] = [];
+  let current = node.parent;
+  while (current) {
+    if (current.type === 'mod_item') {
+      const nameNode = current.childForFieldName('name');
+      if (nameNode) names.unshift(nameNode.text);
+    }
+    current = current.parent;
+  }
+  return names;
+}
+
+/**
+ * Whether a `mod_item` node declares an inline module body (`mod x { ... }`)
+ * rather than a file-backed declaration (`mod x;`). An inline module is a
+ * namespace, not an import — it has no separate file and must NOT produce a
+ * dependency edge (see `extractModImportPath`'s doc comment, #1000).
+ */
+function isInlineModDeclaration(node: SyntaxNode): boolean {
+  return node.childForFieldName('body') !== null;
+}
+
+/**
+ * `#[path = "..."]` overrides the default sibling-file lookup for a single
+ * `mod_item`. tree-sitter-rust attaches attributes as PRECEDING SIBLINGS of
+ * the item they annotate (not children of it), so this walks backward
+ * through the contiguous run of `attribute_item`s immediately before
+ * `modNode` — there can be more than one (`#[cfg(test)] #[path = "..."]
+ * mod x;`) — looking for one shaped like `path = "<value>"`. Returns null
+ * (falls through to the default sibling-file convention) if none is found;
+ * this is the "at least don't crash on it" floor #1000 asks for, not full
+ * attribute-macro support.
+ */
+function findPathAttributeOverride(modNode: SyntaxNode): string | null {
+  const parent = modNode.parent;
+  if (!parent) return null;
+  const siblings = parent.namedChildren;
+  const index = siblings.indexOf(modNode);
+  if (index === -1) return null;
+
+  for (const sibling of siblings.slice(0, index).reverse()) {
+    if (sibling.type !== 'attribute_item') break;
+    const override = extractPathAttributeValue(sibling);
+    if (override) return override;
+  }
+  return null;
+}
+
+/** The `"<value>"` of a single `attribute_item` shaped like `#[path = "..."]`, or null. */
+function extractPathAttributeValue(attributeItem: SyntaxNode): string | null {
+  const attribute = attributeItem.namedChildren.find(child => child.type === 'attribute');
+  if (!attribute) return null;
+  if (attribute.namedChildren[0]?.text !== 'path') return null;
+
+  const valueNode = attribute.childForFieldName('value');
+  const stringContent = valueNode?.namedChildren.find(child => child.type === 'string_content');
+  return stringContent?.text ?? null;
+}
+
+/**
+ * Resolve a FILE-BACKED `mod_item` (`mod x;`, no body) to the concrete
+ * sibling path it declares.
+ *
+ * The trap this deliberately avoids (#1000, closed against #928/#884): a
+ * bare specifier like `reporter` requires downstream fuzzy bare-module
+ * matching to guess which file it means, which is exactly the
+ * language-blind fabrication #928 was closed to prevent. A Rust `mod x;` is
+ * NOT ambiguous like that — it's a declaration that resolves deterministically
+ * to one specific sibling path relative to the declaring file — so this
+ * resolves the concrete path up front (`rustModOwningDirectory` +
+ * `#[path]` override) and returns it complete, the same way
+ * `resolveRustRelativeModulePath` already resolves `self::`/`super::`
+ * precisely instead of leaving them for the generic bare-word matcher.
+ *
+ * Returns null for an inline module (has a body — no separate file, no
+ * edge) or when there's no `importerFile` to resolve against.
+ */
+function extractModImportPath(node: SyntaxNode, importerFile?: string): string | null {
+  if (isInlineModDeclaration(node) || !importerFile) return null;
+
+  const nameNode = node.childForFieldName('name');
+  if (!nameNode) return null;
+
+  const pathOverride = findPathAttributeOverride(node);
+  if (pathOverride) {
+    const normalizedImporter = importerFile.replace(/\\/g, '/');
+    return joinFromDir(dirnameOf(normalizedImporter), pathOverride.replace(/\.rs$/, ''));
+  }
+
+  return joinFromDir(rustModOwningDirectory(importerFile, node), nameNode.text);
+}
+
+/**
  * Resolve a `self::`/`super::`-relative Rust module path against the
  * importing file's own location (#928).
  *
@@ -417,8 +553,15 @@ function extractUseListSymbols(useList: SyntaxNode): string[] {
 /**
  * Rust import extractor
  *
- * Handles all `use` declarations (not just `pub use`).
- * Every `use` creates a dependency.
+ * Handles all `use` declarations (not just `pub use`) — every `use` creates
+ * a dependency — AND file-backed `mod` declarations (`mod x;`/`pub mod x;`,
+ * #1000): the idiomatic Rust pattern of `mod x;` at the crate root plus
+ * qualified calls (`x::func()`) with no `use` at all otherwise produces no
+ * edge whatsoever. See `extractModImportPath` for how a `mod` declaration is
+ * resolved to a concrete sibling path rather than an ambiguous bare
+ * specifier. An INLINE `mod x { ... }` (has a body) is a namespace, not an
+ * import, and correctly produces no edge for itself — see
+ * `isInlineModDeclaration`.
  *
  * Examples:
  * - `use crate::auth::AuthService;`
@@ -427,15 +570,21 @@ function extractUseListSymbols(useList: SyntaxNode): string[] {
  * - `use crate::models::*;`
  * - `use std::io::Read;` (external - skipped)
  * - `use super::utils::helper;`
+ * - `mod reporter;` -> `<owning dir>/reporter` (#1000)
+ * - `pub mod reporter;` -> same as above; visibility doesn't affect whether
+ *   the sibling file is a real dependency
+ * - `mod tests { ... }` -> no edge (inline, no separate file)
  */
 export class RustImportExtractor implements LanguageImportExtractor {
-  readonly importNodeTypes = ['use_declaration'];
+  readonly importNodeTypes = ['use_declaration', 'mod_item'];
 
   extractImportPath(
     node: SyntaxNode,
     rustCrateMap?: ReadonlyMap<string, string>,
     importerFile?: string,
   ): string | null {
+    if (node.type === 'mod_item') return extractModImportPath(node, importerFile);
+
     const argument = node.childForFieldName('argument');
     if (!argument) return null;
 
@@ -456,6 +605,15 @@ export class RustImportExtractor implements LanguageImportExtractor {
     rustCrateMap?: ReadonlyMap<string, string>,
     importerFile?: string,
   ): { importPath: string; symbols: string[] } | null {
+    if (node.type === 'mod_item') {
+      // A `mod x;` brings the whole module namespace into scope (consumers
+      // then use qualified `x::func()` calls) rather than naming specific
+      // symbols, the same "whole module" shape as `use crate::models::*;` —
+      // see `processUseWildcard` below.
+      const importPath = extractModImportPath(node, importerFile);
+      return importPath ? { importPath, symbols: ['*'] } : null;
+    }
+
     const argument = node.childForFieldName('argument');
     if (!argument) return null;
 

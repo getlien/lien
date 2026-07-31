@@ -1063,6 +1063,53 @@ use crate::auth::{AuthService, AuthError};
 
       expect(imports).toContain('auth');
     });
+
+    // #1000: `mod x;` (no `use` at all) is the idiomatic Rust pattern for
+    // crate-root submodules referenced only via qualified calls (`x::func()`).
+    // Before this, mod_item wasn't in importNodeTypes, so it produced no
+    // import edge whatsoever.
+    describe('mod declarations (#1000)', () => {
+      it('extracts a file-backed mod declaration when rustImporterFile is provided', () => {
+        const content = 'mod reporter;';
+        const parseResult = parseAST(content, 'rust');
+        const imports = extractImports(
+          parseResult.tree!.rootNode,
+          'rust',
+          undefined,
+          undefined,
+          undefined,
+          'src/main.rs',
+        );
+        expect(imports).toContain('src/reporter');
+      });
+
+      it('extracts nothing for a mod declaration without rustImporterFile — cannot resolve deterministically', () => {
+        const content = 'mod reporter;';
+        const parseResult = parseAST(content, 'rust');
+        const imports = extractImports(parseResult.tree!.rootNode, 'rust');
+        expect(imports).toHaveLength(0);
+      });
+
+      it('does not fabricate an edge for an inline mod block, but surfaces a use_declaration nested inside it', () => {
+        const content = `
+#[cfg(test)]
+mod tests {
+    use crate::helper::assert_helper;
+}
+        `.trim();
+        const parseResult = parseAST(content, 'rust');
+        const imports = extractImports(
+          parseResult.tree!.rootNode,
+          'rust',
+          undefined,
+          undefined,
+          undefined,
+          'src/lib.rs',
+        );
+        expect(imports).not.toContain('tests');
+        expect(imports).toContain('helper/assert_helper');
+      });
+    });
   });
 
   describe('extractImportedSymbols - Rust', () => {
