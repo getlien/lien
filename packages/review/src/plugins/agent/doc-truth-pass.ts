@@ -851,22 +851,34 @@ function hasCompleteVerdictCoverage(ids: string[], raw: RawDocClaimVerdict[]): b
 
 /**
  * Reduce the raw v2 findings array to real findings: every ad hoc finding (no `claimId`) passes
- * through unchanged, and every claimed entry is kept ONLY when its verdict is `contradicted`
- * (cleaned of the v2-only fields) — mirroring v1's rule text (stay silent unless you have proof
- * of a contradiction) and the exact inclusion-list pattern every sibling candidate-loop pass
- * uses: `stale-duplicate-pass.ts` keeps `verdict === 'stale'` only, `removed-exports-pass.ts`
- * keeps `'breaking'` only, `incomplete-handling-pass.ts` keeps `'incomplete'` only. Both
- * `accurate` and `unverifiable` are dropped rather than guess-promoted: `accurate` because the
- * claim checked out, `unverifiable` because "I couldn't check" is not proof of a contradiction —
- * promoting it made a thin-evidence claim look like a real finding (see the `accurate-doc`
- * precision-guard fixture, which this reduction previously false-fired on 3/3). Coverage
- * honesty is unaffected: `hasCompleteVerdictCoverage` (below) reads the RAW, pre-reduction list,
- * so a claim honestly verdicted `unverifiable` still counts as covered even though it never
- * surfaces here.
+ * through unchanged, and every claimed entry is kept ONLY when its `claimId` names a real
+ * worklist entry AND its verdict is `contradicted` (cleaned of the v2-only fields) — mirroring
+ * v1's rule text (stay silent unless you have proof of a contradiction) and the exact
+ * inclusion-list pattern every sibling candidate-loop pass uses: `stale-duplicate-pass.ts` keeps
+ * `verdict === 'stale'` only, `removed-exports-pass.ts` keeps `'breaking'` only,
+ * `incomplete-handling-pass.ts` keeps `'incomplete'` only. Both `accurate` and `unverifiable`
+ * are dropped rather than guess-promoted: `accurate` because the claim checked out,
+ * `unverifiable` because "I couldn't check" is not proof of a contradiction — promoting it made
+ * a thin-evidence claim look like a real finding (see the `accurate-doc` precision-guard
+ * fixture, which this reduction previously false-fired on 3/3). Coverage honesty is unaffected:
+ * `hasCompleteVerdictCoverage` (below) reads the RAW, pre-reduction list, so a claim honestly
+ * verdicted `unverifiable` still counts as covered even though it never surfaces here.
+ *
+ * The `expected.has(claimId)` check guards against the hallucinated-id loophole a code reviewer
+ * caught in PR #804 (see `docs-drift-pass.ts`'s sibling reducer): a phantom `claimId` paired
+ * with `verdict: 'contradicted'` must not leak through as a real finding just because it isn't
+ * `undefined` — an out-of-worklist `claimId` is a malformed claimed entry (same as a missing or
+ * unrecognized verdict), not a legitimate ad hoc finding, so it is dropped here exactly like
+ * `hasCompleteVerdictCoverage` already treats it as a coverage failure.
  */
-function reduceDocTruthV2Findings(raw: RawDocClaimVerdict[]): AgentFinding[] {
+function reduceDocTruthV2Findings(
+  raw: RawDocClaimVerdict[],
+  expected: Set<string>,
+): AgentFinding[] {
   return raw
-    .filter(f => f.claimId === undefined || f.verdict === 'contradicted')
+    .filter(
+      f => f.claimId === undefined || (expected.has(f.claimId) && f.verdict === 'contradicted'),
+    )
     .map(f => (f.claimId !== undefined ? toCleanDocTruthFinding(f) : f));
 }
 
@@ -898,13 +910,14 @@ export function postProcessDocTruthResult(
   const ceiling = affordableCandidateCeiling(budget, DOC_TRUTH_TOKENS_PER_CLAIM);
   const { worklist, deferredCount, deferredIds } = capClaimWorklistToCeiling(full, ceiling);
   const ids = allClaimIds(worklist);
+  const expected = new Set(ids);
   const raw = result.findings as RawDocClaimVerdict[];
   const coverageIncomplete = !hasCompleteVerdictCoverage(ids, raw);
   const wasAlreadyIncomplete = result.incomplete;
 
   return {
     ...result,
-    findings: reduceDocTruthV2Findings(raw),
+    findings: reduceDocTruthV2Findings(raw, expected),
     incomplete: wasAlreadyIncomplete || coverageIncomplete,
     stopReason:
       !wasAlreadyIncomplete && coverageIncomplete ? 'incomplete_verdict' : result.stopReason,

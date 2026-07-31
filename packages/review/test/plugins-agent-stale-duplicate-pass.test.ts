@@ -499,7 +499,7 @@ describe('postProcessStaleDuplicateResult', () => {
     expect(result.stopReason).toBe('incomplete_verdict');
   });
 
-  it('is incomplete when an entry names a candidate id outside the worklist', () => {
+  it('is incomplete when an entry names a candidate id outside the worklist, and the phantom never leaks through', () => {
     const raw = fakeResult({
       findings: [
         finding({ candidateId: 'candidate-1', verdict: 'unverifiable' }),
@@ -509,6 +509,7 @@ describe('postProcessStaleDuplicateResult', () => {
     const result = postProcessStaleDuplicateResult(raw, eligibleContext());
     expect(result.incomplete).toBe(true);
     expect(result.stopReason).toBe('incomplete_verdict');
+    expect(result.findings).toHaveLength(0);
   });
 
   // -------------------------------------------------------------------------

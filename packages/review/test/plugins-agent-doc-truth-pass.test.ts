@@ -967,7 +967,7 @@ describe('postProcessDocTruthResult', () => {
     expect(processed.stopReason).toBe('incomplete_verdict');
   });
 
-  it('is incomplete when an entry names a claimId outside the worklist', () => {
+  it('is incomplete when an entry names a claimId outside the worklist, and the phantom never leaks through', () => {
     process.env.LIEN_DOC_TRUTH_V2 = 'on';
     const result = fakeResult([
       verdictFinding({ claimId: 'claim-1', verdict: 'accurate' }),
@@ -976,6 +976,7 @@ describe('postProcessDocTruthResult', () => {
     const processed = postProcessDocTruthResult(result, singleClaimCtx());
     expect(processed.incomplete).toBe(true);
     expect(processed.stopReason).toBe('incomplete_verdict');
+    expect(processed.findings).toHaveLength(0);
   });
 
   it('keeps the ORIGINAL stopReason when the client was already incomplete for a real reason', () => {
