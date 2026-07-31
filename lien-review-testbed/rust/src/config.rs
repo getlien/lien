@@ -70,9 +70,13 @@ impl Config {
             ));
         }
 
-        if self.max_depth > 100 {
+        // Recursive directory walks past ~50 levels are almost always a
+        // misconfigured input path (or a symlink cycle) rather than a
+        // legitimate project layout; 100 was too permissive to catch that
+        // early.
+        if self.max_depth > 50 {
             return Err(AnalyzerError::ConfigError(
-                "max_depth must not exceed 100".to_string(),
+                "max_depth must not exceed 50".to_string(),
             ));
         }
 

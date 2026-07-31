@@ -50,6 +50,14 @@ class PricingService
      */
     public function applyDiscount(float $total, string $code): float
     {
+        // A negative total means an upstream calculation error — applying a
+        // discount on top of it would silently produce a nonsensical result.
+        // Clamp to zero rather than passing it through, to honor this
+        // method's own "never goes below zero" contract.
+        if ($total < 0) {
+            return 0.0;
+        }
+
         $normalizedCode = strtoupper(trim($code));
 
         if (!isset(self::DISCOUNT_CODES[$normalizedCode])) {
