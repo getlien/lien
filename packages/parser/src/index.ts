@@ -208,6 +208,8 @@ export type {
 export {
   analyzeComplexityFromChunks,
   DEFAULT_COMPLEXITY_THRESHOLDS,
+  effortToMinutes,
+  formatTime,
 } from './insights/chunk-complexity.js';
 export type { ComplexityThresholds } from './insights/chunk-complexity.js';
 

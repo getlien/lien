@@ -1,5 +1,6 @@
 import chalk from 'chalk';
 import type { ComplexityReport, ComplexityViolation, FileComplexityData } from '@liendev/parser';
+import { effortToMinutes, formatTime } from '@liendev/parser';
 
 /**
  * Violation with associated file path for rendering
@@ -22,25 +23,6 @@ function getMetricLabel(metricType: ComplexityViolation['metricType']): string {
     default:
       return 'Complexity';
   }
-}
-
-/**
- * Convert Halstead effort to time in minutes
- */
-function effortToMinutes(effort: number): number {
-  return effort / 1080;
-}
-
-/**
- * Format minutes as human-readable time
- */
-function formatTime(minutes: number): string {
-  if (minutes >= 60) {
-    const hours = Math.floor(minutes / 60);
-    const mins = Math.round(minutes % 60);
-    return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
-  }
-  return `${Math.round(minutes)}m`;
 }
 
 /**

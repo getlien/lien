@@ -633,11 +633,13 @@ describe('analyzeComplexityFromChunks — entry point', () => {
   });
 
   it('files filter narrows report.files, but dependency/test-association enrichment still sees the full chunk universe', () => {
-    // NOTE: mirrors the identical design in packages/core's instance `analyze()`
-    // (see its comment "we fetch all chunks even with --files filter because
-    // dependency analysis needs the complete dataset"). Pinning it here for the
-    // parser's standalone entry point too, since it is easy to assume `files`
-    // scopes everything.
+    // NOTE: this used to be pinned separately because packages/core's instance
+    // `analyze()` had an independently hand-maintained copy of this same
+    // "fetch all chunks even with --files filter" design (#994 Phase 4 found
+    // and removed it). `analyze()` now delegates straight into
+    // `analyzeComplexityFromChunks`, so there is nothing left to keep in sync
+    // — this test is the only place the behavior is pinned. Kept because it's
+    // easy to assume `files` scopes everything.
     const target = chunk({ file: 'src/target.ts', complexity: 40, imports: [] });
     const outsideImporter: CodeChunk = {
       content: 'import { x } from "./target";',
