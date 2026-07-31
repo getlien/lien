@@ -616,6 +616,171 @@ describe('analyzeDependencies', () => {
       expect(result.dependents.map(d => d.filepath)).toContain('app/consumer.py');
     });
   });
+
+  // #994 Phase 3 characterization: `buildReExportGraph` is one of the four
+  // match-side call paths path-matching.ts:378-388 (pre-fix) documents as not
+  // routed through `importMatchesTarget`. Its own re-export detection
+  // (`fileIsReExporter` -> `findReExportedSymbolsForFile` ->
+  // `collectImportedSymbolsFromSource`) already routes through the guarded
+  // primitive, so the three guards below are exercised here at the
+  // `buildReExportGraph`/`analyzeDependencies` level for the first time --
+  // previously #884 only had unit coverage one layer down
+  // (`findReExportedSymbolsForFile`'s own describe block), and #887/#929 had
+  // none at all in the barrel/re-export path.
+  describe('buildReExportGraph guard coverage (#994 Phase 3 characterization)', () => {
+    it('#884: a Swift whole-module bare import does not make a same-basename file a re-exporter', () => {
+      const chunks: CodeChunk[] = [
+        createChunk('Source/Alamofire.swift', [], undefined, { exports: ['Alamofire'] }),
+        // Bare whole-module import sharing the target's basename (the #884
+        // false-hub shape) that also happens to export the same name --
+        // without the guard this would look like a genuine re-export.
+        createChunk('Source/Core/Session.swift', ['Alamofire'], undefined, {
+          importedSymbols: { Alamofire: ['Alamofire'] },
+          exports: ['Alamofire'],
+        }),
+        createChunk('Tests/SessionTests.swift', ['Source/Core/Session.swift'], undefined, {
+          importedSymbols: { './Session': ['Alamofire'] },
+        }),
+      ];
+
+      const result = analyzeDependencies('Source/Alamofire.swift', chunks, workspaceRoot);
+
+      const dependentPaths = result.dependents.map(d => d.filepath);
+      expect(dependentPaths).not.toContain('Source/Core/Session.swift');
+      expect(dependentPaths).not.toContain('Tests/SessionTests.swift');
+    });
+
+    it('#887 (Ruby): a bare multi-segment require does not make a sibling file a re-exporter of an unrelated target', () => {
+      // Mirrors the #887 findDependentChunks fixture above, for the
+      // re-export path instead: base.rb bare-requires 'rack/protection',
+      // which Ruby's single-file semantics resolve to the umbrella entry
+      // point ONLY, never to a sibling under the same directory. If this
+      // guard were missing here, base.rb would be wrongly credited as a
+      // re-exporter of xss_header.rb (a sibling, not the umbrella), pulling
+      // in its own consumers as fabricated transitive dependents.
+      const chunks: CodeChunk[] = [
+        createChunk('rack-protection/lib/rack/protection/base.rb', ['rack/protection'], undefined, {
+          importedSymbols: { 'rack/protection': ['ProtectionThing'] },
+          exports: ['ProtectionThing'],
+        }),
+        createChunk(
+          'rack-protection/lib/rack/protection/consumer.rb',
+          ['rack/protection/base'],
+          undefined,
+          { importedSymbols: { 'rack/protection/base': ['ProtectionThing'] } },
+        ),
+      ];
+
+      const result = analyzeDependencies(
+        'rack-protection/lib/rack/protection/xss_header.rb',
+        chunks,
+        workspaceRoot,
+      );
+
+      const dependentPaths = result.dependents.map(d => d.filepath);
+      expect(dependentPaths).not.toContain('rack-protection/lib/rack/protection/base.rb');
+      expect(dependentPaths).not.toContain('rack-protection/lib/rack/protection/consumer.rb');
+    });
+
+    it('#929 (Python): a TypeScript resolved bare-directory import does not make its file a re-exporter of an unrelated file under that directory', () => {
+      const chunks: CodeChunk[] = [
+        createChunk('src/middleware/jwt/index.ts', ['src'], undefined, {
+          importedSymbols: { src: ['color'] },
+          exports: ['color'],
+        }),
+        createChunk('src/middleware/jwt/consumer.ts', ['src/middleware/jwt/index.ts'], undefined, {
+          importedSymbols: { './index': ['color'] },
+        }),
+      ];
+
+      const result = analyzeDependencies('src/utils/color.ts', chunks, workspaceRoot);
+
+      const dependentPaths = result.dependents.map(d => d.filepath);
+      expect(dependentPaths).not.toContain('src/middleware/jwt/index.ts');
+      expect(dependentPaths).not.toContain('src/middleware/jwt/consumer.ts');
+    });
+
+    it('still finds a genuine re-exporter through a Go package-directory import (regression guard)', () => {
+      const chunks: CodeChunk[] = [
+        createChunk('internal/fs/fs.go', [], undefined, { exports: ['Open'] }),
+        createChunk('render/html.go', ['internal/fs'], undefined, {
+          importedSymbols: { 'internal/fs': ['Open'] },
+          exports: ['Open'],
+        }),
+        createChunk('app/main.go', ['render/html.go'], undefined, {
+          importedSymbols: { 'render/html': ['Open'] },
+        }),
+      ];
+
+      const result = analyzeDependencies('internal/fs/fs.go', chunks, workspaceRoot);
+
+      const dependentPaths = result.dependents.map(d => d.filepath);
+      expect(dependentPaths).toContain('render/html.go');
+      expect(dependentPaths).toContain('app/main.go');
+    });
+  });
+
+  // #994 Phase 3 characterization: `buildReExportGraph`'s own raw
+  // `matchesFile(filepath, normalizedTarget)` self-skip call (excluding the
+  // target file itself from re-exporter consideration) is orthogonal to the
+  // three guards above -- there is no import specifier in play, only two
+  // already-identically-normalized file paths, so none of #884/#887/#929
+  // apply to it. This pins its current behavior; see the NOTE below for why
+  // it's suspicious.
+  describe('buildReExportGraph self-skip fuzzy-matching (#994 Phase 3, investigated)', () => {
+    it('a two-hop re-export chain through a file whose own path fuzzy-matches the target is still found (masking regression guard)', () => {
+      // Investigation note (not a confirmed bug -- see #994 Phase 3 report):
+      // `fs/fs.go` and `internal/fs/fs.go` are two DIFFERENT real files.
+      // buildReExportGraph's self-skip does `matchesFile(filepath,
+      // normalizedTarget)` -- a fuzzy match, not exact equality, even though
+      // both sides already come from the SAME `normalizePathCached` (so a
+      // plain `===` would be exact and sufficient). `matchesFile('fs/fs.go',
+      // 'internal/fs/fs.go')` returns true via Strategy 2's permissive
+      // (Go-default) multi-segment tail match -- the same boundary rule that
+      // legitimately lets a bare `internal/fs` import credit every file in
+      // that package directory here misfires on a FILE-vs-FILE identity
+      // check instead of an import-vs-file one, so `fs/fs.go` is wrongly
+      // treated as if it WERE the target and excluded from
+      // `reExporterPaths` via `continue`.
+      //
+      // On paper this should silently drop any consumer only reachable
+      // through `fs/fs.go`'s re-export chain. Empirically it does not: ANY
+      // specifier that references `fs/fs.go` by its own path/name (the only
+      // way to build a chain through it) ALSO fuzzy-matches the target
+      // directly, by the same tail-match property that trips the self-skip
+      // in the first place. So `mid/wrapper.go` (which re-exports
+      // `fs/fs.go`'s `Open`) gets independently, directly recognized as a
+      // target re-exporter by `buildReExportGraph`'s own loop over every
+      // file in the corpus -- bypassing the broken chain through `fs/fs.go`
+      // entirely -- and `app/main.go` is still found. Two attempts to
+      // construct a repro where this masking does NOT apply were
+      // unsuccessful; the self-skip's fuzzy-vs-exact mismatch looks like a
+      // code smell (using an import matcher for a file-identity check) but
+      // has no demonstrated observable effect through `analyzeDependencies`/
+      // `findDependents`. Reported as an unconfirmed finding, not fixed here.
+      const chunks: CodeChunk[] = [
+        createChunk('internal/fs/fs.go', [], undefined, { exports: ['Open'] }),
+        createChunk('fs/fs.go', ['internal/fs'], undefined, {
+          importedSymbols: { 'internal/fs': ['Open'] },
+          exports: ['Open'],
+        }),
+        createChunk('mid/wrapper.go', ['fs/fs.go'], undefined, {
+          importedSymbols: { 'fs/fs.go': ['Open'] },
+          exports: ['Open'],
+        }),
+        createChunk('app/main.go', ['mid/wrapper.go'], undefined, {
+          importedSymbols: { 'mid/wrapper.go': ['Open'] },
+        }),
+      ];
+
+      const result = analyzeDependencies('internal/fs/fs.go', chunks, workspaceRoot);
+      const dependentPaths = result.dependents.map(d => d.filepath);
+
+      expect(dependentPaths).toContain('fs/fs.go');
+      expect(dependentPaths).toContain('mid/wrapper.go');
+      expect(dependentPaths).toContain('app/main.go');
+    });
+  });
 });
 
 // Direct unit coverage for the shared re-export intersection algorithm,
