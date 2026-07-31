@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs/promises';
 import path from 'path';
 import Database from 'better-sqlite3';
-import { getIndexDir } from '@liendev/parser';
+import { getIndexDir } from '../utils/index-dir.js';
 import { createTestDir, cleanupTestDir } from '../test/helpers/test-db.js';
 import { indexCodebase } from './index.js';
 import { buildOverlay, computeOverlaySignature } from './overlay-index.js';

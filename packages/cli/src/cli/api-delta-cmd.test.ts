@@ -404,7 +404,7 @@ describe('apiDeltaCommand — enrichment when an index is present', () => {
     // `hasStructuralIndex`'s cheap pre-check only looks for the file's
     // existence at the real per-repo index dir — its content doesn't matter
     // since `createVectorDB` itself is mocked below.
-    const { getIndexDir } = await import('@liendev/parser');
+    const { getIndexDir } = await import('@liendev/core');
     const realIndexDir = getIndexDir(dir);
     await fs.mkdir(realIndexDir, { recursive: true });
     await fs.writeFile(path.join(realIndexDir, 'structural.db'), '', 'utf-8');
@@ -482,7 +482,7 @@ describe('apiDeltaCommand — enrichment when an index is present', () => {
     await git('-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'init');
     await write('a.ts', '// oldHelper removed\n');
 
-    const { getIndexDir } = await import('@liendev/parser');
+    const { getIndexDir } = await import('@liendev/core');
     const realIndexDir = getIndexDir(dir);
     await fs.mkdir(realIndexDir, { recursive: true });
     await fs.writeFile(path.join(realIndexDir, 'structural.db'), '', 'utf-8');
@@ -525,7 +525,7 @@ describe('apiDeltaCommand — enrichment when an index is present', () => {
     await git('-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'init');
     await write('a.ts', 'export function formatUser(user, opts) { return user.name; }');
 
-    const { getIndexDir } = await import('@liendev/parser');
+    const { getIndexDir } = await import('@liendev/core');
     const realIndexDir = getIndexDir(dir);
     await fs.mkdir(realIndexDir, { recursive: true });
     await fs.writeFile(path.join(realIndexDir, 'structural.db'), '', 'utf-8');

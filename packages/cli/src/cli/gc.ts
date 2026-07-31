@@ -1,6 +1,6 @@
 import chalk from 'chalk';
-import { getIndexDir } from '@liendev/parser';
 import {
+  getIndexDir,
   planGc,
   executeGc,
   formatBytes,

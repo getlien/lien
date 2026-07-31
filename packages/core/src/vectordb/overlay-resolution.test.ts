@@ -3,7 +3,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { getIndexDir } from '@liendev/parser';
+import { getIndexDir } from '../utils/index-dir.js';
 import { INDEX_FORMAT_VERSION } from '../constants.js';
 import { STRUCTURAL_DB_FILENAME } from './sqlite/schema.js';
 import { resolveIndexStrategy, _resetWarnMemo } from './overlay-resolution.js';

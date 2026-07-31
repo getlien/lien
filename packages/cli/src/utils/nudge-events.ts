@@ -37,7 +37,7 @@
 
 import fs from 'fs/promises';
 import path from 'path';
-import { getIndexDir } from '@liendev/parser';
+import { getIndexDir } from '@liendev/core';
 import { canonicalizePath } from './canonicalize-path.js';
 import { getBuildStamp, type BuildStamp } from './nudge-build.js';
 

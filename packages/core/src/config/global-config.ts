@@ -1,6 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { getLienHome } from '@liendev/parser';
+import { getLienHome } from '../utils/lien-home.js';
 
 /**
  * Error thrown when config file exists but has invalid syntax or structure.

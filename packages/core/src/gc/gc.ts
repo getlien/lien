@@ -1,6 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { getLienHome } from '@liendev/parser';
+import { getLienHome } from '../utils/lien-home.js';
 import { readVersionFile } from '../vectordb/version.js';
 import type { IndexManifest } from '../indexer/manifest.js';
 import { readAccessStamp } from './access-stamp.js';

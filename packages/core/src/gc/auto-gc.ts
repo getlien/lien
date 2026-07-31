@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { randomUUID } from 'crypto';
-import { getLienHome } from '@liendev/parser';
+import { getLienHome } from '../utils/lien-home.js';
 import { runGc, type GcSummary } from './gc.js';
 
 /** Stamp file recording the epoch-ms of the last machine-wide auto-GC run. */

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'fs/promises';
 import path from 'path';
-import { getIndexDir } from '@liendev/parser';
+import { getIndexDir } from '../utils/index-dir.js';
 import { createTestDir, cleanupTestDir, createTestFile } from '../test/helpers/test-db.js';
 import { indexCodebase } from './index.js';
 import { indexMultipleFiles } from './incremental.js';

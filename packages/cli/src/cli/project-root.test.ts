@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import path from 'path';
 import os from 'os';
 import fs from 'fs/promises';
-import { getIndexDir } from '@liendev/parser';
+import { getIndexDir } from '@liendev/core';
 import { VERSION_FILE } from '@liendev/core';
 import { resolveProjectRoot } from './project-root.js';
 

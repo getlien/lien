@@ -3,7 +3,7 @@ import path from 'path';
 import Database from 'better-sqlite3';
 import type DatabaseType from 'better-sqlite3';
 import type { ChunkMetadata } from '@liendev/parser';
-import { getIndexDir } from '@liendev/parser';
+import { getIndexDir } from '../utils/index-dir.js';
 import type { SearchResult, VectorDBInterface } from './types.js';
 import { wrapError } from '../errors/index.js';
 import { readVersionFile, writeVersionFile } from './version.js';

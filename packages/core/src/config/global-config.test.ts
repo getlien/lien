@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'fs/promises';
 import path from 'path';
-import { getLienHome } from '@liendev/parser';
+import { getLienHome } from '../utils/lien-home.js';
 import { loadGlobalConfig, ConfigValidationError } from './global-config.js';
 
 describe('loadGlobalConfig', () => {
