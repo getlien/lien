@@ -454,6 +454,19 @@ class User {
       }
     });
 
+    // #976 (#965 recurring): `signature` dropped the extends/implements
+    // heritage clause entirely — `class Dog extends Animal implements
+    // Serializable {}` came back as bare `class Dog`, the single most
+    // useful fact about the class.
+    it('should include the extends/implements heritage clause in a class signature', () => {
+      const code = '<?php\nclass Dog extends Animal implements Serializable {}';
+      const root = mustParse(code, 'php');
+      const classNode = root.namedChildren.find(child => child.type === 'class_declaration');
+      expect(classNode).not.toBeUndefined();
+      const symbol = symbolExtractor.extractSymbol(classNode!, code);
+      expect(symbol!.signature).toBe('class Dog extends Animal implements Serializable');
+    });
+
     it('should extract call site from function call', () => {
       const code = '<?php\nhelper();';
       const root = mustParse(code, 'php');

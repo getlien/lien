@@ -11,6 +11,8 @@ import {
   extractSignature,
   extractParameters,
   extractReturnType,
+  clampSignatureLength,
+  collapseWhitespace,
 } from '../extractors/symbol-helpers.js';
 import { calculateComplexity } from '../complexity/index.js';
 
@@ -475,9 +477,41 @@ export class PHPSymbolExtractor implements LanguageSymbolExtractor {
       type: 'class',
       startLine: node.startPosition.row + 1,
       endLine: node.endPosition.row + 1,
-      signature: `class ${nameNode.text}`,
+      signature: clampSignatureLength(`class ${nameNode.text}${heritageClause(node)}`),
     };
   }
+}
+
+// =============================================================================
+// HELPERS
+// =============================================================================
+
+/**
+ * Extends/implements heritage clause, exactly as declared in source — the
+ * PHP analog of C#'s `typeParamsAndBaseList`/Java's `typeParamsAndHeritage`
+ * (same underlying bug: `signature` for a class reported only its bare
+ * keyword and name, dropping `extends Animal implements Serializable`
+ * entirely — #976, #965 recurring). PHP has no generic type parameters, so
+ * unlike the C#/Java/Kotlin/Swift/JS analogs this only extracts the
+ * heritage half. Neither `base_clause` (single class, `extends Animal`) nor
+ * `class_interface_clause` (`implements Serializable, ...`) is a registered
+ * grammar field on `class_declaration` (only `name`/`body`/`attributes`
+ * are), so both are found by scanning `namedChildren`, mirroring C#/Java's
+ * fallback-scan case.
+ *
+ * Whitespace is collapsed to a single line (matching `extractSignature`'s
+ * convention, see `collapseWhitespace`) in case either clause spans
+ * multiple physical lines.
+ */
+function heritageClause(node: SyntaxNode): string {
+  const baseClause = collapseWhitespace(
+    node.namedChildren.find(child => child.type === 'base_clause')?.text,
+  );
+  const interfaceClause = collapseWhitespace(
+    node.namedChildren.find(child => child.type === 'class_interface_clause')?.text,
+  );
+  const heritage = [baseClause, interfaceClause].filter(Boolean).join(' ');
+  return heritage ? ` ${heritage}` : '';
 }
 
 // =============================================================================

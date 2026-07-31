@@ -487,6 +487,25 @@ import (
       expect(symbol!.signature).toBe('type Validator interface');
     });
 
+    // #976 (#965 recurring): `signature` dropped generic type parameters
+    // entirely — `type Stack[T any] struct { items []T }` came back as bare
+    // `type Stack struct`, the single most useful fact about the type.
+    it('should include generic type parameters in a struct signature', () => {
+      const code = 'package main\ntype Stack[T any] struct { items []T }';
+      const root = mustParse(code, 'go');
+      const typeNode = root.namedChild(1)!;
+      const symbol = symbolExtractor.extractSymbol(typeNode, code);
+      expect(symbol!.signature).toBe('type Stack[T any] struct');
+    });
+
+    it('should include generic type parameters in an interface signature', () => {
+      const code = 'package main\ntype Container[T any] interface { Get() T }';
+      const root = mustParse(code, 'go');
+      const typeNode = root.namedChild(1)!;
+      const symbol = symbolExtractor.extractSymbol(typeNode, code);
+      expect(symbol!.signature).toBe('type Container[T any] interface');
+    });
+
     it('should extract return type from result field', () => {
       const code = 'package main\nfunc GetName() string { return "" }';
       const root = mustParse(code, 'go');
