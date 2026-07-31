@@ -180,6 +180,7 @@ export type {
 
 export {
   analyzeDependencies,
+  findDependents,
   findTransitiveDependents,
   groupChunksByNormalizedPath,
   addFuzzyMatchChunks,
@@ -190,7 +191,14 @@ export {
   DEPENDENT_COUNT_THRESHOLDS,
   COMPLEXITY_THRESHOLDS,
 } from './dependency-analyzer.js';
-export type { FileComplexityInfo, DependencyAnalysisResult } from './dependency-analyzer.js';
+export type {
+  FileComplexityInfo,
+  DependencyAnalysisResult,
+  FindDependentsResult,
+  ComplexityMetrics,
+  DependentInfo,
+  SymbolUsage,
+} from './dependency-analyzer.js';
 
 // =============================================================================
 // COMPLEXITY ANALYSIS (chunk-based, no VectorDB)
