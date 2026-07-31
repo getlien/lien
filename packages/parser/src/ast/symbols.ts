@@ -100,12 +100,20 @@ export function extractSymbolInfo(
  * non-matching direct child to find imports nested inside such a container. This
  * is backward compatible: languages whose import nodes are already direct
  * children match in the first branch and are never descended into.
+ *
+ * Rust's `mod_item` (#1000) is the one matched type that can ITSELF contain
+ * further import nodes at arbitrary depth: an inline `mod x { ... }` nests
+ * further `use_declaration`/`mod_item` children inside its own body, unlike
+ * every other matched type here (a leaf import statement with nothing
+ * further inside it worth looking for). So a matched `mod_item` with a body
+ * is also recursed into — every other language's matched nodes are leaves
+ * and this is a no-op for them.
  */
 function collectImportNodes(rootNode: SyntaxNode, nodeTypeSet: Set<string>): SyntaxNode[] {
   const nodes: SyntaxNode[] = [];
   for (const child of rootNode.namedChildren) {
     if (nodeTypeSet.has(child.type)) {
-      nodes.push(child);
+      nodes.push(child, ...collectNestedModImportNodes(child, nodeTypeSet));
     } else {
       for (const grandchild of child.namedChildren) {
         if (nodeTypeSet.has(grandchild.type)) nodes.push(grandchild);
@@ -113,6 +121,18 @@ function collectImportNodes(rootNode: SyntaxNode, nodeTypeSet: Set<string>): Syn
     }
   }
   return nodes;
+}
+
+/**
+ * Rust-only (#1000): further import nodes nested inside a matched
+ * `mod_item`'s own inline body — see `collectImportNodes`'s doc comment. A
+ * no-op for every other matched type, and for a file-backed `mod_item`
+ * (no body).
+ */
+function collectNestedModImportNodes(node: SyntaxNode, nodeTypeSet: Set<string>): SyntaxNode[] {
+  if (node.type !== 'mod_item') return [];
+  const body = node.childForFieldName('body');
+  return body ? collectImportNodes(body, nodeTypeSet) : [];
 }
 
 /**
