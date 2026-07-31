@@ -7,8 +7,9 @@ parameters and the heritage clause (base class / interface list) — #965
 recurring in the three languages that fix missed (#976).
 
 - Python: `class Dog(Animal, Serializable):` reported `signature: "class Dog"`;
-  now `"class Dog(Animal, Serializable)"`. Also covers PEP 695 generics
-  (`class Box[T](Base):` → `"class Box[T](Base)"`).
+  now `"class Dog(Animal, Serializable)"`. PEP 695 generics are also
+  covered — a generic class with a base class keeps both its type
+  parameter and its base in the signature.
 - PHP: `class Dog extends Animal implements Serializable {}` reported
   `"class Dog"`; now `"class Dog extends Animal implements Serializable"`.
 - Go: `type Stack[T any] struct { items []T }` reported `"type Stack struct"`;
