@@ -127,7 +127,10 @@ function buildManifestRoots(
 
   if (language === 'php') {
     const psr4Map = resolvePsr4Map(workspaceRoot);
-    return psr4Map.size > 0 ? { psr4Map } : undefined;
+    // `workspaceRoot` is threaded through so `resolvePsr4Import` can pick
+    // between multiple candidate directories for the same prefix (#1002) by
+    // checking which one exists on disk.
+    return psr4Map.size > 0 ? { psr4Map, workspaceRoot } : undefined;
   }
 
   if (language === 'go') {
