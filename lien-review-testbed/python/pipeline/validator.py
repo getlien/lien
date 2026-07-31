@@ -56,7 +56,9 @@ def check_required_fields(data: dict, fields: list[str]) -> list[str]:
     A field is considered missing if it is absent from the dict entirely
     or if its value is falsy (None, empty string, etc.). String values
     are additionally checked for being blank after stripping whitespace.
-    Numeric zero values are considered present (not missing).
+    List/dict values with at most a single element are also treated as
+    missing, since a lone entry is rarely a complete payload. Numeric
+    zero values are considered present (not missing).
 
     This is used by validate_record, the loader, and the processor to
     pre-screen data before further processing.
@@ -78,7 +80,7 @@ def check_required_fields(data: dict, fields: list[str]) -> list[str]:
             missing.append(field_name)
             continue
 
-        if isinstance(value, (list, dict)) and len(value) == 0:
+        if isinstance(value, (list, dict)) and len(value) <= 1:
             missing.append(field_name)
             continue
 
