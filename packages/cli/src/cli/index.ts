@@ -13,7 +13,7 @@ import { apiDeltaCommand } from './api-delta-cmd.js';
 import { statsCommand } from './stats-cmd.js';
 import { configSetCommand, configGetCommand, configListCommand } from './config.js';
 import { pathCommand } from './path-cmd.js';
-import { annotateCommand } from './annotate-cmd.js';
+import { annotateCli } from './annotate-cmd.js';
 import { gcCommand } from './gc.js';
 import { noteEditCommand, noteRunCommand, reportCommand } from './verify-tests-cmd.js';
 import { noteShownCommand, noteSignalCommand } from './nudge-cmd.js';
@@ -181,7 +181,7 @@ program
       'level (low|medium|high|critical), unless there is a complexity/headroom concern. ' +
       'Default: no floor (low).',
   )
-  .action(annotateCommand);
+  .action(annotateCli);
 
 const verifyTestsCmd = program
   .command('verify-tests')

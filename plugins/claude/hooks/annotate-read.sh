@@ -5,10 +5,25 @@
 # Habituation guard (default ON; opt out with LIEN_ANNOTATE_GUARD=off):
 #   (a) per-session dedup — annotate a given file at most ONCE per session
 #       (integrates with the existing touchfile; guard OFF restores the older
-#       LIEN_ANNOTATE_TTL_MIN-minute re-annotation window instead).
+#       LIEN_ANNOTATE_TTL_MIN-minute re-annotation window instead) --
+#       UNLESS the file's last known annotation carried a never-suppress
+#       signal (#978 below).
 #   (b) risk floor — pass --min-risk (LIEN_ANNOTATE_MIN_RISK, default 'medium')
 #       so `lien annotate` stays silent for below-floor files unless they carry
 #       a complexity/headroom concern. See docs/architecture/nudge-telemetry.md.
+#
+# #978: (a) and (b) used to be describable as fully independent, but they
+# aren't — `lien annotate` itself never silences a never-suppress signal
+# (an incomplete dependent-attribution result, a complexity warning, or a
+# headroom concern; see annotate-cmd.ts's `hasNeverSuppressSignal`), yet this
+# gate ran BEFORE `lien annotate` and, on a file's second Read this session,
+# exited unconditionally — content-blind by construction, so that policy
+# never got a chance to apply. Fixed by having `lien annotate` exit 2
+# whenever the annotation it just printed carried that signal, and recording
+# that in the touchfile's CONTENT (not just its existence): '1' means "don't
+# ever dedup-skip this file again this session," so a signal-carrying file
+# re-invokes `lien annotate` on every read, while an ordinary file keeps the
+# cheap existence-only dedup.
 #
 # Also records a nudge-shown event (for the `lien stats` funnels) whenever an
 # annotation is actually emitted. Skips files outside Lien's indexed extension
@@ -96,10 +111,16 @@ if [ -f "$touchfile" ]; then
       exit 0
     fi
   else
-    # Guard ON: per-session dedup — this file was already annotated this
-    # session (ignore mtime), so stay silent for the rest of the session.
-    [ -d "$session_dir" ] && touch "$session_dir" 2>/dev/null
-    exit 0
+    # Guard ON: per-session dedup — UNLESS this file's last known annotation
+    # carried a never-suppress signal (#978), recorded in the touchfile's
+    # CONTENT ('1') by the write below. That case falls through and
+    # re-invokes `lien annotate` on every read, same as a first read, so the
+    # #938 carve-outs (`isTrivial`/`belowRiskFloor`) always get a chance to
+    # run instead of being silenced sight-unseen by this dedup gate.
+    if [ "$(cat "$touchfile" 2>/dev/null)" != "1" ]; then
+      [ -d "$session_dir" ] && touch "$session_dir" 2>/dev/null
+      exit 0
+    fi
   fi
 fi
 
@@ -110,16 +131,26 @@ if [ -n "$min_risk" ]; then
 else
   annotation="$(run_lien "${LIEN_CMD[@]}" annotate "$file_path" 2>/dev/null)"
 fi
+# exit 2 (see annotate-cmd.ts's `annotateCli`) means the annotation just
+# printed carries a never-suppress signal — anything else (0, or a crash) is
+# treated as an ordinary annotation, the fail-open default.
+annotate_exit=$?
 
 # Trivial/below-floor impact → `lien annotate` prints nothing → stay silent.
 [ -n "$annotation" ] || exit 0
 
-# Record the annotation so suppression kicks in next time. Truncating an
-# existing touchfile doesn't update the parent dir's mtime on most
-# filesystems, so touch the dir explicitly to keep SessionStart cleanup
+# Record the annotation so suppression kicks in next time — UNLESS
+# annotate_exit says this file must never be dedup-silenced (#978): the
+# touchfile's content ('1' vs anything else) is what the check above reads.
+# Truncating an existing touchfile doesn't update the parent dir's mtime on
+# most filesystems, so touch the dir explicitly to keep SessionStart cleanup
 # from GC'ing this session at the 24h threshold.
 mkdir -p "$session_dir" 2>/dev/null || exit 0
-: > "$touchfile"
+if [ "$annotate_exit" = "2" ]; then
+  printf '1' > "$touchfile"
+else
+  printf '0' > "$touchfile"
+fi
 touch "$session_dir" 2>/dev/null
 
 # Record a nudge-shown event for the `lien stats` funnels (best-effort; its own

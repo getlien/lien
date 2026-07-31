@@ -5,8 +5,10 @@ import * as coreModule from '@liendev/core';
 import * as dependencyAnalyzerModule from '../mcp/handlers/dependency-analyzer.js';
 import {
   annotateCommand,
+  annotateCli,
   isTrivial,
   belowRiskFloor,
+  hasNeverSuppressSignal,
   formatDependents,
   formatTests,
   formatTestReminder,
@@ -38,6 +40,28 @@ vi.mock('../mcp/handlers/dependency-analyzer.js', async () => {
     ...actual,
     findDependents: vi.fn(actual.findDependents),
   };
+});
+
+describe('hasNeverSuppressSignal', () => {
+  it('is false when nothing is present', () => {
+    expect(hasNeverSuppressSignal(0, 0, false)).toBe(false);
+  });
+
+  it('is true for a complexity warning alone', () => {
+    expect(hasNeverSuppressSignal(1, 0, false)).toBe(true);
+  });
+
+  it('is true for a headroom concern alone', () => {
+    expect(hasNeverSuppressSignal(0, 1, false)).toBe(true);
+  });
+
+  it('is true for an incomplete dependent-attribution result alone', () => {
+    expect(hasNeverSuppressSignal(0, 0, true)).toBe(true);
+  });
+
+  it('is true when all three are present', () => {
+    expect(hasNeverSuppressSignal(2, 3, true)).toBe(true);
+  });
 });
 
 describe('isTrivial', () => {
@@ -681,7 +705,7 @@ describe('annotateCommand — plan-time nudge (integration)', () => {
       scanAll: vi.fn().mockResolvedValue([overBudgetChunk]),
     } as unknown as Awaited<ReturnType<typeof coreModule.createVectorDB>>);
 
-    await annotateCommand(target);
+    const carriesSignal = await annotateCommand(target);
 
     expect(errSpy).not.toHaveBeenCalled();
     expect(logSpy).toHaveBeenCalledTimes(1);
@@ -691,6 +715,9 @@ describe('annotateCommand — plan-time nudge (integration)', () => {
       '⚠ Lien: overBudgetFn cognitive 20/15 (over) — avoid adding complexity here; prefer extraction.',
     );
     expect(printed).toContain(`Lien impact for ${target}:`);
+    // A headroom concern is a never-suppress signal (#978) — the shell
+    // hook's session dedup must never be allowed to silence this file again.
+    expect(carriesSignal).toBe(true);
   });
 
   it('stays on the non-nudge path (no leading warning line) when nothing is near budget', async () => {
@@ -716,7 +743,7 @@ describe('annotateCommand — plan-time nudge (integration)', () => {
       scanAll: vi.fn().mockResolvedValue([quietChunk]),
     } as unknown as Awaited<ReturnType<typeof coreModule.createVectorDB>>);
 
-    await annotateCommand(target);
+    const carriesSignal = await annotateCommand(target);
 
     expect(errSpy).not.toHaveBeenCalled();
     // Still non-trivial (no test coverage), so it prints — but the first line
@@ -725,6 +752,96 @@ describe('annotateCommand — plan-time nudge (integration)', () => {
     const printed = logSpy.mock.calls[0][0] as string;
     expect(printed.split('\n')[0]).toBe(`Lien impact for ${target}:`);
     expect(printed).not.toContain('avoid adding complexity');
+    // An ordinary (non-signal-carrying) annotation — safe for the shell
+    // hook's session dedup to silence on a later Read (#978).
+    expect(carriesSignal).toBe(false);
+  });
+});
+
+describe('annotateCli (CLI exit-code contract, #978)', () => {
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  let errSpy: ReturnType<typeof vi.spyOn>;
+  let exitSpy: ReturnType<typeof vi.spyOn>;
+
+  // Same stable target as the plan-time-nudge block above.
+  const target = 'packages/cli/src/cli/index.ts';
+
+  beforeEach(() => {
+    logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    errSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    // Never let a real process.exit tear down the test worker — annotateCli
+    // is exercised for its call arguments only.
+    exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+  });
+
+  afterEach(() => {
+    logSpy.mockRestore();
+    errSpy.mockRestore();
+    exitSpy.mockRestore();
+    vi.mocked(coreModule.createVectorDB).mockClear();
+  });
+
+  it('exits 2 when the printed annotation carries a never-suppress signal (headroom concern)', async () => {
+    const overBudgetChunk = {
+      content: '',
+      metadata: {
+        file: target,
+        startLine: 1,
+        endLine: 20,
+        type: 'function',
+        language: 'typescript',
+        symbolName: 'overBudgetFn',
+        symbolType: 'function',
+        cognitiveComplexity: 20,
+        imports: [],
+      },
+      score: 0,
+      relevance: 'not_relevant',
+    };
+    vi.mocked(coreModule.createVectorDB).mockResolvedValueOnce({
+      initialize: vi.fn().mockResolvedValue(undefined),
+      hasData: vi.fn().mockResolvedValue(true),
+      scanAll: vi.fn().mockResolvedValue([overBudgetChunk]),
+    } as unknown as Awaited<ReturnType<typeof coreModule.createVectorDB>>);
+
+    await annotateCli(target);
+
+    expect(exitSpy).toHaveBeenCalledTimes(1);
+    expect(exitSpy).toHaveBeenCalledWith(2);
+  });
+
+  it('does not call process.exit for an ordinary annotation', async () => {
+    const quietChunk = {
+      content: '',
+      metadata: {
+        file: target,
+        startLine: 1,
+        endLine: 5,
+        type: 'function',
+        language: 'typescript',
+        symbolName: 'tidyFn',
+        symbolType: 'function',
+        cognitiveComplexity: 2,
+        imports: [],
+      },
+      score: 0,
+      relevance: 'not_relevant',
+    };
+    vi.mocked(coreModule.createVectorDB).mockResolvedValueOnce({
+      initialize: vi.fn().mockResolvedValue(undefined),
+      hasData: vi.fn().mockResolvedValue(true),
+      scanAll: vi.fn().mockResolvedValue([quietChunk]),
+    } as unknown as Awaited<ReturnType<typeof coreModule.createVectorDB>>);
+
+    await annotateCli(target);
+
+    expect(exitSpy).not.toHaveBeenCalled();
+  });
+
+  it('does not call process.exit for a non-existent file (silent no-op path)', async () => {
+    await annotateCli('this/path/does/not/exist.ts');
+
+    expect(exitSpy).not.toHaveBeenCalled();
   });
 });
 

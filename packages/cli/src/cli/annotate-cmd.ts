@@ -64,18 +64,37 @@ export interface AnnotateOptions {
 const RISK_RANK: Record<string, number> = { low: 0, medium: 1, high: 2, critical: 3 };
 
 /**
+ * Single source of truth for "does this annotation carry an honest-
+ * uncertainty signal that must never be silently suppressed?" (the #938
+ * policy). A complexity or headroom concern is always high-value (the
+ * plan-time nudges this annotator exists for); an incomplete dependent-
+ * attribution result is the false-all-clear shape (#930/#936) — a file with
+ * structurally-undeterminable dependents reads as "0 dependents" i.e. low
+ * risk by construction, which is exactly what must never go silent.
+ *
+ * `isTrivial` and `belowRiskFloor` both gate on this (that's the #938 fix:
+ * `isTrivial` got the carve-out first, `belowRiskFloor` sat three lines below
+ * it and didn't). `run()` also consults it directly to decide whether the
+ * `lien annotate` process should exit 2 — the signal a THIRD site, the
+ * session-dedup shell hook (`annotate-read.sh`), reads across the process
+ * boundary so it can stop treating this class of annotation as suppressible
+ * habituation noise (#978: that hook used to run before `lien annotate` at
+ * all, so this predicate never got a chance to fire).
+ */
+export function hasNeverSuppressSignal(
+  complexityWarnings: number,
+  headroomCount: number,
+  dependentAttributionIncomplete: boolean,
+): boolean {
+  return complexityWarnings > 0 || headroomCount > 0 || dependentAttributionIncomplete;
+}
+
+/**
  * Habituation guard: is this annotation below the configured risk floor and
- * therefore suppressible? A complexity or headroom concern always clears the
- * floor (those are the high-value plan-time nudges — never suppressed). An
- * incomplete dependent-attribution result also always clears the floor: a
- * file with structurally-undeterminable dependents reads as "0 dependents"
- * (i.e. low risk by construction), which is exactly the false-all-clear
- * shape this guard must never suppress — mirrors `isTrivial`'s identical
- * carve-out for the same flag (#930/#936/#938; this parameter closes the gap
- * Lien Review flagged on #938: `isTrivial` got the carve-out, this guard sat
- * three lines below it and didn't). An unset or unrecognized floor never
- * suppresses anything (fail-open: default = current always-on behavior).
- * Pure and exported for direct unit testing.
+ * therefore suppressible? `hasNeverSuppressSignal` always clears the floor —
+ * never suppressed. An unset or unrecognized floor never suppresses anything
+ * (fail-open: default = current always-on behavior). Pure and exported for
+ * direct unit testing.
  */
 export function belowRiskFloor(
   riskLevel: string,
@@ -87,8 +106,9 @@ export function belowRiskFloor(
   if (!minRisk) return false;
   const floor = RISK_RANK[minRisk];
   if (floor === undefined) return false; // unknown floor → no suppression
-  // always emit high-value / honest-uncertainty signals
-  if (complexityWarnings > 0 || headroomCount > 0 || dependentAttributionIncomplete) return false;
+  if (hasNeverSuppressSignal(complexityWarnings, headroomCount, dependentAttributionIncomplete)) {
+    return false;
+  }
   return (RISK_RANK[riskLevel] ?? 0) < floor;
 }
 
@@ -110,13 +130,38 @@ export function belowRiskFloor(
  * NOT silent, though: a resolved project root whose index has never been
  * built (#894) prints a one-line warning instead of an empty-but-plausible
  * "no dependents"/"no test coverage" annotation — see `formatNoIndexWarning`.
+ *
+ * Returns whether the printed annotation (if any) carried a never-suppress
+ * signal per `hasNeverSuppressSignal` (false for every early-return path:
+ * unresolvable path, `--tests-only`, no index, trivial, below-floor). Kept
+ * as a plain boolean return — rather than a `process.exit` here — so tests
+ * can call this directly without tearing down the test process; the CLI
+ * wiring's `process.exit` contract lives one layer up, in `annotateCli`.
  */
-export async function annotateCommand(file: string, options?: AnnotateOptions): Promise<void> {
+export async function annotateCommand(file: string, options?: AnnotateOptions): Promise<boolean> {
   try {
-    await run(file, options);
+    return await run(file, options);
   } catch {
-    // Silent — never break the consuming hook.
+    return false; // Silent — never break the consuming hook.
   }
+}
+
+/**
+ * Commander action for `lien annotate`: same behavior as `annotateCommand`,
+ * plus the process exit-code contract the session-dedup shell hook
+ * (`annotate-read.sh`) reads to know whether this file is exempt from its
+ * own per-session suppression (#978):
+ *   - exit 2: the printed annotation carried a never-suppress signal
+ *     (`hasNeverSuppressSignal`) — the hook must not let habituation dedup
+ *     silence this file again this session.
+ *   - exit 0 (default): an ordinary annotation, or none at all — safe for
+ *     the hook's existing per-session dedup.
+ * Separate from `annotateCommand` itself specifically so its exit call never
+ * reaches the test process.
+ */
+export async function annotateCli(file: string, options?: AnnotateOptions): Promise<void> {
+  const carriesNeverSuppressSignal = await annotateCommand(file, options);
+  if (carriesNeverSuppressSignal) process.exit(2);
 }
 
 interface ResolvedPaths {
@@ -440,13 +485,19 @@ async function computeAnnotationData(
   };
 }
 
-async function run(file: string, options?: AnnotateOptions): Promise<void> {
+/**
+ * Returns whether the printed annotation carried a never-suppress signal —
+ * see `annotateCommand`'s doc comment for the full contract. Every early
+ * `return` below (unresolvable path, `--tests-only`, no index, trivial,
+ * below-floor) returns `false`: none of those paths reach `emitAnnotation`.
+ */
+async function run(file: string, options?: AnnotateOptions): Promise<boolean> {
   const paths = resolvePaths(file);
-  if (!paths) return;
+  if (!paths) return false;
 
   if (options?.testsOnly) {
     await runTestsOnly(paths);
-    return;
+    return false;
   }
 
   const { originalCwd, rootDir, filepath } = paths;
@@ -469,7 +520,7 @@ async function run(file: string, options?: AnnotateOptions): Promise<void> {
     // `formatNoIndexWarning`.
     if (!(await vectorDB.hasData())) {
       console.log(formatNoIndexWarning(rootDir));
-      return;
+      return false;
     }
 
     const data = await computeAnnotationData(vectorDB, filepath, rootDir);
@@ -483,7 +534,7 @@ async function run(file: string, options?: AnnotateOptions): Promise<void> {
         data.dependentAttributionIncomplete,
       )
     ) {
-      return;
+      return false;
     }
 
     // Habituation guard's risk floor (opt-in via --min-risk; the read hook
@@ -497,7 +548,7 @@ async function run(file: string, options?: AnnotateOptions): Promise<void> {
         data.dependentAttributionIncomplete,
       )
     ) {
-      return;
+      return false;
     }
 
     emitAnnotation(
@@ -511,6 +562,12 @@ async function run(file: string, options?: AnnotateOptions): Promise<void> {
       data.complexity,
       data.risk,
       data.headroom,
+    );
+
+    return hasNeverSuppressSignal(
+      data.complexity.warningCount,
+      data.headroom.entries.length,
+      data.dependentAttributionIncomplete ?? false,
     );
   } finally {
     if (needsChdir) process.chdir(originalCwd);
@@ -787,11 +844,14 @@ export function isTrivial(
   headroomCount = 0,
   dependentAttributionIncomplete = false,
 ): boolean {
-  // An incomplete-attribution zero is exactly the false-all-clear shape
-  // this annotation exists to warn about -- never let it go silent, the
-  // same way a complexity/headroom concern always clears the floor below.
-  if (dependentAttributionIncomplete) return false;
-  return dependentCount <= 1 && complexityWarnings === 0 && testCount > 0 && headroomCount === 0;
+  // A never-suppress signal (complexity/headroom concern, or an incomplete-
+  // attribution false-all-clear) is never trivial — see `hasNeverSuppressSignal`.
+  if (hasNeverSuppressSignal(complexityWarnings, headroomCount, dependentAttributionIncomplete)) {
+    return false;
+  }
+  // complexityWarnings and headroomCount are both guaranteed 0 here (the
+  // guard above already returned for either being nonzero).
+  return dependentCount <= 1 && testCount > 0;
 }
 
 interface ComplexitySummary {
