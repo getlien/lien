@@ -10,6 +10,7 @@ import {
   extractSignature,
   extractParameters,
   collapseWhitespace,
+  clampSignatureLength,
 } from '../extractors/symbol-helpers.js';
 import { calculateComplexity } from '../complexity/index.js';
 
@@ -388,13 +389,13 @@ export class GoSymbolExtractor implements LanguageSymbolExtractor {
     // Use concise keyword for struct/interface, actual type text for aliases/maps/etc.
     let signature: string;
     if (typeNode?.type === 'struct_type') {
-      signature = `type ${nameNode.text}${typeParams} struct`;
+      signature = clampSignatureLength(`type ${nameNode.text}${typeParams} struct`);
     } else if (typeNode?.type === 'interface_type') {
-      signature = `type ${nameNode.text}${typeParams} interface`;
+      signature = clampSignatureLength(`type ${nameNode.text}${typeParams} interface`);
     } else if (typeNode) {
-      signature = `type ${nameNode.text}${typeParams} ${typeNode.text}`;
+      signature = clampSignatureLength(`type ${nameNode.text}${typeParams} ${typeNode.text}`);
     } else {
-      signature = `type ${nameNode.text}${typeParams}`;
+      signature = clampSignatureLength(`type ${nameNode.text}${typeParams}`);
     }
 
     return {

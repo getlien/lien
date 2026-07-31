@@ -506,6 +506,30 @@ import (
       expect(symbol!.signature).toBe('type Container[T any] interface');
     });
 
+    // A long type-parameter list can now push a struct/interface signature
+    // past clampSignatureLength's 200-char limit, now that the type
+    // parameters are included at all — every sibling branch (and every
+    // other language's type-declaration signature) already clamps.
+    it('should clamp a struct signature with a long generic type-parameter list', () => {
+      const names = [
+        'AAAAAAAAAAAAAAAAAAAA',
+        'BBBBBBBBBBBBBBBBBBBB',
+        'CCCCCCCCCCCCCCCCCCCC',
+        'DDDDDDDDDDDDDDDDDDDD',
+        'EEEEEEEEEEEEEEEEEEEE',
+        'FFFFFFFFFFFFFFFFFFFF',
+        'GGGGGGGGGGGGGGGGGGGG',
+        'HHHHHHHHHHHHHHHHHHHH',
+      ];
+      const typeParams = names.map(n => `${n} any`).join(', ');
+      const code = `package main\ntype Stack[${typeParams}] struct { items []int }`;
+      const root = mustParse(code, 'go');
+      const typeNode = root.namedChild(1)!;
+      const symbol = symbolExtractor.extractSymbol(typeNode, code);
+      expect(symbol!.signature.length).toBe(200);
+      expect(symbol!.signature.endsWith('...')).toBe(true);
+    });
+
     it('should extract return type from result field', () => {
       const code = 'package main\nfunc GetName() string { return "" }';
       const root = mustParse(code, 'go');
