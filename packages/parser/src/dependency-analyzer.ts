@@ -7,8 +7,6 @@ import {
   isTestFile,
   isUnresolvableWholeModuleImport,
   importMatchesTarget,
-  hasSingleFileImportSemantics,
-  hasPythonModuleSemantics,
 } from './utils/path-matching.js';
 import { RISK_ORDER } from './insights/types.js';
 import { detectLanguage, hasEnclosingNamespaceAccess } from './ast/languages/registry.js';
@@ -105,8 +103,26 @@ function createPathNormalizer(workspaceRoot: string): (path: string) => string {
 }
 
 /**
- * Builds an index mapping normalized import paths to chunks that import them.
- * Enables O(1) lookup instead of O(n*m) iteration.
+ * One (chunk, raw import specifier) pair in an import index bucket. #994
+ * Phase 3: the index used to store bare chunks, discarding both the raw
+ * (pre-normalization) specifier and the fact that a bucket can span multiple
+ * importer files -- so match-time code (`findDependentChunks`'s fuzzy loop)
+ * had nothing to hand `importMatchesTarget` and had to re-derive the #887/
+ * #929 guards per chunk instead. Keeping `rawSpecifier` alongside each chunk
+ * means every entry now carries both of `importMatchesTarget`'s required
+ * inputs (the raw specifier and `chunk.metadata.file`), so match-time code
+ * can call the single guarded primitive directly. See path-matching.ts:378
+ * for the resulting invariant.
+ */
+export interface ImportIndexEntry<T extends CodeChunk> {
+  chunk: T;
+  rawSpecifier: string;
+}
+
+/**
+ * Builds an index mapping normalized import paths to (chunk, raw specifier)
+ * entries for chunks that import them. Enables O(1) lookup instead of
+ * O(n*m) iteration.
  *
  * Skips bare whole-module imports (#884): for a `wholeModuleImports`
  * language (Swift), a bare import can only ever match a target through
@@ -116,29 +132,31 @@ function createPathNormalizer(workspaceRoot: string): (path: string) => string {
  * feeds both `analyzeDependencies` (consumed by `ComplexityAnalyzer` for
  * complexity reports and `get_complexity`) and `findDependents` (consumed by
  * the `get_dependents` MCP tool), so both index builders need the same
- * treatment.
+ * treatment. This is an early-drop optimization, not a match-time guard --
+ * retaining `rawSpecifier` on every entry that DOES get indexed doesn't
+ * require giving it up.
  *
  * @param chunks - All chunks from the vector database
  * @param normalizePathCached - Cached path normalization function
- * @returns Map of normalized import paths to chunks that import them
+ * @returns Map of normalized import paths to matching (chunk, rawSpecifier) entries
  */
 function buildImportIndex(
   chunks: CodeChunk[],
   normalizePathCached: (path: string) => string,
-): Map<string, CodeChunk[]> {
-  const importIndex = new Map<string, CodeChunk[]>();
+): Map<string, ImportIndexEntry<CodeChunk>[]> {
+  const importIndex = new Map<string, ImportIndexEntry<CodeChunk>[]>();
 
   for (const chunk of chunks) {
     const imports = chunk.metadata.imports || [];
     for (const imp of imports) {
       if (isUnresolvableWholeModuleImport(imp, chunk.metadata.file)) continue;
       const normalizedImport = normalizePathCached(imp);
-      let chunkList = importIndex.get(normalizedImport);
-      if (!chunkList) {
-        chunkList = [];
-        importIndex.set(normalizedImport, chunkList);
+      let entries = importIndex.get(normalizedImport);
+      if (!entries) {
+        entries = [];
+        importIndex.set(normalizedImport, entries);
       }
-      chunkList.push(chunk);
+      entries.push({ chunk, rawSpecifier: imp });
     }
   }
 
@@ -146,52 +164,37 @@ function buildImportIndex(
 }
 
 /**
- * Add the chunks keyed by `normalizedImport` to the dependent set via
- * `addChunk`, applying the #887 per-chunk language check when the match is
- * ambiguous.
- *
- * A multi-segment specifier that matches `normalizedTarget` ONLY through the
- * permissive (package-directory) path -- not the strict (single-file) path
- * -- is #887's ambiguous shape: a Go-shaped importer legitimately means it
- * (every file in the package directory is a member); a Ruby-shaped importer
- * doesn't (a sibling file under the same directory is a separate, unrelated
- * module). `matchesFile` can't disambiguate that without both a target and
- * an importer's language in scope at once, and this function's `chunks`
- * bucket can span multiple importer files (and in principle languages)
- * sharing the same normalized import key, so the language check runs per
- * chunk rather than once per key -- see `hasSingleFileImportSemantics`'s doc
- * comment. `importMatchesTarget` (used by every match-side call site that
- * *does* have a single importer file) makes the same derivation once,
- * up front.
- *
- * #953: applies the same per-chunk treatment for `matchesFile`'s Python
- * Strategy 5 (`matchesParentPythonPackage`'s bare-specifier matching) --
- * see that function's own #929 doc comment for the confirmed hono/TypeScript
- * false-hub this guards against: a resolved bare directory specifier (e.g.
- * `src`, left over when no `index.<ext>` entry file exists for
- * `resolveJsDirectoryIndex` to redirect to -- see `./js-directory-index.ts`)
- * fuzzy-matching every file under that directory for a chunk with no Python
- * semantics at all. `pythonOnlyMatch` is true exactly when Strategy 5 was
- * the ONLY reason the top-of-function permissive gate matched; a genuinely
- * Python chunk still passes (its own bare-package match IS the real
- * semantic), same as `hasSingleFileImportSemantics` above.
+ * Add the chunks in an import-index bucket to the dependent set via
+ * `addChunk`, applying all three match-side guards (#884/#887/#929) through
+ * `importMatchesTarget` -- one call per entry, using that entry's own
+ * `rawSpecifier` and `chunk.metadata.file` (#994 Phase 3). Previously this
+ * function received only a normalized specifier with no per-chunk importer
+ * identity, so it had to reconstruct the #887/#929 guards itself via two
+ * extra `matchesFile` calls (`ambiguous`/`pythonOnlyMatch`) instead of
+ * calling the primitive directly -- see git history on this function for
+ * that shape. Because each `ImportIndexEntry` now carries its own raw
+ * specifier, a bucket spanning multiple importer files (and in principle
+ * languages) is handled correctly for free: `importMatchesTarget` derives
+ * each guard from that entry's own importer file, per entry, exactly like
+ * every other match-side call site.
  */
 export function addFuzzyMatchChunks<T extends CodeChunk>(
-  normalizedImport: string,
   normalizedTarget: string,
-  chunks: T[],
+  entries: ImportIndexEntry<T>[],
+  normalizePathCached: (path: string) => string,
   addChunk: (chunk: T) => void,
 ): void {
-  if (!matchesFile(normalizedImport, normalizedTarget)) return;
-
-  const ambiguous =
-    normalizedImport.includes('/') && !matchesFile(normalizedImport, normalizedTarget, true);
-  const pythonOnlyMatch = !matchesFile(normalizedImport, normalizedTarget, false, false);
-
-  for (const chunk of chunks) {
-    if (ambiguous && hasSingleFileImportSemantics(chunk.metadata.file)) continue;
-    if (pythonOnlyMatch && !hasPythonModuleSemantics(chunk.metadata.file)) continue;
-    addChunk(chunk);
+  for (const entry of entries) {
+    if (
+      importMatchesTarget(
+        entry.rawSpecifier,
+        entry.chunk.metadata.file,
+        normalizedTarget,
+        normalizePathCached,
+      )
+    ) {
+      addChunk(entry.chunk);
+    }
   }
 }
 
@@ -199,12 +202,15 @@ export function addFuzzyMatchChunks<T extends CodeChunk>(
  * Finds all chunks that import the target file using index + fuzzy matching.
  *
  * @param normalizedTarget - The normalized path of the target file
- * @param importIndex - Index mapping import paths to chunks
+ * @param importIndex - Index mapping import paths to (chunk, rawSpecifier) entries
+ * @param normalizePathCached - Cached path normalization function, threaded
+ *   through to `importMatchesTarget` for the fuzzy match branch (#994)
  * @returns Array of chunks that import the target file (deduplicated)
  */
 export function findDependentChunks<T extends CodeChunk>(
   normalizedTarget: string,
-  importIndex: Map<string, T[]>,
+  importIndex: Map<string, ImportIndexEntry<T>[]>,
+  normalizePathCached: (path: string) => string,
 ): T[] {
   const dependentChunks: T[] = [];
   const seenChunkIds = new Set<string>();
@@ -217,20 +223,22 @@ export function findDependentChunks<T extends CodeChunk>(
     }
   };
 
-  // Direct index lookup (fastest path)
+  // Direct index lookup (fastest path). Bucket entries were built via the
+  // identical normalizePathCached, and already passed the build-time #884
+  // prune, so no further guard is needed for an exact key match.
   const directMatches = importIndex.get(normalizedTarget);
   if (directMatches) {
-    for (const chunk of directMatches) {
-      addChunk(chunk);
+    for (const entry of directMatches) {
+      addChunk(entry.chunk);
     }
   }
 
   // Fuzzy match for relative imports and path variations
   // Note: This is O(M) where M = unique import paths. For large codebases with many
   // violations, consider caching fuzzy match results at a higher level.
-  for (const [normalizedImport, chunks] of importIndex.entries()) {
+  for (const [normalizedImport, entries] of importIndex.entries()) {
     if (normalizedImport !== normalizedTarget) {
-      addFuzzyMatchChunks(normalizedImport, normalizedTarget, chunks, addChunk);
+      addFuzzyMatchChunks(normalizedTarget, entries, normalizePathCached, addChunk);
     }
   }
 
@@ -634,7 +642,7 @@ function processTransitiveChunk(
  */
 export function findTransitiveDependents(
   reExporterPaths: string[],
-  importIndex: Map<string, CodeChunk[]>,
+  importIndex: Map<string, ImportIndexEntry<CodeChunk>[]>,
   normalizedTarget: string,
   normalizePathCached: (path: string) => string,
   allChunksByFile: Map<string, CodeChunk[]>,
@@ -653,7 +661,7 @@ export function findTransitiveDependents(
 
   while (queue.length > 0) {
     const [reExporterPath, depth] = queue.shift()!;
-    const dependentChunks = findDependentChunks(reExporterPath, importIndex);
+    const dependentChunks = findDependentChunks(reExporterPath, importIndex, normalizePathCached);
 
     for (const chunk of dependentChunks) {
       const result = processTransitiveChunk(
@@ -670,6 +678,45 @@ export function findTransitiveDependents(
   }
 
   return transitiveChunks;
+}
+
+/**
+ * Find transitive dependents through re-export chains (barrel files) and
+ * merge them into `chunksByFile` in place. Extracted out of
+ * `analyzeDependencies` to keep that function's own complexity flat (#994
+ * Phase 3) -- mirrors `resolveTransitiveDependents`/`mergeTransitiveDependents`
+ * further down, the `findDependents` equivalent of this same merge; this
+ * version has no `ScanContext`/`log` callback since `analyzeDependencies`
+ * has no logging contract.
+ */
+function mergeReExportTransitiveDependents(
+  allChunksByFile: Map<string, CodeChunk[]>,
+  normalizedTarget: string,
+  normalizePathCached: (path: string) => string,
+  importIndex: Map<string, ImportIndexEntry<CodeChunk>[]>,
+  workspaceRoot: string,
+  chunksByFile: Map<string, CodeChunk[]>,
+): void {
+  const reExporterPaths = buildReExportGraph(
+    allChunksByFile,
+    normalizedTarget,
+    normalizePathCached,
+  );
+  if (reExporterPaths.length === 0) return;
+
+  const existingFiles = new Set(chunksByFile.keys());
+  const transitiveChunks = findTransitiveDependents(
+    reExporterPaths,
+    importIndex,
+    normalizedTarget,
+    normalizePathCached,
+    allChunksByFile,
+    existingFiles,
+  );
+  if (transitiveChunks.length > 0) {
+    const transitiveByFile = groupChunksByFile(transitiveChunks, workspaceRoot);
+    mergeChunksByFile(chunksByFile, transitiveByFile);
+  }
 }
 
 /**
@@ -693,39 +740,21 @@ export function analyzeDependencies(
 
   // Find all dependent chunks
   const normalizedTarget = normalizePathCached(targetFilepath);
-  const dependentChunks = findDependentChunks(normalizedTarget, importIndex);
+  const dependentChunks = findDependentChunks(normalizedTarget, importIndex, normalizePathCached);
 
   // Group by file for analysis
   const chunksByFile = groupChunksByFile(dependentChunks, workspaceRoot);
 
   // Find transitive dependents through re-export chains (barrel files)
   const allChunksByFile = groupChunksByNormalizedPath(allChunks, normalizePathCached);
-  const reExporterPaths = buildReExportGraph(
+  mergeReExportTransitiveDependents(
     allChunksByFile,
     normalizedTarget,
     normalizePathCached,
+    importIndex,
+    workspaceRoot,
+    chunksByFile,
   );
-  if (reExporterPaths.length > 0) {
-    const existingFiles = new Set(chunksByFile.keys());
-    const transitiveChunks = findTransitiveDependents(
-      reExporterPaths,
-      importIndex,
-      normalizedTarget,
-      normalizePathCached,
-      allChunksByFile,
-      existingFiles,
-    );
-    if (transitiveChunks.length > 0) {
-      const transitiveByFile = groupChunksByFile(transitiveChunks, workspaceRoot);
-      for (const [fp, chunks] of transitiveByFile.entries()) {
-        if (chunksByFile.has(fp)) {
-          chunksByFile.get(fp)!.push(...chunks);
-        } else {
-          chunksByFile.set(fp, chunks);
-        }
-      }
-    }
-  }
 
   // Calculate complexity metrics
   const fileComplexities = calculateFileComplexities(chunksByFile);
@@ -957,19 +986,23 @@ function fileImportsSymbolFromAny<T extends CodeChunk>(
  * dependency — see `isUnresolvableWholeModuleImport`'s doc comment. Indexing
  * it anyway would let it win both the direct-lookup and fuzzy-match branches
  * of `findDependentChunks` purely by coincidence.
+ *
+ * Stores the raw `importPath` alongside the chunk (#994 Phase 3) so
+ * `findDependentChunks`'s fuzzy loop can call `importMatchesTarget` directly
+ * instead of reconstructing the #887/#929 guards from a bare chunk list.
  */
 function indexImportEntry<T extends CodeChunk>(
   importPath: string,
   chunk: T,
   normalizePathCached: (path: string) => string,
-  importIndex: Map<string, T[]>,
+  importIndex: Map<string, ImportIndexEntry<T>[]>,
 ): void {
   if (isUnresolvableWholeModuleImport(importPath, chunk.metadata.file)) return;
   const normalizedImport = normalizePathCached(importPath);
   if (!importIndex.has(normalizedImport)) {
     importIndex.set(normalizedImport, []);
   }
-  importIndex.get(normalizedImport)!.push(chunk);
+  importIndex.get(normalizedImport)!.push({ chunk, rawSpecifier: importPath });
 }
 
 /**
@@ -978,7 +1011,7 @@ function indexImportEntry<T extends CodeChunk>(
 function addChunkToImportIndex<T extends CodeChunk>(
   chunk: T,
   normalizePathCached: (path: string) => string,
-  importIndex: Map<string, T[]>,
+  importIndex: Map<string, ImportIndexEntry<T>[]>,
 ): void {
   const imports = chunk.metadata.imports || [];
   for (const imp of imports) {
@@ -1030,10 +1063,10 @@ function buildScanIndex<T extends CodeChunk>(
   chunks: Iterable<T>,
   normalizePathCached: (path: string) => string,
 ): {
-  importIndex: Map<string, T[]>;
+  importIndex: Map<string, ImportIndexEntry<T>[]>;
   allChunksByFile: Map<string, T[]>;
 } {
-  const importIndex = new Map<string, T[]>();
+  const importIndex = new Map<string, ImportIndexEntry<T>[]>();
   const allChunksByFile = new Map<string, T[]>();
   const seenRanges = new Map<string, Set<string>>();
 
@@ -1209,7 +1242,7 @@ function mergeChunksByFile<T extends CodeChunk>(
  * travel together, so grouping them removes parameter noise from helpers.
  */
 interface ScanContext<T extends CodeChunk> {
-  importIndex: Map<string, T[]>;
+  importIndex: Map<string, ImportIndexEntry<T>[]>;
   allChunksByFile: Map<string, T[]>;
   normalizePathCached: (p: string) => string;
   log: (message: string, level?: 'warning') => void;
@@ -1614,7 +1647,11 @@ function seedDepth1Dependents<T extends CodeChunk>(
   ctx: ScanContext<T>,
   normalizedTarget: string,
 ): { chunksByFile: Map<string, T[]>; reExporterPaths: string[] } {
-  const dependentChunks = findDependentChunks(normalizedTarget, ctx.importIndex);
+  const dependentChunks = findDependentChunks(
+    normalizedTarget,
+    ctx.importIndex,
+    ctx.normalizePathCached,
+  );
   const chunksByFile = groupChunksByFile(dependentChunks, ctx.workspaceRoot);
   const reExporterPaths = resolveTransitiveDependents(ctx, normalizedTarget, chunksByFile);
   return { chunksByFile, reExporterPaths };
@@ -1754,7 +1791,11 @@ function discoverFrontierDependents<T extends CodeChunk>(
   ctx: ScanContext<T>,
   normalizedFrontier: string,
 ): Map<string, T[]> {
-  const dependentChunks = findDependentChunks(normalizedFrontier, ctx.importIndex);
+  const dependentChunks = findDependentChunks(
+    normalizedFrontier,
+    ctx.importIndex,
+    ctx.normalizePathCached,
+  );
   if (dependentChunks.length === 0) return new Map();
   const grouped = groupChunksByFile(dependentChunks, ctx.workspaceRoot);
   resolveTransitiveDependents(ctx, normalizedFrontier, grouped);
@@ -1820,7 +1861,11 @@ function countUncoveredProductionDependents<T extends CodeChunk>(
 }
 
 function hasTestImporter<T extends CodeChunk>(filepath: string, ctx: ScanContext<T>): boolean {
-  const importers = findDependentChunks(ctx.normalizePathCached(filepath), ctx.importIndex);
+  const importers = findDependentChunks(
+    ctx.normalizePathCached(filepath),
+    ctx.importIndex,
+    ctx.normalizePathCached,
+  );
   for (const chunk of importers) {
     if (isTestFile(chunk.metadata.file)) return true;
   }

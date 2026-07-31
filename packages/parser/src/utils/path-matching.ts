@@ -272,8 +272,10 @@ export function isUnresolvableWholeModuleImport(
  * caller passes the default (`true`), preserving this function's pre-#929
  * behavior exactly -- this is deliberately scoped to `importMatchesTarget`'s
  * match-side callers, mirroring #887's precedent, not to `matchesFile`'s
- * direct callers (existing Python fixtures, `findDependentChunks`'s fuzzy
- * loop, `buildReExportGraph`).
+ * remaining direct callers (existing Python fixtures, `buildReExportGraph`'s
+ * self-skip check -- see `importMatchesTarget`'s doc comment for why
+ * `findDependentChunks`'s fuzzy loop no longer belongs on this list as of
+ * #994 Phase 3).
  *
  * @param normalizedImport - Normalized import path
  * @param normalizedTarget - Normalized target file path
@@ -377,14 +379,35 @@ export function matchesFile(
  *
  * Every match-side reverse-dependency call path that used to open-code
  * `!isUnresolvableWholeModuleImport(imp, f) && matchesFile(normalize(imp), t)`
- * now goes through here instead (#886); the two build-side sites that index
- * imports with no target in scope (`buildImportIndex`,
- * `indexImportEntry`/`addChunkToImportIndex`) still call
- * `isUnresolvableWholeModuleImport` directly, and `findDependentChunks`'s
- * fuzzy loop and `buildReExportGraph` stay on raw `matchesFile` -- see #886's
- * design comment for why those four are not routed through this primitive,
- * and `findDependentChunks`'s own doc comment for how it independently
- * derives the #887 distinction per-chunk (it has no single importer file).
+ * now goes through here instead (#886). Three call paths in
+ * `dependency-analyzer.ts` used to be the exception, and are no longer (#994
+ * Phase 3):
+ *
+ * - The two build-side sites that index imports with no target in scope
+ *   (`buildImportIndex`, `indexImportEntry`/`addChunkToImportIndex`) still
+ *   call `isUnresolvableWholeModuleImport` directly at build time (that part
+ *   hasn't changed -- it's an early-drop optimization, and there's still no
+ *   target to compare against yet). What changed is what they store: each
+ *   index entry now keeps the raw (pre-normalization) specifier alongside its
+ *   chunk (`ImportIndexEntry`), instead of discarding it once the bucket key
+ *   is computed.
+ * - `findDependentChunks`'s fuzzy loop (`addFuzzyMatchChunks`) used to have
+ *   nothing but a normalized specifier and a bare chunk list to work with, so
+ *   it reconstructed the #887/#929 guards itself via two extra `matchesFile`
+ *   calls per bucket. With `rawSpecifier` preserved on every entry, it now
+ *   calls `importMatchesTarget` directly, per entry -- the same primitive,
+ *   the same guards, no reconstruction.
+ *
+ * `buildReExportGraph` is unchanged and still not routed through here, for a
+ * different reason than the other three: it never reads the import index at
+ * all. Its own re-export detection (`fileIsReExporter` ->
+ * `findReExportedSymbolsForFile` -> `collectImportedSymbolsFromSource`)
+ * already calls `importMatchesTarget` (that was already true before #994).
+ * The one raw `matchesFile` call left in `buildReExportGraph` itself is a
+ * same-normalizer FILE-vs-FILE identity check (skip the target file when
+ * scanning candidates), not an import-vs-file match -- there is no
+ * `importSpecifier` in that comparison for this primitive to guard, so it
+ * was never a candidate for routing through it in the first place.
  *
  * @param importSpecifier - The raw (pre-normalization) import specifier, or
  *   an `importedSymbols` key (same shape).
@@ -412,8 +435,13 @@ export function importMatchesTarget(
 /**
  * True when `importerFile`'s language sets `LanguageDefinition.singleFileImports`
  * (Ruby today) -- see that flag's doc comment for the Ruby-vs-Go distinction
- * this drives. Shared by `importMatchesTarget` and `findDependentChunks`'s
- * per-chunk #887 check so the two can't compute it differently.
+ * this drives. Until #994 Phase 3, this was also called directly by
+ * `findDependentChunks`'s own per-chunk #887 reconstruction (see git history
+ * on `addFuzzyMatchChunks`), specifically so the two computations couldn't
+ * drift apart. `findDependentChunks` now routes through `importMatchesTarget`
+ * like every other match-side call site, so `importMatchesTarget` is this
+ * function's only caller -- there is no longer a second computation to keep
+ * in sync with.
  */
 export function hasSingleFileImportSemantics(importerFile: string): boolean {
   const language = detectLanguage(importerFile);

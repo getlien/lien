@@ -198,6 +198,7 @@ export type {
   ComplexityMetrics,
   DependentInfo,
   SymbolUsage,
+  ImportIndexEntry,
 } from './dependency-analyzer.js';
 
 // =============================================================================
