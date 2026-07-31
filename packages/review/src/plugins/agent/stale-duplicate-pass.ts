@@ -557,16 +557,23 @@ function hasCompleteVerdictCoverage(ids: string[], raw: RawVerdictFinding[]): bo
 /**
  * Reduce this pass's raw per-candidate verdict array (still carried inside
  * `result.findings`, tagged with `candidateId`/`verdict` — see module doc)
- * down to real findings (`verdict === 'stale'` only, cleaned of the loop-
- * only fields), and mark the result honestly incomplete when the verdict
- * array doesn't cleanly cover the worklist (see `hasCompleteVerdictCoverage`)
- * — the pr658 Finding-A lesson made machine-checkable: a coverage gap is a
- * completeness failure the harness can assert on directly, not a semantic
- * judgment call. When the underlying client result was ALREADY incomplete
- * for a real reason (budget/max_turns/error), that reason is kept as-is
- * (more specific than the generic coverage-gap marker); `incomplete_verdict`
- * is only used when the model otherwise returned a syntactically complete
- * verdict.
+ * down to real findings (`verdict === 'stale'` AND `candidateId` names a real
+ * worklist entry only, cleaned of the loop-only fields), and mark the result
+ * honestly incomplete when the verdict array doesn't cleanly cover the
+ * worklist (see `hasCompleteVerdictCoverage`) — the pr658 Finding-A lesson
+ * made machine-checkable: a coverage gap is a completeness failure the
+ * harness can assert on directly, not a semantic judgment call. When the
+ * underlying client result was ALREADY incomplete for a real reason
+ * (budget/max_turns/error), that reason is kept as-is (more specific than the
+ * generic coverage-gap marker); `incomplete_verdict` is only used when the
+ * model otherwise returned a syntactically complete verdict.
+ *
+ * The candidateId check guards against the hallucinated-id loophole a code
+ * reviewer caught in PR #804 (see `docs-drift-pass.ts`'s sibling reducer): a
+ * phantom candidate id must not leak through as a real finding just because
+ * it carries `verdict: 'stale'` — `hasCompleteVerdictCoverage` marks the
+ * result incomplete in that case, but incompleteness alone doesn't stop a
+ * finding already sitting in `raw` from being published.
  *
  * Coverage is checked against the RANK-AND-CAPPED worklist (`ids`, from
  * `computeStaleDuplicateWorklist(context, budget)`), not the full pre-cap
@@ -584,13 +591,19 @@ export function postProcessStaleDuplicateResult(
 ): AgentResult {
   const { candidates, deferredCount, deferredIds } = computeStaleDuplicateWorklist(context, budget);
   const ids = candidateIds(candidates);
+  const expected = new Set(ids);
   const raw = result.findings as RawVerdictFinding[];
   const coverageIncomplete = !hasCompleteVerdictCoverage(ids, raw);
   const wasAlreadyIncomplete = result.incomplete;
 
   return {
     ...result,
-    findings: raw.filter(f => f.verdict === 'stale').map(toCleanFinding),
+    findings: raw
+      .filter(
+        f =>
+          f.verdict === 'stale' && typeof f.candidateId === 'string' && expected.has(f.candidateId),
+      )
+      .map(toCleanFinding),
     incomplete: wasAlreadyIncomplete || coverageIncomplete,
     stopReason:
       !wasAlreadyIncomplete && coverageIncomplete ? 'incomplete_verdict' : result.stopReason,
