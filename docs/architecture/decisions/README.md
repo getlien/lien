@@ -20,6 +20,7 @@ This directory contains Architectural Decision Records (ADRs) documenting signif
 | [ADR-012](0012-self-hostable-review-action.md) | Self-Hostable GitHub Action for PR Review | 2026-06-27 | Accepted |
 | [ADR-013](0013-prebuilt-native-parser-napi-rs.md) | Prebuilt Native Parser via napi-rs (`@liendev/parser-native`) | 2026-07-08 | Accepted |
 | [ADR-014](0014-per-rule-candidate-loop-passes.md) | Per-Rule Candidate-Loop Passes for Agent Review | 2026-07-16 | Accepted |
+| [ADR-015](0015-required-matcher-path-language-fields.md) | Make Per-Language Matching Policy Mandatory and Declarative | 2026-08-01 | Accepted |
 
 ## Conventions
 

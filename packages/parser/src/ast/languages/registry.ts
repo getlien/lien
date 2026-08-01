@@ -144,8 +144,8 @@ export function hasEnclosingNamespaceAccess(language: SupportedLanguage): boolea
  * True when `language`'s bare, potentially multi-segment import specifiers
  * always name a single file rather than a package directory whose files are
  * all implicitly members (see `LanguageDefinition.singleFileImports`, #887).
- * Only Ruby sets this today; every other language (notably Go, whose
- * `import "pkg/sub"` names a directory) leaves it unset and keeps the
+ * Only Ruby sets this `true` today; every other language (notably Go, whose
+ * `import "pkg/sub"` names a directory) sets it `false`, keeping the
  * permissive package-directory matching `matchesFile` has always done.
  */
 export function hasSingleFileImports(language: SupportedLanguage): boolean {

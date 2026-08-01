@@ -539,6 +539,49 @@ export const goDefinition: LanguageDefinition = {
   importExtractor: new GoImportExtractor(),
   symbolExtractor: new GoSymbolExtractor(),
 
+  // ADR-015 (#1038): verified against a real corpus (chi), and against the
+  // real, language-gated `importMatchesTarget` -- not the lower-level
+  // `matchesFile` called directly, which defaults Strategy 5 (Python module
+  // matching) ON and can produce a false positive for an unrelated reason if
+  // probed without the language guard (a real mistake caught during this
+  // verification, corrected here rather than left in).
+  // `wholeModuleImports: false`: a Go import like
+  // `"github.com/go-chi/chi/v5/_examples/versions/data"` (`main.go:14`)
+  // names a package directory, not a single file, but that's ALREADY
+  // resolvable -- not structurally unresolvable the way Swift's whole-module
+  // imports are -- so this stays false; see `singleFileImports` below for
+  // the confirmed-working mechanism.
+  wholeModuleImports: false,
+  // `singleFileImports: false`: THE canonical non-example this flag's own
+  // doc comment cites, and this one is LOAD-BEARING, not just a safe
+  // default -- confirmed by directly toggling it against the real
+  // `importMatchesTarget` path. `main.go:14`'s
+  // `"github.com/go-chi/chi/v5/_examples/versions/data"` normalizes (after
+  // module-prefix stripping) to the multi-segment bare specifier
+  // `_examples/versions/data`, which today correctly matches
+  // `_examples/versions/data/article.go` and `.../data/errors.go` via
+  // Strategy 2's interior-hit leniency (`requireExactTailForMultiSegment:
+  // false`) -- confirmed in this PR's own before/after corpus dump. Setting
+  // this flag `true` measurably DELETES both of those real edges (verified
+  // by toggling it and re-running `importMatchesTarget` against the same
+  // pair): the multi-segment specifier would then require its match to
+  // reach the exact end of the target string, which it doesn't (the target
+  // continues with `/article`/`/errors` past the shared `data` segment).
+  // Correction from an earlier draft of this comment: a BARE
+  // SINGLE-segment package import in this same corpus -- `main.go:19`'s
+  // `"github.com/go-chi/chi/v5/middleware"`, stripping to the single word
+  // `middleware` -- does NOT currently resolve to any of `middleware/`'s 49
+  // files (confirmed directly: `matchesSingleSegmentTail` requires the
+  // match to reach the end of the target, and a directory prefix never
+  // does). That's a real, pre-existing gap, but it's independent of all
+  // three fields this ADR covers -- it doesn't change with this flag either
+  // way, so it's left as a separate observation, not fixed here.
+  singleFileImports: false,
+  // `namespaceStyleImports: false`: Go import paths are case-sensitive and
+  // mirror directory case exactly (`middleware` -> `middleware/`, never a
+  // differently-cased directory); no PSR-4-style convention exists.
+  namespaceStyleImports: false,
+
   complexity: {
     decisionPoints: [
       'if_statement',

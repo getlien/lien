@@ -603,6 +603,32 @@ export const javaDefinition: LanguageDefinition = {
   // for the full rationale (and why this needs no directory bounding).
   samePackageTestConvention: true,
 
+  // ADR-015 (#1038): verified against a real corpus (javapoet).
+  // `wholeModuleImports: false`: Java's `import com.example.Foo;` names a
+  // precise class, not a whole, per-file-unresolvable module -- confirmed:
+  // every non-stdlib symbol javapoet's own code needs is either same-package
+  // (no import at all, `samePackageTestConvention` above) or an ordinary
+  // `java.*`/`javax.*` stdlib import (`TypeSpec.java:18-25`). javapoet's own
+  // package (`com/squareup/javapoet`) is a single flat directory with no
+  // sub-packages, so this corpus has no genuine cross-package internal
+  // import to independently exercise -- noted as a real limitation of this
+  // corpus, not papered over; the `false` value rests on the import
+  // extractor's own dotted (never-unresolvable) shape (`JavaImportExtractor`
+  // never emits a bare, per-file-ambiguous specifier) rather than a
+  // same-repo cross-package repro.
+  wholeModuleImports: false,
+  // `singleFileImports: false`: inapplicable, not merely unconfirmed --
+  // `JavaImportExtractor.getImportPath` stores the raw DOTTED path
+  // (`path.split('.')`, never converted to `/`), so a Java import never
+  // reaches `matchesAtBoundaryPrecise`'s slash-based multi-segment branch
+  // this flag gates at all.
+  singleFileImports: false,
+  // `namespaceStyleImports: false`: Java package/directory mirroring
+  // (`com.squareup.javapoet` -> `com/squareup/javapoet/`) is case-sensitive
+  // in both the language spec and idiomatic tooling, confirmed exact-case
+  // in this corpus -- no PSR-4-style case-insensitive convention.
+  namespaceStyleImports: false,
+
   complexity: {
     decisionPoints: [
       'if_statement',

@@ -1120,6 +1120,45 @@ export const rustDefinition: LanguageDefinition = {
   importExtractor: new RustImportExtractor(),
   symbolExtractor: new RustSymbolExtractor(),
 
+  // ADR-015 (#1038): verified against a real corpus (anyhow == dtolnay/anyhow,
+  // the exact repo #1028's bug was found on).
+  // `wholeModuleImports: false`: Rust has no whole-crate-only import shape --
+  // `mod x;` (`src/lib.rs:252-263`: `mod backtrace;`, `mod chain;`, ...) names
+  // exactly one file via the #1021 mod-marker system (bypasses these flags
+  // entirely, see `rust-mod-marker.ts`), and `use crate::...` resolves via
+  // ordinary `matchesFile` strategies (`use crate::error::ErrorImpl;` at
+  // `src/lib.rs:265` resolves to `src/error.rs` today via Strategy 2's
+  // one-leading-segment convention).
+  wholeModuleImports: false,
+  // `singleFileImports: false` -- MUST stay false, not just unconfirmed: this
+  // is `LanguageDefinition.singleFileImports`'s own documented "DELIBERATE
+  // non-example". A `mod x;` declaration does name exactly one file, but a
+  // single Rust file routinely has BOTH a `mod x;` and a `use crate::y;`
+  // among its own imports (`src/lib.rs` has both), and this flag can't
+  // disambiguate between two entries in one file's import list the way it
+  // disambiguates between two languages -- `mod`-derived specifiers carry
+  // their own per-specifier marker (#1021) straight past this flag instead
+  // (see `rust-mod-marker.ts`). Rust's `use`/`self::`/`super::` specifiers
+  // (e.g. `use crate::ptr::Own;`, `src/lib.rs:266`) still need `matchesFile`'s
+  // permissive, Go-style package-directory leniency to resolve at all, since
+  // a `crate::`-relative path is missing its real `src/`-style directory
+  // prefix -- setting this to `true` would apply Ruby's exact-tail semantics
+  // to those specifiers too and regress #1024's own fix. This corpus's own
+  // `use` statements are all single-segment after `crate::`-stripping (no
+  // nested `a::b::c` module path exists in anyhow's flat module layout), so
+  // this flag's multi-segment branch isn't independently exercised here --
+  // the reasoning above is #1021/#1024's own, not re-derived from this
+  // corpus, per the ADR's explicit instruction not to re-litigate it.
+  singleFileImports: false,
+  // `namespaceStyleImports: false` -- MUST stay false, actively bug-preventing,
+  // not just unconfirmed: `src/error.rs:8` has `use crate::{Error, StdError};`
+  // and `src/context.rs:2` has `use crate::{Context, Error, StdError};` --
+  // exactly the grouped-use shape whose first-wins bare specifier `"Error"`
+  // case-insensitively self-matched `src/error.rs` before #1028/#1032 gated
+  // Strategy 4 to PHP only. Setting this to `true` would reintroduce that
+  // exact self-edge on this exact file.
+  namespaceStyleImports: false,
+
   complexity: {
     decisionPoints: [
       'if_expression',

@@ -530,7 +530,38 @@ export const phpDefinition: LanguageDefinition = {
   // language `matchesFile`'s Strategy 4 (`matchesPHPNamespace`) is a real
   // semantic for, not an incidental leniency. See `LanguageDefinition.namespaceStyleImports`'s
   // doc comment (#1028) for the Rust false-positive this flag now excludes.
+  // Re-verified (ADR-015, #1038) against monolog: `composer.json:57` maps
+  // `"Monolog\\": "src/Monolog"` and `Logger.php:12` declares
+  // `namespace Monolog;` -- this particular corpus's own case happens to
+  // match exactly (unlike the canonical Laravel `App\` vs. `app/` example
+  // this flag's doc comment cites). Correction: PSR-4 the autoloading SPEC
+  // actually mandates exact-case file/directory matching -- it is PHP's own
+  // namespace name resolution that's case-insensitive at the language level
+  // (`\App` and `\app` are the same namespace to the parser), and real-world
+  // autoloading tolerates the mismatch anyway on case-insensitive
+  // filesystems (macOS/Windows) even though a strict PSR-4 implementation
+  // on Linux would not. `matchesPHPNamespace`'s case-insensitive leniency
+  // models that real-world tolerance, not a literal PSR-4 spec requirement --
+  // this stays `true` on that basis, independent of whether any one
+  // corpus's names happen to already match case.
   namespaceStyleImports: true,
+  // ADR-015 (#1038): the other two matcher-path fields, declared for PHP for
+  // the first time (previously silently unset, i.e. effectively false).
+  // `wholeModuleImports: false`: PHP's `use` statements resolve to a precise
+  // file via Strategy 4's own dedicated namespace-to-path mapping (above),
+  // not a whole-module-unresolvable shape.
+  wholeModuleImports: false,
+  // `singleFileImports: false`: preserves the permissive default. PHP's
+  // normalized (backslash to forward-slash) `use` specifiers usually end in
+  // a class name (`use Monolog\Handler\HandlerInterface;`, `Logger.php:17`,
+  // mapping to exactly one file), which would arguably also satisfy a
+  // single-file semantic if Strategies 1/2 were ever reached for a
+  // case-matching PHP import -- but Strategy 4 is PHP's real, primary
+  // resolution mechanism, and there is no confirmed case today where
+  // Strategies 1/2's interior-hit leniency produces a wrong match for PHP,
+  // so this is left `false` (no behavior change) rather than speculatively
+  // tightened.
+  singleFileImports: false,
 
   complexity: {
     decisionPoints: [
