@@ -629,6 +629,104 @@ pub static COUNTER: i32 = 0;`;
         ]);
       });
     });
+
+    describe('Cargo crate roots -- tests/benches/examples/src/bin (#1016)', () => {
+      // #1016 regression: tests/*.rs (and benches/*.rs, examples/*.rs,
+      // src/bin/*.rs) are each their OWN Cargo crate root, exactly like
+      // lib.rs/main.rs -- NOT a "leaf" file that owns a subdirectory named
+      // after itself. Before the fix, isRustModuleRootFile only recognized
+      // mod.rs/lib.rs/main.rs, so a mod_item declared inside one of these
+      // files fell through to the leaf rule and resolved into a phantom
+      // subdirectory sharing the file's own basename -- which then
+      // fuzzy-matched back onto the declaring file as a fabricated
+      // self-edge (dtolnay/anyhow's tests/test_context.rs, tests/test_convert.rs,
+      // tests/test_downcast.rs, tests/test_macros.rs, tests/test_repr.rs all
+      // hit this). None of these shapes existed in the pre-#1016 fixture set
+      // (mod.rs/lib.rs/main.rs and one flat leaf file only), so this suite
+      // could not express the bug at all until now.
+      it('resolves `mod x;` from a top-level tests/ file to a SIBLING within tests/, not a subdirectory named after the file', () => {
+        const code = 'mod drop;';
+        const root = mustParse(code, 'rust');
+        const modNode = root.namedChild(0)!;
+        expect(importExtractor.extractImportPath(modNode, undefined, 'tests/test_context.rs')).toBe(
+          'tests/drop',
+        );
+      });
+
+      it("never resolves to the importer's own path -- the exact #1016 self-edge shape", () => {
+        const code = 'mod drop;';
+        const root = mustParse(code, 'rust');
+        const modNode = root.namedChild(0)!;
+        const resolved = importExtractor.extractImportPath(
+          modNode,
+          undefined,
+          'tests/test_context.rs',
+        );
+        expect(resolved).not.toBeNull();
+        expect(resolved).not.toBe('tests/test_context');
+      });
+
+      it('treats a file directly under benches/ as a crate root the same way', () => {
+        const code = 'mod helper;';
+        const root = mustParse(code, 'rust');
+        const modNode = root.namedChild(0)!;
+        expect(importExtractor.extractImportPath(modNode, undefined, 'benches/my_bench.rs')).toBe(
+          'benches/helper',
+        );
+      });
+
+      it('treats a file directly under examples/ as a crate root the same way', () => {
+        const code = 'mod util;';
+        const root = mustParse(code, 'rust');
+        const modNode = root.namedChild(0)!;
+        expect(importExtractor.extractImportPath(modNode, undefined, 'examples/demo.rs')).toBe(
+          'examples/util',
+        );
+      });
+
+      it('treats a file directly under src/bin/ as an additional-binary crate root', () => {
+        const code = 'mod helper;';
+        const root = mustParse(code, 'rust');
+        const modNode = root.namedChild(0)!;
+        expect(importExtractor.extractImportPath(modNode, undefined, 'src/bin/mytool.rs')).toBe(
+          'src/bin/helper',
+        );
+      });
+
+      it('does NOT treat a NESTED file inside tests/ as a crate root -- only the top-level tests/*.rs files are', () => {
+        const code = 'mod baz;';
+        const root = mustParse(code, 'rust');
+        const modNode = root.namedChild(0)!;
+        // tests/foo/bar.rs is a module WITHIN whatever crate root owns
+        // tests/foo.rs (or tests/foo/main.rs), not a fresh crate root
+        // itself -- falls through to the ordinary LEAF rule.
+        expect(importExtractor.extractImportPath(modNode, undefined, 'tests/foo/bar.rs')).toBe(
+          'tests/foo/bar/baz',
+        );
+      });
+
+      it('self-edge guard rejects a #[path] override that points back at the declaring file itself', () => {
+        const code = '#[path = "test_context.rs"]\nmod whatever;';
+        const root = mustParse(code, 'rust');
+        const modNode = root.namedChildren.find(n => n.type === 'mod_item')!;
+        expect(
+          importExtractor.extractImportPath(modNode, undefined, 'tests/test_context.rs'),
+        ).toBeNull();
+      });
+
+      it("does not regress the ordinary leaf-file case: src/foo.rs's own submodule is a real sibling, not a self-edge (guard false-positive check)", () => {
+        const code = 'mod bar;';
+        const root = mustParse(code, 'rust');
+        const modNode = root.namedChild(0)!;
+        // src/foo/bar is a superstring of the importer's own stripped path
+        // (src/foo) at a path boundary -- a fuzzy self-edge guard would
+        // wrongly reject this ubiquitous, correct convention. Exact-path
+        // equality does not.
+        expect(importExtractor.extractImportPath(modNode, undefined, 'src/foo.rs')).toBe(
+          'src/foo/bar',
+        );
+      });
+    });
   });
 
   describe('Symbol Extraction', () => {
