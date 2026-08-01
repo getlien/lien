@@ -71,4 +71,18 @@ export interface VectorDBInterface {
    *  overlay). Lets the indexer route to the overlay build instead of a full
    *  reindex of the worktree. */
   readonly isOverlay: boolean;
+  /**
+   * Relative file paths this backend currently considers indexed — the
+   * source of truth for "is this path known to the index at all" existence
+   * checks (see `findUnindexedPaths` in the MCP layer, which drives the
+   * `get_dependents`/`get_complexity`/`get_files_context` unindexed-path
+   * caveat).
+   *
+   * For `SqliteBackend` this is just its own manifest. For `OverlayBackend`
+   * it is deliberately NOT a plain union of the base and overlay manifests:
+   * reads there are base (minus masked base files) UNION overlay, so this
+   * must mirror that same masking to stay correct — see
+   * `OverlayBackend.getIndexedFiles()`.
+   */
+  getIndexedFiles(): Promise<string[]>;
 }

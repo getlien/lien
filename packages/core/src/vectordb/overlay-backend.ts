@@ -4,6 +4,7 @@ import Database from 'better-sqlite3';
 import type DatabaseType from 'better-sqlite3';
 import type { ChunkMetadata } from '@liendev/parser';
 import { getIndexDir } from '../utils/index-dir.js';
+import { ManifestManager } from '../indexer/manifest.js';
 import type { SearchResult, VectorDBInterface } from './types.js';
 import { wrapError } from '../errors/index.js';
 import { readVersionFile, writeVersionFile } from './version.js';
@@ -333,6 +334,25 @@ export class OverlayBackend implements VectorDBInterface {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Effective indexed-file view: overlay-tracked files (added + modified —
+   * a modified file is masked out of the base AND written into the overlay,
+   * see `buildOverlay`) UNION un-masked base files. A masked base file with
+   * no overlay replacement (a real deletion in this worktree) is correctly
+   * excluded from both sides — the file no longer exists here, so reporting
+   * it as unindexed is the right call, not a false positive.
+   *
+   * This is what `findUnindexedPaths` (get_dependents/get_complexity/
+   * get_files_context's "not found in the index" diagnostic) must consult
+   * instead of the overlay's own manifest alone — see #1014.
+   */
+  async getIndexedFiles(): Promise<string[]> {
+    const overlayFiles = await new ManifestManager(this.dbPath).getIndexedFiles();
+    const mask = this.loadMask();
+    const baseFiles = [...this.baseHashes.keys()].filter(f => !mask.has(f));
+    return [...new Set([...overlayFiles, ...baseFiles])];
   }
 
   // ── Overlay build support (driven by indexer/overlay-index.ts) ─────────
