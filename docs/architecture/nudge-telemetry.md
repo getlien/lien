@@ -261,7 +261,9 @@ than stacking a second mechanism: when the guard is on, the touchfile means
 "already annotated this file this session" → stay silent — **unless** the
 touchfile's *content* says otherwise (see below). The dirs are already GC'd by
 the SessionStart/SessionEnd hooks, so this is naturally session-scoped with no
-new cross-session state. Guard **off** restores the old TTL-windowed behavior.
+new cross-session state. Guard **off** restores the old TTL-windowed behavior
+**for an ordinary annotation** — see the HOOKS-12 note below for the one
+exception.
 
 **Not fully independent of (b) (#978).** `lien annotate` itself never silences
 a never-suppress signal (see (b) below), but this dedup gate runs *before*
@@ -277,6 +279,21 @@ existence — `1` means "never dedup-skip this file again this session," so a
 signal-carrying file re-invokes `lien annotate` (and re-applies its own
 carve-outs) on every read for the rest of the session, while an ordinary
 file keeps the cheap existence-only dedup unchanged.
+
+**HOOKS-12 (found in a later duplication audit, #1028).** The content check
+above was originally wired into the guard-**ON** branch only; the guard-**OFF**
+branch kept the pre-#978 mtime-only check with no reference to content at
+all. Since `LIEN_ANNOTATE_GUARD=off` is documented (right above) to make
+suppression *weaker* — a TTL window instead of session-long dedup — nobody
+expected it to make a never-suppress file's suppression *stronger*, but that's
+exactly what it did: a repeat Read inside the TTL window went straight to the
+mtime check and suppressed the one class of annotation that must never be
+suppressed. Fixed by checking the touchfile's content *before* branching on
+guard mode at all, so `1` (never-suppress) now bypasses both the session
+dedup **and** the TTL window unconditionally, while an ordinary (`0`)
+touchfile still gets exactly the guard-mode-specific behavior described
+above — `LIEN_ANNOTATE_GUARD=off`'s TTL-windowed intent for ordinary
+annotations is otherwise unchanged.
 
 ### (b) Risk floor
 

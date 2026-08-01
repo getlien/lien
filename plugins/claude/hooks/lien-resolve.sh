@@ -15,6 +15,16 @@
 # hook invocations never pay the cold install). Fails the source (caller
 # exits 0, staying silent) only when neither is available.
 #
+# On failure, `LIEN_RESOLVE_FAIL_REASON` is set to `breaker_open` (the npx
+# circuit breaker below is tripped) or `no_binary` (neither `lien` nor `npx`
+# exists) so a caller that needs to distinguish can, e.g.:
+#   if ! . "$(dirname "${BASH_SOURCE[0]}")/lien-resolve.sh"; then
+#     [ "$LIEN_RESOLVE_FAIL_REASON" = "breaker_open" ] && ...
+#     exit 0
+#   fi
+# annotate-read.sh is the one caller that does this (HOOKS-6) — see its own
+# comments for why.
+#
 # Circuit breaker for an unreachable/black-holed npm registry (default on;
 # opt out with LIEN_NPX_BREAKER=off). There's no portable `timeout` binary
 # on macOS bash 3.2, so this can't bound npx's own hang from the inside;
@@ -97,6 +107,18 @@
 # survive a sibling script's own `cd "$cwd"` before it shells out.
 LIEN_HOOKS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# HOOKS-6: WHY resolution failed, for the one caller that cares
+# (annotate-read.sh, whose complexity/headroom annotation is covered by the
+# #938/#978 never-suppress guarantee). Every other hook still just treats a
+# nonzero return as "stay silent" via `|| exit 0` and never reads this — set
+# unconditionally (cleared on the success paths below) so `set -u` callers
+# can safely reference `${LIEN_RESOLVE_FAIL_REASON:-}` either way.
+# "breaker_open" specifically means: an actual annotation attempt was
+# skipped, not merely deferred, because the npx circuit breaker below is (or
+# was just now) tripped — as opposed to "no_binary" (neither `lien` nor
+# `npx` exists at all), which no fallback in this repo can do anything about.
+LIEN_RESOLVE_FAIL_REASON=""
+
 if command -v lien >/dev/null 2>&1; then
   LIEN_CMD=(lien)
 elif command -v npx >/dev/null 2>&1; then
@@ -130,6 +152,7 @@ elif command -v npx >/dev/null 2>&1; then
       # Still cooling down from a previously detected hang. Fail the source
       # (caller exits 0, silent) without even looking at the in-flight
       # marker — that's the whole point: no new attempt, no new hang.
+      LIEN_RESOLVE_FAIL_REASON="breaker_open"
       return 1
     fi
 
@@ -146,6 +169,7 @@ elif command -v npx >/dev/null 2>&1; then
           mkdir -p "$(dirname "$breaker_until")" 2>/dev/null
           echo $(( now_ts + cooldown )) > "$breaker_until" 2>/dev/null
           rm -f "$marker" 2>/dev/null
+          LIEN_RESOLVE_FAIL_REASON="breaker_open"
           return 1
         fi
       fi
@@ -155,5 +179,6 @@ elif command -v npx >/dev/null 2>&1; then
     LIEN_CMD=(bash "$(dirname "${BASH_SOURCE[0]}")/lien-npx-breaker.sh")
   fi
 else
+  LIEN_RESOLVE_FAIL_REASON="no_binary"
   return 1
 fi

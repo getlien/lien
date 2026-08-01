@@ -1,11 +1,24 @@
 #!/usr/bin/env bash
 # SessionStart hook: GC stale annotated-sessions/ dirs, FEATURE 2's
-# test-sessions/ ledger files (test-verification-nudge.md), and the
-# nudge-build/ per-session build-stamp cache (issue #916, nudge-build.ts).
-# Keeps state from concurrent sessions intact (don't wipe other-session state
-# on startup); only removes entries that haven't been touched in >24h.
+# test-sessions/ ledger files (test-verification-nudge.md), the
+# nudge-build/ per-session build-stamp cache (issue #916, nudge-build.ts),
+# and (HOOKS-6) annotate-read.sh's breaker-open notice markers. Keeps state
+# from concurrent sessions intact (don't wipe other-session state on
+# startup); only removes entries that haven't been touched in >24h.
 
 set -u
+
+# HOOKS-6: GC stale breaker-open notice markers FIRST, before the jq/lien
+# requirement below — this directory is machine-global (same tmp-dir family
+# as lien-npx-breaker.sh's own markers, computed with the exact same default
+# formula annotate-read.sh uses, so a custom LIEN_NPX_BREAKER_MARKER/
+# LIEN_NPX_BREAKER_UNTIL_MARKER override is honored here too), not
+# store-scoped, specifically so it can be swept even when `lien` itself is
+# unresolvable, i.e. exactly the condition that creates these markers.
+marker_default="${TMPDIR:-/tmp}/lien-npx-breaker/inflight"
+until_default="$(dirname "${LIEN_NPX_BREAKER_MARKER:-$marker_default}")/breaker-open-until"
+notice_dir="$(dirname "${LIEN_NPX_BREAKER_UNTIL_MARKER:-$until_default}")/notice-shown"
+[ -d "$notice_dir" ] && find "$notice_dir" -mindepth 1 -maxdepth 1 -type f -mmin +1440 -exec rm -f {} + 2>/dev/null
 
 command -v jq >/dev/null 2>&1 || exit 0
 . "$(dirname "${BASH_SOURCE[0]}")/lien-resolve.sh" || exit 0

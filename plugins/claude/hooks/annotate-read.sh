@@ -25,6 +25,28 @@
 # re-invokes `lien annotate` on every read, while an ordinary file keeps the
 # cheap existence-only dedup.
 #
+# HOOKS-12: the guard-OFF branch below used to check ONLY the touchfile's
+# mtime (the pre-#978 TTL logic), never its content — so
+# `LIEN_ANNOTATE_GUARD=off` (which is supposed to make suppression WEAKER,
+# a TTL window instead of session-long) accidentally made it STRONGER for a
+# never-suppress file: re-reading it inside the TTL window suppressed the
+# one class of annotation that must never be suppressed. Fixed by checking
+# the touchfile's content ('1' = never-suppress) BEFORE branching on guard
+# mode at all, so that check now applies unconditionally; only an ORDINARY
+# (content '0') touchfile still falls through to the guard-specific
+# TTL-vs-session-dedup behavior below.
+#
+# HOOKS-6: the npx circuit breaker (lien-resolve.sh) fails resolution
+# BEFORE `lien annotate` is ever invoked, so a never-suppress file would
+# otherwise vanish, completely silently, for the whole cooldown window —
+# defeating the exact guarantee above just as badly, just earlier in the
+# pipeline. We can't know whether THIS file carries a never-suppress signal
+# without invoking the CLI, which is exactly what's unavailable, so instead
+# of staying silent we surface the degraded state itself: once per session
+# (not per file — this would otherwise nag on every Read for the whole
+# cooldown), via the same additionalContext channel a real annotation uses.
+# No extra npx round-trip: this path never invokes LIEN_CMD.
+#
 # Also records a nudge-shown event (for the `lien stats` funnels) whenever an
 # annotation is actually emitted. Skips files outside Lien's indexed extension
 # set. Best-effort throughout — never fails the Read pipeline.
@@ -32,7 +54,6 @@
 set -u
 
 command -v jq >/dev/null 2>&1 || exit 0
-. "$(dirname "${BASH_SOURCE[0]}")/lien-resolve.sh" || exit 0
 
 input="$(cat)"
 file_path="$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty')"
@@ -48,6 +69,31 @@ cwd="$(printf '%s' "$input" | jq -r '.cwd // empty')"
 case "$session_id" in
   *[!A-Za-z0-9_-]*) exit 0;;
 esac
+
+if ! . "$(dirname "${BASH_SOURCE[0]}")/lien-resolve.sh"; then
+  # HOOKS-6 (see header comment). Surface a breaker-open degraded notice
+  # once per session, machine-global (same tmp-dir family as the breaker's
+  # own markers, computed with the exact same default formula as
+  # lien-resolve.sh's own `marker`/`breaker_until` so a custom
+  # LIEN_NPX_BREAKER_MARKER/LIEN_NPX_BREAKER_UNTIL_MARKER override is
+  # honored here too) so this works even though `store` — which needs a
+  # working `lien` to resolve — is unavailable right here.
+  if [ "${LIEN_RESOLVE_FAIL_REASON:-}" = "breaker_open" ]; then
+    marker_default="${TMPDIR:-/tmp}/lien-npx-breaker/inflight"
+    until_default="$(dirname "${LIEN_NPX_BREAKER_MARKER:-$marker_default}")/breaker-open-until"
+    notice_dir="$(dirname "${LIEN_NPX_BREAKER_UNTIL_MARKER:-$until_default}")/notice-shown"
+    notice_marker="$notice_dir/$session_id"
+    if [ ! -f "$notice_marker" ]; then
+      mkdir -p "$notice_dir" 2>/dev/null
+      if : > "$notice_marker" 2>/dev/null; then
+        text="⚠ Lien unavailable this session: the npx circuit breaker is open (a prior lien call was killed, or the npm registry is unreachable). Complexity/impact annotations are suppressed until it clears — do not read this silence as \"no issues.\""
+        printf '{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":%s}}\n' \
+          "$(printf '%s' "$text" | jq -Rs .)"
+      fi
+    fi
+  fi
+  exit 0
+fi
 
 # Run lien from the session's cwd (if valid) so multi-repo setups resolve the
 # right store/root; else run in place. All lien calls in this hook go through it.
@@ -102,22 +148,25 @@ fi
 session_dir="$store/annotated-sessions/$session_id"
 touchfile="$session_dir/$hash"
 if [ -f "$touchfile" ]; then
-  if [ "$guard" = "off" ]; then
-    # Legacy: suppress only within the TTL window; re-annotate afterwards.
-    if find "$touchfile" -mmin -"$ttl_min" 2>/dev/null | grep -q .; then
-      # Touch the session dir so SessionStart cleanup sees this session as
-      # active even if no new annotation is emitted for >24h.
-      [ -d "$session_dir" ] && touch "$session_dir" 2>/dev/null
-      exit 0
-    fi
-  else
-    # Guard ON: per-session dedup — UNLESS this file's last known annotation
-    # carried a never-suppress signal (#978), recorded in the touchfile's
-    # CONTENT ('1') by the write below. That case falls through and
-    # re-invokes `lien annotate` on every read, same as a first read, so the
-    # #938 carve-outs (`isTrivial`/`belowRiskFloor`) always get a chance to
-    # run instead of being silenced sight-unseen by this dedup gate.
-    if [ "$(cat "$touchfile" 2>/dev/null)" != "1" ]; then
+  # The never-suppress carve-out (#978) is checked FIRST and unconditionally,
+  # regardless of guard mode (HOOKS-12 — see header comment): the touchfile's
+  # CONTENT being '1' means this file's last known annotation carried a
+  # never-suppress signal, and that must re-invoke `lien annotate` on every
+  # read — guard on OR off — so the #938 carve-outs (`isTrivial`/
+  # `belowRiskFloor`) always get a chance to run instead of being silenced
+  # sight-unseen by this dedup gate. Only an ORDINARY (content '0')
+  # touchfile falls through to the guard-mode-specific behavior below.
+  if [ "$(cat "$touchfile" 2>/dev/null)" != "1" ]; then
+    if [ "$guard" = "off" ]; then
+      # Legacy: suppress only within the TTL window; re-annotate afterwards.
+      if find "$touchfile" -mmin -"$ttl_min" 2>/dev/null | grep -q .; then
+        # Touch the session dir so SessionStart cleanup sees this session as
+        # active even if no new annotation is emitted for >24h.
+        [ -d "$session_dir" ] && touch "$session_dir" 2>/dev/null
+        exit 0
+      fi
+    else
+      # Guard ON: per-session dedup for an ordinary annotation.
       [ -d "$session_dir" ] && touch "$session_dir" 2>/dev/null
       exit 0
     fi

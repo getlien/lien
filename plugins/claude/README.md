@@ -18,7 +18,7 @@ for which hook output channels actually reach the model.
 
 | Hook | Event | What it does | Kill switch |
 | --- | --- | --- | --- |
-| `annotate-read.sh` | PostToolUse: `Read` | Surfaces dependents/coverage/complexity for the file just read, as an `additionalContext` annotation. When a function in the file is at/near its complexity budget, the annotation *leads* with an imperative nudge line ("avoid adding complexity here; prefer extraction"). This is the plan-time nudge, surfaced before the agent edits rather than after via `delta-write.sh`. Suppressed per file per session within a TTL. | `LIEN_ANNOTATE_TTL_MIN=<minutes>` (default 5) |
+| `annotate-read.sh` | PostToolUse: `Read` | Surfaces dependents/coverage/complexity for the file just read, as an `additionalContext` annotation. When a function in the file is at/near its complexity budget, the annotation *leads* with an imperative nudge line ("avoid adding complexity here; prefer extraction"). This is the plan-time nudge, surfaced before the agent edits rather than after via `delta-write.sh`. Suppressed per file per session (see the habituation guard below) — **except** a never-suppress signal (complexity/headroom/incomplete-dependent-attribution, #938/#978), which re-fires on every read regardless of guard mode (#1028's HOOKS-12 fix), and **except** while the npx circuit breaker is open, when a one-time-per-session "Lien unavailable" notice fires instead of going silent (#1028's HOOKS-6 fix — see below). | `LIEN_ANNOTATE_TTL_MIN=<minutes>` (default 5), `LIEN_ANNOTATE_GUARD=off` |
 | `delta-write.sh` | PostToolUse: `Edit\|Write\|MultiEdit` | Runs `lien delta --file <path> --format json`; warns only when the edit pushed a function to a new complexity-threshold crossing. Silent on everything else (improvements, pre-existing violations, advisory movement). | `LIEN_DELTA_HOOK=off` |
 | `test-reminder.sh` | PostToolUse: `Edit\|Write\|MultiEdit` | Runs `lien annotate <path> --tests-only` (a cheap test-association-only lookup); when the edited file has associated tests, emits one compact `additionalContext` line naming them and asking the model to run them before completing. Silent when the file has no known tests. Shares `annotate-read.sh`'s per-file-per-session TTL suppression (same `annotated-sessions/` dir, namespaced hash) so an edit burst only reminds once per window. | `LIEN_TEST_REMINDER=off` |
 | `augment-explore-task.sh` | PreToolUse: `Agent\|Task` | Two mandates on one matcher. When the subagent is `Explore` (or `lien:Explore`/`project:Explore`), appends a Lien-tool-usage mandate to its prompt. For every other subagent (the code-writing "builder" agents) it instead scans the prompt for repo-relative file paths, and, only when one resolves on disk and `lien annotate` reports a function at/near its complexity budget, appends a compact "Lien plan-time note" naming the near-budget functions (same warning line `annotate-read.sh` surfaces on Read, capped at 3 entries per #788). Both branches skip if the repo has no `structural.db` index yet; the Explore branch also skips if the prompt already names a Lien MCP tool. | `LIEN_EXPLORE_INJECT=off` (Explore mandate), `LIEN_SUBAGENT_NUDGE=off` (builder nudge) |
@@ -35,9 +35,24 @@ timestamp marker immediately before each call and clears it immediately
 after, so a call left behind stale — the fingerprint of Claude Code's own
 5000ms hook timeout SIGKILLing a hung call, since there's no portable
 `timeout` binary on macOS bash 3.2 to bound it from the inside — fails
-subsequent resolutions fast and silent for a cooldown window instead of
-re-hanging on every later edit. `LIEN_NPX_BREAKER_STALE_SEC` (default 7) and
+subsequent resolutions fast for a cooldown window instead of re-hanging on
+every later edit. `LIEN_NPX_BREAKER_STALE_SEC` (default 7) and
 `LIEN_NPX_BREAKER_COOLDOWN_SEC` (default 300) tune the thresholds.
+
+**Fails fast, not silent, for `annotate-read.sh` specifically (#1028's
+HOOKS-6 fix).** When the breaker is open, `lien annotate` can't be invoked at
+all — no hook can tell whether the file being read carries a complexity/
+headroom/incomplete-attribution signal that must never go silent (#938/#978).
+`annotate-read.sh` is the one hook whose annotation is covered by that
+guarantee, so instead of the old silent `exit 0`, it surfaces the degraded
+state itself: a short "Lien unavailable this session: the npx circuit
+breaker is open..." notice, once per session (not per file — that would nag
+on every Read for the whole cooldown), via the same `additionalContext`
+channel a real annotation uses. This adds no npx round-trip — the notice
+fires without ever invoking `LIEN_CMD`. Every other hook here still fails
+silently on a breaker-open resolution, same as any other unresolvable-`lien`
+condition (missing `jq`, an unindexed repo, etc.) — only `annotate-read.sh`'s
+signal is covered by the never-suppress guarantee.
 
 **Known false-positive trigger:** a stale marker only proves the process
 that wrote it was killed before it could clean up — it can't prove *why*. A

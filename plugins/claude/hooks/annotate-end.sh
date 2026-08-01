@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # SessionEnd hook: clean up the current session's annotated-sessions dir,
-# and FEATURE 2's test-sessions/<sessionId>.jsonl ledger, on graceful exit.
+# FEATURE 2's test-sessions/<sessionId>.jsonl ledger, and (HOOKS-6)
+# annotate-read.sh's breaker-open notice marker, on graceful exit.
 # Belt-and-braces — SessionStart's 24h-idle GC remains the load-bearing
 # cleanup mechanism (covers crashes / force-quits).
 
 set -u
 
 command -v jq >/dev/null 2>&1 || exit 0
-. "$(dirname "${BASH_SOURCE[0]}")/lien-resolve.sh" || exit 0
 
 input="$(cat)"
 session_id="$(printf '%s' "$input" | jq -r '.session_id // empty')"
@@ -20,6 +20,17 @@ cwd="$(printf '%s' "$input" | jq -r '.cwd // empty')"
 case "$session_id" in
   *[!A-Za-z0-9_-]*) exit 0;;
 esac
+
+# HOOKS-6: remove this session's breaker-open notice marker regardless of
+# whether `lien` itself is resolvable right now — same machine-global,
+# store-independent, override-respecting path formula as annotate-clean.sh's
+# GC of this directory and annotate-read.sh's own write side.
+marker_default="${TMPDIR:-/tmp}/lien-npx-breaker/inflight"
+until_default="$(dirname "${LIEN_NPX_BREAKER_MARKER:-$marker_default}")/breaker-open-until"
+notice_dir="$(dirname "${LIEN_NPX_BREAKER_UNTIL_MARKER:-$until_default}")/notice-shown"
+rm -f "$notice_dir/$session_id" 2>/dev/null
+
+. "$(dirname "${BASH_SOURCE[0]}")/lien-resolve.sh" || exit 0
 
 if [ -n "$cwd" ] && [ -d "$cwd" ]; then
   store="$(cd "$cwd" && "${LIEN_CMD[@]}" path --store 2>/dev/null)"
