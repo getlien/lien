@@ -31,6 +31,20 @@ vi.mock('@liendev/core', async () => {
   };
 });
 
+// `hasStructuralIndex` is a real filesystem check — none of this file's
+// tests write a real `structural.db` stub (they simulate "index exists"
+// purely by mocking `createVectorDB`), so default it to `true`. No test in
+// this file exercises the "never indexed" path, unlike annotate-cmd.test.ts.
+vi.mock('../utils/index-freshness.js', async () => {
+  const actual = await vi.importActual<typeof import('../utils/index-freshness.js')>(
+    '../utils/index-freshness.js',
+  );
+  return {
+    ...actual,
+    hasStructuralIndex: vi.fn().mockResolvedValue(true),
+  };
+});
+
 // A stable, real file (must exist on disk — `resolvePaths` checks) with no
 // requirement that it actually be associated with any test in the real
 // index; `createVectorDB`'s `scanAll` is mocked per-test to control that.

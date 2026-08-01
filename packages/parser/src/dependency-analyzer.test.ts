@@ -988,3 +988,104 @@ describe('Rust mod-derived edges end-to-end (#1021 regression)', () => {
     ).toEqual(['src/engine.rs']);
   });
 });
+
+describe('bare crate-relative `use` edges end-to-end (#1028 regression)', () => {
+  // #1028: `matchesFile`'s Strategy 4 (`matchesPHPNamespace`) was applied
+  // unconditionally to every language, not just PHP. Its bare-single-
+  // component branch is case-INSENSITIVE and allows up to one leading
+  // directory segment (added by #883 for an unrelated Swift/Go/Ruby fix) --
+  // on Rust, this let a bare `use crate::{Error, StdError}` specifier
+  // (the import extractor's "first wins" grouped-use handling, mirroring
+  // Go's own precedent) case-insensitively self-match its own file. Real
+  // `dtolnay/anyhow` repro, parsed through the REAL Rust extractor
+  // (`chunkByAST`) exactly like the #1021 fixtures above, not a hand-built
+  // `imports: [...]` array.
+  const workspaceRoot = '/test/workspace';
+
+  it('fixture 1 (self-edge): a file whose own re-exported type name case-insensitively matches its own basename must not become its own dependent', () => {
+    // Mirrors anyhow's real src/error.rs: `pub(crate) use crate::{Error,
+    // StdError};` extracts the bare "Error" specifier (first-wins), which
+    // case-insensitively collides with this file's own basename ("error").
+    const chunks = chunkByAST(
+      'src/error.rs',
+      'pub(crate) use crate::{Error, StdError};\n\npub(crate) struct ErrorImpl<E = ()> {\n    x: E,\n}\n',
+    );
+
+    expect(analyzeDependencies('src/error.rs', chunks, workspaceRoot).dependents).toEqual([]);
+  });
+
+  it('fixture 2 (different-files false positive): a bare specifier must not fabricate an edge to an unrelated file that merely shares its basename case-insensitively', () => {
+    // src/other.rs's bare `Config` specifier names the type declared in
+    // src/lib.rs -- src/config.rs is a completely unrelated file that
+    // happens to share "config" as its basename. Before #1028, Strategy 4's
+    // case-insensitive, up-to-one-leading-segment leniency fabricated an
+    // edge from src/other.rs to src/config.rs anyway (the same class of bug
+    // as the self-edge above, just between two DIFFERENT files) -- proving
+    // a self-edge guard alone would not have been sufficient.
+    const chunks = [
+      ...chunkByAST('src/lib.rs', 'pub struct Config {\n    pub debug: bool,\n}\n'),
+      ...chunkByAST(
+        'src/other.rs',
+        'use crate::Config;\n\npub fn make() -> Config {\n    Config { debug: false }\n}\n',
+      ),
+      ...chunkByAST('src/config.rs', 'pub fn helper() -> u32 {\n    1\n}\n'),
+    ];
+
+    expect(analyzeDependencies('src/config.rs', chunks, workspaceRoot).dependents).toEqual([]);
+  });
+
+  it('verified boundary: a same-shaped self-reference one directory deeper was never affected (control, unchanged by this fix)', () => {
+    // Issue #1028's own verified boundary: a file directly under ONE
+    // top-level directory is the exact trigger shape (targetComponents.length
+    // <= 2). One level deeper, `matchesPHPNamespace`'s bare-import guard
+    // already rejected the match before this fix (4 target components), so
+    // this fixture pins that this control path stays correct, not that this
+    // fix changed it.
+    const chunks = chunkByAST(
+      'src/deep/nested/error.rs',
+      'pub(crate) use crate::Error;\n\npub(crate) struct ErrorImpl;\n',
+    );
+
+    expect(
+      analyzeDependencies('src/deep/nested/error.rs', chunks, workspaceRoot).dependents,
+    ).toEqual([]);
+  });
+
+  it("#883's own repro stays fixed end-to-end (Swift bare system-framework import must not match an unrelated same-named file)", () => {
+    // #883 fixed this exact shape directly in `matchesPHPNamespace` (the
+    // bare-import ≤2-target-component guard this fix now additionally gates
+    // by language) -- confirms #1028 didn't reopen it for the language #883
+    // was originally protecting.
+    const chunks = [
+      ...chunkByAST('Source/Features/Combine.swift', 'struct Combine {\n}\n'),
+      ...chunkByAST(
+        'Tests/CombineTests.swift',
+        'import Combine\n\nclass CombineTests {\n    func testIt() {}\n}\n',
+      ),
+    ];
+
+    // Swift's whole-module import guard (#884) already suppresses this bare
+    // `import Combine` from ever reaching `matchesFile` for a per-file
+    // relationship -- the honest #869 "not determinable" outcome, not a
+    // match. Either way, it must not resolve to the unrelated file.
+    expect(
+      analyzeDependencies('Source/Features/Combine.swift', chunks, workspaceRoot).dependents,
+    ).toEqual([]);
+  });
+
+  it("PHP's own namespace matching is completely unaffected end-to-end (the language Strategy 4 is a real semantic for)", () => {
+    const chunks = [
+      ...chunkByAST(
+        'Controller.php',
+        '<?php\nnamespace App;\nuse App\\Models\\User;\n\nclass Controller {\n    function index() { return new User(); }\n}\n',
+      ),
+      ...chunkByAST('app/Models/User.php', '<?php\nnamespace App\\Models;\n\nclass User {\n}\n'),
+    ];
+
+    expect(
+      analyzeDependencies('app/Models/User.php', chunks, workspaceRoot).dependents.map(
+        d => d.filepath,
+      ),
+    ).toEqual(['Controller.php']);
+  });
+});

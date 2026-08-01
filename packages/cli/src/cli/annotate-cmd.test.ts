@@ -3,6 +3,9 @@ import path from 'path';
 import os from 'os';
 import * as coreModule from '@liendev/core';
 import * as dependencyAnalyzerModule from '../mcp/handlers/dependency-analyzer.js';
+import * as indexFreshnessModule from '../utils/index-freshness.js';
+import { resolveProjectRoot } from './project-root.js';
+import { toAbsolutePath } from '../types/paths.js';
 import {
   annotateCommand,
   annotateCli,
@@ -25,6 +28,25 @@ vi.mock('@liendev/core', async () => {
   return {
     ...actual,
     createVectorDB: vi.fn(actual.createVectorDB),
+  };
+});
+
+// `hasStructuralIndex` is a real filesystem check against this MACHINE's
+// actual home directory for this ACTUAL repo path (most of these tests don't
+// redirect LIEN_HOME/os.homedir — only the "annotateCommand (integration)"
+// block below does, via a real empty tmp home). Default it to `true` so
+// every block that mocks `createVectorDB` directly (and assumes an
+// already-indexed project) isn't at the mercy of whether this real machine
+// happens to have this real repo indexed. The "annotateCommand (integration)"
+// block restores the real implementation for the two tests that specifically
+// exercise the "never indexed" path against its own empty tmp home.
+vi.mock('../utils/index-freshness.js', async () => {
+  const actual = await vi.importActual<typeof import('../utils/index-freshness.js')>(
+    '../utils/index-freshness.js',
+  );
+  return {
+    ...actual,
+    hasStructuralIndex: vi.fn().mockResolvedValue(true),
   };
 });
 
@@ -585,6 +607,7 @@ describe('annotateCommand (integration)', () => {
   let errSpy: ReturnType<typeof vi.spyOn>;
   let tmpHome: string;
   let homeSpy: ReturnType<typeof vi.spyOn>;
+  let originalLienHome: string | undefined;
 
   beforeEach(async () => {
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
@@ -593,6 +616,30 @@ describe('annotateCommand (integration)', () => {
     const fs = await import('fs/promises');
     tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-annotate-test-'));
     homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(tmpHome);
+    // Pre-existing test-isolation bug (found while rebasing this PR, unrelated
+    // to it — reproduces identically on main with zero code changes, and in
+    // real CI: getLienHome() is `process.env.LIEN_HOME || os.homedir()`, and
+    // vitest's own `global-setup.ts` already sets `LIEN_HOME` to ONE shared
+    // temp dir for the ENTIRE test run. That env var wins over the
+    // `os.homedir()` mock above, so every check that resolves the index dir
+    // via `getLienHome()` (this block's own `hasStructuralIndex` restoration
+    // below, and `resolveProjectRoot`'s `hasCompletedIndex`) was silently
+    // reading the SHARED run-wide home instead of this test's own pristine
+    // one -- polluted by any other test in the same run that legitimately
+    // indexes this repo's real root under that shared home. Redirecting
+    // `LIEN_HOME` itself (not just `os.homedir()`) gives this block the
+    // per-test isolation its own comment already claimed to provide.
+    originalLienHome = process.env.LIEN_HOME;
+    process.env.LIEN_HOME = tmpHome;
+    // This block specifically exercises the real "never indexed" path (an
+    // empty tmp home has no structural.db) — restore the real
+    // `hasStructuralIndex` here instead of the file-wide `true` default.
+    const actualIndexFreshness = await vi.importActual<
+      typeof import('../utils/index-freshness.js')
+    >('../utils/index-freshness.js');
+    vi.mocked(indexFreshnessModule.hasStructuralIndex).mockImplementation(
+      actualIndexFreshness.hasStructuralIndex,
+    );
   });
 
   afterEach(async () => {
@@ -600,13 +647,43 @@ describe('annotateCommand (integration)', () => {
     logSpy.mockRestore();
     errSpy.mockRestore();
     homeSpy.mockRestore();
+    if (originalLienHome === undefined) delete process.env.LIEN_HOME;
+    else process.env.LIEN_HOME = originalLienHome;
+    vi.mocked(indexFreshnessModule.hasStructuralIndex).mockResolvedValue(true);
     await fs.rm(tmpHome, { recursive: true, force: true });
   });
 
-  it('silently exits for a non-existent file', async () => {
+  // HOOKS-9: this used to be a completely silent, exit-0 no-op —
+  // indistinguishable from "this file has no impact". tmpHome (this
+  // describe's fixture) has no index built, so the honest answer is the same
+  // "no index found" warning a real, resolvable path gets against an
+  // unindexed root (see 'warns loudly instead of silently analyzing an
+  // unindexed root' below) — NOT silence.
+  it('warns instead of silently exiting for a non-existent file (unindexed root)', async () => {
     await annotateCommand('this/path/does/not/exist.ts');
-    expect(logSpy).not.toHaveBeenCalled();
     expect(errSpy).not.toHaveBeenCalled();
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    expect(logSpy.mock.calls[0][0]).toContain('Lien: no index found at the resolved project root');
+  });
+
+  // HOOKS-9's actual reported shape: an INDEXED repo given a path the index
+  // has never heard of. Mocks createVectorDB directly (rather than building
+  // a real index in tmpHome) so `hasData()` reports true without an actual
+  // indexing pass.
+  it('says the path is not found in the index for a non-existent path in an INDEXED repo', async () => {
+    vi.mocked(coreModule.createVectorDB).mockResolvedValueOnce({
+      initialize: vi.fn().mockResolvedValue(undefined),
+      hasData: vi.fn().mockResolvedValue(true),
+      getIndexedFiles: vi.fn().mockResolvedValue(['packages/cli/src/cli/index.ts']),
+    } as unknown as Awaited<ReturnType<typeof coreModule.createVectorDB>>);
+
+    await annotateCommand('this/path/does/not/exist.ts');
+
+    expect(errSpy).not.toHaveBeenCalled();
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    const printed = logSpy.mock.calls[0][0] as string;
+    expect(printed).toContain('not found in the index');
+    expect(printed).toContain('this/path/does/not/exist.ts');
   });
 
   it('silently exits for an empty path', async () => {
@@ -660,6 +737,23 @@ describe('annotateCommand (integration)', () => {
     expect(errSpy).not.toHaveBeenCalled();
     expect(logSpy).toHaveBeenCalledTimes(1);
     expect(logSpy.mock.calls[0][0]).toContain('Lien: no index found at the resolved project root');
+  });
+
+  // HOOKS-7 regression: a single `lien annotate` (the read-hook's underlying
+  // command) on a never-indexed repo used to create an empty structural.db
+  // as a side effect of `createVectorDB(rootDir).initialize()` — which then
+  // made OTHER hooks (whose gate is "does a structural store exist?") wrongly
+  // believe the repo was indexed for the rest of the session. Assert the
+  // database is never even opened, and nothing gets created on disk.
+  it('never opens or creates the structural store on a never-indexed root', async () => {
+    const fs = await import('fs/promises');
+    vi.mocked(coreModule.createVectorDB).mockClear();
+
+    await annotateCommand('packages/cli/src/cli/index.ts');
+
+    expect(coreModule.createVectorDB).not.toHaveBeenCalled();
+    const indexDir = coreModule.getIndexDir(resolveProjectRoot(toAbsolutePath(process.cwd())));
+    await expect(fs.access(path.join(indexDir, 'structural.db'))).rejects.toThrow();
   });
 });
 
@@ -758,6 +852,90 @@ describe('annotateCommand — plan-time nudge (integration)', () => {
   });
 });
 
+describe('annotateCommand — blast-radius population parity (HOOKS-2, integration)', () => {
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  let errSpy: ReturnType<typeof vi.spyOn>;
+
+  // Same stable target as the plan-time-nudge block above.
+  const target = 'packages/cli/src/cli/index.ts';
+
+  beforeEach(() => {
+    logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    errSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    logSpy.mockRestore();
+    errSpy.mockRestore();
+    vi.mocked(coreModule.createVectorDB).mockClear();
+  });
+
+  function importerChunk(file: string, imports: string[]) {
+    return {
+      content: '',
+      metadata: {
+        file,
+        startLine: 1,
+        endLine: 5,
+        type: 'function',
+        language: 'typescript',
+        symbolName: 'fn',
+        symbolType: 'function',
+        imports,
+      },
+      score: 0,
+      relevance: 'not_relevant',
+    };
+  }
+
+  // Regression for HOOKS-2: `lien annotate` used to feed `dependents.length`
+  // (production + test) into `computeBlastRadiusRisk` instead of
+  // `productionDependentCount` (what `get_dependents`/`lien api-delta` feed).
+  // 2 production dependents (both individually test-covered, so
+  // uncoveredProductionDependents is 0) + 6 dependents that are themselves
+  // test files gives `dependents.length === 8` but `productionDependentCount
+  // === 2` -- the pre-fix bug fed 8 into `classifyLevel` (>5 -> "medium");
+  // the fix feeds 2 (<=5, 0 uncovered -> "low"). A file with many test-only
+  // importers and few production ones must not read riskier than it is.
+  it('computes risk from productionDependentCount, not the wider dependents.length', async () => {
+    // `findDependents` only searches for importers once the target itself
+    // resolves to a real chunk in the scanned universe (`targetIndexed`) --
+    // without this, it fails closed to zero dependents regardless of any
+    // import edges pointing at it.
+    const targetChunk = importerChunk(target, []);
+    const prod1 = importerChunk('src/prodCaller1.ts', [target]);
+    const prod1Test = importerChunk('src/prodCaller1.test.ts', ['src/prodCaller1.ts']);
+    const prod2 = importerChunk('src/prodCaller2.ts', [target]);
+    const prod2Test = importerChunk('src/prodCaller2.test.ts', ['src/prodCaller2.ts']);
+    const testOnlyCallers = Array.from({ length: 6 }, (_, i) =>
+      importerChunk(`src/testCaller${i}.test.ts`, [target]),
+    );
+    const allChunks = [targetChunk, prod1, prod1Test, prod2, prod2Test, ...testOnlyCallers];
+
+    vi.mocked(coreModule.createVectorDB).mockResolvedValueOnce({
+      initialize: vi.fn().mockResolvedValue(undefined),
+      hasData: vi.fn().mockResolvedValue(true),
+      scanAll: vi.fn().mockResolvedValue(allChunks),
+    } as unknown as Awaited<ReturnType<typeof coreModule.createVectorDB>>);
+
+    await annotateCommand(target);
+
+    expect(errSpy).not.toHaveBeenCalled();
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    const printed = logSpy.mock.calls[0][0] as string;
+
+    // The displayed dependents count stays the WIDER total (production +
+    // test) -- that part is unchanged and correct.
+    expect(printed).toContain('8 files import this');
+    // But the risk verdict and its reasoning are scoped to PRODUCTION
+    // dependents only, matching get_dependents/lien api-delta.
+    expect(printed).toContain('risk: low');
+    expect(printed).toContain('2 production callers');
+    expect(printed).not.toContain('risk: medium');
+    expect(printed).not.toContain('8 callers');
+  });
+});
+
 describe('annotateCli (CLI exit-code contract, #978)', () => {
   let logSpy: ReturnType<typeof vi.spyOn>;
   let errSpy: ReturnType<typeof vi.spyOn>;
@@ -838,7 +1016,16 @@ describe('annotateCli (CLI exit-code contract, #978)', () => {
     expect(exitSpy).not.toHaveBeenCalled();
   });
 
-  it('does not call process.exit for a non-existent file (silent no-op path)', async () => {
+  it('does not call process.exit for a non-existent file', async () => {
+    // This describe block doesn't isolate `os.homedir()`/tmpHome like the
+    // plain 'annotateCommand (integration)' block above — mock createVectorDB
+    // directly so `reportUnresolvedPath`'s new index check (HOOKS-9) never
+    // touches the real developer machine's `~/.lien`.
+    vi.mocked(coreModule.createVectorDB).mockResolvedValueOnce({
+      initialize: vi.fn().mockResolvedValue(undefined),
+      hasData: vi.fn().mockResolvedValue(false),
+    } as unknown as Awaited<ReturnType<typeof coreModule.createVectorDB>>);
+
     await annotateCli('this/path/does/not/exist.ts');
 
     expect(exitSpy).not.toHaveBeenCalled();

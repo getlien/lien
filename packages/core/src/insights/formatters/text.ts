@@ -128,7 +128,12 @@ function formatViolation(
     chalk.dim(`    ⬆️  ${formatPercentageOver(violation.complexity, violation.threshold)}`),
     ...formatHalsteadDetails(violation),
     ...formatDependencyInfo(fileData),
-    chalk.dim(`    ⚠️  Risk: ${fileData.riskLevel.toUpperCase()}`),
+    // "Complexity risk" (not bare "Risk") -- this is the file's OWN
+    // complexity severity boosted by dependent count/complexity, a
+    // DIFFERENT metric from `lien annotate`/`get_dependents`/`lien
+    // api-delta`'s blast-radius risk (CLI-4/REVIEW-6). See
+    // docs/architecture/blast-radius-nudge.md's "Two risk concepts".
+    chalk.dim(`    ⚠️  Complexity risk: ${fileData.riskLevel.toUpperCase()}`),
     '',
   ];
 }

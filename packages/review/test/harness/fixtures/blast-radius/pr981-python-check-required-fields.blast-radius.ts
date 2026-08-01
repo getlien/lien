@@ -20,19 +20,29 @@
  * collection-emptiness check from `== 0` to `<= 1` (boundary-change shape),
  * giving blast radius a changed function with real cross-file dependents.
  *
- * Result as of this fixture's capture: the dependency graph's fallback tier
- * — Python has no precise-tier resolver, see `dependency-graph.ts`'s
- * `resolveImportPath` (relative-import + `.ts/.tsx/.js/.jsx/.mts/.mjs` only)
- * — resolves all 3 direct callers correctly via the cross-package
- * symbol-match strategy (`addCrossPackageEdges`, matching `from
- * pipeline.validator import check_required_fields`). This is a CORRECT
- * baseline for THIS import shape, not a weak one. It says nothing about the
- * OOP method-call fallback (`addOopMethodEdges`) or same-namespace fallback
- * (`addSameNamespaceEdges`) — those need a class-method-call fixture (e.g.
- * PHP) to exercise. NOTE: if a future resolution change (routing through
- * @liendev/parser's primitives) regresses this specific case, this baseline
- * will flag it; if it *improves* recall on the harder OOP/namespace shapes
- * this fixture doesn't cover, that's expected and this file won't move.
+ * Result as of this fixture's capture: all 3 direct callers resolve at the
+ * TOP of `resolveCallSiteEdges`'s strategy ladder in `dependency-graph.ts`
+ * (same-file, then a guarded import via `@liendev/parser`'s
+ * `importMatchesTarget`, before any fallback tier is even tried) — no
+ * fallback strategy fires for this fixture at all:
+ *   - `validate_record` -> `provenance: 'same-file'` (it's defined in
+ *     `validator.py` alongside `check_required_fields`, no import needed).
+ *   - `parse_raw_data` (loader.py) and `process_pipeline` (processor.py) ->
+ *     `provenance: 'import-verified'` (both do `from pipeline.validator
+ *     import check_required_fields` AND call it directly as a call site, so
+ *     the import resolves AND a call site names the symbol — see
+ *     `EdgeProvenance`'s doc comment in `dependency-graph.ts`).
+ * This is a CORRECT, strong baseline for Python's `from module import name`
+ * shape, not a weak one — and NOT an instance of the cross-package
+ * symbol-match fallback (`addCrossPackageEdges`, which only fires when the
+ * import can't be verified against a specific file and tags
+ * `symbol-name-match`): the import here verifies cleanly, so resolution
+ * never reaches that fallback. This fixture says nothing about the OOP
+ * method-call fallback (`addOopMethodEdges`), the cross-package
+ * symbol-match fallback (`addCrossPackageEdges`), or the same-namespace
+ * fallback (`addSameNamespaceEdges`) — those need a class-method-call
+ * fixture (e.g. PHP) to exercise. NOTE: if a future resolution change
+ * regresses this specific case, this baseline will flag it.
  *
  * Regenerate the fixture:
  *   npx tsx packages/review/test/harness/capture-pr.ts 981 \
@@ -60,20 +70,38 @@ const SEED_SYMBOL = 'check_required_fields';
 interface DependentPin {
   filepath: string;
   symbolName: string;
+  provenance: string;
 }
 
-/** The 3 real (hand-verified) direct callers — the baseline this pins. */
+/**
+ * The 3 real (hand-verified) direct callers — the baseline this pins,
+ * including `provenance` so a future resolution-strategy change that
+ * reroutes one of these through a weaker fallback tier fails loudly here
+ * instead of silently drifting from this file's module-doc claim.
+ */
 const EXPECTED_DIRECT_DEPENDENTS: DependentPin[] = [
-  { filepath: 'lien-review-testbed/python/pipeline/validator.py', symbolName: 'validate_record' },
-  { filepath: 'lien-review-testbed/python/pipeline/processor.py', symbolName: 'process_pipeline' },
-  { filepath: 'lien-review-testbed/python/pipeline/loader.py', symbolName: 'parse_raw_data' },
+  {
+    filepath: 'lien-review-testbed/python/pipeline/validator.py',
+    symbolName: 'validate_record',
+    provenance: 'same-file',
+  },
+  {
+    filepath: 'lien-review-testbed/python/pipeline/processor.py',
+    symbolName: 'process_pipeline',
+    provenance: 'import-verified',
+  },
+  {
+    filepath: 'lien-review-testbed/python/pipeline/loader.py',
+    symbolName: 'parse_raw_data',
+    provenance: 'import-verified',
+  },
 ];
 
 /** Total dependents (all hops, depth default 2) — a loose sanity bound on the transitive expansion. */
 const EXPECTED_TOTAL_DEPENDENTS = 12;
 const EXPECTED_RISK_LEVEL = 'high';
 
-function keyOf(d: DependentPin): string {
+function keyOf(d: { filepath: string; symbolName: string }): string {
   return `${d.filepath}::${d.symbolName}`;
 }
 
@@ -89,11 +117,9 @@ function findSeedEntry(report: BlastRadiusReport): BlastRadiusEntry | undefined 
   );
 }
 
-/** Set-difference the actual hop=1 dependents against the pinned baseline. Returns failure messages (empty = pass). */
+/** Set-difference the actual hop=1 dependents against the pinned baseline, including provenance. Returns failure messages (empty = pass). */
 function checkDirectDependents(entry: BlastRadiusEntry): string[] {
-  const actualDirect = entry.dependents
-    .filter(d => d.hops === 1)
-    .map(d => ({ filepath: d.filepath, symbolName: d.symbolName }));
+  const actualDirect = entry.dependents.filter(d => d.hops === 1);
   const actualKeys = new Set(actualDirect.map(keyOf));
   const expectedKeys = new Set(EXPECTED_DIRECT_DEPENDENTS.map(keyOf));
 
@@ -105,8 +131,18 @@ function checkDirectDependents(entry: BlastRadiusEntry): string[] {
     failures.push(`missing expected direct dependent(s): ${missing.map(keyOf).join(', ')}`);
   }
   if (extra.length > 0) {
-    failures.push(`unexpected extra direct dependent(s): ${extra.map(keyOf).join(', ')}`);
+    failures.push(`unexpected extra direct dependent(s): ${extra.map(d => keyOf(d)).join(', ')}`);
   }
+
+  for (const expected of EXPECTED_DIRECT_DEPENDENTS) {
+    const actual = actualDirect.find(d => keyOf(d) === keyOf(expected));
+    if (actual && actual.provenance !== expected.provenance) {
+      failures.push(
+        `${keyOf(expected)}: expected provenance '${expected.provenance}', got '${actual.provenance}'`,
+      );
+    }
+  }
+
   return failures;
 }
 

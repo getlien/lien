@@ -2,6 +2,7 @@ import type { z } from 'zod';
 import { wrapToolHandler } from '../utils/tool-wrapper.js';
 import { GetDependentsSchema } from '../schemas/index.js';
 import { findUnindexedPaths, formatUnindexedPathsNote } from '../utils/unindexed-paths.js';
+import { relabelCallerReasoning } from '../../utils/blast-radius-reasoning.js';
 import type { ToolContext, MCPToolResult } from '../types.js';
 import { computeBlastRadiusRisk, type BlastRadiusRisk } from '@liendev/parser';
 import type { AttributionCaveatReason } from '../attribution-caveat-reasons.js';
@@ -155,27 +156,7 @@ function computeRisk(analysis: DependencyAnalysisResult): BlastRadiusRisk {
     hasHighComplexityUncovered,
     complexityRiskBoost: complexityMetrics.complexityRiskBoost,
   });
-  return { ...risk, reasoning: clarifyCallerReasoning(risk.reasoning) };
-}
-
-/**
- * Relabel the shared primitive's generic "N callers"/"N caller" reasoning
- * entry to make explicit that it counts PRODUCTION dependents only (#928).
- * `computeRisk` above deliberately feeds `productionDependentCount` in — a
- * test file calling the target shouldn't weigh into risk the same way a
- * production caller does — but the response's own top-level `dependentCount`
- * field is the WIDER total (production + test). Left unrelabeled, a reader
- * sees two different numbers answering what looks like the same question
- * ("14 callers" next to `dependentCount: 80`) with nothing to indicate
- * they're deliberately scoped differently; this makes the scoping explicit
- * instead of changing either number. Scoped to this handler's own response
- * rather than the shared `blast-radius-risk.ts` primitive, which the review-
- * side blast-radius injection also consumes with its own (unrelated) scoping.
- */
-function clarifyCallerReasoning(reasoning: string[]): string[] {
-  return reasoning.map(entry =>
-    /^\d+ callers?$/.test(entry) ? entry.replace(/ callers?$/, m => ` production${m}`) : entry,
-  );
+  return { ...risk, reasoning: relabelCallerReasoning(risk.reasoning) };
 }
 
 /**

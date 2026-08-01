@@ -190,7 +190,15 @@ Examples:
 
 Returns:
 - summary: { filesAnalyzed, avgComplexity, maxComplexity, violationCount, bySeverity: { error, warning } }
-- violations[]: { filepath, symbolName, symbolType, complexity, metricType, threshold, severity, riskLevel, dependentCount, testAssociations }
+- violations[]: { filepath, symbolName, symbolType, complexity, metricType, threshold, severity, complexityRiskLevel, dependentCount, testAssociations }
+- complexityRiskLevel: "low" | "medium" | "high" | "critical" — the file's OWN complexity
+  severity (this violation plus any others in the same file), boosted (never downgraded)
+  by its dependent count/complexity. This is a DIFFERENT metric from \`get_dependents\`'/
+  \`lien annotate\`'s \`riskLevel\` (blast-radius risk): that one weighs dependents' TEST
+  COVERAGE and applies a complexity floor; this one has no test-coverage term at all.
+  The two can and do disagree for the same file at the same moment — see
+  docs/architecture/blast-radius-nudge.md's "Two risk concepts" section before assuming
+  they should match.
 - metricType: "cyclomatic" | "cognitive" | "halstead_effort" | "halstead_bugs"
 - severity: "error" | "warning"
 - note?: present and explicit when a requested \`files\` entry has no index entry at all — filesAnalyzed silently excludes it otherwise`,

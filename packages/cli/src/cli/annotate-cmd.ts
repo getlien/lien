@@ -28,9 +28,12 @@ import {
   computeComplexityHeadroom,
   formatComplexityHeadroomWarning,
 } from '../mcp/handlers/get-files-context.js';
+import { findUnindexedPaths, formatUnindexedPathsNote } from '../mcp/utils/unindexed-paths.js';
+import { relabelCallerReasoning } from '../utils/blast-radius-reasoning.js';
 import { resolveProjectRoot } from './project-root.js';
 import { type AbsolutePath, type RelativePath, toAbsolutePath } from '../types/paths.js';
 import { canonicalizePath } from '../utils/canonicalize-path.js';
+import { hasStructuralIndex } from '../utils/index-freshness.js';
 
 // Complexity threshold lives in @liendev/core (dependency-analyzer's
 // COMPLEXITY_THRESHOLDS.HIGH_COMPLEXITY_DEPENDENT = 10) and surfaces
@@ -460,8 +463,22 @@ async function computeAnnotationData(
     allChunks,
     rootDir,
   );
+  // HOOKS-2: this used to feed `result.dependents.length` (production + test)
+  // in here while `uncoveredDependents` below was already production-only
+  // (`uncoveredProductionDependents`) -- an internal mismatch, and a
+  // cross-surface one too, since `get_dependents`/`api-delta` both feed
+  // `productionDependentCount` (a test file calling the target shouldn't
+  // weigh into blast-radius risk the same way a production caller does,
+  // #928). A file with many test-only importers and few/no production ones
+  // could come back a HIGHER risk here than `get_dependents` reported for
+  // the identical file at the identical moment. `productionDependentCount`
+  // matches the other two blast-radius surfaces; `relabelCallerReasoning`
+  // below then makes that scoping explicit in the printed reasoning, the
+  // same way `get_dependents` already does, since the displayed dependents
+  // list (`formatDependents`, below) intentionally stays the WIDER
+  // production+test total.
   const risk = computeBlastRadiusRisk({
-    dependentCount: result.dependents.length,
+    dependentCount: result.productionDependentCount,
     uncoveredDependents: result.uncoveredProductionDependents,
     // Dependents' max complexity feeds the blast-radius risk score. The
     // target file's own complexity (`complexity.max`) is reported
@@ -470,6 +487,10 @@ async function computeAnnotationData(
     hasHighComplexityUncovered,
     complexityRiskBoost: result.complexityMetrics.complexityRiskBoost,
   });
+  const relabeledRisk: BlastRadiusRisk = {
+    ...risk,
+    reasoning: relabelCallerReasoning(risk.reasoning),
+  };
 
   return {
     allChunks,
@@ -481,8 +502,45 @@ async function computeAnnotationData(
     csharpTypeReferenceTests,
     complexity,
     headroom,
-    risk,
+    risk: relabeledRisk,
   };
+}
+
+/**
+ * `resolvePaths` returning null covers three distinct cases (see its own doc
+ * comment): an empty input, a path that escapes the project root, or one
+ * that simply doesn't exist on disk. An empty input has nothing to report
+ * (stays silent — the CLI's existing error-tolerant contract for garbage
+ * input). The other two are the same silent-wrong-answer shape
+ * `findUnindexedPaths` exists to close for the MCP tools (#1014/#927): a
+ * typo'd or deleted path must never read as "ran clean, no impact" (HOOKS-9)
+ * — it must say the index has no record of it, the same honest note
+ * `get_complexity`/`get_files_context` already give an unindexed filepath.
+ *
+ * Reuses `findUnindexedPaths`/`formatUnindexedPathsNote` rather than a new
+ * existence check: if the index turns out to have a record of `file` after
+ * all (e.g. a canonicalization edge case `resolvePaths`' own disk check
+ * missed), this stays silent rather than printing a false "not found".
+ */
+async function reportUnresolvedPath(file: string): Promise<boolean> {
+  if (!file.trim()) return false;
+
+  const rootDir = resolveProjectRoot(toAbsolutePath(process.cwd()));
+  const vectorDB = await createVectorDB(rootDir);
+  await vectorDB.initialize();
+
+  // #894: same "index never built" check `run()` makes for a resolvable
+  // path — a stray/typo'd path against a never-indexed root should say so,
+  // not "not found in the index" (which implies indexing exists to check).
+  if (!(await vectorDB.hasData())) {
+    console.log(formatNoIndexWarning(rootDir));
+    return false;
+  }
+
+  const unindexedPaths = await findUnindexedPaths(vectorDB, [file], rootDir);
+  const note = formatUnindexedPathsNote(unindexedPaths);
+  if (note) console.log(note);
+  return false;
 }
 
 /**
@@ -493,7 +551,7 @@ async function computeAnnotationData(
  */
 async function run(file: string, options?: AnnotateOptions): Promise<boolean> {
   const paths = resolvePaths(file);
-  if (!paths) return false;
+  if (!paths) return reportUnresolvedPath(file);
 
   if (options?.testsOnly) {
     await runTestsOnly(paths);
@@ -513,11 +571,24 @@ async function run(file: string, options?: AnnotateOptions): Promise<boolean> {
   const needsChdir = originalCwd !== rootDir;
   if (needsChdir) process.chdir(rootDir);
   try {
+    // #894 + HOOKS-7: check existence BEFORE createVectorDB/initialize() —
+    // that call unconditionally materializes an empty structural.db on a
+    // project that has never been indexed (see `hasStructuralIndex`'s doc
+    // comment), which is exactly the side effect that let a single Read on
+    // an unindexed repo permanently flip other hooks' "is this repo
+    // indexed?" gate for the rest of the session.
+    if (!(await hasStructuralIndex(rootDir))) {
+      console.log(formatNoIndexWarning(rootDir));
+      return false;
+    }
+
     const vectorDB = await createVectorDB(rootDir);
     await vectorDB.initialize();
 
     // #894: warn loudly instead of silently analyzing an empty store — see
-    // `formatNoIndexWarning`.
+    // `formatNoIndexWarning`. Kept as defense-in-depth for the rarer case
+    // where the store file exists but genuinely has zero rows; the
+    // `hasStructuralIndex` check above only catches "never indexed at all".
     if (!(await vectorDB.hasData())) {
       console.log(formatNoIndexWarning(rootDir));
       return false;
@@ -634,27 +705,45 @@ export interface FileTestAssociations {
  * callers print via the same `formatTestReminder`, so the reminder text an
  * agent sees can never drift between the two commands.
  */
+/** The `indexMissing: true` shape `scanTestAssociations` returns from either of its two "no usable index" early-returns. */
+function noIndexTestAssociations(
+  filepath: RelativePath,
+  rootDir: AbsolutePath,
+): FileTestAssociations {
+  return {
+    filepath,
+    rootDir,
+    tests: [],
+    packageLevelTests: [],
+    symbolUsageTests: [],
+    csharpTypeReferenceTests: [],
+    indexMissing: true,
+  };
+}
+
 async function scanTestAssociations(paths: ResolvedPaths): Promise<FileTestAssociations> {
   const { originalCwd, rootDir, filepath } = paths;
   const needsChdir = originalCwd !== rootDir;
   if (needsChdir) process.chdir(rootDir);
   try {
+    // #894 + HOOKS-7: same pre-check as `run()` above — see
+    // `hasStructuralIndex`'s doc comment for why this must run BEFORE
+    // `createVectorDB`/`initialize()` rather than after.
+    if (!(await hasStructuralIndex(rootDir))) {
+      return noIndexTestAssociations(filepath, rootDir);
+    }
+
     const vectorDB = await createVectorDB(rootDir);
     await vectorDB.initialize();
     // #894: check before scanning, not after — an empty scan result is
     // indistinguishable from "no tests" otherwise. `hasData()` is the same
     // signal the MCP server's auto-index gate uses, and is worktree/overlay-
-    // aware (true when either the base or the overlay has rows).
+    // aware (true when either the base or the overlay has rows). Kept as
+    // defense-in-depth for the rarer case where the store file exists but
+    // genuinely has zero rows — `hasStructuralIndex` above only catches
+    // "never indexed at all".
     if (!(await vectorDB.hasData())) {
-      return {
-        filepath,
-        rootDir,
-        tests: [],
-        packageLevelTests: [],
-        symbolUsageTests: [],
-        csharpTypeReferenceTests: [],
-        indexMissing: true,
-      };
+      return noIndexTestAssociations(filepath, rootDir);
     }
     const allChunks = adaptChunkImports(await vectorDB.scanAll());
     const tests =

@@ -416,7 +416,7 @@ Analyze complexity of src/api/
       "language": "typescript",
       "message": "Cyclomatic complexity 23 exceeds threshold 15",
       "dependentCount": 5,
-      "riskLevel": "high"
+      "complexityRiskLevel": "high"
     },
     {
       "filepath": "src/parser/index.ts",
@@ -431,7 +431,7 @@ Analyze complexity of src/api/
       "language": "typescript",
       "message": "Time to understand ~1h 30m exceeds threshold 1h",
       "dependentCount": 5,
-      "riskLevel": "medium",
+      "complexityRiskLevel": "medium",
       "halsteadDetails": {
         "volume": 850.5,
         "difficulty": 45.2,
@@ -442,6 +442,16 @@ Analyze complexity of src/api/
   ]
 }
 ```
+
+::: tip `complexityRiskLevel` is not `get_dependents`' `riskLevel`
+`complexityRiskLevel` is this file's OWN complexity severity, boosted (never
+downgraded) by its dependent count/complexity — there's no test-coverage
+term in the formula at all. [`get_dependents`](#get_dependents)'s (and `lien
+annotate`'s, and `lien api-delta`'s) `riskLevel` is a different metric —
+blast-radius risk, which weighs dependents' test coverage and applies a
+complexity floor instead. The two can disagree for the same file at the
+same moment by design; don't assume they should match.
+:::
 
 ### Metric Types
 

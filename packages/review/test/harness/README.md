@@ -184,13 +184,16 @@ these can never be swept into a paid `--calibrate` run by accident.
 
 Use this shape when you want a baseline for the dependency-resolution
 tiers themselves (which callers a seed symbol resolves to), not for what
-the agent says about them — e.g. measuring a resolution refactor's
-before/after impact on a language the precise (JS/TS-only) tier can't
-reach.
+the agent says about them — e.g. measuring a resolution-strategy change's
+before/after impact on a language whose call sites don't look like a plain
+JS/TS import (PHP's constructor-injected-property calls, Python module
+imports, Rust `use`/`mod`).
 
 | Fixture | PR | Seed | What it pins |
 |---|---|---|---|
-| `blast-radius/pr981-python-check-required-fields` | #981 | `check_required_fields` (Python, `lien-review-testbed/`) | 3 direct dependents resolved via the cross-package symbol-match fallback (`addCrossPackageEdges`) — hand-verified correct for this import shape (`from module import name`); says nothing about the OOP-method or same-namespace fallback strategies |
+| `blast-radius/pr981-python-check-required-fields` | #981 | `check_required_fields` (Python, `lien-review-testbed/`) | 3 direct dependents, all resolved at the TOP of the strategy ladder in `resolveCallSiteEdges` (same-file once, `import-verified` twice) — hand-verified correct for Python's `from module import name` shape; none of the fallback tiers (cross-package symbol-match, OOP-method, same-namespace) fire here, so this fixture says nothing about them |
+| `blast-radius/pr1003-php-pricingservice-guard` | #1003 | `PricingService` (PHP, `lien-review-testbed/`) | 2 direct dependents recovered via the import-only fallback (`buildImportOnlyEdges`, `provenance: 'import-only'`) — PHP's constructor-injected-property call shape (`$this->pricingService->method()`) never produces a literal `PricingService` call site, so this was 0 dependents pre-#994-Phase-5; 2 more same-namespace-only references remain a documented, not-yet-recovered gap |
+| `blast-radius/pr1003-rust-config-guard` | #1003 | `Config` (Rust, `lien-review-testbed/`) | Known-gap baseline, 1 of 5 hand-verified real dependents recovered: `main.rs` (via the require-only fallback recovering its `mod config;` declaration, `provenance: 'require-only'`); the other 4 (`use crate::config::Config;` sites) remain capped by `matchesAtBoundaryPrecise`'s `maxLeadingSegments` limit — a testbed-directory-depth artifact, not a real-world Rust concern |
 
 Regenerate:
 
@@ -198,12 +201,22 @@ Regenerate:
 npx tsx packages/review/test/harness/capture-pr.ts 981 \
   packages/review/test/harness/fixtures/blast-radius/pr981-python-check-required-fields.fixture.json \
   --sha 51c32d23f08a84ab195bc85d6f366594229f96aa
+
+npx tsx packages/review/test/harness/capture-pr.ts 1003 \
+  packages/review/test/harness/fixtures/blast-radius/pr1003-php-pricingservice-guard.fixture.json \
+  --sha 77820895632948747e1a95e2388549c8f5555616
+
+npx tsx packages/review/test/harness/capture-pr.ts 1003 \
+  packages/review/test/harness/fixtures/blast-radius/pr1003-rust-config-guard.fixture.json \
+  --sha 77820895632948747e1a95e2388549c8f5555616
 ```
 
-Run the check:
+Run the checks:
 
 ```bash
 npx tsx packages/review/test/harness/fixtures/blast-radius/pr981-python-check-required-fields.blast-radius.ts
+npx tsx packages/review/test/harness/fixtures/blast-radius/pr1003-php-pricingservice-guard.blast-radius.ts
+npx tsx packages/review/test/harness/fixtures/blast-radius/pr1003-rust-config-guard.blast-radius.ts
 ```
 
 ## Documented-miss fixtures (real bugs, not yet reliably caught)

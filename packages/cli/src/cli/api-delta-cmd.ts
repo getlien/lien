@@ -7,9 +7,7 @@
  */
 
 import chalk from 'chalk';
-import fs from 'node:fs/promises';
-import path from 'node:path';
-import { createVectorDB, getIndexDir } from '@liendev/core';
+import { createVectorDB } from '@liendev/core';
 import { computeBlastRadiusRisk, type FileContentChange } from '@liendev/parser';
 import { getRepoRoot, collectFileChanges, collectFileChange } from './delta-git.js';
 import {
@@ -23,6 +21,7 @@ import {
 } from '../utils/signature-delta.js';
 import { recordBlastEvent, type BlastEvent } from '../utils/blast-events.js';
 import { findDocReferences } from '../utils/doc-references.js';
+import { hasStructuralIndex } from '../utils/index-freshness.js';
 
 export interface ApiDeltaOptions {
   format: 'text' | 'json';
@@ -103,16 +102,6 @@ function computeRisk(analysis: DependencyAnalysisResult): string {
     hasHighComplexityUncovered,
     complexityRiskBoost: complexityMetrics.complexityRiskBoost,
   }).level;
-}
-
-/** Cheap existence check — avoids `createVectorDB().initialize()`'s side effect of creating an empty structural.db where none exists yet. */
-async function hasStructuralIndex(rootDir: string): Promise<boolean> {
-  try {
-    await fs.access(path.join(getIndexDir(rootDir), 'structural.db'));
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 /**

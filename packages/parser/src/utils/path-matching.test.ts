@@ -9,6 +9,7 @@ import {
   importMatchesTarget,
   hasSingleFileImportSemantics,
   hasPythonModuleSemantics,
+  hasNamespaceMatchingSemantics,
 } from './path-matching.js';
 import { markRustModSpecifier } from './rust-mod-marker.js';
 
@@ -206,6 +207,43 @@ describe('matchesFile - Path Boundary Checking', () => {
     it('should NOT apply PHP matching to non-namespace imports', () => {
       // Regular file paths should not use PHP namespace matching
       expect(testMatchesFile('src/models/user', 'src/models/product')).toBe(false);
+    });
+
+    describe('allowNamespaceMatching gate (#1028)', () => {
+      // Real dtolnay/anyhow repro: a Rust bare `use crate::{Error, StdError}`
+      // (first-wins) extracts to the bare specifier "Error", which
+      // case-insensitively self-matches src/error.rs purely via Strategy 4's
+      // bare-import <=2-target-component leniency (added by #883 for an
+      // unrelated Swift fix) -- unrelated to PHP namespace semantics.
+      it("matchesFile alone stays permissive by default (this function stays language-agnostic, mirroring #929's own precedent)", () => {
+        expect(testMatchesFile('Error', 'src/error')).toBe(true);
+      });
+
+      it('allowNamespaceMatching=false disables Strategy 4 entirely, closing the Rust false-positive', () => {
+        expect(matchesFile(normalize('Error'), normalize('src/error'), false, true, false)).toBe(
+          false,
+        );
+      });
+
+      it('allowNamespaceMatching=false does not disturb Strategies 1-3 (a real, case-matching relationship still resolves)', () => {
+        // src/auth.rs's own basename-matching convention (Strategy 2) is
+        // untouched by this gate.
+        expect(matchesFile(normalize('auth'), normalize('src/auth.rs'), false, true, false)).toBe(
+          true,
+        );
+      });
+
+      it('allowNamespaceMatching=true (the default) preserves every existing PHP namespace assertion above', () => {
+        expect(
+          matchesFile(
+            normalize('App\\Models\\User'),
+            normalize('app/Models/User.php'),
+            false,
+            true,
+            true,
+          ),
+        ).toBe(true);
+      });
     });
   });
 
@@ -822,6 +860,50 @@ describe('importMatchesTarget (#886)', () => {
       ).toBe(true);
     });
   });
+
+  describe('#1028 PHP-namespace guard (Rust false-positive exclusion)', () => {
+    // Real dtolnay/anyhow repro at the exact primitive `findDependentChunks`'s
+    // fuzzy loop calls per (chunk, rawSpecifier) entry -- see `matchesFile`'s
+    // doc comment for the full mechanism.
+    it('closes the self-edge shape: a Rust file whose bare `use crate::{Self}` re-export case-insensitively matches its own basename', () => {
+      expect(
+        importMatchesTarget('Error', 'src/error.rs', normalize('src/error.rs'), normalize),
+      ).toBe(false);
+      expect(
+        importMatchesTarget('Context', 'src/context.rs', normalize('src/context.rs'), normalize),
+      ).toBe(false);
+      expect(
+        importMatchesTarget('Chain', 'src/chain.rs', normalize('src/chain.rs'), normalize),
+      ).toBe(false);
+    });
+
+    it('closes the different-files false-positive shape: a bare specifier must not match an unrelated file sharing its basename case-insensitively', () => {
+      // "CONFIG" (e.g. a re-exported constant) must not fabricate an edge to
+      // src/config.rs just because they coincide case-insensitively within
+      // Strategy 4's <=2-target-component window -- Strategy 2's equivalent
+      // leniency is case-SENSITIVE and never produces this false positive.
+      expect(
+        importMatchesTarget('CONFIG', 'src/lib.rs', normalize('src/config.rs'), normalize),
+      ).toBe(false);
+    });
+
+    it('leaves Strategies 1-3 fully intact for a Rust importer (the legitimate case-matching relationship still resolves)', () => {
+      expect(
+        importMatchesTarget('auth', 'src/consumer.rs', normalize('src/auth.rs'), normalize),
+      ).toBe(true);
+    });
+
+    it("PHP's own namespace matching is untouched (the language this guard stays permissive for)", () => {
+      expect(
+        importMatchesTarget(
+          'App\\Models\\User',
+          'Controller.php',
+          normalize('app/Models/User.php'),
+          normalize,
+        ),
+      ).toBe(true);
+    });
+  });
 });
 
 describe('hasPythonModuleSemantics (#929)', () => {
@@ -849,6 +931,24 @@ describe('hasSingleFileImportSemantics (#887)', () => {
 
   it('is false for an importer file in an unrecognized/undetectable language', () => {
     expect(hasSingleFileImportSemantics('README.md')).toBe(false);
+  });
+});
+
+describe('hasNamespaceMatchingSemantics (#1028)', () => {
+  it('is true for a PHP importer file', () => {
+    expect(hasNamespaceMatchingSemantics('app/Http/Controllers/UserController.php')).toBe(true);
+  });
+
+  it('is false for a Rust importer file (the dtolnay/anyhow false-positive this excludes)', () => {
+    expect(hasNamespaceMatchingSemantics('src/error.rs')).toBe(false);
+  });
+
+  it('is false for a Go importer file (the chi middleware/middleware.go false-positive this excludes)', () => {
+    expect(hasNamespaceMatchingSemantics('render/html.go')).toBe(false);
+  });
+
+  it('is false for an importer file in an unrecognized/undetectable language', () => {
+    expect(hasNamespaceMatchingSemantics('README.md')).toBe(false);
   });
 });
 

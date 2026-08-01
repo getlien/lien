@@ -28,8 +28,12 @@ const NON_SUBSTITUTION_NOTE =
   "this PR's change; Complexity = a static metric, not a correctness check. " +
   'This table does not substitute for get_files_context / read_file on a ' +
   'dependent when you need to confirm the change is actually handled there. ' +
-  'Confidence: verified = a real import/call-site edge; inferred = a ' +
-  'name-matched, same-namespace, or text-matched guess — weight it lower.';
+  'Confidence: verified = same-file, or a guarded import that resolves to ' +
+  'this specific symbol (whether or not a call site literally names it — ' +
+  "e.g. PHP's `new Order()` still counts); inferred = the file-symbol link " +
+  'relies on a name/namespace convention instead of a resolved import ' +
+  '(includes a resolved import of the FILE with no symbol-level match at ' +
+  'all, e.g. Ruby `require`) — weight it lower.';
 
 /**
  * Render a blast-radius report as markdown wrapped in a `<blast_radius>` XML tag.
