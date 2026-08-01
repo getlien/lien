@@ -169,4 +169,33 @@ export interface LanguageDefinition {
    * convention has been verified against real code.
    */
   samePackageTestConvention?: boolean;
+
+  /**
+   * True when this language has a same-unit (package/namespace/module)
+   * access shape that lets a real caller reach this language's exports with
+   * NO import statement at all, for a reason not already covered by
+   * `enclosingNamespaceAccess`, `samePackageTestConvention`, or
+   * `wholeModuleImports` above (#1005's Mechanism 2).
+   *
+   * Kotlin confirmed: JVM same-package visibility is the same underlying
+   * fact `samePackageTestConvention` documents for Java (Klaxon's 104 files
+   * sit in one package and reference each other with zero `import`
+   * statements). Rather than setting `samePackageTestConvention` on Kotlin
+   * too, this is a SEPARATE flag: that one is deliberately scoped by its own
+   * doc comment to TEST association specifically (`java-same-package-tests.ts`'s
+   * package-relative-path recovery, verified against Java's Maven/Gradle
+   * Standard Directory Layout, #925) — no equivalent recovery mechanism has
+   * been verified for Kotlin's own Gradle conventions, so setting that flag
+   * for Kotlin would imply a real recovery this codebase doesn't have.
+   * `sameUnitAccessWithoutImport` exists purely so
+   * `hasDependentAttributionBlindSpot` (registry.ts) can give Kotlin the
+   * same GENERAL `get_dependents` honesty caveat C#/Java/Swift already get
+   * (#1005's Mechanism 2 fix is scoped to the caveat only, not real
+   * resolution) without implying a recovery mechanism exists.
+   *
+   * Absent/false (the default for every language except Kotlin) means this
+   * flag contributes nothing; only set it where the same-unit-without-import
+   * shape has been verified against real code.
+   */
+  sameUnitAccessWithoutImport?: boolean;
 }

@@ -180,6 +180,50 @@ export function hasSamePackageTestConvention(language: SupportedLanguage): boole
 }
 
 /**
+ * True when `language` has a known reason the import graph structurally
+ * cannot see every real usage within the current compilation/scoping unit —
+ * i.e. a real caller can reach `language`'s exports from the SAME package,
+ * namespace, or module with NO per-file import statement naming them at all
+ * (#1005's Mechanism 2). Used by `get_dependents`'s `dependentAttributionIncomplete`
+ * honesty caveat (see `dependency-analyzer.ts`'s `checkDependentAttributionIncomplete`)
+ * to decide whether a zero-dependent FILE-LEVEL answer needs hedging.
+ *
+ * Composed from three existing, narrower capability flags plus one
+ * Kotlin-only flag, rather than a fourth wholesale reinterpretation of any of
+ * them — each already documents this exact same underlying language fact for
+ * its own original, narrower purpose (see each flag's own doc comment):
+ *   - `enclosingNamespaceAccess` (C#'s nested-namespace access, #930/#936).
+ *   - `samePackageTestConvention` (Java's same-package access — previously
+ *     consulted for TEST association only, #925; the underlying fact "this
+ *     package needs no import to see it" is exactly the same gap for
+ *     `get_dependents`'s general file-level answer, not something specific
+ *     to tests).
+ *   - `wholeModuleImports` (Swift's whole-module access, #869/#884).
+ *   - `sameUnitAccessWithoutImport` (Kotlin — no existing flag to reuse; see
+ *     that flag's own doc comment for why).
+ *
+ * Deliberately EXCLUDES `sameDirectoryTestConvention` (Go): Go's
+ * same-directory test convention already recovers a REAL association
+ * (`go-same-directory-tests.ts`), not just an honesty label, and Go was not
+ * part of #1005's measured 100%-orphan set — folding it in here would
+ * demote an already-working recovery path down to a mere caveat.
+ *
+ * Does not change what any of the underlying flags mean, and no other code
+ * should read a `true` result here as "this language has C#-style namespace
+ * scoping" or any other single mechanism — it is deliberately the widest,
+ * least specific of the four flags it composes.
+ */
+export function hasDependentAttributionBlindSpot(language: SupportedLanguage): boolean {
+  const def = getLanguage(language);
+  return (
+    def.enclosingNamespaceAccess === true ||
+    def.samePackageTestConvention === true ||
+    def.wholeModuleImports === true ||
+    def.sameUnitAccessWithoutImport === true
+  );
+}
+
+/**
  * Get all registered language definitions.
  */
 export function getAllLanguages(): readonly LanguageDefinition[] {

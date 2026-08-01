@@ -76,6 +76,7 @@ export {
   hasEnclosingNamespaceAccess,
   hasSameDirectoryTestConvention,
   hasSamePackageTestConvention,
+  hasDependentAttributionBlindSpot,
 } from './ast/languages/registry.js';
 
 // =============================================================================

@@ -65,6 +65,7 @@ describe('handleGetDependents', () => {
       uncoveredProductionDependents?: number;
       symbolAttributionDegraded?: boolean;
       symbolFoundInFile?: boolean;
+      typeSymbolAttributionIncomplete?: boolean;
       dependentAttributionIncomplete?: boolean;
       dependentAttributionPartial?: boolean;
       targetIndexed?: boolean;
@@ -94,6 +95,7 @@ describe('handleGetDependents', () => {
       uncoveredProductionDependents: overrides.uncoveredProductionDependents ?? 0,
       symbolAttributionDegraded: overrides.symbolAttributionDegraded,
       symbolFoundInFile: overrides.symbolFoundInFile,
+      typeSymbolAttributionIncomplete: overrides.typeSymbolAttributionIncomplete,
       dependentAttributionIncomplete: overrides.dependentAttributionIncomplete,
       dependentAttributionPartial: overrides.dependentAttributionPartial,
       targetIndexed: overrides.targetIndexed ?? true,
@@ -708,6 +710,49 @@ describe('handleGetDependents', () => {
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.attributionCaveat).toBeUndefined();
+    });
+  });
+
+  describe('attributionCaveat: type-symbol-attribution-incomplete (class/struct/interface/enum usage floor, #1015)', () => {
+    it('surfaces attributionCaveat for a type-shaped symbol query even though dependents were found', async () => {
+      vi.mocked(findDependents).mockResolvedValue({
+        ...createMockAnalysis({
+          dependents: [{ filepath: 'src/api/users.ts', isTestFile: false }],
+          typeSymbolAttributionIncomplete: true,
+        }),
+        totalUsageCount: 0,
+      });
+
+      const result = await handleGetDependents(
+        { filepath: 'src/types.ts', symbol: 'User' },
+        mockCtx,
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.attributionCaveat.reason).toBe('type-symbol-attribution-incomplete');
+      expect(parsed.attributionCaveat.note).toContain('User');
+      expect(parsed.attributionCaveat.note).toContain('class/struct/interface/enum declaration');
+      expect(parsed.attributionCaveat.note).toContain('not a verified total');
+      expect(parsed.dependentCount).toBe(1);
+      expect(parsed.totalUsageCount).toBe(0);
+    });
+
+    it('omits attributionCaveat for a normal function symbol query with real usages (e.g. PHP formatPrice)', async () => {
+      vi.mocked(findDependents).mockResolvedValue({
+        ...createMockAnalysis({
+          dependents: [{ filepath: 'src/ProductController.php', isTestFile: false }],
+        }),
+        totalUsageCount: 5,
+      });
+
+      const result = await handleGetDependents(
+        { filepath: 'src/PricingService.php', symbol: 'formatPrice' },
+        mockCtx,
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.attributionCaveat).toBeUndefined();
+      expect(parsed.totalUsageCount).toBe(5);
     });
   });
 

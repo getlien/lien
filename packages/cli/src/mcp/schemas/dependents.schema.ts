@@ -39,9 +39,12 @@ export const GetDependentsSchema = z.object({
         'When provided, returns call sites instead of just importing files.\n\n' +
         "Example: 'validateEmail' to find where validateEmail() is called.\n\n" +
         "Response includes 'usages' array showing which functions call this symbol.\n\n" +
-        "Also accepts a method or constructor name (e.g. '__construct', 'moveUp'). When " +
-        "provided, the response sets attributionCaveat.reason: 'symbol-attribution-degraded' " +
-        `if ${ATTRIBUTION_CAVEAT_REASON_TEXT['symbol-attribution-degraded']} Check for ` +
+        "Also accepts a method or constructor name (e.g. '__construct', 'moveUp'), or a " +
+        'class/struct/interface/enum name. When provided, the response may set ' +
+        "attributionCaveat.reason: 'symbol-attribution-degraded' if " +
+        `${ATTRIBUTION_CAVEAT_REASON_TEXT['symbol-attribution-degraded']} or ` +
+        "'type-symbol-attribution-incomplete' if " +
+        `${ATTRIBUTION_CAVEAT_REASON_TEXT['type-symbol-attribution-incomplete']} Check for ` +
         'attributionCaveat before trusting a low count.',
     ),
 

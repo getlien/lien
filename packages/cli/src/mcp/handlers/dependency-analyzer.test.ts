@@ -544,6 +544,126 @@ describe('findDependents', () => {
     });
   });
 
+  describe('typeSymbolAttributionIncomplete (#1015: class/struct/interface/enum usage floor)', () => {
+    it('flags a TS interface symbol query even though real dependents were found (0 usages, ground-truth nonzero)', async () => {
+      // Nothing "calls" an interface the way a function call does -- the
+      // dependent file genuinely imports User, but no call site can ever
+      // name it.
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/types.ts', {
+          exports: ['User'],
+          symbolName: 'User',
+          symbolType: 'interface',
+        }),
+        createChunk('src/api/users.ts', {
+          imports: ['src/types.ts'],
+          importedSymbols: { 'src/types': ['User'] },
+          symbolName: 'getUser',
+        }),
+      ]);
+
+      const result = await findDependents(mockDB as any, 'src/types.ts', mockLog, 'User');
+
+      expect(result.dependents).toHaveLength(1);
+      expect(result.totalUsageCount).toBe(0);
+      expect(result.typeSymbolAttributionIncomplete).toBe(true);
+      expect(result.symbolAttributionDegraded).toBeUndefined();
+      expect(mockLog).toHaveBeenCalledWith(
+        expect.stringContaining('class/struct/interface/enum declaration'),
+      );
+    });
+
+    it('flags a PHP class symbol query (constructor-injected, never "new"-called -- #1015 PricingService shape)', async () => {
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('app/Services/PricingService.php', {
+          exports: ['PricingService'],
+          symbolName: 'PricingService',
+          symbolType: 'class',
+        }),
+        createChunk('app/Http/Controllers/ProductController.php', {
+          imports: ['App\\Services\\PricingService'],
+          importedSymbols: { 'App\\Services\\PricingService': ['PricingService'] },
+          symbolName: 'formatTotal',
+          // Calls a METHOD on the injected instance -- never "PricingService" itself.
+          callSites: [{ symbol: 'formatPrice', line: 10 }],
+        }),
+      ]);
+
+      const result = await findDependents(
+        mockDB as any,
+        'app/Services/PricingService.php',
+        mockLog,
+        'PricingService',
+      );
+
+      expect(result.dependents).toHaveLength(1);
+      expect(result.totalUsageCount).toBe(0);
+      expect(result.typeSymbolAttributionIncomplete).toBe(true);
+    });
+
+    it('flags a Rust struct symbol query even with ZERO dependents (the floor applies regardless of dependents.length)', async () => {
+      // Structs collapse into symbolType 'class' -- see
+      // `isTypeDeclarationSymbol`'s doc comment. `Config` IS a top-level
+      // export, so the pre-#1015 code path never degraded here at all and
+      // silently reported a bare, uncaveated zero.
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/config.rs', {
+          exports: ['Config'],
+          symbolName: 'Config',
+          symbolType: 'class',
+        }),
+      ]);
+
+      const result = await findDependents(mockDB as any, 'src/config.rs', mockLog, 'Config');
+
+      expect(result.dependents).toHaveLength(0);
+      expect(result.typeSymbolAttributionIncomplete).toBe(true);
+    });
+
+    it('does NOT flag a function symbol with real, exact call-site usages (PHP formatPrice reference case, #1015)', async () => {
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('app/Services/PricingService.php', {
+          exports: ['formatPrice'],
+          symbolName: 'formatPrice',
+          symbolType: 'method',
+        }),
+        createChunk('app/Http/Controllers/ProductController.php', {
+          imports: ['App\\Services\\PricingService'],
+          importedSymbols: { 'App\\Services\\PricingService': ['formatPrice'] },
+          callSites: [{ symbol: 'formatPrice', line: 31 }],
+          symbolName: 'show',
+        }),
+      ]);
+
+      const result = await findDependents(
+        mockDB as any,
+        'app/Services/PricingService.php',
+        mockLog,
+        'formatPrice',
+      );
+
+      expect(result.totalUsageCount).toBe(1);
+      expect(result.typeSymbolAttributionIncomplete).toBeUndefined();
+    });
+
+    it('does NOT flag a genuinely unused function (clean, confident 0 -- the negative case #1015 requires)', async () => {
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/utils.py', {
+          exports: ['unusedHelper'],
+          symbolName: 'unusedHelper',
+          symbolType: 'function',
+        }),
+      ]);
+
+      const result = await findDependents(mockDB as any, 'src/utils.py', mockLog, 'unusedHelper');
+
+      expect(result.dependents).toHaveLength(0);
+      expect(result.totalUsageCount).toBe(0);
+      expect(result.typeSymbolAttributionIncomplete).toBeUndefined();
+      expect(result.symbolAttributionDegraded).toBeUndefined();
+    });
+  });
+
   describe('dependentAttributionIncomplete (C# enclosing-namespace-access floor, #930)', () => {
     it('flags a file-level query with zero dependents for a C# file', async () => {
       // Once a `global using` exists for a namespace, a real C# caller needs
@@ -588,6 +708,71 @@ describe('findDependents', () => {
 
       const result = await findDependents(mockDB as any, 'Alignment.cs', mockLog, 'Alignment');
 
+      expect(result.dependentAttributionIncomplete).toBeUndefined();
+    });
+  });
+
+  describe('dependentAttributionIncomplete widening to Java/Kotlin/Swift (#1005)', () => {
+    it('flags a zero-dependent Java file (same-package access has no import statement -- JavaPoet shape)', async () => {
+      mockDB.scanAll.mockResolvedValue([createChunk('TypeName.java', { exports: ['TypeName'] })]);
+
+      const result = await findDependents(mockDB as any, 'TypeName.java', mockLog);
+
+      expect(result.dependents).toHaveLength(0);
+      expect(result.dependentAttributionIncomplete).toBe(true);
+      expect(mockLog).toHaveBeenCalledWith(
+        expect.stringContaining('import-invisible same-unit access'),
+        'warning',
+      );
+    });
+
+    it('flags a zero-dependent Kotlin file (same shape as Java, via its own dedicated flag -- Klaxon shape)', async () => {
+      mockDB.scanAll.mockResolvedValue([createChunk('TypeName.kt', { exports: ['TypeName'] })]);
+
+      const result = await findDependents(mockDB as any, 'TypeName.kt', mockLog);
+
+      expect(result.dependentAttributionIncomplete).toBe(true);
+    });
+
+    it('flags a zero-dependent Swift file (whole-module access -- SwiftyJSON shape)', async () => {
+      mockDB.scanAll.mockResolvedValue([createChunk('TypeName.swift', { exports: ['TypeName'] })]);
+
+      const result = await findDependents(mockDB as any, 'TypeName.swift', mockLog);
+
+      expect(result.dependentAttributionIncomplete).toBe(true);
+    });
+
+    it('does not flag a Java file that has real file-level dependents', async () => {
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('TypeName.java', { exports: ['TypeName'] }),
+        createChunk('Consumer.java', { imports: ['TypeName.java'] }),
+      ]);
+
+      const result = await findDependents(mockDB as any, 'TypeName.java', mockLog);
+
+      expect(result.dependents).toHaveLength(1);
+      expect(result.dependentAttributionIncomplete).toBeUndefined();
+    });
+
+    it('does NOT widen to Go, despite its own same-directory test convention (deliberate exclusion)', async () => {
+      // Go's `hasSameDirectoryTestConvention` already recovers a REAL
+      // association for test files; it must not also be swept into this
+      // wider, honesty-only caveat -- see `hasDependentAttributionBlindSpot`'s
+      // doc comment for why Go is the explicit exclusion.
+      mockDB.scanAll.mockResolvedValue([createChunk('pkg/thing.go', { exports: ['Thing'] })]);
+
+      const result = await findDependents(mockDB as any, 'pkg/thing.go', mockLog);
+
+      expect(result.dependents).toHaveLength(0);
+      expect(result.dependentAttributionIncomplete).toBeUndefined();
+    });
+
+    it('does NOT widen to Python (genuinely unused file, clean confident 0 -- the negative case #1005 requires)', async () => {
+      mockDB.scanAll.mockResolvedValue([createChunk('src/unused.py', { exports: ['Unused'] })]);
+
+      const result = await findDependents(mockDB as any, 'src/unused.py', mockLog);
+
+      expect(result.dependents).toHaveLength(0);
       expect(result.dependentAttributionIncomplete).toBeUndefined();
     });
   });

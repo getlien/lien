@@ -63,6 +63,15 @@ import {
  *   `callSite`. Without this tier the dependent would silently vanish (see
  *   the module doc on `buildImportOnlyEdges`); the caller identity attached
  *   is the file's best-effort representative chunk, not a verified call site.
+ * - `require-only`: the caller's import statement verifiably resolves to the
+ *   callee's FILE (same `importMatchesTarget` guards as `import-only`), but
+ *   the statement itself names only the FILE, never a symbol at all — Ruby's
+ *   `require`/`require_relative`/`load`/`autoload` (#1013), which never
+ *   mention a class/module name the way `use Ns\Foo;` or `import { Foo }`
+ *   do. Weaker than `import-only`: that tier at least verifies which
+ *   SPECIFIC symbol was imported (even if never called); this tier has no
+ *   symbol-level signal at all, only "this file is a real dependency of
+ *   that one" — see `buildRawImportsByFile`/`resolveRequireOnlyFallback`.
  * - `symbol-name-match`: the caller imports a same-named symbol from some
  *   non-relative (package) path, but the specific source file was never
  *   confirmed — a real edge only if the name isn't coincidentally reused
@@ -79,6 +88,7 @@ export type EdgeProvenance =
   | 'same-file'
   | 'import-verified'
   | 'import-only'
+  | 'require-only'
   | 'symbol-name-match'
   | 'oop-method-import'
   | 'namespace-inferred';
@@ -187,7 +197,7 @@ function createNormalizer(workspaceRoot: string): (p: string) => string {
  * through as `ComputeBlastRadiusOptions.workspaceRoot` (`context.repoRootDir`
  * in production); omitting it is safe when chunk paths are already relative.
  *
- * Four-pass algorithm:
+ * Five-pass algorithm:
  * 1. Build export index: which files export/declare which symbols.
  * 2. Resolve imports: for each chunk, verify which of its import specifiers
  *    resolve to a real exporting file (via parser's guarded matching).
@@ -197,6 +207,10 @@ function createNormalizer(workspaceRoot: string): (p: string) => string {
  *    verifiably import a symbol but never literally "call" it (e.g. a PHP
  *    `new Order()`), so a class/type-shaped seed doesn't silently resolve to
  *    zero dependents just because nothing invokes it by name.
+ * 5. Build the raw-imports-by-file index (#1013): the require-only fallback
+ *    for languages (Ruby) whose import statement names a FILE, never a
+ *    symbol, so passes 2-4 (all keyed on `importedSymbols`) have nothing to
+ *    match on at all — see `buildRawImportsByFile`/`resolveRequireOnlyFallback`.
  */
 export function buildDependencyGraph(chunks: CodeChunk[], workspaceRoot = ''): DependencyGraph {
   const normalize = createNormalizer(workspaceRoot);
@@ -204,7 +218,9 @@ export function buildDependencyGraph(chunks: CodeChunk[], workspaceRoot = ''): D
   const chunkImportMaps = resolveChunkImports(chunks, exportIndex, normalize);
   const callerEdges = buildCallerEdges(chunks, chunkImportMaps, exportIndex);
   const importOnlyEdges = buildImportOnlyEdges(chunkImportMaps, callerEdges, chunksByFile);
+  const rawImportsByFile = buildRawImportsByFile(chunks);
   const csharpDependentFilesCache = new Map<string, string[] | null>();
+  const requireOnlyCache = new Map<string, string[] | null>();
 
   const getCallers = (filepath: string, symbolName: string): CallerEdge[] => {
     const key = `${filepath}::${symbolName}`;
@@ -214,13 +230,23 @@ export function buildDependencyGraph(chunks: CodeChunk[], workspaceRoot = ''): D
     const importOnly = importOnlyEdges.get(key);
     if (importOnly && importOnly.length > 0) return importOnly;
 
+    const csharpFallback = resolveCSharpFallback(
+      filepath,
+      symbolName,
+      chunks,
+      chunksByFile,
+      csharpDependentFilesCache,
+    );
+    if (csharpFallback && csharpFallback.length > 0) return csharpFallback;
+
     return (
-      resolveCSharpFallback(
+      resolveRequireOnlyFallback(
         filepath,
         symbolName,
-        chunks,
+        rawImportsByFile,
         chunksByFile,
-        csharpDependentFilesCache,
+        normalize,
+        requireOnlyCache,
       ) ?? []
     );
   };
@@ -901,5 +927,106 @@ function resolveCSharpFallback(
 
   return dependentFiles.map(file =>
     buildRepresentativeEdge(file, chunksByFile, 'namespace-inferred', symbolName),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Require-only fallback (#1013) — the LAST resort, consulted only when
+// nothing else (a real call-site edge, the import-only fallback, or the C#
+// namespace fallback) found anything for a `file::symbol` key.
+//
+// Ruby's `require`/`require_relative`/`load`/`autoload` name a FILE, never a
+// symbol (`ruby.ts`'s `REQUIRE_METHODS`) — unlike PHP's `use Ns\Foo;`, which
+// names the class directly. `RubyImportExtractor.processImportSymbols` DOES
+// still populate `chunk.metadata.importedSymbols`, but keyed to a GUESSED
+// symbol name (the require path's lowercase basename, e.g.
+// `'./logger'` -> `'logger'`) that essentially never matches the file's REAL
+// declared export (Ruby convention capitalizes class/module constants, e.g.
+// `Logger`) — so `resolveChunkImports`'s `verifiedExportLocations` (keyed on
+// `exportIndex.get(sym)`) can never find it, and neither can
+// `buildImportOnlyEdges` downstream, which is exactly issue #1013's 0%
+// resolve rate.
+//
+// `chunk.metadata.imports` carries the SAME raw require path with no
+// attached (and wrong) symbol guess attached, so matching against it
+// directly — via the same guarded `importMatchesTarget` every other tier
+// uses — sidesteps the bad guess entirely and recovers a real, verified
+// FILE-level relationship. Not gated to Ruby specifically: any language's
+// plain `imports` list can carry a real edge this fallback recovers, but it
+// only ever fires after every stronger, more specific signal already came
+// back empty, so it never demotes a real call-site/import-verified edge.
+// ---------------------------------------------------------------------------
+
+/**
+ * Caller file -> its RAW (unresolved) import specifiers, from
+ * `chunk.metadata.imports` (NOT `importedSymbols` — see this section's
+ * module doc for why). Deduped per file: `imports` is duplicated onto every
+ * chunk in a file (same as `importedSymbols`, see `pickRepresentativeChunk`'s
+ * doc comment), so a multi-method class would otherwise repeat the same
+ * specifier once per chunk.
+ */
+function buildRawImportsByFile(chunks: CodeChunk[]): Map<string, string[]> {
+  const result = new Map<string, string[]>();
+  for (const chunk of chunks) {
+    const imports = chunk.metadata.imports;
+    if (!imports || imports.length === 0) continue;
+    const file = chunk.metadata.file;
+    const existing = result.get(file);
+    if (existing) {
+      for (const spec of imports) if (!existing.includes(spec)) existing.push(spec);
+    } else {
+      result.set(file, [...imports]);
+    }
+  }
+  return result;
+}
+
+/**
+ * File-level `require`/`require_relative`/`load`/`autoload` dependents of
+ * `filepath`, memoized (symbol-independent — multiple exported symbols in
+ * the same orphaned file would otherwise repeat an identical O(files) scan).
+ * `null` means "none found"; consulted only via `resolveRequireOnlyFallback`.
+ */
+function getRequireOnlyDependentFiles(
+  filepath: string,
+  rawImportsByFile: Map<string, string[]>,
+  normalize: (p: string) => string,
+  cache: Map<string, string[] | null>,
+): string[] | null {
+  const cached = cache.get(filepath);
+  if (cached !== undefined) return cached;
+
+  const normalizedTarget = normalize(filepath);
+  const found: string[] = [];
+  for (const [callerFile, specs] of rawImportsByFile) {
+    if (callerFile === filepath) continue;
+    if (specs.some(spec => importMatchesTarget(spec, callerFile, normalizedTarget, normalize))) {
+      found.push(callerFile);
+    }
+  }
+
+  const result = found.length > 0 ? found : null;
+  cache.set(filepath, result);
+  return result;
+}
+
+/**
+ * Last-resort fallback (#1013): file-level `require`-based dependents for
+ * `filepath`, tagged `'require-only'` so a consumer never mistakes this for
+ * a symbol-verified edge — see `EdgeProvenance`'s doc comment.
+ */
+function resolveRequireOnlyFallback(
+  filepath: string,
+  symbolName: string,
+  rawImportsByFile: Map<string, string[]>,
+  chunksByFile: Map<string, CodeChunk[]>,
+  normalize: (p: string) => string,
+  cache: Map<string, string[] | null>,
+): CallerEdge[] | undefined {
+  const dependentFiles = getRequireOnlyDependentFiles(filepath, rawImportsByFile, normalize, cache);
+  if (!dependentFiles) return undefined;
+
+  return dependentFiles.map(file =>
+    buildRepresentativeEdge(file, chunksByFile, 'require-only', symbolName),
   );
 }

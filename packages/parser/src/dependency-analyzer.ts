@@ -9,7 +9,11 @@ import {
   importMatchesTarget,
 } from './utils/path-matching.js';
 import { RISK_ORDER } from './insights/types.js';
-import { detectLanguage, hasEnclosingNamespaceAccess } from './ast/languages/registry.js';
+import {
+  detectLanguage,
+  hasEnclosingNamespaceAccess,
+  hasDependentAttributionBlindSpot,
+} from './ast/languages/registry.js';
 import { findCSharpTypeReferenceDependents } from './csharp-type-reference-signals.js';
 
 /**
@@ -880,17 +884,40 @@ export interface FindDependentsResult<T extends CodeChunk = CodeChunk> {
    */
   symbolFoundInFile?: boolean;
   /**
+   * True for a SYMBOL-level query (`symbol` requested) where `symbol`
+   * resolves to a real class/struct/interface/enum declaration in
+   * `filepath` -- #1015. Distinct from (and mutually exclusive with)
+   * `symbolAttributionDegraded`: that one fires when `symbol` is NOT a
+   * top-level export at all (the shape of a method/constructor/typo, #931);
+   * this one fires when `symbol` VERY MUCH IS a top-level export, just one
+   * whose kind (a type) call-site tracking structurally cannot see through.
+   * Nothing "calls" a type by its own name the way a function call does --
+   * constructor calls, type hints, `extends`/`implements` clauses, generic
+   * type arguments, and dependency-injected property access don't reliably
+   * surface as a tracked `callSite` -- so `totalUsageCount`/`dependents[].usages`
+   * are a partial, best-effort floor here (often `0` even when real usages
+   * exist), never a verified total, unlike a function/method symbol query
+   * where `totalUsageCount` IS call-site-verified (see #1015's PHP
+   * `formatPrice` reference case). `dependents`/`dependentCount` (which
+   * files import the symbol) stay reliable either way -- only the
+   * per-symbol usage count is in question. See `isTypeDeclarationSymbol`.
+   */
+  typeSymbolAttributionIncomplete?: boolean;
+  /**
    * True for a FILE-level query (no `symbol` requested) that came back with
-   * zero dependents for a language where `hasEnclosingNamespaceAccess` is
-   * set (currently only C# -- see that flag's doc comment), EVEN AFTER
+   * zero dependents for a language where `hasDependentAttributionBlindSpot`
+   * is set (C#, Java, Kotlin, and Swift as of #1005 -- see that predicate's
+   * doc comment for why each qualifies for its own reason), EVEN AFTER
    * attempting the type-reference-matching recovery below
-   * (`dependentAttributionPartial`). Those languages let a real caller use
-   * `filepath`'s types with no per-file import statement naming it at all
-   * (C#'s `global using` / implicit enclosing-namespace member access --
-   * #930), so the import-graph scan this function runs has no signal for
-   * that usage shape. `dependentCount: 0` / `riskLevel: "low"` in this case
-   * means "neither scan found anything," not "nothing depends on this
-   * file" -- the same false-all-clear risk `symbolAttributionDegraded`
+   * (`dependentAttributionPartial`, still C#-only -- see
+   * `enrichWithCSharpTypeReferenceDependents`). Those languages let a real
+   * caller use `filepath`'s exports with no per-file import statement naming
+   * it at all (C#'s `global using` / implicit enclosing-namespace member
+   * access, #930; Java/Kotlin's same-package visibility; Swift's
+   * whole-module access), so the import-graph scan this function runs has
+   * no signal for that usage shape. `dependentCount: 0` / `riskLevel: "low"`
+   * in this case means "neither scan found anything," not "nothing depends
+   * on this file" -- the same false-all-clear risk `symbolAttributionDegraded`
    * guards against for symbol queries, just for the file-level answer
    * instead. Mutually exclusive with `dependentAttributionPartial`: this
    * requires the final `dependents.length` to be zero; that one requires it
@@ -1093,6 +1120,17 @@ function buildScanIndex<T extends CodeChunk>(
  * tells the caller the count is a widened floor, not a verified
  * per-symbol count) -- getting the failure mode right beats asserting a
  * precise count we can't actually back up.
+ *
+ * A second, DIFFERENT honesty gap (#1015) applies when `symbol` DOES resolve
+ * as a real top-level export but is a TYPE declaration (class/struct/
+ * interface/enum) rather than a function or method: nothing "calls" a type
+ * by its own name the way a function call does, so `findSymbolUsages`'s
+ * call-site-driven `totalUsageCount` structurally can't see constructor
+ * calls, type hints, `extends`/`implements` clauses, generic type arguments,
+ * or DI-injected property access -- regardless of whether that count comes
+ * back `0` or some small positive number, it is a floor, not a verified
+ * total. See `isTypeDeclarationSymbol` and `typeSymbolAttributionIncomplete`'s
+ * doc comment on `FindDependentsResult`.
  */
 function buildDependentsList<T extends CodeChunk>(
   chunksByFile: Map<string, T[]>,
@@ -1108,6 +1146,7 @@ function buildDependentsList<T extends CodeChunk>(
   totalUsageCount?: number;
   symbolAttributionDegraded?: boolean;
   symbolFoundInFile?: boolean;
+  typeSymbolAttributionIncomplete?: boolean;
 } {
   if (symbol) {
     const exportsSymbol = validateSymbolExport(targetFileChunks, symbol, filepath, log);
@@ -1137,6 +1176,17 @@ function buildDependentsList<T extends CodeChunk>(
         symbolAttributionDegraded: true,
         symbolFoundInFile: foundInFile,
       };
+    }
+
+    if (isTypeDeclarationSymbol(targetFileChunks, symbol)) {
+      log(
+        `Note: "${symbol}" is a class/struct/interface/enum declaration in ${filepath} — ` +
+          `usage attribution for types is call-site-driven and structurally can't see ` +
+          `constructor calls, type hints, extends/implements clauses, generic type ` +
+          `arguments, or DI-injected property access, so totalUsageCount here is a ` +
+          `partial, best-effort floor, not a verified total (#1015).`,
+      );
+      return { ...symbolResult, typeSymbolAttributionIncomplete: true };
     }
 
     return symbolResult;
@@ -1218,6 +1268,133 @@ function symbolFoundInFileChunks<T extends CodeChunk>(
       symbols.interfaces.includes(symbol)
     );
   });
+}
+
+function escapeForTypeDeclarationRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Type-declaration keywords whose header line names the type BEFORE the
+ * symbol -- the dominant shape across every supported language except Go
+ * (`class Foo`, `pub struct Foo`, `public interface Foo`, `data class Foo`,
+ * `protocol Foo`). Deliberately excludes TypeScript's `type X = ...` alias:
+ * no language's `symbolType` has a distinct kind for it either (`ast/types.ts`'s
+ * `SymbolInfo.type` caps out at `'function'|'method'|'class'|'interface'`),
+ * and bare `type` is too common a token elsewhere (variable/parameter names,
+ * generic bounds) to scan for safely.
+ */
+const TYPE_DECLARATION_KEYWORD_RE = /\b(?:class|struct|interface|enum|trait|protocol|module)\b/;
+
+/** A comment-only line (the common false-positive source: a doc comment prose-mentioning both a keyword and the symbol name). */
+const COMMENT_LINE_RE = /^\s*(?:\/\/|\/\*|\*|#)/;
+
+/** Go's `type Foo struct` / `type Foo interface` -- the one dominant shape where the keyword follows the name instead of preceding it. */
+function isGoTypeDeclarationLine(line: string, symbolNameRe: RegExp): boolean {
+  return /\btype\s+/.test(line) && symbolNameRe.test(line) && /\b(?:struct|interface)\b/.test(line);
+}
+
+/**
+ * The "header" portion of a raw source line usable as declaration evidence,
+ * or `undefined` when the line is disqualified entirely -- a comment (the
+ * common false-positive source: a doc comment prose-mentioning both a
+ * keyword and the symbol name) or containing a quote character (a string
+ * literal/log message that happens to mention both words, e.g.
+ * `log.debug("struct Error created")`). Truncated at the first `{`/`;` so a
+ * multi-statement line's LATER, unrelated statement can't smuggle in a
+ * keyword or name match.
+ */
+function declarationHeader(rawLine: string): string | undefined {
+  if (COMMENT_LINE_RE.test(rawLine) || rawLine.includes('"') || rawLine.includes("'")) {
+    return undefined;
+  }
+  return rawLine.split('{')[0].split(';')[0];
+}
+
+/** True iff `header` itself declares a type named per `nameRe` -- keyword-then-name, or Go's name-then-keyword. */
+function headerDeclaresType(header: string, nameRe: RegExp): boolean {
+  if (!nameRe.test(header)) return false;
+  const nameIndex = header.search(nameRe);
+  const keywordMatch = TYPE_DECLARATION_KEYWORD_RE.exec(header);
+  if (keywordMatch && keywordMatch.index < nameIndex) return true;
+  return isGoTypeDeclarationLine(header, nameRe);
+}
+
+/**
+ * Text-based fallback for `isTypeDeclarationSymbol` (#1015): true iff some
+ * line of `targetFileChunks`' own raw content declares `symbol` as a
+ * class/struct/interface/enum/trait/protocol/module, keyword-then-name (or
+ * Go's name-then-keyword), BEFORE the first `{`/`;` on that line (the
+ * "header" portion, see `declarationHeader`) and with no quote character on
+ * the line (kills the dominant false-positive source: a string literal or
+ * log message that happens to mention both words, e.g.
+ * `log.debug("struct Error created")`).
+ *
+ * Needed because a plain data-only type with no inline methods (e.g. Rust's
+ * `pub struct Error { inner: ErrorImpl }` in a real anyhow/anyhow clone)
+ * never gets its own chunk with a matching `symbolName`/`symbolType` --
+ * the chunker only creates a dedicated chunk for a symbol with its own
+ * extractable body (see `chunker.ts`), so a bare struct with no methods
+ * falls into a surrounding "uncovered"/block chunk that carries no
+ * per-symbol metadata at all, even though the file's own `exports` list
+ * (duplicated onto every chunk) still names it -- confirmed empirically
+ * against a real `dtolnay/anyhow` clone: `Error` (declared in `src/lib.rs`)
+ * has zero chunks with `symbolName === 'Error'` at all.
+ *
+ * Scoped to the DECLARING FILE'S OWN text, never a corpus-wide scan --
+ * unlike C#'s `findCSharpTypeReferenceDependents` (a real cross-file
+ * resolution mechanism, explicitly out of scope for #1015's honesty-only
+ * fix), this only asks "does this file's own source declare a type by this
+ * name", which needs none of that mechanism's cross-file fabrication-risk
+ * guards. Callers must already have confirmed `symbol` is a genuine
+ * top-level export (`validateSymbolExport`) before consulting this --
+ * scanning raw text for an unconfirmed name would risk matching an
+ * unrelated local variable/parameter that merely shares a same-line keyword
+ * by coincidence.
+ */
+function isTypeDeclarationLine<T extends CodeChunk>(
+  targetFileChunks: T[],
+  symbol: string,
+): boolean {
+  const nameRe = new RegExp(`\\b${escapeForTypeDeclarationRegex(symbol)}\\b`);
+  return targetFileChunks.some(chunk =>
+    chunk.content.split('\n').some(rawLine => {
+      const header = declarationHeader(rawLine);
+      return header !== undefined && headerDeclaresType(header, nameRe);
+    }),
+  );
+}
+
+/**
+ * True iff `symbol` is a class/struct/interface/enum/record declaration in
+ * `targetFileChunks`. Two tiers, cheapest first:
+ * 1. Some chunk's own `symbolName` equals `symbol` and that chunk's
+ *    `symbolType` is `'class'` or `'interface'` -- every language extractor
+ *    collapses struct/enum/record declarations into these same two
+ *    `SymbolInfo.type` values (see `ast/types.ts`'s doc comment on
+ *    `SymbolInfo`, and `csharp-type-reference-signals.ts`'s
+ *    `isCandidateCSharpTypeDeclarationChunk` for the same fact verified
+ *    empirically against C#) -- so this check is language-agnostic across
+ *    every AST-supported language, not just C#, and needs no text scanning.
+ * 2. `isTypeDeclarationLine`: a text-based fallback for when tier 1 misses
+ *    because the type never got its own chunk at all (a plain data-only
+ *    struct with no inline methods -- see that function's doc comment).
+ *
+ * Used by `buildDependentsList` to recognize the #1015 shape:
+ * `typeSymbolAttributionIncomplete`'s doc comment on `FindDependentsResult`
+ * explains why a type-shaped symbol query needs its own honesty caveat
+ * distinct from `symbolAttributionDegraded`.
+ */
+function isTypeDeclarationSymbol<T extends CodeChunk>(
+  targetFileChunks: T[],
+  symbol: string,
+): boolean {
+  const hasDeclarationChunk = targetFileChunks.some(
+    chunk =>
+      chunk.metadata.symbolName === symbol &&
+      (chunk.metadata.symbolType === 'class' || chunk.metadata.symbolType === 'interface'),
+  );
+  return hasDeclarationChunk || isTypeDeclarationLine(targetFileChunks, symbol);
 }
 
 /**
@@ -1317,6 +1494,7 @@ function resolveDependents<T extends CodeChunk>(args: {
   totalUsageCount?: number;
   symbolAttributionDegraded?: boolean;
   symbolFoundInFile?: boolean;
+  typeSymbolAttributionIncomplete?: boolean;
   dependentAttributionPartial?: true;
 } {
   const {
@@ -1331,17 +1509,22 @@ function resolveDependents<T extends CodeChunk>(args: {
     targetIndexed,
   } = args;
 
-  const { dependents, totalUsageCount, symbolAttributionDegraded, symbolFoundInFile } =
-    buildDependentsList(
-      chunksByFile,
-      symbol,
-      normalizedTarget,
-      ctx.normalizePathCached,
-      targetFileChunks,
-      filepath,
-      ctx.log,
-      reExporterPaths,
-    );
+  const {
+    dependents,
+    totalUsageCount,
+    symbolAttributionDegraded,
+    symbolFoundInFile,
+    typeSymbolAttributionIncomplete,
+  } = buildDependentsList(
+    chunksByFile,
+    symbol,
+    normalizedTarget,
+    ctx.normalizePathCached,
+    targetFileChunks,
+    filepath,
+    ctx.log,
+    reExporterPaths,
+  );
   const dependentAttributionPartial = enrichWithCSharpTypeReferenceDependents(
     ctx,
     filepath,
@@ -1357,6 +1540,7 @@ function resolveDependents<T extends CodeChunk>(args: {
     totalUsageCount,
     symbolAttributionDegraded,
     symbolFoundInFile,
+    typeSymbolAttributionIncomplete,
     dependentAttributionPartial,
   };
 }
@@ -1435,6 +1619,7 @@ export function findDependents<T extends CodeChunk>(
     totalUsageCount,
     symbolAttributionDegraded,
     symbolFoundInFile,
+    typeSymbolAttributionIncomplete,
     dependentAttributionPartial,
   } = resolveDependents({
     ctx,
@@ -1492,6 +1677,7 @@ export function findDependents<T extends CodeChunk>(
     uncoveredProductionDependents,
     symbolAttributionDegraded,
     symbolFoundInFile,
+    typeSymbolAttributionIncomplete,
     dependentAttributionIncomplete,
     dependentAttributionPartial,
     targetIndexed,
@@ -1581,10 +1767,18 @@ function enrichWithCSharpTypeReferenceDependents<T extends CodeChunk>(
  * Logs a warning when it fires, matching the logging `buildDependentsList`
  * already does for its own degradation case.
  *
+ * Gated by `hasDependentAttributionBlindSpot` (#1005's Mechanism 2), not
+ * `hasEnclosingNamespaceAccess` directly -- C# is one of four languages this
+ * now covers (Java/Kotlin/Swift too), each for its own reason (same-package
+ * or whole-module access, not C#'s specific namespace-nesting rule). See
+ * that predicate's own doc comment in `ast/languages/registry.ts` for why
+ * it's a composed, wider check rather than a reuse of
+ * `hasEnclosingNamespaceAccess`'s narrower meaning.
+ *
  * Skipped when `targetIndexed` is false (#928): an unresolved target's zero
  * dependents already carries its own, more fundamental "unresolved" signal
- * (see `seedIfTargetIndexed`) -- layering the C#-specific reasoning on top
- * would produce two notes competing to explain the same zero, one of them
+ * (see `seedIfTargetIndexed`) -- layering this reasoning on top would
+ * produce two notes competing to explain the same zero, one of them
  * describing a language nuance that's moot when the file was never found
  * in the index at all.
  */
@@ -1598,12 +1792,15 @@ function checkDependentAttributionIncomplete(
   if (symbol || dependentCount !== 0 || !targetIndexed) return undefined;
 
   const targetLanguage = detectLanguage(filepath);
-  if (targetLanguage === null || !hasEnclosingNamespaceAccess(targetLanguage)) return undefined;
+  if (targetLanguage === null || !hasDependentAttributionBlindSpot(targetLanguage)) {
+    return undefined;
+  }
 
   log(
-    `No import-based dependents found for ${filepath} -- ${targetLanguage} has enclosing-` +
-      `namespace access, so this scan has no signal for a real caller that reaches it ` +
-      `without a per-file import (#930)`,
+    `No import-based dependents found for ${filepath} -- ${targetLanguage} has a known ` +
+      `import-invisible same-unit access shape (e.g. C#'s enclosing-namespace access, ` +
+      `Java/Kotlin's same-package access, or Swift's whole-module access), so this scan ` +
+      `has no signal for a real caller that reaches it without a per-file import (#930, #1005)`,
     'warning',
   );
   return true;

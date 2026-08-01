@@ -944,6 +944,200 @@ describe('buildDependencyGraph — import-only fallback', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Require-only fallback (#1013) — Ruby's `require_relative` names a FILE,
+// never a symbol, so `chunk.metadata.importedSymbols`'s GUESSED lowercase
+// basename (e.g. './logger' -> 'logger') never matches the file's REAL
+// declared export ('Logger', PascalCase by convention) -- neither the
+// call-site tier nor the import-only fallback (both keyed on
+// `importedSymbols`) can ever resolve it. This fallback matches
+// `chunk.metadata.imports` (the SAME raw path, with no symbol guess
+// attached) directly against the target file.
+// ---------------------------------------------------------------------------
+
+describe('buildDependencyGraph — require-only fallback (#1013)', () => {
+  it('recovers a Ruby dependent via require_relative when importedSymbols carries a guessed name that never matches the real export', () => {
+    const classChunk = createTestChunk({
+      content: 'class Logger\nend',
+      metadata: {
+        file: 'lib/logger.rb',
+        startLine: 1,
+        endLine: 2,
+        type: 'class',
+        symbolName: 'Logger',
+        symbolType: 'class',
+        language: 'ruby',
+        exports: ['Logger'],
+      },
+    });
+
+    // `require_relative './logger'` -- imports carries the raw path;
+    // importedSymbols carries the SAME path but keyed to the guessed
+    // lowercase basename 'logger', which never matches the real export
+    // 'Logger' in exportIndex. No call site names 'Logger' either (Ruby
+    // rarely calls a logger class by its own name).
+    const callerChunk = createTestChunk({
+      content: "require_relative './logger'\nLogger.new.info('hi')",
+      metadata: {
+        file: 'lib/app.rb',
+        startLine: 1,
+        endLine: 2,
+        type: 'class',
+        symbolName: 'App',
+        symbolType: 'class',
+        language: 'ruby',
+        exports: ['App'],
+        imports: ['./logger'],
+        importedSymbols: { './logger': ['logger'] },
+      },
+    });
+
+    const graph = buildDependencyGraph([classChunk, callerChunk]);
+    const callers = graph.getCallers('lib/logger.rb', 'Logger');
+
+    expect(callers).toHaveLength(1);
+    expect(callers[0].caller.filepath).toBe('lib/app.rb');
+    expect(callers[0].caller.symbolName).toBe('App');
+    expect(callers[0].provenance).toBe('require-only');
+  });
+
+  it('does not fabricate an edge when no file requires the target at all', () => {
+    const classChunk = createTestChunk({
+      metadata: {
+        file: 'lib/logger.rb',
+        startLine: 1,
+        endLine: 2,
+        type: 'class',
+        symbolName: 'Logger',
+        symbolType: 'class',
+        language: 'ruby',
+        exports: ['Logger'],
+      },
+    });
+    const unrelatedChunk = createTestChunk({
+      metadata: {
+        file: 'lib/unrelated.rb',
+        startLine: 1,
+        endLine: 2,
+        type: 'class',
+        symbolName: 'Unrelated',
+        symbolType: 'class',
+        language: 'ruby',
+        exports: ['Unrelated'],
+      },
+    });
+
+    const graph = buildDependencyGraph([classChunk, unrelatedChunk]);
+    expect(graph.getCallers('lib/logger.rb', 'Logger')).toHaveLength(0);
+  });
+
+  it('is a LAST resort: does not override a real call-site edge for the same key', () => {
+    // Same shape as the recovery test above, but this time a real call site
+    // DOES name the symbol directly -- the ordinary import-verified tier
+    // must win, never the require-only fallback.
+    const classChunk = createTestChunk({
+      metadata: {
+        file: 'lib/logger.rb',
+        startLine: 1,
+        endLine: 2,
+        type: 'class',
+        symbolName: 'Logger',
+        symbolType: 'class',
+        language: 'ruby',
+        exports: ['Logger'],
+      },
+    });
+    const callerChunk = createTestChunk({
+      content: "require_relative './logger'\nLogger()",
+      metadata: {
+        file: 'lib/app.rb',
+        startLine: 1,
+        endLine: 2,
+        type: 'class',
+        symbolName: 'App',
+        symbolType: 'class',
+        language: 'ruby',
+        exports: ['App'],
+        imports: ['./logger'],
+        importedSymbols: { './logger': ['Logger'] },
+        callSites: [{ symbol: 'Logger', line: 2 }],
+      },
+    });
+
+    const graph = buildDependencyGraph([classChunk, callerChunk]);
+    const callers = graph.getCallers('lib/logger.rb', 'Logger');
+
+    expect(callers).toHaveLength(1);
+    expect(callers[0].provenance).toBe('import-verified');
+  });
+
+  it('continues a transitive walk through TWO require-only edges (cross-directory, so the same-directory namespace fallback cannot accidentally cover for it)', () => {
+    // Each pair of files lives in a DIFFERENT directory specifically so
+    // `addSameNamespaceEdges`'s same-directory fallback (tier 3c) cannot
+    // accidentally resolve the edge instead -- the only path available at
+    // either hop is the require-only fallback this test exists to prove.
+    const loggerChunk = createTestChunk({
+      metadata: {
+        file: 'lib/logger.rb',
+        startLine: 1,
+        endLine: 2,
+        type: 'class',
+        symbolName: 'Logger',
+        symbolType: 'class',
+        language: 'ruby',
+        exports: ['Logger'],
+      },
+    });
+    const mainChunk = createTestChunk({
+      content: "require_relative '../lib/logger'\nLogger.new.info('hi')",
+      metadata: {
+        file: 'app/main.rb',
+        startLine: 1,
+        endLine: 2,
+        type: 'class',
+        symbolName: 'Main',
+        symbolType: 'class',
+        language: 'ruby',
+        exports: ['Main'],
+        imports: ['../lib/logger'],
+        importedSymbols: { '../lib/logger': ['logger'] },
+      },
+    });
+    const consumerChunk = createTestChunk({
+      content: "require_relative '../app/main'\nMain.new.run",
+      metadata: {
+        file: 'cli/run.rb',
+        startLine: 1,
+        endLine: 2,
+        type: 'class',
+        symbolName: 'Run',
+        symbolType: 'class',
+        language: 'ruby',
+        exports: ['Run'],
+        imports: ['../app/main'],
+        importedSymbols: { '../app/main': ['main'] },
+      },
+    });
+
+    const graph = buildDependencyGraph([loggerChunk, mainChunk, consumerChunk]);
+    const transitive = graph.getCallersTransitive('lib/logger.rb', 'Logger', { depth: 2 });
+
+    expect(transitive.truncated).toBe(false);
+    const mainEdge = transitive.callers.find(c => c.caller.filepath === 'app/main.rb');
+    expect(mainEdge?.provenance).toBe('require-only');
+    expect(mainEdge?.hops).toBe(1);
+    expect(mainEdge?.caller.symbolName).toBe('Main');
+
+    // cli/run.rb requires app/main.rb (cross-directory, same broken-guess
+    // shape) -- reachable only because hop 1's frontier correctly carries
+    // 'Main' forward as the next node to query.
+    const consumerEdge = transitive.callers.find(c => c.caller.filepath === 'cli/run.rb');
+    expect(consumerEdge).toBeDefined();
+    expect(consumerEdge?.hops).toBe(2);
+    expect(consumerEdge?.provenance).toBe('require-only');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // C# same-namespace gating fix (#994 Phase 5) — `addSameNamespaceEdges`'s
 // crude same-directory heuristic must NOT apply to C#, which has a REAL
 // namespace/enclosing-access model (`findCSharpTypeReferenceDependents`).

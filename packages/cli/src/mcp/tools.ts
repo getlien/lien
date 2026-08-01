@@ -162,6 +162,7 @@ Returns:
   one of:
   - "unresolved-target": ${ATTRIBUTION_CAVEAT_REASON_TEXT['unresolved-target']}
   - "symbol-attribution-degraded": ${ATTRIBUTION_CAVEAT_REASON_TEXT['symbol-attribution-degraded']}
+  - "type-symbol-attribution-incomplete": ${ATTRIBUTION_CAVEAT_REASON_TEXT['type-symbol-attribution-incomplete']}
   - "dependent-attribution-partial": ${ATTRIBUTION_CAVEAT_REASON_TEXT['dependent-attribution-partial']}
   - "dependent-attribution-incomplete": ${ATTRIBUTION_CAVEAT_REASON_TEXT['dependent-attribution-incomplete']}
   At most one reason ever fires per response.`,
