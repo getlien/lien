@@ -17,13 +17,23 @@ export const typescriptDefinition: LanguageDefinition = {
 
   // ADR-015 (#1038): verified against a real corpus (zod), not inherited.
   // TypeScript's import extractor stores the raw specifier text verbatim
-  // (see `javascript.ts`'s shared `JavaScriptImportExtractor`), but a
-  // relative (`./x`) or workspace-package specifier is already resolved to a
-  // concrete file upstream (`ast/symbols.ts`'s `resolveRelativeImport`/
-  // `resolveWorkspaceImport`), before `matchesFile` ever runs -- so a bare
-  // specifier that reaches these flags is a genuinely external npm package
-  // with no corresponding local file, never the language's own typical
-  // whole-module test-import convention Swift's flag exists for.
+  // (see `javascript.ts`'s shared `JavaScriptImportExtractor`), and a
+  // relative (`./x`) specifier is resolved to a concrete file upstream
+  // (`ast/symbols.ts`'s `resolveRelativeImport`) before `matchesFile` ever
+  // runs. Correction from an earlier draft of this comment, caught during
+  // verification: it is NOT true that every remaining bare specifier is a
+  // genuinely external npm package. `resolveWorkspaceImport` only resolves
+  // an EXACT bare package name from an npm/yarn `workspaces` field
+  // (`workspace-packages.ts`) -- zod itself is a pnpm workspace (no npm
+  // `workspaces` field; `pnpm-workspace.yaml` is deliberately out of that
+  // resolver's v1 scope), so zod's own 165 internal SUBPATH self-references
+  // (`zod/v3`, `zod/v4`, etc. -- see `singleFileImports` below) reach these
+  // flags unresolved too, not because they're external, but because subpath
+  // `exports` resolution is a separate, out-of-scope gap. Either way --
+  // genuinely external, or an unresolved internal subpath -- neither is the
+  // language's own typical whole-module test-import convention Swift's flag
+  // exists for, so the value below is unaffected; only the reasoning
+  // needed correcting.
   // `wholeModuleImports: false`: no whole-module-only import shape exists --
   // every internal zod import found (`packages/zod/src/v3/types.ts:10-35`)
   // is an ordinary relative specifier (`"./errors.js"`, `"./helpers/util.js"`).
