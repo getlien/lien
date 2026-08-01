@@ -65,6 +65,9 @@ describe('complexityCommand', () => {
     mockVectorDB = {
       initialize: vi.fn().mockResolvedValue(undefined),
       scanAll: vi.fn(), // Used for actual analysis
+      // Healthy-index default; the "indexed-but-empty" test below overrides
+      // this to `false` to exercise `classifyIndexState`'s S1 branch.
+      hasData: vi.fn().mockResolvedValue(true),
     };
 
     // The factory hands back our mock instance
@@ -367,6 +370,24 @@ describe('complexityCommand', () => {
     // project that has never been indexed.
     expect(coreModule.createVectorDB).not.toHaveBeenCalled();
     await expect(fs.access(path.join(await indexDir(), 'structural.db'))).rejects.toThrow();
+  });
+
+  // Regression test for the sibling false-clean bug the "never-indexed" test
+  // above doesn't cover: an index DIRECTORY that exists (structural.db is on
+  // disk) but whose store has zero rows — e.g. cleared, moved aside, or
+  // indexed against an all-ignored tree. Before this fix, `ensureIndexExists`
+  // only checked file existence, so this state sailed straight through to
+  // `ComplexityAnalyzer` and reported "0 violations, exit 0" indistinguishable
+  // from a genuinely clean, fully-indexed codebase.
+  it('should error loudly on an indexed-but-empty project (store has 0 rows), without proceeding to analysis', async () => {
+    mockVectorDB.hasData.mockResolvedValue(false);
+
+    await complexityCommand({ format: 'text' });
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('Index is empty'));
+    expect(processExitSpy).toHaveBeenCalledWith(1);
+    // Never even ran the analyzer over the empty store.
+    expect(mockVectorDB.scanAll).not.toHaveBeenCalled();
   });
 
   it('should handle a thrown error from the database gracefully once the index exists', async () => {

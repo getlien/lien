@@ -1,5 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
+import type { VectorDBInterface } from '@liendev/core';
 import { getIndexDir, isGitRepo, getCurrentBranch, getCurrentCommit } from '@liendev/core';
 
 /**
@@ -100,4 +101,84 @@ export async function getIndexStalenessWarning(rootDir: string): Promise<string 
   } catch {
     return null;
   }
+}
+
+/**
+ * The whole-index states a read-only, index-backed command can find itself
+ * in (see #1029 W1 — this is the shared classifier that replaces every call
+ * site re-deriving its own version of this ladder):
+ *
+ * - `S0` — no index directory at all (never indexed).
+ * - `S1` — the index directory exists, but the structural store has zero
+ *   rows (cleared, moved aside, or indexed against an all-ignored tree).
+ * - `S2` — the store has data, but it's stale vs the working tree's current
+ *   git HEAD (the one-shot CLI path has no auto-reindex machinery — that
+ *   only lives in `lien serve`'s `git-detection.ts` — so this is the only
+ *   place staleness gets caught).
+ * - `ok` — none of the above; safe to answer normally.
+ *
+ * Deliberately NOT covering "the requested path isn't in the index" (S3 in
+ * the issue's vocabulary) — that's a per-path question, answered by
+ * `findUnindexedPaths` (`../mcp/utils/unindexed-paths.js`) against a
+ * specific filepath, not a whole-index state this classifier can decide in
+ * isolation. Nor does it cover "the analysis mechanism structurally cannot
+ * see an answer" (Java same-package, Ruby class names, type symbols) — that
+ * is #1026's `attributionCaveat` vocabulary (`get_dependents`'s
+ * `AttributionCaveatReason`), a different axis entirely: this classifier is
+ * about the INDEX's state, not about a language's import-graph visibility.
+ */
+export type IndexState = 'S0' | 'S1' | 'S2' | 'ok';
+
+export interface IndexStateResult {
+  state: IndexState;
+  /** Populated only for `S2` — the human-readable staleness warning. */
+  warning?: string;
+  /**
+   * The opened, initialized `VectorDBInterface` — present for every state
+   * except `S0`, where it is deliberately never constructed at all (see
+   * `hasStructuralIndex`'s doc comment: `createVectorDB(rootDir).initialize()`
+   * itself materializes an empty store as a side effect, which is exactly
+   * the bug this classifier exists to prevent).
+   */
+  vectorDB?: VectorDBInterface;
+}
+
+/**
+ * Classify `rootDir`'s whole-index state in one call, composing the three
+ * checks above in the only safe order: the cheap on-disk existence check
+ * FIRST (so an `S0` project is never opened at all), then — only once that
+ * has ruled out S0 — open the store and check `hasData()` for `S1`, then
+ * the git-state comparison for `S2`.
+ *
+ * `openVectorDB` is a thunk (not a plain `VectorDBInterface`) specifically
+ * so this function — not each call site — owns the decision of whether to
+ * ever invoke `createVectorDB(...).initialize()` at all. Callers that
+ * already need an initialized `vectorDB` for their real work get it back on
+ * the result (`ok`/`S1`/`S2`) rather than opening it a second time; callers
+ * that only need the verdict can ignore the field.
+ *
+ * This is the single place new read-only, index-backed commands should call
+ * into — see CLAUDE.md's "Index-state honesty" policy and
+ * `docs/architecture/index-state-honesty.md`.
+ */
+export async function classifyIndexState(
+  rootDir: string,
+  openVectorDB: () => Promise<VectorDBInterface>,
+): Promise<IndexStateResult> {
+  if (!(await hasStructuralIndex(rootDir))) {
+    return { state: 'S0' };
+  }
+
+  const vectorDB = await openVectorDB();
+
+  if (!(await vectorDB.hasData())) {
+    return { state: 'S1', vectorDB };
+  }
+
+  const warning = await getIndexStalenessWarning(rootDir);
+  if (warning) {
+    return { state: 'S2', warning, vectorDB };
+  }
+
+  return { state: 'ok', vectorDB };
 }

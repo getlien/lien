@@ -659,18 +659,38 @@ describe('annotateCommand (integration)', () => {
   // "no index found" warning a real, resolvable path gets against an
   // unindexed root (see 'warns loudly instead of silently analyzing an
   // unindexed root' below) — NOT silence.
-  it('warns instead of silently exiting for a non-existent file (unindexed root)', async () => {
+  //
+  // #1029 W1: `reportUnresolvedPath` used to skip straight to
+  // `createVectorDB(rootDir).initialize()` before checking
+  // `hasStructuralIndex` — since `createVectorDB` here is the REAL
+  // implementation (only mocked per-test via `mockResolvedValueOnce`
+  // elsewhere in this describe block), that silently materialized an empty
+  // `structural.db` in tmpHome as a side effect of asking about a typo'd
+  // path on a virgin project. The printed warning was already correct; only
+  // the side effect was wrong.
+  it('warns instead of silently exiting for a non-existent file (unindexed root), without creating a structural.db', async () => {
     await annotateCommand('this/path/does/not/exist.ts');
     expect(errSpy).not.toHaveBeenCalled();
     expect(logSpy).toHaveBeenCalledTimes(1);
     expect(logSpy.mock.calls[0][0]).toContain('Lien: no index found at the resolved project root');
+    expect(coreModule.createVectorDB).not.toHaveBeenCalled();
   });
 
   // HOOKS-9's actual reported shape: an INDEXED repo given a path the index
   // has never heard of. Mocks createVectorDB directly (rather than building
   // a real index in tmpHome) so `hasData()` reports true without an actual
-  // indexing pass.
+  // indexing pass — but `reportUnresolvedPath`'s `hasStructuralIndex`
+  // pre-check (#1029 W1) is a REAL filesystem check in this describe block,
+  // so a real (content-irrelevant) `structural.db` stub must exist too, or
+  // that check reads this as an unindexed root instead.
   it('says the path is not found in the index for a non-existent path in an INDEXED repo', async () => {
+    const fs = await import('fs/promises');
+    const { getIndexDir } = await import('@liendev/core');
+    const rootDir = resolveProjectRoot(toAbsolutePath(process.cwd()));
+    const idxDir = getIndexDir(rootDir);
+    await fs.mkdir(idxDir, { recursive: true });
+    await fs.writeFile(path.join(idxDir, 'structural.db'), '', 'utf-8');
+
     vi.mocked(coreModule.createVectorDB).mockResolvedValueOnce({
       initialize: vi.fn().mockResolvedValue(undefined),
       hasData: vi.fn().mockResolvedValue(true),

@@ -21,7 +21,7 @@ import {
 } from '../utils/signature-delta.js';
 import { recordBlastEvent, type BlastEvent } from '../utils/blast-events.js';
 import { findDocReferences } from '../utils/doc-references.js';
-import { hasStructuralIndex } from '../utils/index-freshness.js';
+import { classifyIndexState } from '../utils/index-freshness.js';
 
 export interface ApiDeltaOptions {
   format: 'text' | 'json';
@@ -149,9 +149,18 @@ async function enrichOneChange(
  * Enrich every change with dependent counts + risk, best-effort. Only runs
  * index-touching work when there is at least one change (the rare event) —
  * the common edit pays only the cheap content-based detection. Degrades to
- * signature-only (whole batch) when no index exists or the vectorDB itself
- * fails to open; degrades per-change when `findDependents` throws for that
- * one symbol. Never throws.
+ * signature-only (whole batch) when no index exists (S0), the index exists
+ * but has zero rows (S1 — cleared, moved aside, or mid-rebuild; without this
+ * check `findDependents` would return a real-looking `dependentCount: 0`
+ * marked `enriched: true`, indistinguishable from a verified empty result),
+ * or the vectorDB itself fails to open; degrades per-change when
+ * `findDependents` throws for that one symbol. Never throws.
+ *
+ * Deliberately does not surface S2 (stale index) here — this command is
+ * advisory-only (see the module doc comment) and its core signal (which
+ * exported symbols changed/were removed) comes from the git diff content,
+ * not the index; only the enrichment counts could be mildly stale, which
+ * doesn't warrant interrupting a nudge with a warning.
  */
 async function enrichDeltas(
   rootDir: string,
@@ -159,13 +168,18 @@ async function enrichDeltas(
 ): Promise<EnrichedSignatureDelta[]> {
   if (deltas.length === 0) return [];
 
-  if (!(await hasStructuralIndex(rootDir))) {
-    return deltas.map(d => ({ filepath: d.filepath, changes: d.changes.map(degradedChange) }));
-  }
-
   try {
-    const vectorDB = await createVectorDB(rootDir);
-    await vectorDB.initialize();
+    const result = await classifyIndexState(rootDir, async () => {
+      const vectorDB = await createVectorDB(rootDir);
+      await vectorDB.initialize();
+      return vectorDB;
+    });
+
+    if (result.state === 'S0' || result.state === 'S1' || !result.vectorDB) {
+      return deltas.map(d => ({ filepath: d.filepath, changes: d.changes.map(degradedChange) }));
+    }
+
+    const vectorDB = result.vectorDB;
     // Captured once so every symbol in this run shares the scan cache inside
     // findDependents — only the first symbol in the batch pays the scanAll.
     const indexVersion = vectorDB.getCurrentVersion();
