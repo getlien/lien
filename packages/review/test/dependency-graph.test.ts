@@ -1029,3 +1029,167 @@ describe('buildDependencyGraph — C# namespace gating fix', () => {
     expect(callers[0].provenance).toBe('namespace-inferred');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Barrel transitive-walk regression (post-#1011) — a pure re-export barrel
+// (no chunk of its own carries a real symbol name) used to dead-end
+// `getCallersTransitive`: the frontier re-queried
+// `getCallers(barrel, '(module-level)')`, a key nothing is ever indexed
+// under, so every real consumer reachable only through the barrel silently
+// vanished at hop 2. Fails on the pre-fix `dependency-graph.ts` (confirmed:
+// reverting the `frontierSymbol` plumbing reproduces a truncated 1-caller
+// walk that never reaches `consumerChunk`).
+// ---------------------------------------------------------------------------
+
+describe('buildDependencyGraph — barrel transitive-walk regression (post-#1011)', () => {
+  it('reaches a real consumer through a pure re-export barrel via getCallersTransitive', () => {
+    const implChunk = createTestChunk({
+      metadata: {
+        file: 'src/impl.ts',
+        startLine: 1,
+        endLine: 5,
+        type: 'function',
+        symbolName: 'doWork',
+        symbolType: 'function',
+        language: 'typescript',
+        exports: ['doWork'],
+      },
+    });
+
+    // A pure re-export barrel: no chunk of its own carries a real symbol
+    // name, so `pickRepresentativeChunk` returns undefined and the caller
+    // identity is the `NO_REPRESENTATIVE_SYMBOL` sentinel — exactly the
+    // shape that dead-ended the BFS pre-fix.
+    const barrelChunk = createTestChunk({
+      content: "export { doWork } from './impl.js';",
+      metadata: {
+        file: 'src/index.ts',
+        startLine: 1,
+        endLine: 1,
+        type: 'block',
+        symbolName: undefined,
+        symbolType: undefined,
+        language: 'typescript',
+        exports: ['doWork'],
+        importedSymbols: { './impl.js': ['doWork'] },
+      },
+    });
+
+    const consumerChunk = createTestChunk({
+      content: "import { doWork } from './index.js';\nfunction run() { doWork(); }",
+      metadata: {
+        file: 'src/consumer.ts',
+        startLine: 1,
+        endLine: 5,
+        type: 'function',
+        symbolName: 'run',
+        symbolType: 'function',
+        language: 'typescript',
+        exports: ['run'],
+        importedSymbols: { './index.js': ['doWork'] },
+        callSites: [{ symbol: 'doWork', line: 2 }],
+      },
+    });
+
+    const graph = buildDependencyGraph([implChunk, barrelChunk, consumerChunk]);
+
+    // Direct getCallers on the impl file: only the barrel's import-only
+    // pass-through edge (no one calls impl.ts's doWork directly).
+    const direct = graph.getCallers('src/impl.ts', 'doWork');
+    expect(direct).toHaveLength(1);
+    expect(direct[0].caller.filepath).toBe('src/index.ts');
+    expect(direct[0].caller.symbolName).toBe('(module-level)');
+    expect(direct[0].provenance).toBe('import-only');
+
+    // The transitive walk must continue THROUGH the barrel and reach the
+    // real consumer at hop 2 — this is exactly what #1011 broke: the BFS
+    // frontier re-queried getCallers(barrel, '(module-level)'), a key
+    // nothing is indexed under, and dead-ended instead of continuing via
+    // 'doWork'.
+    const transitive = graph.getCallersTransitive('src/impl.ts', 'doWork', { depth: 2 });
+    expect(transitive.truncated).toBe(false);
+    const consumerEdge = transitive.callers.find(c => c.caller.filepath === 'src/consumer.ts');
+    expect(consumerEdge).toBeDefined();
+    expect(consumerEdge?.hops).toBe(2);
+    expect(consumerEdge?.caller.symbolName).toBe('run');
+    expect(consumerEdge?.provenance).toBe('import-verified');
+
+    // The barrel itself must NOT be credited as if it calls doWork — its
+    // display identity stays the honest '(module-level)' placeholder (the
+    // false-attribution shape #1011 removed must not come back).
+    const barrelEdge = transitive.callers.find(c => c.caller.filepath === 'src/index.ts');
+    expect(barrelEdge?.caller.symbolName).toBe('(module-level)');
+  });
+
+  it('does not infinite-loop when a consumer is reached through a chain of two barrels (cycle-adjacent guard)', () => {
+    const implChunk = createTestChunk({
+      metadata: {
+        file: 'src/real.ts',
+        startLine: 1,
+        endLine: 5,
+        type: 'function',
+        symbolName: 'compute',
+        symbolType: 'function',
+        language: 'typescript',
+        exports: ['compute'],
+      },
+    });
+
+    const barrelBChunk = createTestChunk({
+      content: "export { compute } from './real.js';",
+      metadata: {
+        file: 'src/barrel-b.ts',
+        startLine: 1,
+        endLine: 1,
+        type: 'block',
+        symbolName: undefined,
+        symbolType: undefined,
+        language: 'typescript',
+        exports: ['compute'],
+        importedSymbols: { './real.js': ['compute'] },
+      },
+    });
+
+    const barrelAChunk = createTestChunk({
+      content: "export { compute } from './barrel-b.js';",
+      metadata: {
+        file: 'src/barrel-a.ts',
+        startLine: 1,
+        endLine: 1,
+        type: 'block',
+        symbolName: undefined,
+        symbolType: undefined,
+        language: 'typescript',
+        exports: ['compute'],
+        importedSymbols: { './barrel-b.js': ['compute'] },
+      },
+    });
+
+    const consumerChunk = createTestChunk({
+      content: "import { compute } from './barrel-a.js';\nfunction run() { compute(); }",
+      metadata: {
+        file: 'src/consumer.ts',
+        startLine: 1,
+        endLine: 5,
+        type: 'function',
+        symbolName: 'run',
+        symbolType: 'function',
+        language: 'typescript',
+        exports: ['run'],
+        importedSymbols: { './barrel-a.js': ['compute'] },
+        callSites: [{ symbol: 'compute', line: 2 }],
+      },
+    });
+
+    const graph = buildDependencyGraph([implChunk, barrelBChunk, barrelAChunk, consumerChunk]);
+    const transitive = graph.getCallersTransitive('src/real.ts', 'compute', {
+      depth: 3,
+      maxNodes: 30,
+    });
+
+    expect(transitive.truncated).toBe(false);
+    const consumerEdge = transitive.callers.find(c => c.caller.filepath === 'src/consumer.ts');
+    expect(consumerEdge).toBeDefined();
+    expect(consumerEdge?.hops).toBe(3);
+  });
+});

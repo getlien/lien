@@ -16,6 +16,22 @@
  * genuinely different abstraction from parser's file-level `findDependents`)
  * — see the module doc on `resolveCallSiteEdges` for why the two were not
  * unified into one call.
+ *
+ * Post-#1011 regression fix: a pure re-export barrel (a file with no chunk
+ * of its own carrying a real symbol name — see `NO_REPRESENTATIVE_SYMBOL`)
+ * used to dead-end the BFS. `buildRepresentativeEdge` keyed the barrel's
+ * *display* identity ('(module-level)') as the frontier node too, so
+ * `getCallers(barrel, '(module-level)')` was queried next — a key nothing
+ * is ever indexed under, since no call site literally names that sentinel.
+ * The real dependents reachable only through the barrel (e.g. every
+ * language extractor importing `calculateComplexity` from
+ * `ast/complexity/index.ts` rather than `cyclomatic.ts` directly) silently
+ * vanished at hop 2. Fixed by carrying the *traced* symbol forward as
+ * `CallerEdge.frontierSymbol`, used only to decide the next frontier node —
+ * the barrel's caller identity shown to a consumer stays '(module-level)'
+ * (it is never credited as if it called anything; that false-attribution
+ * shape is exactly what #1011 removed and must not come back), but the walk
+ * now continues via the symbol actually being traced, not the placeholder.
  */
 
 import type { CodeChunk } from '@liendev/parser';
@@ -83,6 +99,19 @@ export interface CallerEdge {
   callSiteLine: number;
   /** How this edge was resolved — see `EdgeProvenance`'s doc comment. */
   provenance: EdgeProvenance;
+  /**
+   * The symbol to use in place of `caller.symbolName` when this edge's
+   * `caller` becomes the next BFS frontier node. Only set by
+   * `buildRepresentativeEdge` when the target file has no chunk of its own
+   * carrying a real symbol name (`caller.symbolName === NO_REPRESENTATIVE_SYMBOL`
+   * — a pure re-export barrel or similar pass-through file). `caller.symbolName`
+   * stays the honest *display* identity ('(module-level)': this file doesn't
+   * call anything); `frontierSymbol` is purely a traversal hint so
+   * `bfsTransitiveCallers` keeps expanding via the symbol actually being
+   * traced through the barrel instead of a placeholder nothing is indexed
+   * under. See the module doc's "Post-#1011 regression fix" note.
+   */
+  frontierSymbol?: string;
 }
 
 export interface TransitiveCallerEdge extends CallerEdge {
@@ -175,7 +204,7 @@ export function buildDependencyGraph(chunks: CodeChunk[], workspaceRoot = ''): D
   const chunkImportMaps = resolveChunkImports(chunks, exportIndex, normalize);
   const callerEdges = buildCallerEdges(chunks, chunkImportMaps, exportIndex);
   const importOnlyEdges = buildImportOnlyEdges(chunkImportMaps, callerEdges, chunksByFile);
-  const csharpFallbackCache = new Map<string, CallerEdge[] | undefined>();
+  const csharpDependentFilesCache = new Map<string, string[] | null>();
 
   const getCallers = (filepath: string, symbolName: string): CallerEdge[] => {
     const key = `${filepath}::${symbolName}`;
@@ -185,7 +214,15 @@ export function buildDependencyGraph(chunks: CodeChunk[], workspaceRoot = ''): D
     const importOnly = importOnlyEdges.get(key);
     if (importOnly && importOnly.length > 0) return importOnly;
 
-    return resolveCSharpFallback(filepath, chunks, chunksByFile, csharpFallbackCache) ?? [];
+    return (
+      resolveCSharpFallback(
+        filepath,
+        symbolName,
+        chunks,
+        chunksByFile,
+        csharpDependentFilesCache,
+      ) ?? []
+    );
   };
 
   return {
@@ -222,8 +259,20 @@ function callerGraphNodeKey(node: CallerGraphNode): string {
   return `${node.filepath}::${node.symbolName}`;
 }
 
+/**
+ * The frontier identity an edge's caller continues the walk as — the traced
+ * symbol for a barrel/representative edge (`frontierSymbol`), otherwise the
+ * caller's own real symbol name. Shared by `callerEdgeKey` and the
+ * `getNextNode` mapper below so both stay in the same key format, per
+ * `walkBounded`'s contract (`getEdgeKey(edge)` must equal
+ * `getNodeKey(getNextNode(edge))`).
+ */
+function callerFrontierSymbol(edge: CallerEdge): string {
+  return edge.frontierSymbol ?? edge.caller.symbolName;
+}
+
 function callerEdgeKey(edge: CallerEdge): string {
-  return `${edge.caller.filepath}::${edge.caller.symbolName}`;
+  return `${edge.caller.filepath}::${callerFrontierSymbol(edge)}`;
 }
 
 function bfsTransitiveCallers(
@@ -238,7 +287,7 @@ function bfsTransitiveCallers(
   const { results, truncated, visitedCount } = walkBounded<CallerGraphNode, CallerEdge>(
     { filepath, symbolName },
     node => getCallers(node.filepath, node.symbolName),
-    edge => ({ filepath: edge.caller.filepath, symbolName: edge.caller.symbolName }),
+    edge => ({ filepath: edge.caller.filepath, symbolName: callerFrontierSymbol(edge) }),
     callerEdgeKey,
     callerGraphNodeKey,
     { depth, maxNodes },
@@ -703,23 +752,41 @@ const NO_REPRESENTATIVE_SYMBOL = '(module-level)';
  * type-reference recovery) — see `pickRepresentativeChunk`'s doc comment.
  * Shared by `buildImportOnlyEdges` and `resolveCSharpFallback` so the two
  * fallback tiers build their edges identically.
+ *
+ * `tracedSymbol` is the symbol whose callers are being looked for (e.g. the
+ * `sym` key in `buildImportOnlyEdges`, or the `symbolName` `getCallers` was
+ * called with, for the C# fallback). When `file` has no representative
+ * chunk of its own — a pure re-export barrel, `NO_REPRESENTATIVE_SYMBOL` —
+ * there is no real "caller symbol" to continue the walk with, so the edge's
+ * `frontierSymbol` carries `tracedSymbol` forward instead, letting
+ * `bfsTransitiveCallers` keep expanding through the barrel. See the module
+ * doc's "Post-#1011 regression fix" note.
  */
 function buildRepresentativeEdge(
   file: string,
   chunksByFile: Map<string, CodeChunk[]>,
   provenance: EdgeProvenance,
+  tracedSymbol: string,
 ): CallerEdge {
   const fileChunks = chunksByFile.get(file) ?? [];
   const representative = pickRepresentativeChunk(fileChunks);
+  const symbolName = representative?.metadata.symbolName ?? NO_REPRESENTATIVE_SYMBOL;
   return {
     caller: {
       filepath: file,
-      symbolName: representative?.metadata.symbolName ?? NO_REPRESENTATIVE_SYMBOL,
+      symbolName,
       chunk: representative ?? (fileChunks[0] as CodeChunk),
     },
     callSiteLine: representative?.metadata.startLine ?? 0,
     provenance,
+    frontierSymbol: symbolName === NO_REPRESENTATIVE_SYMBOL ? tracedSymbol : undefined,
   };
+}
+
+/** One `file::symbol` key's import-only bucket: the traced symbol plus the importing files. */
+interface ImportOnlyBucket {
+  symbol: string;
+  importingFiles: Set<string>;
 }
 
 /**
@@ -727,13 +794,16 @@ function buildRepresentativeEdge(
  * edge, the set of files that verifiably import that symbol — deduped per
  * file (the SAME chunk's `importedSymbols` is duplicated across every chunk
  * in its file, see `pickRepresentativeChunk`'s doc comment, so without
- * dedup a 20-method class would produce 20 candidate "files").
+ * dedup a 20-method class would produce 20 candidate "files"). Keeps `sym`
+ * alongside the files so `buildImportOnlyEdges` can pass it to
+ * `buildRepresentativeEdge` as the traced symbol (needed for the barrel
+ * frontier fix — see the module doc's "Post-#1011 regression fix" note).
  */
 function collectImportOnlyFileKeys(
   chunkImportMaps: Map<CodeChunk, ChunkImportMap>,
   callerEdges: Map<string, CallerEdge[]>,
-): Map<string, Set<string>> {
-  const filesByKey = new Map<string, Set<string>>();
+): Map<string, ImportOnlyBucket> {
+  const buckets = new Map<string, ImportOnlyBucket>();
 
   for (const [chunk, importMap] of chunkImportMaps) {
     const callerFile = chunk.metadata.file;
@@ -742,14 +812,14 @@ function collectImportOnlyFileKeys(
         if (loc.filepath === callerFile) continue;
         const key = `${loc.filepath}::${sym}`;
         if (callerEdges.has(key)) continue; // a real call-site edge already covers this key
-        const files = filesByKey.get(key) ?? new Set<string>();
-        files.add(callerFile);
-        filesByKey.set(key, files);
+        const bucket = buckets.get(key) ?? { symbol: sym, importingFiles: new Set<string>() };
+        bucket.importingFiles.add(callerFile);
+        buckets.set(key, bucket);
       }
     }
   }
 
-  return filesByKey;
+  return buckets;
 }
 
 /**
@@ -764,12 +834,12 @@ function buildImportOnlyEdges(
   callerEdges: Map<string, CallerEdge[]>,
   chunksByFile: Map<string, CodeChunk[]>,
 ): Map<string, CallerEdge[]> {
-  const filesByKey = collectImportOnlyFileKeys(chunkImportMaps, callerEdges);
+  const buckets = collectImportOnlyFileKeys(chunkImportMaps, callerEdges);
 
   const result = new Map<string, CallerEdge[]>();
-  for (const [key, files] of filesByKey) {
-    const edges = [...files].map(file =>
-      buildRepresentativeEdge(file, chunksByFile, 'import-only'),
+  for (const [key, bucket] of buckets) {
+    const edges = [...bucket.importingFiles].map(file =>
+      buildRepresentativeEdge(file, chunksByFile, 'import-only', bucket.symbol),
     );
     result.set(key, edges);
   }
@@ -784,33 +854,52 @@ function buildImportOnlyEdges(
 // parser primitive has no per-call-site detail), memoized per target file
 // since a review pass can query the same C# file's declared type more than
 // once (e.g. multiple seeds in the same file, or repeated BFS visits).
+//
+// The expensive part (`findCSharpTypeReferenceDependents`) is cached purely
+// per `filepath` — it's file-level and ignores `symbolName` — but the
+// `CallerEdge[]` returned to `getCallers` is rebuilt per call (cheap: a
+// `.map()` over an already-small dependent-file list) so `frontierSymbol`
+// can carry whichever `symbolName` THIS query traced, matching the barrel
+// frontier fix in `buildRepresentativeEdge` (see the module doc's
+// "Post-#1011 regression fix" note). Caching the built edges themselves, as
+// before, would freeze `frontierSymbol` to whichever symbol first missed
+// the cache for a given file.
 // ---------------------------------------------------------------------------
 
-function resolveCSharpFallback(
+/** Cached, file-level (`symbolName`-independent) part of the C# fallback — `null` means "not applicable". */
+function getCSharpDependentFiles(
   filepath: string,
   allChunks: CodeChunk[],
   chunksByFile: Map<string, CodeChunk[]>,
-  cache: Map<string, CallerEdge[] | undefined>,
-): CallerEdge[] | undefined {
-  if (cache.has(filepath)) return cache.get(filepath);
+  cache: Map<string, string[] | null>,
+): string[] | null {
+  const cached = cache.get(filepath);
+  if (cached !== undefined) return cached;
 
   const fileChunks = chunksByFile.get(filepath);
   const language = fileChunks?.[0]?.metadata.language;
   if (language !== 'csharp' || detectLanguage(filepath) !== 'csharp') {
-    cache.set(filepath, undefined);
-    return undefined;
+    cache.set(filepath, null);
+    return null;
   }
 
   const dependentFiles = findCSharpTypeReferenceDependents(filepath, allChunks);
-  if (dependentFiles.length === 0) {
-    cache.set(filepath, undefined);
-    return undefined;
-  }
+  const result = dependentFiles.length > 0 ? dependentFiles : null;
+  cache.set(filepath, result);
+  return result;
+}
 
-  const edges: CallerEdge[] = dependentFiles.map(file =>
-    buildRepresentativeEdge(file, chunksByFile, 'namespace-inferred'),
+function resolveCSharpFallback(
+  filepath: string,
+  symbolName: string,
+  allChunks: CodeChunk[],
+  chunksByFile: Map<string, CodeChunk[]>,
+  cache: Map<string, string[] | null>,
+): CallerEdge[] | undefined {
+  const dependentFiles = getCSharpDependentFiles(filepath, allChunks, chunksByFile, cache);
+  if (!dependentFiles) return undefined;
+
+  return dependentFiles.map(file =>
+    buildRepresentativeEdge(file, chunksByFile, 'namespace-inferred', symbolName),
   );
-
-  cache.set(filepath, edges);
-  return edges;
 }
