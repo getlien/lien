@@ -3,6 +3,9 @@ import path from 'path';
 import os from 'os';
 import * as coreModule from '@liendev/core';
 import * as dependencyAnalyzerModule from '../mcp/handlers/dependency-analyzer.js';
+import * as indexFreshnessModule from '../utils/index-freshness.js';
+import { resolveProjectRoot } from './project-root.js';
+import { toAbsolutePath } from '../types/paths.js';
 import {
   annotateCommand,
   annotateCli,
@@ -25,6 +28,25 @@ vi.mock('@liendev/core', async () => {
   return {
     ...actual,
     createVectorDB: vi.fn(actual.createVectorDB),
+  };
+});
+
+// `hasStructuralIndex` is a real filesystem check against this MACHINE's
+// actual home directory for this ACTUAL repo path (most of these tests don't
+// redirect LIEN_HOME/os.homedir — only the "annotateCommand (integration)"
+// block below does, via a real empty tmp home). Default it to `true` so
+// every block that mocks `createVectorDB` directly (and assumes an
+// already-indexed project) isn't at the mercy of whether this real machine
+// happens to have this real repo indexed. The "annotateCommand (integration)"
+// block restores the real implementation for the two tests that specifically
+// exercise the "never indexed" path against its own empty tmp home.
+vi.mock('../utils/index-freshness.js', async () => {
+  const actual = await vi.importActual<typeof import('../utils/index-freshness.js')>(
+    '../utils/index-freshness.js',
+  );
+  return {
+    ...actual,
+    hasStructuralIndex: vi.fn().mockResolvedValue(true),
   };
 });
 
@@ -593,6 +615,15 @@ describe('annotateCommand (integration)', () => {
     const fs = await import('fs/promises');
     tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-annotate-test-'));
     homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(tmpHome);
+    // This block specifically exercises the real "never indexed" path (an
+    // empty tmp home has no structural.db) — restore the real
+    // `hasStructuralIndex` here instead of the file-wide `true` default.
+    const actualIndexFreshness = await vi.importActual<
+      typeof import('../utils/index-freshness.js')
+    >('../utils/index-freshness.js');
+    vi.mocked(indexFreshnessModule.hasStructuralIndex).mockImplementation(
+      actualIndexFreshness.hasStructuralIndex,
+    );
   });
 
   afterEach(async () => {
@@ -600,6 +631,7 @@ describe('annotateCommand (integration)', () => {
     logSpy.mockRestore();
     errSpy.mockRestore();
     homeSpy.mockRestore();
+    vi.mocked(indexFreshnessModule.hasStructuralIndex).mockResolvedValue(true);
     await fs.rm(tmpHome, { recursive: true, force: true });
   });
 
@@ -660,6 +692,23 @@ describe('annotateCommand (integration)', () => {
     expect(errSpy).not.toHaveBeenCalled();
     expect(logSpy).toHaveBeenCalledTimes(1);
     expect(logSpy.mock.calls[0][0]).toContain('Lien: no index found at the resolved project root');
+  });
+
+  // HOOKS-7 regression: a single `lien annotate` (the read-hook's underlying
+  // command) on a never-indexed repo used to create an empty structural.db
+  // as a side effect of `createVectorDB(rootDir).initialize()` — which then
+  // made OTHER hooks (whose gate is "does a structural store exist?") wrongly
+  // believe the repo was indexed for the rest of the session. Assert the
+  // database is never even opened, and nothing gets created on disk.
+  it('never opens or creates the structural store on a never-indexed root', async () => {
+    const fs = await import('fs/promises');
+    vi.mocked(coreModule.createVectorDB).mockClear();
+
+    await annotateCommand('packages/cli/src/cli/index.ts');
+
+    expect(coreModule.createVectorDB).not.toHaveBeenCalled();
+    const indexDir = coreModule.getIndexDir(resolveProjectRoot(toAbsolutePath(process.cwd())));
+    await expect(fs.access(path.join(indexDir, 'structural.db'))).rejects.toThrow();
   });
 });
 

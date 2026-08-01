@@ -31,6 +31,7 @@ import {
 import { resolveProjectRoot } from './project-root.js';
 import { type AbsolutePath, type RelativePath, toAbsolutePath } from '../types/paths.js';
 import { canonicalizePath } from '../utils/canonicalize-path.js';
+import { hasStructuralIndex } from '../utils/index-freshness.js';
 
 // Complexity threshold lives in @liendev/core (dependency-analyzer's
 // COMPLEXITY_THRESHOLDS.HIGH_COMPLEXITY_DEPENDENT = 10) and surfaces
@@ -513,11 +514,24 @@ async function run(file: string, options?: AnnotateOptions): Promise<boolean> {
   const needsChdir = originalCwd !== rootDir;
   if (needsChdir) process.chdir(rootDir);
   try {
+    // #894 + HOOKS-7: check existence BEFORE createVectorDB/initialize() —
+    // that call unconditionally materializes an empty structural.db on a
+    // project that has never been indexed (see `hasStructuralIndex`'s doc
+    // comment), which is exactly the side effect that let a single Read on
+    // an unindexed repo permanently flip other hooks' "is this repo
+    // indexed?" gate for the rest of the session.
+    if (!(await hasStructuralIndex(rootDir))) {
+      console.log(formatNoIndexWarning(rootDir));
+      return false;
+    }
+
     const vectorDB = await createVectorDB(rootDir);
     await vectorDB.initialize();
 
     // #894: warn loudly instead of silently analyzing an empty store — see
-    // `formatNoIndexWarning`.
+    // `formatNoIndexWarning`. Kept as defense-in-depth for the rarer case
+    // where the store file exists but genuinely has zero rows; the
+    // `hasStructuralIndex` check above only catches "never indexed at all".
     if (!(await vectorDB.hasData())) {
       console.log(formatNoIndexWarning(rootDir));
       return false;
@@ -634,27 +648,45 @@ export interface FileTestAssociations {
  * callers print via the same `formatTestReminder`, so the reminder text an
  * agent sees can never drift between the two commands.
  */
+/** The `indexMissing: true` shape `scanTestAssociations` returns from either of its two "no usable index" early-returns. */
+function noIndexTestAssociations(
+  filepath: RelativePath,
+  rootDir: AbsolutePath,
+): FileTestAssociations {
+  return {
+    filepath,
+    rootDir,
+    tests: [],
+    packageLevelTests: [],
+    symbolUsageTests: [],
+    csharpTypeReferenceTests: [],
+    indexMissing: true,
+  };
+}
+
 async function scanTestAssociations(paths: ResolvedPaths): Promise<FileTestAssociations> {
   const { originalCwd, rootDir, filepath } = paths;
   const needsChdir = originalCwd !== rootDir;
   if (needsChdir) process.chdir(rootDir);
   try {
+    // #894 + HOOKS-7: same pre-check as `run()` above — see
+    // `hasStructuralIndex`'s doc comment for why this must run BEFORE
+    // `createVectorDB`/`initialize()` rather than after.
+    if (!(await hasStructuralIndex(rootDir))) {
+      return noIndexTestAssociations(filepath, rootDir);
+    }
+
     const vectorDB = await createVectorDB(rootDir);
     await vectorDB.initialize();
     // #894: check before scanning, not after — an empty scan result is
     // indistinguishable from "no tests" otherwise. `hasData()` is the same
     // signal the MCP server's auto-index gate uses, and is worktree/overlay-
-    // aware (true when either the base or the overlay has rows).
+    // aware (true when either the base or the overlay has rows). Kept as
+    // defense-in-depth for the rarer case where the store file exists but
+    // genuinely has zero rows — `hasStructuralIndex` above only catches
+    // "never indexed at all".
     if (!(await vectorDB.hasData())) {
-      return {
-        filepath,
-        rootDir,
-        tests: [],
-        packageLevelTests: [],
-        symbolUsageTests: [],
-        csharpTypeReferenceTests: [],
-        indexMissing: true,
-      };
+      return noIndexTestAssociations(filepath, rootDir);
     }
     const allChunks = adaptChunkImports(await vectorDB.scanAll());
     const tests =

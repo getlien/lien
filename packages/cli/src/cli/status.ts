@@ -20,6 +20,7 @@ import {
 } from '@liendev/core';
 import { DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP } from '@liendev/parser';
 import { showCompactBanner } from '../utils/banner.js';
+import { readIndexGitState } from '../utils/index-freshness.js';
 
 const VALID_FORMATS = ['text', 'json'];
 
@@ -84,17 +85,6 @@ async function resolveBackend(): Promise<string> {
   return (await loadGlobalConfig()).backend ?? 'sqlite';
 }
 
-async function getStoredGitState(
-  indexPath: string,
-): Promise<{ branch: string; commit: string } | null> {
-  try {
-    const content = await fs.readFile(path.join(indexPath, '.git-state.json'), 'utf-8');
-    return JSON.parse(content);
-  } catch {
-    return null;
-  }
-}
-
 // --- Display helpers (text format) ---
 
 async function printIndexStatus(indexPath: string) {
@@ -141,7 +131,7 @@ async function printGitStatus(rootDir: string, indexPath: string) {
   console.log(chalk.dim('  Current branch:'), gitState.branch);
   console.log(chalk.dim('  Current commit:'), gitState.commit.substring(0, 8));
 
-  const storedGit = await getStoredGitState(indexPath);
+  const storedGit = await readIndexGitState(indexPath);
   if (storedGit && (storedGit.branch !== gitState.branch || storedGit.commit !== gitState.commit)) {
     console.log(chalk.yellow('  ⚠️  Git state changed - will reindex on next serve'));
   }
