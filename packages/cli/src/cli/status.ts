@@ -17,6 +17,7 @@ import {
   extractRepoId,
   getLienHome,
   getIndexDir,
+  ManifestManager,
 } from '@liendev/core';
 import { DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP } from '@liendev/parser';
 import { showCompactBanner } from '../utils/banner.js';
@@ -40,6 +41,20 @@ async function getFileCount(dirPath: string): Promise<number | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * Count of files actually tracked in the index manifest — what "Index files"
+ * means to a user. Deliberately NOT `getFileCount(indexPath)` above: that
+ * counts raw directory entries in the store dir (manifest.json, the sqlite
+ * db + its `-shm`/`-wal` sidecars, `.git-state.json`, `.lien-accessed`,
+ * `.lien-index-version`), which has no relationship to how many source files
+ * are indexed. `ManifestManager.load()` fails open (missing/corrupt manifest
+ * -> empty file list) rather than throwing, so this never needs a null case.
+ */
+async function getIndexedFileCount(indexPath: string): Promise<number> {
+  const files = await new ManifestManager(indexPath).getIndexedFiles();
+  return files.length;
 }
 
 async function getLastReindex(indexPath: string): Promise<number | null> {
@@ -112,10 +127,7 @@ async function printIndexStatus(indexPath: string) {
   console.log(chalk.dim('Index location:'), indexPath);
   console.log(chalk.dim('Index status:'), chalk.green('✓ Exists'));
 
-  const fileCount = await getFileCount(indexPath);
-  if (fileCount !== null) {
-    console.log(chalk.dim('Index files:'), fileCount);
-  }
+  console.log(chalk.dim('Index files:'), await getIndexedFileCount(indexPath));
 
   console.log(chalk.dim('Last modified:'), stats.mtime.toLocaleString());
 
@@ -301,11 +313,7 @@ async function outputJson(rootDir: string, indexPath: string) {
   if (stats) {
     data.indexStatus = 'exists';
     data.lastModified = stats.mtime.toISOString();
-
-    const fileCount = await getFileCount(indexPath);
-    if (fileCount !== null) {
-      data.indexFiles = fileCount;
-    }
+    data.indexFiles = await getIndexedFileCount(indexPath);
 
     const reindexTs = await getLastReindex(indexPath);
     if (reindexTs !== null) {
