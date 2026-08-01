@@ -8,6 +8,8 @@ import {
   hasEnclosingNamespaceAccess,
   hasSingleFileImports,
   hasSameDirectoryTestConvention,
+  hasSamePackageTestConvention,
+  hasDependentAttributionBlindSpot,
 } from './registry.js';
 import type { SupportedLanguage } from './registry.js';
 
@@ -229,6 +231,41 @@ describe('Language Registry', () => {
       expect(hasWholeModuleImports('go')).toBe(false);
       expect(hasEnclosingNamespaceAccess('go')).toBe(false);
       expect(hasSingleFileImports('go')).toBe(false);
+    });
+  });
+
+  describe('hasDependentAttributionBlindSpot (#1005)', () => {
+    it('is true for C#, Java, Kotlin, and Swift', () => {
+      expect(hasDependentAttributionBlindSpot('csharp')).toBe(true);
+      expect(hasDependentAttributionBlindSpot('java')).toBe(true);
+      expect(hasDependentAttributionBlindSpot('kotlin')).toBe(true);
+      expect(hasDependentAttributionBlindSpot('swift')).toBe(true);
+    });
+
+    it('is false for every other registered language, notably Go despite its own same-directory test convention', () => {
+      const others = getAllLanguages()
+        .map(d => d.id)
+        .filter(id => !['csharp', 'java', 'kotlin', 'swift'].includes(id));
+      expect(others.length).toBeGreaterThan(0);
+      others.forEach(id => {
+        expect(hasDependentAttributionBlindSpot(id)).toBe(false);
+      });
+      // Go is the explicit exclusion: hasSameDirectoryTestConvention already
+      // recovers a REAL association, so it must not also be swept into this
+      // wider, honesty-only predicate.
+      expect(hasSameDirectoryTestConvention('go')).toBe(true);
+      expect(hasDependentAttributionBlindSpot('go')).toBe(false);
+    });
+
+    it('composes the three pre-existing flags for C#/Java/Swift, each for its own reason', () => {
+      expect(hasEnclosingNamespaceAccess('csharp')).toBe(true);
+      expect(hasSamePackageTestConvention('java')).toBe(true);
+      expect(hasWholeModuleImports('swift')).toBe(true);
+      // None of those three pre-existing flags are themselves true for Kotlin
+      // -- it needs its own dedicated flag (`sameUnitAccessWithoutImport`).
+      expect(hasEnclosingNamespaceAccess('kotlin')).toBe(false);
+      expect(hasSamePackageTestConvention('kotlin')).toBe(false);
+      expect(hasWholeModuleImports('kotlin')).toBe(false);
     });
   });
 });

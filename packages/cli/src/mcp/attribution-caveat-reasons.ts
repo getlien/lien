@@ -2,7 +2,7 @@
  * Why a `get_dependents` answer's counts can't be trusted as a verified
  * clear (#940). Exactly one reason can ever apply to a given response --
  * see `buildAttributionCaveat`'s doc comment in `handlers/get-dependents.ts`
- * for why these four are mutually exclusive by construction:
+ * for why these five are mutually exclusive by construction:
  *
  * - `unresolved-target`: `filepath` isn't resolvable in the index at all
  *   (not in the manifest, or has zero chunks in the current scan -- #927,
@@ -13,6 +13,18 @@
  *   be a typo'd/hallucinated/removed name -- those look identical on that
  *   signal alone, so the response widens to file-level dependents instead
  *   of asserting an unverifiable symbol-scoped count.
+ * - `type-symbol-attribution-incomplete`: `symbol` IS a top-level export of
+ *   `filepath`, but it names a TYPE declaration (class/struct/interface/
+ *   enum) rather than a function or method (#1015). Usage attribution is
+ *   call-site-driven, and nothing "calls" a type by its own name the way a
+ *   function call does (constructor calls, type hints, `extends`/
+ *   `implements` clauses, generic type arguments, and dependency-injected
+ *   property access don't reliably surface as a tracked call site), so
+ *   `totalUsageCount`/`usages` are a partial, best-effort floor -- often `0`
+ *   even when real usages exist -- never a verified total. Distinct from
+ *   `symbol-attribution-degraded`: that one fires when `symbol` is NOT a
+ *   top-level export at all; this one fires when it very much IS one, just
+ *   not the kind of export call-site tracking can see through.
  * - `dependent-attribution-partial`: a file-level query (no `symbol`) found
  *   zero import-based dependents, but the C# type-reference-matching
  *   fallback recovered one or more (#930 part 2) -- those entries are
@@ -21,8 +33,9 @@
  * - `dependent-attribution-incomplete`: a file-level query (no `symbol`)
  *   came back with zero dependents in a language where the import graph
  *   structurally can't see every real usage, e.g. C#'s `global using` /
- *   implicit enclosing-namespace access (#930, #936), EVEN AFTER the
- *   type-reference-matching fallback also found nothing.
+ *   implicit enclosing-namespace access (#930, #936), or Java/Kotlin's
+ *   same-package visibility and Swift's whole-module access (#1005), EVEN
+ *   AFTER the type-reference-matching fallback also found nothing.
  *
  * This is the SINGLE SOURCE for the model/user-facing explanation of each
  * reason (`ATTRIBUTION_CAVEAT_REASON_TEXT` below). #941 hand-wrote this
@@ -42,6 +55,7 @@
 export type AttributionCaveatReason =
   | 'unresolved-target'
   | 'symbol-attribution-degraded'
+  | 'type-symbol-attribution-incomplete'
   | 'dependent-attribution-partial'
   | 'dependent-attribution-incomplete';
 
@@ -68,6 +82,16 @@ export const ATTRIBUTION_CAVEAT_REASON_TEXT: Record<AttributionCaveatReason, str
     'which); either way, dependentCount/riskLevel/dependents become the file-level answer ' +
     '(every file that imports filepath), not a verified count for symbol itself.',
 
+  'type-symbol-attribution-incomplete':
+    'symbol names a class/struct/interface/enum declaration, not a function or method — ' +
+    'usage attribution is call-site-driven, and nothing "calls" a type by its own name the ' +
+    'way a function call does (constructor calls, type hints, extends/implements clauses, ' +
+    "generic type arguments, and dependency-injected property access don't reliably surface " +
+    'as a tracked call site). totalUsageCount/usages are a partial, best-effort floor — often ' +
+    '0 even when real usages exist — never a verified total; dependentCount/dependents ' +
+    '(which files import symbol) remain reliable. Verify with grep before concluding the ' +
+    'type is unused or safe to rename.',
+
   'dependent-attribution-partial':
     'a file-level query (no symbol) found zero import-based dependents, but a lower-confidence ' +
     'text-matching fallback recovered some dependents anyway (those entries carry ' +
@@ -78,9 +102,10 @@ export const ATTRIBUTION_CAVEAT_REASON_TEXT: Record<AttributionCaveatReason, str
   'dependent-attribution-incomplete':
     'a file-level query (no symbol) came back with zero dependents in a language where the ' +
     "import graph structurally can't see every real usage (e.g. C#'s global using / implicit " +
-    'enclosing-namespace access), even after the text-matching fallback above also found ' +
-    'nothing. Treat dependentCount: 0 and riskLevel: "low" as a floor, not a finding — verify ' +
-    'with grep before concluding the file is unused.',
+    "enclosing-namespace access, Java/Kotlin's same-package visibility, or Swift's " +
+    'whole-module access), even after the text-matching fallback above also found nothing. ' +
+    'Treat dependentCount: 0 and riskLevel: "low" as a floor, not a finding — verify with ' +
+    'grep before concluding the file is unused.',
 };
 
 /**

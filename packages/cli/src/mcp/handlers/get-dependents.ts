@@ -25,7 +25,7 @@ interface IndexInfo {
   indexDate: string;
 }
 
-// `AttributionCaveatReason` and its doc comment (which four reasons exist,
+// `AttributionCaveatReason` and its doc comment (which five reasons exist,
 // what triggers each, and why they're mutually exclusive) now live in
 // `../attribution-caveat-reasons.js` -- the single source that every
 // model/user-facing prose surface interpolates from (#980). Re-exported here
@@ -71,7 +71,7 @@ interface DependentsResponse {
   complexityMetrics: ComplexityMetrics;
   /**
    * Present when this answer's counts can't be trusted as a verified clear
-   * -- read `reason` to tell which of the four ways that can happen (see
+   * -- read `reason` to tell which of the five ways that can happen (see
    * `AttributionCaveatReason`'s doc comment) and `note` for the specific
    * explanation. Absent entirely on a normal, fully-attributed answer.
    */
@@ -94,6 +94,15 @@ function logRiskAssessment(
     log(
       `Symbol-level attribution degraded for "${symbol}" — falling back to ` +
         `${analysis.dependents.length} file-level dependents ${prodTest} - risk: ${riskLevel}${truncatedSuffix}`,
+    );
+    return;
+  }
+
+  if (symbol && analysis.typeSymbolAttributionIncomplete) {
+    log(
+      `Symbol "${symbol}" is a type declaration — totalUsageCount ` +
+        `(${analysis.totalUsageCount ?? 0}) is a partial, call-site-only floor, not a ` +
+        `verified total ${prodTest} - risk: ${riskLevel}${truncatedSuffix}`,
     );
     return;
   }
@@ -172,21 +181,26 @@ function clarifyCallerReasoning(reasoning: string[]): string[] {
 /**
  * Decide which (if any) attribution caveat applies, and build its note.
  *
- * The four reasons are mutually exclusive by construction, so at most one
+ * The five reasons are mutually exclusive by construction, so at most one
  * ever fires:
  * - `unresolvedTargetNote` is only non-empty when `filepath` has no chunks
  *   anywhere in the index, in which case `findDependents` returns an empty
- *   `chunksByFile` up front -- so `symbolAttributionDegraded` (which
- *   requires `chunksByFile.size > 0` to fire), `dependentAttributionPartial`,
- *   and `dependentAttributionIncomplete` (both of which explicitly skip
- *   when `!targetIndexed`) can never also be set.
- * - `symbolAttributionDegraded` only fires for a `symbol` query;
- *   `dependentAttributionPartial`/`dependentAttributionIncomplete` only fire
- *   for a file-level query (no `symbol`) -- see
- *   `enrichWithCSharpTypeReferenceDependents`/
+ *   `chunksByFile` up front -- so `symbolAttributionDegraded`/
+ *   `typeSymbolAttributionIncomplete` (both of which require
+ *   `chunksByFile.size > 0` or a resolved target to fire), and
+ *   `dependentAttributionPartial`/`dependentAttributionIncomplete` (both of
+ *   which explicitly skip when `!targetIndexed`) can never also be set.
+ * - `symbolAttributionDegraded`/`typeSymbolAttributionIncomplete` only fire
+ *   for a `symbol` query; `dependentAttributionPartial`/
+ *   `dependentAttributionIncomplete` only fire for a file-level query (no
+ *   `symbol`) -- see `enrichWithCSharpTypeReferenceDependents`/
  *   `checkDependentAttributionIncomplete` in `@liendev/parser`'s
- *   `dependency-analyzer.ts`. So those can't co-occur with
- *   `symbolAttributionDegraded` either.
+ *   `dependency-analyzer.ts`. So those two pairs can never co-occur.
+ * - `symbolAttributionDegraded` and `typeSymbolAttributionIncomplete` are
+ *   themselves mutually exclusive: `buildDependentsList` (parser-side) only
+ *   ever checks `isTypeDeclarationSymbol` in the branch where `symbol`
+ *   did NOT degrade to the file-level fallback -- see that function's doc
+ *   comment.
  * - `dependentAttributionPartial` requires the FINAL `dependents.length`
  *   (after the type-reference-matching fallback runs) to be positive;
  *   `dependentAttributionIncomplete` requires that same final count to be
@@ -244,6 +258,18 @@ function buildAttributionCaveat(
         `specifically.`;
     return { reason: 'symbol-attribution-degraded', note };
   }
+  if (analysis.typeSymbolAttributionIncomplete) {
+    const note =
+      `"${symbol}" is a class/struct/interface/enum declaration in ${filepath}, not a ` +
+      `function or method. Usage attribution here is call-site-driven, and nothing "calls" ` +
+      `a type by its own name the way a function call does — constructor calls, type hints, ` +
+      `extends/implements clauses, generic type arguments, and dependency-injected property ` +
+      `access don't reliably surface as a tracked call site. totalUsageCount/usages below ` +
+      `are a partial, best-effort floor — often 0 even when real usages exist — not a ` +
+      `verified total; dependentCount/dependents (which files import "${symbol}") remain ` +
+      `reliable. Verify with grep before concluding "${symbol}" is unused or safe to rename.`;
+    return { reason: 'type-symbol-attribution-incomplete', note };
+  }
   if (analysis.dependentAttributionPartial) {
     const inferredCount = analysis.dependents.filter(d => d.confidence === 'inferred').length;
     return {
@@ -265,10 +291,11 @@ function buildAttributionCaveat(
       reason: 'dependent-attribution-incomplete',
       note:
         `No import-based dependents were found for ${filepath}, but its language lets real ` +
-        `callers use its exports with no per-file import naming it at all (C#'s "global using" ` +
-        `/ implicit enclosing-namespace member access). The import graph has no signal for ` +
-        `that usage shape, so dependentCount: 0 and riskLevel: "low" here mean "the scan found ` +
-        `nothing," not "nothing depends on this file" — don't treat this as a verified clear.`,
+        `callers use its exports with no per-file import naming it at all (e.g. C#'s "global ` +
+        `using" / implicit enclosing-namespace access, Java/Kotlin's same-package visibility, ` +
+        `or Swift's whole-module access). The import graph has no signal for that usage shape, ` +
+        `so dependentCount: 0 and riskLevel: "low" here mean "the scan found nothing," not ` +
+        `"nothing depends on this file" — don't treat this as a verified clear.`,
     };
   }
   return undefined;

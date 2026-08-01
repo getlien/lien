@@ -39,12 +39,15 @@ symbol:
   "safe" or "unused" without checking it first. Its reason tells you why:
   "unresolved-target" means ${ATTRIBUTION_CAVEAT_REASON_TEXT['unresolved-target']}
   "symbol-attribution-degraded" means ${ATTRIBUTION_CAVEAT_REASON_TEXT['symbol-attribution-degraded']}
+  "type-symbol-attribution-incomplete" means ${ATTRIBUTION_CAVEAT_REASON_TEXT['type-symbol-attribution-incomplete']}
   "dependent-attribution-partial" means ${ATTRIBUTION_CAVEAT_REASON_TEXT['dependent-attribution-partial']}
   "dependent-attribution-incomplete" means ${ATTRIBUTION_CAVEAT_REASON_TEXT['dependent-attribution-incomplete']}
-  (The latter two reasons only fire for FILE-level queries, i.e. no "symbol"
-  argument.) riskLevel is not adjusted for any of the latter three and may
-  still read "low"; attributionCaveat is the authoritative signal in all
-  four cases.
+  (symbol-attribution-degraded and type-symbol-attribution-incomplete only
+  fire for SYMBOL-level queries; dependent-attribution-partial and
+  dependent-attribution-incomplete only fire for FILE-level queries, i.e. no
+  "symbol" argument.) riskLevel is not adjusted for any of the latter four
+  and may still read "low"; attributionCaveat is the authoritative signal in
+  all five cases.
 
 For discovery ("where is X?", "how does Y work?"), choose by what you already
 know. If you know the exact name, go straight to list_functions (a symbol) or

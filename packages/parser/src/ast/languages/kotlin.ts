@@ -654,4 +654,13 @@ export const kotlinDefinition: LanguageDefinition = {
   symbols: {
     callExpressionTypes: ['call_expression'],
   },
+
+  // #1005: JVM same-package visibility lets real Kotlin callers reach a
+  // file's declarations with zero `import` statements (Klaxon's 104 files
+  // sit in one package with 0 recorded edges) -- the same underlying fact
+  // `samePackageTestConvention` documents for Java, but that flag is scoped
+  // to TEST association specifically (no verified Kotlin Gradle test-source
+  // recovery exists), so this is its own flag -- see
+  // `LanguageDefinition.sameUnitAccessWithoutImport`'s doc comment.
+  sameUnitAccessWithoutImport: true,
 };
