@@ -12,6 +12,7 @@ import {
   detectLanguage,
   hasWholeModuleImports,
   hasSingleFileImports,
+  hasNamespaceStyleImports,
 } from '../ast/languages/registry.js';
 import { hasRustModMarker, stripRustModMarker } from './rust-mod-marker.js';
 
@@ -289,6 +290,21 @@ export function isUnresolvableWholeModuleImport(
  * `findDependentChunks`'s fuzzy loop no longer belongs on this list as of
  * #994 Phase 3).
  *
+ * Strategy 4 has the identical per-language shape (#1028): `matchesPHPNamespace`
+ * is a real semantic for PHP's case-insensitive, directory-mirroring PSR-4
+ * namespaces, but `matchesFile` used to run it unconditionally for every
+ * language too. Its bare-single-component branch's case-insensitivity (added
+ * by #883 for an unrelated Swift fix) let a Rust bare `use crate::{Error}`
+ * specifier (the import extractor's "first wins" grouped-use handling)
+ * case-insensitively self-match `src/error.rs` on a real `dtolnay/anyhow`
+ * clone -- confirmed for three files (`chain.rs`/`context.rs`/`error.rs`),
+ * each via a self-referential `pub(crate) use crate::Self type;` naming its
+ * own type. See `allowNamespaceMatching` and `importMatchesTarget`, the only
+ * caller that derives it from the importer's language via
+ * `hasNamespaceMatchingSemantics`. Every other caller passes the default
+ * (`true`), preserving this function's pre-#1028 behavior exactly, mirroring
+ * `allowPythonModuleMatching`'s own scoping precedent immediately above.
+ *
  * @param normalizedImport - Normalized import path
  * @param normalizedTarget - Normalized target file path
  * @param requireExactTailForMultiSegment - When true, a multi-segment bare
@@ -300,6 +316,11 @@ export function isUnresolvableWholeModuleImport(
  *   matching) is skipped entirely. Defaults to `true` (this function's
  *   pre-#929 behavior); `importMatchesTarget` passes `false` for any
  *   non-Python importer -- see the doc comment above.
+ * @param allowNamespaceMatching - When false, Strategy 4 (PHP namespace
+ *   matching) is skipped entirely. Defaults to `true` (this function's
+ *   pre-#1028 behavior); `importMatchesTarget` passes `false` for any
+ *   importer whose language doesn't set `namespaceStyleImports` -- see the
+ *   doc comment above.
  * @returns True if the import matches the target file
  */
 export function matchesFile(
@@ -307,6 +328,7 @@ export function matchesFile(
   normalizedTarget: string,
   requireExactTailForMultiSegment = false,
   allowPythonModuleMatching = true,
+  allowNamespaceMatching = true,
 ): boolean {
   // Exact match
   if (normalizedImport === normalizedTarget) return true;
@@ -352,7 +374,7 @@ export function matchesFile(
 
   // Strategy 4: PHP namespace matching
   // PHP imports use namespaces like "App\Models\User" which should match "app/Models/User.php"
-  if (matchesPHPNamespace(normalizedImport, normalizedTarget)) {
+  if (allowNamespaceMatching && matchesPHPNamespace(normalizedImport, normalizedTarget)) {
     return true;
   }
 
@@ -399,7 +421,7 @@ function matchesRustModSpecifier(normalizedImport: string, normalizedTarget: str
  * The single guarded import-matching decision: does `importSpecifier` (as
  * written in `importerFile`) resolve to `normalizedTarget`?
  *
- * Couples four guards to `matchesFile` so neither can drift apart from a
+ * Couples five guards to `matchesFile` so neither can drift apart from a
  * match-side call site again:
  * - The #884 whole-module guard (`isUnresolvableWholeModuleImport`) --
  *   `matchesFile` is language-agnostic and cannot know the importer's
@@ -418,15 +440,22 @@ function matchesRustModSpecifier(normalizedImport: string, normalizedTarget: str
  *   a Python identifier shape (see `matchesFile`'s doc comment for the real
  *   hono/TypeScript repro). Derived from the importer's language the same
  *   way as the #887 guard, at this same call site.
+ * - The #1028 PHP-namespace guard (`allowNamespaceMatching`) --
+ *   `matchesFile`'s Strategy 4 is a real PHP PSR-4 semantic, but a false hub
+ *   for any other language whose resolved bare/qualified specifier
+ *   case-insensitively coincides with a target's basename (see `matchesFile`'s
+ *   doc comment for the real `dtolnay/anyhow` Rust self-edge repro). Derived
+ *   from the importer's language via `hasNamespaceMatchingSemantics`, the
+ *   same way as the #887/#929 guards, at this same call site.
  * - The #1021 Rust-mod single-file guard (`hasRustModMarker`) -- unlike the
- *   other three, this is derived from the SPECIFIER, not the importer's
+ *   other four, this is derived from the SPECIFIER, not the importer's
  *   language: a single Rust file can have both a `mod x;` (needs
  *   `matchesRustModSpecifier`'s strict semantics) and a `use crate::y;`
  *   (needs `matchesFile`'s existing leniency) among its own imports, so a
  *   per-language flag can't disambiguate between two entries in the same
- *   file's import list the way it can for #887/#929. When present, this
- *   guard short-circuits entirely -- `matchesFile` never runs at all for a
- *   marked specifier.
+ *   file's import list the way it can for #887/#929/#1028. When present,
+ *   this guard short-circuits entirely -- `matchesFile` never runs at all
+ *   for a marked specifier.
  *
  * Every match-side reverse-dependency call path that used to open-code
  * `!isUnresolvableWholeModuleImport(imp, f) && matchesFile(normalize(imp), t)`
@@ -486,6 +515,7 @@ export function importMatchesTarget(
     normalizedTarget,
     hasSingleFileImportSemantics(importerFile),
     hasPythonModuleSemantics(importerFile),
+    hasNamespaceMatchingSemantics(importerFile),
   );
 }
 
@@ -519,6 +549,24 @@ export function hasSingleFileImportSemantics(importerFile: string): boolean {
  */
 export function hasPythonModuleSemantics(importerFile: string): boolean {
   return detectLanguage(importerFile) === 'python';
+}
+
+/**
+ * True when `importerFile`'s language sets `LanguageDefinition.namespaceStyleImports`
+ * (PHP today) -- see that flag's doc comment for the case-insensitive
+ * PSR-4-vs-Rust distinction this drives (#1028). Unlike `hasPythonModuleSemantics`
+ * above, this IS backed by a `LanguageDefinition` flag, mirroring
+ * `hasSingleFileImportSemantics`: `matchesPHPNamespace`'s case-insensitive,
+ * directory-mirroring semantic is a genuine per-language toggle another
+ * language's own namespace convention could legitimately opt into later,
+ * unlike Python's dotted-module parsing. Shared by `importMatchesTarget`'s
+ * `allowNamespaceMatching` argument -- see `matchesFile`'s doc comment for
+ * the false-hub (a Rust bare `use crate::{Error}` self-matching
+ * `src/error.rs`) this guards against.
+ */
+export function hasNamespaceMatchingSemantics(importerFile: string): boolean {
+  const language = detectLanguage(importerFile);
+  return language !== null && hasNamespaceStyleImports(language);
 }
 
 /**
@@ -668,6 +716,14 @@ function matchesPythonModule(importPath: string, targetPath: string): boolean {
  *
  * Also useful for case-insensitive file systems.
  *
+ * Only ever reached for a PHP importer as of #1028 (see `allowNamespaceMatching`
+ * on `matchesFile` and `hasNamespaceMatchingSemantics`) -- this function's own
+ * case-insensitivity is exactly what made it unsafe to run unconditionally for
+ * every language: a Rust bare `use crate::{Error}` specifier case-insensitively
+ * self-matched `src/error.rs` on a real `dtolnay/anyhow` clone, a false
+ * positive Strategy 2's equivalent (case-SENSITIVE) one-leading-segment
+ * leniency never produces.
+ *
  * A single-component (bare) importPath is the same ambiguous case
  * `matchesAtBoundaryPrecise` (above) guards for `matchesFile`'s strategies
  * 1/2: on its own it doesn't name a specific file, so matching it against the
@@ -675,7 +731,11 @@ function matchesPythonModule(importPath: string, targetPath: string): boolean {
  * directory" limit -- otherwise a bare `import Combine` (system framework)
  * would match `Source/Features/Combine.swift` purely because the basenames
  * coincide, exactly like the multi-segment case this function otherwise
- * guards against.
+ * guards against. (That specific Swift shape is now additionally excluded
+ * by the #1028 gate above, since Swift doesn't set `namespaceStyleImports`
+ * either -- but the guard stays, since this function is still reachable
+ * directly by `matchesFile`'s other callers, which default
+ * `allowNamespaceMatching` to `true`.)
  *
  * @param importPath - The normalized import path
  * @param targetPath - The normalized file path

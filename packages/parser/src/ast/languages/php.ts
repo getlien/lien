@@ -526,6 +526,12 @@ export const phpDefinition: LanguageDefinition = {
   importExtractor: new PHPImportExtractor(),
   symbolExtractor: new PHPSymbolExtractor(),
 
+  // PSR-4 namespaces are case-insensitive and directory-mirroring -- the one
+  // language `matchesFile`'s Strategy 4 (`matchesPHPNamespace`) is a real
+  // semantic for, not an incidental leniency. See `LanguageDefinition.namespaceStyleImports`'s
+  // doc comment (#1028) for the Rust false-positive this flag now excludes.
+  namespaceStyleImports: true,
+
   complexity: {
     decisionPoints: [
       'if_statement',
