@@ -344,6 +344,15 @@ export class OverlayBackend implements VectorDBInterface {
    * excluded from both sides — the file no longer exists here, so reporting
    * it as unindexed is the right call, not a false positive.
    *
+   * That last guarantee depends on the overlay's own manifest never holding
+   * a STALE entry for a file that used to be diverged (modified/added) but
+   * no longer is — e.g. modified, then deleted, or modified back to match
+   * base. `buildOverlay` maintains this by reconciling the overlay manifest
+   * (removing entries outside the current diverged set, not just merging
+   * new ones in) on every build that changes the overlay's content; if that
+   * reconciliation is ever dropped, a modify-then-delete file would resurface
+   * here as falsely "indexed" via the overlay side of the union.
+   *
    * This is what `findUnindexedPaths` (get_dependents/get_complexity/
    * get_files_context's "not found in the index" diagnostic) must consult
    * instead of the overlay's own manifest alone — see #1014.

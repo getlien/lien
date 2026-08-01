@@ -77,6 +77,32 @@ export function computeOverlaySignature(
 }
 
 /**
+ * Reconcile the overlay's manifest with the current diverged set on a real
+ * content change, don't just merge: `ManifestManager.updateFiles` is an
+ * upsert that never drops a key, so a file that WAS diverged (modified/added)
+ * on a prior build but isn't anymore (deleted, or edited back to match base)
+ * would otherwise leave a stale manifest entry behind forever. That stale
+ * entry would resurface via `OverlayBackend.getIndexedFiles()`'s union with
+ * the base and falsely report the file as indexed even though it no longer
+ * exists in this worktree (see #1014 follow-up: modify-then-delete).
+ */
+async function reconcileOverlayManifest(
+  overlayManifest: ManifestManager,
+  diverged: readonly DivergedFile[],
+  manifestEntries: FileEntry[],
+): Promise<void> {
+  const previouslyTracked = await overlayManifest.getIndexedFiles();
+  const currentDivergedPaths = new Set(diverged.map(d => d.rel));
+  const stale = previouslyTracked.filter(f => !currentDivergedPaths.has(f));
+  if (stale.length > 0) {
+    await overlayManifest.removeFiles(stale);
+  }
+  if (manifestEntries.length > 0) {
+    await overlayManifest.updateFiles(manifestEntries);
+  }
+}
+
+/**
  * (Re)build a worktree overlay by diffing the worktree's current content
  * against the base index's per-file content hashes (state-based, not
  * git-history-based).
@@ -216,9 +242,7 @@ export async function buildOverlay(
 
   if (changed) {
     const overlayManifest = new ManifestManager(overlay.dbPath);
-    if (manifestEntries.length > 0) {
-      await overlayManifest.updateFiles(manifestEntries);
-    }
+    await reconcileOverlayManifest(overlayManifest, diverged, manifestEntries);
     // Provenance for `lien gc`: the overlay's source root is the worktree, so a
     // deleted worktree leaves an orphan-detectable overlay index.
     await overlayManifest.recordSourceRoot(path.resolve(overlay.worktreeRoot));

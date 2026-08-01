@@ -197,6 +197,27 @@ describe('findUnindexedPaths against a real OverlayBackend (#1014)', () => {
     (wtDb as unknown as { close?: () => void }).close?.();
   });
 
+  it('does not resurrect a modify-then-delete file as indexed via a stale overlay manifest entry', async () => {
+    // beforeEach's indexCodebase call already modified + indexed to-modify.ts
+    // into the overlay (see the "present-in-overlay" test above). Now delete
+    // it from the worktree entirely and rebuild: `buildOverlay` must PRUNE
+    // the now-stale overlay-manifest entry it wrote on the prior build, not
+    // just leave it there while masking the base row. Without that
+    // reconciliation, getIndexedFiles() would still report this file as
+    // indexed via the overlay side of its union even though it no longer
+    // exists anywhere in the worktree.
+    await fs.rm(path.join(worktreeRoot!, 'to-modify.ts'));
+    await git(worktreeRoot!, 'add', '-A');
+    const secondIndexResult = await indexCodebase({ rootDir: worktreeRoot! });
+    expect(secondIndexResult.success).toBe(true);
+
+    const wtDb = await createVectorDB(worktreeRoot!);
+    await wtDb.initialize();
+    const result = await findUnindexedPaths(wtDb, ['to-modify.ts'], worktreeRoot!);
+    expect(result).toEqual(['to-modify.ts']);
+    (wtDb as unknown as { close?: () => void }).close?.();
+  });
+
   it('still reports a genuinely nonexistent path as unindexed (does not lose the real #927/#951 signal)', async () => {
     const wtDb = await createVectorDB(worktreeRoot!);
     await wtDb.initialize();
