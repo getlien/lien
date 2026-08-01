@@ -1,5 +1,16 @@
 # @liendev/review
 
+## 0.1.19
+
+### Patch Changes
+
+- Updated dependencies [1f94a12]
+- Updated dependencies [921cd76]
+- Updated dependencies [62ad43e]
+- Updated dependencies [7db9264]
+- Updated dependencies [5947350]
+  - @liendev/parser@0.75.0
+
 ## 0.1.18
 
 ### Patch Changes
