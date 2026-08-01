@@ -25,6 +25,20 @@ interface ProcessedViolations {
 
 /**
  * Transform a violation with file-level metadata for API response.
+ *
+ * `complexityRiskLevel` (renamed from `riskLevel` — CLI-4/REVIEW-6) is
+ * `FileComplexityData.riskLevel`: the file's own complexity severity, boosted
+ * (never downgraded) by dependent count/complexity — see that field's doc
+ * comment in `@liendev/parser`'s `insights/types.ts`. It is a DIFFERENT
+ * metric from `get_dependents`/`lien annotate`/`lien api-delta`'s
+ * `riskLevel` (blast-radius risk, `computeBlastRadiusRisk` in
+ * `@liendev/parser`'s `risk/blast-radius-risk.ts`), which weighs dependents'
+ * test coverage and applies a complexity floor instead of a ceiling-less
+ * boost. The two can disagree for the same file at the same moment by
+ * design — see docs/architecture/blast-radius-nudge.md's "Two risk
+ * concepts" section. Do not rename this back to `riskLevel`: that name
+ * collision, observed side-by-side across `get_complexity` and the other
+ * three surfaces, is the exact defect this rename fixes.
  */
 function transformViolation(v: ComplexityViolation, fileData: FileComplexityData) {
   return {
@@ -40,7 +54,7 @@ function transformViolation(v: ComplexityViolation, fileData: FileComplexityData
     language: v.language,
     message: v.message,
     dependentCount: fileData.dependentCount || 0,
-    riskLevel: fileData.riskLevel,
+    complexityRiskLevel: fileData.riskLevel,
     testAssociations: fileData.testAssociations,
     ...(v.halsteadDetails && { halsteadDetails: v.halsteadDetails }),
   };

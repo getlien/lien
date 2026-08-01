@@ -54,6 +54,17 @@ describe('formatJsonReport', () => {
     expect(parsed.files).not.toHaveProperty('src/simple.ts');
   });
 
+  // CLI-4/REVIEW-6: `lien complexity --format json`'s `riskLevel` collided
+  // with `lien annotate`/`get_dependents`/`lien api-delta`'s unrelated
+  // blast-radius `riskLevel` -- same name, different formula, disagreeing
+  // for the same file at the same moment. Renamed to `complexityRiskLevel`
+  // here; `riskLevel` must never reappear in this output.
+  it('renames riskLevel to complexityRiskLevel in the JSON output (CLI-4/REVIEW-6)', () => {
+    const parsed = JSON.parse(formatJsonReport(report));
+    expect(parsed.files['src/utils.ts'].complexityRiskLevel).toBe('low');
+    expect(parsed.files['src/utils.ts']).not.toHaveProperty('riskLevel');
+  });
+
   it('should handle empty report', () => {
     const empty: ComplexityReport = {
       summary: {

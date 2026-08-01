@@ -607,6 +607,7 @@ describe('annotateCommand (integration)', () => {
   let errSpy: ReturnType<typeof vi.spyOn>;
   let tmpHome: string;
   let homeSpy: ReturnType<typeof vi.spyOn>;
+  let originalLienHome: string | undefined;
 
   beforeEach(async () => {
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
@@ -615,6 +616,21 @@ describe('annotateCommand (integration)', () => {
     const fs = await import('fs/promises');
     tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-annotate-test-'));
     homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(tmpHome);
+    // Pre-existing test-isolation bug (found while rebasing this PR, unrelated
+    // to it — reproduces identically on main with zero code changes, and in
+    // real CI: getLienHome() is `process.env.LIEN_HOME || os.homedir()`, and
+    // vitest's own `global-setup.ts` already sets `LIEN_HOME` to ONE shared
+    // temp dir for the ENTIRE test run. That env var wins over the
+    // `os.homedir()` mock above, so every check that resolves the index dir
+    // via `getLienHome()` (this block's own `hasStructuralIndex` restoration
+    // below, and `resolveProjectRoot`'s `hasCompletedIndex`) was silently
+    // reading the SHARED run-wide home instead of this test's own pristine
+    // one -- polluted by any other test in the same run that legitimately
+    // indexes this repo's real root under that shared home. Redirecting
+    // `LIEN_HOME` itself (not just `os.homedir()`) gives this block the
+    // per-test isolation its own comment already claimed to provide.
+    originalLienHome = process.env.LIEN_HOME;
+    process.env.LIEN_HOME = tmpHome;
     // This block specifically exercises the real "never indexed" path (an
     // empty tmp home has no structural.db) — restore the real
     // `hasStructuralIndex` here instead of the file-wide `true` default.
@@ -631,6 +647,8 @@ describe('annotateCommand (integration)', () => {
     logSpy.mockRestore();
     errSpy.mockRestore();
     homeSpy.mockRestore();
+    if (originalLienHome === undefined) delete process.env.LIEN_HOME;
+    else process.env.LIEN_HOME = originalLienHome;
     vi.mocked(indexFreshnessModule.hasStructuralIndex).mockResolvedValue(true);
     await fs.rm(tmpHome, { recursive: true, force: true });
   });
@@ -831,6 +849,90 @@ describe('annotateCommand — plan-time nudge (integration)', () => {
     // An ordinary (non-signal-carrying) annotation — safe for the shell
     // hook's session dedup to silence on a later Read (#978).
     expect(carriesSignal).toBe(false);
+  });
+});
+
+describe('annotateCommand — blast-radius population parity (HOOKS-2, integration)', () => {
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  let errSpy: ReturnType<typeof vi.spyOn>;
+
+  // Same stable target as the plan-time-nudge block above.
+  const target = 'packages/cli/src/cli/index.ts';
+
+  beforeEach(() => {
+    logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    errSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    logSpy.mockRestore();
+    errSpy.mockRestore();
+    vi.mocked(coreModule.createVectorDB).mockClear();
+  });
+
+  function importerChunk(file: string, imports: string[]) {
+    return {
+      content: '',
+      metadata: {
+        file,
+        startLine: 1,
+        endLine: 5,
+        type: 'function',
+        language: 'typescript',
+        symbolName: 'fn',
+        symbolType: 'function',
+        imports,
+      },
+      score: 0,
+      relevance: 'not_relevant',
+    };
+  }
+
+  // Regression for HOOKS-2: `lien annotate` used to feed `dependents.length`
+  // (production + test) into `computeBlastRadiusRisk` instead of
+  // `productionDependentCount` (what `get_dependents`/`lien api-delta` feed).
+  // 2 production dependents (both individually test-covered, so
+  // uncoveredProductionDependents is 0) + 6 dependents that are themselves
+  // test files gives `dependents.length === 8` but `productionDependentCount
+  // === 2` -- the pre-fix bug fed 8 into `classifyLevel` (>5 -> "medium");
+  // the fix feeds 2 (<=5, 0 uncovered -> "low"). A file with many test-only
+  // importers and few production ones must not read riskier than it is.
+  it('computes risk from productionDependentCount, not the wider dependents.length', async () => {
+    // `findDependents` only searches for importers once the target itself
+    // resolves to a real chunk in the scanned universe (`targetIndexed`) --
+    // without this, it fails closed to zero dependents regardless of any
+    // import edges pointing at it.
+    const targetChunk = importerChunk(target, []);
+    const prod1 = importerChunk('src/prodCaller1.ts', [target]);
+    const prod1Test = importerChunk('src/prodCaller1.test.ts', ['src/prodCaller1.ts']);
+    const prod2 = importerChunk('src/prodCaller2.ts', [target]);
+    const prod2Test = importerChunk('src/prodCaller2.test.ts', ['src/prodCaller2.ts']);
+    const testOnlyCallers = Array.from({ length: 6 }, (_, i) =>
+      importerChunk(`src/testCaller${i}.test.ts`, [target]),
+    );
+    const allChunks = [targetChunk, prod1, prod1Test, prod2, prod2Test, ...testOnlyCallers];
+
+    vi.mocked(coreModule.createVectorDB).mockResolvedValueOnce({
+      initialize: vi.fn().mockResolvedValue(undefined),
+      hasData: vi.fn().mockResolvedValue(true),
+      scanAll: vi.fn().mockResolvedValue(allChunks),
+    } as unknown as Awaited<ReturnType<typeof coreModule.createVectorDB>>);
+
+    await annotateCommand(target);
+
+    expect(errSpy).not.toHaveBeenCalled();
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    const printed = logSpy.mock.calls[0][0] as string;
+
+    // The displayed dependents count stays the WIDER total (production +
+    // test) -- that part is unchanged and correct.
+    expect(printed).toContain('8 files import this');
+    // But the risk verdict and its reasoning are scoped to PRODUCTION
+    // dependents only, matching get_dependents/lien api-delta.
+    expect(printed).toContain('risk: low');
+    expect(printed).toContain('2 production callers');
+    expect(printed).not.toContain('risk: medium');
+    expect(printed).not.toContain('8 callers');
   });
 });
 

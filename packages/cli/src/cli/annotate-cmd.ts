@@ -29,6 +29,7 @@ import {
   formatComplexityHeadroomWarning,
 } from '../mcp/handlers/get-files-context.js';
 import { findUnindexedPaths, formatUnindexedPathsNote } from '../mcp/utils/unindexed-paths.js';
+import { relabelCallerReasoning } from '../utils/blast-radius-reasoning.js';
 import { resolveProjectRoot } from './project-root.js';
 import { type AbsolutePath, type RelativePath, toAbsolutePath } from '../types/paths.js';
 import { canonicalizePath } from '../utils/canonicalize-path.js';
@@ -462,8 +463,22 @@ async function computeAnnotationData(
     allChunks,
     rootDir,
   );
+  // HOOKS-2: this used to feed `result.dependents.length` (production + test)
+  // in here while `uncoveredDependents` below was already production-only
+  // (`uncoveredProductionDependents`) -- an internal mismatch, and a
+  // cross-surface one too, since `get_dependents`/`api-delta` both feed
+  // `productionDependentCount` (a test file calling the target shouldn't
+  // weigh into blast-radius risk the same way a production caller does,
+  // #928). A file with many test-only importers and few/no production ones
+  // could come back a HIGHER risk here than `get_dependents` reported for
+  // the identical file at the identical moment. `productionDependentCount`
+  // matches the other two blast-radius surfaces; `relabelCallerReasoning`
+  // below then makes that scoping explicit in the printed reasoning, the
+  // same way `get_dependents` already does, since the displayed dependents
+  // list (`formatDependents`, below) intentionally stays the WIDER
+  // production+test total.
   const risk = computeBlastRadiusRisk({
-    dependentCount: result.dependents.length,
+    dependentCount: result.productionDependentCount,
     uncoveredDependents: result.uncoveredProductionDependents,
     // Dependents' max complexity feeds the blast-radius risk score. The
     // target file's own complexity (`complexity.max`) is reported
@@ -472,6 +487,10 @@ async function computeAnnotationData(
     hasHighComplexityUncovered,
     complexityRiskBoost: result.complexityMetrics.complexityRiskBoost,
   });
+  const relabeledRisk: BlastRadiusRisk = {
+    ...risk,
+    reasoning: relabelCallerReasoning(risk.reasoning),
+  };
 
   return {
     allChunks,
@@ -483,7 +502,7 @@ async function computeAnnotationData(
     csharpTypeReferenceTests,
     complexity,
     headroom,
-    risk,
+    risk: relabeledRisk,
   };
 }
 

@@ -144,6 +144,11 @@ interface FileComplexityData {
   violations: ComplexityViolation[];
   dependents: string[];        // Files that import this file
   testAssociations: string[];  // Test files covering this file
+  // Own complexity severity, boosted (never downgraded) by dependent
+  // count/complexity -- NOT the same concept as get_dependents'/`lien
+  // annotate`'s blast-radius `riskLevel` (no test-coverage term here at
+  // all). Serialized as `complexityRiskLevel` in `lien complexity
+  // --format json` / `get_complexity`'s MCP response.
   riskLevel: 'low' | 'medium' | 'high' | 'critical';
 }
 
