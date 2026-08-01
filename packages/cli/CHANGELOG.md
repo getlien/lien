@@ -1,5 +1,86 @@
 # @liendev/lien
 
+## 0.75.2
+
+### Patch Changes
+
+- e729cf7: Fix `lien complexity` reporting a false clean (exit 0, "no violations found") on a project that has never been indexed, and silently materializing an empty `structural.db` as a side effect — the worst possible gate failure mode, since `--fail-on error` is meant to be a CI gate.
+
+  Root cause: `complexityCommand()` called `createVectorDB(rootDir).initialize()` before checking whether an index existed. `SqliteBackend.initialize()` unconditionally `mkdir`s the index directory and opens the database with `CREATE TABLE IF NOT EXISTS` (`schema.ts`'s `openDatabase`), which materializes a valid, empty store even for a project that was never indexed — and the existing `ensureIndexExists` check only caught a thrown exception, never an empty-but-valid result, so it never fired. The created store then made a subsequent `lien status` wrongly report the project as indexed.
+
+  `lien api-delta` had already solved exactly this with a cheap, side-effect-free existence check (`hasStructuralIndex`, a plain `fs.access` on `structural.db`) run BEFORE ever calling `createVectorDB`. This consolidates that pattern into a shared `packages/cli/src/utils/index-freshness.ts` and applies it at every read-only call site that had the same bug:
+  - `lien complexity` now checks `hasStructuralIndex` first and, on a missing index, prints the existing "Index not found" error and exits 1 — unconditionally, independent of `--fail-on` — without ever touching the database file.
+  - `lien annotate` (both its full-annotation path and its `--tests-only`/`lookupTestAssociations` path, also used by `lien verify-tests note-edit`) had the identical bug: `createVectorDB(rootDir).initialize()` ran before the `hasData()` check that prints its own "no index found" warning, so a single `Read` or `Edit` in an unindexed repo silently created `structural.db` too. Since several of this plugin's own hooks (`augment-explore-task.sh`, `test-reminder.sh`) gate on "does `structural.db` exist on disk?" as their sole signal for "is this repo indexed?", that one side effect permanently flipped those hooks' gate open for the rest of the session, making them act on an empty index. Fixed the same way: check existence before ever calling `createVectorDB`.
+  - `lien api-delta` now imports the shared `hasStructuralIndex` instead of keeping its own copy.
+
+  Also added: `lien complexity` now warns (via `getIndexStalenessWarning`, reusing `lien status`'s existing "git state changed" detection against `.git-state.json`) when the on-disk index's recorded git state no longer matches the working tree, instead of silently serving stale results with no signal at all. `lien serve`'s auto-reindex machinery (`git-detection.ts`) doesn't run for this one-shot command, so this is a warning, not an auto-reindex — `lien status`'s own staleness check (`status.ts`) was refactored to share the same read (`readIndexGitState`) rather than re-deriving it a third time.
+
+  A genuinely clean, up-to-date, indexed project is unaffected: `lien complexity` still reports "no violations found" at exit 0, and `lien index` still creates the store on a virgin directory exactly as before — only read-only commands that have no business creating index state were changed.
+
+- 4703563: Fix three more instances of the fail-quiet defect class (#1029 Workstream 1) and build the detector that stops the class from recurring.
+
+  **New instances fixed** (same disposition as #1031/#1034: a confident answer where the honest answer is "I don't know"):
+  - **`get_complexity` (MCP tool)**: a whole-repo scan (no `files` filter) over a structural store with zero rows reported "0 files analyzed, 0 violations" with no indication the store was empty — indistinguishable from a genuinely clean, fully-indexed codebase. Now adds the same `⚠ Lien: ... no data` note `search_code`/`list_functions` already give.
+  - **`find_similar` (MCP tool)**: 0 results on an empty structural store got the generic "ensure your snippet is representative" note — the same one a healthy index gives for a real 0-match query. Now escalates to the unmissable no-data note when `hasData()` is false.
+  - **`lien api-delta`**: an index directory that exists but has zero rows (cleared, moved aside, mid-rebuild) sailed past the existing `hasStructuralIndex` check and reported a real-looking `enriched: true, dependentCount: 0` instead of degrading like a never-indexed project does.
+  - **`lien annotate`**: `reportUnresolvedPath` (a typo'd/nonexistent path) skipped the `hasStructuralIndex` pre-check the file's other two call sites already have, silently materializing an empty `structural.db` as a side effect on a virgin project.
+  - **`lien complexity`**: extended to catch S1 (index directory exists, store has 0 rows) as a hard error — previously only S0 (no index at all) was caught.
+
+  **The detector**: `packages/cli/utils/index-freshness.ts` (from #1031) gains a `classifyIndexState` function consolidating the S0 (no index) / S1 (empty store) / S2 (stale vs. HEAD) ladder in one place. `packages/cli/test/integration/index-state-matrix.test.ts` is a new table test asserting every read-only, index-backed entry point's actual response against a real `SqliteBackend` (no mocking) across every state that applies to it, with a completeness guard that fails the build if a new `createVectorDB` call site or MCP tool handler isn't accounted for.
+
+  Policy documented in CLAUDE.md and `docs/architecture/index-state-honesty.md`: the right response differs by command disposition (gate-shaped commands hard-error on S0/S1; advisory nudges warn loudly but stay exit-0; MCP tools use an explicit `note`/`attributionCaveat`) — never a blanket rule.
+
+- 3366131: Fix six small, independently-confirmed defects in the CLI and MCP server, all in the same "silent wrong answer" family:
+  - **`get_complexity` silently ignored an unrecognized `filepath` argument.** Every MCP tool schema in `packages/cli/src/mcp/schemas/` was a plain `z.object({...})` with no `.strict()` — Zod's default behavior _strips_ unknown keys rather than rejecting them, so a caller passing `filepath` (instead of the correct `files` array) had it silently vanish, `files` stayed `undefined`, and the handler fell through to "analyze the entire codebase." The advertised JSON schema said `"additionalProperties": false`, but that's descriptive metadata for the client, not runtime enforcement. All six MCP schemas (`search`, `similarity`, `file`, `symbols`, `dependents`, `complexity`) now call `.strict()`, so an unrecognized key returns a clear `INVALID_INPUT` error instead of a structurally-indistinguishable whole-repo answer. A legitimate call that omits `files` still analyzes the whole codebase as documented — only unrecognized keys are rejected.
+  - **`lien status`'s "Index files" counted directory entries, not indexed files.** `getFileCount()` was `fs.readdir(indexPath, {recursive:true}).length` — the number of bookkeeping entries in the store dir (`manifest.json`, `structural.db` + its `-shm`/`-wal` sidecars, `.git-state.json`, `.lien-accessed`, `.lien-index-version`), unrelated to how many source files are actually indexed. Both the text and `--format json` output now report `ManifestManager.getIndexedFiles().length` — the manifest's real indexed-file count.
+  - **`lien annotate <nonexistent-path>` in an indexed repo printed nothing and exited 0** — indistinguishable from "this file has no impact," unlike the (correctly loud) unindexed-root case. `resolvePaths` returning null (path doesn't exist on disk, or escapes the project root) now reports "not found in the index" via the same `findUnindexedPaths`/`formatUnindexedPathsNote` machinery the MCP tools already use for this exact class of bug, rather than silently exiting.
+  - **`lien delta --soft` advised re-running with `--soft`, even when `--soft` was already passed.** `formatDeltaText()` took no `soft` parameter and unconditionally printed "re-run with --soft to advise only" whenever crossings existed. It now prints "Advisory only — not failing the build" when `--soft` is set, and the original advice otherwise. Exit code behavior (`--soft` always exits 0) was already correct — only the printed advice was wrong.
+  - **`lien config set` help text advertised a project-scoped key that doesn't exist.** The `set <key> <value>` subcommand description said "global or project, depending on the key" — leftover prose from before `embeddings.enabled` (the one former project-scoped key) was retired along with embeddings. `ALLOWED_KEYS` has exactly one entry (`backend`, global-only) today, and the parent `config` command's own description already says so correctly. The subcommand description now matches.
+
+  All six were verified by direct reproduction (before/after) against a real indexed scratch repo and the MCP server's stdio protocol, not just unit tests.
+
+- 7097ad6: Fixes two confirmed defects where `riskLevel` disagreed for the same file at
+  the same moment (CLI-4/REVIEW-6/#1017), plus a related population-parity bug
+  found while investigating (HOOKS-2).
+
+  **CLI-4/REVIEW-6 — `get_complexity`/`lien complexity` computed a genuinely
+  different concept than `get_dependents`/`lien annotate`/`lien api-delta`,
+  under the identical field name `riskLevel`.** The two are legitimately
+  different questions — "how risky is this file's own complexity" (own
+  violation severity, boosted but never downgraded by dependent count/
+  complexity, no test-coverage term at all) vs "how risky is changing this
+  file given who depends on it" (blast-radius risk: dependent breadth plus
+  untested-dependent count, with a complexity floor) — so the fix renames
+  rather than merges: `lien complexity --format json` and `get_complexity`'s
+  `violations[]` now report `complexityRiskLevel` instead of `riskLevel`.
+  `lien complexity`'s text output now prints "Complexity risk:" instead of
+  bare "Risk:". `get_dependents`/`lien annotate`/`lien api-delta` are
+  unchanged — they keep `riskLevel` for blast-radius risk. Both concepts are
+  now documented side by side, with the divergence pinned by a dedicated test,
+  in `docs/architecture/blast-radius-nudge.md`'s new "Two risk concepts"
+  section.
+
+  **HOOKS-2 — `lien annotate` fed the wrong population into blast-radius
+  risk.** `get_dependents`/`lien api-delta` compute risk from
+  `productionDependentCount` (test files calling the target don't weigh into
+  risk the same way production callers do); `lien annotate` fed the wider
+  `dependents.length` (production + test) instead — an internal mismatch too,
+  since it already used the narrower `uncoveredProductionDependents` for the
+  untested count in the same call. A file with many test-only importers and
+  few production ones could read riskier from `lien annotate` than from
+  `get_dependents` for the identical file at the identical moment. Fixed by
+  feeding `productionDependentCount` into `lien annotate`'s risk computation
+  too, and relabeling the "N callers" reasoning entry as "N production
+  callers" (shared `relabelCallerReasoning`, used by both `get_dependents` and
+  `lien annotate` — one implementation instead of two that can drift again).
+  The displayed dependents list and count are unchanged (still the wider
+  production + test total, sorted production-first).
+
+- Updated dependencies [bddcdb9]
+- Updated dependencies [7097ad6]
+  - @liendev/parser@0.75.2
+  - @liendev/core@0.75.2
+
 ## 0.75.1
 
 ### Patch Changes
