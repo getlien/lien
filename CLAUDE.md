@@ -101,6 +101,42 @@ Lien provides lexical (FTS5) code search and dependency analysis via MCP. These 
 
 ---
 
+## Index-State Honesty — MANDATORY for New Commands/Tools
+
+**A read-only, index-backed command MUST NEVER produce a confident answer
+when it has no data, or the wrong data, to answer from.** An empty scan
+that formats as "0 violations, clean!" and a genuinely clean codebase are
+the same shape unless the command checks which one it actually has —
+checking is not optional.
+
+Classify the index state via `classifyIndexState`
+(`packages/cli/src/utils/index-freshness.ts`) for whole-index states, and
+`findUnindexedPaths` (`packages/cli/src/mcp/utils/unindexed-paths.ts`) for a
+specific requested path. **Do not hand-roll this check again** — every
+existing read-only entry point already goes through one of these two.
+
+The response required differs by what kind of command it is — **never a
+blanket "always error"**:
+
+| Disposition | No index / empty store (S0/S1) | Stale vs. HEAD (S2) | Requested path not indexed (S3) |
+|---|---|---|---|
+| Gate-shaped (`lien complexity --fail-on`) | **Hard error, non-zero exit** | Loud warning, still runs | — |
+| Advisory nudge (`lien annotate`, `lien api-delta`) | Loud, un-suppressible warning or degraded marker (`enriched: false`) — exit 0 is fine | n/a for these two | Explicit "not found in the index" |
+| MCP tool | S0 is structurally impossible (`lien serve` initializes the store before registering tools); S1 → explicit `note`/`attributionCaveat`, never a bare empty result | n/a — `lien serve`'s git-detection keeps it fresh | Explicit `note`/`attributionCaveat` naming the path |
+
+**Hard constraint: never turn a genuinely clean, freshly-indexed result into
+a false alarm.** Gate on the actual state (`hasData()`, `getIndexedFiles()`),
+never on the shape of the result — see #1014 for what over-firing costs
+(a false caveat that fires every session gets trained out as noise).
+
+**Before shipping a new command or MCP tool that reads the structural
+index**, add it to `packages/cli/test/integration/index-state-matrix.test.ts`
+— its completeness guard fails the build if a new `createVectorDB` call site
+or MCP tool handler isn't accounted for there. Full policy, the four-state
+vocabulary, and worked examples: `docs/architecture/index-state-honesty.md`.
+
+---
+
 ## Agent-Review Rule Development — Use the Test Harness
 
 Adding or tweaking a rule in `packages/review/src/plugins/agent/` MUST go

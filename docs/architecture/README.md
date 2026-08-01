@@ -167,6 +167,19 @@ Read this before adding or changing a plugin hook.
 
 ---
 
+### [Index-State Honesty](./index-state-honesty.md)
+The policy + detector behind never producing a confident answer on missing/stale data.
+
+Explains:
+- The four whole-index/per-path states (S0/S1/S2/S3) and `classifyIndexState`
+- Why the right response differs by command disposition (gate-shaped, advisory, MCP tool) — never a blanket rule
+- The table test (`packages/cli/test/integration/index-state-matrix.test.ts`) and its completeness guard
+- How to wire a new read-only, index-backed command correctly
+
+Read this before adding any command or MCP tool that reads from the structural index.
+
+---
+
 ### [Agent-Review Pass Architecture](./review-pass-architecture.md)
 `ReviewPassSpec` and the extra-pass executor (Lien Review).
 
@@ -210,6 +223,7 @@ For the history behind these designs, see the [Architectural Decision Records in
 | Session risk-ledger recap (`lien recap`) | [Session Risk-Ledger Recap](./session-risk-recap.md) |
 | Plugin hook design (what reaches the model) | [Claude Code Hook Output Channels](./claude-code-hook-channels.md) |
 | Lien Review's extra LLM passes (doc-truth, candidate loops) | [Agent-Review Pass Architecture](./review-pass-architecture.md) |
+| Never a confident answer on missing/stale data (S0-S3) | [Index-State Honesty](./index-state-honesty.md) |
 
 ### For debugging
 

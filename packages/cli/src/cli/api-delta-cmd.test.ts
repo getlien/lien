@@ -450,6 +450,7 @@ describe('apiDeltaCommand — enrichment when an index is present', () => {
     };
     vi.mocked(coreModule.createVectorDB).mockResolvedValueOnce({
       initialize: vi.fn().mockResolvedValue(undefined),
+      hasData: vi.fn().mockResolvedValue(true),
       getCurrentVersion: vi.fn().mockReturnValue(1),
       scanAll: vi.fn().mockResolvedValue([targetChunk, callerChunk]),
     } as unknown as Awaited<ReturnType<typeof coreModule.createVectorDB>>);
@@ -476,6 +477,46 @@ describe('apiDeltaCommand — enrichment when an index is present', () => {
     expect(errSpy).not.toHaveBeenCalled();
   });
 
+  // #1029 W1: the index DIRECTORY existing (structural.db on disk) is not
+  // the same as the store having usable data — a cleared/moved-aside/
+  // mid-rebuild store must degrade exactly like "no index at all" (S0),
+  // never report a real-looking `enriched: true, dependentCount: 0`.
+  it('degrades to signature-only when the index directory exists but the store has 0 rows', async () => {
+    await write('a.ts', 'export function formatUser(user) { return user.name; }');
+    await git('add', '-A');
+    await git('-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'init');
+    await write('a.ts', 'export function formatUser(user, opts) { return user.name; }');
+
+    const { getIndexDir } = await import('@liendev/core');
+    const realIndexDir = getIndexDir(dir);
+    await fs.mkdir(realIndexDir, { recursive: true });
+    await fs.writeFile(path.join(realIndexDir, 'structural.db'), '', 'utf-8');
+
+    vi.mocked(coreModule.createVectorDB).mockResolvedValueOnce({
+      initialize: vi.fn().mockResolvedValue(undefined),
+      hasData: vi.fn().mockResolvedValue(false),
+      getCurrentVersion: vi.fn().mockReturnValue(1),
+      scanAll: vi.fn().mockResolvedValue([]),
+    } as unknown as Awaited<ReturnType<typeof coreModule.createVectorDB>>);
+
+    await expect(apiDeltaCommand({ format: 'json', file: 'a.ts' })).rejects.toThrow('__exit__:0');
+
+    const result = lastJsonLog() as {
+      changes: Array<{
+        symbol: string;
+        enriched: boolean;
+        dependentCount: number | null;
+        untestedDependentCount: number | null;
+      }>;
+    };
+    expect(result.changes[0]).toMatchObject({
+      symbol: 'formatUser',
+      enriched: false,
+      dependentCount: null,
+      untestedDependentCount: null,
+    });
+  });
+
   it('reports docRefCount/docRefPaths for a REMOVED symbol referenced by doc chunks in the stub index', async () => {
     await write('a.ts', 'export function oldHelper() { return 1; }');
     await git('add', '-A');
@@ -495,6 +536,7 @@ describe('apiDeltaCommand — enrichment when an index is present', () => {
     };
     vi.mocked(coreModule.createVectorDB).mockResolvedValueOnce({
       initialize: vi.fn().mockResolvedValue(undefined),
+      hasData: vi.fn().mockResolvedValue(true),
       getCurrentVersion: vi.fn().mockReturnValue(1),
       scanAll: vi.fn().mockResolvedValue([docChunk]),
     } as unknown as Awaited<ReturnType<typeof coreModule.createVectorDB>>);
@@ -532,6 +574,7 @@ describe('apiDeltaCommand — enrichment when an index is present', () => {
 
     vi.mocked(coreModule.createVectorDB).mockResolvedValueOnce({
       initialize: vi.fn().mockResolvedValue(undefined),
+      hasData: vi.fn().mockResolvedValue(true),
       getCurrentVersion: vi.fn().mockReturnValue(1),
       scanAll: vi.fn().mockResolvedValue([]),
     } as unknown as Awaited<ReturnType<typeof coreModule.createVectorDB>>);

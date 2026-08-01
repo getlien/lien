@@ -42,6 +42,7 @@ describe('handleGetComplexity', () => {
     scanWithFilter: vi.fn(),
     getCurrentVersion: vi.fn(() => 1234567890),
     getVersionDate: vi.fn(() => '2025-12-19'),
+    hasData: vi.fn(),
   };
 
   // Config no longer needed - ComplexityAnalyzer uses defaults
@@ -74,6 +75,9 @@ describe('handleGetComplexity', () => {
       mockAnalyzeFn.mockClear();
     }
     vi.mocked(findUnindexedPaths).mockResolvedValue([]);
+    // Healthy-index default; the "empty structural store" tests below
+    // override this to `false` to exercise the `hasData()`-gated note.
+    mockVectorDB.hasData.mockResolvedValue(true);
   });
 
   const getMockAnalyze = () => (globalThis as any).__mockAnalyze;
@@ -620,6 +624,34 @@ describe('handleGetComplexity', () => {
       const result = await handleGetComplexity({ top: 10 }, mockCtx);
 
       expect(findUnindexedPaths).not.toHaveBeenCalled();
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed).not.toHaveProperty('note');
+    });
+
+    // #1029 W1: a whole-codebase sweep (no `files` filter) over a structural
+    // store with zero rows (never indexed, cleared, or mid-rebuild) used to
+    // report "0 files analyzed, 0 violations" with no note at all —
+    // structurally indistinguishable from a genuinely clean, fully-indexed
+    // codebase. `findUnindexedPaths` never even runs in this no-`files`
+    // path (see the test above), so it can't be the thing that catches this.
+    it('adds the unmissable no-index note on a whole-codebase sweep when the structural store has no data at all', async () => {
+      mockVectorDB.hasData.mockResolvedValue(false);
+      getMockAnalyze().mockResolvedValue(emptyReport);
+
+      const result = await handleGetComplexity({ top: 10 }, mockCtx);
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.note).toContain('⚠ Lien:');
+      expect(parsed.note).toContain('no data');
+      expect(parsed.summary.filesAnalyzed).toBe(0);
+    });
+
+    it('does not add the no-index note when a whole-codebase sweep genuinely finds 0 violations on a healthy index', async () => {
+      mockVectorDB.hasData.mockResolvedValue(true);
+      getMockAnalyze().mockResolvedValue(emptyReport);
+
+      const result = await handleGetComplexity({ top: 10 }, mockCtx);
+
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed).not.toHaveProperty('note');
     });

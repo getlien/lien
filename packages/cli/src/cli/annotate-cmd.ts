@@ -526,12 +526,25 @@ async function reportUnresolvedPath(file: string): Promise<boolean> {
   if (!file.trim()) return false;
 
   const rootDir = resolveProjectRoot(toAbsolutePath(process.cwd()));
+
+  // #1029 W1: check existence BEFORE createVectorDB/initialize() — same
+  // reason as `run()`'s own pre-check just below (see `hasStructuralIndex`'s
+  // doc comment). This call site used to skip straight to `createVectorDB`,
+  // which silently materializes an empty structural.db as a side effect on a
+  // never-indexed project — the printed warning text was already correct
+  // (via the `hasData()` check below), but a virgin project shouldn't gain a
+  // stray store just because someone ran `lien annotate` on a typo'd path.
+  if (!(await hasStructuralIndex(rootDir))) {
+    console.log(formatNoIndexWarning(rootDir));
+    return false;
+  }
+
   const vectorDB = await createVectorDB(rootDir);
   await vectorDB.initialize();
 
-  // #894: same "index never built" check `run()` makes for a resolvable
-  // path — a stray/typo'd path against a never-indexed root should say so,
-  // not "not found in the index" (which implies indexing exists to check).
+  // #894: defense-in-depth for the rarer case where the store file exists
+  // but genuinely has zero rows — the `hasStructuralIndex` check above only
+  // catches "never indexed at all".
   if (!(await vectorDB.hasData())) {
     console.log(formatNoIndexWarning(rootDir));
     return false;

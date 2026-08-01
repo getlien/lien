@@ -13,6 +13,7 @@ describe('handleFindSimilar', () => {
 
   let mockVectorDB: {
     search: ReturnType<typeof vi.fn>;
+    hasData: ReturnType<typeof vi.fn>;
   };
 
   let mockCtx: ToolContext;
@@ -53,6 +54,9 @@ describe('handleFindSimilar', () => {
 
     mockVectorDB = {
       search: vi.fn(),
+      // Healthy-index default; the "no data at all" test below overrides
+      // this to `false` to exercise the `hasData()`-gated note.
+      hasData: vi.fn().mockResolvedValue(true),
     };
 
     mockCtx = {
@@ -454,6 +458,33 @@ describe('handleFindSimilar', () => {
       expect(parsed.note).toContain('0 results');
       expect(parsed.note).toContain('24 characters');
       expect(parsed.note).toContain('grep');
+    });
+
+    // #1029 W1: 0 results on a structural store with no data at all (never
+    // indexed, cleared, or mid-rebuild) used to get the exact same "ensure
+    // the snippet is representative" note as a genuinely healthy index that
+    // just found nothing similar — indistinguishable from "confirmed absent"
+    // when it should read as "unknown".
+    it('escalates to the unmissable no-index note when the structural store has no data at all', async () => {
+      mockVectorDB.search.mockResolvedValue([]);
+      mockVectorDB.hasData.mockResolvedValue(false);
+
+      const result = await handleFindSimilar({ code: 'async function fetchData() {}' }, mockCtx);
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.results).toHaveLength(0);
+      expect(parsed.note).toContain('⚠ Lien:');
+      expect(parsed.note).toContain('no data');
+    });
+
+    it('does not call hasData() when results are already non-empty', async () => {
+      mockVectorDB.search.mockResolvedValue([
+        createMockResult({ content: 'function fetchUser() {}' }),
+      ]);
+
+      await handleFindSimilar({ code: 'async function fetchData() {}' }, mockCtx);
+
+      expect(mockVectorDB.hasData).not.toHaveBeenCalled();
     });
   });
 

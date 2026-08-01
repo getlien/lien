@@ -2,7 +2,11 @@ import collect from 'collect.js';
 import { wrapToolHandler } from '../utils/tool-wrapper.js';
 import { GetComplexitySchema } from '../schemas/index.js';
 import type { GetComplexityInput } from '../schemas/index.js';
-import { findUnindexedPaths, formatUnindexedPathsNote } from '../utils/unindexed-paths.js';
+import {
+  findUnindexedPaths,
+  formatUnindexedPathsNote,
+  formatNoIndexNote,
+} from '../utils/unindexed-paths.js';
 import { ComplexityAnalyzer } from '@liendev/core';
 import type { ComplexityViolation, FileComplexityData, ComplexityReport } from '@liendev/parser';
 import type { ToolContext, MCPToolResult } from '../types.js';
@@ -140,6 +144,22 @@ export async function handleGetComplexity(args: unknown, ctx: ToolContext): Prom
       metricType,
     );
 
+    // A whole-repo scan (no `files` filter) over a structural store that has
+    // no data at all (never indexed, cleared, or mid-rebuild) produces
+    // exactly the same "0 files analyzed, 0 violations" shape as a
+    // genuinely clean, fully-indexed codebase — that's backwards for a tool
+    // whose entire purpose is a confidence check before relying on the
+    // answer. `unindexedNote` above already covers the scoped-`files` case
+    // (every requested path already reads as unknown-to-the-index when the
+    // whole store is empty); this only fires the ADDITIONAL "the index
+    // itself is empty" fact when `files` was omitted, mirroring
+    // search_code/list_functions's own `hasData()` gate for the identical
+    // 0-results ambiguity.
+    let note = unindexedNote;
+    if (!note && report.summary.filesAnalyzed === 0 && !(await vectorDB.hasData())) {
+      note = formatNoIndexNote();
+    }
+
     return {
       indexInfo: getIndexMetadata(),
       summary: {
@@ -150,7 +170,7 @@ export async function handleGetComplexity(args: unknown, ctx: ToolContext): Prom
         bySeverity,
       },
       violations: topViolations,
-      ...(unindexedNote && { note: unindexedNote }),
+      ...(note && { note }),
     };
   })(args);
 }

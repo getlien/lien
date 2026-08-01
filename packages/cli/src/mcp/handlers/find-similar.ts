@@ -1,6 +1,7 @@
 import { wrapToolHandler } from '../utils/tool-wrapper.js';
 import { FindSimilarSchema } from '../schemas/index.js';
 import { shapeResults, deduplicateResults } from '../utils/metadata-shaper.js';
+import { formatNoIndexNote } from '../utils/unindexed-paths.js';
 import type { ToolContext, MCPToolResult } from '../types.js';
 import type { SearchResult, VectorDBInterface } from '@liendev/core';
 
@@ -39,9 +40,17 @@ async function fetchCandidates(
 /**
  * Build the diagnostic note, if any. Never states a specific total — only
  * what's actually known (empty, or capped with more possibly available).
+ *
+ * On 0 results, only assert the harder "no index at all" fact (`hasData`)
+ * when it's actually established — same reasoning as search_code/
+ * list_functions's own `hasData()` gate: a structural store with zero rows
+ * (never indexed, cleared, or mid-rebuild) produces the exact same "0
+ * results" as a genuinely healthy index that just found nothing similar,
+ * which is exactly backwards for a tool an agent is told to trust.
  */
-function buildNote(finalCount: number, hasMore: boolean): string | undefined {
+function buildNote(finalCount: number, hasMore: boolean, hasData: boolean): string | undefined {
   if (finalCount === 0) {
+    if (!hasData) return formatNoIndexNote();
     return '0 results. Ensure the code snippet is at least 24 characters and representative of the pattern. Try grep for exact string matches.';
   }
   if (hasMore) {
@@ -150,7 +159,11 @@ export async function handleFindSimilar(args: unknown, ctx: ToolContext): Promis
     // have more filtered candidates than `limit` shows, OR the underlying
     // fetch window wasn't proven exhausted (see fetchCandidates).
     const hasMore = filtered.length > limit || !fetchWindowExhausted;
-    const note = buildNote(finalResults.length, hasMore);
+    // Only pay for the extra hasData() round-trip when it would actually
+    // change the note (0 results) — same "only ask when it matters" pattern
+    // as get_complexity/list_functions.
+    const hasData = finalResults.length > 0 || (await vectorDB.hasData());
+    const note = buildNote(finalResults.length, hasMore, hasData);
 
     return {
       indexInfo: getIndexMetadata(),
