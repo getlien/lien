@@ -206,14 +206,40 @@ function fmtFunction(fn: FunctionComplexityDelta): string {
 }
 
 /**
+ * The trailing "how to proceed" line shown after crossings > 0. Split out
+ * as its own function (rather than an inline ternary in `formatDeltaText`)
+ * so the two-way branch on `soft` doesn't add to `formatDeltaText`'s own
+ * cyclomatic complexity, which is already near its warn threshold.
+ *
+ * `--soft` already advises rather than fails (see `deltaExitCode`), so
+ * telling a caller who passed `--soft` to "re-run with --soft" is both
+ * confusing and wrong — the advice must match the mode actually in effect.
+ */
+function formatCrossingsAdvice(soft: boolean | undefined): string {
+  if (soft) {
+    return (
+      chalk.yellow('  → new complexity crossings introduced.') +
+      chalk.dim(' Advisory only (--soft) — not failing the build.')
+    );
+  }
+  return (
+    chalk.red('  → new complexity crossings introduced.') +
+    chalk.dim(' Simplify before committing, or re-run with --soft to advise only.')
+  );
+}
+
+/**
  * Render the human-readable report. Pure — no I/O, no process state.
  * `baseLabel` names the comparison point in the header (default `HEAD`;
  * `--base <ref>` passes `ref` so the report is honest about what it compared).
+ * `soft` mirrors `--soft` (see `deltaExitCode`) so the trailing advice line
+ * matches the mode actually in effect — see `formatCrossingsAdvice`.
  */
 export function formatDeltaText(
   result: ComplexityDeltaResult,
   elapsedMs: number,
   baseLabel = 'HEAD',
+  soft?: boolean,
 ): string {
   const { summary, files } = result;
   const filesWithFindings = files.filter(f => f.functions.length > 0);
@@ -247,10 +273,7 @@ export function formatDeltaText(
 
   if (crossings > 0) {
     lines.push('');
-    lines.push(
-      chalk.red('  → new complexity crossings introduced.') +
-        chalk.dim(' Simplify before committing, or re-run with --soft to advise only.'),
-    );
+    lines.push(formatCrossingsAdvice(soft));
   }
   return lines.join('\n');
 }
@@ -348,7 +371,7 @@ export async function deltaCommand(options: DeltaOptions): Promise<void> {
   if (options.format === 'json') {
     console.log(JSON.stringify({ ...result, elapsedMs }, null, 2));
   } else {
-    console.log(formatDeltaText(result, elapsedMs, options.base ?? 'HEAD'));
+    console.log(formatDeltaText(result, elapsedMs, options.base ?? 'HEAD', options.soft));
   }
 
   process.exit(exitCode);
