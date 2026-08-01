@@ -572,6 +572,31 @@ export const pythonDefinition: LanguageDefinition = {
   importExtractor: new PythonImportExtractor(),
   symbolExtractor: new PythonSymbolExtractor(),
 
+  // ADR-015 (#1038): verified against a real corpus (requests).
+  // `wholeModuleImports: false` -- MUST stay false, not merely "no evidence
+  // for true": `tests/test_requests.py:19-20` has `import requests` (bare)
+  // and `from requests.adapters import HTTPAdapter` (dotted), both resolved
+  // TODAY via `matchesFile`'s Strategy 5 (`matchesPythonModule`,
+  // `../../utils/path-matching.ts`) to `src/requests/__init__.py` and
+  // `src/requests/adapters.py` respectively. `isUnresolvableWholeModuleImport`
+  // runs unconditionally BEFORE Strategy 5 in `importMatchesTarget` -- setting
+  // this to `true` would short-circuit every bare Python import and silently
+  // regress this real, currently-working resolution (confirmed via this PR's
+  // own before/after corpus dump: `src/requests/__init__.py` has 9+
+  // dependents today, including both test files above).
+  wholeModuleImports: false,
+  // `singleFileImports: false`: inapplicable, not merely unconfirmed --
+  // Python's dotted specifiers (`requests.adapters`) never contain a literal
+  // `/`, so they never reach `matchesAtBoundaryPrecise`'s multi-segment
+  // branch this flag gates; only an already-relative-resolved import (a real
+  // file path by the time it gets here) would, and that's not what this flag
+  // is about.
+  singleFileImports: false,
+  // `namespaceStyleImports: false`: Python's dotted module paths are
+  // case-sensitive and resolved by Strategy 5's own dedicated matcher, never
+  // Strategy 4's PSR-4-style case-insensitive namespace mirroring.
+  namespaceStyleImports: false,
+
   complexity: {
     decisionPoints: [
       'if_statement',

@@ -69,13 +69,17 @@ export interface LanguageDefinition {
    * `chunk.metadata.imports` carries no per-file signal an import-based
    * test-association matcher (`matchesFile`) can ever resolve to a specific
    * source file. This is a structural gap, not a matching bug (#869) — no
-   * heuristic recovers it here. Absent/false (the default for every
-   * language except Swift) means the existing per-file import matching
-   * applies as before; unset is NOT the same as "confirmed false", it's just
-   * unconfirmed, so only set this where the whole-module convention has
-   * been verified against real code.
+   * heuristic recovers it here. `false` means the existing per-file import
+   * matching applies as before.
+   *
+   * REQUIRED (ADR-015, #1038): every `LanguageDefinition` must set this
+   * explicitly, verified against real code, one way or the other -- there is
+   * no permissive default to silently inherit. `false` is not "nobody
+   * looked", it is "this was checked against a real corpus and the
+   * whole-module convention does not apply". See each language's own
+   * definition file for its citation. Only Swift is `true` today.
    */
-  wholeModuleImports?: boolean;
+  wholeModuleImports: boolean;
 
   /**
    * True when this language lets a nested namespace body reference an
@@ -109,17 +113,22 @@ export interface LanguageDefinition {
    * stripping) to the bare `internal/fs`, which names a PACKAGE — every
    * `.go` file inside that directory is a member of the package, so
    * `internal/fs` legitimately matches `internal/fs/fs.go`,
-   * `internal/fs/utils.go`, etc. Absent/false (the default for every
-   * language except Ruby) preserves that permissive package-directory
-   * matching. Every other currently-supported language is unaffected either
-   * way and leaves this unset too: TypeScript/JavaScript resolve specifiers
-   * to a concrete file before `matchesFile` ever runs, and Python/PHP use
-   * their own dedicated matching strategies (`matchesPythonModule`/
-   * `matchesPHPNamespace`). See `matchesFile`'s `requireExactTailForMultiSegment`
-   * parameter for how this flag is consumed (only `importMatchesTarget`
-   * derives it from the importer's language; the two build-side sites and
-   * the two stay-raw `matchesFile` call sites don't have a specific target
-   * to disambiguate against).
+   * `internal/fs/utils.go`, etc. `false` preserves that permissive
+   * package-directory matching. Every other language is `false` too, each
+   * for its own reason -- see each definition file's own citation. Notably:
+   * TypeScript/JavaScript resolve specifiers to a concrete file before
+   * `matchesFile` ever runs (relative imports and workspace packages are
+   * resolved upstream; a genuinely unresolved bare specifier is an external
+   * package with no local file to disambiguate against), and Python/PHP/
+   * Java/Kotlin/C# route their bare/qualified specifiers through their own
+   * dedicated per-language matching (`matchesPythonModule`/
+   * `matchesPHPNamespace`) or a dotted (never slash-converted) form this
+   * flag's slash-based multi-segment check never reaches at all. See
+   * `matchesFile`'s `requireExactTailForMultiSegment` parameter for how this
+   * flag is consumed (only `importMatchesTarget` derives it from the
+   * importer's language; the two build-side sites and the two stay-raw
+   * `matchesFile` call sites don't have a specific target to disambiguate
+   * against).
    *
    * Rust is a DELIBERATE non-example, not an oversight: its `mod x;`
    * declarations do name an exact file (never a package directory), but
@@ -133,9 +142,13 @@ export interface LanguageDefinition {
    * (#1021) straight past this flag entirely -- see `rust-mod-marker.ts`
    * and `matchesRustModSpecifier` in `../../utils/path-matching.ts`. Rust's
    * `use`/`self::`/`super::` specifiers are unaffected by that marker and
-   * keep relying on this flag staying unset for Rust, exactly as before.
+   * keep relying on this flag staying `false` for Rust, exactly as before
+   * (#1021/#1024) -- see `rust.ts`'s own citation.
+   *
+   * REQUIRED (ADR-015, #1038): every `LanguageDefinition` must set this
+   * explicitly, verified against real code. Only Ruby is `true` today.
    */
-  singleFileImports?: boolean;
+  singleFileImports: boolean;
 
   /**
    * True when this language's dominant test convention colocates a test file
@@ -241,15 +254,22 @@ export interface LanguageDefinition {
    * bare specifier happens to share a target's basename modulo case, within
    * the same one-leading-directory window — not just the self-edge shape.
    *
-   * Absent/false (the default for every language except PHP) means
-   * `matchesFile` skips Strategy 4 entirely for that language's imports —
-   * see `allowNamespaceMatching` in `../../utils/path-matching.ts` and
-   * `hasNamespaceMatchingSemantics`, the one place this flag is consulted
-   * (mirroring the established `singleFileImports`/#887 and Python/#929
-   * per-language-gate pattern, rather than adding an eighteenth patch to the
-   * shared matcher itself, per #1028's own recommendation). Only set this
-   * where the case-insensitive-namespace-to-directory convention has been
-   * verified against real code.
+   * `false` means `matchesFile` skips Strategy 4 entirely for that
+   * language's imports — see `allowNamespaceMatching` in
+   * `../../utils/path-matching.ts` and `hasNamespaceMatchingSemantics`, the
+   * one place this flag is consulted (mirroring the established
+   * `singleFileImports`/#887 and Python/#929 per-language-gate pattern,
+   * rather than adding an eighteenth patch to the shared matcher itself, per
+   * #1028's own recommendation).
+   *
+   * REQUIRED (ADR-015, #1038): every `LanguageDefinition` must set this
+   * explicitly, verified against real code — a case-insensitive,
+   * directory-mirroring namespace convention is exactly the kind of thing
+   * that looks superficially plausible for a dotted-path language (C#,
+   * Java, Kotlin all have directory-mirroring namespace/package
+   * conventions) but is actually case-SENSITIVE in every one of them —
+   * setting this without checking would silently reintroduce the Rust
+   * self-edge bug (#1028) for a new language. Only PHP is `true` today.
    */
-  namespaceStyleImports?: boolean;
+  namespaceStyleImports: boolean;
 }

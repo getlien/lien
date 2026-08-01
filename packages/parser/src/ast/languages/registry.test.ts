@@ -7,6 +7,7 @@ import {
   hasWholeModuleImports,
   hasEnclosingNamespaceAccess,
   hasSingleFileImports,
+  hasNamespaceStyleImports,
   hasSameDirectoryTestConvention,
   hasSamePackageTestConvention,
   hasDependentAttributionBlindSpot,
@@ -209,6 +210,95 @@ describe('Language Registry', () => {
     it('is independent of hasWholeModuleImports/hasEnclosingNamespaceAccess', () => {
       expect(hasWholeModuleImports('ruby')).toBe(false);
       expect(hasEnclosingNamespaceAccess('ruby')).toBe(false);
+    });
+  });
+
+  describe('hasNamespaceStyleImports (#1028, made required by ADR-015/#1038)', () => {
+    it('is true for PHP (PSR-4 case-insensitive, directory-mirroring namespaces)', () => {
+      expect(hasNamespaceStyleImports('php')).toBe(true);
+    });
+
+    it('is false for every other registered language, notably C#/Java/Kotlin despite their own directory-mirroring package/namespace conventions', () => {
+      expect(hasNamespaceStyleImports('csharp')).toBe(false);
+      expect(hasNamespaceStyleImports('java')).toBe(false);
+      expect(hasNamespaceStyleImports('kotlin')).toBe(false);
+      const others = getAllLanguages()
+        .map(d => d.id)
+        .filter(id => id !== 'php');
+      expect(others.length).toBeGreaterThan(0);
+      others.forEach(id => {
+        expect(hasNamespaceStyleImports(id)).toBe(false);
+      });
+    });
+
+    it('is independent of hasWholeModuleImports/hasSingleFileImports', () => {
+      expect(hasWholeModuleImports('php')).toBe(false);
+      expect(hasSingleFileImports('php')).toBe(false);
+    });
+  });
+
+  describe('ADR-015 (#1038): matcher-path fields are required and declared for all 11 languages', () => {
+    const MATCHER_PATH_FLAGS = [
+      'wholeModuleImports',
+      'singleFileImports',
+      'namespaceStyleImports',
+    ] as const;
+
+    it('every language declares a real boolean (never undefined) for all three fields', () => {
+      // Runtime defense-in-depth for the compile-time `LanguageDefinition`
+      // contract: this stays green even if some future refactor constructs a
+      // definition dynamically (object spread, `Object.assign`, a JS
+      // consumer bypassing TS) in a way that could silently smuggle an
+      // `undefined` back in past `tsc`.
+      getAllLanguages().forEach(def => {
+        MATCHER_PATH_FLAGS.forEach(flag => {
+          expect(typeof def[flag]).toBe('boolean');
+        });
+      });
+    });
+
+    it('cross-language policy: at most one of the three matcher-path flags is true per language', () => {
+      // These three fields are alternative, largely mutually-exclusive
+      // resolution strategies for a language's BARE import specifiers --
+      // whole-module-only (Swift), single-file (Ruby), or case-insensitive
+      // namespace-mirroring (PHP). A language genuinely needing two at once
+      // would be a surprising enough finding to warrant its own discussion,
+      // not a silent combination, so this is asserted as a policy, not
+      // merely observed per-language.
+      getAllLanguages().forEach(def => {
+        const trueCount = MATCHER_PATH_FLAGS.filter(flag => def[flag] === true).length;
+        expect(trueCount).toBeLessThanOrEqual(1);
+      });
+    });
+
+    it('cross-language policy: these three escape hatches stay sparse -- at most one language sets each one', () => {
+      // A tripwire, not a hard architectural limit: these flags exist
+      // because a language's bare-import convention diverges from the
+      // shared matcher's default. If a review ever needs to set a SECOND
+      // language's flag true for the same field, that's a fine, deliberate
+      // outcome -- but this test should fail loudly when it happens, forcing
+      // a conscious bump here rather than a silent third/fourth escape hatch
+      // accumulating unnoticed (the exact failure mode ADR-015/#1038 was
+      // written to close off).
+      MATCHER_PATH_FLAGS.forEach(flag => {
+        const languagesSettingTrue = getAllLanguages().filter(def => def[flag] === true);
+        expect(languagesSettingTrue.length).toBeLessThanOrEqual(1);
+      });
+      expect(
+        getAllLanguages()
+          .filter(d => d.wholeModuleImports)
+          .map(d => d.id),
+      ).toEqual(['swift']);
+      expect(
+        getAllLanguages()
+          .filter(d => d.singleFileImports)
+          .map(d => d.id),
+      ).toEqual(['ruby']);
+      expect(
+        getAllLanguages()
+          .filter(d => d.namespaceStyleImports)
+          .map(d => d.id),
+      ).toEqual(['php']);
     });
   });
 

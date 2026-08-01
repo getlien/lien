@@ -505,7 +505,23 @@ export const swiftDefinition: LanguageDefinition = {
   // the bare module path (`import Alamofire` -> `"Alamofire"`), never a
   // per-file specifier, so import-based test-association can structurally
   // never resolve a Swift test file to the specific source file it covers.
+  // Re-verified (ADR-015, #1038) against swiftyjson:
+  // `Tests/SwiftJSONTests/SubscriptTests.swift:24` has plain
+  // `import SwiftyJSON` -- bare module name, no file-level signal at all.
   wholeModuleImports: true,
+  // ADR-015 (#1038): the other two matcher-path fields, declared for Swift
+  // for the first time (previously silently unset, i.e. effectively false).
+  // `singleFileImports: false`: moot in practice -- `SwiftImportExtractor`
+  // only ever extracts a single bare identifier (`childByType(node,
+  // 'identifier')`), never a multi-segment specifier, so this flag's
+  // multi-segment branch is unreachable for Swift either way; `false`
+  // preserves the permissive default with no behavior change.
+  singleFileImports: false,
+  // `namespaceStyleImports: false`: Swift's bare module imports are
+  // case-sensitive and carry no directory-mirroring namespace convention;
+  // confirmed no `App\`-vs-`app/`-style case divergence exists for Swift
+  // module names.
+  namespaceStyleImports: false,
 
   complexity: {
     decisionPoints: [

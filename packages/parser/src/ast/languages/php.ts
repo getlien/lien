@@ -530,7 +530,31 @@ export const phpDefinition: LanguageDefinition = {
   // language `matchesFile`'s Strategy 4 (`matchesPHPNamespace`) is a real
   // semantic for, not an incidental leniency. See `LanguageDefinition.namespaceStyleImports`'s
   // doc comment (#1028) for the Rust false-positive this flag now excludes.
+  // Re-verified (ADR-015, #1038) against monolog: `composer.json:57` maps
+  // `"Monolog\\": "src/Monolog"` and `Logger.php:12` declares
+  // `namespace Monolog;` -- this particular corpus's own case happens to
+  // match exactly (unlike the canonical Laravel `App\` vs. `app/` example
+  // this flag's doc comment cites), but PSR-4 is case-insensitive BY SPEC
+  // regardless of whether any one corpus's names happen to collide, so this
+  // stays `true`.
   namespaceStyleImports: true,
+  // ADR-015 (#1038): the other two matcher-path fields, declared for PHP for
+  // the first time (previously silently unset, i.e. effectively false).
+  // `wholeModuleImports: false`: PHP's `use` statements resolve to a precise
+  // file via Strategy 4's own dedicated namespace-to-path mapping (above),
+  // not a whole-module-unresolvable shape.
+  wholeModuleImports: false,
+  // `singleFileImports: false`: preserves the permissive default. PHP's
+  // normalized (backslash to forward-slash) `use` specifiers usually end in
+  // a class name (`use Monolog\Handler\HandlerInterface;`, `Logger.php:17`,
+  // mapping to exactly one file), which would arguably also satisfy a
+  // single-file semantic if Strategies 1/2 were ever reached for a
+  // case-matching PHP import -- but Strategy 4 is PHP's real, primary
+  // resolution mechanism, and there is no confirmed case today where
+  // Strategies 1/2's interior-hit leniency produces a wrong match for PHP,
+  // so this is left `false` (no behavior change) rather than speculatively
+  // tightened.
+  singleFileImports: false,
 
   complexity: {
     decisionPoints: [

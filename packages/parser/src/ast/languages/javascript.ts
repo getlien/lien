@@ -932,6 +932,26 @@ export const javascriptDefinition: LanguageDefinition = {
   importExtractor: new JavaScriptImportExtractor(),
   symbolExtractor: new JavaScriptSymbolExtractor(),
 
+  // ADR-015 (#1038): verified against a real corpus (express), not
+  // inherited from TypeScript's identical reasoning above (`typescript.ts`).
+  // `express.js:15-21` shows the real distinction clearly: internal modules
+  // use relative requires (`require('./application')`, `require('./request')`
+  // -- resolved to a concrete file before `matchesFile` ever runs), while
+  // every bare, slash-free require (`require('body-parser')`,
+  // `require('router')`, `require('merge-descriptors')`) is a genuinely
+  // external npm package with no corresponding local file.
+  wholeModuleImports: false,
+  // `singleFileImports: false`: preserves the permissive default; no bare
+  // multi-segment CommonJS require in this corpus names a package directory
+  // vs. a single file in a way this flag would need to disambiguate (deep
+  // requires like `require('mime/lite')`-shaped specifiers, if present,
+  // resolve into node_modules, outside this corpus's own dependency graph).
+  singleFileImports: false,
+  // `namespaceStyleImports: false`: CommonJS/ESM specifiers are relative
+  // paths or npm package names, never a case-insensitive directory-mirroring
+  // namespace.
+  namespaceStyleImports: false,
+
   complexity: jsTsComplexityConfig,
 
   symbols: {

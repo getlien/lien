@@ -737,6 +737,34 @@ export const csharpDefinition: LanguageDefinition = {
   // `wholeModuleImports` here would discard all of them and regress #866.
   enclosingNamespaceAccess: true,
 
+  // ADR-015 (#1038): verified against a real corpus (mediatr). Note for the
+  // record: issue #1038's own "current state" table listed C# as already
+  // setting `wholeModuleImports` -- that was incorrect. C# has only ever set
+  // `enclosingNamespaceAccess` (above, a DIFFERENT, out-of-scope flag); this
+  // is confirmed both by `registry.test.ts`'s pre-existing
+  // `hasWholeModuleImports('csharp')).toBe(false)` assertion and by this
+  // very file's own comment two lines up arguing against it. All three
+  // matcher-path fields below are being declared for C# for the first time.
+  // `wholeModuleImports: false`: per the comment above, C#'s dotted
+  // `using` directives resolve correctly today via ordinary per-file
+  // matching (`test/MediatR.DependencyInjectionTests/MicrosoftDependencyInjectionTests.cs:1-2`'s
+  // `using MediatR.DependencyInjectionTests.Abstractions;` is a real, precise,
+  // working per-file reference, not a whole-module-unresolvable one).
+  wholeModuleImports: false,
+  // `singleFileImports: false`: inapplicable, not merely unconfirmed --
+  // `CSharpImportExtractor.getImportPath` returns the qualified name text
+  // verbatim (dotted, e.g. `MediatR.Pipeline`), never converted to `/`, so a
+  // C# import never reaches `matchesAtBoundaryPrecise`'s slash-based
+  // multi-segment branch this flag gates.
+  singleFileImports: false,
+  // `namespaceStyleImports: false`: C# namespace/folder mirroring is
+  // case-sensitive in practice -- confirmed exact-case in this corpus
+  // (`namespace MediatR.Pipeline;` in `src/MediatR/Pipeline/RequestExceptionActionProcessorBehavior.cs`
+  // matches `src/MediatR/Pipeline/` exactly, no case divergence the way
+  // PHP's PSR-4 has). Setting this would risk the same case-insensitive
+  // false-hub class #1028 fixed for Rust, for no confirmed benefit here.
+  namespaceStyleImports: false,
+
   complexity: {
     decisionPoints: [
       'if_statement',

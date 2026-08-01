@@ -539,6 +539,27 @@ export const goDefinition: LanguageDefinition = {
   importExtractor: new GoImportExtractor(),
   symbolExtractor: new GoSymbolExtractor(),
 
+  // ADR-015 (#1038): verified against a real corpus (chi).
+  // `wholeModuleImports: false`: a Go import like `"github.com/go-chi/chi/v5/middleware"`
+  // (`middleware/client_ip_example_test.go:9`) names a package directory, not
+  // a single file, but that's ALREADY handled correctly and permissively by
+  // Strategy 2's package-directory matching (see `singleFileImports` below)
+  // -- it's resolvable, not structurally unresolvable the way Swift's
+  // whole-module imports are, so this stays false.
+  wholeModuleImports: false,
+  // `singleFileImports: false`: THE canonical non-example this flag's own
+  // doc comment cites. `middleware/` has 49 `.go` files
+  // (`clean_path.go`, `compress_test.go`, `client_ip_test.go`, ...), and a
+  // single bare import of the directory (`"github.com/go-chi/chi/v5/middleware"`,
+  // normalized after module-prefix stripping to `middleware`) legitimately
+  // matches every one of them as a package member -- confirmed via this PR's
+  // own before/after corpus dump (chi is byte-identical).
+  singleFileImports: false,
+  // `namespaceStyleImports: false`: Go import paths are case-sensitive and
+  // mirror directory case exactly (`middleware` -> `middleware/`, never a
+  // differently-cased directory); no PSR-4-style convention exists.
+  namespaceStyleImports: false,
+
   complexity: {
     decisionPoints: [
       'if_statement',

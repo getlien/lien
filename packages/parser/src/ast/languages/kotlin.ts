@@ -547,6 +547,33 @@ export const kotlinDefinition: LanguageDefinition = {
   importExtractor: new KotlinImportExtractor(),
   symbolExtractor: new KotlinSymbolExtractor(),
 
+  // ADR-015 (#1038): verified against a real corpus (klaxon).
+  // `wholeModuleImports: false`: Kotlin's cross-package imports name a
+  // precise class or sub-package, never a whole-module-only shape --
+  // confirmed with real cross-package imports (unlike javapoet's flat
+  // layout, klaxon genuinely has sub-packages): `JsonObjectConverter.kt:3`'s
+  // `import com.beust.klaxon.internal.firstNotNullResult` and
+  // `StateMachine.kt:3-4`'s `import com.beust.klaxon.token.Token` both
+  // resolve to real directories (`com/beust/klaxon/internal/`,
+  // `com/beust/klaxon/token/`, confirmed on disk). Note this is orthogonal to
+  // #1005's separate, already-documented zero-edge gap
+  // (`KNOWN_ZERO_EDGE_LANGUAGES` in the E2E suite) -- Kotlin's dotted
+  // specifiers never get slash-converted, so they don't reach `matchesFile`'s
+  // slash-oriented strategies at all today regardless of this flag; that gap
+  // is `sameUnitAccessWithoutImport`'s territory (out of scope here), not
+  // these three matcher-path fields.
+  wholeModuleImports: false,
+  // `singleFileImports: false`: inapplicable, not merely unconfirmed --
+  // `KotlinImportExtractor` stores the raw DOTTED path (mirrors Java's
+  // `JavaImportExtractor`), never converted to `/`, so it never reaches this
+  // flag's slash-based multi-segment branch.
+  singleFileImports: false,
+  // `namespaceStyleImports: false`: Kotlin package/directory mirroring is
+  // case-sensitive, confirmed exact-case in this corpus
+  // (`com.beust.klaxon.token` -> `com/beust/klaxon/token/`); no PSR-4-style
+  // convention.
+  namespaceStyleImports: false,
+
   complexity: {
     decisionPoints: [
       'if_expression',

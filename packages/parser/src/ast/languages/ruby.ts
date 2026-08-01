@@ -355,8 +355,23 @@ export const rubyDefinition: LanguageDefinition = {
   // to share the same directory (`rack/protection/base.rb`) is a distinct,
   // unrelated module, not an implicit member of the required specifier
   // (#887). See `LanguageDefinition.singleFileImports`'s doc comment for the
-  // contrast with Go's package-directory semantics.
+  // contrast with Go's package-directory semantics. Re-verified (ADR-015,
+  // #1038) against sinatra, with a stronger, fully-INTERNAL example than the
+  // external-gem one above: `lib/sinatra/base.rb:22`'s
+  // `require 'sinatra/indifferent_hash'` resolves to exactly
+  // `lib/sinatra/indifferent_hash.rb` -- a single file, confirmed on disk,
+  // not a directory of implicit siblings.
   singleFileImports: true,
+  // ADR-015 (#1038): the other two matcher-path fields, declared for Ruby for
+  // the first time (previously silently unset, i.e. effectively false).
+  // `wholeModuleImports: false`: Ruby's `require`/`require_relative` always
+  // names a specific file (via $LOAD_PATH or a relative path) -- there is no
+  // Ruby equivalent of Swift's whole-module-only import shape.
+  wholeModuleImports: false,
+  // `namespaceStyleImports: false`: Ruby's require paths are case-sensitive
+  // file paths, not a PSR-4-style case-insensitive directory-mirroring
+  // namespace convention.
+  namespaceStyleImports: false,
 
   complexity: {
     // Structural control-flow branch points. NOTE: Ruby's logical operators
