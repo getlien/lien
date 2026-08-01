@@ -298,8 +298,10 @@ export function isUnresolvableWholeModuleImport(
  * specifier (the import extractor's "first wins" grouped-use handling)
  * case-insensitively self-match `src/error.rs` on a real `dtolnay/anyhow`
  * clone -- confirmed for three files (`chain.rs`/`context.rs`/`error.rs`),
- * each via a self-referential `pub(crate) use crate::Self type;` naming its
- * own type. See `allowNamespaceMatching` and `importMatchesTarget`, the only
+ * each via a self-referential bare `use crate::<OwnType>;` (grouped or not --
+ * only `chain.rs`'s is `pub(crate)` and ungrouped; `error.rs`/`context.rs`
+ * are plain grouped `use crate::{...}`) naming its own type. See
+ * `allowNamespaceMatching` and `importMatchesTarget`, the only
  * caller that derives it from the importer's language via
  * `hasNamespaceMatchingSemantics`. Every other caller passes the default
  * (`true`), preserving this function's pre-#1028 behavior exactly, mirroring
