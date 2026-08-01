@@ -6,7 +6,8 @@ import os from 'os';
 import crypto from 'crypto';
 import { execSync } from 'child_process';
 import { createVectorDB, getLienHome } from '@liendev/core';
-import type { VectorDBInterface } from '@liendev/core';
+import type { VectorDBInterface, SearchResult } from '@liendev/core';
+import { findDependents } from '@liendev/parser';
 
 /**
  * E2E Tests with Real Open Source Projects
@@ -54,7 +55,36 @@ interface ProjectConfig {
   expectedMinFiles: number; // Minimum files to index
   expectedMinChunks: number; // Minimum chunks to create
   sampleSearchQuery: string; // Query that should find results
+  /**
+   * #1004: floor on TOTAL resolved dependency edges across the whole corpus
+   * (sum of `findDependents(...).dependents.length` over every indexed
+   * file) -- a COLLAPSE DETECTOR, not a precision assertion. These numbers
+   * are deliberately far below what each project actually resolves today;
+   * do NOT "tighten" them to match a measured snapshot -- the whole point
+   * is to fail loudly only when resolution falls to zero/near-zero (as it
+   * did for Monolog/#1002 and Rust `mod`/#1000), not to pin an exact count
+   * that churns as corpora move or matching improves.
+   *
+   * Java/Kotlin/Swift are a different case: see `KNOWN_ZERO_EDGE_LANGUAGES`
+   * below -- those three genuinely resolve zero edges today (#1005, a real
+   * open gap), so their floor is asserted as an exact-zero tripwire instead
+   * of a `>=` floor.
+   */
+  expectedMinDependencyEdges: number;
 }
+
+/**
+ * Languages where `findDependents` resolves ZERO edges today -- not a test
+ * bug, a real product gap tracked as #1005. Asserting `toBe(0)` (rather than
+ * skipping or asserting `>= 0`) makes this a TRIPWIRE: the moment #1005
+ * lands and one of these corpora starts resolving real edges, the assertion
+ * will FAIL. That failure is a good thing -- it means the gap closed and
+ * this test needs to switch from tripwire mode to a real `expectedMinDependencyEdges`
+ * floor like every other language already has. Do not "fix" the failure by
+ * loosening this back to `>= 0` without first confirming #1005 actually
+ * landed.
+ */
+const KNOWN_ZERO_EDGE_LANGUAGES = new Set(['java', 'kotlin', 'swift']);
 
 /**
  * Test projects for each supported language
@@ -68,6 +98,7 @@ const TEST_PROJECTS: ProjectConfig[] = [
     expectedMinFiles: 10, // Requests has clean structure with requests/*.py
     expectedMinChunks: 50, // Conservative estimate
     sampleSearchQuery: 'make http request',
+    expectedMinDependencyEdges: 20, // measured ~353 (2026-07); floor is a collapse detector, not a target
   },
   {
     name: 'Zod',
@@ -77,6 +108,7 @@ const TEST_PROJECTS: ProjectConfig[] = [
     expectedMinFiles: 30,
     expectedMinChunks: 100,
     sampleSearchQuery: 'validate schema',
+    expectedMinDependencyEdges: 50, // measured ~1265 (2026-07); floor is a collapse detector, not a target
   },
   {
     name: 'Express',
@@ -86,6 +118,7 @@ const TEST_PROJECTS: ProjectConfig[] = [
     expectedMinFiles: 20,
     expectedMinChunks: 80,
     sampleSearchQuery: 'handle http request',
+    expectedMinDependencyEdges: 50, // measured ~2924 (2026-07); floor is a collapse detector, not a target
   },
   {
     name: 'Monolog',
@@ -95,6 +128,10 @@ const TEST_PROJECTS: ProjectConfig[] = [
     expectedMinFiles: 30,
     expectedMinChunks: 100,
     sampleSearchQuery: 'log message handler',
+    // measured ~405 edges (2026-07, post-#1002 PSR-4 fix); before that fix
+    // this was 0 across all 232 files and the suite was still green -- this
+    // floor is exactly the regression detector #1004 asks for.
+    expectedMinDependencyEdges: 20,
   },
   {
     name: 'Anyhow',
@@ -104,6 +141,14 @@ const TEST_PROJECTS: ProjectConfig[] = [
     expectedMinFiles: 5,
     expectedMinChunks: 15,
     sampleSearchQuery: 'error handling context',
+    // DELIBERATELY VERY LOW, do not raise from a measured snapshot (#1004).
+    // Current Rust edge counts (measured ~39 pre-fix) are INFLATED by #1021
+    // (`mod x;` fabricates edges to every file under `x/`, plus self-edges).
+    // Once #1021 lands, legitimate edges will DROP -- a floor pinned to
+    // today's inflated number would bake the bug in and block its own fix.
+    // 1 just proves resolution hasn't collapsed to zero; it is intentionally
+    // not a precision target.
+    expectedMinDependencyEdges: 1,
   },
   {
     name: 'Chi',
@@ -113,6 +158,11 @@ const TEST_PROJECTS: ProjectConfig[] = [
     expectedMinFiles: 5,
     expectedMinChunks: 20,
     sampleSearchQuery: 'http router middleware',
+    // measured ~20 edges / 93% orphan rate (2026-07) -- see the Go sanity
+    // check in #1004's investigation notes on whether that orphan rate
+    // itself hides a resolution gap. Floor stays a collapse detector either
+    // way: not raised pending that follow-up.
+    expectedMinDependencyEdges: 5,
   },
   {
     name: 'JavaPoet',
@@ -122,6 +172,10 @@ const TEST_PROJECTS: ProjectConfig[] = [
     expectedMinFiles: 10,
     expectedMinChunks: 100,
     sampleSearchQuery: 'generate java source code',
+    // KNOWN GAP: #1005 -- Java resolves 0 dependency edges today. See
+    // KNOWN_ZERO_EDGE_LANGUAGES: this is asserted as an exact-zero tripwire,
+    // not a floor, elsewhere in this file.
+    expectedMinDependencyEdges: 0,
   },
   {
     name: 'MediatR',
@@ -131,6 +185,7 @@ const TEST_PROJECTS: ProjectConfig[] = [
     expectedMinFiles: 10,
     expectedMinChunks: 30,
     sampleSearchQuery: 'mediator request handler',
+    expectedMinDependencyEdges: 20, // measured ~578 (2026-07); floor is a collapse detector, not a target
   },
   {
     name: 'Sinatra',
@@ -140,6 +195,11 @@ const TEST_PROJECTS: ProjectConfig[] = [
     expectedMinFiles: 50, // sinatra + rack-protection + sinatra-contrib lib/ (~155 indexed)
     expectedMinChunks: 300, // AST chunking yields ~1300 (def/class/module per chunk)
     sampleSearchQuery: 'route handler matching http request',
+    // measured ~109 edges / 87% orphan rate (2026-07) -- see the Ruby sanity
+    // check in #1004's investigation notes on whether that orphan rate
+    // itself hides a resolution gap. Floor stays a collapse detector either
+    // way: not raised pending that follow-up.
+    expectedMinDependencyEdges: 10,
   },
   {
     name: 'Klaxon',
@@ -149,6 +209,10 @@ const TEST_PROJECTS: ProjectConfig[] = [
     expectedMinFiles: 40, // ~101 indexed (src/main + tests)
     expectedMinChunks: 250, // AST chunking yields ~960 (fun/class/object per chunk)
     sampleSearchQuery: 'parse json string into an object',
+    // KNOWN GAP: #1005 -- Kotlin resolves 0 dependency edges today. See
+    // KNOWN_ZERO_EDGE_LANGUAGES: this is asserted as an exact-zero tripwire,
+    // not a floor, elsewhere in this file.
+    expectedMinDependencyEdges: 0,
   },
   {
     name: 'SwiftyJSON',
@@ -158,6 +222,10 @@ const TEST_PROJECTS: ProjectConfig[] = [
     expectedMinFiles: 15, // ~26 indexed (Source + Tests)
     expectedMinChunks: 150, // AST chunking yields ~356 (func/struct/extension per chunk)
     sampleSearchQuery: 'parse json data into typed values',
+    // KNOWN GAP: #1005 -- Swift resolves 0 dependency edges today. See
+    // KNOWN_ZERO_EDGE_LANGUAGES: this is asserted as an exact-zero tripwire,
+    // not a floor, elsewhere in this file.
+    expectedMinDependencyEdges: 0,
   },
 ];
 
@@ -208,6 +276,88 @@ async function loadDb(projectDir: string): Promise<VectorDBInterface> {
   const db = await createVectorDB(projectDir);
   await db.initialize();
   return db;
+}
+
+/** No-op log sink for `findDependents` calls below — this test doesn't care
+ * about its warning messages, only the resolved counts. */
+function noopLog(_message: string, _level?: 'warning'): void {
+  // Intentionally empty.
+}
+
+/**
+ * Count of resolved dependents for one target file, via the exported,
+ * production `findDependents` -- the exact engine `get_dependents` runs,
+ * including re-export-chain resolution and the C# type-reference-matching
+ * recovery fallback (#930). A leaner reimplementation using only
+ * `findDependentChunks`/raw `imports` was tried and rejected here: it
+ * silently under-counts languages whose real resolution leans on that
+ * fallback (C#/MediatR measured 0 instead of the ~578 the full pipeline
+ * finds), which would have made the floor below meaningless for exactly the
+ * languages `hasEnclosingNamespaceAccess` calls out as structurally reliant
+ * on it. Fidelity to what `get_dependents` actually returns matters more
+ * here than shaving the sweep's cost.
+ */
+function countDependents(file: string, chunks: SearchResult[], workspaceRoot: string): number {
+  return findDependents(chunks, file, noopLog, workspaceRoot).dependents.length;
+}
+
+/**
+ * Every real `findDependents` call above re-scans the whole corpus (its own
+ * import-index rebuild, plus a re-export-graph scan that itself walks every
+ * OTHER file) -- correct and appropriate for a single interactive
+ * `get_dependents` query, but that per-call cost times every file in a
+ * ~450-file corpus (Zod) measured out to 70+ seconds for this one test. This
+ * caps the sweep to `maxFiles` targets, evenly spaced across the full file
+ * list (not just a prefix), so a corpus with edges concentrated in one
+ * directory doesn't get an unlucky all-orphan sample. A collapse to zero
+ * shows up identically whether every file is swept or every Nth one -- the
+ * failure mode this test exists to catch (#1002, #1000) makes EVERY file an
+ * orphan, not a directory-scoped subset of them.
+ */
+function sampleFilesForSweep(files: string[], maxFiles: number): string[] {
+  if (files.length <= maxFiles) return files;
+  const step = files.length / maxFiles;
+  return Array.from({ length: maxFiles }, (_, i) => files[Math.floor(i * step)]);
+}
+
+/** Cap on how many files `computeDependencyStats` sweeps per project -- see
+ * `sampleFilesForSweep`'s doc comment for why this stays a cheap, honest
+ * approximation rather than an exhaustive corpus-wide count. */
+const MAX_DEPENDENCY_SWEEP_FILES = 100;
+
+/**
+ * #1004: aggregate dependency-resolution stats across a project (see
+ * `sampleFilesForSweep` for corpora larger than `MAX_DEPENDENCY_SWEEP_FILES`).
+ * This is a COLLAPSE DETECTOR: the point is to notice when resolution falls
+ * to zero/near-zero (as it silently did for Monolog/#1002 and Rust `mod`/
+ * #1000 while this suite stayed green), not to pin an exact edge count --
+ * `totalEdges`/`orphanCount` are a sample-scaled approximation for large
+ * corpora, never a precise whole-project total.
+ *
+ * Reuses the already-built SQLite index via a single `db.scanAll()` rather
+ * than re-indexing or re-scanning per file.
+ */
+async function computeDependencyStats(projectDir: string): Promise<{
+  totalEdges: number;
+  orphanCount: number;
+  fileCount: number;
+  sweptFileCount: number;
+}> {
+  const workspaceRoot = fsSync.realpathSync(projectDir);
+  const db = await loadDb(workspaceRoot);
+  const chunks = await db.scanAll();
+  const files = Array.from(new Set(chunks.map(c => c.metadata.file)));
+  const sweptFiles = sampleFilesForSweep(files, MAX_DEPENDENCY_SWEEP_FILES);
+
+  let totalEdges = 0;
+  let orphanCount = 0;
+  for (const file of sweptFiles) {
+    const dependentCount = countDependents(file, chunks, workspaceRoot);
+    totalEdges += dependentCount;
+    if (dependentCount === 0) orphanCount++;
+  }
+
+  return { totalEdges, orphanCount, fileCount: files.length, sweptFileCount: sweptFiles.length };
 }
 
 /**
@@ -574,6 +724,73 @@ describe('E2E: Real Open Source Projects', () => {
           // Every real-world project has imports
           expect(chunksWithImports.length).toBeGreaterThan(0);
           expect(chunksWithExports.length).toBeGreaterThan(0);
+        },
+        E2E_TIMEOUT,
+      );
+
+      // #1004: the assertions above only ever checked shape (files/chunks
+      // counts, metadata presence) -- never that `findDependents` actually
+      // resolves a single edge. A project with a 100% orphan rate passed
+      // every test above; #1002 (Monolog, PSR-4) and #1000 (Rust `mod`) both
+      // shipped invisibly through exactly that gap. These two tests close it.
+      it(
+        'should resolve real dependency edges across the corpus (#1004 collapse-to-zero detector)',
+        async () => {
+          const stats = await computeDependencyStats(projectDir);
+          const sweptNote =
+            stats.sweptFileCount < stats.fileCount
+              ? ` (swept ${stats.sweptFileCount}/${stats.fileCount} files, evenly sampled)`
+              : '';
+
+          console.log(
+            `🔗 ${project.name} dependency stats: ${stats.totalEdges} edges, ` +
+              `${stats.orphanCount} orphans out of ${stats.sweptFileCount} files checked ` +
+              `(${((stats.orphanCount / stats.sweptFileCount) * 100).toFixed(1)}%)${sweptNote}`,
+          );
+
+          if (KNOWN_ZERO_EDGE_LANGUAGES.has(project.language)) {
+            // KNOWN GAP: #1005. This is a deliberate tripwire, not an
+            // oversight -- see KNOWN_ZERO_EDGE_LANGUAGES's doc comment. If
+            // this fails, #1005 likely just got fixed; update this project's
+            // config to a real `expectedMinDependencyEdges` floor instead of
+            // re-asserting zero.
+            expect(stats.totalEdges).toBe(0);
+          } else {
+            // Floor only -- see `expectedMinDependencyEdges`'s doc comment.
+            // This must NOT be tightened to match `stats.totalEdges` above.
+            expect(stats.totalEdges).toBeGreaterThanOrEqual(project.expectedMinDependencyEdges);
+          }
+        },
+        E2E_TIMEOUT,
+      );
+
+      it(
+        "should return zero dependents for a nonexistent path, and not inherit a real file's " +
+          'graph by basename collision (#928)',
+        async () => {
+          const workspaceRoot = fsSync.realpathSync(projectDir);
+          const db = await loadDb(workspaceRoot);
+          const chunks = await db.scanAll();
+          expect(chunks.length).toBeGreaterThan(0);
+
+          // Construct a path that shares a real indexed file's basename but
+          // lives under a directory that does not exist anywhere in this
+          // project -- the exact #928 shape (Command/Command.php silently
+          // inheriting an unrelated Command.php's dependent graph through
+          // textual/basename coincidence rather than a real import edge).
+          const realFile = chunks[0].metadata.file;
+          const basename = path.basename(realFile);
+          const bogusPath = `__lien_e2e_nonexistent_dir__/${basename}`;
+
+          const result = findDependents(chunks, bogusPath, noopLog, workspaceRoot);
+
+          console.log(
+            `🚫 ${project.name} nonexistent-path check: targetIndexed=${result.targetIndexed}, ` +
+              `dependents=${result.dependents.length} (bogus path derived from ${realFile})`,
+          );
+
+          expect(result.targetIndexed).toBe(false);
+          expect(result.dependents.length).toBe(0);
         },
         E2E_TIMEOUT,
       );
