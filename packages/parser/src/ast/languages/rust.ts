@@ -16,6 +16,7 @@ import {
 } from '../extractors/symbol-helpers.js';
 import { calculateComplexity } from '../complexity/index.js';
 import { resolveRustCrateImport } from '../../rust-crate-map.js';
+import { markRustModSpecifier } from '../../utils/rust-mod-marker.js';
 
 // =============================================================================
 // TRAVERSER
@@ -403,6 +404,16 @@ function extractPathAttributeValue(attributeItem: SyntaxNode): string | null {
  *
  * Returns null for an inline module (has a body — no separate file, no
  * edge) or when there's no `importerFile` to resolve against.
+ *
+ * The returned specifier is tagged with `markRustModSpecifier` (#1021): a
+ * `mod x;` resolves to EXACTLY one of `x.rs` / `x/mod.rs`, never a
+ * grandchild, an unrelated sibling, or the declaring file itself, which
+ * `matchesFile`'s generic (Go-package-directory-shaped) boundary leniency
+ * doesn't know how to enforce — see `matchesRustModSpecifier` in
+ * `../../utils/path-matching.ts` for the dedicated, marker-gated matching
+ * rule this specifier gets instead, and `rust-mod-marker.ts` for why a
+ * string marker (rather than a `use`-wide language flag) is how that
+ * distinction survives from here to match time.
  */
 function extractModImportPath(node: SyntaxNode, importerFile?: string): string | null {
   if (isInlineModDeclaration(node) || !importerFile) return null;
@@ -416,7 +427,7 @@ function extractModImportPath(node: SyntaxNode, importerFile?: string): string |
     ? joinFromDir(dirnameOf(normalizedImporter), pathOverride.replace(/\.rs$/, ''))
     : joinFromDir(rustModOwningDirectory(importerFile, node), nameNode.text);
 
-  return isModSelfEdge(resolved, normalizedImporter) ? null : resolved;
+  return isModSelfEdge(resolved, normalizedImporter) ? null : markRustModSpecifier(resolved);
 }
 
 /**
@@ -469,6 +480,17 @@ function extractModImportPath(node: SyntaxNode, importerFile?: string): string |
  *   imports that package's own name and resolves back to itself.
  * A Rust `mod x;` declaring itself has no such legitimate shape: it is
  * always either a mistake or, as here, a resolution bug.
+ *
+ * Still needed after #1021's stricter downstream matching
+ * (`matchesRustModSpecifier`), not made redundant by it: that fix rejects an
+ * INTERIOR hit (a specifier continuing past its target with anything other
+ * than the literal `/mod` suffix), but a crate-root file whose own basename
+ * coincides with a submodule it declares (this function's one documented
+ * non-catch aside) resolves to a specifier EQUAL to the importer's own path
+ * — an exact match, which `matchesRustModSpecifier` intentionally still
+ * allows (that's its `x.rs` case). Only this exact-equality check at
+ * extraction time catches that shape; #1021's fix operates entirely on
+ * interior hits and never sees this one at all.
  */
 function isModSelfEdge(resolvedSpecifier: string, importerFile: string): boolean {
   return resolvedSpecifier === importerFile.replace(/\.rs$/, '');
@@ -734,12 +756,31 @@ export class RustImportExtractor implements LanguageImportExtractor {
     importerFile?: string,
   ): { importPath: string; symbols: string[] } | null {
     if (node.type === 'mod_item') {
-      // A `mod x;` brings the whole module namespace into scope (consumers
-      // then use qualified `x::func()` calls) rather than naming specific
-      // symbols, the same "whole module" shape as `use crate::models::*;` —
-      // see `processUseWildcard` below.
+      // A `mod x;` brings the module NAMESPACE into scope (consumers then
+      // use qualified `x::func()` calls) rather than naming specific symbols
+      // -- deliberately NOT the wildcard marker `['*']` `processUseWildcard`
+      // below returns for a genuine `use crate::models::*;`, even though an
+      // earlier version of this comment called them "the same whole-module
+      // shape" (#1021 correction): a real wildcard `use` FLATTENS the
+      // source's exports into the importer's own namespace (and, if `pub`,
+      // re-exports them under the importer's own name) --
+      // `findReExportedSymbolsForFile` treats that `'*'` as "credit every
+      // one of my own exports as re-exported from this source." A `mod x;`
+      // does NOT flatten anything: `sibling::declared_fn` stays reachable
+      // only as `mod::sibling::declared_fn`, never as `mod::declared_fn`.
+      // Reusing the wildcard marker here made `pub mod sibling;` -- a plain
+      // namespace declaration -- misreport EVERY one of the declaring
+      // file's own, unrelated `pub` exports as "re-exported from sibling",
+      // fabricating transitive dependents through
+      // `mergeReExportTransitiveDependents` even after the direct-match
+      // fabrication (`matchesRustModSpecifier`'s whole reason for existing)
+      // was fixed. An empty symbols list loses no real signal: no other
+      // consumer treats a bare (non-`* as `-prefixed) `'*'` specially, and a
+      // qualified `x::func()` call site already resolves through
+      // `fileImportsSymbolFromAny`'s call-site fallback once the module
+      // path itself matches.
       const importPath = extractModImportPath(node, importerFile);
-      return importPath ? { importPath, symbols: ['*'] } : null;
+      return importPath ? { importPath, symbols: [] } : null;
     }
 
     const argument = node.childForFieldName('argument');

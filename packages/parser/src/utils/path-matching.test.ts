@@ -10,6 +10,7 @@ import {
   hasSingleFileImportSemantics,
   hasPythonModuleSemantics,
 } from './path-matching.js';
+import { markRustModSpecifier } from './rust-mod-marker.js';
 
 /**
  * Test cases for path matching logic in get_dependents tool.
@@ -699,6 +700,123 @@ describe('importMatchesTarget (#886)', () => {
           'flask',
           'flask/tests/test_app.py',
           normalize('flask/app.py'),
+          normalize,
+        ),
+      ).toBe(true);
+    });
+  });
+
+  describe('#1021 Rust mod-derived single-file guard', () => {
+    // Reproduces issue #1021's two fixtures directly against `importMatchesTarget`
+    // -- the same primitive `findDependentChunks`'s fuzzy loop calls per
+    // (chunk, rawSpecifier) entry, so this is the exact decision `get_dependents`
+    // makes for each candidate dependent.
+
+    it('fixture 1 (fabricated descendant edges): `mod thing;` in main.rs matches ONLY the real mod.rs sibling, never an undeclared/unrelated child', () => {
+      const mainImportsThing = markRustModSpecifier('src/thing');
+      const importerFile = 'src/main.rs';
+
+      // src/thing/mod.rs -- real: mod.rs is the module's own file (`x/mod.rs`
+      // convention).
+      expect(
+        importMatchesTarget(
+          mainImportsThing,
+          importerFile,
+          normalize('src/thing/mod.rs'),
+          normalize,
+        ),
+      ).toBe(true);
+
+      // src/thing/sibling.rs -- FABRICATED before #1021: only reachable via
+      // mod.rs's own `pub mod sibling;`, never via main.rs's `mod thing;`.
+      expect(
+        importMatchesTarget(
+          mainImportsThing,
+          importerFile,
+          normalize('src/thing/sibling.rs'),
+          normalize,
+        ),
+      ).toBe(false);
+
+      // src/thing/undeclared.rs -- FABRICATED before #1021: nothing declares
+      // `mod undeclared;` anywhere.
+      expect(
+        importMatchesTarget(
+          mainImportsThing,
+          importerFile,
+          normalize('src/thing/undeclared.rs'),
+          normalize,
+        ),
+      ).toBe(false);
+    });
+
+    it("fixture 1: mod.rs's `pub mod sibling;` still matches sibling.rs exactly (the real edge)", () => {
+      expect(
+        importMatchesTarget(
+          markRustModSpecifier('src/thing/sibling'),
+          'src/thing/mod.rs',
+          normalize('src/thing/sibling.rs'),
+          normalize,
+        ),
+      ).toBe(true);
+    });
+
+    it("fixture 2 (fabricated self-edges): a leaf file's own `mod helpers;` never matches the leaf file itself", () => {
+      // src/engine.rs contains `mod helpers;` -> resolves to
+      // src/engine/helpers (owning subdirectory named after the leaf file).
+      // Computing get_dependents('src/engine.rs') must not fabricate a
+      // self-edge from this.
+      expect(
+        importMatchesTarget(
+          markRustModSpecifier('src/engine/helpers'),
+          'src/engine.rs',
+          normalize('src/engine.rs'),
+          normalize,
+        ),
+      ).toBe(false);
+    });
+
+    it("fixture 2: lib.rs's `pub mod engine;` never matches engine/helpers.rs (only engine.rs does)", () => {
+      // src/lib.rs contains `pub mod engine;` -> resolves to src/engine.
+      // This must match engine.rs itself, but must NOT also match the
+      // unrelated grandchild engine/helpers.rs.
+      const libImportsEngine = markRustModSpecifier('src/engine');
+      expect(
+        importMatchesTarget(libImportsEngine, 'src/lib.rs', normalize('src/engine.rs'), normalize),
+      ).toBe(true);
+      expect(
+        importMatchesTarget(
+          libImportsEngine,
+          'src/lib.rs',
+          normalize('src/engine/helpers.rs'),
+          normalize,
+        ),
+      ).toBe(false);
+    });
+
+    it("fixture 2: engine.rs's own `mod helpers;` still matches engine/helpers.rs exactly (the real edge)", () => {
+      expect(
+        importMatchesTarget(
+          markRustModSpecifier('src/engine/helpers'),
+          'src/engine.rs',
+          normalize('src/engine/helpers.rs'),
+          normalize,
+        ),
+      ).toBe(true);
+    });
+
+    it('leaves an UNMARKED Rust specifier on the identical string value fully permissive, unaffected by the marker guard', () => {
+      // Same specifier value as fixture 1 ("src/thing"), but WITHOUT the
+      // #1021 marker -- as if some hypothetical `use`-derived path had
+      // resolved to this exact anchored string. Must keep matchesFile's
+      // existing (package-directory-style) leniency exactly as before this
+      // fix: the marker guard only ever narrows behavior for specifiers that
+      // carry it, never for ones that don't.
+      expect(
+        importMatchesTarget(
+          'src/thing',
+          'src/main.rs',
+          normalize('src/thing/sibling.rs'),
           normalize,
         ),
       ).toBe(true);

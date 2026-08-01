@@ -10,6 +10,7 @@ import {
   extractCallSites,
 } from './symbols.js';
 import { matchesFile, normalizePath } from '../utils/path-matching.js';
+import { markRustModSpecifier } from '../utils/rust-mod-marker.js';
 
 describe('Symbol Extraction', () => {
   describe('extractImportedSymbols', () => {
@@ -1080,7 +1081,7 @@ use crate::auth::{AuthService, AuthError};
           undefined,
           'src/main.rs',
         );
-        expect(imports).toContain('src/reporter');
+        expect(imports).toContain(markRustModSpecifier('src/reporter'));
       });
 
       it('extracts nothing for a mod declaration without rustImporterFile — cannot resolve deterministically', () => {
