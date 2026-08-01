@@ -1,5 +1,179 @@
 # @liendev/parser
 
+## 0.75.0
+
+### Minor Changes
+
+- 1f94a12: Collapse the import index's remaining unguarded match paths onto
+  `importMatchesTarget` (#994 Phase 3). `dependency-analyzer.ts`'s import index
+  used to store bare chunks (`Map<string, CodeChunk[]>`), discarding both the
+  raw (pre-normalization) import specifier and per-importer identity once a
+  bucket key was computed. That forced `findDependentChunks`'s fuzzy loop to
+  reconstruct the #887 (Ruby/Go single-file-vs-package) and #929 (Python
+  bare-module) guards itself, per chunk, via two extra `matchesFile` calls
+  instead of calling the single guarded primitive directly — the same three
+  guards expressed in two different shapes, with nothing forcing them to
+  agree (the root cause behind #934 and #955 shipping the same guard gap
+  twice).
+
+  Each index entry now carries `{ chunk, rawSpecifier }` (`ImportIndexEntry`,
+  newly exported), so `findDependentChunks`'s fuzzy loop and both of the
+  index's own builders (`buildImportIndex` for `analyzeDependencies`,
+  `indexImportEntry`/`addChunkToImportIndex` for `findDependents`) route
+  through `importMatchesTarget` uniformly. `addFuzzyMatchChunks`'s signature
+  changed accordingly (bucket entries + a normalizer, instead of a normalized
+  specifier + bare chunk list) — it and `findDependentChunks` are both public
+  exports of `@liendev/parser`, hence the minor bump.
+
+  `buildReExportGraph`'s one remaining raw `matchesFile` call is unchanged: it
+  is a same-normalizer file-identity check (skip the target file itself when
+  scanning re-exporter candidates), not an import-vs-file match, so there was
+  never a specifier for `importMatchesTarget` to guard there in the first
+  place — see `path-matching.ts`'s updated design comment.
+
+  Pure consolidation, not a behavior change: verified byte-identical
+  `lien annotate` output before and after on this repo and on tracked
+  multi-language fixtures (`lien-review-testbed`'s Python and Rust files).
+  `lien delta` (gate 6) reports 2 improved functions (`analyzeDependencies`,
+  `addFuzzyMatchChunks`), 0 regressions.
+
+- 62ad43e: Finish the complexity-analysis migration into `@liendev/parser` (#994 Phase
+  4). `@liendev/core`'s `ComplexityAnalyzer` used to carry a hand-synchronized
+  ~350-line copy of the violation/report/enrichment algorithm that already
+  lived in parser's `analyzeComplexityFromChunks` — the divergence risk that
+  let #979 ship (the copy's testAssociations enrichment was never wired up).
+  `ComplexityAnalyzer.analyze()` now fetches chunks from the structural store
+  and delegates straight into `analyzeComplexityFromChunks`, same as the
+  static `analyzeFromChunks()` already did; the class is now a thin bridge
+  from `VectorDBInterface` to that pure function, with no independent copy of
+  the algorithm left to drift.
+
+  Also moves `effortToMinutes`/`formatTime` (Halstead-effort-to-readable-time
+  conversion) out of `@liendev/core`'s text formatter, which had its own copy,
+  and re-exports the single implementation from `@liendev/parser`.
+
+  No output change for any existing caller (`lien complexity`, `get_complexity`,
+  `lien annotate`, `lien delta`) — verified byte-identical on this repo except
+  for `complexity-analyzer.ts` itself, which naturally drops the complexity
+  violation it used to report on its own now-deleted 350-line implementation.
+
+### Patch Changes
+
+- 921cd76: Fix `get_dependents` reporting `0` (with no caveat) for every file in a PHP
+  project whose `composer.json` declares the same PSR-4 namespace prefix in
+  both `autoload` and `autoload-dev` — the standard library layout, where a
+  package's tests share its own namespace (#1002). `resolvePsr4Map`
+  (`php-psr4.ts`) used to build a flat `Map<prefix, string>`, and
+  `autoload-dev` was processed second, so it silently overwrote `autoload`'s
+  directory for the shared prefix. On Monolog's real `composer.json`
+  (`"Monolog\\"` declared as both `src/Monolog` and `tests/Monolog`), every
+  `use Monolog\Logger;` in `src/` resolved to the nonexistent
+  `tests/Monolog/Logger`, and `get_dependents` reported `0` dependents for
+  all 232 of Monolog's files with `attributionCaveat: null` — indistinguishable
+  from "nothing depends on this file."
+
+  Both directories are simultaneously correct (`Monolog\Logger` really lives
+  under `src/Monolog`, `Monolog\LoggerTest` really lives under
+  `tests/Monolog`), so a flat `Map<prefix, string>` can't represent the data —
+  reordering to prefer `autoload` would just invert the bug and break PHP test
+  association (#867), the reason this module exists. The map now stores
+  `Map<prefix, string[]>`, appending rather than overwriting (this also
+  resolves, for free, the previously-ignored case of a PSR-4 prefix mapping to
+  an array of Composer fallback directories — only the first entry used to be
+  kept). `resolvePsr4Import` tries each candidate directory in declaration
+  order (`autoload` before `autoload-dev`) and prefers whichever resolves to a
+  real `.php` file on disk, falling back to the first-registered candidate
+  when neither exists (matching prior behavior for the single-candidate case).
+
+  Verified end to end against a real `Seldaek/monolog` clone: before this fix,
+  `0 edges / 232 orphans (100.0%)`; after, `src/Monolog/Logger.php` correctly
+  reports all 13 of its real production importers as dependents. Confirmed no
+  over-correction (no production file's import resolves to a `tests/`
+  candidate that doesn't apply to it). Swept the sibling manifest resolvers
+  this module says it "mirrors" (`workspace-packages.ts`, `rust-crate-map.ts`)
+  for the same last-write-wins shape — both are clean, because npm/Cargo
+  package names are uniqueness-enforced by their respective package managers,
+  unlike Composer's PSR-4, which explicitly permits the same prefix in two
+  sections.
+
+- 7db9264: Fix a regression from #1008: Cargo integration-test/bench/example/binary
+  files fabricated a `mod` self-edge (#1016).
+
+  #1008 taught `mod x;` to resolve to a directory-anchored sibling path, but
+  `isRustModuleRootFile` only recognized `mod.rs`/`lib.rs`/`main.rs` as
+  "module-root" files that own their own directory. Every other Cargo
+  crate-root convention — `tests/*.rs` (each an independent integration-test
+  binary), `benches/*.rs`, `examples/*.rs`, and `src/bin/*.rs` — fell through
+  to the "leaf file owns a subdirectory named after itself" branch instead.
+  So `tests/test_context.rs`'s `mod drop;` resolved to the phantom path
+  `tests/test_context/drop`, which then fuzzy-matched back onto
+  `tests/test_context.rs` itself at a path boundary, fabricating a
+  self-edge — inflating that file's own dependent count and blast-radius
+  risk with a dependency on itself.
+
+  `isRustModuleRootFile` now also recognizes a `.rs` file directly under a
+  top-level `tests/`, `benches/`, or `examples/` directory, and a `.rs` file
+  directly under `src/bin/`, as owning its own directory the same way
+  `lib.rs`/`main.rs` do. A file nested one level deeper (`tests/foo/bar.rs`)
+  is unaffected — it's a module within that directory's own crate root, not
+  a fresh crate root itself.
+
+  Independently, `extractModImportPath` now rejects a resolved specifier
+  that is _exactly_ the declaring file's own (extensionless) path — a self-edge,
+  which is never a real dependency regardless of which convention produced
+  it. This is deliberately exact-equality, not fuzzy path-boundary matching:
+  the ordinary leaf-file convention (`src/foo.rs`'s `mod bar;` -> `src/foo/bar`)
+  always produces a specifier that is a superstring of the leaf file's own
+  path at a boundary, which is correct, not a self-edge — a fuzzy guard would
+  misfire on every leaf-file submodule. The guard is scoped to `mod`
+  resolution only: a bare `use crate::x` path resolving back onto its own
+  file is a distinct, pre-existing issue (fuzzy bare-word matching, not `mod`
+  resolution) left untouched here.
+
+  Verified on a fresh `dtolnay/anyhow` clone: the 5 fabricated self-edges
+  (`tests/test_context.rs`, `tests/test_convert.rs`, `tests/test_downcast.rs`,
+  `tests/test_macros.rs`, `tests/test_repr.rs`) are gone, and the real edge
+  now appears (`tests/drop/mod.rs` gains `tests/test_context.rs` as a
+  dependent, via its now-correctly-resolved `mod drop;`). The 3 pre-existing
+  `use crate::`-based self-edges (`src/chain.rs`, `src/context.rs`,
+  `src/error.rs`) are unaffected, as expected — they come from a different
+  code path. `lib.rs`'s 11 top-level `mod` declarations still all produce
+  edges, and `lien-review-testbed/rust`'s `reporter.rs`/`formatter.rs`/
+  `parser.rs` dependents (#1008's original fix) are unchanged.
+
+- 5947350: Fix Rust `mod X;` declarations producing no import edge (#1000).
+
+  `RustImportExtractor.importNodeTypes` only listed `use_declaration` —
+  `mod_item` was absent, so the idiomatic Rust pattern of `mod x;` at the
+  crate root plus qualified calls (`x::func()`) with no `use` at all produced
+  zero import edges. `get_dependents` on the child module returned a
+  confident, wrong `[]` (or an undercount when the file also happened to gain
+  one edge via an unrelated `use crate::x` elsewhere).
+
+  A `mod x;` declaration is resolved to a directory-anchored, extensionless
+  module path (e.g. `src/reporter` for `src/main.rs`'s `mod reporter;`,
+  honoring the leaf-file 2018+-edition directory-split convention, inline-mod
+  nesting, and a `#[path = "..."]` override) rather than emitted as an
+  unanchored bare specifier for downstream fuzzy bare-module matching to
+  guess at. The extractor itself doesn't choose between the `x.rs` and
+  `x/mod.rs` on-disk conventions — it leaves the specifier extensionless, and
+  downstream matching (which already normalizes every candidate file path by
+  stripping extensions) resolves it to whichever one is actually on disk. The
+  unanchored-bare-specifier shape is exactly what #928/#884's
+  `isUnresolvableWholeModuleImport` guard exists to reject, so resolving to a
+  directory-anchored path up front avoids reintroducing that fabrication bug.
+  An inline `mod x { ... }` (has a body, e.g. `#[cfg(test)] mod tests { ... }`)
+  is a namespace, not an import, and correctly produces no edge for itself;
+  `collectImportNodes` now recurses into such a body so any `use`/nested `mod`
+  declared inside it is still discovered.
+
+  Verified on the tracked `lien-review-testbed/rust` fixture (reporter.rs
+  0 -> 1 dependent, formatter.rs and parser.rs each gain the previously-missing
+  `main.rs` edge, the other 5 files unchanged) and on the real `dtolnay/anyhow`
+  crate (all 10 of `lib.rs`'s `mod` declarations now produce edges; the two
+  real inline modules in that crate, `context.rs`'s `mod ext` and `fmt.rs`'s
+  `mod tests`, correctly produce none).
+
 ## 0.74.0
 
 ### Minor Changes
