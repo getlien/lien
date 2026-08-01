@@ -28,6 +28,7 @@ import {
   computeComplexityHeadroom,
   formatComplexityHeadroomWarning,
 } from '../mcp/handlers/get-files-context.js';
+import { findUnindexedPaths, formatUnindexedPathsNote } from '../mcp/utils/unindexed-paths.js';
 import { resolveProjectRoot } from './project-root.js';
 import { type AbsolutePath, type RelativePath, toAbsolutePath } from '../types/paths.js';
 import { canonicalizePath } from '../utils/canonicalize-path.js';
@@ -487,6 +488,43 @@ async function computeAnnotationData(
 }
 
 /**
+ * `resolvePaths` returning null covers three distinct cases (see its own doc
+ * comment): an empty input, a path that escapes the project root, or one
+ * that simply doesn't exist on disk. An empty input has nothing to report
+ * (stays silent — the CLI's existing error-tolerant contract for garbage
+ * input). The other two are the same silent-wrong-answer shape
+ * `findUnindexedPaths` exists to close for the MCP tools (#1014/#927): a
+ * typo'd or deleted path must never read as "ran clean, no impact" (HOOKS-9)
+ * — it must say the index has no record of it, the same honest note
+ * `get_complexity`/`get_files_context` already give an unindexed filepath.
+ *
+ * Reuses `findUnindexedPaths`/`formatUnindexedPathsNote` rather than a new
+ * existence check: if the index turns out to have a record of `file` after
+ * all (e.g. a canonicalization edge case `resolvePaths`' own disk check
+ * missed), this stays silent rather than printing a false "not found".
+ */
+async function reportUnresolvedPath(file: string): Promise<boolean> {
+  if (!file.trim()) return false;
+
+  const rootDir = resolveProjectRoot(toAbsolutePath(process.cwd()));
+  const vectorDB = await createVectorDB(rootDir);
+  await vectorDB.initialize();
+
+  // #894: same "index never built" check `run()` makes for a resolvable
+  // path — a stray/typo'd path against a never-indexed root should say so,
+  // not "not found in the index" (which implies indexing exists to check).
+  if (!(await vectorDB.hasData())) {
+    console.log(formatNoIndexWarning(rootDir));
+    return false;
+  }
+
+  const unindexedPaths = await findUnindexedPaths(vectorDB, [file], rootDir);
+  const note = formatUnindexedPathsNote(unindexedPaths);
+  if (note) console.log(note);
+  return false;
+}
+
+/**
  * Returns whether the printed annotation carried a never-suppress signal —
  * see `annotateCommand`'s doc comment for the full contract. Every early
  * `return` below (unresolvable path, `--tests-only`, no index, trivial,
@@ -494,7 +532,7 @@ async function computeAnnotationData(
  */
 async function run(file: string, options?: AnnotateOptions): Promise<boolean> {
   const paths = resolvePaths(file);
-  if (!paths) return false;
+  if (!paths) return reportUnresolvedPath(file);
 
   if (options?.testsOnly) {
     await runTestsOnly(paths);

@@ -7,52 +7,57 @@ import path from 'path';
  * Validates parameters for complexity analysis queries,
  * enabling tech debt analysis and refactoring prioritization.
  */
-export const GetComplexitySchema = z.object({
-  files: z
-    .array(
-      z
-        .string()
-        .min(1, 'Filepath cannot be empty')
-        .max(1000)
-        .refine(p => {
-          const normalized = p.replace(/\\/g, '/');
-          return !path.isAbsolute(normalized) && !normalized.split('/').includes('..');
-        }, 'Path must be relative and cannot contain ".." traversal'),
-    )
-    .optional()
-    .describe(
-      'Specific files to analyze. If omitted, analyzes entire codebase.\n\n' +
-        "Example: ['src/auth.ts', 'src/api/user.ts']",
-    ),
+export const GetComplexitySchema = z
+  .object({
+    files: z
+      .array(
+        z
+          .string()
+          .min(1, 'Filepath cannot be empty')
+          .max(1000)
+          .refine(p => {
+            const normalized = p.replace(/\\/g, '/');
+            return !path.isAbsolute(normalized) && !normalized.split('/').includes('..');
+          }, 'Path must be relative and cannot contain ".." traversal'),
+      )
+      .optional()
+      .describe(
+        'Specific files to analyze. If omitted, analyzes entire codebase.\n\n' +
+          "Example: ['src/auth.ts', 'src/api/user.ts']",
+      ),
 
-  top: z
-    .number()
-    .int()
-    .min(1, 'Top must be at least 1')
-    .max(50, 'Top cannot exceed 50')
-    .default(10)
-    .describe(
-      'Return top N most complex functions. Default: 10\n\n' +
-        'Use higher values to see more violations.',
-    ),
+    top: z
+      .number()
+      .int()
+      .min(1, 'Top must be at least 1')
+      .max(50, 'Top cannot exceed 50')
+      .default(10)
+      .describe(
+        'Return top N most complex functions. Default: 10\n\n' +
+          'Use higher values to see more violations.',
+      ),
 
-  threshold: z
-    .number()
-    .int()
-    .min(1, 'Threshold must be at least 1')
-    .optional()
-    .describe(
-      'Only return functions above this complexity threshold.\n\n' +
-        'Note: Violations are first identified using the threshold from lien.config.json (default: 15). ' +
-        'This parameter filters those violations to show only items above the specified value. ' +
-        'Setting threshold below the config threshold will not show additional functions.',
-    ),
+    threshold: z
+      .number()
+      .int()
+      .min(1, 'Threshold must be at least 1')
+      .optional()
+      .describe(
+        'Only return functions above this complexity threshold.\n\n' +
+          'Note: Violations are first identified using the threshold from lien.config.json (default: 15). ' +
+          'This parameter filters those violations to show only items above the specified value. ' +
+          'Setting threshold below the config threshold will not show additional functions.',
+      ),
 
-  metricType: z
-    .enum(['cyclomatic', 'cognitive', 'halstead_effort', 'halstead_bugs'])
-    .optional()
-    .describe('Filter violations to a specific metric type. If omitted, returns all types.'),
-});
+    metricType: z
+      .enum(['cyclomatic', 'cognitive', 'halstead_effort', 'halstead_bugs'])
+      .optional()
+      .describe('Filter violations to a specific metric type. If omitted, returns all types.'),
+  })
+  // Reject unknown keys instead of silently stripping them (e.g. `filepath`
+  // instead of `files`) — a typo'd key must never fall through to "no files
+  // given, analyze the whole codebase".
+  .strict();
 
 /**
  * Inferred TypeScript type for get_complexity input

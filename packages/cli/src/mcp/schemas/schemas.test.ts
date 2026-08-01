@@ -495,4 +495,42 @@ describe('GetComplexitySchema', () => {
     const longPath = 'a'.repeat(1001);
     expect(() => GetComplexitySchema.parse({ files: [longPath] })).toThrow();
   });
+
+  it('should reject an unrecognized `filepath` key instead of silently falling through to whole-repo analysis', () => {
+    // Regression test: `filepath` (singular) is not a valid key — the schema
+    // only accepts `files` (an array). Without `.strict()`, Zod silently
+    // strips unknown keys and the handler falls through to "no files given,
+    // analyze the entire codebase" with no error and no warning.
+    expect(() =>
+      GetComplexitySchema.parse({ filepath: 'packages/parser/src/chunker.ts' }),
+    ).toThrow();
+  });
+});
+
+describe('MCP schema strictness (unknown keys rejected)', () => {
+  it('SearchCodeSchema rejects unknown keys', () => {
+    expect(() => SearchCodeSchema.parse({ query: 'test query', bogus: 1 })).toThrow();
+  });
+
+  it('FindSimilarSchema rejects unknown keys', () => {
+    expect(() =>
+      FindSimilarSchema.parse({ code: 'const x = 1; return x + 2;', bogus: 1 }),
+    ).toThrow();
+  });
+
+  it('GetFilesContextSchema rejects unknown keys', () => {
+    expect(() => GetFilesContextSchema.parse({ filepaths: 'src/index.ts', bogus: 1 })).toThrow();
+  });
+
+  it('ListFunctionsSchema rejects unknown keys', () => {
+    expect(() => ListFunctionsSchema.parse({ pattern: 'handle.*', bogus: 1 })).toThrow();
+  });
+
+  it('GetDependentsSchema rejects unknown keys', () => {
+    expect(() => GetDependentsSchema.parse({ filepath: 'src/test.ts', bogus: 1 })).toThrow();
+  });
+
+  it('GetComplexitySchema rejects unknown keys', () => {
+    expect(() => GetComplexitySchema.parse({ top: 5, bogus: 1 })).toThrow();
+  });
 });

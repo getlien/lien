@@ -46,8 +46,42 @@ import {
   loadGlobalConfig,
   detectLinkedWorktree,
   resolveIndexStrategy,
+  INDEX_FORMAT_VERSION,
 } from '@liendev/core';
 import fs from 'fs/promises';
+
+/**
+ * An ENOENT-shaped error (`.code` set, matching Node's real fs errors) for
+ * mocking `fs.readFile` rejections. `ManifestManager.load()` branches on
+ * `.code === 'ENOENT'` to treat "no manifest yet" as silent/expected; a
+ * plain `new Error('ENOENT')` (message only, no `.code`) instead falls into
+ * its "corrupt manifest" branch and logs a spurious console.error warning.
+ */
+function enoentError(): NodeJS.ErrnoException {
+  const error = new Error('ENOENT') as NodeJS.ErrnoException;
+  error.code = 'ENOENT';
+  return error;
+}
+
+/** Find the `console.log(chalk.dim('Index files:'), count)` call and return its raw `count` arg. */
+function findIndexFilesValue(calls: unknown[][]): unknown {
+  const call = calls.find(c => typeof c[0] === 'string' && c[0].includes('Index files:'));
+  return call?.[1];
+}
+
+/** Minimal valid manifest.json body with `count` indexed files, for mocking `fs.readFile`. */
+function fakeManifest(fileCount: number): string {
+  const files: Record<string, unknown> = {};
+  for (let i = 0; i < fileCount; i++) {
+    files[`file${i}.ts`] = { filepath: `file${i}.ts`, lastModified: 0, chunkCount: 1 };
+  }
+  return JSON.stringify({
+    formatVersion: INDEX_FORMAT_VERSION,
+    lienVersion: '0.0.0',
+    lastIndexed: 0,
+    files,
+  });
+}
 
 describe('statusCommand', () => {
   let consoleLogSpy: ReturnType<typeof vi.spyOn>;
@@ -57,7 +91,7 @@ describe('statusCommand', () => {
     vi.mocked(isGitRepo).mockResolvedValue(false);
     vi.mocked(fs.stat).mockRejectedValue(new Error('ENOENT'));
     vi.mocked(fs.readdir).mockResolvedValue([]);
-    vi.mocked(fs.readFile).mockRejectedValue(new Error('ENOENT'));
+    vi.mocked(fs.readFile).mockRejectedValue(enoentError());
     vi.mocked(loadGlobalConfig).mockResolvedValue({ backend: 'sqlite' });
     vi.mocked(detectLinkedWorktree).mockResolvedValue({ isLinkedWorktree: false, mainRoot: null });
     vi.mocked(resolveIndexStrategy).mockResolvedValue({ mode: 'standalone' });
@@ -207,17 +241,67 @@ describe('statusCommand', () => {
     expect(data.embeddings).toBeUndefined();
   });
 
-  it('should show file count in index', async () => {
+  it('should report the manifest-tracked indexFiles count in JSON output, not raw store-dir entries', async () => {
     vi.mocked(fs.stat).mockResolvedValue({
       mtime: new Date('2025-01-01'),
       isDirectory: () => true,
     } as any);
-    vi.mocked(fs.readdir).mockResolvedValue(['a.lance', 'b.lance', 'c.json'] as any);
+    vi.mocked(fs.readdir).mockResolvedValue(['manifest.json', 'structural.db'] as any);
+    vi.mocked(fs.readFile).mockResolvedValue(fakeManifest(3) as any);
+
+    await statusCommand({ format: 'json' });
+
+    const calls = consoleLogSpy.mock.calls as string[][];
+    const jsonCall = calls.find(call => {
+      try {
+        JSON.parse(call[0]);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    const data = JSON.parse(jsonCall![0]);
+    expect(data.indexFiles).toBe(3);
+  });
+
+  it('should show the manifest-tracked file count, not raw store-dir entries', async () => {
+    vi.mocked(fs.stat).mockResolvedValue({
+      mtime: new Date('2025-01-01'),
+      isDirectory: () => true,
+    } as any);
+    // Regression guard for the bug this replaces: the store dir has 7 raw
+    // entries (manifest.json, structural.db, -shm/-wal, .git-state.json,
+    // .lien-accessed, .lien-index-version) but the manifest itself tracks
+    // only 3 indexed source files — "Index files" must report 3, not 7.
+    vi.mocked(fs.readdir).mockResolvedValue([
+      'manifest.json',
+      'structural.db',
+      'structural.db-shm',
+      'structural.db-wal',
+      '.git-state.json',
+      '.lien-accessed',
+      '.lien-index-version',
+    ] as any);
+    vi.mocked(fs.readFile).mockResolvedValue(fakeManifest(3) as any);
 
     await statusCommand();
 
-    const allOutput = consoleLogSpy.mock.calls.flat().join(' ');
-    expect(allOutput).toContain('3');
+    // Inspect the call's raw args rather than the ANSI-coded joined string
+    // (chalk's reset code sits between the label and the value, which breaks
+    // a naive string/regex match) — see findIndexFilesValue.
+    expect(findIndexFilesValue(consoleLogSpy.mock.calls)).toBe(3);
+  });
+
+  it('reports 0 index files when the manifest is missing or unreadable (fails open, never throws)', async () => {
+    vi.mocked(fs.stat).mockResolvedValue({
+      mtime: new Date('2025-01-01'),
+      isDirectory: () => true,
+    } as any);
+    vi.mocked(fs.readFile).mockRejectedValue(enoentError());
+
+    await statusCommand();
+
+    expect(findIndexFilesValue(consoleLogSpy.mock.calls)).toBe(0);
   });
 
   describe('worktree-aware indexing status', () => {

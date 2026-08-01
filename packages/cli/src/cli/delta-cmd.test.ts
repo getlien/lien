@@ -183,6 +183,30 @@ describe('formatDeltaText', () => {
     expect(text).toContain('Simplify before committing');
   });
 
+  it('advises re-running with --soft when --soft was NOT passed', () => {
+    const result = computeComplexityDelta(
+      [{ filepath: 'src/foo.ts', before: BODY.twoNest, after: BODY.threeNest }],
+      COG_ONLY,
+    );
+    const text = stripAnsi(formatDeltaText(result, 42));
+    expect(text).toContain('re-run with --soft to advise only');
+  });
+
+  // Regression (CLI-5): `--soft` already makes crossings advisory (see
+  // `deltaExitCode` — exit 0 regardless), so telling a caller who already
+  // passed `--soft` to "re-run with --soft" is nonsensical. The footer must
+  // say the crossing is advisory-only, not repeat advice already followed.
+  it('does NOT advise re-running with --soft when --soft was already passed', () => {
+    const result = computeComplexityDelta(
+      [{ filepath: 'src/foo.ts', before: BODY.twoNest, after: BODY.threeNest }],
+      COG_ONLY,
+    );
+    const text = stripAnsi(formatDeltaText(result, 42, 'HEAD', true));
+    expect(text).toContain('new complexity crossings introduced');
+    expect(text).toContain('Advisory only');
+    expect(text).not.toContain('re-run with --soft');
+  });
+
   it('renders improvements without a failure footer', () => {
     const result = computeComplexityDelta(
       [{ filepath: 'src/foo.ts', before: BODY.threeNest, after: BODY.oneIf }],
@@ -426,6 +450,23 @@ describe('deltaCommand — --base <ref> integration (real git fixtures)', () => 
     expect(errSpy).toHaveBeenCalledWith(
       expect.stringContaining('base ref "totally-not-a-ref" not found'),
     );
+  });
+
+  // Regression (CLI-5): `deltaCommand` must actually pass `options.soft`
+  // through to `formatDeltaText` — verifying the wiring end to end, not just
+  // `formatDeltaText` in isolation.
+  it('--soft prints advisory-only text instead of "re-run with --soft" (exit code still 0)', async () => {
+    await initRepo();
+    await write('a.ts', BODY.oneIf);
+    await commitAll('init');
+    await write('a.ts', BODY.twoNest); // uncommitted crossing (against threshold 2)
+
+    const exitCode = await runDelta({ format: 'text', threshold: '2', soft: true });
+    expect(exitCode).toBe(0);
+    const printed = String(logSpy.mock.calls.at(-1)?.[0]);
+    expect(printed).toContain('new complexity crossings introduced');
+    expect(printed).toContain('Advisory only');
+    expect(printed).not.toContain('re-run with --soft');
   });
 
   it('loads complexity.thresholds from a real .lien.config.json on disk (no --threshold flag)', async () => {

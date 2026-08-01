@@ -635,10 +635,37 @@ describe('annotateCommand (integration)', () => {
     await fs.rm(tmpHome, { recursive: true, force: true });
   });
 
-  it('silently exits for a non-existent file', async () => {
+  // HOOKS-9: this used to be a completely silent, exit-0 no-op —
+  // indistinguishable from "this file has no impact". tmpHome (this
+  // describe's fixture) has no index built, so the honest answer is the same
+  // "no index found" warning a real, resolvable path gets against an
+  // unindexed root (see 'warns loudly instead of silently analyzing an
+  // unindexed root' below) — NOT silence.
+  it('warns instead of silently exiting for a non-existent file (unindexed root)', async () => {
     await annotateCommand('this/path/does/not/exist.ts');
-    expect(logSpy).not.toHaveBeenCalled();
     expect(errSpy).not.toHaveBeenCalled();
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    expect(logSpy.mock.calls[0][0]).toContain('Lien: no index found at the resolved project root');
+  });
+
+  // HOOKS-9's actual reported shape: an INDEXED repo given a path the index
+  // has never heard of. Mocks createVectorDB directly (rather than building
+  // a real index in tmpHome) so `hasData()` reports true without an actual
+  // indexing pass.
+  it('says the path is not found in the index for a non-existent path in an INDEXED repo', async () => {
+    vi.mocked(coreModule.createVectorDB).mockResolvedValueOnce({
+      initialize: vi.fn().mockResolvedValue(undefined),
+      hasData: vi.fn().mockResolvedValue(true),
+      getIndexedFiles: vi.fn().mockResolvedValue(['packages/cli/src/cli/index.ts']),
+    } as unknown as Awaited<ReturnType<typeof coreModule.createVectorDB>>);
+
+    await annotateCommand('this/path/does/not/exist.ts');
+
+    expect(errSpy).not.toHaveBeenCalled();
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    const printed = logSpy.mock.calls[0][0] as string;
+    expect(printed).toContain('not found in the index');
+    expect(printed).toContain('this/path/does/not/exist.ts');
   });
 
   it('silently exits for an empty path', async () => {
@@ -887,7 +914,16 @@ describe('annotateCli (CLI exit-code contract, #978)', () => {
     expect(exitSpy).not.toHaveBeenCalled();
   });
 
-  it('does not call process.exit for a non-existent file (silent no-op path)', async () => {
+  it('does not call process.exit for a non-existent file', async () => {
+    // This describe block doesn't isolate `os.homedir()`/tmpHome like the
+    // plain 'annotateCommand (integration)' block above — mock createVectorDB
+    // directly so `reportUnresolvedPath`'s new index check (HOOKS-9) never
+    // touches the real developer machine's `~/.lien`.
+    vi.mocked(coreModule.createVectorDB).mockResolvedValueOnce({
+      initialize: vi.fn().mockResolvedValue(undefined),
+      hasData: vi.fn().mockResolvedValue(false),
+    } as unknown as Awaited<ReturnType<typeof coreModule.createVectorDB>>);
+
     await annotateCli('this/path/does/not/exist.ts');
 
     expect(exitSpy).not.toHaveBeenCalled();
