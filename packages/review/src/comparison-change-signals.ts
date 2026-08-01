@@ -623,21 +623,35 @@ export function computeComparisonChanges(context: ReviewContext): ComparisonChan
 // Rendering
 // ---------------------------------------------------------------------------
 
-const HEADER =
-  'Pre-computed by a deterministic diff scan — the comparison/threshold-shaped ' +
-  'edit discovery is done for you; do not re-scan the whole diff line-by-line ' +
-  'looking for these. Each entry is a removed/added line pair this PR changed ' +
-  'that shifts a comparison operator, a numeric literal in a conditional ' +
-  'context, or index arithmetic adjacent to indexing. Discovery only — this ' +
-  'block does NOT judge whether the change is intentional, disclosed, or ' +
-  "breaking, and it does NOT substitute for the boundary-change protocol's " +
-  'MANDATORY get_files_context call: knowing the file:line here does not tell ' +
-  'you the test associations for that file, so you must still call ' +
-  'get_files_context on it to find and inspect the covering tests, per the ' +
-  'protocol. Apply the full protocol to each entry: identify the divergence ' +
-  'input, check test coverage for it via get_files_context, and consult ' +
-  '<blast_radius>. This scan can miss compound changes (operator AND literal ' +
-  'changed on the same line) — the <diff> section is still the ground truth.';
+/**
+ * `blastRadiusPresent` gates the "consult <blast_radius>" clause: that tag
+ * only exists in the prompt when `renderBlastRadius` (system-prompt.ts)
+ * actually rendered a non-empty section — the two are otherwise assembled
+ * independently (this section is gated on the `boundary-change` rule alone),
+ * so without this flag the instruction could tell the agent to consult a
+ * section that isn't in its context at all (e.g. blast radius resolved to
+ * zero seeds, or a caller like the harness's build-prompts.ts never computed
+ * it in the first place).
+ */
+function buildHeader(blastRadiusPresent: boolean): string {
+  const blastRadiusClause = blastRadiusPresent ? ', and consult <blast_radius>' : '';
+  return (
+    'Pre-computed by a deterministic diff scan — the comparison/threshold-shaped ' +
+    'edit discovery is done for you; do not re-scan the whole diff line-by-line ' +
+    'looking for these. Each entry is a removed/added line pair this PR changed ' +
+    'that shifts a comparison operator, a numeric literal in a conditional ' +
+    'context, or index arithmetic adjacent to indexing. Discovery only — this ' +
+    'block does NOT judge whether the change is intentional, disclosed, or ' +
+    "breaking, and it does NOT substitute for the boundary-change protocol's " +
+    'MANDATORY get_files_context call: knowing the file:line here does not tell ' +
+    'you the test associations for that file, so you must still call ' +
+    'get_files_context on it to find and inspect the covering tests, per the ' +
+    'protocol. Apply the full protocol to each entry: identify the divergence ' +
+    `input, check test coverage for it via get_files_context${blastRadiusClause}. ` +
+    'This scan can miss compound changes (operator AND literal changed on the ' +
+    'same line) — the <diff> section is still the ground truth.'
+  );
+}
 
 function renderEntry(c: ComparisonChangeCandidate): string {
   return `- ${c.file}:${c.line} — \`${c.oldFragment}\` → \`${c.newFragment}\` (${c.kind}): ${c.reason}`;
@@ -647,11 +661,17 @@ function renderEntry(c: ComparisonChangeCandidate): string {
  * Render comparison-change candidates as a `<comparison_change_candidates>`
  * block. Returns '' when there are none. Caps at MAX_CANDIDATES with an
  * explicit omission note — never truncates silently. Exposed for testing.
+ *
+ * `blastRadiusPresent` (default `true`, matching every existing caller's
+ * prior behavior) — see `buildHeader`'s doc comment.
  */
-export function renderComparisonChangeCandidates(candidates: ComparisonChangeCandidate[]): string {
+export function renderComparisonChangeCandidates(
+  candidates: ComparisonChangeCandidate[],
+  blastRadiusPresent = true,
+): string {
   if (candidates.length === 0) return '';
 
-  const lines: string[] = ['<comparison_change_candidates>', HEADER];
+  const lines: string[] = ['<comparison_change_candidates>', buildHeader(blastRadiusPresent)];
   const shown = candidates.slice(0, MAX_CANDIDATES);
   for (const c of shown) lines.push(renderEntry(c));
 
@@ -669,8 +689,12 @@ export function renderComparisonChangeCandidates(candidates: ComparisonChangeCan
 /**
  * Build the `<comparison_change_candidates>` section from the review
  * context. Returns '' when the PR's diff has no qualifying comparison
- * change, or there's no diff at all.
+ * change, or there's no diff at all. `blastRadiusPresent` — see
+ * `buildHeader`'s doc comment; forwarded to `renderComparisonChangeCandidates`.
  */
-export function renderComparisonChangeSection(context: ReviewContext): string {
-  return renderComparisonChangeCandidates(computeComparisonChanges(context));
+export function renderComparisonChangeSection(
+  context: ReviewContext,
+  blastRadiusPresent = true,
+): string {
+  return renderComparisonChangeCandidates(computeComparisonChanges(context), blastRadiusPresent);
 }

@@ -171,4 +171,53 @@ describe('renderBlastRadiusMarkdown', () => {
     const out = renderBlastRadiusMarkdown(makeReport());
     expect(out.includes('[truncated')).toBe(false);
   });
+
+  // ---------------------------------------------------------------------
+  // Confidence column — see dependency-graph.ts's `isPreciseProvenance` for
+  // the tier ranking this bucketing is derived from. `import-only` renders
+  // "verified": the import itself is guarded/resolved for this exact symbol,
+  // it just lacks a literal call site naming it (e.g. PHP's `new Order()`).
+  // ---------------------------------------------------------------------
+  describe('Confidence column', () => {
+    function renderWithProvenance(
+      provenance?: BlastRadiusEntry['dependents'][number]['provenance'],
+    ): string {
+      return renderBlastRadiusMarkdown(
+        makeReport({
+          entries: [
+            makeEntry({
+              dependents: [
+                {
+                  filepath: 'src/a.ts',
+                  symbolName: 'a',
+                  hops: 1,
+                  callSiteLine: 3,
+                  hasTestCoverage: true,
+                  provenance,
+                },
+              ],
+            }),
+          ],
+        }),
+      );
+    }
+
+    it.each([
+      ['same-file', 'verified'],
+      ['import-verified', 'verified'],
+      ['import-only', 'verified'],
+      ['require-only', 'inferred'],
+      ['symbol-name-match', 'inferred'],
+      ['oop-method-import', 'inferred'],
+      ['namespace-inferred', 'inferred'],
+    ] as const)('renders %s as %s', (provenance, expected) => {
+      const out = renderWithProvenance(provenance);
+      expect(out).toContain(`| ${expected} |`);
+    });
+
+    it('renders as verified when provenance is absent (pre-#994-Phase-5 fixtures)', () => {
+      const out = renderWithProvenance(undefined);
+      expect(out).toContain('| verified |');
+    });
+  });
 });

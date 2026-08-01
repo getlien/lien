@@ -93,9 +93,25 @@ export type EdgeProvenance =
   | 'oop-method-import'
   | 'namespace-inferred';
 
-/** True for the two tiers backed by a verified import statement (same-file counts as trivially verified). */
+/**
+ * True for the three tiers where the SPECIFIC seed symbol is verifiably
+ * imported/declared in the dependent — same-file trivially, import-verified
+ * via a named call site, import-only via the import alone (no call site
+ * names it, but `resolveOneChunkImports` still confirmed this exact symbol
+ * resolves to this exact file through `importMatchesTarget`'s guards — see
+ * `EdgeProvenance`'s doc comment). Deliberately excludes `require-only`
+ * despite it also being a guarded, resolved import: that tier only verifies
+ * a FILE-level relationship (Ruby's `require`/`load` names no symbol at
+ * all), never that THIS symbol is the one depended on — see `require-only`'s
+ * own doc for why it ranks below `import-only`. The remaining tiers
+ * (`symbol-name-match`, `oop-method-import`, `namespace-inferred`) resolve
+ * the specific file via a name/namespace convention rather than a verified
+ * import, so they stay imprecise regardless of language.
+ */
 export function isPreciseProvenance(provenance: EdgeProvenance): boolean {
-  return provenance === 'same-file' || provenance === 'import-verified';
+  return (
+    provenance === 'same-file' || provenance === 'import-verified' || provenance === 'import-only'
+  );
 }
 
 export interface SymbolNode {
