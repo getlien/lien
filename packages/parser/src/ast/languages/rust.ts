@@ -183,15 +183,73 @@ export class RustExportExtractor implements LanguageExportExtractor {
 // =============================================================================
 
 /**
+ * Cargo directories whose DIRECT (non-nested) `.rs` children are themselves
+ * separate crate roots, exactly like `lib.rs`/`main.rs` — Cargo builds each
+ * `tests/foo.rs` as its own integration-test binary target (ditto
+ * `benches/*.rs` for benchmarks and `examples/*.rs` for examples; see the
+ * Cargo Book's "Package Layout"). A file nested one level deeper
+ * (`tests/foo/bar.rs`) is a module WITHIN that `tests/foo.rs` crate, not a
+ * fresh crate root itself, so this only matches when the file's OWN parent
+ * directory is literally named one of these three — not merely somewhere
+ * inside a `tests/`/`benches/`/`examples/` tree (#1016).
+ */
+const CARGO_TOP_LEVEL_CRATE_ROOT_DIRS = new Set(['tests', 'benches', 'examples']);
+
+/** Last path component (basename) of a directory path; `''` for the repo root. */
+function directoryBasename(dir: string): string {
+  return dir.slice(dir.lastIndexOf('/') + 1);
+}
+
+/**
+ * Whether `importerFile` is a `src/bin/*.rs` additional-binary crate root
+ * (Cargo Book "Package Layout": each file directly under `src/bin/` is its
+ * own binary target). `src/bin/name/main.rs` is a separate, already-covered
+ * shape — it matches the plain `main.rs` check in `isRustModuleRootFile` —
+ * so this only needs to add the single-file form.
+ */
+function isSrcBinCrateRootFile(importerFile: string): boolean {
+  const dir = dirnameOf(importerFile);
+  return directoryBasename(dir) === 'bin' && directoryBasename(dirnameOf(dir)) === 'src';
+}
+
+/**
+ * Whether `importerFile` is a Cargo crate root by virtue of its DIRECTORY
+ * (an integration test, benchmark, or example — see
+ * `CARGO_TOP_LEVEL_CRATE_ROOT_DIRS` — or an additional `src/bin/` binary),
+ * as opposed to `mod.rs`/`lib.rs`/`main.rs`'s basename-based crate-root
+ * shapes.
+ *
+ * Fixes the regression #1008 introduced (#1016): these files were
+ * previously misclassified as "leaf" files by `isRustModuleRootFile`, so a
+ * `mod x;` declared inside one resolved into a phantom subdirectory named
+ * after the file itself (e.g. `tests/test_context.rs`'s `mod drop;` ->
+ * `tests/test_context/drop`), which then fuzzy-matched back onto the
+ * declaring file as a fabricated self-edge instead of resolving to the real
+ * sibling module (`tests/drop.rs` / `tests/drop/mod.rs`).
+ */
+function isCargoDirectoryCrateRootFile(importerFile: string): boolean {
+  const dirName = directoryBasename(dirnameOf(importerFile));
+  return CARGO_TOP_LEVEL_CRATE_ROOT_DIRS.has(dirName) || isSrcBinCrateRootFile(importerFile);
+}
+
+/**
  * Whether `importerFile`'s basename identifies it as a Rust module-root file
- * (`mod.rs`, or the crate-root files `lib.rs`/`main.rs`) rather than a "leaf"
- * file. Rust's file-to-module convention gives these two shapes DIFFERENT
+ * (`mod.rs`, or the crate-root files `lib.rs`/`main.rs`) — or its directory
+ * identifies it as one of Cargo's other crate-root shapes (`tests/*.rs`,
+ * `benches/*.rs`, `examples/*.rs`, `src/bin/*.rs` — see
+ * `isCargoDirectoryCrateRootFile`, #1016) — rather than a "leaf" file. Rust's
+ * file-to-module convention gives these two shapes DIFFERENT
  * containing-directory semantics — see `resolveRustRelativeModulePath`'s doc
  * comment for why that distinction matters for `self::`/`super::`.
  */
 function isRustModuleRootFile(importerFile: string): boolean {
   const base = importerFile.slice(importerFile.lastIndexOf('/') + 1);
-  return base === 'mod.rs' || base === 'lib.rs' || base === 'main.rs';
+  return (
+    base === 'mod.rs' ||
+    base === 'lib.rs' ||
+    base === 'main.rs' ||
+    isCargoDirectoryCrateRootFile(importerFile)
+  );
 }
 
 /**
@@ -352,13 +410,68 @@ function extractModImportPath(node: SyntaxNode, importerFile?: string): string |
   const nameNode = node.childForFieldName('name');
   if (!nameNode) return null;
 
+  const normalizedImporter = importerFile.replace(/\\/g, '/');
   const pathOverride = findPathAttributeOverride(node);
-  if (pathOverride) {
-    const normalizedImporter = importerFile.replace(/\\/g, '/');
-    return joinFromDir(dirnameOf(normalizedImporter), pathOverride.replace(/\.rs$/, ''));
-  }
+  const resolved = pathOverride
+    ? joinFromDir(dirnameOf(normalizedImporter), pathOverride.replace(/\.rs$/, ''))
+    : joinFromDir(rustModOwningDirectory(importerFile, node), nameNode.text);
 
-  return joinFromDir(rustModOwningDirectory(importerFile, node), nameNode.text);
+  return isModSelfEdge(resolved, normalizedImporter) ? null : resolved;
+}
+
+/**
+ * Whether a `mod_item`'s resolved sibling-module specifier is EXACTLY its
+ * own declaring file — a self-edge, which is never a real dependency no
+ * matter which file-to-module convention produced it (#1016). Deliberately
+ * EXACT (extensionless string) equality, not `matchesFile`'s fuzzy boundary
+ * matching: Rust's ordinary "leaf file owns a namesake subdirectory"
+ * convention makes every leaf file's OWN submodule specifier a superstring
+ * of the leaf file's own path by design (`src/foo.rs`'s `mod bar;` ->
+ * `src/foo/bar`, which contains `src/foo` at a path boundary) — that's a
+ * real, different, already-correct sibling file, not a self-edge, so a
+ * fuzzy `matchesFile`-based guard here would misfire on that ubiquitous,
+ * correct case (confirmed by a test regression while building this fix).
+ * Exact equality has no such false positive: it only rejects a specifier
+ * that resolves back to the literal file that declared it, which can only
+ * happen via a `#[path = "..."]` override pointing at the declaring file
+ * itself, or a future regression in `rustModOwningDirectory`/
+ * `isRustModuleRootFile` that (re)introduces this shape — precisely the
+ * "next variant of this bug" this guard exists to catch, independent of the
+ * `isRustModuleRootFile` fix above (which corrects THIS specific #1016
+ * resolution bug; that bug's actual shape — a phantom subdirectory named
+ * after the importer — was never exact-equal to the importer's own path
+ * either, so this guard alone would not have masked #1016 without that
+ * fix, nor does it substitute for it).
+ *
+ * One known, narrow non-catch: a module-root file (`lib.rs`/`main.rs`/
+ * `mod.rs`/a Cargo crate root — see `isRustModuleRootFile`) declaring a
+ * submodule with the SAME basename as itself (e.g. `tests/foo.rs`
+ * containing `mod foo;`, meaning the sibling `tests/foo/mod.rs`) resolves
+ * to a specifier exactly equal to the importer's own stripped path and so
+ * IS suppressed by this guard, even though `tests/foo/mod.rs` can be a
+ * genuinely different, valid file. This is accepted rather than special-
+ * cased: the extensionless matching scheme downstream already collapses
+ * `tests/foo.rs` and `tests/foo/mod.rs` to the same specifier, so that edge
+ * was already ambiguous with a real self-match before this guard: dropping
+ * it errs toward not fabricating a self-edge rather than resolving the
+ * ambiguity in the specifier's favor.
+ *
+ * Deliberately scoped to `mod` resolution only — not `use` imports, and
+ * not other languages:
+ * - A bare `use crate::x` path resolving back onto its own declaring file
+ *   is a distinct, PRE-EXISTING issue (fuzzy bare-word matching in
+ *   `convertRustModulePath`/`matchesFile`, not `mod` resolution — see
+ *   #1016's `src/chain.rs`/`src/context.rs`/`src/error.rs` findings), left
+ *   untouched here rather than silently absorbed by a broader guard.
+ * - Other languages have legitimate same-file specifiers a blanket
+ *   cross-language guard would wrongly suppress — e.g. Node's package
+ *   self-reference feature, where a file inside a package legitimately
+ *   imports that package's own name and resolves back to itself.
+ * A Rust `mod x;` declaring itself has no such legitimate shape: it is
+ * always either a mistake or, as here, a resolution bug.
+ */
+function isModSelfEdge(resolvedSpecifier: string, importerFile: string): boolean {
+  return resolvedSpecifier === importerFile.replace(/\.rs$/, '');
 }
 
 /**
