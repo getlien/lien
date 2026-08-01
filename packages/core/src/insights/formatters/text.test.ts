@@ -111,7 +111,9 @@ describe('formatTextReport', () => {
 
   it('should show risk level, percentage over threshold, and dependency info', () => {
     const result = formatTextReport(createReport());
-    expect(result).toContain('Risk:');
+    // "Complexity risk" (not bare "Risk") -- disambiguates from
+    // `lien annotate`/`get_dependents`'s blast-radius risk (CLI-4/REVIEW-6).
+    expect(result).toContain('Complexity risk:');
     expect(result).toContain('HIGH');
     expect(result).toContain('133% over threshold'); // 35 over 15
     expect(result).toContain('Imported by 1 file');

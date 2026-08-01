@@ -11,6 +11,50 @@ in CLAUDE.md that was still honor-system: "run `get_dependents` before changing
 the signature of an exported symbol." Within its covered shapes it's a nudge for
 that rule, not a complete enforcement of it.
 
+## Two risk concepts — read this before assuming every `riskLevel` agrees
+
+Lien computes **two genuinely different things** and, until CLI-4/REVIEW-6 were
+fixed, both were exposed under the identical field name `riskLevel`. They answer
+different questions, are computed by different formulas over different inputs,
+and are **expected to disagree** for the same file at the same moment. Treat
+that as a documented property, not a bug to chase — see
+`packages/parser/src/insights/complexity-vs-blast-radius-risk.test.ts`, which
+pins concrete cases where they diverge in both directions.
+
+| | **Complexity risk** (`get_complexity`/`lien complexity`) | **Blast-radius risk** (this doc's subject) |
+|---|---|---|
+| Question answered | "How risky is this file's own complexity?" | "How risky is *changing* this file, given who depends on it?" |
+| Field name | `complexityRiskLevel` (`lien complexity --format json`'s `files[x].complexityRiskLevel`; `get_complexity`'s `violations[].complexityRiskLevel`) | `riskLevel` (`get_dependents`, `lien annotate`, `lien api-delta`) |
+| Formula | `max(calculateRiskLevel(own violations' severity), calculateRiskLevelFromCount(dependentCount) boosted by dependents' complexity)` — a **ceiling that only ever rises**, never falls | `computeBlastRadiusRisk`: dependent breadth + untested-dependent count, with a complexity **floor** (one tier below `complexityRiskBoost`, never a ceiling) |
+| Test coverage of dependents | **Not a term in the formula at all** | Central: an untested dependent escalates risk; full coverage lowers it (but never below the complexity floor) |
+| Implementation | `packages/parser/src/insights/chunk-complexity.ts` (`calculateRiskLevel`, `enrichWithDependencies`) + `packages/parser/src/dependency-analyzer.ts` (`calculateRiskLevelFromCount`, `calculateComplexityRiskBoost`) | `packages/parser/src/risk/blast-radius-risk.ts` (`computeBlastRadiusRisk`) |
+| Internal type field | `FileComplexityData.riskLevel` (`packages/parser/src/insights/types.ts`) — kept as-is internally; renamed only at the `get_complexity`/`lien complexity --format json` output boundary, since that's where the same-named collision was actually observed | n/a |
+
+**Why the rename (not a formula merge).** Reading both implementations: these
+are legitimately different concepts, not one concept computed two
+inconsistent ways. Collapsing them into one formula would lose information —
+"this function's cyclomatic complexity is already over threshold" and "three
+of your five callers have no tests" are both real, independent signals a
+change author needs, and neither should silently override the other. The
+fix is the name collision, not the formula difference: `get_complexity`'s
+field is `complexityRiskLevel`; the three surfaces below keep `riskLevel` for
+blast-radius risk.
+
+**This can't silently re-converge (or re-diverge) unnoticed:**
+
+- The two-concepts comparison above is pinned by a test
+  (`complexity-vs-blast-radius-risk.test.ts`) that computes both formulas
+  against the same fixtures and asserts they land on *different* levels — if
+  a future change makes either formula start agreeing with the other on
+  those fixtures, that test fails and must be consciously updated (and this
+  table re-read), rather than drifting unnoticed.
+- Within blast-radius risk itself, all three surfaces (`get_dependents`,
+  `lien annotate`, `lien api-delta`) must feed `computeBlastRadiusRisk` the
+  **same population** — production dependents only, never production + test
+  — see "Enrichment: dependent counts and risk, best-effort" below for the
+  HOOKS-2 fix that made `lien annotate` match the other two, and why
+  production-only is the correct population.
+
 ## Motivation
 
 CLAUDE.md has had two "before you touch an exported symbol" rules for a while.
@@ -155,11 +199,34 @@ Only runs when at least one change was found (the rare event, so the common
 edit — no exported-signature change — pays only the cheap content check and
 never touches the index). For each changed symbol, calls the existing
 `findDependents(vectorDB, filepath, log, symbolName, indexVersion)` and composes
-a risk level via the shared `computeBlastRadiusRisk` primitive — the same two
-calls `get_dependents` and `annotate-read.sh` already make. `indexVersion` is
-captured once (`vectorDB.getCurrentVersion()`) so every symbol in one run shares
-`findDependents`'s internal scan cache — only the first symbol in a file pays
-the `scanAll`.
+a risk level via the shared `computeBlastRadiusRisk` primitive — the same
+primitive `get_dependents` and `lien annotate` compose their own risk from.
+`indexVersion` is captured once (`vectorDB.getCurrentVersion()`) so every
+symbol in one run shares `findDependents`'s internal scan cache — only the
+first symbol in a file pays the `scanAll`.
+
+**Population parity across all three surfaces (HOOKS-2).** Sharing
+`computeBlastRadiusRisk` is not sufficient for the three surfaces to agree —
+they must also feed it the *same* `dependentCount`. `get_dependents` and
+`lien api-delta` always have (`productionDependentCount`, excluding test
+files: a test importing the target isn't the same risk as production code
+importing it). `lien annotate` did not: until this fix it fed the WIDER
+`dependents.length` (production + test) into `computeBlastRadiusRisk` while
+already using the narrower `uncoveredProductionDependents` for the untested
+count in the same call — an internal mismatch as well as a cross-surface
+one. A file with many test-only importers and few or no production ones
+could come back a *higher* risk from `lien annotate` than `get_dependents`
+reported for the identical file at the identical moment (confirmed live:
+`lien annotate` read `risk: medium (8 callers, ...)` while `get_dependents`
+read `riskLevel: "low"` / `productionDependentCount: 2` for the same file,
+same index, same moment). Fixed by feeding `productionDependentCount` into
+`lien annotate`'s `computeBlastRadiusRisk` call too, and relabeling the
+reasoning's generic "N callers" entry as "N production callers" (shared
+`relabelCallerReasoning` in `packages/cli/src/utils/blast-radius-reasoning.ts`,
+used by both `get_dependents` and `lien annotate` — one implementation, not
+two copies that can drift again) so the wider dependents list this command
+also prints (production + test, sorted production-first) is never confused
+with the narrower count driving the risk verdict.
 
 **Graceful degrade**, in two layers:
 

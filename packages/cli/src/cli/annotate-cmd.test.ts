@@ -834,6 +834,90 @@ describe('annotateCommand — plan-time nudge (integration)', () => {
   });
 });
 
+describe('annotateCommand — blast-radius population parity (HOOKS-2, integration)', () => {
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  let errSpy: ReturnType<typeof vi.spyOn>;
+
+  // Same stable target as the plan-time-nudge block above.
+  const target = 'packages/cli/src/cli/index.ts';
+
+  beforeEach(() => {
+    logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    errSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    logSpy.mockRestore();
+    errSpy.mockRestore();
+    vi.mocked(coreModule.createVectorDB).mockClear();
+  });
+
+  function importerChunk(file: string, imports: string[]) {
+    return {
+      content: '',
+      metadata: {
+        file,
+        startLine: 1,
+        endLine: 5,
+        type: 'function',
+        language: 'typescript',
+        symbolName: 'fn',
+        symbolType: 'function',
+        imports,
+      },
+      score: 0,
+      relevance: 'not_relevant',
+    };
+  }
+
+  // Regression for HOOKS-2: `lien annotate` used to feed `dependents.length`
+  // (production + test) into `computeBlastRadiusRisk` instead of
+  // `productionDependentCount` (what `get_dependents`/`lien api-delta` feed).
+  // 2 production dependents (both individually test-covered, so
+  // uncoveredProductionDependents is 0) + 6 dependents that are themselves
+  // test files gives `dependents.length === 8` but `productionDependentCount
+  // === 2` -- the pre-fix bug fed 8 into `classifyLevel` (>5 -> "medium");
+  // the fix feeds 2 (<=5, 0 uncovered -> "low"). A file with many test-only
+  // importers and few production ones must not read riskier than it is.
+  it('computes risk from productionDependentCount, not the wider dependents.length', async () => {
+    // `findDependents` only searches for importers once the target itself
+    // resolves to a real chunk in the scanned universe (`targetIndexed`) --
+    // without this, it fails closed to zero dependents regardless of any
+    // import edges pointing at it.
+    const targetChunk = importerChunk(target, []);
+    const prod1 = importerChunk('src/prodCaller1.ts', [target]);
+    const prod1Test = importerChunk('src/prodCaller1.test.ts', ['src/prodCaller1.ts']);
+    const prod2 = importerChunk('src/prodCaller2.ts', [target]);
+    const prod2Test = importerChunk('src/prodCaller2.test.ts', ['src/prodCaller2.ts']);
+    const testOnlyCallers = Array.from({ length: 6 }, (_, i) =>
+      importerChunk(`src/testCaller${i}.test.ts`, [target]),
+    );
+    const allChunks = [targetChunk, prod1, prod1Test, prod2, prod2Test, ...testOnlyCallers];
+
+    vi.mocked(coreModule.createVectorDB).mockResolvedValueOnce({
+      initialize: vi.fn().mockResolvedValue(undefined),
+      hasData: vi.fn().mockResolvedValue(true),
+      scanAll: vi.fn().mockResolvedValue(allChunks),
+    } as unknown as Awaited<ReturnType<typeof coreModule.createVectorDB>>);
+
+    await annotateCommand(target);
+
+    expect(errSpy).not.toHaveBeenCalled();
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    const printed = logSpy.mock.calls[0][0] as string;
+
+    // The displayed dependents count stays the WIDER total (production +
+    // test) -- that part is unchanged and correct.
+    expect(printed).toContain('8 files import this');
+    // But the risk verdict and its reasoning are scoped to PRODUCTION
+    // dependents only, matching get_dependents/lien api-delta.
+    expect(printed).toContain('risk: low');
+    expect(printed).toContain('2 production callers');
+    expect(printed).not.toContain('risk: medium');
+    expect(printed).not.toContain('8 callers');
+  });
+});
+
 describe('annotateCli (CLI exit-code contract, #978)', () => {
   let logSpy: ReturnType<typeof vi.spyOn>;
   let errSpy: ReturnType<typeof vi.spyOn>;
