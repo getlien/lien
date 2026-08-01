@@ -7,7 +7,7 @@ import crypto from 'crypto';
 import { execSync } from 'child_process';
 import { createVectorDB, getLienHome } from '@liendev/core';
 import type { VectorDBInterface, SearchResult } from '@liendev/core';
-import { findDependents } from '@liendev/parser';
+import { findDependents, findTestAssociationsFromChunks } from '@liendev/parser';
 
 /**
  * E2E Tests with Real Open Source Projects
@@ -36,6 +36,13 @@ import { findDependents } from '@liendev/parser';
  *    - No indexing errors
  *    - AST metadata present
  *    - Search works
+ *    - #1004/#1023: dependency edges actually resolve (not just "shape")
+ *    - #1029 (W3): complexity violations, test associations, exports, and a
+ *      known symbol via search all actually resolve too, each as a
+ *      collapse-to-zero detector (floor far below measured) or an explicit
+ *      `toBe(0)` tripwire for a documented, currently-real gap -- see
+ *      `KNOWN_ZERO_EDGE_LANGUAGES`/`KNOWN_ZERO_TESTASSOC_LANGUAGES`'s doc
+ *      comments below for which languages are which and why.
  * 5. Cleanup temp directory (always, even on failure/interrupt)
  *
  * **Cleanup guarantees:**
@@ -71,6 +78,50 @@ interface ProjectConfig {
    * of a `>=` floor.
    */
   expectedMinDependencyEdges: number;
+  /**
+   * #1029 (W3): floor on `report.summary.totalViolations` from
+   * `lien complexity --format json` -- a COLLAPSE DETECTOR for the same
+   * reason `expectedMinDependencyEdges` is: before this, the complexity test
+   * only asserted `filesAnalyzed > 0`, so a report that silently found zero
+   * violations on a corpus known to have plenty (every project here does;
+   * see the measured counts in each project's comment) was indistinguishable
+   * from a healthy "this code is just clean" result. Deliberately far below
+   * the measured count -- do not tighten to match a snapshot.
+   */
+  expectedMinComplexityViolations: number;
+  /**
+   * #1029 (W3): floor on the TOTAL test-association count across a sampled
+   * sweep of this project's files (same `sampleFilesForSweep` cap as
+   * dependency edges, reusing the same chunks -- see `computeDependencyStats`
+   * and the test-association test below that mirrors its sampling).
+   * This is #979's blind spot at the E2E layer: `get_complexity` reported
+   * `testAssociations: []` for every hotspot while `lien annotate` was
+   * correct for the same file, and nothing here would have caught it. Like
+   * `expectedMinDependencyEdges`, a collapse detector, not a precision
+   * target. Languages with a genuine, currently-real zero go through
+   * `KNOWN_ZERO_TESTASSOC_LANGUAGES` as a tripwire instead.
+   */
+  expectedMinTestAssociations: number;
+  /**
+   * #1029 (W3): floor on the count of indexed chunks with a non-empty
+   * `exports` array -- replaces the old blanket "at least SOME chunk in the
+   * whole suite has exports" check (which stayed green even if any single
+   * project's export extraction collapsed to zero, since it summed across
+   * chunks from one arbitrarily-sized project at a time anyway) with a
+   * per-project floor.
+   */
+  expectedMinChunksWithExports: number;
+  /**
+   * #1029 (W3): a search query for a real, verified-present identifier in
+   * this corpus (not the vague natural-language `sampleSearchQuery` above,
+   * which only asserts a generic relevance bucket) -- paired with
+   * `knownSymbolFile`, the file that query must surface, so this test can
+   * catch "search returns SOMETHING plausible" collapsing into "search
+   * returns nothing real" without becoming a brittle exact-rank assertion.
+   */
+  knownSymbolQuery: string;
+  /** File expected among the top results for `knownSymbolQuery` (see its own doc comment). */
+  knownSymbolFile: string;
 }
 
 /**
@@ -87,6 +138,38 @@ interface ProjectConfig {
 const KNOWN_ZERO_EDGE_LANGUAGES = new Set(['java', 'kotlin', 'swift']);
 
 /**
+ * Languages where `findTestAssociationsFromChunks` resolves ZERO test
+ * associations today across a real corpus with a real test suite -- same
+ * TRIPWIRE contract as `KNOWN_ZERO_EDGE_LANGUAGES` above (`toBe(0)`, not a
+ * skip, so a real fix makes this fail loudly instead of staying silently
+ * green).
+ *
+ * - **kotlin**: documented and accepted -- see `sameUnitAccessWithoutImport`
+ *   in `ast/languages/kotlin.ts`: "no verified Kotlin Gradle test-source
+ *   recovery exists" (#1005). Measured: Klaxon, 0/100 sampled files.
+ * - **swift**: documented and accepted, #869 ("whole-module-import
+ *   languages have no per-file test-association signal -- structural gap,
+ *   not a matching bug"). Measured: SwiftyJSON, 0/27 files.
+ * - **csharp**: a NEW gap found while building this test, filed as #1040.
+ *   `test-associations.ts` wires in a same-convention fallback for Go
+ *   (`hasSameDirectoryTestConvention`) and Java (`hasSamePackageTestConvention`)
+ *   but has no C# case, even though C# is the one language with
+ *   `enclosingNamespaceAccess` for general dependents (#930) -- a C# test
+ *   file in a nested namespace (e.g. `MediatR.Tests`) sees its parent
+ *   namespace's (`MediatR`) types with no `using` statement at all, the
+ *   same shape as Go/Java's no-import test conventions, but nothing gives
+ *   that convention credit for test-association purposes. Measured: MediatR,
+ *   0/160 files, confirmed not a sampling artifact (checked all 160, not
+ *   just the 100-file sample).
+ *
+ * Note this is a DIFFERENT set from `KNOWN_ZERO_EDGE_LANGUAGES`: Java is
+ * zero-edge (#1005) but NOT zero-test-association -- `samePackageTestConvention`
+ * covers test association only, not dependents, exactly as #1005 documents.
+ * Measured: JavaPoet, 13/43 files, real non-zero test associations.
+ */
+const KNOWN_ZERO_TESTASSOC_LANGUAGES = new Set(['csharp', 'kotlin', 'swift']);
+
+/**
  * Test projects for each supported language
  */
 const TEST_PROJECTS: ProjectConfig[] = [
@@ -99,6 +182,11 @@ const TEST_PROJECTS: ProjectConfig[] = [
     expectedMinChunks: 50, // Conservative estimate
     sampleSearchQuery: 'make http request',
     expectedMinDependencyEdges: 20, // measured ~353 (2026-07); floor is a collapse detector, not a target
+    expectedMinComplexityViolations: 10, // measured ~34 (2026-08)
+    expectedMinTestAssociations: 20, // measured ~139 across 51 files (2026-08)
+    expectedMinChunksWithExports: 100, // measured ~759/841 chunks (2026-08)
+    knownSymbolQuery: 'get_encoding_from_headers',
+    knownSymbolFile: 'src/requests/utils.py',
   },
   {
     name: 'Zod',
@@ -109,6 +197,11 @@ const TEST_PROJECTS: ProjectConfig[] = [
     expectedMinChunks: 100,
     sampleSearchQuery: 'validate schema',
     expectedMinDependencyEdges: 50, // measured ~1265 (2026-07); floor is a collapse detector, not a target
+    expectedMinComplexityViolations: 50, // measured ~255 (2026-08)
+    expectedMinTestAssociations: 1, // measured ~3 across a 100-file sample of 454 (2026-08); zod's test files import a lot via barrel re-exports rather than direct file imports, so the ratio is genuinely low but non-zero
+    expectedMinChunksWithExports: 500, // measured ~3139/5078 chunks (2026-08)
+    knownSymbolQuery: 'ZodString',
+    knownSymbolFile: 'packages/zod/src/v4/core/schemas.ts',
   },
   {
     name: 'Express',
@@ -119,6 +212,11 @@ const TEST_PROJECTS: ProjectConfig[] = [
     expectedMinChunks: 80,
     sampleSearchQuery: 'handle http request',
     expectedMinDependencyEdges: 50, // measured ~2924 (2026-07); floor is a collapse detector, not a target
+    expectedMinComplexityViolations: 1, // measured ~3 (2026-08) -- express is a thin, low-complexity router shim
+    expectedMinTestAssociations: 100, // measured ~1254 across a 100-file sample of 150 (2026-08)
+    expectedMinChunksWithExports: 30, // measured ~159/771 chunks (2026-08)
+    knownSymbolQuery: 'Router prototype',
+    knownSymbolFile: 'lib/express.js',
   },
   {
     name: 'Monolog',
@@ -132,6 +230,11 @@ const TEST_PROJECTS: ProjectConfig[] = [
     // this was 0 across all 232 files and the suite was still green -- this
     // floor is exactly the regression detector #1004 asks for.
     expectedMinDependencyEdges: 20,
+    expectedMinComplexityViolations: 10, // measured ~39 (2026-08)
+    expectedMinTestAssociations: 3, // measured ~15 across a 100-file sample of 232 (2026-08)
+    expectedMinChunksWithExports: 300, // measured ~2672/2857 chunks (2026-08)
+    knownSymbolQuery: 'pushHandler',
+    knownSymbolFile: 'src/Monolog/Logger.php',
   },
   {
     name: 'Anyhow',
@@ -149,6 +252,11 @@ const TEST_PROJECTS: ProjectConfig[] = [
     // 1 just proves resolution hasn't collapsed to zero; it is intentionally
     // not a precision target.
     expectedMinDependencyEdges: 1,
+    expectedMinComplexityViolations: 2, // measured ~10 (2026-08)
+    expectedMinTestAssociations: 1, // measured ~6 across 40 files (2026-08)
+    expectedMinChunksWithExports: 50, // measured ~363/508 chunks (2026-08)
+    knownSymbolQuery: 'struct Chain',
+    knownSymbolFile: 'src/chain.rs',
   },
   {
     name: 'Chi',
@@ -158,11 +266,19 @@ const TEST_PROJECTS: ProjectConfig[] = [
     expectedMinFiles: 5,
     expectedMinChunks: 20,
     sampleSearchQuery: 'http router middleware',
-    // measured ~20 edges / 93% orphan rate (2026-07) -- see the Go sanity
-    // check in #1004's investigation notes on whether that orphan rate
-    // itself hides a resolution gap. Floor stays a collapse detector either
-    // way: not raised pending that follow-up.
+    // measured ~11 edges / 94% orphan rate (2026-08) -- #1029/W3 chased this:
+    // it is a REAL GAP, not (only) leaf-heaviness. Filed as #1039:
+    // `resolveGoModuleImport` never resolves a bare root-module self-import
+    // (e.g. `import "github.com/go-chi/chi/v5"` from middleware/*.go,
+    // referencing the repo-root package with no trailing path segment) --
+    // 35 such imports exist in this corpus alone and none of them resolve.
+    // Floor stays a collapse detector either way: not raised pending that fix.
     expectedMinDependencyEdges: 5,
+    expectedMinComplexityViolations: 15, // measured ~72 (2026-08)
+    expectedMinTestAssociations: 3, // measured ~20 across 86 files (2026-08)
+    expectedMinChunksWithExports: 100, // measured ~662/765 chunks (2026-08)
+    knownSymbolQuery: 'RouteContext',
+    knownSymbolFile: 'context.go',
   },
   {
     name: 'JavaPoet',
@@ -176,6 +292,15 @@ const TEST_PROJECTS: ProjectConfig[] = [
     // KNOWN_ZERO_EDGE_LANGUAGES: this is asserted as an exact-zero tripwire,
     // not a floor, elsewhere in this file.
     expectedMinDependencyEdges: 0,
+    expectedMinComplexityViolations: 5, // measured ~19 (2026-08)
+    // NOT a KNOWN_ZERO_TESTASSOC_LANGUAGES tripwire, despite Java being
+    // zero-edge above: `samePackageTestConvention` (#925) covers test
+    // association only, not dependents -- measured ~13 across 43 files
+    // (2026-08), a real non-zero floor.
+    expectedMinTestAssociations: 2,
+    expectedMinChunksWithExports: 100, // measured ~892/951 chunks (2026-08)
+    knownSymbolQuery: 'TypeSpec',
+    knownSymbolFile: 'src/main/java/com/squareup/javapoet/TypeSpec.java',
   },
   {
     name: 'MediatR',
@@ -186,6 +311,16 @@ const TEST_PROJECTS: ProjectConfig[] = [
     expectedMinChunks: 30,
     sampleSearchQuery: 'mediator request handler',
     expectedMinDependencyEdges: 20, // measured ~578 (2026-07); floor is a collapse detector, not a target
+    expectedMinComplexityViolations: 5, // measured ~20 (2026-08)
+    // KNOWN GAP: #1040 (filed by #1029/W3) -- C# resolves 0 test
+    // associations today despite MediatR shipping a real test project. See
+    // KNOWN_ZERO_TESTASSOC_LANGUAGES: asserted as an exact-zero tripwire,
+    // not a floor, elsewhere in this file. This value is unused while csharp
+    // is in that set, but keeps the field non-optional for every project.
+    expectedMinTestAssociations: 0,
+    expectedMinChunksWithExports: 200, // measured ~1376/1449 chunks (2026-08)
+    knownSymbolQuery: 'IRequestHandler',
+    knownSymbolFile: 'src/MediatR/IRequestHandler.cs',
   },
   {
     name: 'Sinatra',
@@ -195,11 +330,28 @@ const TEST_PROJECTS: ProjectConfig[] = [
     expectedMinFiles: 50, // sinatra + rack-protection + sinatra-contrib lib/ (~155 indexed)
     expectedMinChunks: 300, // AST chunking yields ~1300 (def/class/module per chunk)
     sampleSearchQuery: 'route handler matching http request',
-    // measured ~109 edges / 87% orphan rate (2026-07) -- see the Ruby sanity
-    // check in #1004's investigation notes on whether that orphan rate
-    // itself hides a resolution gap. Floor stays a collapse detector either
-    // way: not raised pending that follow-up.
+    // measured ~109 edges / 87% orphan rate (2026-07/08) -- #1029/W3 chased
+    // this: it is GENUINE leaf-heaviness, not a hidden resolution gap.
+    // Verified by source inspection: core `lib/sinatra/*.rb` (7 files)
+    // resolves with ZERO orphans (every file is required somewhere, directly
+    // or via `require 'sinatra/x'` load-path resolution). The orphans are
+    // concentrated in (a) the ~50 test files, which are expected in-degree-0
+    // targets in every language (nothing requires a test file), (b)
+    // rack-protection's ~19 `protection/*.rb` submodules, which are meant to
+    // be required directly by CONSUMING apps outside this corpus (only
+    // `rack/protection.rb` itself is required internally, by each
+    // submodule, not the reverse), and (c) sinatra-contrib's extensions,
+    // which are wired up via Ruby's dynamic `autoload` (a runtime
+    // name->path table, not a static `require`) and are therefore
+    // structurally invisible to any static import analysis -- not a Lien
+    // bug. Floor stays a collapse detector either way: not raised pending
+    // that write-up (see PR description for the full trace).
     expectedMinDependencyEdges: 10,
+    expectedMinComplexityViolations: 2, // measured ~11 (2026-08)
+    expectedMinTestAssociations: 1, // measured ~3 across a 100-file sample of 170 (2026-08)
+    expectedMinChunksWithExports: 150, // measured ~1286/1605 chunks (2026-08)
+    knownSymbolQuery: 'dispatch! route request',
+    knownSymbolFile: 'lib/sinatra/base.rb',
   },
   {
     name: 'Klaxon',
@@ -213,6 +365,15 @@ const TEST_PROJECTS: ProjectConfig[] = [
     // KNOWN_ZERO_EDGE_LANGUAGES: this is asserted as an exact-zero tripwire,
     // not a floor, elsewhere in this file.
     expectedMinDependencyEdges: 0,
+    expectedMinComplexityViolations: 3, // measured ~16 (2026-08)
+    // KNOWN GAP: #1005's `sameUnitAccessWithoutImport` -- "no verified
+    // Kotlin Gradle test-source recovery exists". See
+    // KNOWN_ZERO_TESTASSOC_LANGUAGES: exact-zero tripwire, not a floor, used
+    // instead of this value.
+    expectedMinTestAssociations: 0,
+    expectedMinChunksWithExports: 100, // measured ~938/987 chunks (2026-08)
+    knownSymbolQuery: 'JsonObject',
+    knownSymbolFile: 'klaxon/src/main/kotlin/com/beust/klaxon/JsonObject.kt',
   },
   {
     name: 'SwiftyJSON',
@@ -226,6 +387,15 @@ const TEST_PROJECTS: ProjectConfig[] = [
     // KNOWN_ZERO_EDGE_LANGUAGES: this is asserted as an exact-zero tripwire,
     // not a floor, elsewhere in this file.
     expectedMinDependencyEdges: 0,
+    expectedMinComplexityViolations: 1, // measured ~6 (2026-08)
+    // KNOWN GAP: #869 -- whole-module-import languages have no per-file
+    // test-association signal (structural, not a matching bug). See
+    // KNOWN_ZERO_TESTASSOC_LANGUAGES: exact-zero tripwire, not a floor, used
+    // instead of this value.
+    expectedMinTestAssociations: 0,
+    expectedMinChunksWithExports: 50, // measured ~338/381 chunks (2026-08)
+    knownSymbolQuery: 'rawString',
+    knownSymbolFile: 'Source/SwiftyJSON/SwiftyJSON.swift',
   },
 ];
 
@@ -641,6 +811,17 @@ describe('E2E: Real Open Source Projects', () => {
               `avg ${report.summary.avgComplexity.toFixed(1)}, ` +
               `${report.summary.totalViolations} violations`,
           );
+
+          // #1029 (W3): until now this test only ever asserted "a report
+          // exists with filesAnalyzed > 0" -- a report that found ZERO
+          // violations on a real, non-trivial corpus (every project here has
+          // some, per `expectedMinComplexityViolations`'s measured comment)
+          // was indistinguishable from a healthy "this code is clean"
+          // result. Collapse detector, not a precision target -- see that
+          // field's doc comment.
+          expect(report.summary.totalViolations).toBeGreaterThanOrEqual(
+            project.expectedMinComplexityViolations,
+          );
         },
         E2E_TIMEOUT,
       );
@@ -723,7 +904,35 @@ describe('E2E: Real Open Source Projects', () => {
 
           // Every real-world project has imports
           expect(chunksWithImports.length).toBeGreaterThan(0);
-          expect(chunksWithExports.length).toBeGreaterThan(0);
+          // #1029 (W3): upgraded from a blanket `toBeGreaterThan(0)` to a
+          // per-project floor -- see `expectedMinChunksWithExports`'s doc
+          // comment for why "at least SOME chunk has exports" is too weak a
+          // collapse detector.
+          expect(chunksWithExports.length).toBeGreaterThanOrEqual(
+            project.expectedMinChunksWithExports,
+          );
+
+          // #999 (referenced by #1029/W3): Rust has no symbol extractor for
+          // `struct_item`/`enum_item` at all, so a Rust struct/enum
+          // declaration never produces its own chunk with a `struct `/`enum
+          // `-prefixed signature -- unlike every other supported language.
+          // Export extraction is UNAFFECTED (`RustExportExtractor.exportableTypes`
+          // already lists both node kinds, which is why the floor above
+          // passes for Rust too), so this gap is invisible to the exports
+          // check; it only shows up when asking specifically for
+          // declaration-level signature metadata. TRIPWIRE, not a skip: the
+          // moment Rust gets a real struct/enum extractor this starts
+          // finding matches and needs to flip to a `>= 1` floor.
+          if (project.language === 'rust') {
+            const structOrEnumSignatures = results.filter(r => {
+              const signature = (r.metadata.signature ?? '').trim();
+              return /^(pub(\([^)]*\))?\s+)?(struct|enum)\s/.test(signature);
+            });
+            console.log(
+              `🦀 ${project.name} #999 tripwire: ${structOrEnumSignatures.length} chunks with a struct/enum signature`,
+            );
+            expect(structOrEnumSignatures.length).toBe(0);
+          }
         },
         E2E_TIMEOUT,
       );
@@ -759,6 +968,57 @@ describe('E2E: Real Open Source Projects', () => {
             // Floor only -- see `expectedMinDependencyEdges`'s doc comment.
             // This must NOT be tightened to match `stats.totalEdges` above.
             expect(stats.totalEdges).toBeGreaterThanOrEqual(project.expectedMinDependencyEdges);
+          }
+        },
+        E2E_TIMEOUT,
+      );
+
+      // #1029 (W3): extends #1004's pattern past dependency edges. #979 was
+      // exactly this gap at the MCP layer -- `get_complexity` reported
+      // `testAssociations: []` for every hotspot while `lien annotate` (a
+      // different code path calling the same underlying resolver) was
+      // correct for the same file -- and nothing in the E2E suite would
+      // have caught it, since no test here ever called
+      // `findTestAssociationsFromChunks` at all.
+      it(
+        'should resolve real test associations for source files with real test suites (#1029 collapse-to-zero detector)',
+        async () => {
+          const workspaceRoot = fsSync.realpathSync(projectDir);
+          const db = await loadDb(workspaceRoot);
+          // Reuse the already-built index's chunks (no re-indexing) and the
+          // same evenly-spaced sample cap `computeDependencyStats` uses --
+          // see `sampleFilesForSweep`'s doc comment for why sampling here is
+          // just as valid a collapse detector as sweeping every file.
+          const chunks = await db.scanAll();
+          const files = Array.from(new Set(chunks.map(c => c.metadata.file)));
+          const sweptFiles = sampleFilesForSweep(files, MAX_DEPENDENCY_SWEEP_FILES);
+
+          const associations = findTestAssociationsFromChunks(sweptFiles, chunks, workspaceRoot);
+          let filesWithTests = 0;
+          let totalAssociations = 0;
+          for (const file of sweptFiles) {
+            const tests = associations.get(file) ?? [];
+            if (tests.length > 0) filesWithTests++;
+            totalAssociations += tests.length;
+          }
+
+          console.log(
+            `🧪 ${project.name} test-association stats: ${totalAssociations} associations, ` +
+              `${filesWithTests}/${sweptFiles.length} files with at least one`,
+          );
+
+          if (KNOWN_ZERO_TESTASSOC_LANGUAGES.has(project.language)) {
+            // KNOWN GAP -- see KNOWN_ZERO_TESTASSOC_LANGUAGES's doc comment
+            // for which issue and why. Deliberate tripwire, not an
+            // oversight: if this fails, the gap likely just closed --
+            // update this project's config to a real
+            // `expectedMinTestAssociations` floor instead of re-asserting
+            // zero.
+            expect(totalAssociations).toBe(0);
+          } else {
+            // Floor only -- see `expectedMinTestAssociations`'s doc comment.
+            // This must NOT be tightened to match the measured count above.
+            expect(totalAssociations).toBeGreaterThanOrEqual(project.expectedMinTestAssociations);
           }
         },
         E2E_TIMEOUT,
@@ -847,6 +1107,31 @@ describe('E2E: Real Open Source Projects', () => {
             expect(result.metadata.file).toBeTruthy();
             expect(result.content).toBeTruthy();
           }
+        },
+        E2E_TIMEOUT,
+      );
+
+      // #1029 (W3): the test above only ever asserts a generic relevance
+      // bucket for a vague natural-language query -- it would pass even if
+      // search surfaced an unrelated-but-plausible-looking file. This test
+      // asks for a specific, verified-present identifier (`knownSymbolQuery`)
+      // and checks that a specific, verified-present file (`knownSymbolFile`)
+      // comes back, so a collapse of the FTS5/BM25 index (empty results, or
+      // results from the wrong corpus entirely) fails loudly instead of
+      // reading as "search returned something, ship it".
+      it(
+        'should find a known, verified-present symbol via search (#1029 collapse-to-zero detector)',
+        async () => {
+          const db = await loadDb(fsSync.realpathSync(projectDir));
+          const results = await db.search(project.knownSymbolQuery, 5);
+
+          console.log(
+            `🔎 Known-symbol search "${project.knownSymbolQuery}" returned ${results.length} results: ` +
+              results.map(r => r.metadata.file).join(', '),
+          );
+
+          expect(results.length).toBeGreaterThan(0);
+          expect(results.some(r => r.metadata.file === project.knownSymbolFile)).toBe(true);
         },
         E2E_TIMEOUT,
       );
