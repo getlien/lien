@@ -607,6 +607,7 @@ describe('annotateCommand (integration)', () => {
   let errSpy: ReturnType<typeof vi.spyOn>;
   let tmpHome: string;
   let homeSpy: ReturnType<typeof vi.spyOn>;
+  let originalLienHome: string | undefined;
 
   beforeEach(async () => {
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
@@ -615,6 +616,21 @@ describe('annotateCommand (integration)', () => {
     const fs = await import('fs/promises');
     tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-annotate-test-'));
     homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(tmpHome);
+    // Pre-existing test-isolation bug (found while rebasing this PR, unrelated
+    // to it — reproduces identically on main with zero code changes, and in
+    // real CI: getLienHome() is `process.env.LIEN_HOME || os.homedir()`, and
+    // vitest's own `global-setup.ts` already sets `LIEN_HOME` to ONE shared
+    // temp dir for the ENTIRE test run. That env var wins over the
+    // `os.homedir()` mock above, so every check that resolves the index dir
+    // via `getLienHome()` (this block's own `hasStructuralIndex` restoration
+    // below, and `resolveProjectRoot`'s `hasCompletedIndex`) was silently
+    // reading the SHARED run-wide home instead of this test's own pristine
+    // one -- polluted by any other test in the same run that legitimately
+    // indexes this repo's real root under that shared home. Redirecting
+    // `LIEN_HOME` itself (not just `os.homedir()`) gives this block the
+    // per-test isolation its own comment already claimed to provide.
+    originalLienHome = process.env.LIEN_HOME;
+    process.env.LIEN_HOME = tmpHome;
     // This block specifically exercises the real "never indexed" path (an
     // empty tmp home has no structural.db) — restore the real
     // `hasStructuralIndex` here instead of the file-wide `true` default.
@@ -631,6 +647,8 @@ describe('annotateCommand (integration)', () => {
     logSpy.mockRestore();
     errSpy.mockRestore();
     homeSpy.mockRestore();
+    if (originalLienHome === undefined) delete process.env.LIEN_HOME;
+    else process.env.LIEN_HOME = originalLienHome;
     vi.mocked(indexFreshnessModule.hasStructuralIndex).mockResolvedValue(true);
     await fs.rm(tmpHome, { recursive: true, force: true });
   });
