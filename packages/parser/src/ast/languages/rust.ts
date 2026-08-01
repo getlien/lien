@@ -1143,12 +1143,22 @@ export const rustDefinition: LanguageDefinition = {
   // permissive, Go-style package-directory leniency to resolve at all, since
   // a `crate::`-relative path is missing its real `src/`-style directory
   // prefix -- setting this to `true` would apply Ruby's exact-tail semantics
-  // to those specifiers too and regress #1024's own fix. This corpus's own
-  // `use` statements are all single-segment after `crate::`-stripping (no
-  // nested `a::b::c` module path exists in anyhow's flat module layout), so
-  // this flag's multi-segment branch isn't independently exercised here --
-  // the reasoning above is #1021/#1024's own, not re-derived from this
-  // corpus, per the ADR's explicit instruction not to re-litigate it.
+  // to those specifiers too and regress #1024's own fix.
+  //
+  // Correction from an earlier draft of this comment: it claimed this
+  // corpus's `use` statements are all single-segment after `crate::`-
+  // stripping, with no multi-segment case independently exercised here.
+  // That's wrong -- `tests/test_downcast.rs:6-7` has `use self::common::*;`
+  // and `use self::drop::{DetectDrop, Flag};`; `self::` resolves against the
+  // importer's OWN directory (`resolveRustRelativeModulePath`), giving the
+  // genuine multi-segment bare specifiers `tests/common` and `tests/drop` --
+  // matching `tests/common/mod.rs`/`tests/drop/mod.rs` via exactly the same
+  // interior-hit leniency this flag governs. Confirmed by toggling the flag
+  // directly: permissive (today) matches; strict
+  // (`singleFileImports: true`) does not. So this flag IS independently
+  // load-bearing in this corpus too, via `self::`, not only via #1021/#1024's
+  // own `crate::` reasoning (which stands unchanged and is not re-derived
+  // here, per the ADR's explicit instruction).
   singleFileImports: false,
   // `namespaceStyleImports: false` -- MUST stay false, actively bug-preventing,
   // not just unconfirmed: `src/error.rs:8` has `use crate::{Error, StdError};`
