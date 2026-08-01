@@ -4,7 +4,8 @@ import path from 'path';
 import { createVectorDB } from '@liendev/core';
 import { ComplexityAnalyzer } from '@liendev/core';
 import { formatReport } from '@liendev/core';
-import type { OutputFormat, VectorDBInterface } from '@liendev/core';
+import type { OutputFormat } from '@liendev/core';
+import { hasStructuralIndex, getIndexStalenessWarning } from '../utils/index-freshness.js';
 
 interface ComplexityOptions {
   files?: string[];
@@ -51,19 +52,35 @@ function validateFilesExist(files: string[] | undefined, rootDir: string): void 
   }
 }
 
-/** Check if index exists */
-async function ensureIndexExists(vectorDB: VectorDBInterface): Promise<void> {
-  try {
-    await vectorDB.scanWithFilter({ limit: 1 });
-  } catch {
-    console.error(chalk.red('Error: Index not found'));
-    console.log(
-      chalk.yellow('\nRun'),
-      chalk.bold('lien index'),
-      chalk.yellow('to index your codebase first'),
-    );
-    process.exit(1);
-  }
+/**
+ * Check if the project has ever been indexed, and exit loudly if not.
+ *
+ * Deliberately a plain filesystem existence check (`hasStructuralIndex`)
+ * rather than opening the database and probing for rows: `createVectorDB(
+ * rootDir).initialize()` unconditionally creates the index directory and an
+ * empty-but-valid `structural.db` (see `schema.ts`'s `openDatabase`), so
+ * calling it first — then discovering there's no data — is too late to
+ * distinguish "never indexed" from "empty index," and leaves behind exactly
+ * the store this command has no business creating. `lien complexity` is a
+ * gate-shaped command (`--fail-on`), so a missing index is always a hard
+ * error here, independent of `--fail-on`.
+ *
+ * Returns whether the index exists. `process.exit(1)` terminates the process
+ * for real in production, but the boolean return (checked by the caller) is
+ * what actually stops this function's caller from proceeding to
+ * `createVectorDB` in a test environment where `process.exit` is mocked —
+ * belt-and-suspenders against ever opening the database on a missing index.
+ */
+async function ensureIndexExists(rootDir: string): Promise<boolean> {
+  if (await hasStructuralIndex(rootDir)) return true;
+  console.error(chalk.red('Error: Index not found'));
+  console.log(
+    chalk.yellow('\nRun'),
+    chalk.bold('lien index'),
+    chalk.yellow('to index your codebase first'),
+  );
+  process.exit(1);
+  return false;
 }
 
 /**
@@ -78,11 +95,22 @@ export async function complexityCommand(options: ComplexityOptions) {
     validateFormat(options.format);
     validateFilesExist(options.files, rootDir);
 
+    // Cheap existence check BEFORE ever opening the database — see
+    // `ensureIndexExists`'s doc comment for why this must come first.
+    if (!(await ensureIndexExists(rootDir))) return;
+
+    // `lien serve`'s auto-reindex machinery (git-detection.ts) doesn't run
+    // for this one-shot command, so a repo whose working tree has moved on
+    // since the last `lien index`/`lien serve` reindex would otherwise
+    // report a silent false clean. Warn, don't block or auto-reindex —
+    // reuses the same staleness check `lien status` already computes.
+    const stalenessWarning = await getIndexStalenessWarning(rootDir);
+    if (stalenessWarning) console.warn(chalk.yellow(stalenessWarning));
+
     // Initialize database via the factory so reads hit the same backend
     // `lien index` wrote
     const vectorDB = await createVectorDB(rootDir);
     await vectorDB.initialize();
-    await ensureIndexExists(vectorDB);
 
     // Run analysis and output (uses default thresholds)
     const analyzer = new ComplexityAnalyzer(vectorDB);
