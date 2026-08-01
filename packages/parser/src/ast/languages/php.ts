@@ -534,9 +534,16 @@ export const phpDefinition: LanguageDefinition = {
   // `"Monolog\\": "src/Monolog"` and `Logger.php:12` declares
   // `namespace Monolog;` -- this particular corpus's own case happens to
   // match exactly (unlike the canonical Laravel `App\` vs. `app/` example
-  // this flag's doc comment cites), but PSR-4 is case-insensitive BY SPEC
-  // regardless of whether any one corpus's names happen to collide, so this
-  // stays `true`.
+  // this flag's doc comment cites). Correction: PSR-4 the autoloading SPEC
+  // actually mandates exact-case file/directory matching -- it is PHP's own
+  // namespace name resolution that's case-insensitive at the language level
+  // (`\App` and `\app` are the same namespace to the parser), and real-world
+  // autoloading tolerates the mismatch anyway on case-insensitive
+  // filesystems (macOS/Windows) even though a strict PSR-4 implementation
+  // on Linux would not. `matchesPHPNamespace`'s case-insensitive leniency
+  // models that real-world tolerance, not a literal PSR-4 spec requirement --
+  // this stays `true` on that basis, independent of whether any one
+  // corpus's names happen to already match case.
   namespaceStyleImports: true,
   // ADR-015 (#1038): the other two matcher-path fields, declared for PHP for
   // the first time (previously silently unset, i.e. effectively false).

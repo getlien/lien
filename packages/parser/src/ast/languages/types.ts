@@ -108,7 +108,7 @@ export interface LanguageDefinition {
    * (`rack/protection.rb`, resolved via `$LOAD_PATH`) — a sibling file like
    * `rack/protection/base.rb` is a separate, unrelated module that merely
    * shares a directory, not an implicit member of the `rack/protection`
-   * specifier. Go is the opposite and deliberately leaves this unset:
+   * specifier. Go is the opposite and sets this to `false`:
    * `import "mymodule/internal/fs"` normalizes (after #877's module-prefix
    * stripping) to the bare `internal/fs`, which names a PACKAGE — every
    * `.go` file inside that directory is a member of the package, so
