@@ -153,7 +153,13 @@ const configCmd = program
 
 configCmd
   .command('set <key> <value>')
-  .description('Set a config value (global or project, depending on the key)')
+  // Every key in ALLOWED_KEYS (config.ts) is global-only today — the former
+  // project-scoped key (embeddings.enabled) was retired with embeddings, and
+  // this command has no other way to reach ./.lien.config.json (see the
+  // parent `config` command's description above). Don't reintroduce
+  // "project" language here without also adding a project-scoped key to
+  // ALLOWED_KEYS.
+  .description("Set a global config value (see 'lien config list' for valid keys)")
   .action(configSetCommand);
 
 configCmd.command('get <key>').description('Get a config value').action(configGetCommand);
