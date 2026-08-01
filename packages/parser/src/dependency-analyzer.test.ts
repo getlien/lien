@@ -5,6 +5,7 @@ import {
   chunkImportsFrom,
   COMPLEXITY_THRESHOLDS,
 } from './dependency-analyzer.js';
+import { chunkByAST } from './ast/chunker.js';
 import type { CodeChunk, ChunkMetadata } from './types.js';
 
 describe('analyzeDependencies', () => {
@@ -929,5 +930,61 @@ describe('chunkImportsFrom', () => {
       const chunk = makeChunk('Tests/SessionTests.swift', { imports: ['./Networking/Session'] });
       expect(chunkImportsFrom(chunk, 'Source/Networking/Session', identity)).toBe(true);
     });
+  });
+});
+
+describe('Rust mod-derived edges end-to-end (#1021 regression)', () => {
+  // Both fixtures below are issue #1021's own reproductions, parsed through
+  // the REAL Rust extractor (`chunkByAST`) and run through the same
+  // `analyzeDependencies`/`findDependentChunks` engine `get_dependents` uses
+  // -- not a hand-built `imports: [...]` array -- so this exercises the
+  // full extraction-to-matching pipeline, not just one layer of it. Neither
+  // shape (a `mod dir;` with several files, or a leaf file owning a
+  // subdirectory) previously existed as a regression fixture anywhere in the
+  // repo, which is why two rounds of real-world validation (#1000/#1008,
+  // #1016/#1020) missed both bugs.
+  const workspaceRoot = '/test/workspace';
+
+  it('fixture 1: `mod thing;` (src/main.rs) fabricates edges to every file under thing/, not just the real ones', () => {
+    const chunks = [
+      ...chunkByAST('src/main.rs', 'mod thing;\n\nfn main() {\n    thing::declared_fn();\n}\n'),
+      ...chunkByAST('src/thing/mod.rs', 'pub fn declared_fn() -> u32 { 1 }\npub mod sibling;\n'),
+      ...chunkByAST('src/thing/sibling.rs', 'pub fn sibling_fn() -> u32 { 2 }\n'),
+      ...chunkByAST('src/thing/undeclared.rs', 'pub fn nobody_declares_me() -> u32 { 3 }\n'),
+    ];
+
+    expect(
+      analyzeDependencies('src/thing/mod.rs', chunks, workspaceRoot).dependents.map(
+        d => d.filepath,
+      ),
+    ).toEqual(['src/main.rs']);
+
+    expect(
+      analyzeDependencies('src/thing/sibling.rs', chunks, workspaceRoot).dependents.map(
+        d => d.filepath,
+      ),
+    ).toEqual(['src/thing/mod.rs']);
+
+    expect(
+      analyzeDependencies('src/thing/undeclared.rs', chunks, workspaceRoot).dependents,
+    ).toEqual([]);
+  });
+
+  it('fixture 2: a leaf file owning a submodule subdirectory (src/engine.rs -> mod helpers;) fabricates a self-edge', () => {
+    const chunks = [
+      ...chunkByAST('src/lib.rs', 'pub mod engine;\n'),
+      ...chunkByAST('src/engine.rs', 'mod helpers;\n\npub fn run() -> u32 { helpers::help() }\n'),
+      ...chunkByAST('src/engine/helpers.rs', 'pub fn help() -> u32 { 7 }\n'),
+    ];
+
+    expect(
+      analyzeDependencies('src/engine.rs', chunks, workspaceRoot).dependents.map(d => d.filepath),
+    ).toEqual(['src/lib.rs']);
+
+    expect(
+      analyzeDependencies('src/engine/helpers.rs', chunks, workspaceRoot).dependents.map(
+        d => d.filepath,
+      ),
+    ).toEqual(['src/engine.rs']);
   });
 });

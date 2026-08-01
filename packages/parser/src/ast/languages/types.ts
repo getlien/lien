@@ -113,14 +113,27 @@ export interface LanguageDefinition {
    * language except Ruby) preserves that permissive package-directory
    * matching. Every other currently-supported language is unaffected either
    * way and leaves this unset too: TypeScript/JavaScript resolve specifiers
-   * to a concrete file before `matchesFile` ever runs, Python/PHP use their
-   * own dedicated matching strategies (`matchesPythonModule`/
-   * `matchesPHPNamespace`), and Rust's multi-segment module paths already
-   * name an exact file — see `matchesFile`'s
-   * `requireExactTailForMultiSegment` parameter for how this flag is
-   * consumed (only `importMatchesTarget` derives it from the importer's
-   * language; the two build-side sites and the two stay-raw `matchesFile`
-   * call sites don't have a specific target to disambiguate against).
+   * to a concrete file before `matchesFile` ever runs, and Python/PHP use
+   * their own dedicated matching strategies (`matchesPythonModule`/
+   * `matchesPHPNamespace`). See `matchesFile`'s `requireExactTailForMultiSegment`
+   * parameter for how this flag is consumed (only `importMatchesTarget`
+   * derives it from the importer's language; the two build-side sites and
+   * the two stay-raw `matchesFile` call sites don't have a specific target
+   * to disambiguate against).
+   *
+   * Rust is a DELIBERATE non-example, not an oversight: its `mod x;`
+   * declarations do name an exact file (never a package directory), but
+   * this per-LANGUAGE flag can't express that alone -- a single Rust file
+   * routinely has both a `mod x;` (single-file) and a `use crate::y;`
+   * (needs this same package-directory leniency, since `crate::`-relative
+   * paths are missing their real `src/`-style prefix) among its own
+   * imports, and this flag can't disambiguate between two entries in one
+   * file's import list the way it disambiguates between two LANGUAGES.
+   * `mod`-derived specifiers instead carry their own per-specifier marker
+   * (#1021) straight past this flag entirely -- see `rust-mod-marker.ts`
+   * and `matchesRustModSpecifier` in `../../utils/path-matching.ts`. Rust's
+   * `use`/`self::`/`super::` specifiers are unaffected by that marker and
+   * keep relying on this flag staying unset for Rust, exactly as before.
    */
   singleFileImports?: boolean;
 

@@ -13,6 +13,7 @@ import {
   hasWholeModuleImports,
   hasSingleFileImports,
 } from '../ast/languages/registry.js';
+import { hasRustModMarker, stripRustModMarker } from './rust-mod-marker.js';
 
 /**
  * Escape special regex characters in a string.
@@ -49,7 +50,18 @@ function getExtensionRegex(): RegExp {
  * @returns Normalized path
  */
 export function normalizePath(path: string, workspaceRoot: string): string {
-  let normalized = path.replace(/['"]/g, '').trim().replace(/\\/g, '/');
+  // Strip the #1021 Rust-mod marker (see `rust-mod-marker.ts`) first, before
+  // any other processing, so every caller that normalizes a raw specifier --
+  // including the two `isExactDirectImport` helpers (test-associations.ts,
+  // get_files_context's handler) that compare `normalize(imp) ===
+  // normalizedTarget` directly rather than routing through
+  // `importMatchesTarget` -- gets a clean, comparable value with no changes
+  // needed at those call sites. A no-op for every non-Rust-mod path (the
+  // marker is a Private-Use-Area code point no real specifier starts with).
+  let normalized = (hasRustModMarker(path) ? stripRustModMarker(path) : path)
+    .replace(/['"]/g, '')
+    .trim()
+    .replace(/\\/g, '/');
 
   // Normalize extensions: strip all AST-supported language extensions
   // This handles TypeScript's ESM requirement of .js imports for .ts files
@@ -354,10 +366,40 @@ export function matchesFile(
 }
 
 /**
+ * Rust `mod x;` resolution semantics (#1021): the specifier names EXACTLY
+ * one of two files -- `x.rs` (exact match) or `x/mod.rs` (the sole
+ * directory-module alternative Rust's file-to-module convention allows) --
+ * never a grandchild, an unrelated sibling, or the declaring file itself.
+ *
+ * Deliberately bypasses every `matchesFile` strategy: those exist to resolve
+ * AMBIGUOUS bare/relative specifiers, but a `mod`-derived specifier (see
+ * `rustModOwningDirectory` in `../ast/languages/rust.ts`) is already a fully
+ * resolved, directory-anchored path with no remaining ambiguity for a
+ * boundary-matching heuristic to add. That's exactly what let `matchesFile`
+ * fabricate edges to any file continuing past the specifier -- Go
+ * package-directory semantics wrongly applied to a Rust `mod`, in BOTH
+ * directions: Strategy 2's `requireExactTailForMultiSegment` leniency let
+ * `src/thing` (from `mod thing;`) match every file under `src/thing/`, not
+ * just `src/thing/mod.rs`; and Strategy 1 -- hardcoded to the same
+ * leniency regardless of caller/language, since its `pattern` position is
+ * normally a concrete target file, never a package name -- let a LEAF
+ * file's own `mod helpers;` specifier (`src/engine/helpers`, longer than
+ * the file's own path) match back against `src/engine` itself, fabricating
+ * a self-edge.
+ *
+ * Only called for specifiers carrying the #1021 marker (see
+ * `rust-mod-marker.ts`) -- i.e. never for `use crate::...`/`self::`/`super::`
+ * specifiers, which keep resolving through `matchesFile` exactly as before.
+ */
+function matchesRustModSpecifier(normalizedImport: string, normalizedTarget: string): boolean {
+  return normalizedImport === normalizedTarget || normalizedTarget === `${normalizedImport}/mod`;
+}
+
+/**
  * The single guarded import-matching decision: does `importSpecifier` (as
  * written in `importerFile`) resolve to `normalizedTarget`?
  *
- * Couples three guards to `matchesFile` so neither can drift apart from a
+ * Couples four guards to `matchesFile` so neither can drift apart from a
  * match-side call site again:
  * - The #884 whole-module guard (`isUnresolvableWholeModuleImport`) --
  *   `matchesFile` is language-agnostic and cannot know the importer's
@@ -376,6 +418,15 @@ export function matchesFile(
  *   a Python identifier shape (see `matchesFile`'s doc comment for the real
  *   hono/TypeScript repro). Derived from the importer's language the same
  *   way as the #887 guard, at this same call site.
+ * - The #1021 Rust-mod single-file guard (`hasRustModMarker`) -- unlike the
+ *   other three, this is derived from the SPECIFIER, not the importer's
+ *   language: a single Rust file can have both a `mod x;` (needs
+ *   `matchesRustModSpecifier`'s strict semantics) and a `use crate::y;`
+ *   (needs `matchesFile`'s existing leniency) among its own imports, so a
+ *   per-language flag can't disambiguate between two entries in the same
+ *   file's import list the way it can for #887/#929. When present, this
+ *   guard short-circuits entirely -- `matchesFile` never runs at all for a
+ *   marked specifier.
  *
  * Every match-side reverse-dependency call path that used to open-code
  * `!isUnresolvableWholeModuleImport(imp, f) && matchesFile(normalize(imp), t)`
@@ -424,6 +475,12 @@ export function importMatchesTarget(
   normalize: (p: string) => string,
 ): boolean {
   if (isUnresolvableWholeModuleImport(importSpecifier, importerFile)) return false;
+  if (hasRustModMarker(importSpecifier)) {
+    return matchesRustModSpecifier(
+      normalize(stripRustModMarker(importSpecifier)),
+      normalizedTarget,
+    );
+  }
   return matchesFile(
     normalize(importSpecifier),
     normalizedTarget,

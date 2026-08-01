@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { mustParse } from '../test/helpers/parse-fixture.js';
 import type { SyntaxNode } from '../types.js';
 import { chunkByAST } from '../chunker.js';
+import { markRustModSpecifier } from '../../utils/rust-mod-marker.js';
 import {
   RustTraverser,
   RustExportExtractor,
@@ -533,7 +534,7 @@ pub static COUNTER: i32 = 0;`;
         const root = mustParse(code, 'rust');
         const modNode = root.namedChild(0)!;
         expect(importExtractor.extractImportPath(modNode, undefined, 'src/main.rs')).toBe(
-          'src/reporter',
+          markRustModSpecifier('src/reporter'),
         );
       });
 
@@ -542,7 +543,7 @@ pub static COUNTER: i32 = 0;`;
         const root = mustParse(code, 'rust');
         const modNode = root.namedChild(0)!;
         expect(importExtractor.extractImportPath(modNode, undefined, 'src/main.rs')).toBe(
-          'src/reporter',
+          markRustModSpecifier('src/reporter'),
         );
       });
 
@@ -551,7 +552,7 @@ pub static COUNTER: i32 = 0;`;
         const root = mustParse(code, 'rust');
         const modNode = root.namedChild(0)!;
         expect(importExtractor.extractImportPath(modNode, undefined, 'src/foo.rs')).toBe(
-          'src/foo/bar',
+          markRustModSpecifier('src/foo/bar'),
         );
       });
 
@@ -562,7 +563,7 @@ pub static COUNTER: i32 = 0;`;
         const innerNode = outerNode.childForFieldName('body')!.namedChild(0)!;
         expect(innerNode.type).toBe('mod_item');
         expect(importExtractor.extractImportPath(innerNode, undefined, 'src/main.rs')).toBe(
-          'src/outer/inner',
+          markRustModSpecifier('src/outer/inner'),
         );
       });
 
@@ -585,7 +586,7 @@ pub static COUNTER: i32 = 0;`;
         const root = mustParse(code, 'rust');
         const modNode = root.namedChildren.find(n => n.type === 'mod_item')!;
         expect(importExtractor.extractImportPath(modNode, undefined, 'src/main.rs')).toBe(
-          'src/custom_path',
+          markRustModSpecifier('src/custom_path'),
         );
       });
 
@@ -593,24 +594,30 @@ pub static COUNTER: i32 = 0;`;
         const adjacent = mustParse('#[cfg(test)]\n#[path = "other.rs"]\nmod combo;', 'rust');
         const adjacentMod = adjacent.namedChildren.find(n => n.type === 'mod_item')!;
         expect(importExtractor.extractImportPath(adjacentMod, undefined, 'src/main.rs')).toBe(
-          'src/other',
+          markRustModSpecifier('src/other'),
         );
 
         const reversed = mustParse('#[path = "other.rs"]\n#[cfg(test)]\nmod combo;', 'rust');
         const reversedMod = reversed.namedChildren.find(n => n.type === 'mod_item')!;
         expect(importExtractor.extractImportPath(reversedMod, undefined, 'src/main.rs')).toBe(
-          'src/other',
+          markRustModSpecifier('src/other'),
         );
       });
 
-      it('processImportSymbols reports the whole-module wildcard, like a use_wildcard', () => {
+      it("processImportSymbols reports an empty symbols list -- NOT the use_wildcard `['*']` marker (#1021)", () => {
+        // A `mod x;` namespace declaration doesn't flatten its target's
+        // exports the way a genuine `use crate::x::*;` does -- reusing that
+        // wildcard marker here made `findReExportedSymbolsForFile` credit
+        // every one of the declaring file's OWN unrelated exports as
+        // "re-exported from" the named submodule. See the doc comment on
+        // this branch in rust.ts for the full incident.
         const code = 'mod reporter;';
         const root = mustParse(code, 'rust');
         const modNode = root.namedChild(0)!;
         const result = importExtractor.processImportSymbols(modNode, undefined, 'src/main.rs');
         expect(result).not.toBeNull();
-        expect(result!.importPath).toBe('src/reporter');
-        expect(result!.symbols).toEqual(['*']);
+        expect(result!.importPath).toBe(markRustModSpecifier('src/reporter'));
+        expect(result!.symbols).toEqual([]);
       });
 
       it('processImportSymbols returns null for an inline mod (no separate file to attribute symbols to)', () => {
@@ -625,7 +632,7 @@ pub static COUNTER: i32 = 0;`;
         const root = mustParse(code, 'rust');
         const modNode = root.namedChild(0)!;
         expect(importExtractor.extractImportPaths(modNode, undefined, 'src/main.rs')).toEqual([
-          'src/reporter',
+          markRustModSpecifier('src/reporter'),
         ]);
       });
     });
@@ -649,7 +656,7 @@ pub static COUNTER: i32 = 0;`;
         const root = mustParse(code, 'rust');
         const modNode = root.namedChild(0)!;
         expect(importExtractor.extractImportPath(modNode, undefined, 'tests/test_context.rs')).toBe(
-          'tests/drop',
+          markRustModSpecifier('tests/drop'),
         );
       });
 
@@ -664,6 +671,7 @@ pub static COUNTER: i32 = 0;`;
         );
         expect(resolved).not.toBeNull();
         expect(resolved).not.toBe('tests/test_context');
+        expect(resolved).not.toBe(markRustModSpecifier('tests/test_context'));
       });
 
       it('treats a file directly under benches/ as a crate root the same way', () => {
@@ -671,7 +679,7 @@ pub static COUNTER: i32 = 0;`;
         const root = mustParse(code, 'rust');
         const modNode = root.namedChild(0)!;
         expect(importExtractor.extractImportPath(modNode, undefined, 'benches/my_bench.rs')).toBe(
-          'benches/helper',
+          markRustModSpecifier('benches/helper'),
         );
       });
 
@@ -680,7 +688,7 @@ pub static COUNTER: i32 = 0;`;
         const root = mustParse(code, 'rust');
         const modNode = root.namedChild(0)!;
         expect(importExtractor.extractImportPath(modNode, undefined, 'examples/demo.rs')).toBe(
-          'examples/util',
+          markRustModSpecifier('examples/util'),
         );
       });
 
@@ -689,7 +697,7 @@ pub static COUNTER: i32 = 0;`;
         const root = mustParse(code, 'rust');
         const modNode = root.namedChild(0)!;
         expect(importExtractor.extractImportPath(modNode, undefined, 'src/bin/mytool.rs')).toBe(
-          'src/bin/helper',
+          markRustModSpecifier('src/bin/helper'),
         );
       });
 
@@ -701,7 +709,7 @@ pub static COUNTER: i32 = 0;`;
         // tests/foo.rs (or tests/foo/main.rs), not a fresh crate root
         // itself -- falls through to the ordinary LEAF rule.
         expect(importExtractor.extractImportPath(modNode, undefined, 'tests/foo/bar.rs')).toBe(
-          'tests/foo/bar/baz',
+          markRustModSpecifier('tests/foo/bar/baz'),
         );
       });
 
@@ -723,7 +731,7 @@ pub static COUNTER: i32 = 0;`;
         // wrongly reject this ubiquitous, correct convention. Exact-path
         // equality does not.
         expect(importExtractor.extractImportPath(modNode, undefined, 'src/foo.rs')).toBe(
-          'src/foo/bar',
+          markRustModSpecifier('src/foo/bar'),
         );
       });
     });
@@ -1044,7 +1052,7 @@ fn main() {
       const chunks = chunkByAST('src/main.rs', content);
       const funcChunk = chunks.find(c => c.metadata.symbolName === 'main');
       expect(funcChunk).toBeDefined();
-      expect(funcChunk?.metadata.imports).toContain('src/reporter');
+      expect(funcChunk?.metadata.imports).toContain(markRustModSpecifier('src/reporter'));
     });
 
     // An inline `mod tests { ... }` (e.g. `#[cfg(test)] mod tests`) has no
