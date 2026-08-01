@@ -280,7 +280,7 @@ signal-carrying file re-invokes `lien annotate` (and re-applies its own
 carve-outs) on every read for the rest of the session, while an ordinary
 file keeps the cheap existence-only dedup unchanged.
 
-**HOOKS-12 (found in a later duplication audit, #1028).** The content check
+**HOOKS-12 (PR #1036).** The content check
 above was originally wired into the guard-**ON** branch only; the guard-**OFF**
 branch kept the pre-#978 mtime-only check with no reference to content at
 all. Since `LIEN_ANNOTATE_GUARD=off` is documented (right above) to make

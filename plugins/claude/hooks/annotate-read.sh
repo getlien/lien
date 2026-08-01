@@ -47,6 +47,15 @@
 # cooldown), via the same additionalContext channel a real annotation uses.
 # No extra npx round-trip: this path never invokes LIEN_CMD.
 #
+# #1033: a genuinely trivial or below-risk-floor file (empty `lien annotate`
+# output) used to skip the touchfile write entirely (it lived after the
+# "stay silent" early-return), so it re-paid the full `lien annotate`
+# subprocess on every single read all session, with no amortization at
+# all — the dedup above never even got a marker to check. Fixed by writing
+# the touchfile ('0', same as an ordinary non-empty annotation — there's no
+# never-suppress signal possible when output is empty) before that
+# early-return, so a repeat read of a trivial file is now cheap too.
+#
 # Also records a nudge-shown event (for the `lien stats` funnels) whenever an
 # annotation is actually emitted. Skips files outside Lien's indexed extension
 # set. Best-effort throughout — never fails the Read pipeline.
@@ -86,7 +95,7 @@ if ! . "$(dirname "${BASH_SOURCE[0]}")/lien-resolve.sh"; then
     if [ ! -f "$notice_marker" ]; then
       mkdir -p "$notice_dir" 2>/dev/null
       if : > "$notice_marker" 2>/dev/null; then
-        text="⚠ Lien unavailable this session: the npx circuit breaker is open (a prior lien call was killed, or the npm registry is unreachable). Complexity/impact annotations are suppressed until it clears — do not read this silence as \"no issues.\""
+        text="⚠ Lien unavailable this session: the npx circuit breaker is open (a prior lien/npx call was interrupted — killed, timed out, the registry was unreachable, or the machine slept/quit mid-call). Complexity/impact annotations are suppressed until it clears — do not read this silence as \"no issues.\""
         printf '{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":%s}}\n' \
           "$(printf '%s' "$text" | jq -Rs .)"
       fi
@@ -185,15 +194,26 @@ fi
 # treated as an ordinary annotation, the fail-open default.
 annotate_exit=$?
 
-# Trivial/below-floor impact → `lien annotate` prints nothing → stay silent.
-[ -n "$annotation" ] || exit 0
-
-# Record the annotation so suppression kicks in next time — UNLESS
-# annotate_exit says this file must never be dedup-silenced (#978): the
-# touchfile's content ('1' vs anything else) is what the check above reads.
-# Truncating an existing touchfile doesn't update the parent dir's mtime on
-# most filesystems, so touch the dir explicitly to keep SessionStart cleanup
-# from GC'ing this session at the 24h threshold.
+# Record that this file was CHECKED this session — UNLESS annotate_exit says
+# it must never be dedup-silenced (#978): the touchfile's content ('1' vs
+# anything else) is what the check above reads. Written BEFORE the
+# trivial/below-floor early-return below (#1033 fix): a genuinely trivial or
+# below-risk-floor file (empty $annotation, which per annotate-cmd.ts's
+# `hasNeverSuppressSignal`/`isTrivial`/`belowRiskFloor` can only happen when
+# annotate_exit is 0, never 2 — a never-suppress signal always forces
+# non-empty output) used to skip this write entirely, so it re-paid the full
+# `lien annotate` subprocess on every single read for the rest of the
+# session with no amortization at all. There's no third touchfile state
+# needed: "checked, nothing to say" gets the same '0' an ordinary
+# NON-empty annotation already gets, and the read-side check already
+# treats any content other than '1' as "suppressible" — exactly the
+# fail-open treatment this hook's own contract already gives a crash that
+# happens to print partial output (see the comment above: "anything else
+# (0, or a crash) is treated as an ordinary annotation"), just applied
+# uniformly to the empty-output case too. Truncating an existing touchfile
+# doesn't update the parent dir's mtime on most filesystems, so touch the
+# dir explicitly to keep SessionStart cleanup from GC'ing this session at
+# the 24h threshold.
 mkdir -p "$session_dir" 2>/dev/null || exit 0
 if [ "$annotate_exit" = "2" ]; then
   printf '1' > "$touchfile"
@@ -201,6 +221,12 @@ else
   printf '0' > "$touchfile"
 fi
 touch "$session_dir" 2>/dev/null
+
+# Trivial/below-floor impact → `lien annotate` prints nothing → stay silent.
+# The touchfile write above already happened, so a repeat read of this same
+# file this session is now cheap (dedup-suppressed above) instead of
+# re-spawning `lien annotate` again for nothing.
+[ -n "$annotation" ] || exit 0
 
 # Record a nudge-shown event for the `lien stats` funnels (best-effort; its own
 # kill switch is LIEN_NUDGE_EVENTS=off). Only reached when we actually emit.

@@ -1,10 +1,11 @@
 /**
  * Unit tests for the PostToolUse read hook `plugins/claude/hooks/annotate-read.sh`.
  *
- * Two regressions, both defeating the #938/#978 never-suppress guarantee
- * (an annotation carrying a complexity/headroom/incomplete-dependent-
- * attribution signal — `hasNeverSuppressSignal` in `annotate-cmd.ts` — must
- * never be silenced by session dedup):
+ * Three bugs, the first two defeating the #938/#978 never-suppress
+ * guarantee (an annotation carrying a complexity/headroom/incomplete-
+ * dependent-attribution signal — `hasNeverSuppressSignal` in
+ * `annotate-cmd.ts` — must never be silenced by session dedup), the third
+ * a distinct cost/amortization bug in the same touchfile logic:
  *
  * HOOKS-12: the touchfile dedup gate's `LIEN_ANNOTATE_GUARD=off` branch used
  * to check ONLY the touchfile's mtime (the pre-#978 TTL logic), never its
@@ -22,6 +23,12 @@
  * file — via the same `additionalContext` channel a real annotation uses,
  * with no extra npx round-trip (the notice fires without ever invoking
  * `LIEN_CMD`).
+ *
+ * #1033: a genuinely trivial/below-floor file (empty `lien annotate`
+ * output) used to skip the touchfile write entirely — it lived after the
+ * "stay silent" early-return — so every read of that file re-spawned the
+ * full `lien annotate` subprocess with zero amortization all session long.
+ * Fixed by writing the touchfile ('0') before that early-return.
  *
  * `lien` (and, for the breaker suite, `npx`) are stubbed on PATH; real `jq`
  * is used throughout. Payloads use the real PostToolUse stdin shape
@@ -265,6 +272,38 @@ describe('annotate-read.sh — HOOKS-12: never-suppress carve-out vs LIEN_ANNOTA
     seedTouchfile('s1', 'a.ts', '0', 0);
     const { stdout } = runHook('b.ts', 's1', { annotationText: 'b.ts annotation' });
     expect(additionalContext(stdout)).toBe('b.ts annotation');
+  });
+
+  describe('#1033: a trivial/below-floor file (empty annotate output) amortizes too', () => {
+    it('stays silent on both reads but only spawns `annotate` ONCE — the touchfile write happens even when output is empty', () => {
+      // ANNOTATION_TEXT defaults to '' — simulates isTrivial/belowRiskFloor
+      // suppressing the whole annotation (a real trivial/low-risk file).
+      const first = runHook('trivial.ts', 's1', { annotationExit: 0 });
+      expect(first.stdout).toBe('');
+      expect(callCount()).toBe(1);
+      // Before the fix: no touchfile was ever written for this path, so this
+      // directory either wouldn't exist or would be empty.
+      expect(readFileSync(touchfilePath(storeDir, 's1', 'trivial.ts'), 'utf-8')).toBe('0');
+
+      const second = runHook('trivial.ts', 's1', { annotationExit: 0 });
+      expect(second.stdout).toBe('');
+      // The money assertion: before the fix this would be 2 — every read of
+      // a trivial file re-spawned `annotate` for the rest of the session.
+      expect(callCount()).toBe(1);
+
+      const third = runHook('trivial.ts', 's1', { annotationExit: 0 });
+      expect(third.stdout).toBe('');
+      expect(callCount()).toBe(1);
+    });
+
+    it('a genuinely trivial file cannot produce a never-suppress touchfile (exit 2 implies non-empty output, never reached here)', () => {
+      // Defensive/documentation test: hasNeverSuppressSignal-driven exit 2 is
+      // only ever paired with real (non-empty) output in the real CLI, so
+      // the '0' written above is always the correct, safe default for the
+      // empty-output path — there is no way for a trivial read to need '1'.
+      runHook('trivial.ts', 's1', { annotationExit: 0 });
+      expect(readFileSync(touchfilePath(storeDir, 's1', 'trivial.ts'), 'utf-8')).not.toBe('1');
+    });
   });
 });
 
