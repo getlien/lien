@@ -211,4 +211,45 @@ export interface LanguageDefinition {
    * shape has been verified against real code.
    */
   sameUnitAccessWithoutImport?: boolean;
+
+  /**
+   * True when this language's import specifiers use case-insensitive,
+   * directory-structure-mirroring namespaces, so `matchesFile`'s Strategy 4
+   * (`matchesPHPNamespace`) is a real, intended semantic for it rather than
+   * an incidental leniency (#1028).
+   *
+   * PHP confirmed: PSR-4 autoloading maps a namespace like `App\Models\User`
+   * onto a file path (`app/Models/User.php`) where the FIRST segment's case
+   * routinely differs from the directory's actual case on disk (Laravel's
+   * `App\` vs. `app/`), and case-insensitive filesystems make this doubly
+   * real. That is a genuine per-language semantic worth its own matching
+   * strategy, unlike `matchesFile`'s other case-sensitive boundary strategies.
+   *
+   * `matchesPHPNamespace` was applied UNCONDITIONALLY to every language
+   * (never gated on this flag, because this flag didn't exist before
+   * #1028) — harmless for the other ten languages' *legitimate* matches
+   * (which all resolve through Strategies 1-3 first, see #1028's own
+   * investigation), but its bare-single-component leniency (added by #883
+   * for an unrelated Swift/Go/Ruby fix — see `matchesPHPNamespace`'s doc
+   * comment) is ALSO case-insensitive, unlike Strategy 2's equivalent
+   * one-leading-segment leniency. On Rust, `use crate::{Error, StdError}`'s
+   * first-wins bare specifier `"Error"` case-insensitively self-matched
+   * `src/error.rs` (a real `dtolnay/anyhow` repro: `chain.rs`/`context.rs`/
+   * `error.rs` each became their own dependent via a self-referential bare
+   * `use crate::X` naming their own type). The same case-insensitivity can
+   * also fabricate an edge between two DIFFERENT files whenever an unrelated
+   * bare specifier happens to share a target's basename modulo case, within
+   * the same one-leading-directory window — not just the self-edge shape.
+   *
+   * Absent/false (the default for every language except PHP) means
+   * `matchesFile` skips Strategy 4 entirely for that language's imports —
+   * see `allowNamespaceMatching` in `../../utils/path-matching.ts` and
+   * `hasNamespaceMatchingSemantics`, the one place this flag is consulted
+   * (mirroring the established `singleFileImports`/#887 and Python/#929
+   * per-language-gate pattern, rather than adding an eighteenth patch to the
+   * shared matcher itself, per #1028's own recommendation). Only set this
+   * where the case-insensitive-namespace-to-directory convention has been
+   * verified against real code.
+   */
+  namespaceStyleImports?: boolean;
 }

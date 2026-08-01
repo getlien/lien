@@ -224,6 +224,19 @@ export function hasDependentAttributionBlindSpot(language: SupportedLanguage): b
 }
 
 /**
+ * True when `language` sets `LanguageDefinition.namespaceStyleImports` (#1028)
+ * -- i.e. its import specifiers use case-insensitive, directory-mirroring
+ * namespaces, the one confirmed real semantic `matchesFile`'s Strategy 4
+ * (`matchesPHPNamespace`) exists for. Only PHP sets this today. See that
+ * flag's own doc comment for the Rust `dtolnay/anyhow` false-positive
+ * (`use crate::{Error}` self-matching `src/error.rs`) this excludes for
+ * every other language.
+ */
+export function hasNamespaceStyleImports(language: SupportedLanguage): boolean {
+  return getLanguage(language).namespaceStyleImports === true;
+}
+
+/**
  * Get all registered language definitions.
  */
 export function getAllLanguages(): readonly LanguageDefinition[] {
