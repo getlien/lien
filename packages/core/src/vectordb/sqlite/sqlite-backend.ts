@@ -4,6 +4,7 @@ import type DatabaseType from 'better-sqlite3';
 import type { ChunkMetadata } from '@liendev/parser';
 import { extractRepoId } from '../../utils/repo-id.js';
 import { getLienHome } from '../../utils/lien-home.js';
+import { ManifestManager } from '../../indexer/manifest.js';
 import type { SearchResult, VectorDBInterface } from '../types.js';
 import { DatabaseError, wrapError } from '../../errors/index.js';
 import { readVersionFile, writeVersionFile } from '../version.js';
@@ -205,6 +206,10 @@ export class SqliteBackend implements VectorDBInterface {
     } catch {
       return false;
     }
+  }
+
+  async getIndexedFiles(): Promise<string[]> {
+    return new ManifestManager(this.dbPath).getIndexedFiles();
   }
 
   async clear(): Promise<void> {

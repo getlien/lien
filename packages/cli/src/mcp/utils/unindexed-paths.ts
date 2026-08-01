@@ -1,4 +1,3 @@
-import { ManifestManager } from '@liendev/core';
 import type { VectorDBInterface } from '@liendev/core';
 import { getCanonicalPath } from '@liendev/parser';
 
@@ -16,11 +15,15 @@ import { getCanonicalPath } from '@liendev/parser';
  * masquerading as "this file has no dependents" reads as "safe to edit
  * carelessly".
  *
- * The manifest (`ManifestManager.getIndexedFiles()`) is the cheap way to
- * break the tie: it's the indexer's own ledger of "these paths are indexed",
- * independent of how many chunks each one produced, so a lookup here doesn't
- * require a full `scanAll` and doesn't get confused by a file that is indexed
- * but genuinely empty.
+ * `vectorDB.getIndexedFiles()` is the cheap way to break the tie: it's the
+ * backend's own ledger of "these paths are indexed", independent of how many
+ * chunks each one produced, so a lookup here doesn't require a full
+ * `scanAll` and doesn't get confused by a file that is indexed but genuinely
+ * empty. Delegating to the backend (rather than reading a manifest file
+ * directly here) matters for `OverlayBackend`: in a linked worktree the
+ * effective indexed set is base (minus masked files) UNION overlay, not just
+ * the overlay's own manifest — see #1014, where consulting the overlay
+ * manifest alone made every base-only file falsely report as unindexed.
  */
 export async function findUnindexedPaths(
   vectorDB: VectorDBInterface,
@@ -31,8 +34,7 @@ export async function findUnindexedPaths(
   // diagnostic add-on, not load-bearing, so a missing/unreadable manifest
   // must never surface as a false "unindexed" claim or crash the handler.
   try {
-    const manifest = new ManifestManager(vectorDB.dbPath);
-    const indexedFiles = await manifest.getIndexedFiles();
+    const indexedFiles = await vectorDB.getIndexedFiles();
     const indexedCanonical = new Set(indexedFiles.map(f => getCanonicalPath(f, workspaceRoot)));
     return filepaths.filter(fp => !indexedCanonical.has(getCanonicalPath(fp, workspaceRoot)));
   } catch {

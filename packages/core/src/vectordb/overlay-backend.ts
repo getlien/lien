@@ -4,6 +4,7 @@ import Database from 'better-sqlite3';
 import type DatabaseType from 'better-sqlite3';
 import type { ChunkMetadata } from '@liendev/parser';
 import { getIndexDir } from '../utils/index-dir.js';
+import { ManifestManager } from '../indexer/manifest.js';
 import type { SearchResult, VectorDBInterface } from './types.js';
 import { wrapError } from '../errors/index.js';
 import { readVersionFile, writeVersionFile } from './version.js';
@@ -333,6 +334,34 @@ export class OverlayBackend implements VectorDBInterface {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Effective indexed-file view: overlay-tracked files (added + modified —
+   * a modified file is masked out of the base AND written into the overlay,
+   * see `buildOverlay`) UNION un-masked base files. A masked base file with
+   * no overlay replacement (a real deletion in this worktree) is correctly
+   * excluded from both sides — the file no longer exists here, so reporting
+   * it as unindexed is the right call, not a false positive.
+   *
+   * That last guarantee depends on the overlay's own manifest never holding
+   * a STALE entry for a file that used to be diverged (modified/added) but
+   * no longer is — e.g. modified, then deleted, or modified back to match
+   * base. `buildOverlay` maintains this by reconciling the overlay manifest
+   * (removing entries outside the current diverged set, not just merging
+   * new ones in) on every build that changes the overlay's content; if that
+   * reconciliation is ever dropped, a modify-then-delete file would resurface
+   * here as falsely "indexed" via the overlay side of the union.
+   *
+   * This is what `findUnindexedPaths` (get_dependents/get_complexity/
+   * get_files_context's "not found in the index" diagnostic) must consult
+   * instead of the overlay's own manifest alone — see #1014.
+   */
+  async getIndexedFiles(): Promise<string[]> {
+    const overlayFiles = await new ManifestManager(this.dbPath).getIndexedFiles();
+    const mask = this.loadMask();
+    const baseFiles = [...this.baseHashes.keys()].filter(f => !mask.has(f));
+    return [...new Set([...overlayFiles, ...baseFiles])];
   }
 
   // ── Overlay build support (driven by indexer/overlay-index.ts) ─────────
