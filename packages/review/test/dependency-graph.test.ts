@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { buildDependencyGraph } from '../src/dependency-graph.js';
+import { buildDependencyGraph, isPreciseProvenance } from '../src/dependency-graph.js';
+import type { EdgeProvenance } from '../src/dependency-graph.js';
 import { createTestChunk } from '../src/test-helpers.js';
 
 // ---------------------------------------------------------------------------
@@ -1385,5 +1386,27 @@ describe('buildDependencyGraph — barrel transitive-walk regression (post-#1011
     const consumerEdge = transitive.callers.find(c => c.caller.filepath === 'src/consumer.ts');
     expect(consumerEdge).toBeDefined();
     expect(consumerEdge?.hops).toBe(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isPreciseProvenance — the "verified vs. inferred" boundary consumed by
+// blast-radius-render.ts's Confidence column. `import-only` is precise: the
+// import IS verified for this exact symbol (see resolveOneChunkImports), it
+// just lacks a literal call site. `require-only` stays imprecise despite
+// also being a guarded, resolved import: it only confirms a FILE-level
+// relationship, never that this specific symbol is the one depended on.
+// ---------------------------------------------------------------------------
+describe('isPreciseProvenance', () => {
+  it.each<[EdgeProvenance, boolean]>([
+    ['same-file', true],
+    ['import-verified', true],
+    ['import-only', true],
+    ['require-only', false],
+    ['symbol-name-match', false],
+    ['oop-method-import', false],
+    ['namespace-inferred', false],
+  ])('%s -> %s', (provenance, expected) => {
+    expect(isPreciseProvenance(provenance)).toBe(expected);
   });
 });

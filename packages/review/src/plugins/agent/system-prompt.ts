@@ -191,7 +191,10 @@ export interface BuildInitialMessageOptions {
    * type-literal/class field with no read site anywhere in the corpus) —
    * all three are the same partial-implementation-gap shape that rule
    * targets, just at different granularity (variant vs. family vs. field).
-   * `boundary-change` likewise gates `<comparison_change_candidates>`.
+   * `boundary-change` likewise gates `<comparison_change_candidates>`; that
+   * section's own prose additionally only names `<blast_radius>` when this
+   * options object's `blastRadius` actually rendered a non-empty section —
+   * see `renderComparisonChangeSection`'s `blastRadiusPresent` parameter.
    * Omit (CLI callers that don't resolve rules) to skip that gating.
    */
   rules?: ResolvedRules;
@@ -213,7 +216,8 @@ export function buildInitialMessage(
   appendIfPresent(sections, renderDiff(context));
   appendIfPresent(sections, renderComplexityRegressions(context));
   appendIfPresent(sections, renderChangedFunctions(context));
-  appendIfPresent(sections, renderBlastRadius(opts));
+  const blastRadiusSection = renderBlastRadius(opts);
+  appendIfPresent(sections, blastRadiusSection);
   appendIfPresent(sections, renderRemovedExportsSection(context));
   // stale-duplicate's `always: true` trigger meant this rendered
   // unconditionally before the candidate-loop pilot's LIEN_STALE_DUP_MAIN
@@ -233,7 +237,7 @@ export function buildInitialMessage(
     appendIfPresent(sections, renderVariantSweepSection(context));
   }
   if (isRuleActive(opts.rules, 'boundary-change')) {
-    appendIfPresent(sections, renderComparisonChangeSection(context));
+    appendIfPresent(sections, renderComparisonChangeSection(context, blastRadiusSection !== null));
   }
   appendIfPresent(sections, renderUntrustedInputSection(context));
   appendIfPresent(sections, renderRenameSweepSection(context));

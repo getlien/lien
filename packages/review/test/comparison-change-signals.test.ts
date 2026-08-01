@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { ReviewContext } from '../src/plugin-types.js';
+import type { BlastRadiusReport } from '../src/blast-radius.js';
 import type { ReviewRule, ResolvedRules } from '../src/plugins/agent/types.js';
 import {
   classifyLinePair,
@@ -348,6 +349,36 @@ describe('renderComparisonChangeCandidates', () => {
     ]);
     expect(rendered).not.toContain('omitted');
   });
+
+  // -------------------------------------------------------------------
+  // blastRadiusPresent — the header must not tell the agent to consult
+  // <blast_radius> when that section isn't actually in the prompt.
+  // -------------------------------------------------------------------
+  const oneCandidate = [
+    {
+      file: 'src/example.ts',
+      line: 11,
+      kind: 'operator' as const,
+      oldFragment: '>',
+      newFragment: '>=',
+      reason: 'x',
+    },
+  ];
+
+  it('mentions <blast_radius> by default (blastRadiusPresent omitted)', () => {
+    expect(renderComparisonChangeCandidates(oneCandidate)).toContain('<blast_radius>');
+  });
+
+  it('mentions <blast_radius> when blastRadiusPresent is true', () => {
+    expect(renderComparisonChangeCandidates(oneCandidate, true)).toContain('<blast_radius>');
+  });
+
+  it('omits any mention of <blast_radius> when blastRadiusPresent is false', () => {
+    const rendered = renderComparisonChangeCandidates(oneCandidate, false);
+    expect(rendered).not.toContain('<blast_radius>');
+    // The rest of the protocol instruction must still be intact.
+    expect(rendered).toContain('get_files_context');
+  });
 });
 
 describe('renderComparisonChangeSection', () => {
@@ -360,6 +391,14 @@ describe('renderComparisonChangeSection', () => {
     const rendered = renderComparisonChangeSection(makeContext(patches));
     expect(rendered).toContain('<comparison_change_candidates>');
     expect(rendered).toContain('src/example.ts:10');
+  });
+
+  it('forwards blastRadiusPresent to gate the <blast_radius> mention', () => {
+    const patches = patch('@@ -10,1 +10,1 @@', '-  if (a > 5) {', '+  if (a >= 5) {');
+    const withBlastRadius = renderComparisonChangeSection(makeContext(patches), true);
+    const withoutBlastRadius = renderComparisonChangeSection(makeContext(patches), false);
+    expect(withBlastRadius).toContain('<blast_radius>');
+    expect(withoutBlastRadius).not.toContain('<blast_radius>');
   });
 });
 
@@ -394,5 +433,70 @@ describe('buildInitialMessage injection (rule-gated)', () => {
     const context = makeContext();
     const message = buildInitialMessage(context, { rules: resolvedRulesWith('boundary-change') });
     expect(message).not.toContain('<comparison_change_candidates>');
+  });
+
+  // -------------------------------------------------------------------
+  // The comparison-change section's own <blast_radius> mention must track
+  // whether a <blast_radius> block actually rendered elsewhere in the SAME
+  // message — the two sections are otherwise assembled independently, so a
+  // caller (e.g. the harness's build-prompts.ts, which hardcodes
+  // `blastRadius: null`) must never see an instruction pointing at a tag
+  // that isn't present.
+  // -------------------------------------------------------------------
+  function sampleBlastRadiusReport(): BlastRadiusReport {
+    return {
+      entries: [
+        {
+          seed: { filepath: 'src/a.ts', symbolName: 'a', symbolType: 'function', complexity: 1 },
+          dependents: [
+            {
+              filepath: 'src/b.ts',
+              symbolName: 'b',
+              hops: 1,
+              callSiteLine: 3,
+              complexity: 2,
+              hasTestCoverage: true,
+            },
+          ],
+          risk: { level: 'low', reasoning: ['1 caller'] },
+          truncated: false,
+        },
+      ],
+      totalDistinctDependents: 1,
+      globalRisk: { level: 'low', reasoning: ['1 caller'] },
+      truncated: false,
+    };
+  }
+
+  it('mentions <blast_radius> in the comparison-change block when a blast-radius report renders', () => {
+    const message = buildInitialMessage(makeContext(patches), {
+      rules: resolvedRulesWith('boundary-change'),
+      blastRadius: sampleBlastRadiusReport(),
+    });
+    expect(message).toContain('<blast_radius>');
+    const comparisonBlock = message.slice(message.indexOf('<comparison_change_candidates>'));
+    expect(comparisonBlock).toContain('consult <blast_radius>');
+  });
+
+  it('never mentions <blast_radius> in the comparison-change block when no report renders', () => {
+    for (const opts of [
+      { rules: resolvedRulesWith('boundary-change') },
+      { rules: resolvedRulesWith('boundary-change'), blastRadius: null },
+      {
+        rules: resolvedRulesWith('boundary-change'),
+        blastRadius: {
+          entries: [],
+          totalDistinctDependents: 0,
+          globalRisk: { level: 'low' as const, reasoning: [] },
+          truncated: false,
+        },
+      },
+    ]) {
+      const message = buildInitialMessage(makeContext(patches), opts);
+      expect(message).not.toContain('<blast_radius>');
+      expect(message).toContain('<comparison_change_candidates>');
+      const comparisonBlock = message.slice(message.indexOf('<comparison_change_candidates>'));
+      expect(comparisonBlock).not.toContain('blast_radius');
+    }
   });
 });
