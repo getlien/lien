@@ -613,36 +613,72 @@ function buildReExportGraph<T extends CodeChunk>(
 
 /**
  * Process a single dependent chunk during BFS traversal.
- * Returns the chunk if it's a new dependent, or null if already visited.
- * If the chunk's file is itself a re-exporter, adds it to the BFS queue.
+ *
+ * Returns the chunk if its file hasn't been reported as a dependent yet, or
+ * `null` if it has (dedup for the output list -- `reported`). Independently
+ * of that, if `chunkFile` hasn't already been queued for its OWN re-export
+ * exploration, checks whether it re-exports from `reExporterPath` and -- if
+ * so -- enqueues it (`queued`).
+ *
+ * `reported` and `queued` are deliberately two separate sets, not one
+ * (#1044): a file reachable from more than one depth-1 re-export candidate
+ * (a common shape -- a namespace-import heuristic in `fileIsReExporter`
+ * flags any file that imports-and-also-exports as a "re-exporter," so a
+ * genuine barrel and several files that merely happen to import-for-
+ * internal-use both qualify) is a genuine re-exporter of SOME of those
+ * candidates and not others. A single shared `visited` set used to gate
+ * both concerns at once, so whichever candidate's turn came first in the
+ * (traversal-order-dependent) queue "consumed" the file: if that first
+ * candidate happened to be a dead end (the file doesn't re-export from
+ * it), the file got reported once but never queued for further
+ * exploration, and the genuine chain through a LATER candidate was never
+ * checked at all -- silently dropping every dependent reachable only past
+ * that file, non-deterministically, depending on which candidate the
+ * BFS's traversal order (itself downstream of nondeterministic concurrent
+ * file-scan order) happened to process first. Checking the re-exporter
+ * condition once per (file, candidate) pair -- gated only on `queued`, not
+ * on whether the file was already reported -- makes the result depend on
+ * whether ANY valid chain exists, not on which one was tried first.
  */
 function processTransitiveChunk(
   chunk: CodeChunk,
   reExporterPath: string,
   depth: number,
-  visited: Set<string>,
+  reported: Set<string>,
+  queued: Set<string>,
+  checkedThisStep: Set<string>,
   allChunksByFile: Map<string, CodeChunk[]>,
   normalizePathCached: (path: string) => string,
   queue: Array<[string, number]>,
 ): CodeChunk | null {
   const chunkFile = normalizePathCached(chunk.metadata.file);
-  if (visited.has(chunkFile)) return null;
 
-  visited.add(chunkFile);
-
-  if (depth < MAX_REEXPORT_DEPTH) {
+  // `checkedThisStep` memoizes the re-exporter check per (file,
+  // reExporterPath) pair within one BFS step, since `dependentChunks` can
+  // contain many chunks for the same file -- without it, a dead-end file
+  // with N chunks would re-run `fileIsReExporter` N times for no benefit.
+  if (depth < MAX_REEXPORT_DEPTH && !queued.has(chunkFile) && !checkedThisStep.has(chunkFile)) {
+    checkedThisStep.add(chunkFile);
     const fileChunks = allChunksByFile.get(chunkFile) || [];
     if (fileIsReExporter(fileChunks, reExporterPath, normalizePathCached)) {
       queue.push([chunkFile, depth + 1]);
+      queued.add(chunkFile);
     }
   }
 
+  if (reported.has(chunkFile)) return null;
+  reported.add(chunkFile);
   return chunk;
 }
 
 /**
  * Find transitive dependents through re-export chains using BFS.
  * Bounded to MAX_REEXPORT_DEPTH.
+ *
+ * `reported` (output dedup) and `queued` (BFS-exploration dedup) are kept
+ * as two separate sets -- see `processTransitiveChunk`'s doc comment for why
+ * conflating them into one `visited` set made the result depend on BFS
+ * traversal order (#1044).
  */
 export function findTransitiveDependents(
   reExporterPaths: string[],
@@ -653,26 +689,30 @@ export function findTransitiveDependents(
   existingFiles: Set<string>,
 ): CodeChunk[] {
   const transitiveChunks: CodeChunk[] = [];
-  const visited = new Set<string>([normalizedTarget, ...existingFiles]);
+  const reported = new Set<string>([normalizedTarget, ...existingFiles]);
+  const queued = new Set<string>();
 
   const queue: Array<[string, number]> = [];
   for (const rePath of reExporterPaths) {
-    if (!visited.has(rePath)) {
+    if (!queued.has(rePath)) {
       queue.push([rePath, 1]);
-      visited.add(rePath);
+      queued.add(rePath);
     }
   }
 
   while (queue.length > 0) {
     const [reExporterPath, depth] = queue.shift()!;
     const dependentChunks = findDependentChunks(reExporterPath, importIndex, normalizePathCached);
+    const checkedThisStep = new Set<string>();
 
     for (const chunk of dependentChunks) {
       const result = processTransitiveChunk(
         chunk,
         reExporterPath,
         depth,
-        visited,
+        reported,
+        queued,
+        checkedThisStep,
         allChunksByFile,
         normalizePathCached,
         queue,

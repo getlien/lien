@@ -496,6 +496,76 @@ describe('analyzeDependencies', () => {
     });
   });
 
+  describe('#1044 re-export BFS is independent of chunk scan order', () => {
+    it('finds a dependent reachable through only one of several depth-1 re-export candidates, regardless of which candidate the BFS visits first', () => {
+      // target ← deadend (genuinely re-exports target)
+      // target ← livechain (genuinely re-exports target)
+      // bridge imports BOTH deadend and livechain, but only genuinely
+      // re-exports from livechain (its own `exports` intersects livechain's
+      // re-exported symbol, not deadend's).
+      // bridge ← consumer (imports ONLY bridge — not target/deadend/
+      // livechain directly).
+      //
+      // consumer is discoverable ONLY if the BFS recognizes bridge as a
+      // re-export-chain continuer of livechain. Pre-fix, a single shared
+      // `visited` set gated both "reported as a dependent" and "queued for
+      // its own re-export exploration": whichever of deadend/livechain the
+      // BFS processed FIRST consumed bridge's slot in that set. If deadend
+      // went first, bridge was reported (correctly) but marked visited
+      // before the livechain check ever ran, so bridge was never enqueued
+      // for further exploration and consumer was silently dropped.
+      // `reExporterPaths`' traversal order comes from iterating a `Map`
+      // built by inserting chunks in the order they were scanned — exactly
+      // what real indexing's concurrent, unordered file scan does not hold
+      // constant across runs of the same, unmodified tree (#1044). Feeding
+      // the identical chunk set in two different array orders (only
+      // deadend/livechain's relative position swaps) reproduces that same
+      // order-dependence deterministically, in-process.
+      const target = createChunk('src/target.ts', [], undefined, {
+        exports: ['targetSymbol'],
+      });
+      const deadend = createChunk('src/deadend.ts', ['src/target.ts'], undefined, {
+        exports: ['targetSymbol'],
+        importedSymbols: { './target': ['targetSymbol'] },
+      });
+      const livechain = createChunk('src/livechain.ts', ['src/target.ts'], undefined, {
+        exports: ['targetSymbol'],
+        importedSymbols: { './target': ['targetSymbol'] },
+      });
+      const bridge = createChunk(
+        'src/bridge.ts',
+        ['src/deadend.ts', 'src/livechain.ts'],
+        undefined,
+        {
+          // Only 'liveSymbol' is re-exported: 'deadOnlySymbol' is imported
+          // from deadend but never appears in bridge's own exports, so
+          // bridge is NOT a re-exporter of deadend (a dead end for the
+          // chain), while it IS a genuine re-exporter of livechain.
+          exports: ['liveSymbol'],
+          importedSymbols: {
+            './deadend': ['deadOnlySymbol'],
+            './livechain': ['liveSymbol'],
+          },
+        },
+      );
+      const consumer = createChunk('src/consumer.ts', ['src/bridge.ts'], undefined, {
+        importedSymbols: { './bridge': ['liveSymbol'] },
+      });
+
+      const orderA = [target, deadend, livechain, bridge, consumer];
+      const orderB = [target, livechain, deadend, bridge, consumer];
+
+      const resultA = analyzeDependencies('src/target.ts', orderA, workspaceRoot);
+      const resultB = analyzeDependencies('src/target.ts', orderB, workspaceRoot);
+
+      const pathsA = resultA.dependents.map(d => d.filepath).sort();
+      const pathsB = resultB.dependents.map(d => d.filepath).sort();
+
+      expect(pathsA).toContain('src/consumer.ts');
+      expect(pathsB).toEqual(pathsA);
+    });
+  });
+
   describe('whole-module-import basename hub (#884)', () => {
     it('does not count Swift whole-module test imports as dependents of a same-basename file', () => {
       const chunks: CodeChunk[] = [
