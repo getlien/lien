@@ -87,13 +87,27 @@ const PROC_MACRO_DERIVE_RE = /^\s*#\s*\[\s*proc_macro_derive\s*\(\s*([A-Za-z_]\w
 
 /**
  * A top-level (column-0, i.e. un-indented) `pub` item declaration --
- * `pub fn foo`, `pub(crate) struct Bar`, etc. Anchored to the start of the
- * line (no leading whitespace) so a same-named item nested inside an
- * `impl`/`fn`/`mod` body -- always indented in idiomatic Rust -- isn't
- * mistaken for a crate-root export (see this file's doc comment).
+ * `pub fn foo`, `pub(crate) struct Bar`, `pub async fn foo`, `pub unsafe
+ * extern "C" fn foo`, etc. Anchored to the start of the line (no leading
+ * whitespace) so a same-named item nested inside an `impl`/`fn`/`mod` body --
+ * always indented in idiomatic Rust -- isn't mistaken for a crate-root
+ * export (see this file's doc comment).
+ *
+ * Allows any of `async`/`const`/`unsafe`/`extern "ABI"` between the
+ * visibility modifier and the declaration keyword (Rust lets these combine,
+ * e.g. `pub const unsafe fn`, `pub unsafe extern "C" fn`) -- without this,
+ * `pub async fn helper()` failed to match at all (`async` isn't itself one
+ * of the declaration keywords), silently dropping `helper` from the export
+ * map and resolving `use my_crate::helper;` to `null` instead of the crate
+ * root file. `const` doing double duty (both a modifier, `pub const fn`, and
+ * a standalone item keyword, `pub const NAME: T = ...;`) is resolved by
+ * ordinary regex backtracking: greedily consuming it as a modifier fails the
+ * mandatory keyword alternation for a plain const item (no `fn`/`struct`/...
+ * follows), so the engine backs off to zero modifiers and matches `const`
+ * itself as the item keyword instead.
  */
 const TOP_LEVEL_PUB_ITEM_RE =
-  /^pub(?:\([^)]*\))?\s+(?:fn|struct|enum|trait|type|const|static|mod)\s+([A-Za-z_]\w*)/gm;
+  /^pub(?:\([^)]*\))?\s+(?:(?:async|const|unsafe|extern(?:\s+"[^"]*")?)\s+)*(?:fn|struct|enum|trait|type|const|static|mod)\s+([A-Za-z_]\w*)/gm;
 
 /** Every name this crate root file exports directly (see the two shapes in the file's doc comment). */
 function collectRootExportNames(content: string): Set<string> {
