@@ -5,6 +5,7 @@ import { getLanguage } from './languages/registry.js';
 
 import { resolveRelativeImport, resolveWorkspaceImport } from '../utils/path-matching.js';
 import { resolvePsr4Import } from '../php-psr4.js';
+import { requireTargetExists } from '../php-require.js';
 import { resolveGoModuleImport } from '../go-module.js';
 import { resolvePythonSrcLayoutImport } from '../python-src-layout.js';
 import { resolveJsDirectoryIndex } from '../js-directory-index.js';
@@ -253,6 +254,40 @@ function appendReferencedFQCNs(
 }
 
 /**
+ * Append `extractStaticRequireTargets`'s results (PHP only, today — #1009)
+ * to `imports` IN PLACE, each resolved through the same pipeline as a
+ * declaration-based import, deduplicated against what's already present, and
+ * ADDITIONALLY dropped unless `requireTargetExists` confirms the resolved
+ * path is a real file. A no-op when the extractor doesn't implement the
+ * optional method, so every other language's `extractImportPaths` behavior
+ * is unaffected.
+ *
+ * The existence check is what makes this safe to trust despite being
+ * inferred from a string-concatenation heuristic rather than a language-
+ * level guarantee — see `php-require.ts`'s doc comment for why this is a
+ * stronger bar than `appendReferencedFQCNs`'s PSR-4 resolution.
+ */
+function appendStaticRequireTargets(
+  imports: string[],
+  importExtractor: ReturnType<typeof getImportExtractor>,
+  rootNode: SyntaxNode,
+  filepath: string | undefined,
+  workspacePackages: ReadonlyMap<string, string> | undefined,
+  manifestRoots: ManifestRoots | undefined,
+): void {
+  if (!importExtractor?.extractStaticRequireTargets) return;
+
+  const seen = new Set(imports);
+  for (const raw of importExtractor.extractStaticRequireTargets(rootNode)) {
+    const resolved = resolveImportSpecifier(raw, filepath, workspacePackages, manifestRoots);
+    if (seen.has(resolved)) continue;
+    if (!requireTargetExists(resolved, manifestRoots?.workspaceRoot)) continue;
+    seen.add(resolved);
+    imports.push(resolved);
+  }
+}
+
+/**
  * Extract import paths using the language-specific extractor.
  *
  * When `filepath` is provided, relative specifiers (`./foo`, `../bar`) are
@@ -263,8 +298,8 @@ function appendReferencedFQCNs(
  * dependency analysis in monorepos. Everything else passes through
  * unchanged.
  *
- * Also merges in `appendReferencedFQCNs`'s results (#878) — see its doc
- * comment.
+ * Also merges in `appendReferencedFQCNs`'s results (#878) and
+ * `appendStaticRequireTargets`'s results (#1009) — see their doc comments.
  */
 function extractImportPaths(
   rootNode: SyntaxNode,
@@ -290,6 +325,14 @@ function extractImportPaths(
   }
 
   appendReferencedFQCNs(
+    imports,
+    importExtractor,
+    rootNode,
+    filepath,
+    workspacePackages,
+    manifestRoots,
+  );
+  appendStaticRequireTargets(
     imports,
     importExtractor,
     rootNode,

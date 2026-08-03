@@ -220,6 +220,45 @@ export interface LanguageImportExtractor {
    *   manifest-root resolution).
    */
   extractReferencedFQCNs?(rootNode: SyntaxNode): string[];
+
+  /**
+   * Extract `require`/`require_once`/`include`/`include_once` targets that
+   * are STATICALLY resolvable to a concrete file: a plain, non-absolute
+   * string literal, or a `__DIR__`/`dirname(__FILE__)`/`dirname(__DIR__)`-
+   * prefixed concatenation with a literal remainder (#1009 — PHP's other
+   * file-inclusion mechanism, alongside `use`, which `importNodeTypes` above
+   * already covers).
+   *
+   * Deliberately narrower than `extractReferencedFQCNs`: a target built from
+   * a variable, a bare constant, a function call other than the three
+   * blessed `__DIR__`-equivalent forms, or an interpolated string is NOT
+   * statically decidable — PHP resolves those at runtime, and guessing would
+   * risk the #928 fabrication shape. This method's caller
+   * (`appendStaticRequireTargets` in `ast/symbols.ts`) additionally requires
+   * the resolved target to exist on disk before trusting it as a real edge —
+   * a stronger bar than `extractReferencedFQCNs`'s PSR-4 resolution, which
+   * doesn't independently verify existence for a single-candidate namespace
+   * prefix.
+   *
+   * Optional: only PHP has this file-inclusion shape today (Ruby's/
+   * JavaScript's own `require` equivalents are declaration/call-expression
+   * shaped and already covered by `importNodeTypes`). Callers treat a
+   * missing implementation as "no static require/include targets" — a no-op
+   * for every other language.
+   *
+   * @param rootNode - AST root node for the whole file. Like
+   *   `extractReferencedFQCNs`, scans the entire file recursively, since a
+   *   `require`/`include` statement can appear anywhere a PHP expression can
+   *   (top-level, inside a function, inside a conditional) — unlike a
+   *   declaration-based import, which is only ever found at the top one-or-
+   *   two levels from the root.
+   * @returns Raw `./`- or `../`-prefixed specifiers, relative to the file
+   *   containing the require/include statement — subject to the same
+   *   relative-import resolution `extractImportPaths` applies to every
+   *   other specifier, but NOT yet existence-checked; see
+   *   `appendStaticRequireTargets`.
+   */
+  extractStaticRequireTargets?(rootNode: SyntaxNode): string[];
 }
 
 /**

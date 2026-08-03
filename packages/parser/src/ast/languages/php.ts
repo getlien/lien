@@ -364,6 +364,230 @@ export class PHPImportExtractor implements LanguageImportExtractor {
     if (!qualifiedName) return null;
     return this.extractQualifiedNameParts(qualifiedName).join('\\');
   }
+
+  // ---------------------------------------------------------------------------
+  // require / include static-target scanning (#1009)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * `require`/`require_once`/`include`/`include_once` are PHP EXPRESSIONS
+   * (they can appear as the right-hand side of an assignment), not
+   * declarations — the grammar parses each as one of these four node types,
+   * each wrapping exactly one child: the expression naming the file to load.
+   */
+  private static readonly REQUIRE_EXPRESSION_TYPES = new Set([
+    'require_expression',
+    'require_once_expression',
+    'include_expression',
+    'include_once_expression',
+  ]);
+
+  /**
+   * String-literal node types that can hold a statically-readable value.
+   * PHP's double-quoted strings parse as `encapsed_string` regardless of
+   * whether they actually interpolate anything — `stringLiteralContent`
+   * below is what distinguishes a plain literal from one with real
+   * interpolation, by checking its children, not its node type.
+   */
+  private static readonly STRING_LITERAL_NODE_TYPES = new Set(['string', 'encapsed_string']);
+
+  /**
+   * Scan the WHOLE file (recursively, like `extractReferencedFQCNs`) for
+   * `require`/`include` targets that are statically resolvable to a concrete
+   * path relative to this file's own directory. See
+   * `LanguageImportExtractor.extractStaticRequireTargets`'s doc comment for
+   * the full contract; only three shapes are accepted here:
+   * - A plain, non-absolute string literal (`require 'includes/foo.php';`).
+   * - `__DIR__`/`dirname(__FILE__)` concatenated with a literal
+   *   (`require_once __DIR__ . '/../vendor/autoload.php';`).
+   * - `dirname(__DIR__)` concatenated with a literal -- the file's PARENT
+   *   directory (`require_once dirname(__DIR__) . '/wp-load.php';`).
+   * Everything else (a variable, a bare constant, an arbitrary function
+   * call, an interpolated string, a ternary, ...) is left for the caller to
+   * skip entirely — see `resolveStaticRequireTarget`.
+   */
+  extractStaticRequireTargets(rootNode: SyntaxNode): string[] {
+    const targets: string[] = [];
+    const seen = new Set<string>();
+
+    const visit = (node: SyntaxNode): void => {
+      if (PHPImportExtractor.REQUIRE_EXPRESSION_TYPES.has(node.type)) {
+        const target = this.extractStaticRequireTarget(node);
+        if (target && !seen.has(target)) {
+          seen.add(target);
+          targets.push(target);
+        }
+      }
+      node.namedChildren.forEach(visit);
+    };
+    visit(rootNode);
+
+    return targets;
+  }
+
+  /**
+   * `node` is one of `REQUIRE_EXPRESSION_TYPES` — its sole named child is the
+   * expression naming the file to load (optionally wrapped in one or more
+   * `parenthesized_expression`s, e.g. WordPress's conventional
+   * `require_once( ABSPATH . 'wp-load.php' );`).
+   */
+  private extractStaticRequireTarget(node: SyntaxNode): string | null {
+    const exprNode = node.namedChildren[0];
+    if (!exprNode) return null;
+    return this.resolveStaticRequireExpression(this.unwrapParenthesized(exprNode));
+  }
+
+  private unwrapParenthesized(node: SyntaxNode): SyntaxNode {
+    let current = node;
+    while (current.type === 'parenthesized_expression') {
+      const inner = current.namedChildren[0];
+      if (!inner) break;
+      current = inner;
+    }
+    return current;
+  }
+
+  /**
+   * Resolves a require/include target expression to a `./`- or `../`-prefixed
+   * specifier, or `null` when it isn't one of the three statically-decidable
+   * shapes this method accepts.
+   */
+  private resolveStaticRequireExpression(node: SyntaxNode): string | null {
+    if (node.type === 'binary_expression' && node.childForFieldName('operator')?.text === '.') {
+      return this.resolveDirRelativeConcatenation(node);
+    }
+
+    // Plain string literal, e.g. `require 'includes/foo.php';`. A leading
+    // `/` names an OS-absolute path (essentially never inside the indexed
+    // workspace) rather than a path relative to this file's own directory --
+    // skip rather than guess, mirroring the concatenation branch's own
+    // leading-slash handling below.
+    const literal = this.stringLiteralContent(node);
+    if (!literal || literal.startsWith('/')) return null;
+    return `./${literal}`;
+  }
+
+  /**
+   * `__DIR__ . '<literal>'`, `dirname(__FILE__) . '<literal>'`, or
+   * `dirname(__DIR__) . '<literal>'` -- PHP's idioms for "this file's own
+   * directory" (the first two) or its PARENT (the third), each resolvable to
+   * a `./`- or `../`-prefixed specifier relative to the file containing the
+   * require/include statement (`resolveRelativeImport` in
+   * `../../utils/path-matching.ts` does the actual join once this reaches
+   * `ast/symbols.ts`). `dirname(__DIR__)` is a real, common WordPress-core
+   * idiom for climbing from a subdirectory (`wp-admin/`) back to the install
+   * root (confirmed on a real corpus, 19 files -- e.g.
+   * `wp-admin/admin-ajax.php`'s `require_once dirname( __DIR__ ) .
+   * '/wp-load.php';`) -- see `dirLevelOf`'s doc comment for why this is just
+   * as sound as the same-directory forms, not a guess. Any other
+   * concatenation left operand (a bare constant like `ABSPATH` -- WordPress's
+   * OTHER common idiom, but not lexically resolvable the way a magic
+   * constant is -- or an arbitrary function call) is not one of these forms
+   * and is left unresolved.
+   */
+  private resolveDirRelativeConcatenation(node: SyntaxNode): string | null {
+    const left = node.childForFieldName('left');
+    const right = node.childForFieldName('right');
+    if (!left || !right) return null;
+
+    const level = this.dirLevelOf(this.unwrapParenthesized(left));
+    if (level === null) return null;
+
+    const literal = this.stringLiteralContent(this.unwrapParenthesized(right));
+    if (!literal) return null;
+    // Strip at most one leading slash from the literal before joining -- the
+    // idiomatic `__DIR__ . '/config.php'` shape already supplies the
+    // separator itself.
+    const cleaned = literal.replace(/^\/+/, '');
+    return level === 0 ? `./${cleaned}` : `${'../'.repeat(level)}${cleaned}`;
+  }
+
+  /**
+   * Returns how many directory levels above the containing file's own
+   * directory `node` names, or `null` when it isn't one of PHP's
+   * `__DIR__`-equivalent forms at all:
+   * - `__DIR__` or `dirname(__FILE__)` -- the file's own directory -- both 0.
+   * - `dirname(__DIR__)` -- ITS PARENT -- 1. `dirname()` applied to a
+   *   directory (unlike applied to `__FILE__`, which merely strips the
+   *   filename to reach the SAME directory) genuinely climbs one level, and
+   *   `__DIR__` is always a compile-time-constant lexical value with zero
+   *   runtime ambiguity -- there is nothing to "guess" here, unlike a bare
+   *   constant such as `ABSPATH` (WordPress's other common concatenation
+   *   idiom, deliberately NOT resolved: its value is assigned dynamically in
+   *   `wp-load.php`, not lexically tied to the current file's location).
+   *
+   * Deliberately does not recurse into further nesting
+   * (`dirname(dirname(__FILE__))`) -- real but rare (a handful of sites on
+   * the same corpus that motivated the `dirname(__DIR__)` case, confined to
+   * a single vendored library) -- left as an honest, documented remainder
+   * rather than added speculatively.
+   *
+   * EXPLICITLY REJECTS (returns `null`, never guesses) PHP 8's two-argument
+   * `dirname($path, $levels)` form -- `dirname(__DIR__, 2)` climbs TWO
+   * levels, not one; `dirname(__FILE__, 2)` climbs one (not zero). Silently
+   * treating it as the one-argument form would resolve to a DIFFERENT real
+   * directory -- if a file happens to exist at that wrong path, this would
+   * fabricate an edge to a file the statement doesn't actually require
+   * (#928/#1008/#1056's failure mode, caught by Lien Review before it ever
+   * shipped). Requires exactly one argument before matching `__FILE__`/
+   * `__DIR__` at all, below.
+   *
+   * Matches `__DIR__`/`__FILE__`/`dirname` case-INSENSITIVELY (confirmed
+   * empirically against a real PHP 8.4 interpreter, #1009 Lien Review
+   * finding): PHP's magic constants and its built-in function names are both
+   * case-insensitive at the language level -- `__dir__`, `__Dir__`, and
+   * `Dirname(__FILE__)` all behave identically to their canonical-case
+   * spelling. A case-sensitive comparison would silently under-resolve any
+   * legacy PHP file using non-canonical casing, which is exactly the kind of
+   * codebase this fix targets -- a MISS, not a fabrication risk, since it
+   * only means falling through to `null` (skip) rather than producing a
+   * wrong answer.
+   */
+  private dirLevelOf(node: SyntaxNode): number | null {
+    if (node.type === 'name' && node.text.toLowerCase() === '__dir__') return 0;
+    if (node.type !== 'function_call_expression') return null;
+
+    const fn = node.childForFieldName('function');
+    if (fn?.type !== 'name' || fn.text.toLowerCase() !== 'dirname') return null;
+
+    const args = node.childForFieldName('arguments');
+    // PHP 8's `dirname($path, $levels)` two-argument form climbs $levels
+    // directories, not one -- e.g. `dirname(__DIR__, 2) . '/foo.php'` climbs
+    // TWO levels above `__DIR__`, not one. Reject anything but exactly one
+    // argument rather than silently treating it as the single-argument form:
+    // a wrong level count doesn't just miss, it resolves to a DIFFERENT real
+    // path, which -- if a file happens to exist there -- fabricates an edge
+    // to a file this statement doesn't actually require. Left as an honest,
+    // documented remainder (see this method's own doc comment) rather than
+    // computed, matching this method's existing stance on further nesting.
+    if (args?.namedChildren.length !== 1) return null;
+
+    const firstArg = args.namedChildren[0];
+    const value = firstArg.type === 'argument' ? firstArg.namedChildren[0] : firstArg;
+    if (value?.type !== 'name') return null;
+    const valueText = value.text.toLowerCase();
+    if (valueText === '__file__') return 0;
+    if (valueText === '__dir__') return 1;
+    return null;
+  }
+
+  /**
+   * Returns a `string`/`encapsed_string` node's literal text content, or
+   * `null` when it isn't a plain literal at all (interpolation present --
+   * `variable_name`, `expression`, etc. among its children -- makes the
+   * value only known at runtime, not statically decidable). An empty string
+   * literal (`''`) returns `''` rather than `null`; callers reject it as a
+   * useless require target on their own terms.
+   */
+  private stringLiteralContent(node: SyntaxNode): string | null {
+    if (!PHPImportExtractor.STRING_LITERAL_NODE_TYPES.has(node.type)) return null;
+    if (node.namedChildren.length === 0) return '';
+
+    const isPlainLiteral = node.namedChildren.every(child => child.type === 'string_content');
+    if (!isPlainLiteral) return null;
+
+    return node.namedChildren.map(child => child.text).join('');
+  }
 }
 
 // =============================================================================
