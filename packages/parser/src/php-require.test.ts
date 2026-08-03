@@ -38,4 +38,13 @@ describe('requireTargetExists', () => {
     await writeFile('vendor/other.php', '<?php\n');
     expect(requireTargetExists('vendor/autoload.php', testDir)).toBe(false);
   });
+
+  it('is false when the specifier names a real DIRECTORY, not a file -- PHP cannot require a directory (Lien Review finding)', async () => {
+    // fs.existsSync would return true here (a real reproduction of the bug):
+    // `require 'vendor'` where `vendor/` exists on disk as a directory must
+    // never fabricate an edge, since PHP's require/include can only ever
+    // load a FILE at runtime, never a directory.
+    await writeFile('vendor/autoload.php', '<?php\n');
+    expect(requireTargetExists('vendor', testDir)).toBe(false);
+  });
 });

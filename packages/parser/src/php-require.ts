@@ -30,5 +30,9 @@ import path from 'path';
  */
 export function requireTargetExists(specifier: string, workspaceRoot: string | undefined): boolean {
   if (!workspaceRoot) return false;
-  return fs.existsSync(path.join(workspaceRoot, specifier));
+  try {
+    return fs.statSync(path.join(workspaceRoot, specifier)).isFile();
+  } catch {
+    return false;
+  }
 }

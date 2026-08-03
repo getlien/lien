@@ -224,15 +224,15 @@ export interface LanguageImportExtractor {
   /**
    * Extract `require`/`require_once`/`include`/`include_once` targets that
    * are STATICALLY resolvable to a concrete file: a plain string literal, or
-   * a `__DIR__`/`dirname(__FILE__)`-prefixed concatenation with a literal
-   * remainder (#1009 — PHP's other file-inclusion mechanism, alongside `use`,
-   * which `importNodeTypes` above already covers).
+   * a `__DIR__`/`dirname(__FILE__)`/`dirname(__DIR__)`-prefixed concatenation
+   * with a literal remainder (#1009 — PHP's other file-inclusion mechanism,
+   * alongside `use`, which `importNodeTypes` above already covers).
    *
    * Deliberately narrower than `extractReferencedFQCNs`: a target built from
-   * a variable, a bare constant, a function call other than the two blessed
-   * `__DIR__`-equivalent forms, or an interpolated string is NOT statically
-   * decidable — PHP resolves those at runtime, and guessing would risk the
-   * #928 fabrication shape. This method's caller
+   * a variable, a bare constant, a function call other than the three
+   * blessed `__DIR__`-equivalent forms, or an interpolated string is NOT
+   * statically decidable — PHP resolves those at runtime, and guessing would
+   * risk the #928 fabrication shape. This method's caller
    * (`appendStaticRequireTargets` in `ast/symbols.ts`) additionally requires
    * the resolved target to exist on disk before trusting it as a real edge —
    * a stronger bar than `extractReferencedFQCNs`'s PSR-4 resolution, which
