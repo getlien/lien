@@ -13,6 +13,7 @@ import {
   detectLanguage,
   hasSameDirectoryTestConvention,
   hasSamePackageTestConvention,
+  hasEnclosingNamespaceAccess,
 } from './ast/languages/registry.js';
 import {
   buildGoTestDirIndex,
@@ -27,6 +28,11 @@ import {
   type JavaTestCandidate,
   type JavaTestDirIndex,
 } from './java-same-package-tests.js';
+import {
+  buildCSharpTypeReferenceIndex,
+  resolveCSharpTypeReferenceDependents,
+  type CSharpTypeReferenceIndex,
+} from './csharp-type-reference-signals.js';
 import type { CodeChunk } from './types.js';
 
 /**
@@ -47,6 +53,16 @@ function hasGoSameDirectoryConvention(filepath: string): boolean {
 function hasJavaSamePackageConvention(filepath: string): boolean {
   const language = detectLanguage(filepath);
   return language !== null && hasSamePackageTestConvention(language);
+}
+
+/**
+ * True when `filepath`'s language sets `enclosingNamespaceAccess` (C#
+ * today, #930/#1040) -- mirrors `hasGoSameDirectoryConvention` /
+ * `hasJavaSamePackageConvention` above.
+ */
+function hasCSharpEnclosingNamespaceConvention(filepath: string): boolean {
+  const language = detectLanguage(filepath);
+  return language !== null && hasEnclosingNamespaceAccess(language);
 }
 
 /**
@@ -151,6 +167,33 @@ function collectJavaBasenameTests(
 }
 
 /**
+ * #1040: C#'s enclosing-namespace test convention has no basename pairing to
+ * fall back on (unlike Go/Java, a C# test class's file name routinely bears
+ * no relation to the specific type(s) it covers -- e.g. MediatR's
+ * `PipelineTests.cs` tests `IPipelineBehavior`/`IRequestHandler`, declared in
+ * files with neither name). Instead, this reuses
+ * `resolveCSharpTypeReferenceDependents` -- the SAME namespace-scoped
+ * signal `get_dependents`'s file-level recovery already relies on (#930,
+ * `csharp-type-reference-signals.ts`) -- filtered down to the test-file
+ * subset of `filepath`'s recovered dependents. Both of that signal's tiers
+ * already refuse to guess on ambiguity (global-uniqueness for tier 1,
+ * namespace-enclosure + shadowing for tier 2), so this is folded directly
+ * into the returned association set here, the same "real recovery, not just
+ * an honesty label" treatment Go/Java's own tier 1 gets above -- unlike
+ * `annotate-cmd.ts`'s OWN, separate, last-resort-only use of this same
+ * function (kept distinct there because it only fires when this module's
+ * import-based `tests` came back empty).
+ */
+function collectCSharpNamespaceTests(
+  filepath: string,
+  csharpIndex: CSharpTypeReferenceIndex,
+): string[] {
+  return hasCSharpEnclosingNamespaceConvention(filepath)
+    ? resolveCSharpTypeReferenceDependents(filepath, csharpIndex).filter(isTestFile)
+    : [];
+}
+
+/**
  * #902: Go's dominant same-package test convention emits no import statement
  * at all, so `collectImportMatchedTests` is structurally blind to it. Builds
  * a directory index of same-directory-test-convention (Go) test chunks --
@@ -220,6 +263,11 @@ export function findTestAssociationsFromChunks(
   // fallback, see annotate-cmd.ts.
   const goTestDirIndex = buildGoTestDirIndexFrom(testChunks, normalize);
   const javaTestDirIndex = buildJavaTestDirIndexFrom(testChunks, normalize);
+  // #1040: C#'s enclosing-namespace test-association index, built once
+  // (project-wide, not just `testChunks` -- tier 1's global-uniqueness gate
+  // needs every declaration) and reused for every target file below, same
+  // "build once" discipline as the two indexes above.
+  const csharpIndex = buildCSharpTypeReferenceIndex(chunks);
 
   for (const filepath of filepaths) {
     const normalizedTarget = normalize(filepath);
@@ -227,6 +275,7 @@ export function findTestAssociationsFromChunks(
       ...collectImportMatchedTests(testChunks, normalizedTarget, normalize),
       ...collectGoBasenameTests(filepath, normalizedTarget, goTestDirIndex),
       ...collectJavaBasenameTests(filepath, normalizedTarget, javaTestDirIndex),
+      ...collectCSharpNamespaceTests(filepath, csharpIndex),
     ]);
 
     if (testFiles.size > 0) {

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { getCanonicalPath, normalizePath, matchesFile, isTestFile } from '@liendev/parser';
+import type { SearchResult } from '@liendev/core';
 import {
   searchFileChunks,
   findRelatedChunks,
@@ -8,6 +9,63 @@ import {
   buildFilesData,
   createPathCache,
 } from './handlers/get-files-context.js';
+
+/**
+ * Minimal `SearchResult` builder for `findTestAssociations` tests below —
+ * these only exercise import/basename-based matching, so `content` and the
+ * scoring fields are irrelevant filler; only `metadata.file`/`imports`
+ * matter to the assertions.
+ */
+function mockSearchResult(file: string, imports?: string[]): SearchResult {
+  return {
+    content: '',
+    metadata: {
+      file,
+      startLine: 1,
+      endLine: 1,
+      type: 'block',
+      language: 'typescript',
+      ...(imports ? { imports } : {}),
+    },
+    score: 0,
+    relevance: 'not_relevant',
+  };
+}
+
+/**
+ * #1040: a real C# type declaration/usage `SearchResult`, optionally
+ * namespaced (a `namespace X;` line prefixed into content) -- mirrors
+ * `@liendev/parser`'s own `csharp-type-reference-signals.test.ts` helpers,
+ * needed here because `findTestAssociations`'s C# tier
+ * (`collectCSharpNamespaceTestFiles`) reads `content`/`symbolType`/`symbolName`,
+ * not just `metadata.file`/`imports` like the plain `mockSearchResult` above.
+ */
+function mockCSharpChunk(opts: {
+  file: string;
+  symbolName: string;
+  namespace?: string;
+  declares?: boolean;
+  references?: string[];
+}): SearchResult {
+  const nsPrefix = opts.namespace ? `namespace ${opts.namespace};\n\n` : '';
+  const body = opts.declares
+    ? `public class ${opts.symbolName} { }`
+    : (opts.references ?? []).map(name => `var x = new ${name}();`).join('\n');
+  return {
+    content: `${nsPrefix}${body}`,
+    metadata: {
+      file: opts.file,
+      startLine: 1,
+      endLine: 10,
+      type: opts.declares ? 'class' : 'function',
+      language: 'csharp',
+      symbolName: opts.symbolName,
+      symbolType: opts.declares ? 'class' : 'method',
+    },
+    score: 0,
+    relevance: 'not_relevant',
+  };
+}
 
 /**
  * Unit tests for get_files_context handler and helper functions.
@@ -327,24 +385,9 @@ describe('get_files_context - Helper Functions', () => {
   describe('findTestAssociations', () => {
     it('should find test files that import target', () => {
       const mockChunks = [
-        {
-          metadata: {
-            file: 'src/__tests__/auth.test.ts',
-            imports: ['../auth', '../utils'],
-          },
-        },
-        {
-          metadata: {
-            file: 'src/__tests__/user.test.ts',
-            imports: ['../user', '../auth'],
-          },
-        },
-        {
-          metadata: {
-            file: 'src/helper.ts',
-            imports: ['./auth'],
-          },
-        },
+        mockSearchResult('src/__tests__/auth.test.ts', ['../auth', '../utils']),
+        mockSearchResult('src/__tests__/user.test.ts', ['../user', '../auth']),
+        mockSearchResult('src/helper.ts', ['./auth']),
       ];
 
       const ctx = {
@@ -362,14 +405,7 @@ describe('get_files_context - Helper Functions', () => {
     });
 
     it('should not include non-test files', () => {
-      const mockChunks = [
-        {
-          metadata: {
-            file: 'src/helper.ts',
-            imports: ['./auth'],
-          },
-        },
-      ];
+      const mockChunks = [mockSearchResult('src/helper.ts', ['./auth'])];
 
       const ctx = {
         vectorDB: {} as any,
@@ -384,14 +420,7 @@ describe('get_files_context - Helper Functions', () => {
     });
 
     it('should handle chunks with no imports', () => {
-      const mockChunks = [
-        {
-          metadata: {
-            file: 'src/__tests__/auth.test.ts',
-            // No imports property
-          },
-        },
-      ];
+      const mockChunks = [mockSearchResult('src/__tests__/auth.test.ts')];
 
       const ctx = {
         vectorDB: {} as any,
@@ -403,6 +432,37 @@ describe('get_files_context - Helper Functions', () => {
       const result = findTestAssociations(['src/auth.ts'], mockChunks, ctx);
 
       expect(result[0]).toHaveLength(0);
+    });
+
+    // #1040: C#'s enclosing-namespace test convention has no import
+    // statement AND no basename relationship to its subject (unlike Go/Java's
+    // tiers above) -- see `collectCSharpNamespaceTestFiles`.
+    it('associates a C# test file with its subject via enclosing-namespace access, with no import and no basename match (#1040)', () => {
+      const mockChunks = [
+        mockCSharpChunk({
+          file: 'src/MediatR/IRequestHandler.cs',
+          symbolName: 'IRequestHandler',
+          namespace: 'MediatR',
+          declares: true,
+        }),
+        mockCSharpChunk({
+          file: 'test/MediatR.Tests/PipelineTests.cs',
+          symbolName: 'TestMethod',
+          namespace: 'MediatR.Tests',
+          references: ['IRequestHandler'],
+        }),
+      ];
+
+      const ctx = {
+        vectorDB: {} as any,
+        embeddings: {} as any,
+        log: vi.fn(),
+        workspaceRoot,
+      };
+
+      const result = findTestAssociations(['src/MediatR/IRequestHandler.cs'], mockChunks, ctx);
+
+      expect(result[0]).toEqual(['test/MediatR.Tests/PipelineTests.cs']);
     });
   });
 

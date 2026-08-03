@@ -1206,13 +1206,18 @@ describe('annotateCommand — --tests-only (integration)', () => {
     }
   });
 
-  // #930/#943, end-to-end: a C# source file reachable only via implicit
-  // enclosing-namespace access (no `using` names it at all) still surfaces
-  // its non-import type-reference fallback through the real
-  // `scanTestAssociations` -> `computeCSharpTypeReferenceTestFallback` ->
-  // `findCSharpTypeReferenceDependents` -> `formatTestReminder` pipeline --
-  // mirrors the Swift symbol-usage integration test immediately above.
-  it('prints the type-reference fallback reminder for a C# file with no import signal', async () => {
+  // #930/#943/#1040, end-to-end: a C# source file reachable only via implicit
+  // enclosing-namespace access (no `using` names it at all) now resolves as a
+  // REAL, direct test association -- not merely the inferred fallback this
+  // test originally demonstrated. #1040 folded the same
+  // `findCSharpTypeReferenceDependents` signal directly into
+  // `findTestAssociationsFromChunks` (`test-associations.ts`'s
+  // `collectCSharpNamespaceTests`), so `tests` itself is non-empty here now,
+  // and `computeCSharpTypeReferenceTestFallback`'s `if (tests.length > 0)
+  // return [];` guard always short-circuits for this fixture -- see that
+  // function's own doc comment for why it is provably unreachable for ANY
+  // C# fixture post-#1040, not just this one.
+  it('prints the direct-tests reminder for a C# file reachable only via enclosing-namespace access (#1040)', async () => {
     const fs = await import('fs/promises');
     const repoRoot = path.resolve(process.cwd(), '..', '..');
     const fixtureDir = path.join(repoRoot, '__annotate_csharp_fixture__');
@@ -1264,7 +1269,7 @@ describe('annotateCommand — --tests-only (integration)', () => {
       expect(errSpy).not.toHaveBeenCalled();
       expect(logSpy).toHaveBeenCalledTimes(1);
       expect(logSpy.mock.calls[0][0]).toBe(
-        `Lien: you changed ${csharpTarget} — no import-verified test match, but type-reference matching suggests: Serilog.Tests/Configuration/LoggerConfigurationTests.cs (inferred, not import-verified). Consider running them before completing.`,
+        `Lien: you changed ${csharpTarget} — associated tests: Serilog.Tests/Configuration/LoggerConfigurationTests.cs. Run them before completing.`,
       );
     } finally {
       await fs.rm(fixtureDir, { recursive: true, force: true });

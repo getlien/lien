@@ -266,6 +266,118 @@ describe('findTestAssociationsFromChunks', () => {
     });
   });
 
+  describe('C# enclosing-namespace test convention (#1040)', () => {
+    // A real C# type declaration chunk, optionally namespaced (a `namespace
+    // X;` line prefixed into content, mirroring how a real file's derived
+    // namespace is recovered from chunk content -- see
+    // `csharp-type-reference-signals.ts`'s `deriveCSharpNamespace`).
+    function csharpDecl(file: string, symbolName: string, namespace?: string): CodeChunk {
+      const nsPrefix = namespace ? `namespace ${namespace};\n\n` : '';
+      return {
+        content: `${nsPrefix}public class ${symbolName} { }`,
+        metadata: {
+          file,
+          startLine: 1,
+          endLine: 10,
+          type: 'class',
+          language: 'csharp',
+          symbolName,
+          symbolType: 'class',
+        },
+      };
+    }
+
+    // A C# usage chunk (e.g. a test method) that references `references` by
+    // bare name, with no `using` import naming the referenced type at all --
+    // the exact MediatR/#1040 repro shape.
+    function csharpUsage(file: string, references: string[], namespace?: string): CodeChunk {
+      const nsPrefix = namespace ? `namespace ${namespace};\n\n` : '';
+      return {
+        content: `${nsPrefix}${references.map(name => `var x = new ${name}();`).join('\n')}`,
+        metadata: {
+          file,
+          startLine: 1,
+          endLine: 10,
+          type: 'function',
+          language: 'csharp',
+          symbolName: 'TestMethod',
+          symbolType: 'method',
+        },
+      };
+    }
+
+    it('associates a C# test file with its subject via enclosing-namespace access, with NO import and NO basename relationship (MediatR repro)', () => {
+      // The exact #1040 shape: `IRequestHandler.cs` declares `IRequestHandler`
+      // in namespace `MediatR`; `PipelineTests.cs` sits in the nested
+      // `MediatR.Tests` namespace and references `IRequestHandler` completely
+      // unqualified, with no `using MediatR;` anywhere -- legal because C#
+      // namespace lookup walks outward through enclosing namespaces. Neither
+      // file's basename bears any relation to the other, so Go/Java's
+      // basename-pairing tier-1 convention would never have caught this even
+      // if C# opted into it.
+      const chunks: CodeChunk[] = [
+        csharpDecl('src/MediatR/IRequestHandler.cs', 'IRequestHandler', 'MediatR'),
+        csharpUsage('test/MediatR.Tests/PipelineTests.cs', ['IRequestHandler'], 'MediatR.Tests'),
+      ];
+
+      const result = findTestAssociationsFromChunks(['src/MediatR/IRequestHandler.cs'], chunks);
+
+      expect(result.get('src/MediatR/IRequestHandler.cs')).toEqual([
+        'test/MediatR.Tests/PipelineTests.cs',
+      ]);
+    });
+
+    it('does not fabricate an association for a globally ambiguous type name with a genuine same-depth clash (never guesses)', () => {
+      // Two DIFFERENT files declare the SAME type name in the SAME namespace
+      // depth -- a genuine tie tier 2's shadowing rule refuses to guess at,
+      // mirroring `csharp-type-reference-signals.test.ts`'s identical tier-2
+      // test. The precision bar here matters: #1040 must not trade a false
+      // "0 associations" for a false PAIRING.
+      const chunks: CodeChunk[] = [
+        csharpDecl('src/Foo/Widget.cs', 'Widget', 'App.Foo'),
+        csharpDecl('src/Bar/Widget.cs', 'Widget', 'App.Bar'),
+        csharpUsage('test/AppTests.cs', ['Widget'], 'App'),
+      ];
+
+      const result = findTestAssociationsFromChunks(['src/Foo/Widget.cs'], chunks);
+
+      expect(result.has('src/Foo/Widget.cs')).toBe(false);
+    });
+
+    it('does not apply the enclosing-namespace convention to a non-C# language', () => {
+      // A same-shaped nested-namespace/no-import reference in a language
+      // that does NOT set `enclosingNamespaceAccess` must not get this
+      // treatment -- only real import-based matching (or that language's own
+      // convention) applies.
+      const chunks: CodeChunk[] = [
+        makeChunk('src/widget.ts'),
+        makeChunk('test/widget.test.ts'), // no import -- would only match via C#'s convention
+      ];
+
+      const result = findTestAssociationsFromChunks(['src/widget.ts'], chunks);
+
+      expect(result.has('src/widget.ts')).toBe(false);
+    });
+
+    it('composes with a real import-based match without duplicating the test file', () => {
+      const chunks: CodeChunk[] = [
+        csharpDecl('src/MediatR/IRequestHandler.cs', 'IRequestHandler', 'MediatR'),
+        csharpUsage('test/MediatR.Tests/PipelineTests.cs', ['IRequestHandler'], 'MediatR.Tests'),
+        makeChunk('test/MediatR.Tests/OtherTests.cs', ['src/MediatR/IRequestHandler']),
+      ];
+
+      const result = findTestAssociationsFromChunks(['src/MediatR/IRequestHandler.cs'], chunks);
+
+      expect(result.get('src/MediatR/IRequestHandler.cs')).toHaveLength(2);
+      expect(result.get('src/MediatR/IRequestHandler.cs')).toContain(
+        'test/MediatR.Tests/PipelineTests.cs',
+      );
+      expect(result.get('src/MediatR/IRequestHandler.cs')).toContain(
+        'test/MediatR.Tests/OtherTests.cs',
+      );
+    });
+  });
+
   describe('direct-importer ranking (#929)', () => {
     // The real hono repro: `src/utils/jwt/jwt.test.ts` imports `./jws`
     // directly (an exact, unambiguous reference), but scan order alone

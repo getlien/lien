@@ -159,10 +159,19 @@ export {
   isTypeShapedIdentifier,
 } from './swift-symbol-usage-signals.js';
 
-// #930 (part 2): C#'s non-import type-reference dependents signal, used by
-// `get_dependents` (not test-association) -- see
-// csharp-type-reference-signals.ts's module doc.
-export { findCSharpTypeReferenceDependents } from './csharp-type-reference-signals.js';
+// #930 (part 2): C#'s non-import type-reference signal, originally built for
+// `get_dependents` and reused by test-association (#1040) -- see
+// csharp-type-reference-signals.ts's module doc. `buildCSharpTypeReferenceIndex`/
+// `resolveCSharpTypeReferenceDependents` let a caller resolving MANY target
+// files (e.g. `get_files_context`'s `findTestAssociations`) build the
+// project-wide index once and reuse it, instead of calling
+// `findCSharpTypeReferenceDependents` (which rebuilds it) per file.
+export {
+  findCSharpTypeReferenceDependents,
+  buildCSharpTypeReferenceIndex,
+  resolveCSharpTypeReferenceDependents,
+} from './csharp-type-reference-signals.js';
+export type { CSharpTypeReferenceIndex } from './csharp-type-reference-signals.js';
 
 // =============================================================================
 // GRAPH TRAVERSAL (generic bounded BFS — domain graphs build on this)

@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { findCSharpTypeReferenceDependents } from './csharp-type-reference-signals.js';
+import {
+  findCSharpTypeReferenceDependents,
+  buildCSharpTypeReferenceIndex,
+  resolveCSharpTypeReferenceDependents,
+} from './csharp-type-reference-signals.js';
 import type { CodeChunk } from './types.js';
 
 interface ChunkOptions {
@@ -415,5 +419,43 @@ describe('findCSharpTypeReferenceDependents', () => {
         'src/Capturing/PropertyValueConverter.cs',
       ]);
     });
+  });
+});
+
+// #1040: `buildCSharpTypeReferenceIndex` + `resolveCSharpTypeReferenceDependents`
+// let a caller resolve MANY target files against one project-wide scan --
+// extracted from `findCSharpTypeReferenceDependents` so `test-associations.ts`
+// doesn't rebuild the index per target file (see that module's
+// `collectCSharpNamespaceTests`).
+describe('buildCSharpTypeReferenceIndex + resolveCSharpTypeReferenceDependents (#1040 build-once API)', () => {
+  it('resolving against a pre-built index matches findCSharpTypeReferenceDependents for the same target', () => {
+    const chunks: CodeChunk[] = [
+      declChunk('src/Parsing/Alignment.cs', 'Alignment'),
+      usageChunk('src/Rendering/Padding.cs', ['Alignment']),
+    ];
+
+    const index = buildCSharpTypeReferenceIndex(chunks);
+
+    expect(resolveCSharpTypeReferenceDependents('src/Parsing/Alignment.cs', index)).toEqual(
+      findCSharpTypeReferenceDependents('src/Parsing/Alignment.cs', chunks),
+    );
+  });
+
+  it('resolves multiple different target files against the SAME built index without rebuilding it per target', () => {
+    const chunks: CodeChunk[] = [
+      declChunk('src/Parsing/Alignment.cs', 'Alignment'),
+      declChunk('src/Rendering/Padding.cs', 'Padding'),
+      usageChunk('test/AlignmentTests.cs', ['Alignment']),
+      usageChunk('test/PaddingTests.cs', ['Padding']),
+    ];
+
+    const index = buildCSharpTypeReferenceIndex(chunks);
+
+    expect(resolveCSharpTypeReferenceDependents('src/Parsing/Alignment.cs', index)).toEqual([
+      'test/AlignmentTests.cs',
+    ]);
+    expect(resolveCSharpTypeReferenceDependents('src/Rendering/Padding.cs', index)).toEqual([
+      'test/PaddingTests.cs',
+    ]);
   });
 });

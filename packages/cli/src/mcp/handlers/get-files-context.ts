@@ -17,12 +17,16 @@ import {
   toJavaTestCandidate,
   buildJavaTestDirIndex,
   pairJavaBasenameTest,
+  hasEnclosingNamespaceAccess,
+  buildCSharpTypeReferenceIndex,
+  resolveCSharpTypeReferenceDependents,
   MAX_CHUNKS_PER_FILE,
   DEFAULT_COMPLEXITY_DELTA_THRESHOLDS,
   type GoTestCandidate,
   type GoTestDirIndex,
   type JavaTestCandidate,
   type JavaTestDirIndex,
+  type CSharpTypeReferenceIndex,
 } from '@liendev/parser';
 import type { SearchResult, VectorDBInterface } from '@liendev/core';
 
@@ -387,6 +391,59 @@ function collectJavaBasenameTestFiles(
 }
 
 /**
+ * True when `filepath`'s language sets `enclosingNamespaceAccess` (C# today,
+ * #930/#1040) — mirrors `hasGoSameDirectoryConvention`/`hasJavaSamePackageConvention` above.
+ */
+function hasCSharpEnclosingNamespaceConvention(filepath: string): boolean {
+  const language = detectLanguage(filepath);
+  return language !== null && hasEnclosingNamespaceAccess(language);
+}
+
+/**
+ * #1040: C#'s enclosing-namespace type-reference index, built once per
+ * `findTestAssociations` call and reused for every target file below —
+ * mirrors `buildGoTestDirIndexFromChunks`/`buildJavaTestDirIndexFromChunks`
+ * immediately above. `resolveCSharpTypeReferenceDependents` needs each
+ * chunk's file keyed EXACTLY as it appears in the index (see that
+ * function's doc comment in `@liendev/parser`), so chunk paths are
+ * canonicalized to workspace-relative first — `chunk.metadata.file` can be
+ * absolute here, the same reason every other tier's index builder above
+ * calls `getCanonicalPath` before comparing against `filepath` (always
+ * workspace-relative, the tool's own argument form).
+ */
+function buildCSharpTestIndexFromChunks(
+  allChunks: SearchResult[],
+  workspaceRoot: string,
+): CSharpTypeReferenceIndex {
+  const canonicalChunks = allChunks.map(chunk => ({
+    ...chunk,
+    metadata: { ...chunk.metadata, file: getCanonicalPath(chunk.metadata.file, workspaceRoot) },
+  }));
+  return buildCSharpTypeReferenceIndex(canonicalChunks);
+}
+
+/**
+ * #1040: C#'s enclosing-namespace test convention has no basename pairing to
+ * fall back on (a C# test class's file name routinely bears no relation to
+ * the specific type(s) it covers). Reuses
+ * `resolveCSharpTypeReferenceDependents` — the SAME namespace-scoped signal
+ * `get_dependents`'s file-level recovery already relies on (#930) — filtered
+ * to the test-file subset of `filepath`'s recovered dependents. See
+ * `@liendev/parser`'s `test-associations.ts` (`collectCSharpNamespaceTests`)
+ * for the full precision reasoning; this is `get_files_context`'s own
+ * separate implementation of the identical tier.
+ */
+function collectCSharpNamespaceTestFiles(
+  filepath: string,
+  csharpIndex: CSharpTypeReferenceIndex,
+  workspaceRoot: string,
+): string[] {
+  if (!hasCSharpEnclosingNamespaceConvention(filepath)) return [];
+  const canonicalTarget = getCanonicalPath(filepath, workspaceRoot);
+  return resolveCSharpTypeReferenceDependents(canonicalTarget, csharpIndex).filter(isTestFile);
+}
+
+/**
  * Find test files that import the given source files.
  *
  * Scans all indexed chunks to find test files that have import
@@ -400,9 +457,11 @@ function collectJavaBasenameTestFiles(
  *
  * Also folds in #902 tier 1 (Go's same-directory basename-paired test
  * convention, which carries no import statement at all) — see
- * `buildGoTestDirIndexFromChunks`/`collectGoBasenameTestFiles` above — and
+ * `buildGoTestDirIndexFromChunks`/`collectGoBasenameTestFiles` above —
  * #925 tier 1 (Java's same-package equivalent) — see
- * `buildJavaTestDirIndexFromChunks`/`collectJavaBasenameTestFiles` above.
+ * `buildJavaTestDirIndexFromChunks`/`collectJavaBasenameTestFiles` above —
+ * and #1040 (C#'s enclosing-namespace equivalent) — see
+ * `buildCSharpTestIndexFromChunks`/`collectCSharpNamespaceTestFiles` above.
  *
  * @param filepaths - Array of source file paths
  * @param allChunks - All chunks from the vector database
@@ -411,13 +470,14 @@ function collectJavaBasenameTestFiles(
  */
 export function findTestAssociations(
   filepaths: string[],
-  allChunks: Array<{ metadata: { file: string; imports?: string[] } }>,
+  allChunks: SearchResult[],
   ctx: HandlerContext,
 ): string[][] {
   const { workspaceRoot } = ctx;
   const { normalize } = createPathCache(workspaceRoot);
   const goTestDirIndex = buildGoTestDirIndexFromChunks(allChunks, workspaceRoot, normalize);
   const javaTestDirIndex = buildJavaTestDirIndexFromChunks(allChunks, workspaceRoot, normalize);
+  const csharpIndex = buildCSharpTestIndexFromChunks(allChunks, workspaceRoot);
 
   return filepaths.map(filepath => {
     const normalizedTarget = normalize(filepath);
@@ -425,6 +485,7 @@ export function findTestAssociations(
       ...collectImportMatchedTestFiles(allChunks, normalizedTarget, normalize, workspaceRoot),
       ...collectGoBasenameTestFiles(filepath, normalizedTarget, goTestDirIndex),
       ...collectJavaBasenameTestFiles(filepath, normalizedTarget, javaTestDirIndex),
+      ...collectCSharpNamespaceTestFiles(filepath, csharpIndex, workspaceRoot),
     ]);
 
     return Array.from(testFiles);
