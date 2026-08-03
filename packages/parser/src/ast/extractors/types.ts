@@ -223,10 +223,11 @@ export interface LanguageImportExtractor {
 
   /**
    * Extract `require`/`require_once`/`include`/`include_once` targets that
-   * are STATICALLY resolvable to a concrete file: a plain string literal, or
-   * a `__DIR__`/`dirname(__FILE__)`/`dirname(__DIR__)`-prefixed concatenation
-   * with a literal remainder (#1009 — PHP's other file-inclusion mechanism,
-   * alongside `use`, which `importNodeTypes` above already covers).
+   * are STATICALLY resolvable to a concrete file: a plain, non-absolute
+   * string literal, or a `__DIR__`/`dirname(__FILE__)`/`dirname(__DIR__)`-
+   * prefixed concatenation with a literal remainder (#1009 — PHP's other
+   * file-inclusion mechanism, alongside `use`, which `importNodeTypes` above
+   * already covers).
    *
    * Deliberately narrower than `extractReferencedFQCNs`: a target built from
    * a variable, a bare constant, a function call other than the three
