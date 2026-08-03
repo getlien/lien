@@ -44,6 +44,7 @@ import { configGetCommand } from '../../src/cli/config.js';
 import { handleSearchCode } from '../../src/mcp/handlers/search-code.js';
 import { handleGetFilesContext } from '../../src/mcp/handlers/get-files-context.js';
 import { handleGetDependents } from '../../src/mcp/handlers/get-dependents.js';
+import { clearDependencyCache } from '../../src/mcp/handlers/dependency-analyzer.js';
 import { handleGetComplexity } from '../../src/mcp/handlers/get-complexity.js';
 import { handleListFunctions } from '../../src/mcp/handlers/list-functions.js';
 import { handleFindSimilar } from '../../src/mcp/handlers/find-similar.js';
@@ -58,7 +59,27 @@ const execFileAsync = promisify(execFile);
 // apply (never a silent omission) rather than being skipped.
 // ============================================================================
 
-type EntryPointState = 'S0' | 'S1' | 'S2' | 'S3' | 'ok' | 'n/a';
+type EntryPointState =
+  | 'S0'
+  | 'S1'
+  | 'S2'
+  | 'S3'
+  | 'ok'
+  | 'n/a'
+  // Layout axis (#1050, #1051) — orthogonal to the whole-index STATES above:
+  // a linked git worktree nested inside its own main checkout (the standard
+  // Claude Code agent-fleet layout) is backed by an `OverlayBackend`, where
+  // `dbPath` is the worktree's own writable overlay and `baseIndexDir` is the
+  // main checkout's read-only base. `worktree-fresh` = the worktree has never
+  // completed its own local `lien index` (no local overlay `structural.db`
+  // yet), but the main checkout's base IS fully populated — the exact shape
+  // both issues require. `worktree-none` = the same fresh-worktree layout,
+  // but the main checkout ALSO has never been indexed, proving the fix
+  // doesn't overcorrect a genuine S0 into a false "ok" (CLAUDE.md's hard
+  // constraint: never turn a real S0 into a false clean, and never turn a
+  // real base into a false S0 either).
+  | 'worktree-fresh'
+  | 'worktree-none';
 
 interface TableRow {
   entryPoint: string;
@@ -119,6 +140,40 @@ const TABLE: TableRow[] = [
     entryPoint: 'lien api-delta',
     state: 'ok',
     expected: 'enriched:true with real dependentCount',
+  },
+  // --- Layout axis (#1050, #1051): a FRESH linked worktree nested inside
+  //     its own main checkout, whose base index is fully populated. See the
+  //     `EntryPointState` doc comment above for the two sub-shapes.
+  {
+    entryPoint: 'lien complexity',
+    state: 'worktree-fresh',
+    expected: 'real report from the shared base — no false "Index not found" (#1051 fix)',
+  },
+  {
+    entryPoint: 'lien complexity',
+    state: 'worktree-none',
+    expected: 'still a real hard error (base also never indexed — no overcorrection)',
+  },
+  {
+    entryPoint: 'lien api-delta',
+    state: 'worktree-fresh',
+    expected: 'enriched:true with a real dependentCount from the shared base (#1051 fix)',
+  },
+  {
+    entryPoint: 'lien api-delta',
+    state: 'worktree-none',
+    expected: 'still degrades (enriched:false) — base also never indexed, no overcorrection',
+  },
+  {
+    entryPoint: 'lien annotate',
+    state: 'worktree-fresh',
+    expected: 'real dependents/tests annotation from the shared base (#1051 fix)',
+  },
+  {
+    entryPoint: 'lien path',
+    state: 'worktree-fresh',
+    expected:
+      '`path --root` resolves to the WORKTREE itself, never the outer main checkout (#1050 fix)',
   },
   // --- CLI, index-independent (never touch the structural store at all) ---
   {
@@ -320,6 +375,18 @@ describe('index-state × entry-point matrix (#1029 W1)', () => {
   let exitSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(async () => {
+    // `findDependents`'s module-level `scanCache` (dependency-analyzer.ts) is
+    // keyed ONLY by `indexVersion` (a plain number), with no project-root
+    // component — safe in production (one `lien serve` process = one root),
+    // but this file drives `get_dependents`/`annotate` against many DIFFERENT
+    // roots in rapid succession within one process. Two unrelated tests'
+    // stores can legitimately land on the same version stamp (timestamp-
+    // based), and without this reset the second test's empty/different store
+    // would silently serve the first test's cached chunks — a real, if
+    // narrow, flake surfaced by adding more indexing-heavy tests here (the
+    // worktree/overlay section below).
+    clearDependencyCache();
+
     dir = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-ism-'));
     dir = await fs.realpath(dir); // resolve macOS /var -> /private/var
     originalCwd = process.cwd();
@@ -528,6 +595,160 @@ describe('index-state × entry-point matrix (#1029 W1)', () => {
       // would make this test brittle to fixture changes.
       expect(addChange.enriched).toBe(true);
       expect(addChange.dependentCount).toBeGreaterThan(0);
+    });
+  });
+
+  // ==========================================================================
+  // Worktree/overlay layout axis (#1050, #1051) — every state proven above
+  // was against a STANDALONE index. Every one of `index-state-matrix.test.ts`'s
+  // original 36 cases (#1029 W1) ran against `dir` directly; none of them
+  // touched a linked git worktree, so this whole layout axis was invisible to
+  // the detector — exactly why #1050/#1051 shipped unnoticed.
+  //
+  // A linked worktree nested inside its own main checkout (the standard
+  // Claude Code agent-fleet layout: `<main>/.claude/worktrees/<name>` — see
+  // `docs/architecture/worktree-aware-indexing.md`) is backed by an
+  // `OverlayBackend`: `dbPath` is the worktree's own writable overlay,
+  // `baseIndexDir` is the main checkout's read-only base. Before this fix:
+  //
+  //  - #1051: `hasStructuralIndex` checked ONLY the worktree's own (not-yet-
+  //    built) overlay `structural.db`, so `lien complexity`/`lien api-delta`
+  //    reported a false S0 ("Index not found") on a fresh worktree despite a
+  //    fully populated, reachable base.
+  //  - #1050: `resolveProjectRoot`'s completed-index walk was unbounded, so
+  //    it walked straight past the worktree's own `.git` FILE (the linked-
+  //    worktree marker) to the outer main checkout's already-completed
+  //    index — silently resolving `lien path`/`annotate`/`gc`/etc. to the
+  //    WRONG repository.
+  //
+  // `worktree-none` cases prove the fix doesn't overcorrect: a fresh
+  // worktree whose base is ALSO never indexed must still report a real S0,
+  // never a false "ok".
+  // ==========================================================================
+
+  describe('worktree/overlay layout (#1050, #1051)', () => {
+    let worktreeRoot: string | undefined;
+
+    afterEach(async () => {
+      if (worktreeRoot) {
+        await execFileAsync('git', ['worktree', 'remove', '--force', worktreeRoot], {
+          cwd: dir,
+        }).catch(() => undefined);
+      }
+      worktreeRoot = undefined;
+    });
+
+    /**
+     * Create a linked worktree of `dir` (the outer `beforeEach`'s main
+     * checkout), nested inside it at `.claude/worktrees/<name>` — the exact
+     * layout that triggers #1050/#1051 — and chdir into it. The worktree's
+     * own `lien index` is deliberately never run: that "fresh" state (no
+     * local overlay build yet) is the whole point of this axis.
+     */
+    async function chdirIntoFreshNestedWorktree(): Promise<string> {
+      const wtDir = path.join(dir, '.claude', 'worktrees', 'agent-fresh');
+      await fs.mkdir(path.join(dir, '.claude', 'worktrees'), { recursive: true });
+      await git(dir, 'worktree', 'add', '-q', wtDir, '-b', 'worktree-agent-fresh');
+      worktreeRoot = await fs.realpath(wtDir);
+      process.chdir(worktreeRoot);
+      return worktreeRoot;
+    }
+
+    describe('lien complexity', () => {
+      it('worktree-fresh: real report from the shared base, not a false "Index not found" (#1051)', async () => {
+        await buildHealthyIndex(dir);
+        await chdirIntoFreshNestedWorktree();
+
+        await complexityCommand({ format: 'json' });
+
+        expect(errSpy).not.toHaveBeenCalledWith(expect.stringContaining('Index not found'));
+        const output = JSON.parse(String(logSpy.mock.calls.at(-1)?.[0]));
+        expect(output.summary.filesAnalyzed).toBeGreaterThan(0);
+        expect(output.summary.totalViolations).toBeGreaterThan(0);
+      });
+
+      it('worktree-none: still a real hard error when the base ALSO has never been indexed (no overcorrection)', async () => {
+        await initRepo(dir);
+        await fs.writeFile(path.join(dir, 'a.ts'), 'export const a = 1;\n');
+        await commitAll(dir, 'init');
+        await chdirIntoFreshNestedWorktree();
+
+        await complexityCommand({ format: 'text' });
+
+        expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('Index not found'));
+        expect(exitSpy).toHaveBeenCalledWith(1);
+      });
+    });
+
+    describe('lien api-delta', () => {
+      it('worktree-fresh: enriches with a real dependentCount from the shared base (#1051)', async () => {
+        await buildHealthyIndex(dir);
+        await chdirIntoFreshNestedWorktree();
+        // Uncommitted signature change on top of the real indexed base state
+        // — `caller.ts` is a real, already-indexed dependent of `add`.
+        await fs.writeFile(
+          path.join(worktreeRoot!, 'math.ts'),
+          [
+            'export function add(a: number, b: number, c: number): number {',
+            '  return a + b + c;',
+            '}',
+            '',
+            'export function manyBranches(x: number): number { return x; }',
+            '',
+          ].join('\n'),
+        );
+
+        await apiDeltaCommand({ format: 'json', file: 'math.ts' });
+
+        const printed = JSON.parse(String(logSpy.mock.calls.at(-1)?.[0]));
+        const addChange = printed.changes.find((c: { symbol: string }) => c.symbol === 'add');
+        expect(addChange.enriched).toBe(true);
+        expect(addChange.dependentCount).toBeGreaterThan(0);
+      });
+
+      it('worktree-none: still degrades (enriched:false) when the base ALSO has never been indexed', async () => {
+        await initRepo(dir);
+        await fs.writeFile(
+          path.join(dir, 'a.ts'),
+          'export function formatUser(user) { return user.name; }\n',
+        );
+        await commitAll(dir, 'init');
+        await chdirIntoFreshNestedWorktree();
+        await fs.writeFile(
+          path.join(worktreeRoot!, 'a.ts'),
+          'export function formatUser(user, opts) { return user.name; }\n',
+        );
+
+        await apiDeltaCommand({ format: 'json', file: 'a.ts' });
+
+        const printed = JSON.parse(String(logSpy.mock.calls.at(-1)?.[0]));
+        expect(printed.changes[0]).toMatchObject({ enriched: false, dependentCount: null });
+      });
+    });
+
+    describe('lien annotate', () => {
+      it('worktree-fresh: real dependents/tests annotation from the shared base (#1051)', async () => {
+        await buildHealthyIndex(dir);
+        await chdirIntoFreshNestedWorktree();
+
+        await annotateCommand('math.ts');
+
+        expect(allLogged()).toContain('Lien impact for math.ts');
+        expect(allLogged()).not.toContain('no index found');
+      });
+    });
+
+    describe('lien path --root', () => {
+      it('worktree-fresh: resolves to the WORKTREE itself, never the outer main checkout (#1050)', async () => {
+        await buildHealthyIndex(dir);
+        const wtRoot = await chdirIntoFreshNestedWorktree();
+
+        pathCommand({ root: true });
+
+        const printed = allLogged().trim();
+        expect(printed).toBe(wtRoot);
+        expect(printed).not.toBe(dir);
+      });
     });
   });
 

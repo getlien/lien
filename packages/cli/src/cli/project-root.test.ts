@@ -154,5 +154,35 @@ describe('resolveProjectRoot', () => {
 
       expect(resolveProjectRoot(cwd)).toBe(worktreeRoot);
     });
+
+    // #1050: the shape above ("resolves to a linked worktree root...") only
+    // covered a worktree that had ALREADY completed its own overlay build
+    // (`markIndexed(worktreeRoot)`). The actual bug is the FRESH worktree —
+    // no local overlay build yet, so `hasCompletedIndex(worktreeRoot)` is
+    // false — sitting inside a main checkout that DOES have a completed
+    // index. The old two-separate-passes implementation ran the completed-
+    // index walk fully unbounded, so it walked straight past the worktree's
+    // own `.git` file to the main checkout's completed index, silently
+    // resolving every annotate/gc/path/etc. call to the WRONG repository.
+    it('#1050: resolves to the fresh worktree root, not the main checkout, even though only the main checkout has a completed index', async () => {
+      const mainCheckout = await fs.realpath(tmp);
+      await fs.mkdir(path.join(mainCheckout, '.git'));
+      await markIndexed(mainCheckout); // the main checkout HAS a completed index...
+
+      const worktreeRoot = path.join(mainCheckout, '.claude', 'worktrees', 'agent-fresh');
+      await fs.mkdir(worktreeRoot, { recursive: true });
+      await fs.writeFile(
+        path.join(worktreeRoot, '.git'),
+        `gitdir: ${path.join(mainCheckout, '.git', 'worktrees', 'agent-fresh')}\n`,
+      );
+      // ...but the worktree itself does NOT — no markIndexed(worktreeRoot)
+      // call. This is the "fresh, not-yet-locally-indexed" state #1050 is
+      // about.
+
+      const cwd = path.join(worktreeRoot, 'packages', 'cli', 'src');
+      await fs.mkdir(cwd, { recursive: true });
+
+      expect(resolveProjectRoot(cwd)).toBe(worktreeRoot);
+    });
   });
 });
