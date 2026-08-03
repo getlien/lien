@@ -384,11 +384,13 @@ class RetryMiddlewareTest {
     // require/include static-target scanning (#1009): PHP's OTHER
     // file-inclusion mechanism, alongside `use`. `require`/`include` are
     // expressions (not declarations), so most call sites are only resolvable
-    // at runtime -- only a plain literal or a `__DIR__`/`dirname(__FILE__)`
-    // -prefixed one is statically decidable. This method only returns a
-    // `./`-prefixed specifier; the existence check that decides whether it
-    // becomes a real edge lives one layer up (`appendStaticRequireTargets` in
-    // `ast/symbols.ts`, exercised in `chunker.test.ts`).
+    // at runtime -- only a plain literal, a `__DIR__`/`dirname(__FILE__)`
+    // -prefixed one, or a `dirname(__DIR__)`-prefixed one (the file's PARENT
+    // directory) is statically decidable. This method only returns a
+    // `./`- or `../`-prefixed specifier; the existence check that decides
+    // whether it becomes a real edge lives one layer up
+    // (`appendStaticRequireTargets` in `ast/symbols.ts`, exercised in
+    // `chunker.test.ts`).
     describe('extractStaticRequireTargets (require/include static targets, #1009)', () => {
       it('resolves a plain string literal relative to the containing file', () => {
         const code = `<?php

@@ -85,10 +85,11 @@ function parseAndValidate(filepath: string, content: string) {
  * same way JS/TS specifiers are.
  *
  * Includes PHP (#1009): `PHPImportExtractor.extractStaticRequireTargets`
- * emits a `./`-prefixed specifier for a statically-resolvable
- * `require`/`include` target (a plain literal, or one prefixed with
- * `__DIR__`/`dirname(__FILE__)`) — a genuine filesystem-relative-to-this-
- * file relationship, same shape as JS/TS's own relative imports. PHP's OTHER
+ * emits a `./`- or `../`-prefixed specifier for a statically-resolvable
+ * `require`/`include` target (a plain literal, one prefixed with
+ * `__DIR__`/`dirname(__FILE__)`, or one prefixed with `dirname(__DIR__)` --
+ * the file's PARENT directory) — a genuine filesystem-relative-to-this-file
+ * relationship, same shape as JS/TS's own relative imports. PHP's OTHER
  * import form (`use` statements, namespace-qualified, resolved via
  * `matchesPHPNamespace`/PSR-4 instead) never produces a `./`/`../`-prefixed
  * specifier, so adding PHP here has zero effect on it —
