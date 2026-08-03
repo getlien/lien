@@ -102,8 +102,17 @@ import { isMultiSegmentIdentifier } from './swift-symbol-usage-signals.js';
  * living in a subdirectory. Mirrors the same "go.mod lives at the workspace
  * root" assumption `resolveGoModulePrefix` already makes (it reads
  * `<workspaceRoot>/go.mod` directly, never searching subdirectories).
+ *
+ * Exported so `findGoRootPackageDependents` can early-return BEFORE building
+ * the project-wide index for any non-root target (a subpackage file can
+ * never own a recovered dependent via this signal -- see
+ * `buildRootExportOwners`, which already filters its OWNER side to
+ * root-level files) -- a perf fix (review finding on #1039's PR): without
+ * this check here, every zero-dependent Go query paid a full
+ * `groupGoChunksByFile` + `buildRootExportOwners` project scan just to be
+ * told `[]`, not only root-level queries.
  */
-function isRootLevelGoFile(file: string): boolean {
+export function isRootLevelGoFile(file: string): boolean {
   const normalized = file.replace(/\\/g, '/').replace(/^\.\//, '');
   return detectLanguage(normalized) === 'go' && !normalized.includes('/');
 }
@@ -241,12 +250,22 @@ export function resolveGoRootPackageDependents(
  * MANY target files against the same chunk set should build the index once
  * themselves instead of calling this in a loop -- see `GoRootPackageIndex`'s
  * doc comment.
+ *
+ * Short-circuits BEFORE `buildGoRootPackageIndex`'s project-wide scan for any
+ * non-Go OR non-root-level target -- a subpackage file can never own a
+ * recovered dependent via this signal (`buildRootExportOwners` only ever
+ * populates owners for root-level files), so there is no reason to pay a
+ * full `groupGoChunksByFile` + `buildRootExportOwners` scan just to
+ * rediscover that and return `[]`. This is the guard
+ * `enrichWithGoRootPackageDependents` (`dependency-analyzer.ts`) documents
+ * itself as relying on to skip the corpus-wide index rebuild for a
+ * non-root-level query.
  */
 export function findGoRootPackageDependents(
   targetFile: string,
   chunks: CodeChunk[],
   workspaceRoot: string,
 ): string[] {
-  if (detectLanguage(targetFile) !== 'go') return [];
+  if (detectLanguage(targetFile) !== 'go' || !isRootLevelGoFile(targetFile)) return [];
   return resolveGoRootPackageDependents(targetFile, buildGoRootPackageIndex(chunks, workspaceRoot));
 }

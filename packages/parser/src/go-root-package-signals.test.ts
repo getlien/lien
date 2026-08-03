@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
@@ -6,9 +6,19 @@ import {
   findGoRootPackageDependents,
   buildGoRootPackageIndex,
   resolveGoRootPackageDependents,
+  isRootLevelGoFile,
 } from './go-root-package-signals.js';
-import { clearGoModuleCache } from './go-module.js';
+import { clearGoModuleCache, resolveGoModulePrefix } from './go-module.js';
 import type { CodeChunk } from './types.js';
+
+// Wraps (not replaces) `resolveGoModulePrefix` with a spy so the perf-guard
+// tests below can observe whether `buildGoRootPackageIndex` -- whose very
+// first statement calls this function -- ran at all, while every other test
+// in this file keeps getting the real go.mod-reading behavior unchanged.
+vi.mock('./go-module.js', async importOriginal => {
+  const actual = await importOriginal<typeof import('./go-module.js')>();
+  return { ...actual, resolveGoModulePrefix: vi.fn(actual.resolveGoModulePrefix) };
+});
 
 const MODULE_PREFIX = 'github.com/go-chi/chi/v5';
 
@@ -195,5 +205,58 @@ describe('findGoRootPackageDependents', () => {
     expect(resolveGoRootPackageDependents('context.go', index)).toEqual([
       'middleware/clean_path.go',
     ]);
+  });
+});
+
+describe('findGoRootPackageDependents root-level guard (perf: no project-wide scan for a non-root target)', () => {
+  let workspaceRoot: string;
+
+  beforeEach(async () => {
+    workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-test-go-root-pkg-guard-'));
+    await fs.writeFile(path.join(workspaceRoot, 'go.mod'), `module ${MODULE_PREFIX}\n\ngo 1.21\n`);
+    vi.mocked(resolveGoModulePrefix).mockClear();
+  });
+
+  afterEach(async () => {
+    clearGoModuleCache();
+    await fs.rm(workspaceRoot, { recursive: true, force: true }).catch(() => {});
+  });
+
+  it("short-circuits for a non-root-level Go target WITHOUT building the project-wide index -- resolveGoModulePrefix (buildGoRootPackageIndex's own first statement) never runs", () => {
+    const chunks: CodeChunk[] = [
+      makeChunk({ file: 'context.go', exports: ['RouteContext'] }),
+      makeChunk({
+        file: 'middleware/clean_path.go',
+        imports: [MODULE_PREFIX],
+        callSites: ['RouteContext'],
+      }),
+    ];
+
+    expect(findGoRootPackageDependents('middleware/clean_path.go', chunks, workspaceRoot)).toEqual(
+      [],
+    );
+    expect(resolveGoModulePrefix).not.toHaveBeenCalled();
+  });
+
+  it('sanity check: the same spy DOES fire for a genuine root-level query (proves the assertion above pins a real guard, not a broken mock)', () => {
+    const chunks: CodeChunk[] = [
+      makeChunk({ file: 'context.go', exports: ['RouteContext'] }),
+      makeChunk({
+        file: 'middleware/clean_path.go',
+        imports: [MODULE_PREFIX],
+        callSites: ['RouteContext'],
+      }),
+    ];
+
+    expect(findGoRootPackageDependents('context.go', chunks, workspaceRoot)).toEqual([
+      'middleware/clean_path.go',
+    ]);
+    expect(resolveGoModulePrefix).toHaveBeenCalledWith(workspaceRoot);
+  });
+
+  it('isRootLevelGoFile correctly distinguishes a root file from a subpackage file and a non-Go file', () => {
+    expect(isRootLevelGoFile('context.go')).toBe(true);
+    expect(isRootLevelGoFile('middleware/clean_path.go')).toBe(false);
+    expect(isRootLevelGoFile('src/context.ts')).toBe(false);
   });
 });

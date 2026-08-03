@@ -183,6 +183,7 @@ export {
   findGoRootPackageDependents,
   buildGoRootPackageIndex,
   resolveGoRootPackageDependents,
+  isRootLevelGoFile,
 } from './go-root-package-signals.js';
 export type { GoRootPackageIndex } from './go-root-package-signals.js';
 
