@@ -171,4 +171,12 @@ describe('resolveJvmSourceRootImport', () => {
       'src/main/java/com/example/Foo',
     );
   });
+
+  it('resolves a real FQN with Unicode package/class names (JLS/Kotlin permit non-ASCII identifiers)', async () => {
+    await writeFile('src/main/java/例/クラス/Foo.java', 'package 例.クラス;');
+    const roots = resolveJvmSourceRoots(testDir);
+    expect(resolveJvmSourceRootImport('例.クラス.Foo', roots, testDir)).toBe(
+      'src/main/java/例/クラス/Foo',
+    );
+  });
 });

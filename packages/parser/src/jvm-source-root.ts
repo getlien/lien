@@ -130,8 +130,16 @@ export function resolveJvmSourceRoots(workspaceRoot: string): string[] {
   return roots;
 }
 
-/** Only a bare/dotted Java or Kotlin identifier path -- excludes anything already slash- or dot-relative. */
-const DOTTED_FQN_PATTERN = /^[A-Za-z_]\w*(\.[A-Za-z_]\w*)*$/;
+/**
+ * Only a bare/dotted Java or Kotlin identifier path -- excludes anything
+ * already slash- or dot-relative. Unicode-aware (`\p{L}` letters, `\p{N}`
+ * digits, plus `_`/`$`): both languages' specs permit any Unicode letter in
+ * an identifier (JLS §3.8; Kotlin's grammar mirrors it), not just ASCII --
+ * `[A-Za-z_]\w*` would silently leave a real, existing, non-ASCII-named
+ * class (e.g. `例.クラス.Foo`) unresolved even when its file exists on disk.
+ * `$` is included since it's a legal (if unusual) Java identifier character.
+ */
+const DOTTED_FQN_PATTERN = /^[\p{L}_$][\p{L}\p{N}_$]*(?:\.[\p{L}_$][\p{L}\p{N}_$]*)*$/u;
 
 /** File extensions checked for each candidate, covering mixed-language Gradle modules (see module doc comment). */
 const JVM_EXTENSIONS = ['java', 'kt'] as const;
