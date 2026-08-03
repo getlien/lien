@@ -371,10 +371,22 @@ function computeSwiftSymbolUsageFallback(
  * `findCSharpTypeReferenceDependents` -- the SAME namespace-scoped signal
  * `get_dependents`'s file-level recovery already relies on (#930/#943) --
  * filtered down to the TEST-file subset of `filepath`'s recovered
- * dependents. Measured on serilog/serilog: 116/216 (54%) of files gain a
- * recovered test-file dependent this way, cutting the previous 100%
- * "test coverage not determinable" figure roughly in half. Deliberately NOT
- * merged into `tests` itself, mirroring every other fallback tier here.
+ * dependents. Originally measured on serilog/serilog: 116/216 (54%) of files
+ * gained a recovered test-file dependent this way, cutting the previous 100%
+ * "test coverage not determinable" figure roughly in half.
+ *
+ * #1040 note: this tier is now PROVABLY UNREACHABLE (always returns `[]`).
+ * `test-associations.ts`'s `findTestAssociationsFromChunks` -- which
+ * produces `tests` above -- now folds this exact same
+ * `findCSharpTypeReferenceDependents(filepath, allChunks).filter(isTestFile)`
+ * computation directly into its own result set (`collectCSharpNamespaceTests`),
+ * using the identical `filepath`/`allChunks`. So whenever this function's own
+ * `if (tests.length > 0) return [];` guard would fall through, its
+ * subsequent computation is guaranteed to reproduce a `[]` that already
+ * informed `tests` being empty in the first place. Kept as dead code for now
+ * rather than folded into this PR's scope -- removing it means also
+ * unwinding `csharpTypeReferenceTests`'s ~13 call sites through
+ * `AnnotationData`/`formatTests`/the tests-only path, a separate cleanup.
  */
 function computeCSharpTypeReferenceTestFallback(
   tests: string[],

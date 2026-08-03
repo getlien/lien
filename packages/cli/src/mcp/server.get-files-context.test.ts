@@ -33,6 +33,41 @@ function mockSearchResult(file: string, imports?: string[]): SearchResult {
 }
 
 /**
+ * #1040: a real C# type declaration/usage `SearchResult`, optionally
+ * namespaced (a `namespace X;` line prefixed into content) -- mirrors
+ * `@liendev/parser`'s own `csharp-type-reference-signals.test.ts` helpers,
+ * needed here because `findTestAssociations`'s C# tier
+ * (`collectCSharpNamespaceTestFiles`) reads `content`/`symbolType`/`symbolName`,
+ * not just `metadata.file`/`imports` like the plain `mockSearchResult` above.
+ */
+function mockCSharpChunk(opts: {
+  file: string;
+  symbolName: string;
+  namespace?: string;
+  declares?: boolean;
+  references?: string[];
+}): SearchResult {
+  const nsPrefix = opts.namespace ? `namespace ${opts.namespace};\n\n` : '';
+  const body = opts.declares
+    ? `public class ${opts.symbolName} { }`
+    : (opts.references ?? []).map(name => `var x = new ${name}();`).join('\n');
+  return {
+    content: `${nsPrefix}${body}`,
+    metadata: {
+      file: opts.file,
+      startLine: 1,
+      endLine: 10,
+      type: opts.declares ? 'class' : 'function',
+      language: 'csharp',
+      symbolName: opts.symbolName,
+      symbolType: opts.declares ? 'class' : 'method',
+    },
+    score: 0,
+    relevance: 'not_relevant',
+  };
+}
+
+/**
  * Unit tests for get_files_context handler and helper functions.
  *
  * Tests cover:
@@ -397,6 +432,37 @@ describe('get_files_context - Helper Functions', () => {
       const result = findTestAssociations(['src/auth.ts'], mockChunks, ctx);
 
       expect(result[0]).toHaveLength(0);
+    });
+
+    // #1040: C#'s enclosing-namespace test convention has no import
+    // statement AND no basename relationship to its subject (unlike Go/Java's
+    // tiers above) -- see `collectCSharpNamespaceTestFiles`.
+    it('associates a C# test file with its subject via enclosing-namespace access, with no import and no basename match (#1040)', () => {
+      const mockChunks = [
+        mockCSharpChunk({
+          file: 'src/MediatR/IRequestHandler.cs',
+          symbolName: 'IRequestHandler',
+          namespace: 'MediatR',
+          declares: true,
+        }),
+        mockCSharpChunk({
+          file: 'test/MediatR.Tests/PipelineTests.cs',
+          symbolName: 'TestMethod',
+          namespace: 'MediatR.Tests',
+          references: ['IRequestHandler'],
+        }),
+      ];
+
+      const ctx = {
+        vectorDB: {} as any,
+        embeddings: {} as any,
+        log: vi.fn(),
+        workspaceRoot,
+      };
+
+      const result = findTestAssociations(['src/MediatR/IRequestHandler.cs'], mockChunks, ctx);
+
+      expect(result[0]).toEqual(['test/MediatR.Tests/PipelineTests.cs']);
     });
   });
 
