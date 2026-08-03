@@ -16,7 +16,7 @@ name: Lien Review
 # fail-on defaults to 'never' (fully advisory) for every OTHER consumer, so
 # the check stays green whenever the action *runs*; findings show as
 # annotations + comments only. This repo's own PRs opt into `fail-on: error`
-# below (INPUT_FAIL_ON in the "Run Lien Review" step's env, as of #1068) — see
+# below (INPUT_FAIL_ON in the "Run Lien Review" step's env, as of #1070) — see
 # that var's comment for why 'error' and not 'any'. One consequence worth
 # knowing: because this is `pull_request` (not `pull_request_target`), a PR
 # that edits this file gates itself using ITS OWN edited copy of the workflow,
@@ -88,13 +88,19 @@ jobs:
           # directories, and its `dirname($p, 2)` misresolution; a third in
           # #1069), all three caught only by findings this check reported as
           # success, because this repo had never opted out of the advisory
-          # default. 'error' fails the job only on a `failure` conclusion — a
-          # non-complexity error-severity (🔴) finding, or a complexity
-          # violation the PR introduced/worsened (engine.ts's
-          # `determineConclusion`) — and never on warnings (🟡). Deliberately
-          # not 'any': #1063 alone produced 9 findings across 5 rounds, 8 of
-          # them warnings, so failing on warnings too would routinely block
-          # PRs on non-blocking findings.
+          # default. Two independent things can make this exit non-zero:
+          # (1) a `failure` conclusion from engine.ts's `determineConclusion`
+          # — a non-complexity error-severity (🔴) finding, or a complexity
+          # violation the PR introduced/worsened — which is what `fail-on`
+          # actually gates on, and never fires on warnings (🟡) alone; and
+          # (2) index.ts's `exitCodeFor` failing unconditionally, REGARDLESS
+          # of `fail-on` (including this repo's 'error'), on an operational
+          # shortfall — a total LLM-provider failure (`providerFailure`) or
+          # an incomplete main pass (`incompleteMainPass`) — since neither is
+          # an advisory finding to gate on; there was no review to advise
+          # from. Deliberately not 'any' for (1): #1063 alone produced 9
+          # findings across 5 rounds, 8 of them warnings, so failing on
+          # warnings too would routinely block PRs on non-blocking findings.
           INPUT_FAIL_ON: 'error'
           # Dedicated candidate-loop passes (stale-duplicate-pass.ts,
           # incomplete-handling-pass.ts) — dark/opt-in for @liendev/review
