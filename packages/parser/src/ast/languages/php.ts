@@ -396,10 +396,12 @@ export class PHPImportExtractor implements LanguageImportExtractor {
    * `require`/`include` targets that are statically resolvable to a concrete
    * path relative to this file's own directory. See
    * `LanguageImportExtractor.extractStaticRequireTargets`'s doc comment for
-   * the full contract; only two shapes are accepted here:
+   * the full contract; only three shapes are accepted here:
    * - A plain, non-absolute string literal (`require 'includes/foo.php';`).
    * - `__DIR__`/`dirname(__FILE__)` concatenated with a literal
    *   (`require_once __DIR__ . '/../vendor/autoload.php';`).
+   * - `dirname(__DIR__)` concatenated with a literal -- the file's PARENT
+   *   directory (`require_once dirname(__DIR__) . '/wp-load.php';`).
    * Everything else (a variable, a bare constant, an arbitrary function
    * call, an interpolated string, a ternary, ...) is left for the caller to
    * skip entirely — see `resolveStaticRequireTarget`.
@@ -447,7 +449,7 @@ export class PHPImportExtractor implements LanguageImportExtractor {
 
   /**
    * Resolves a require/include target expression to a `./`-prefixed
-   * specifier, or `null` when it isn't one of the two statically-decidable
+   * specifier, or `null` when it isn't one of the three statically-decidable
    * shapes this method accepts.
    */
   private resolveStaticRequireExpression(node: SyntaxNode): string | null {
@@ -520,20 +522,32 @@ export class PHPImportExtractor implements LanguageImportExtractor {
    * same corpus that motivated the `dirname(__DIR__)` case, confined to a
    * single vendored library) -- left as an honest, documented remainder
    * rather than added speculatively.
+   *
+   * Matches `__DIR__`/`__FILE__`/`dirname` case-INSENSITIVELY (confirmed
+   * empirically against a real PHP 8.4 interpreter, #1009 Lien Review
+   * finding): PHP's magic constants and its built-in function names are both
+   * case-insensitive at the language level -- `__dir__`, `__Dir__`, and
+   * `Dirname(__FILE__)` all behave identically to their canonical-case
+   * spelling. A case-sensitive comparison would silently under-resolve any
+   * legacy PHP file using non-canonical casing, which is exactly the kind of
+   * codebase this fix targets -- a MISS, not a fabrication risk, since it
+   * only means falling through to `null` (skip) rather than producing a
+   * wrong answer.
    */
   private dirLevelOf(node: SyntaxNode): number | null {
-    if (node.type === 'name' && node.text === '__DIR__') return 0;
+    if (node.type === 'name' && node.text.toLowerCase() === '__dir__') return 0;
     if (node.type !== 'function_call_expression') return null;
 
     const fn = node.childForFieldName('function');
-    if (fn?.type !== 'name' || fn.text !== 'dirname') return null;
+    if (fn?.type !== 'name' || fn.text.toLowerCase() !== 'dirname') return null;
 
     const args = node.childForFieldName('arguments');
     const firstArg = args?.namedChildren[0];
     const value = firstArg?.type === 'argument' ? firstArg.namedChildren[0] : firstArg;
     if (value?.type !== 'name') return null;
-    if (value.text === '__FILE__') return 0;
-    if (value.text === '__DIR__') return 1;
+    const valueText = value.text.toLowerCase();
+    if (valueText === '__file__') return 0;
+    if (valueText === '__dir__') return 1;
     return null;
   }
 

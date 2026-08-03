@@ -420,6 +420,25 @@ require_once dirname( __DIR__ ) . '/wp-load.php';`;
         expect(importExtractor.extractStaticRequireTargets(root)).toEqual(['../wp-load.php']);
       });
 
+      it('resolves non-canonical-case magic constants and `dirname` the same way (PHP is case-insensitive, Lien Review finding)', () => {
+        // Confirmed empirically against a real PHP 8.4 interpreter: __dir__,
+        // __file__, and Dirname()/DIRNAME() all behave identically to their
+        // canonical-case spelling -- PHP magic constants and built-in
+        // function names are both case-insensitive at the language level.
+        const code = `<?php
+require __dir__ . '/config.php';
+require dirname(__file__) . '/other.php';
+require Dirname(__FILE__) . '/third.php';
+require DIRNAME(__DIR__) . '/fourth.php';`;
+        const root = mustParse(code, 'php');
+        expect(importExtractor.extractStaticRequireTargets(root)).toEqual([
+          './config.php',
+          './other.php',
+          './third.php',
+          '../fourth.php',
+        ]);
+      });
+
       it('skips a bare-constant concatenation even when it names a directory-shaped constant (WordPress ABSPATH repro)', () => {
         // ABSPATH is assigned dynamically in wp-load.php -- not a lexical
         // compile-time constant like `__DIR__`, so it is NOT one of the
