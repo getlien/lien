@@ -72,10 +72,13 @@ interface ProjectConfig {
    * did for Monolog/#1002 and Rust `mod`/#1000), not to pin an exact count
    * that churns as corpora move or matching improves.
    *
-   * Java/Kotlin/Swift are a different case: see `KNOWN_ZERO_EDGE_LANGUAGES`
-   * below -- those three genuinely resolve zero edges today (#1005, a real
-   * open gap), so their floor is asserted as an exact-zero tripwire instead
-   * of a `>=` floor.
+   * Swift is a different case: see `KNOWN_ZERO_EDGE_LANGUAGES` below -- it
+   * genuinely resolves zero edges today (#1005, a real open gap structurally
+   * unaffected by #1046's fix), so its floor is asserted as an exact-zero
+   * tripwire instead of a `>=` floor. Java and Kotlin graduated out of that
+   * set (#1046) and now have real floors below, deliberately tighter than
+   * this general guidance (~50% of measured, not "far below") since both
+   * numbers are small enough that a loose floor would defeat the point.
    */
   expectedMinDependencyEdges: number;
   /**
@@ -134,8 +137,20 @@ interface ProjectConfig {
  * floor like every other language already has. Do not "fix" the failure by
  * loosening this back to `>= 0` without first confirming #1005 actually
  * landed.
+ *
+ * Java and Kotlin graduated out of this set (#1046 -- #1005 Mechanism 1):
+ * dotted FQN imports now resolve to real files via a conventional
+ * Maven/Gradle source-root strip (`../../parser/src/jvm-source-root.ts`), so
+ * both now have real `expectedMinDependencyEdges` floors below instead.
+ *
+ * Swift stays in this set -- Mechanism 1's fix doesn't touch it. Swift sets
+ * `wholeModuleImports: true` (whole-file `import ModuleName` carries no
+ * per-file specifier at all, #869/#884), so there is no dotted FQN for a
+ * source-root strip to resolve in the first place; SwiftyJSON measures
+ * genuinely, stably zero edges before and after this fix (confirmed by
+ * direct measurement, not assumed).
  */
-const KNOWN_ZERO_EDGE_LANGUAGES = new Set(['java', 'kotlin', 'swift']);
+const KNOWN_ZERO_EDGE_LANGUAGES = new Set(['swift']);
 
 /**
  * Languages where `findTestAssociationsFromChunks` resolves ZERO test
@@ -288,15 +303,23 @@ const TEST_PROJECTS: ProjectConfig[] = [
     expectedMinFiles: 10,
     expectedMinChunks: 100,
     sampleSearchQuery: 'generate java source code',
-    // KNOWN GAP: #1005 -- Java resolves 0 dependency edges today. See
-    // KNOWN_ZERO_EDGE_LANGUAGES: this is asserted as an exact-zero tripwire,
-    // not a floor, elsewhere in this file.
-    expectedMinDependencyEdges: 0,
+    // #1046 (#1005 Mechanism 1 fix): measured 18 edges / 40 orphans out of 43
+    // files (93.0% orphan rate), stable across 5 repeated index+measure runs
+    // (2026-08). Floor is ~50% of measured (9), tight enough to catch a
+    // roughly-half collapse, not just a total-collapse-to-zero (#1053).
+    // JavaPoet's own package (`com/squareup/javapoet`) is a single flat
+    // directory -- ALL 43 files share one package, so most cross-file
+    // references carry no import at all (Mechanism 2, #1005's OTHER,
+    // out-of-scope gap) and this corpus stays mostly orphaned even with a
+    // perfect Mechanism-1 fix; do not misread the still-high orphan rate as
+    // this fix not working. The resolved edges are real: JavaPoet's ~13 test
+    // files DO cross-package-import their subjects under `src/test/java` ->
+    // `src/main/java`, and those now resolve.
+    expectedMinDependencyEdges: 9,
     expectedMinComplexityViolations: 5, // measured ~19 (2026-08)
-    // NOT a KNOWN_ZERO_TESTASSOC_LANGUAGES tripwire, despite Java being
-    // zero-edge above: `samePackageTestConvention` (#925) covers test
-    // association only, not dependents -- measured ~13 across 43 files
-    // (2026-08), a real non-zero floor.
+    // NOT a KNOWN_ZERO_TESTASSOC_LANGUAGES tripwire: `samePackageTestConvention`
+    // (#925) covers test association only, not dependents -- measured ~13
+    // across 43 files (2026-08), a real non-zero floor.
     expectedMinTestAssociations: 2,
     expectedMinChunksWithExports: 100, // measured ~892/951 chunks (2026-08)
     knownSymbolQuery: 'TypeSpec',
@@ -361,10 +384,29 @@ const TEST_PROJECTS: ProjectConfig[] = [
     expectedMinFiles: 40, // ~101 indexed (src/main + tests)
     expectedMinChunks: 250, // AST chunking yields ~960 (fun/class/object per chunk)
     sampleSearchQuery: 'parse json string into an object',
-    // KNOWN GAP: #1005 -- Kotlin resolves 0 dependency edges today. See
-    // KNOWN_ZERO_EDGE_LANGUAGES: this is asserted as an exact-zero tripwire,
-    // not a floor, elsewhere in this file.
-    expectedMinDependencyEdges: 0,
+    // #1046 (#1005 Mechanism 1 fix): measured 4 edges / 97 orphans out of a
+    // 100-file sample (97.0% orphan rate), stable across 5 repeated
+    // index+measure runs (2026-08). Floor is 2 (~50% of measured), tight
+    // enough to catch a roughly-half collapse rather than only total
+    // collapse-to-zero (#1053).
+    //
+    // The orphan rate stays high even with a correct fix, for two DIFFERENT
+    // reasons neither of which this fix addresses: (1) Klaxon's ~104 files
+    // sit almost entirely in one package (`com.beust.klaxon`), so most
+    // cross-file references carry no import at all -- #1005's Mechanism 2,
+    // out of scope here; (2) of Klaxon's own real cross-package `import`
+    // lines, most are either wildcard (`import com.beust.klaxon.token.*`,
+    // 3 occurrences) or a top-level-function import
+    // (`import com.beust.klaxon.internal.firstNotNullResult`) rather than a
+    // class -- both deliberately unresolved: a wildcard names a package
+    // directory, not a single file, and Kotlin's import extractor has no
+    // static-member-style fallback to tell a function import apart from a
+    // truncated package path (see `KotlinImportExtractor`'s own doc comment
+    // in `ast/languages/kotlin.ts`), so guessing either would risk exactly
+    // the #928 fabrication this fix was built to avoid. The 4 resolved edges
+    // are the real, verified count of Klaxon's class-level cross-package
+    // imports (`ConverterFinder`, `Token`, `Converter`).
+    expectedMinDependencyEdges: 2,
     expectedMinComplexityViolations: 3, // measured ~16 (2026-08)
     // KNOWN GAP: #1005's `sameUnitAccessWithoutImport` -- "no verified
     // Kotlin Gradle test-source recovery exists". See
