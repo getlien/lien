@@ -8,6 +8,7 @@ import { resolvePsr4Import } from '../php-psr4.js';
 import { resolveGoModuleImport } from '../go-module.js';
 import { resolvePythonSrcLayoutImport } from '../python-src-layout.js';
 import { resolveJsDirectoryIndex } from '../js-directory-index.js';
+import { resolveJvmSourceRootImport } from '../jvm-source-root.js';
 
 /**
  * Per-project manifest-declared import-root mappings, threaded through as a
@@ -65,6 +66,14 @@ export interface ManifestRoots {
    * of being applied as post-extraction string resolution.
    */
   rustCrateMap?: ReadonlyMap<string, string>;
+  /**
+   * Java/Kotlin conventional Maven/Gradle source-set directories (#1046 /
+   * #1005 Mechanism 1) — e.g. `src/main/java`, `klaxon/src/main/kotlin` for a
+   * multi-module build. See `../jvm-source-root.ts`. Consumed by
+   * `resolveManifestRoot` below, disambiguated against `workspaceRoot` the
+   * same way `psr4Map` is (an existence check, not a bare textual join).
+   */
+  jvmSourceRoots?: readonly string[];
 }
 
 /**
@@ -192,6 +201,13 @@ function resolveManifestRoot(specifier: string, manifestRoots: ManifestRoots | u
     return resolvePythonSrcLayoutImport(
       specifier,
       manifestRoots.pythonSrcLayoutRoot,
+      manifestRoots.workspaceRoot,
+    );
+  }
+  if (manifestRoots.jvmSourceRoots) {
+    return resolveJvmSourceRootImport(
+      specifier,
+      manifestRoots.jvmSourceRoots,
       manifestRoots.workspaceRoot,
     );
   }

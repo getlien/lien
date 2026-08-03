@@ -622,6 +622,18 @@ export const javaDefinition: LanguageDefinition = {
   // (`path.split('.')`, never converted to `/`), so a Java import never
   // reaches `matchesAtBoundaryPrecise`'s slash-based multi-segment branch
   // this flag gates at all.
+  //
+  // #1046: `JavaImportExtractor`'s raw dotted output is now resolved to a
+  // concrete slash path UPSTREAM of `matchesFile` entirely, when it names a
+  // real file under a conventional Maven/Gradle source set (see
+  // `../../jvm-source-root.ts`, wired through `resolveImportSpecifier` in
+  // `../symbols.ts`). That resolved path is an exact match for its own real
+  // target, so it never needs this flag's multi-segment leniency to resolve
+  // correctly -- an UNRESOLVED (still-dotted) specifier still never reaches
+  // this branch at all, exactly as before. `false` remains the correct value
+  // either way: nothing about this fix makes Java's bare multi-segment
+  // slash specifiers (there are none -- Java has no such form) behave like
+  // Ruby's single-file convention.
   singleFileImports: false,
   // `namespaceStyleImports: false`: Java package/directory mirroring
   // (`com.squareup.javapoet` -> `com/squareup/javapoet/`) is case-sensitive

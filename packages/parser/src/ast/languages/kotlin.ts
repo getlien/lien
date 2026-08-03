@@ -556,17 +556,21 @@ export const kotlinDefinition: LanguageDefinition = {
   // `StateMachine.kt:3-4`'s `import com.beust.klaxon.token.Token` both
   // resolve to real directories (`com/beust/klaxon/internal/`,
   // `com/beust/klaxon/token/`, confirmed on disk). Note this is orthogonal to
-  // #1005's separate, already-documented zero-edge gap
-  // (`KNOWN_ZERO_EDGE_LANGUAGES` in the E2E suite) -- Kotlin's dotted
-  // specifiers never get slash-converted, so they don't reach `matchesFile`'s
-  // slash-oriented strategies at all today regardless of this flag; that gap
-  // is `sameUnitAccessWithoutImport`'s territory (out of scope here), not
-  // these three matcher-path fields.
+  // #1005's Mechanism 2 (`sameUnitAccessWithoutImport` below,
+  // same-package-with-no-import-at-all -- still out of scope for this fix)
+  // -- these three matcher-path fields are unaffected either way, since
+  // Mechanism 1's fix (#1046 -- Kotlin's dotted specifiers, like Java's, now
+  // resolve to a concrete slash path UPSTREAM of `matchesFile`, via
+  // `../../jvm-source-root.ts`) doesn't touch any of the three flags below.
   wholeModuleImports: false,
   // `singleFileImports: false`: inapplicable, not merely unconfirmed --
   // `KotlinImportExtractor` stores the raw DOTTED path (mirrors Java's
-  // `JavaImportExtractor`), never converted to `/`, so it never reaches this
-  // flag's slash-based multi-segment branch.
+  // `JavaImportExtractor`). #1046 resolves that dotted path to a concrete
+  // slash path BEFORE it ever reaches `matchesFile` (see `wholeModuleImports`'s
+  // comment just above), and the resolved path is an exact match for its own
+  // real target -- so it never needs this flag's multi-segment leniency
+  // either. An unresolved (still-dotted) specifier still never reaches this
+  // branch at all.
   singleFileImports: false,
   // `namespaceStyleImports: false`: Kotlin package/directory mirroring is
   // case-sensitive, confirmed exact-case in this corpus
