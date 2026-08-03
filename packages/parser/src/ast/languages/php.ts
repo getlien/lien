@@ -448,7 +448,7 @@ export class PHPImportExtractor implements LanguageImportExtractor {
   }
 
   /**
-   * Resolves a require/include target expression to a `./`-prefixed
+   * Resolves a require/include target expression to a `./`- or `../`-prefixed
    * specifier, or `null` when it isn't one of the three statically-decidable
    * shapes this method accepts.
    */
@@ -517,11 +517,20 @@ export class PHPImportExtractor implements LanguageImportExtractor {
    *   `wp-load.php`, not lexically tied to the current file's location).
    *
    * Deliberately does not recurse into further nesting
-   * (`dirname(dirname(__FILE__))`) or PHP 8's two-argument `dirname($path,
-   * $levels)` form -- both real but rare (a handful of sites total on the
-   * same corpus that motivated the `dirname(__DIR__)` case, confined to a
-   * single vendored library) -- left as an honest, documented remainder
+   * (`dirname(dirname(__FILE__))`) -- real but rare (a handful of sites on
+   * the same corpus that motivated the `dirname(__DIR__)` case, confined to
+   * a single vendored library) -- left as an honest, documented remainder
    * rather than added speculatively.
+   *
+   * EXPLICITLY REJECTS (returns `null`, never guesses) PHP 8's two-argument
+   * `dirname($path, $levels)` form -- `dirname(__DIR__, 2)` climbs TWO
+   * levels, not one; `dirname(__FILE__, 2)` climbs one (not zero). Silently
+   * treating it as the one-argument form would resolve to a DIFFERENT real
+   * directory -- if a file happens to exist at that wrong path, this would
+   * fabricate an edge to a file the statement doesn't actually require
+   * (#928/#1008/#1056's failure mode, caught by Lien Review before it ever
+   * shipped). Requires exactly one argument before matching `__FILE__`/
+   * `__DIR__` at all, below.
    *
    * Matches `__DIR__`/`__FILE__`/`dirname` case-INSENSITIVELY (confirmed
    * empirically against a real PHP 8.4 interpreter, #1009 Lien Review
@@ -542,8 +551,19 @@ export class PHPImportExtractor implements LanguageImportExtractor {
     if (fn?.type !== 'name' || fn.text.toLowerCase() !== 'dirname') return null;
 
     const args = node.childForFieldName('arguments');
-    const firstArg = args?.namedChildren[0];
-    const value = firstArg?.type === 'argument' ? firstArg.namedChildren[0] : firstArg;
+    // PHP 8's `dirname($path, $levels)` two-argument form climbs $levels
+    // directories, not one -- e.g. `dirname(__DIR__, 2) . '/foo.php'` climbs
+    // TWO levels above `__DIR__`, not one. Reject anything but exactly one
+    // argument rather than silently treating it as the single-argument form:
+    // a wrong level count doesn't just miss, it resolves to a DIFFERENT real
+    // path, which -- if a file happens to exist there -- fabricates an edge
+    // to a file this statement doesn't actually require. Left as an honest,
+    // documented remainder (see this method's own doc comment) rather than
+    // computed, matching this method's existing stance on further nesting.
+    if (args?.namedChildren.length !== 1) return null;
+
+    const firstArg = args.namedChildren[0];
+    const value = firstArg.type === 'argument' ? firstArg.namedChildren[0] : firstArg;
     if (value?.type !== 'name') return null;
     const valueText = value.text.toLowerCase();
     if (valueText === '__file__') return 0;

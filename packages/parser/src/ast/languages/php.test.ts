@@ -422,6 +422,25 @@ require_once dirname( __DIR__ ) . '/wp-load.php';`;
         expect(importExtractor.extractStaticRequireTargets(root)).toEqual(['../wp-load.php']);
       });
 
+      it('rejects `dirname(__FILE__, 2)` -- PHP 8 two-argument form, never guess the level count (Lien Review fabrication finding)', () => {
+        // dirname(__FILE__, 2) climbs ONE level above __DIR__ (not zero) --
+        // silently treating this as the one-argument form would resolve to
+        // the WRONG directory and, if a file happened to exist there,
+        // fabricate an edge to something this statement doesn't require.
+        const code = `<?php
+require dirname(__FILE__, 2) . '/foo.php';`;
+        const root = mustParse(code, 'php');
+        expect(importExtractor.extractStaticRequireTargets(root)).toEqual([]);
+      });
+
+      it('rejects `dirname(__DIR__, 2)` -- same fabrication risk, one level further', () => {
+        // dirname(__DIR__, 2) climbs TWO levels above __DIR__ (not one).
+        const code = `<?php
+require dirname(__DIR__, 2) . '/foo.php';`;
+        const root = mustParse(code, 'php');
+        expect(importExtractor.extractStaticRequireTargets(root)).toEqual([]);
+      });
+
       it('resolves non-canonical-case magic constants and `dirname` the same way (PHP is case-insensitive, Lien Review finding)', () => {
         // Confirmed empirically against a real PHP 8.4 interpreter: __dir__,
         // __file__, and Dirname()/DIRNAME() all behave identically to their

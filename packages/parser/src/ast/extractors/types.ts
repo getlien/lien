@@ -252,10 +252,11 @@ export interface LanguageImportExtractor {
    *   (top-level, inside a function, inside a conditional) — unlike a
    *   declaration-based import, which is only ever found at the top one-or-
    *   two levels from the root.
-   * @returns Raw `./`-prefixed specifiers, relative to the file containing
-   *   the require/include statement — subject to the same relative-import
-   *   resolution `extractImportPaths` applies to every other specifier, but
-   *   NOT yet existence-checked; see `appendStaticRequireTargets`.
+   * @returns Raw `./`- or `../`-prefixed specifiers, relative to the file
+   *   containing the require/include statement — subject to the same
+   *   relative-import resolution `extractImportPaths` applies to every
+   *   other specifier, but NOT yet existence-checked; see
+   *   `appendStaticRequireTargets`.
    */
   extractStaticRequireTargets?(rootNode: SyntaxNode): string[];
 }
