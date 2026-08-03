@@ -83,11 +83,22 @@ function parseAndValidate(filepath: string, content: string) {
  * relationship (Python's dot-counting maps directly onto ascending
  * directories from the importer's own), so it's safe to resolve here the
  * same way JS/TS specifiers are.
+ *
+ * Includes PHP (#1009): `PHPImportExtractor.extractStaticRequireTargets`
+ * emits a `./`-prefixed specifier for a statically-resolvable
+ * `require`/`include` target (a plain literal, or one prefixed with
+ * `__DIR__`/`dirname(__FILE__)`) — a genuine filesystem-relative-to-this-
+ * file relationship, same shape as JS/TS's own relative imports. PHP's OTHER
+ * import form (`use` statements, namespace-qualified, resolved via
+ * `matchesPHPNamespace`/PSR-4 instead) never produces a `./`/`../`-prefixed
+ * specifier, so adding PHP here has zero effect on it —
+ * `RELATIVE_IMPORT_PATTERN` simply never matches.
  */
 const RESOLVE_RELATIVE_IMPORTS: ReadonlySet<SupportedLanguage> = new Set([
   'javascript',
   'typescript',
   'python',
+  'php',
 ]);
 
 /**
@@ -125,10 +136,18 @@ type ManifestRootsBuilder = (workspaceRoot: string) => ManifestRoots | undefined
 
 function buildPhpManifestRoots(workspaceRoot: string): ManifestRoots | undefined {
   const psr4Map = resolvePsr4Map(workspaceRoot);
-  // `workspaceRoot` is threaded through so `resolvePsr4Import` can pick
-  // between multiple candidate directories for the same prefix (#1002) by
-  // checking which one exists on disk.
-  return psr4Map.size > 0 ? { psr4Map, workspaceRoot } : undefined;
+  // `workspaceRoot` is threaded through UNCONDITIONALLY (not just when
+  // `psr4Map` is non-empty, unlike before #1009) for two reasons: (1) so
+  // `resolvePsr4Import` can pick between multiple candidate directories for
+  // the same prefix (#1002) by checking which one exists on disk, and (2) so
+  // `appendStaticRequireTargets`'s existence check (`php-require.ts`'s
+  // `requireTargetExists`) has a root to check against even for a PHP
+  // project with no composer.json at all — exactly the framework-less/
+  // legacy/WordPress case #1009 targets. A no-op for PSR-4 resolution itself
+  // when the map is empty: `resolvePsr4Import` already short-circuits on
+  // `psr4Map.size === 0`, so this is zero behavior change for `use`-statement
+  // resolution.
+  return { psr4Map, workspaceRoot };
 }
 
 function buildGoManifestRoots(workspaceRoot: string): ManifestRoots | undefined {

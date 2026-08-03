@@ -380,6 +380,117 @@ class RetryMiddlewareTest {
         expect(importExtractor.extractReferencedFQCNs(root)).toEqual([]);
       });
     });
+
+    // require/include static-target scanning (#1009): PHP's OTHER
+    // file-inclusion mechanism, alongside `use`. `require`/`include` are
+    // expressions (not declarations), so most call sites are only resolvable
+    // at runtime -- only a plain literal or a `__DIR__`/`dirname(__FILE__)`
+    // -prefixed one is statically decidable. This method only returns a
+    // `./`-prefixed specifier; the existence check that decides whether it
+    // becomes a real edge lives one layer up (`appendStaticRequireTargets` in
+    // `ast/symbols.ts`, exercised in `chunker.test.ts`).
+    describe('extractStaticRequireTargets (require/include static targets, #1009)', () => {
+      it('resolves a plain string literal relative to the containing file', () => {
+        const code = `<?php
+include 'includes/foo.php';`;
+        const root = mustParse(code, 'php');
+        expect(importExtractor.extractStaticRequireTargets(root)).toEqual(['./includes/foo.php']);
+      });
+
+      it('resolves `__DIR__ . <literal>` relative to the containing file', () => {
+        const code = `<?php
+require __DIR__ . '/../vendor/autoload.php';`;
+        const root = mustParse(code, 'php');
+        expect(importExtractor.extractStaticRequireTargets(root)).toEqual([
+          './../vendor/autoload.php',
+        ]);
+      });
+
+      it('resolves `dirname(__FILE__) . <literal>` the same way as `__DIR__`', () => {
+        const code = `<?php
+require_once dirname(__FILE__) . '/config.php';`;
+        const root = mustParse(code, 'php');
+        expect(importExtractor.extractStaticRequireTargets(root)).toEqual(['./config.php']);
+      });
+
+      it('unwraps a parenthesized target (WordPress-style `require_once( ... )`)', () => {
+        const code = `<?php
+require_once( __DIR__ . '/wp-load.php' );`;
+        const root = mustParse(code, 'php');
+        expect(importExtractor.extractStaticRequireTargets(root)).toEqual(['./wp-load.php']);
+      });
+
+      it('handles `include_once` the same way as the other three keywords', () => {
+        const code = `<?php
+include_once __DIR__ . '/helpers.php';`;
+        const root = mustParse(code, 'php');
+        expect(importExtractor.extractStaticRequireTargets(root)).toEqual(['./helpers.php']);
+      });
+
+      it('finds a require nested inside a function body, not just top-level', () => {
+        // Unlike `use` (always top-level), require/include can appear
+        // anywhere a PHP expression can -- this method scans the whole file.
+        const code = `<?php
+function bootstrap() {
+  if (!defined('LOADED')) {
+    require __DIR__ . '/config.php';
+  }
+}`;
+        const root = mustParse(code, 'php');
+        expect(importExtractor.extractStaticRequireTargets(root)).toEqual(['./config.php']);
+      });
+
+      it('deduplicates two requires that resolve to the same target', () => {
+        const code = `<?php
+require __DIR__ . '/config.php';
+require_once __DIR__ . '/config.php';`;
+        const root = mustParse(code, 'php');
+        expect(importExtractor.extractStaticRequireTargets(root)).toEqual(['./config.php']);
+      });
+
+      it('skips a variable target -- not statically decidable', () => {
+        const code = `<?php
+require $someVariable;`;
+        const root = mustParse(code, 'php');
+        expect(importExtractor.extractStaticRequireTargets(root)).toEqual([]);
+      });
+
+      it('skips a bare-constant concatenation -- not the `__DIR__`/`dirname(__FILE__)` shape', () => {
+        const code = `<?php
+require SOME_CONSTANT . '/file.php';`;
+        const root = mustParse(code, 'php');
+        expect(importExtractor.extractStaticRequireTargets(root)).toEqual([]);
+      });
+
+      it('skips a function-call concatenation other than `dirname(__FILE__)`', () => {
+        const code = `<?php
+require foo() . '/file.php';`;
+        const root = mustParse(code, 'php');
+        expect(importExtractor.extractStaticRequireTargets(root)).toEqual([]);
+      });
+
+      it('skips a bare OS-absolute literal rather than guessing', () => {
+        const code = `<?php
+require '/etc/passwd';`;
+        const root = mustParse(code, 'php');
+        expect(importExtractor.extractStaticRequireTargets(root)).toEqual([]);
+      });
+
+      it('skips an interpolated string -- its value is only known at runtime', () => {
+        const code = `<?php
+require __DIR__ . "/$var/config.php";`;
+        const root = mustParse(code, 'php');
+        expect(importExtractor.extractStaticRequireTargets(root)).toEqual([]);
+      });
+
+      it('is a no-op for a file with no require/include statements at all', () => {
+        const code = `<?php
+use App\\Models\\User;
+class Foo {}`;
+        const root = mustParse(code, 'php');
+        expect(importExtractor.extractStaticRequireTargets(root)).toEqual([]);
+      });
+    });
   });
 
   describe('Symbol Extraction', () => {

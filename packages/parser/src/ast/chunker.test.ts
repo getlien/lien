@@ -748,6 +748,135 @@ class SetCookieTest {
       });
     });
 
+    describe('PHP require/include static-target resolution (#1009)', () => {
+      let testDir: string;
+
+      beforeEach(async () => {
+        testDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-test-chunker-php-require-'));
+      });
+
+      afterEach(async () => {
+        await fs.rm(testDir, { recursive: true, force: true }).catch(() => {});
+      });
+
+      async function writeFile(relPath: string, content: string): Promise<void> {
+        const abs = path.join(testDir, relPath);
+        await fs.mkdir(path.dirname(abs), { recursive: true });
+        await fs.writeFile(abs, content);
+      }
+
+      it('resolves a `__DIR__`-relative require to a real sibling file (Composer autoloader bootstrap repro)', async () => {
+        await writeFile('vendor/autoload.php', '<?php\n');
+
+        const content = `<?php
+require __DIR__ . '/../vendor/autoload.php';
+
+function bootstrap() {
+  return true;
+}
+`;
+        const chunks = chunkByAST('tests/bootstrap.php', content, { workspaceRoot: testDir });
+        const funcChunk = chunks.find(c => c.metadata.symbolName === 'bootstrap');
+
+        expect(funcChunk?.metadata.imports).toContain('vendor/autoload.php');
+      });
+
+      it('resolves a plain string literal require relative to the containing file (no `__DIR__`)', async () => {
+        await writeFile('includes/foo.php', '<?php\n');
+
+        const content = `<?php
+require_once 'includes/foo.php';
+
+function bootstrap() {
+  return true;
+}
+`;
+        const chunks = chunkByAST('index.php', content, { workspaceRoot: testDir });
+        const funcChunk = chunks.find(c => c.metadata.symbolName === 'bootstrap');
+
+        expect(funcChunk?.metadata.imports).toContain('includes/foo.php');
+      });
+
+      it('drops a statically-resolvable-looking require whose target does not exist on disk (never fabricate an edge, #928/#1008/#1056)', () => {
+        // Regression guard for the existence check itself, not the
+        // require/include feature as a whole: `testDir` is empty here (no
+        // `vendor/autoload.php` written), so a naive "resolve without
+        // checking disk" implementation would wrongly include this edge. The
+        // two positive tests above are what actually fails against pre-#1009
+        // code (which produced zero require/include edges at all).
+        const content = `<?php
+require __DIR__ . '/../vendor/autoload.php';
+
+function bootstrap() {
+  return true;
+}
+`;
+        const chunks = chunkByAST('tests/bootstrap.php', content, { workspaceRoot: testDir });
+        const funcChunk = chunks.find(c => c.metadata.symbolName === 'bootstrap');
+
+        expect(funcChunk?.metadata.imports ?? []).not.toContain('vendor/autoload.php');
+      });
+
+      it('drops every require/include target when workspaceRoot is omitted (no way to verify existence)', async () => {
+        await writeFile('vendor/autoload.php', '<?php\n');
+
+        const content = `<?php
+require __DIR__ . '/../vendor/autoload.php';
+
+function bootstrap() {
+  return true;
+}
+`;
+        const chunks = chunkByAST('tests/bootstrap.php', content);
+        const funcChunk = chunks.find(c => c.metadata.symbolName === 'bootstrap');
+
+        expect(funcChunk?.metadata.imports ?? []).not.toContain('vendor/autoload.php');
+      });
+
+      it('does not resolve a require target that is not statically decidable (variable, constant, function call)', async () => {
+        await writeFile('file.php', '<?php\n');
+
+        const content = `<?php
+require $someVariable;
+require SOME_CONSTANT . '/file.php';
+require foo() . '/file.php';
+
+function bootstrap() {
+  return true;
+}
+`;
+        const chunks = chunkByAST('index.php', content, { workspaceRoot: testDir });
+        const funcChunk = chunks.find(c => c.metadata.symbolName === 'bootstrap');
+
+        expect(funcChunk?.metadata.imports ?? []).toEqual([]);
+      });
+
+      it('still leaves a bare `use` import namespace-resolved via PSR-4 alongside a resolved require (composed, #1002/#1009)', async () => {
+        await writeFile(
+          'composer.json',
+          JSON.stringify({ autoload: { 'psr-4': { 'App\\': 'src/' } } }, null, 2),
+        );
+        await writeFile('src/Config.php', '<?php\n');
+        await writeFile('vendor/autoload.php', '<?php\n');
+
+        const content = `<?php
+require __DIR__ . '/../vendor/autoload.php';
+use App\\Config;
+
+class Bootstrap {
+  public function run() {
+    return new Config();
+  }
+}
+`;
+        const chunks = chunkByAST('app/Bootstrap.php', content, { workspaceRoot: testDir });
+        const methodChunk = chunks.find(c => c.metadata.symbolName === 'run');
+
+        expect(methodChunk?.metadata.imports).toContain('vendor/autoload.php');
+        expect(methodChunk?.metadata.imports).toContain('src/Config');
+      });
+    });
+
     it('should calculate cyclomatic complexity', () => {
       const content = `
 function complexFunction(x: number): string {
