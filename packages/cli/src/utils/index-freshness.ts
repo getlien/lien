@@ -1,7 +1,13 @@
 import fs from 'fs/promises';
 import path from 'path';
 import type { VectorDBInterface } from '@liendev/core';
-import { getIndexDir, isGitRepo, getCurrentBranch, getCurrentCommit } from '@liendev/core';
+import {
+  getIndexDir,
+  isGitRepo,
+  getCurrentBranch,
+  getCurrentCommit,
+  resolveIndexStrategy,
+} from '@liendev/core';
 
 /**
  * Filename of the SQLite structural store inside the index directory.
@@ -12,9 +18,20 @@ import { getIndexDir, isGitRepo, getCurrentBranch, getCurrentCommit } from '@lie
  */
 const STRUCTURAL_DB_FILENAME = 'structural.db';
 
+async function fileExists(p: string): Promise<boolean> {
+  try {
+    await fs.access(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Cheap, side-effect-free existence check for the structural store: does
- * `<indexDir>/structural.db` exist on disk?
+ * `<indexDir>/structural.db` exist on disk — either `rootDir`'s own (the
+ * standalone case), or, for a linked git worktree in overlay mode, the
+ * shared base's?
  *
  * Every read-only CLI command that needs to tell "this project has never
  * been indexed" apart from "the index is just empty" MUST call this BEFORE
@@ -31,14 +48,31 @@ const STRUCTURAL_DB_FILENAME = 'structural.db';
  * This consolidates what used to be `lien api-delta`'s own local
  * `hasStructuralIndex` — the same guard, reused rather than re-invented at
  * every new read-only call site (`lien complexity`, `lien annotate`).
+ *
+ * #1051 fix: this used to check ONLY `getIndexDir(rootDir)` — for a linked
+ * worktree that's `OverlayBackend.dbPath`, the worktree's own *local* overlay
+ * database, which doesn't exist until the worktree completes at least one
+ * local `lien index`/overlay build. A fresh worktree that has never run
+ * `lien index` locally therefore reported S0 ("never indexed") even though
+ * the *shared base* index — what `OverlayBackend` actually reads from, per
+ * `docs/architecture/worktree-aware-indexing.md` — was fully populated. The
+ * local check runs first (cheapest, and correct for both the common
+ * standalone case and a worktree that has already self-healed); only when it
+ * misses do we ask `resolveIndexStrategy` whether `rootDir` is a worktree in
+ * overlay mode and, if so, check the base's `structural.db` instead. This
+ * mirrors `findUnindexedPaths`'s #1014 fix (reading the merged base+overlay
+ * view instead of the overlay manifest alone) one layer up, at the
+ * whole-index existence check rather than the per-path one.
  */
 export async function hasStructuralIndex(rootDir: string): Promise<boolean> {
-  try {
-    await fs.access(path.join(getIndexDir(rootDir), STRUCTURAL_DB_FILENAME));
+  if (await fileExists(path.join(getIndexDir(rootDir), STRUCTURAL_DB_FILENAME))) {
     return true;
-  } catch {
-    return false;
   }
+
+  const strategy = await resolveIndexStrategy(rootDir);
+  if (strategy.mode !== 'overlay') return false;
+
+  return fileExists(path.join(strategy.baseIndexDir, STRUCTURAL_DB_FILENAME));
 }
 
 interface StoredGitState {
