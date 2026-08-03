@@ -1,0 +1,9 @@
+---
+"@liendev/parser": patch
+---
+
+Resolve PHP `require`/`require_once`/`include`/`include_once` targets that are statically decidable to a real dependency edge (#1009). Previously, `PHPImportExtractor.importNodeTypes` only covered `use` declarations — PHP's other file-inclusion mechanism produced no edge at all, unlike Ruby's `require_relative` and JavaScript's `require()`, which both already resolve.
+
+`require`/`include` are expressions, not declarations, and most call sites (a variable, a bare constant, an arbitrary function call, an interpolated string) are only resolvable at runtime — guessing at those would risk the #928/#1008/#1056 fabrication shape this codebase has repeatedly closed. Only two statically-decidable shapes are resolved: a plain string literal, and `__DIR__`/`dirname(__FILE__)` concatenated with a literal (`require_once __DIR__ . '/../vendor/autoload.php';`). Both resolve to a path relative to the file containing the statement, and — stronger than the existing PSR-4 resolution's single-candidate trust — the resolved target must exist on disk before an edge is emitted at all (`php-require.ts`'s `requireTargetExists`).
+
+Measured on Monolog (232 files/2857 chunks): 405 edges/197 orphans both before and after — unchanged, because Monolog's `src/`/`tests/` trees have exactly one real require/include site (`tests/bootstrap.php`), and its target (`vendor/autoload.php`) is gitignored/external, not part of the indexed corpus. The fix's mechanism is independently confirmed to fire on that exact file (`imports` now includes `vendor/autoload.php` when `vendor/` exists on disk). On a synthetic WordPress-style fixture (a plugin entry file `require_once`-ing two sibling class files, plus an unresolvable `ABSPATH`-relative include) — the framework-less/legacy case this issue calls out as the highest-value target — edges go from 0/3 files (100% orphan) to 2/3 files (33% orphan).
