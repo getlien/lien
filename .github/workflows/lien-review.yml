@@ -13,9 +13,14 @@ name: Lien Review
 # dogfoods the current commit instead of the last released tag. Same code
 # path either way, so this isn't a stand-in for the real thing.
 #
-# The review is advisory by default (fail-on defaults to 'never'), so the check
-# stays green whenever the action *runs*; findings show as annotations + comments.
-# Set fail-on: error/any here (or in any consumer workflow) to gate the PR.
+# fail-on defaults to 'never' (fully advisory) for every OTHER consumer, so
+# the check stays green whenever the action *runs*; findings show as
+# annotations + comments only. This repo's own PRs opt into `fail-on: error`
+# below (INPUT_FAIL_ON in the "Run Lien Review" step's env, as of #1068) — see
+# that var's comment for why 'error' and not 'any'. One consequence worth
+# knowing: because this is `pull_request` (not `pull_request_target`), a PR
+# that edits this file gates itself using ITS OWN edited copy of the workflow,
+# not main's — GitHub runs `pull_request` workflows from the PR's head ref.
 #
 # `types` is pinned explicitly rather than left as GitHub's pull_request default
 # (opened/synchronize/reopened) so nobody can widen it to `edited` without
@@ -74,6 +79,23 @@ jobs:
         env:
           INPUT_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           INPUT_OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          # fail-on: 'error' — opts THIS repo's own PRs into the review's
+          # severity gate. Default is 'never' (fully advisory) for every other
+          # @liendev/review / @liendev/action consumer — see action.yml's
+          # `fail-on` input and inputs.ts's `parseFailOn`. Motivated by #1068:
+          # three live defects rode a green `review` check in a single day
+          # (two fabrication bugs: #1063's `fs.existsSync` accepting
+          # directories, and its `dirname($p, 2)` misresolution; a third in
+          # #1069), all three caught only by findings this check reported as
+          # success, because this repo had never opted out of the advisory
+          # default. 'error' fails the job only on a `failure` conclusion — a
+          # non-complexity error-severity (🔴) finding, or a complexity
+          # violation the PR introduced/worsened (engine.ts's
+          # `determineConclusion`) — and never on warnings (🟡). Deliberately
+          # not 'any': #1063 alone produced 9 findings across 5 rounds, 8 of
+          # them warnings, so failing on warnings too would routinely block
+          # PRs on non-blocking findings.
+          INPUT_FAIL_ON: 'error'
           # Dedicated candidate-loop passes (stale-duplicate-pass.ts,
           # incomplete-handling-pass.ts) — dark/opt-in for @liendev/review
           # consumers by default; this repo's own reviews opt in here to

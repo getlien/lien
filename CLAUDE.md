@@ -380,11 +380,14 @@ tree-sitter won't compile) — see `docs/development/worktree-development.md`.
 
 ## Before Merging a PR
 
-- **CI-green ≠ review-clean.** The Lien Review check can pass even with
-  findings — fetch and triage the `lien-stats` block and inline comments
-  before merging: `gh pr view N --json body` (look for the `lien-stats`
-  block) and `gh api repos/getlien/lien/pulls/N/comments`. Fix or explicitly
-  dismiss each finding first.
+- **CI-green ≠ review-clean.** As of #1068, this repo's own `lien-review.yml`
+  sets `fail-on: error`, so the Lien Review check fails on error-severity
+  (🔴) findings and complexity violations the PR worsened. It can still pass
+  with 🟡 warning findings outstanding — fetch and triage the `lien-stats`
+  block and inline comments before merging regardless: `gh pr view N --json
+  body` (look for the `lien-stats` block) and `gh api
+  repos/getlien/lien/pulls/N/comments`. Fix or explicitly dismiss each
+  finding first.
 - Never `gh pr merge --admin` to bypass checks. Wait for CI.
 - Stacked PRs: squash-merging a parent with `--delete-branch` auto-closes
   child PRs whose base was that branch, and a closed PR with a deleted base
