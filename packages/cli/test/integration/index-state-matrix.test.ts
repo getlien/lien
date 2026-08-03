@@ -631,6 +631,16 @@ describe('index-state × entry-point matrix (#1029 W1)', () => {
 
     afterEach(async () => {
       if (worktreeRoot) {
+        // Restore cwd to the (still-alive) main checkout BEFORE removing the
+        // worktree — CodeRabbit correctly flagged that leaving process.cwd()
+        // pointed at worktreeRoot while `git worktree remove` deletes that
+        // very directory risks an ENOENT the moment anything (vitest's own
+        // internal bookkeeping between hooks, not just this file's code)
+        // calls `process.cwd()` before the outer afterEach's
+        // `process.chdir(originalCwd)` runs. `dir` itself isn't removed
+        // until the outer afterEach's `fs.rm(dir, ...)`, so it's a safe,
+        // still-existing intermediate landing spot.
+        process.chdir(dir);
         await execFileAsync('git', ['worktree', 'remove', '--force', worktreeRoot], {
           cwd: dir,
         }).catch(() => undefined);
