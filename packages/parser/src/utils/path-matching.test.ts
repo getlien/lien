@@ -418,6 +418,18 @@ describe('matchesFile - Path Boundary Checking', () => {
 
     describe('legitimate matches survive', () => {
       it('exact dotted module name to its own file', () => {
+        // NOTE (#1046): `com.example.Utils`/`.kt` here are illustrative
+        // dotted-identifier names for exercising `matchesWithSourcePrefix`'s
+        // right-edge anchoring generically -- they are NOT proof that a real
+        // Java/Kotlin import resolves this way in production. `testMatchesFile`
+        // calls `matchesFile` directly, which defaults `allowPythonModuleMatching`
+        // to `true`; the real production path (`importMatchesTarget`) gates
+        // Strategy 5 off for every non-Python importer (#929), so this exact
+        // pair returns `false` through `importMatchesTarget` -- see
+        // "#1046 Java/Kotlin dotted-FQN specifiers" below in the
+        // `importMatchesTarget` describe block for the real, gated behavior,
+        // and `jvm-source-root-integration.test.ts` for how a Java/Kotlin
+        // import actually resolves today (upstream of this file entirely).
         expect(testMatchesFile('com.example.Utils', 'com/example/Utils.kt')).toBe(true);
       });
 
@@ -899,6 +911,54 @@ describe('importMatchesTarget (#886)', () => {
           'App\\Models\\User',
           'Controller.php',
           normalize('app/Models/User.php'),
+          normalize,
+        ),
+      ).toBe(true);
+    });
+  });
+
+  describe('#1046 Java/Kotlin dotted-FQN specifiers', () => {
+    // The #929 Python-only guard (`allowPythonModuleMatching`) correctly stays
+    // CLOSED for Java/Kotlin at this layer -- re-opening Strategy 5 for them
+    // would resurrect exactly the false-hub shape #929 was gated to fix. The
+    // real fix (#1046) resolves a dotted FQN to a concrete file path UPSTREAM
+    // of `matchesFile` entirely (`../jvm-source-root.ts`, wired through
+    // `resolveImportSpecifier` in `ast/symbols.ts`) -- see
+    // `jvm-source-root-integration.test.ts` for the real, resolved-through-the-
+    // whole-pipeline regression coverage. These two tests pin the boundary
+    // between the two mechanisms: a still-dotted (unresolved) specifier must
+    // never match here, but the SAME specifier, once resolved to a plain
+    // slash path the way `resolveJvmSourceRootImport` does, matches through
+    // the ordinary, unmodified strategies -- no new fuzzy-matching surface
+    // was added to this file for Java/Kotlin.
+    it('a raw (unresolved) dotted Java specifier does not match, even against its own real target', () => {
+      expect(
+        importMatchesTarget(
+          'com.squareup.javapoet.TypeName',
+          'src/main/java/com/squareup/javapoet/Util.java',
+          normalize('src/main/java/com/squareup/javapoet/TypeName.java'),
+          normalize,
+        ),
+      ).toBe(false);
+    });
+
+    it('a raw (unresolved) dotted Kotlin specifier does not match, even against its own real target', () => {
+      expect(
+        importMatchesTarget(
+          'com.beust.klaxon.token.Token',
+          'klaxon/src/main/kotlin/com/beust/klaxon/StateMachine.kt',
+          normalize('klaxon/src/main/kotlin/com/beust/klaxon/token/Token.kt'),
+          normalize,
+        ),
+      ).toBe(false);
+    });
+
+    it('the same relationship matches once resolved to a slash path (the shape jvm-source-root.ts produces)', () => {
+      expect(
+        importMatchesTarget(
+          'src/main/java/com/squareup/javapoet/TypeName',
+          'src/main/java/com/squareup/javapoet/Util.java',
+          normalize('src/main/java/com/squareup/javapoet/TypeName.java'),
           normalize,
         ),
       ).toBe(true);

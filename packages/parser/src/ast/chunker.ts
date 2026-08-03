@@ -15,6 +15,7 @@ import { resolvePsr4Map } from '../php-psr4.js';
 import { resolveGoModulePrefix } from '../go-module.js';
 import { detectPythonSrcLayoutRoot } from '../python-src-layout.js';
 import { resolveRustCrateMap } from '../rust-crate-map.js';
+import { resolveJvmSourceRoots } from '../jvm-source-root.js';
 
 export interface ASTChunkOptions {
   minChunkSize?: number;
@@ -103,56 +104,81 @@ const RESOLVE_WORKSPACE_PACKAGES: ReadonlySet<SupportedLanguage> = new Set([
 ]);
 
 /**
+ * Per-language manifest-root builders backing `buildManifestRoots` below,
+ * dispatched via `MANIFEST_ROOT_BUILDERS` rather than an if-chain so adding a
+ * language never grows `buildManifestRoots`'s own complexity (each builder is
+ * independently trivial). PHP resolves `composer.json`'s PSR-4 map; Go
+ * resolves `go.mod`'s module prefix; Python detects an on-disk `src/` layout
+ * (#901 — see `../python-src-layout.ts` for why this is filesystem-detected
+ * rather than manifest-declared); Rust resolves the Cargo workspace's member
+ * crate names (#903); Java/Kotlin detect the on-disk Maven/Gradle source-set
+ * layout (#1046/#1005 Mechanism 1 — see `../jvm-source-root.ts`, same
+ * filesystem-detected rationale as Python's); JS/TS always opts into
+ * `resolveDirectoryIndex: true` (#953, no detection step needed — unlike the
+ * others' manifest/filesystem detection, a directory's `index.<ext>` entry
+ * file is checked per-specifier at resolution time, in
+ * `resolveJsDirectoryIndex` itself). Every other language has no builder
+ * registered, which `buildManifestRoots` treats as `undefined` (a no-op —
+ * see `ManifestRoots` in `./symbols.ts`).
+ */
+type ManifestRootsBuilder = (workspaceRoot: string) => ManifestRoots | undefined;
+
+function buildPhpManifestRoots(workspaceRoot: string): ManifestRoots | undefined {
+  const psr4Map = resolvePsr4Map(workspaceRoot);
+  // `workspaceRoot` is threaded through so `resolvePsr4Import` can pick
+  // between multiple candidate directories for the same prefix (#1002) by
+  // checking which one exists on disk.
+  return psr4Map.size > 0 ? { psr4Map, workspaceRoot } : undefined;
+}
+
+function buildGoManifestRoots(workspaceRoot: string): ManifestRoots | undefined {
+  const goModulePrefix = resolveGoModulePrefix(workspaceRoot);
+  return goModulePrefix ? { goModulePrefix } : undefined;
+}
+
+function buildPythonManifestRoots(workspaceRoot: string): ManifestRoots | undefined {
+  const pythonSrcLayoutRoot = detectPythonSrcLayoutRoot(workspaceRoot);
+  return pythonSrcLayoutRoot ? { pythonSrcLayoutRoot, workspaceRoot } : undefined;
+}
+
+function buildRustManifestRoots(workspaceRoot: string): ManifestRoots | undefined {
+  const rustCrateMap = resolveRustCrateMap(workspaceRoot);
+  return rustCrateMap.size > 0 ? { rustCrateMap } : undefined;
+}
+
+function buildJvmManifestRoots(workspaceRoot: string): ManifestRoots | undefined {
+  const jvmSourceRoots = resolveJvmSourceRoots(workspaceRoot);
+  return jvmSourceRoots.length > 0 ? { jvmSourceRoots, workspaceRoot } : undefined;
+}
+
+function buildJsManifestRoots(workspaceRoot: string): ManifestRoots {
+  return { resolveDirectoryIndex: true, workspaceRoot };
+}
+
+const MANIFEST_ROOT_BUILDERS: Partial<Record<SupportedLanguage, ManifestRootsBuilder>> = {
+  php: buildPhpManifestRoots,
+  go: buildGoManifestRoots,
+  python: buildPythonManifestRoots,
+  rust: buildRustManifestRoots,
+  java: buildJvmManifestRoots,
+  kotlin: buildJvmManifestRoots,
+  javascript: buildJsManifestRoots,
+  typescript: buildJsManifestRoots,
+};
+
+/**
  * Build the manifest-declared import-root mapping for a file's language, when
- * `workspaceRoot` is available. PHP resolves `composer.json`'s PSR-4 map; Go
- * resolves `go.mod`'s module prefix; Python detects an on-disk `src/`
- * layout (#901 — see `../python-src-layout.ts` for why this is filesystem-
- * detected rather than manifest-declared); Rust resolves the Cargo
- * workspace's member crate names (#903); every other language gets
- * `undefined` (a no-op — see `ManifestRoots` in `./symbols.ts`). Returns
- * `undefined` (rather than an object with empty/absent fields) when nothing
- * is found, so the corresponding resolution step is skipped entirely for
- * projects that don't need it.
- *
- * JS/TS always gets `resolveDirectoryIndex: true` (#953, no detection step
- * needed — unlike PHP/Go/Python/Rust's manifest/filesystem detection, a
- * directory's `index.<ext>` entry file is checked per-specifier at
- * resolution time, in `resolveJsDirectoryIndex` itself).
+ * `workspaceRoot` is available. Returns `undefined` (rather than an object
+ * with empty/absent fields) when nothing is found, so the corresponding
+ * resolution step is skipped entirely for projects that don't need it. See
+ * `MANIFEST_ROOT_BUILDERS` above for what each language does.
  */
 function buildManifestRoots(
   language: SupportedLanguage,
   workspaceRoot: string | undefined,
 ): ManifestRoots | undefined {
   if (!workspaceRoot) return undefined;
-
-  if (language === 'php') {
-    const psr4Map = resolvePsr4Map(workspaceRoot);
-    // `workspaceRoot` is threaded through so `resolvePsr4Import` can pick
-    // between multiple candidate directories for the same prefix (#1002) by
-    // checking which one exists on disk.
-    return psr4Map.size > 0 ? { psr4Map, workspaceRoot } : undefined;
-  }
-
-  if (language === 'go') {
-    const goModulePrefix = resolveGoModulePrefix(workspaceRoot);
-    return goModulePrefix ? { goModulePrefix } : undefined;
-  }
-
-  if (language === 'python') {
-    const pythonSrcLayoutRoot = detectPythonSrcLayoutRoot(workspaceRoot);
-    return pythonSrcLayoutRoot ? { pythonSrcLayoutRoot, workspaceRoot } : undefined;
-  }
-
-  if (language === 'rust') {
-    const rustCrateMap = resolveRustCrateMap(workspaceRoot);
-    return rustCrateMap.size > 0 ? { rustCrateMap } : undefined;
-  }
-
-  if (language === 'javascript' || language === 'typescript') {
-    return { resolveDirectoryIndex: true, workspaceRoot };
-  }
-
-  return undefined;
+  return MANIFEST_ROOT_BUILDERS[language]?.(workspaceRoot);
 }
 
 /**
