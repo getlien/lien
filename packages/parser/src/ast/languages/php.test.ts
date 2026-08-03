@@ -413,6 +413,23 @@ require_once dirname(__FILE__) . '/config.php';`;
         expect(importExtractor.extractStaticRequireTargets(root)).toEqual(['./config.php']);
       });
 
+      it('resolves `dirname(__DIR__) . <literal>` one level up (WordPress admin-ajax.php repro, #1009 dogfood)', () => {
+        const code = `<?php
+require_once dirname( __DIR__ ) . '/wp-load.php';`;
+        const root = mustParse(code, 'php');
+        expect(importExtractor.extractStaticRequireTargets(root)).toEqual(['../wp-load.php']);
+      });
+
+      it('skips a bare-constant concatenation even when it names a directory-shaped constant (WordPress ABSPATH repro)', () => {
+        // ABSPATH is assigned dynamically in wp-load.php -- not a lexical
+        // compile-time constant like `__DIR__`, so it is NOT one of the
+        // `dirLevelOf` shapes and stays unresolved, unlike `dirname(__DIR__)`.
+        const code = `<?php
+require_once ABSPATH . 'wp-admin/includes/admin.php';`;
+        const root = mustParse(code, 'php');
+        expect(importExtractor.extractStaticRequireTargets(root)).toEqual([]);
+      });
+
       it('unwraps a parenthesized target (WordPress-style `require_once( ... )`)', () => {
         const code = `<?php
 require_once( __DIR__ . '/wp-load.php' );`;

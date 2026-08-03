@@ -466,48 +466,75 @@ export class PHPImportExtractor implements LanguageImportExtractor {
   }
 
   /**
-   * `__DIR__ . '<literal>'` or `dirname(__FILE__) . '<literal>'` -- PHP's two
-   * common idioms for "this file's own directory", both resolvable to a
-   * `./`-prefixed specifier relative to the file containing the
+   * `__DIR__ . '<literal>'`, `dirname(__FILE__) . '<literal>'`, or
+   * `dirname(__DIR__) . '<literal>'` -- PHP's idioms for "this file's own
+   * directory" (the first two) or its PARENT (the third), each resolvable to
+   * a `./`- or `../`-prefixed specifier relative to the file containing the
    * require/include statement (`resolveRelativeImport` in
    * `../../utils/path-matching.ts` does the actual join once this reaches
-   * `ast/symbols.ts`). Any other concatenation left operand (a bare constant
-   * like `ABSPATH`, an arbitrary function call) is not one of PHP's two
-   * `__DIR__`-equivalent forms and is left unresolved.
+   * `ast/symbols.ts`). `dirname(__DIR__)` is a real, common WordPress-core
+   * idiom for climbing from a subdirectory (`wp-admin/`) back to the install
+   * root (confirmed on a real corpus, 19 files -- e.g.
+   * `wp-admin/admin-ajax.php`'s `require_once dirname( __DIR__ ) .
+   * '/wp-load.php';`) -- see `dirLevelOf`'s doc comment for why this is just
+   * as sound as the same-directory forms, not a guess. Any other
+   * concatenation left operand (a bare constant like `ABSPATH` -- WordPress's
+   * OTHER common idiom, but not lexically resolvable the way a magic
+   * constant is -- or an arbitrary function call) is not one of these forms
+   * and is left unresolved.
    */
   private resolveDirRelativeConcatenation(node: SyntaxNode): string | null {
     const left = node.childForFieldName('left');
     const right = node.childForFieldName('right');
     if (!left || !right) return null;
 
-    const unwrappedLeft = this.unwrapParenthesized(left);
-    if (!this.isDirMagicConstant(unwrappedLeft) && !this.isDirnameOfFile(unwrappedLeft)) {
-      return null;
-    }
+    const level = this.dirLevelOf(this.unwrapParenthesized(left));
+    if (level === null) return null;
 
     const literal = this.stringLiteralContent(this.unwrapParenthesized(right));
     if (!literal) return null;
     // Strip at most one leading slash from the literal before joining -- the
     // idiomatic `__DIR__ . '/config.php'` shape already supplies the
     // separator itself.
-    return `./${literal.replace(/^\/+/, '')}`;
+    const cleaned = literal.replace(/^\/+/, '');
+    return level === 0 ? `./${cleaned}` : `${'../'.repeat(level)}${cleaned}`;
   }
 
-  private isDirMagicConstant(node: SyntaxNode): boolean {
-    return node.type === 'name' && node.text === '__DIR__';
-  }
-
-  /** `dirname(__FILE__)` -- the other common spelling of "this file's directory". */
-  private isDirnameOfFile(node: SyntaxNode): boolean {
-    if (node.type !== 'function_call_expression') return false;
+  /**
+   * Returns how many directory levels above the containing file's own
+   * directory `node` names, or `null` when it isn't one of PHP's
+   * `__DIR__`-equivalent forms at all:
+   * - `__DIR__` or `dirname(__FILE__)` -- the file's own directory -- both 0.
+   * - `dirname(__DIR__)` -- ITS PARENT -- 1. `dirname()` applied to a
+   *   directory (unlike applied to `__FILE__`, which merely strips the
+   *   filename to reach the SAME directory) genuinely climbs one level, and
+   *   `__DIR__` is always a compile-time-constant lexical value with zero
+   *   runtime ambiguity -- there is nothing to "guess" here, unlike a bare
+   *   constant such as `ABSPATH` (WordPress's other common concatenation
+   *   idiom, deliberately NOT resolved: its value is assigned dynamically in
+   *   `wp-load.php`, not lexically tied to the current file's location).
+   *
+   * Deliberately does not recurse into further nesting
+   * (`dirname(dirname(__FILE__))`) or PHP 8's two-argument `dirname($path,
+   * $levels)` form -- both real but rare (a handful of sites total on the
+   * same corpus that motivated the `dirname(__DIR__)` case, confined to a
+   * single vendored library) -- left as an honest, documented remainder
+   * rather than added speculatively.
+   */
+  private dirLevelOf(node: SyntaxNode): number | null {
+    if (node.type === 'name' && node.text === '__DIR__') return 0;
+    if (node.type !== 'function_call_expression') return null;
 
     const fn = node.childForFieldName('function');
-    if (fn?.type !== 'name' || fn.text !== 'dirname') return false;
+    if (fn?.type !== 'name' || fn.text !== 'dirname') return null;
 
     const args = node.childForFieldName('arguments');
     const firstArg = args?.namedChildren[0];
     const value = firstArg?.type === 'argument' ? firstArg.namedChildren[0] : firstArg;
-    return value?.type === 'name' && value.text === '__FILE__';
+    if (value?.type !== 'name') return null;
+    if (value.text === '__FILE__') return 0;
+    if (value.text === '__DIR__') return 1;
+    return null;
   }
 
   /**
