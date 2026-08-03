@@ -1,16 +1,19 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs/promises';
+import fsSync from 'fs';
 import os from 'os';
 import path from 'path';
 import {
   analyzeDependencies,
+  findDependents,
   findReExportedSymbolsForFile,
   chunkImportsFrom,
-  findDependents,
   COMPLEXITY_THRESHOLDS,
 } from './dependency-analyzer.js';
 import { chunkByAST } from './ast/chunker.js';
 import { clearGoModuleCache } from './go-module.js';
+import { clearRustCrateMapCache } from './rust-crate-map.js';
+import { clearRustCrateExportCache } from './rust-crate-exports.js';
 import type { CodeChunk, ChunkMetadata } from './types.js';
 
 describe('analyzeDependencies', () => {
@@ -1326,5 +1329,173 @@ describe('findDependents (Go root-package export-lookup recovery, #1039)', () =>
 
     const result = findDependents(chunks, 'src/context.ts', noopLog, workspaceRoot);
     expect(result.dependentAttributionPartial).toBeUndefined();
+  });
+});
+
+describe('bare crate-root `use` edges end-to-end (#1056 regression)', () => {
+  // The real serde/serde_derive repro: `use serde_derive::Deserialize;` (a
+  // cross-crate import naming only the crate + a symbol, no submodule path)
+  // resolved to the crate's bare `src/` directory, which -- because
+  // `crateDir` for a WORKSPACE MEMBER crate is a multi-segment path
+  // (`serde_derive/src`, not the single-segment `src` a non-workspace
+  // project's own crate gets) -- fuzzy-matched every file the crate
+  // contains via `matchesFile`'s Go-style package-directory leniency.
+  // Confirmed on a real clone: two unrelated files (`serde_derive/src/de.rs`,
+  // `serde_derive/src/dummy.rs`) returned an IDENTICAL 144-file dependent
+  // list. This needs a REAL Cargo workspace on disk (`resolveRustCrateMap`
+  // reads `Cargo.toml` from the filesystem, not from synthetic chunks), so
+  // -- unlike #1021/#1028's in-memory fixtures above -- this writes actual
+  // files to a temp directory and parses them via `chunkByAST`'s
+  // `workspaceRoot` option.
+  //
+  // Uses `findDependents` (not `analyzeDependencies`, used by the fixtures
+  // above): `get_dependents` -- this bug's actual symptom -- is a thin
+  // wrapper over `findDependents`, and only `findDependents`'s import index
+  // (`addChunkToImportIndex`) indexes `chunk.metadata.importedSymbols` keys
+  // alongside the raw `imports` array; `analyzeDependencies`'s own index
+  // (`buildImportIndex`, used for complexity-report risk analysis) only
+  // reads `imports` and would not exercise this fix at all.
+  function noopLog(): void {
+    // Intentionally empty -- this suite only cares about resolved counts.
+  }
+
+  let testDir: string;
+
+  beforeEach(() => {
+    testDir = fsSync.mkdtempSync(path.join(os.tmpdir(), 'lien-test-dep-analyzer-rust-1056-'));
+  });
+
+  afterEach(() => {
+    clearRustCrateMapCache();
+    clearRustCrateExportCache();
+    fsSync.rmSync(testDir, { recursive: true, force: true });
+  });
+
+  /** Parse `content` as `relPath` within `testDir`'s Cargo workspace (writes it to disk first — `resolveRustCrateMap` needs a real `Cargo.toml` to read). */
+  function chunkInWorkspace(relPath: string, content: string) {
+    const abs = path.join(testDir, relPath);
+    fsSync.mkdirSync(path.dirname(abs), { recursive: true });
+    fsSync.writeFileSync(abs, content);
+    return chunkByAST(relPath, content, { workspaceRoot: testDir });
+  }
+
+  function setUpWorkspace(): void {
+    fsSync.writeFileSync(
+      path.join(testDir, 'Cargo.toml'),
+      '[workspace]\nmembers = ["main_crate", "lib_macro"]\n',
+    );
+    fsSync.mkdirSync(path.join(testDir, 'main_crate'), { recursive: true });
+    fsSync.writeFileSync(
+      path.join(testDir, 'main_crate/Cargo.toml'),
+      '[package]\nname = "main_crate"\nversion = "0.1.0"\n',
+    );
+    fsSync.mkdirSync(path.join(testDir, 'lib_macro'), { recursive: true });
+    fsSync.writeFileSync(
+      path.join(testDir, 'lib_macro/Cargo.toml'),
+      '[package]\nname = "lib_macro"\nversion = "0.1.0"\n',
+    );
+  }
+
+  it('DISTINCTNESS: two unrelated files in the same crate do not share a fabricated crate-wide dependent list', () => {
+    setUpWorkspace();
+
+    const chunks = [
+      // lib_macro's own crate root: `Symbol` is a proc-macro-derive name
+      // declared directly here, exactly like serde_derive's real shape.
+      ...chunkInWorkspace(
+        'lib_macro/src/lib.rs',
+        [
+          'mod helper_a;',
+          'mod helper_b;',
+          '',
+          '#[proc_macro_derive(Symbol)]',
+          'pub fn derive_symbol(input: TokenStream) -> TokenStream {',
+          '    unimplemented!()',
+          '}',
+        ].join('\n'),
+      ),
+      // Two UNRELATED files inside lib_macro -- neither declares or
+      // re-exports `Symbol`, and they have nothing to do with each other.
+      ...chunkInWorkspace('lib_macro/src/helper_a.rs', 'pub fn a_helper() -> u32 { 1 }\n'),
+      ...chunkInWorkspace('lib_macro/src/helper_b.rs', 'pub fn b_helper() -> u32 { 2 }\n'),
+      // main_crate consumes lib_macro by its published name (the ordinary
+      // shape for a workspace member consuming another member's public API).
+      ...chunkInWorkspace(
+        'main_crate/src/lib.rs',
+        'use lib_macro::Symbol;\n\n#[derive(Symbol)]\npub struct Thing;\n',
+      ),
+    ];
+
+    const depsA = findDependents(
+      chunks,
+      'lib_macro/src/helper_a.rs',
+      noopLog,
+      testDir,
+    ).dependents.map(d => d.filepath);
+    const depsB = findDependents(
+      chunks,
+      'lib_macro/src/helper_b.rs',
+      noopLog,
+      testDir,
+    ).dependents.map(d => d.filepath);
+    const depsLib = findDependents(chunks, 'lib_macro/src/lib.rs', noopLog, testDir).dependents.map(
+      d => d.filepath,
+    );
+
+    // Each helper's only REAL dependent is `lib.rs` itself (via its own
+    // `mod helper_a;`/`mod helper_b;` declaration) -- neither actually
+    // declares or re-exports `Symbol`. The core #1056 bug shape: before the
+    // fix, BOTH helpers additionally fabricated `main_crate/src/lib.rs` as a
+    // dependent too, via the bare crate-wide directory match.
+    expect(depsA).toEqual(['lib_macro/src/lib.rs']);
+    expect(depsB).toEqual(['lib_macro/src/lib.rs']);
+    // The ONE real edge for lib.rs itself: main_crate consumes what
+    // lib_macro's OWN root file declares.
+    expect(depsLib).toEqual(['main_crate/src/lib.rs']);
+  });
+
+  it('still resolves the real edge when the bare crate-root symbol truly is a top-level pub item', () => {
+    setUpWorkspace();
+
+    const chunks = [
+      ...chunkInWorkspace('lib_macro/src/lib.rs', 'pub fn helper() -> u32 {\n    42\n}\n'),
+      ...chunkInWorkspace(
+        'main_crate/src/lib.rs',
+        'use lib_macro::helper;\n\npub fn run() -> u32 {\n    helper()\n}\n',
+      ),
+    ];
+
+    expect(
+      findDependents(chunks, 'lib_macro/src/lib.rs', noopLog, testDir).dependents.map(
+        d => d.filepath,
+      ),
+    ).toEqual(['main_crate/src/lib.rs']);
+  });
+
+  it('emits nothing (honest gap) rather than fabricating when the symbol cannot be found in the crate root file', () => {
+    setUpWorkspace();
+
+    const chunks = [
+      ...chunkInWorkspace('lib_macro/src/lib.rs', 'mod helper_a;\n'),
+      ...chunkInWorkspace('lib_macro/src/helper_a.rs', 'pub fn a_helper() -> u32 { 1 }\n'),
+      // `a_helper` is real, but only reachable via `helper_a::a_helper()`,
+      // not re-exported from the crate root -- this v1 export lookup
+      // deliberately doesn't trace that chain (see rust-crate-exports.ts).
+      ...chunkInWorkspace(
+        'main_crate/src/lib.rs',
+        'use lib_macro::a_helper;\n\npub fn run() -> u32 {\n    a_helper()\n}\n',
+      ),
+    ];
+
+    // lib.rs has no dependents of its own (nothing imports IT bare); the
+    // real `mod helper_a;` edge is the only relationship in this fixture,
+    // and main_crate's unresolvable `a_helper` import must not fabricate a
+    // second one onto either file.
+    expect(findDependents(chunks, 'lib_macro/src/lib.rs', noopLog, testDir).dependents).toEqual([]);
+    expect(
+      findDependents(chunks, 'lib_macro/src/helper_a.rs', noopLog, testDir).dependents.map(
+        d => d.filepath,
+      ),
+    ).toEqual(['lib_macro/src/lib.rs']);
   });
 });

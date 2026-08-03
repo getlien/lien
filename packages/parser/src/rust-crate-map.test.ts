@@ -7,6 +7,8 @@ import {
   resolveRustCrateImport,
   clearRustCrateMapCache,
 } from './rust-crate-map.js';
+import { clearRustCrateExportCache } from './rust-crate-exports.js';
+import { hasRustModMarker, stripRustModMarker } from './utils/rust-mod-marker.js';
 
 describe('resolveRustCrateMap', () => {
   let testDir: string;
@@ -164,9 +166,15 @@ describe('resolveRustCrateImport', () => {
     );
   });
 
-  it('resolves a bare crate-root import (no further path) to the crate dir itself', () => {
+  it('returns null for a bare crate-root import when there is no workspaceRoot/symbolName to look up an export with (#1056)', () => {
+    // Before #1056 this resolved to the crate's bare `src` dir itself,
+    // which fabricated a match against EVERY file the crate contains (see
+    // resolveRustCrateImport's own doc comment, and the describe block
+    // below for the real serde/serde_derive repro). Without a
+    // workspaceRoot/symbolName to attempt a crate-root export lookup with,
+    // the honest answer is "unresolved", not "the whole crate".
     const crateMap = new Map([['tokio_test', 'tokio-test/src']]);
-    expect(resolveRustCrateImport('tokio_test', crateMap)).toBe('tokio-test/src');
+    expect(resolveRustCrateImport('tokio_test', crateMap)).toBeNull();
   });
 
   it('leaves a genuinely external crate unresolved (returns null) -- no guessing, #868 precedent', () => {
@@ -179,5 +187,125 @@ describe('resolveRustCrateImport', () => {
     // "tokio_util_extra" must not be treated as the "tokio_util" crate.
     const crateMap = new Map([['tokio_util', 'tokio-util/src']]);
     expect(resolveRustCrateImport('tokio_util_extra::foo', crateMap)).toBeNull();
+  });
+
+  // #1056: a bare crate-root import (`use serde_derive::Deserialize;` -- no
+  // submodule path between the crate name and the symbol) used to resolve
+  // to the crate's bare `src` directory, fabricating an identical dependent
+  // list for every file the crate contains. With a `workspaceRoot` on hand,
+  // it now narrows to the ONE file that actually declares the symbol, via a
+  // crate-root export lookup (`resolveRustCrateRootExport`), or emits
+  // nothing when that can't be determined.
+  describe('bare crate-root export lookup (#1056)', () => {
+    let testDir: string;
+
+    beforeEach(async () => {
+      testDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-test-rust-crate-exports-'));
+    });
+
+    afterEach(async () => {
+      clearRustCrateExportCache();
+      await fs.rm(testDir, { recursive: true, force: true }).catch(() => {});
+    });
+
+    async function writeFile(relPath: string, content: string): Promise<void> {
+      const abs = path.join(testDir, relPath);
+      await fs.mkdir(path.dirname(abs), { recursive: true });
+      await fs.writeFile(abs, content);
+    }
+
+    it('resolves the serde/serde_derive repro: a proc-macro-derive name declared directly in the crate root', async () => {
+      // The exact real-world shape from the issue: `Deserialize`/`Serialize`
+      // are proc-macro-derive names declared directly in
+      // `serde_derive/src/lib.rs` (`#[proc_macro_derive(Deserialize, ...)]`),
+      // not re-exported from anywhere else in the crate.
+      await writeFile(
+        'serde_derive/src/lib.rs',
+        [
+          '#[proc_macro_derive(Deserialize, attributes(serde))]',
+          'pub fn derive_deserialize(input: TokenStream) -> TokenStream {',
+          '    unimplemented!()',
+          '}',
+          '',
+          '#[proc_macro_derive(Serialize, attributes(serde))]',
+          'pub fn derive_serialize(input: TokenStream) -> TokenStream {',
+          '    unimplemented!()',
+          '}',
+        ].join('\n'),
+      );
+      const crateMap = new Map([['serde_derive', 'serde_derive/src']]);
+
+      const resolved = resolveRustCrateImport('serde_derive', crateMap, testDir, 'Deserialize');
+      expect(resolved).not.toBeNull();
+      expect(hasRustModMarker(resolved!)).toBe(true);
+      expect(stripRustModMarker(resolved!)).toBe('serde_derive/src/lib');
+    });
+
+    it('resolves a plain top-level pub item declared directly in the crate root', async () => {
+      await writeFile('my_crate/src/lib.rs', 'pub fn helper() {}\n\npub struct Config {}\n');
+      const crateMap = new Map([['my_crate', 'my_crate/src']]);
+
+      expect(resolveRustCrateImport('my_crate', crateMap, testDir, 'helper')).not.toBeNull();
+      expect(
+        stripRustModMarker(resolveRustCrateImport('my_crate', crateMap, testDir, 'Config')!),
+      ).toBe('my_crate/src/lib');
+    });
+
+    it('does not misattribute a same-named item nested inside an impl block (column-0 anchoring)', async () => {
+      await writeFile(
+        'my_crate/src/lib.rs',
+        ['pub struct Thing;', '', 'impl Thing {', '    pub fn helper() {}', '}'].join('\n'),
+      );
+      const crateMap = new Map([['my_crate', 'my_crate/src']]);
+
+      // "helper" is only ever declared INSIDE the impl block (indented), so
+      // a column-0-anchored scan must not find it as a crate-root export.
+      expect(resolveRustCrateImport('my_crate', crateMap, testDir, 'helper')).toBeNull();
+    });
+
+    it('falls back to main.rs when there is no lib.rs', async () => {
+      await writeFile('my_bin/src/main.rs', 'pub fn run() {}\n');
+      const crateMap = new Map([['my_bin', 'my_bin/src']]);
+
+      expect(stripRustModMarker(resolveRustCrateImport('my_bin', crateMap, testDir, 'run')!)).toBe(
+        'my_bin/src/main',
+      );
+    });
+
+    it('returns null (honest gap) when the symbol is not found in the crate root file', async () => {
+      await writeFile('my_crate/src/lib.rs', 'pub fn helper() {}\n');
+      const crateMap = new Map([['my_crate', 'my_crate/src']]);
+
+      // "helper" is real; "somethingElse" is not declared anywhere in the
+      // crate root file (e.g. it's only reachable via a re-export chain
+      // this v1 lookup deliberately doesn't trace -- see
+      // rust-crate-exports.ts's doc comment).
+      expect(resolveRustCrateImport('my_crate', crateMap, testDir, 'somethingElse')).toBeNull();
+    });
+
+    it('returns null when the crate has neither lib.rs nor main.rs', async () => {
+      const crateMap = new Map([['ghost_crate', 'ghost_crate/src']]);
+      expect(resolveRustCrateImport('ghost_crate', crateMap, testDir, 'Anything')).toBeNull();
+    });
+
+    it('DISTINCTNESS: two unrelated crates resolve the same symbol name to their OWN different root files', async () => {
+      // The core #1056 regression check: the bug was never "wrong file",
+      // it was "every file in the crate, identically" -- so the fix must
+      // prove two different crates (each merely happening to export a
+      // same-named symbol) resolve to their OWN distinct files, not a
+      // shared fabricated answer.
+      await writeFile('crate_a/src/lib.rs', 'pub fn shared_name() {}\n');
+      await writeFile('crate_b/src/lib.rs', 'pub fn shared_name() {}\n');
+      const crateMap = new Map([
+        ['crate_a', 'crate_a/src'],
+        ['crate_b', 'crate_b/src'],
+      ]);
+
+      const fromA = resolveRustCrateImport('crate_a', crateMap, testDir, 'shared_name');
+      const fromB = resolveRustCrateImport('crate_b', crateMap, testDir, 'shared_name');
+      expect(stripRustModMarker(fromA!)).toBe('crate_a/src/lib');
+      expect(stripRustModMarker(fromB!)).toBe('crate_b/src/lib');
+      expect(fromA).not.toBe(fromB);
+    });
   });
 });

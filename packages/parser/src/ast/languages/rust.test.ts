@@ -1,8 +1,16 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import fs from 'fs/promises';
+import os from 'os';
+import path from 'path';
 import { mustParse } from '../test/helpers/parse-fixture.js';
 import type { SyntaxNode } from '../types.js';
 import { chunkByAST } from '../chunker.js';
-import { markRustModSpecifier } from '../../utils/rust-mod-marker.js';
+import {
+  markRustModSpecifier,
+  hasRustModMarker,
+  stripRustModMarker,
+} from '../../utils/rust-mod-marker.js';
+import { clearRustCrateExportCache } from '../../rust-crate-exports.js';
 import {
   RustTraverser,
   RustExportExtractor,
@@ -340,22 +348,20 @@ pub static COUNTER: i32 = 0;`;
         );
       });
 
-      it('resolves a bare workspace-crate group reference (no module segment before the braces) to the crate dir itself', () => {
+      it('resolves a bare workspace-crate group reference (no module segment before the braces) to null without a workspaceRoot (#1056)', () => {
         // `use tokio_test::{assert_ok, assert_err};` (tokio-test's own repro
         // shape from #903) has no module path between the crate name and the
-        // group -- convertRustModulePath's `rest` is empty, so it resolves to
-        // the crate's src dir itself, same as a bare crate::-relative import
-        // with nothing to strip.
+        // group -- convertRustModulePath's `rest` is empty. Before #1056 this
+        // resolved to the crate's bare `src` dir itself, which fabricated a
+        // match against EVERY file the crate contains (the exact serde/
+        // serde_derive repro -- see the dedicated describe block below).
+        // Without a `workspaceRoot` to attempt a crate-root export lookup
+        // with, the honest answer is now "unresolved", not "the whole crate".
         const code = 'use tokio_test::{assert_ok, assert_err};';
         const root = mustParse(code, 'rust');
         const useNode = root.namedChild(0)!;
-        expect(importExtractor.extractImportPath(useNode, rustCrateMap)).toBe('tokio-test/src');
-
-        const result = importExtractor.processImportSymbols(useNode, rustCrateMap);
-        expect(result).not.toBeNull();
-        expect(result!.importPath).toBe('tokio-test/src');
-        expect(result!.symbols).toContain('assert_ok');
-        expect(result!.symbols).toContain('assert_err');
+        expect(importExtractor.extractImportPath(useNode, rustCrateMap)).toBeNull();
+        expect(importExtractor.processImportSymbols(useNode, rustCrateMap)).toBeNull();
       });
 
       it('still returns null for a genuinely external crate even with a crate map present', () => {
@@ -387,6 +393,138 @@ pub static COUNTER: i32 = 0;`;
         const root = mustParse(code, 'rust');
         const useNode = root.namedChild(0)!;
         expect(importExtractor.extractImportPath(useNode, rustCrateMap)).toBe('auth/AuthService');
+      });
+    });
+
+    // #1056: the serde/serde_derive fabrication bug. `use serde_derive::
+    // Deserialize;` (a cross-crate import naming only the crate + a symbol,
+    // no submodule path) used to resolve to the crate's bare `src` dir,
+    // fabricating an identical dependent list for every file in the crate.
+    // With `workspaceRoot` on hand, it now narrows to the ONE file the
+    // symbol actually comes from via a crate-root export lookup.
+    describe('bare crate-root export lookup (#1056)', () => {
+      let testDir: string;
+      const rustCrateMap = new Map([['serde_derive', 'serde_derive/src']]);
+
+      beforeEach(async () => {
+        testDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-test-rust-export-lookup-'));
+        await fs.mkdir(path.join(testDir, 'serde_derive/src'), { recursive: true });
+        await fs.writeFile(
+          path.join(testDir, 'serde_derive/src/lib.rs'),
+          [
+            '#[proc_macro_derive(Deserialize, attributes(serde))]',
+            'pub fn derive_deserialize(input: TokenStream) -> TokenStream {',
+            '    unimplemented!()',
+            '}',
+            '',
+            '#[proc_macro_derive(Serialize, attributes(serde))]',
+            'pub fn derive_serialize(input: TokenStream) -> TokenStream {',
+            '    unimplemented!()',
+            '}',
+          ].join('\n'),
+        );
+      });
+
+      afterEach(async () => {
+        clearRustCrateExportCache();
+        await fs.rm(testDir, { recursive: true, force: true }).catch(() => {});
+      });
+
+      it('resolves a single scoped_identifier import (the 143 test_suite/tests/**/*.rs repro shape)', () => {
+        const code = 'use serde_derive::Deserialize;';
+        const root = mustParse(code, 'rust');
+        const useNode = root.namedChild(0)!;
+
+        const result = importExtractor.processImportSymbols(
+          useNode,
+          rustCrateMap,
+          undefined,
+          testDir,
+        );
+        expect(result).not.toBeNull();
+        expect(hasRustModMarker(result!.importPath)).toBe(true);
+        expect(stripRustModMarker(result!.importPath)).toBe('serde_derive/src/lib');
+        expect(result!.symbols).toEqual(['Deserialize']);
+      });
+
+      it('resolves a scoped_use_list import (the serde/src/lib.rs `pub use serde_derive::{Deserialize, Serialize};` repro shape)', () => {
+        const code = 'pub use serde_derive::{Deserialize, Serialize};';
+        const root = mustParse(code, 'rust');
+        const useNode = root.namedChild(0)!;
+
+        const result = importExtractor.processImportSymbols(
+          useNode,
+          rustCrateMap,
+          undefined,
+          testDir,
+        );
+        expect(result).not.toBeNull();
+        expect(stripRustModMarker(result!.importPath)).toBe('serde_derive/src/lib');
+        expect(result!.symbols).toEqual(['Deserialize', 'Serialize']);
+      });
+
+      it('resolves an aliased import by looking up the PRE-alias name', () => {
+        const code = 'use serde_derive::Deserialize as Deser;';
+        const root = mustParse(code, 'rust');
+        const useNode = root.namedChild(0)!;
+
+        const result = importExtractor.processImportSymbols(
+          useNode,
+          rustCrateMap,
+          undefined,
+          testDir,
+        );
+        expect(result).not.toBeNull();
+        expect(stripRustModMarker(result!.importPath)).toBe('serde_derive/src/lib');
+        expect(result!.symbols).toEqual(['Deser']);
+      });
+
+      it('returns null (honest gap) for a symbol not found in the crate root file', () => {
+        const code = 'use serde_derive::NotReallyThere;';
+        const root = mustParse(code, 'rust');
+        const useNode = root.namedChild(0)!;
+
+        expect(
+          importExtractor.processImportSymbols(useNode, rustCrateMap, undefined, testDir),
+        ).toBeNull();
+      });
+
+      it('converges on the ONE real target file rather than the crate-wide directory the bug used to fabricate', () => {
+        // Both of these importer shapes (a single `use`, and the `pub use`
+        // list form) are real consumers of the SAME symbol, from the SAME
+        // crate, so it's correct for both to resolve to the same real
+        // target (serde_derive/src/lib) -- that's convergence on the truth,
+        // not the bug. The bug this whole fix exists for is the crate-WIDE
+        // directory both used to fall back to instead (`serde_derive/src`),
+        // which would have ALSO matched every unrelated file the crate
+        // contains (`de.rs`, `dummy.rs`, ...) -- see the dependency-level
+        // proof in `real-projects.test.ts` / the PR's own before/after
+        // measurement for the actual distinctness check across unrelated
+        // TARGET files.
+        const codeA = 'use serde_derive::Deserialize;'; // e.g. a test_suite/tests/*.rs file
+        const codeB = 'pub use serde_derive::{Deserialize, Serialize};'; // serde/src/lib.rs itself
+
+        const useNodeA = mustParse(codeA, 'rust').namedChild(0)!;
+        const useNodeB = mustParse(codeB, 'rust').namedChild(0)!;
+
+        const resultA = importExtractor.processImportSymbols(
+          useNodeA,
+          rustCrateMap,
+          undefined,
+          testDir,
+        );
+        const resultB = importExtractor.processImportSymbols(
+          useNodeB,
+          rustCrateMap,
+          undefined,
+          testDir,
+        );
+
+        expect(resultA!.importPath).toBe(resultB!.importPath);
+        // Neither resolves to the bare crate directory -- the fabrication
+        // this whole fix exists to eliminate.
+        expect(stripRustModMarker(resultA!.importPath)).not.toBe('serde_derive/src');
+        expect(hasRustModMarker(resultA!.importPath)).toBe(true);
       });
     });
 
