@@ -1,5 +1,132 @@
 # @liendev/parser
 
+## 0.75.3
+
+### Patch Changes
+
+- 03232e6: Correct three doc-comment citations in `python.ts`, `rust.ts`, and
+  `path-matching.ts`, found by an independent verification pass after
+  ADR-015 (#1038, PR #1045) merged. All three are comment-only — no
+  declared `LanguageDefinition` value or matcher behavior changes:
+  - `python.ts`: `singleFileImports`'s comment wrongly claimed the flag was
+    "inapplicable" for Python. It's load-bearing via relative imports
+    (`from . import X` resolves to a bare multi-segment path) — confirmed
+    by toggling the flag against the real matcher and watching a real edge
+    (`src/requests/api.py`'s `from . import sessions`) stop resolving.
+  - `rust.ts`: `singleFileImports`'s comment wrongly claimed no
+    multi-segment case exists in the `anyhow` corpus. `use self::common::*;`
+    in `tests/test_downcast.rs` resolves to one, independently confirmed
+    load-bearing.
+  - `path-matching.ts`: a pre-existing prose overstatement in `matchesFile`'s
+    own doc comment (predates #1045) — only one of the three cited
+    `dtolnay/anyhow` self-edge files matches the shape described.
+
+- a676e66: Make `LanguageDefinition`'s three matcher-path fields (`wholeModuleImports`,
+  `singleFileImports`, `namespaceStyleImports`) required instead of optional,
+  per ADR-015 (#1038). Previously a language declaring nothing silently
+  inherited the shared matcher's permissive defaults — 7 of 11 languages
+  (TypeScript, JavaScript, Python, Rust, Go, Java, Kotlin) declared none of
+  these three fields, so nobody had ever had to state whether that permissive
+  default was correct-by-design or correct-by-accident for them. This is the
+  mechanism behind #1028: a leniency added for Swift/Go/Ruby silently applied
+  to Rust too, which had never opted into anything.
+
+  All 11 language definitions now declare all three fields explicitly,
+  verified against a real corpus per language (requests, zod, express,
+  monolog, anyhow, chi, javapoet, mediatr, sinatra, klaxon, swiftyjson) — see
+  each definition file's own citation. Only Swift (`wholeModuleImports`),
+  Ruby (`singleFileImports`), and PHP (`namespaceStyleImports`) are `true`;
+  every other cell is an explicit, evidence-backed `false`. This corrects one
+  factual error surfaced during verification: C# was previously believed to
+  already set `wholeModuleImports` (per issue #1038's own "current state"
+  table) — it does not, and never has; it only sets the separate,
+  out-of-scope `enclosingNamespaceAccess` flag. Rust's `singleFileImports`
+  stays `false` per #1021/#1024's own established reasoning (`mod`-derived
+  specifiers bypass these flags entirely via `rust-mod-marker.ts`).
+
+  Behavior-preserving by construction: every declared value matches the
+  language's current effective default, confirmed via full before/after
+  per-file dependency-edge dumps across all 11 corpora (byte-identical, modulo
+  one pre-existing, code-independent non-determinism in zod's re-export
+  transitive resolution — filed separately as #1044, unrelated to this
+  change). Adding a 12th language definition without declaring all three
+  fields is now a compile error. A new cross-language policy table asserts
+  these fields stay sparse and mutually exclusive per language, so future
+  additions don't quietly relocate the same drift.
+
+- 5040f35: Clamp PHP require-target resolution (`php-require.ts`'s `requireTargetExists`, added in #1009/#1063) to `workspaceRoot`. Previously `path.join(workspaceRoot, specifier)` resolved `..` segments without clamping the result, so a statically-resolvable specifier like `require __DIR__ . '/../../../../etc/passwd';` could `fs.statSync` a real file entirely outside the indexed project and get trusted as a genuine require/include dependency edge. Now rejected before the existence check ever runs: the candidate path's relative path back to `workspaceRoot` must not escape (start with `..`) or be absolute (the cross-drive case on Windows).
+- 3ae4031: Resolve PHP `require`/`require_once`/`include`/`include_once` targets that are statically decidable to a real dependency edge (#1009). Previously, `PHPImportExtractor.importNodeTypes` only covered `use` declarations — PHP's other file-inclusion mechanism produced no edge at all, unlike Ruby's `require_relative` and JavaScript's `require()`, which both already resolve.
+
+  `require`/`include` are expressions, not declarations, and most call sites (a variable, a bare constant, an arbitrary function call, an interpolated string) are only resolvable at runtime — guessing at those would risk the #928/#1008/#1056 fabrication shape this codebase has repeatedly closed. Three statically-decidable shapes are resolved: a plain string literal, `__DIR__`/`dirname(__FILE__)` concatenated with a literal (the file's own directory), and `dirname(__DIR__)` concatenated with a literal (its parent — confirmed a common WordPress-core idiom for climbing from a subdirectory like `wp-admin/` back to the install root). All three resolve to a path relative to the file containing the statement, and — stronger than the existing PSR-4 resolution's single-candidate trust — the resolved target must exist on disk before an edge is emitted at all (`php-require.ts`'s `requireTargetExists`).
+
+  Measured on WordPress core (`WordPress/WordPress`, shallow clone, 1901 PHP files): **114 → 336 dependency edges (98.5% → 96.1% orphan)**. Of 1456 real require/include AST sites (311 files), 175 (12.0%) are statically resolved and 1281 (88.0%) are honestly skipped — the dominant skip reason is WordPress's own `ABSPATH . 'wp-admin/includes/x.php'` idiom, correctly left unresolved since `ABSPATH` is assigned dynamically at runtime, not a lexical constant like `__DIR__`. Verified no #1056-shaped fabrication: dependent lists for `wp-load.php` (20), `wp-admin/admin.php` (68), `wp-blog-header.php` (3), and two ABSPATH-only files (0, 0) are all distinct.
+
+  Measured on Monolog (232 files/2857 chunks): 405 edges/197 orphans both before and after — unchanged, because Monolog's `src/`/`tests/` trees have exactly one real require/include site (`tests/bootstrap.php`), and its target (`vendor/autoload.php`) is gitignored/external, not part of the indexed corpus. The fix's mechanism is independently confirmed to fire on that exact file (`imports` now includes `vendor/autoload.php` when `vendor/` exists on disk) — Monolog is simply the wrong corpus to demonstrate this fix on, since modern Composer libraries resolve nearly everything through PSR-4 instead.
+
+- 5aefc0c: Fix Go dependency-edge resolution for a module's own ROOT package. Any file
+  outside the root package that genuinely uses it (idiomatic Go — there's no
+  relative-import syntax) can only reference it via a bare self-import of the
+  module's own full path (`import "github.com/go-chi/chi/v5"`). `resolveGoModuleImport`
+  deliberately leaves that exact-match case unresolved (correct for #867's
+  narrower test-association scope), so nothing in the general dependents
+  pipeline ever named a specific root-package file — every root file reported
+  zero dependents despite being heavily imported by every subpackage. Measured
+  on go-chi/chi: `context.go` (exports `RouteContext`) showed 0 dependents
+  despite real `middleware/*.go` callers.
+
+  Adds `go-root-package-signals.ts`, a project-wide export-lookup recovery:
+  which root file actually exports the symbol a bare-self-importing file's own
+  call sites reference, gated by export uniqueness and a distinctiveness check
+  (rejects single-segment, common names like `Use`/`Get`/`Post`). Deliberately
+  NOT a change to `resolveGoModuleImport`/`matchesFile` themselves — crediting
+  the whole root-package directory the way a subpackage import already does
+  would fabricate a false hub (the #1008/#1056 shape), since the module root is
+  frequently the repository root itself alongside dozens of unrelated files.
+
+  Verified against go-chi/chi (86 files): dependency edges 11 → 64 (94.2% → 88.4%
+  orphan rate), `context.go` 0 → 11 real dependents. Confirmed no false hub:
+  `context.go` and `chi.go` recover disjoint dependent lists. No regression to
+  Go same-package test-association (#867) or any of the other 10 corpora in the
+  E2E suite.
+
+- cc1fccb: Resolve Java/Kotlin dotted fully-qualified imports (`com.squareup.javapoet.TypeName`) to real file paths via a conventional Maven/Gradle source-root strip (#1046, #1005 Mechanism 1). Previously, Java's and Kotlin's import extractors stored the raw dotted specifier verbatim, and the only dotted-aware matching strategy is correctly gated off for non-Python importers (#929) — so a Java/Kotlin cross-package `import` never resolved to a dependent edge at all, leaving `get_dependents` silently at or near 0 edges for both languages on real corpora (JavaPoet: 0/43 files; Klaxon: 0/104 files).
+
+  The fix adds `jvm-source-root.ts`, which locates a project's conventional source-set directories (`src/main/java`, `src/main/kotlin`, `src/test/java`, `src/test/kotlin`, found at any depth for multi-module Gradle builds) and resolves a dotted FQN to a workspace-relative path only when the resolved candidate exists on disk as a real file — mirroring the existing `php-psr4.ts`/`rust-crate-map.ts` pattern. Resolution happens upstream of `matchesFile` entirely, so no new fuzzy-matching strategy was added: a resolved import satisfies the existing exact-match strategy directly.
+
+  Measured on real corpora (5 repeated runs each, stable): JavaPoet 0 → 18 edges (93.0% orphan, down from 100%); Klaxon 0 → 4 edges (97.0% orphan, down from 100%). Both corpora stay mostly orphaned even after this fix because most of their files reference each other with no `import` at all (same-package access — #1005's separate, out-of-scope Mechanism 2) — this fix closes the "dotted imports never resolve" gap specifically, not same-package visibility. Wildcard package imports (`import com.example.*`) and Kotlin's function-level dotted imports remain unresolved by design, to avoid the language-blind fuzzy-matching risk #928 was closed to eliminate. No regressions across the other 9 real-project corpora (requests, zod, express, monolog, anyhow, chi, mediatr, sinatra, swiftyjson).
+
+- 5aadd4f: Fix Rust `get_dependents` fabricating an identical dependent list for every
+  file in a crate when consumed via `use crate_name::Symbol;` (a cross-crate
+  import naming only the crate + a symbol, no submodule path — the ordinary
+  shape for consuming what a crate's `lib.rs` re-exports). `resolveRustCrateImport`
+  resolved this to the crate's bare `src/` directory, which fabricated a match
+  against every file the crate contains via `matchesFile`'s Go-style package-
+  directory leniency. Measured on serde-rs/serde: `serde_derive/src/de.rs` and
+  `serde_derive/src/dummy.rs` — two unrelated files — both returned the
+  identical 144-file "dependent" list.
+
+  Adds `rust-crate-exports.ts`, a crate-root export lookup: reads the target
+  crate's own `lib.rs`/`main.rs` directly for (a) top-level `pub` items and
+  (b) `#[proc_macro_derive(Name)]` names (the exact serde/serde_derive shape),
+  and narrows the bare crate-root import to the ONE file that actually
+  declares the symbol. When the symbol can't be found there, emits nothing —
+  an honest gap, not a fabricated crate-wide match. The resolved specifier
+  reuses the existing #1021 mod-marker mechanism for exact-single-file
+  matching.
+
+  Verified against a real serde-rs/serde clone: `de.rs`/`dummy.rs` now
+  correctly show their one real dependent (`lib.rs`, via its own `mod de;`/
+  `mod dummy;`); `internals/ast.rs` shows a genuinely different, much smaller
+  list of real internal consumers (15, down from a fabricated 158); `lib.rs`
+  itself is unchanged (143 real consumers — the file that actually declares
+  `Deserialize`/`Serialize`). `dtolnay/anyhow` (single-crate, non-workspace)
+  went from 27 to ~32 edges — an increase, not a decrease: its own crate
+  directory is a single-segment `src`, which never hit the multi-segment
+  fabrication a workspace member's `<crate>/src` shape does, so its `tests/*.rs`
+  integration tests (`use anyhow::Error;`) simply resolve for the first time
+  instead of matching nothing. No regression to the other 10 corpora in the
+  E2E suite.
+
 ## 0.75.2
 
 ### Patch Changes
