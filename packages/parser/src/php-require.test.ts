@@ -47,4 +47,20 @@ describe('requireTargetExists', () => {
     await writeFile('vendor/autoload.php', '<?php\n');
     expect(requireTargetExists('vendor', testDir)).toBe(false);
   });
+
+  it('is false when the specifier climbs outside workspaceRoot via .. segments, even if the target exists on disk (CodeRabbit path-traversal finding)', async () => {
+    // A sibling directory of testDir (both directly under os.tmpdir()) with
+    // a real file in it -- proving the escape would otherwise succeed, since
+    // path.join alone doesn't clamp the result to stay inside workspaceRoot.
+    const siblingDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-test-php-require-outside-'));
+    try {
+      const siblingFile = path.join(siblingDir, 'secret.php');
+      await fs.writeFile(siblingFile, '<?php\n');
+
+      const escaped = `../${path.basename(siblingDir)}/secret.php`;
+      expect(requireTargetExists(escaped, testDir)).toBe(false);
+    } finally {
+      await fs.rm(siblingDir, { recursive: true, force: true }).catch(() => {});
+    }
+  });
 });
