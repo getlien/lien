@@ -150,24 +150,24 @@ const KNOWN_ZERO_EDGE_LANGUAGES = new Set(['java', 'kotlin', 'swift']);
  * - **swift**: documented and accepted, #869 ("whole-module-import
  *   languages have no per-file test-association signal -- structural gap,
  *   not a matching bug"). Measured: SwiftyJSON, 0/27 files.
- * - **csharp**: a NEW gap found while building this test, filed as #1040.
- *   `test-associations.ts` wires in a same-convention fallback for Go
- *   (`hasSameDirectoryTestConvention`) and Java (`hasSamePackageTestConvention`)
- *   but has no C# case, even though C# is the one language with
- *   `enclosingNamespaceAccess` for general dependents (#930) -- a C# test
- *   file in a nested namespace (e.g. `MediatR.Tests`) sees its parent
- *   namespace's (`MediatR`) types with no `using` statement at all, the
- *   same shape as Go/Java's no-import test conventions, but nothing gives
- *   that convention credit for test-association purposes. Measured: MediatR,
- *   0/160 files, confirmed not a sampling artifact (checked all 160, not
- *   just the 100-file sample).
+ *
+ * **csharp is FIXED (#1040)** and no longer belongs in this set:
+ * `test-associations.ts` now reuses `resolveCSharpTypeReferenceDependents`
+ * (the SAME namespace-scoped signal `get_dependents`'s file-level recovery
+ * already relied on, #930) filtered to test files, recovering C#'s
+ * enclosing-namespace test convention -- a C# test file in a nested
+ * namespace (e.g. `MediatR.Tests`) sees its parent namespace's (`MediatR`)
+ * types with no `using` statement at all, the same shape as Go/Java's
+ * no-import test conventions. Measured: MediatR, 0/160 -> 60/160 files (269
+ * associations across all 160; see MediatR's own `expectedMinTestAssociations`
+ * for the 100-file-sampled floor this test actually asserts).
  *
  * Note this is a DIFFERENT set from `KNOWN_ZERO_EDGE_LANGUAGES`: Java is
  * zero-edge (#1005) but NOT zero-test-association -- `samePackageTestConvention`
  * covers test association only, not dependents, exactly as #1005 documents.
  * Measured: JavaPoet, 13/43 files, real non-zero test associations.
  */
-const KNOWN_ZERO_TESTASSOC_LANGUAGES = new Set(['csharp', 'kotlin', 'swift']);
+const KNOWN_ZERO_TESTASSOC_LANGUAGES = new Set(['kotlin', 'swift']);
 
 /**
  * Test projects for each supported language
@@ -312,12 +312,14 @@ const TEST_PROJECTS: ProjectConfig[] = [
     sampleSearchQuery: 'mediator request handler',
     expectedMinDependencyEdges: 20, // measured ~578 (2026-07); floor is a collapse detector, not a target
     expectedMinComplexityViolations: 5, // measured ~20 (2026-08)
-    // KNOWN GAP: #1040 (filed by #1029/W3) -- C# resolves 0 test
-    // associations today despite MediatR shipping a real test project. See
-    // KNOWN_ZERO_TESTASSOC_LANGUAGES: asserted as an exact-zero tripwire,
-    // not a floor, elsewhere in this file. This value is unused while csharp
-    // is in that set, but keeps the field non-optional for every project.
-    expectedMinTestAssociations: 0,
+    // #1040 FIXED: C# resolved 0 test associations before this fix despite
+    // MediatR shipping a real test project (root cause: the enclosing-
+    // namespace test convention had no case in test-associations.ts). Now
+    // measured ~175 across a 100-file sample of 160 (2026-08; ~269 across
+    // all 160 files, unsampled). Floor set to 90 (~51% of the measured 175)
+    // per #1053 -- tight enough to catch roughly a 50%+ regression, not just
+    // a near-total collapse.
+    expectedMinTestAssociations: 90,
     expectedMinChunksWithExports: 200, // measured ~1376/1449 chunks (2026-08)
     knownSymbolQuery: 'IRequestHandler',
     knownSymbolFile: 'src/MediatR/IRequestHandler.cs',

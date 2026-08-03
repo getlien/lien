@@ -131,15 +131,24 @@
  * `grep -rlw` across the entire `src`+`test` tree, not just the 5 known
  * files).
  *
- * Deliberately scoped to file-level `get_dependents` recovery (via this
- * package's `dependency-analyzer.ts`), NOT test-association -- unlike Go/Java/Swift's
- * same-shaped signals, which stay confined to `lien annotate`'s test-
- * coverage line. #930's remaining gap is specifically that `get_dependents`
- * itself reports a false `dependentCount: 0` / `riskLevel: "low"` "all
- * clear" on a file that has 5 real callers -- an honesty label
- * (`dependentAttributionIncomplete`, #936) already covers the "we don't
- * know" case; this module is what lets the tool answer "we found some"
- * instead, when it genuinely can.
+ * Originally scoped to file-level `get_dependents` recovery only (via this
+ * package's `dependency-analyzer.ts`) -- #930's gap was specifically that
+ * `get_dependents` itself reported a false `dependentCount: 0` /
+ * `riskLevel: "low"` "all clear" on a file that has 5 real callers, which an
+ * honesty label (`dependentAttributionIncomplete`, #936) already covered for
+ * the "we don't know" case; this module is what lets the tool answer "we
+ * found some" instead, when it genuinely can.
+ *
+ * #1040 widens this to test-association too: this is the SAME mechanism
+ * that lets a C# test file in a nested namespace (`MediatR.Tests`) reach its
+ * subject's types (`MediatR`) with no `using` directive at all -- the exact
+ * shape Go's `sameDirectoryTestConvention` and Java's `samePackageTestConvention`
+ * exist to paper over for their own no-import test conventions. Rather than
+ * a THIRD, independent namespace notion for test-association specifically,
+ * `test-associations.ts` (and `get_files_context`) reuse
+ * `buildCSharpTypeReferenceIndex`/`resolveCSharpTypeReferenceDependents`
+ * directly, filtering the recovered dependents down to the test-file subset
+ * -- see those call sites for the measured MediatR corpus numbers.
  */
 
 import type { CodeChunk } from './types.js';
@@ -529,36 +538,59 @@ function resolveTier2NamespaceScopedDependents(
 }
 
 /**
- * Find C# files (any file, production or test) that reference one of
- * `targetFile`'s declared type names, either because the name is uniquely
- * declared project-wide (tier 1) or because namespace scoping + shadowing
- * unambiguously resolves an otherwise globally-ambiguous name back to
- * `targetFile` for that specific referencer (tier 2) -- see the module doc
- * for both rules. Excludes `targetFile` itself. Returns a sorted,
- * deduplicated list of filepaths -- empty when `targetFile` isn't a C# file,
- * declares no resolvable type, or genuinely has no textual referrers in
- * `chunks`.
- *
- * `targetFile` must be the exact `chunk.metadata.file` string used by
- * `targetFile`'s own chunks within `chunks` (not a separately-normalized
- * path) -- this function does no path normalization of its own and relies
- * on plain string equality throughout, mirroring
- * `swift-symbol-usage-signals.ts`'s same discipline.
- *
- * `chunks` should be the FULL project chunk set -- uniqueness (tier 1) and
- * namespace scoping (tier 2) are both project-wide properties, not scoped to
- * `targetFile` alone.
+ * Everything `resolveCSharpTypeReferenceDependents` needs to resolve any
+ * number of target files against ONE project-wide scan -- built once by
+ * `buildCSharpTypeReferenceIndex` and reused per target, so a caller
+ * resolving many target files (e.g. `test-associations.ts`'s per-file loop,
+ * #1040) doesn't re-scan the full chunk set for every one of them, the same
+ * "build the index once, resolve many" discipline
+ * `go-same-directory-tests.ts`/`java-same-package-tests.ts` already use for
+ * their own directory/package indexes.
  */
-export function findCSharpTypeReferenceDependents(
-  targetFile: string,
-  chunks: CodeChunk[],
-): string[] {
-  if (detectLanguage(targetFile) !== 'csharp') return [];
+export interface CSharpTypeReferenceIndex {
+  chunksByFile: Map<string, CodeChunk[]>;
+  namespaceByFile: Map<string, string | undefined>;
+  declarations: CSharpTypeDeclaration[];
+  defMap: Map<string, Set<string>>;
+}
 
+/**
+ * Build the project-wide index `resolveCSharpTypeReferenceDependents` needs
+ * (file->chunks, file->derived namespace, every type declaration, and the
+ * type-name->declaring-files map) from `chunks` once. `chunks` should be the
+ * FULL project chunk set -- uniqueness (tier 1) and namespace scoping (tier 2)
+ * are both project-wide properties, not scoped to any one target file.
+ */
+export function buildCSharpTypeReferenceIndex(chunks: CodeChunk[]): CSharpTypeReferenceIndex {
   const chunksByFile = groupCSharpChunksByFile(chunks);
   const namespaceByFile = buildCSharpNamespaceIndex(chunksByFile);
   const declarations = collectCSharpTypeDeclarations(chunks, namespaceByFile);
   const defMap = buildCSharpTypeOwnerMap(declarations);
+  return { chunksByFile, namespaceByFile, declarations, defMap };
+}
+
+/**
+ * Find C# files (any file, production or test) that reference one of
+ * `targetFile`'s declared type names against an already-built `index` (see
+ * `buildCSharpTypeReferenceIndex`), either because the name is uniquely
+ * declared project-wide (tier 1) or because namespace scoping + shadowing
+ * unambiguously resolves an otherwise globally-ambiguous name back to
+ * `targetFile` for that specific referencer (tier 2) -- see the module doc
+ * for both rules. Excludes `targetFile` itself. Returns a sorted,
+ * deduplicated list of filepaths -- empty when `targetFile` declares no
+ * resolvable type or genuinely has no textual referrers in the index.
+ *
+ * `targetFile` must be the exact `chunk.metadata.file` string used by
+ * `targetFile`'s own chunks within the chunks `index` was built from (not a
+ * separately-normalized path) -- this function does no path normalization of
+ * its own and relies on plain string equality throughout, mirroring
+ * `swift-symbol-usage-signals.ts`'s same discipline.
+ */
+export function resolveCSharpTypeReferenceDependents(
+  targetFile: string,
+  index: CSharpTypeReferenceIndex,
+): string[] {
+  const { chunksByFile, namespaceByFile, declarations, defMap } = index;
 
   const tier1 = resolveTier1UniqueDependents(targetFile, defMap, chunksByFile);
   const tier2 = resolveTier2NamespaceScopedDependents(
@@ -570,4 +602,20 @@ export function findCSharpTypeReferenceDependents(
   );
 
   return [...new Set([...tier1, ...tier2])].sort();
+}
+
+/**
+ * Single-target convenience wrapper around `buildCSharpTypeReferenceIndex` +
+ * `resolveCSharpTypeReferenceDependents`, for callers resolving just ONE
+ * target file (`get_dependents`'s file-level recovery, #930/#943). Callers
+ * resolving MANY target files against the same chunk set should build the
+ * index once themselves instead of calling this in a loop -- see
+ * `CSharpTypeReferenceIndex`'s doc comment.
+ */
+export function findCSharpTypeReferenceDependents(
+  targetFile: string,
+  chunks: CodeChunk[],
+): string[] {
+  if (detectLanguage(targetFile) !== 'csharp') return [];
+  return resolveCSharpTypeReferenceDependents(targetFile, buildCSharpTypeReferenceIndex(chunks));
 }
