@@ -70,9 +70,22 @@ export function resolveGoModulePrefix(workspaceRoot: string): string | undefined
  * the specifier doesn't start with `<modulePrefix>/` — imports of other
  * modules (real external dependencies) and non-Go-module projects see zero
  * behavior change. Same-package imports (a bare import equal to the module
- * prefix itself, with no further path segment) are left unchanged too: Go's
- * own same-package test convention needs no import statement at all, so this
- * case doesn't arise for the cross-package test-association gap #867 targets.
+ * prefix itself, with no further path segment — a ROOT-package self-import,
+ * e.g. a subpackage importing `github.com/gin-gonic/gin` itself) are left
+ * unchanged too, deliberately and permanently: Go's own same-package test
+ * convention needs no import statement at all, so this case doesn't arise for
+ * the cross-package test-association gap #867 targets, and stays a no-op
+ * here even after #1039 gave the general dependents pipeline a real path to
+ * resolve it — see `go-root-package-signals.ts`'s module doc for why that fix
+ * is a separate, narrowly-gated, export-lookup-based recovery signal
+ * (`findGoRootPackageDependents`, wired into `dependency-analyzer.ts`)
+ * instead of a change here: making THIS function (or the generic
+ * `resolveManifestRoot`/`matchesFile` pipeline it feeds) resolve a bare
+ * self-import to "the whole root-package directory" would credit every
+ * subpackage file that merely imports its own module as a dependent of EVERY
+ * root file, regardless of which symbol it actually uses — a false hub, and
+ * it would also apply unconditionally to the #867 test-association path this
+ * function was built for, which has no use for it at all.
  *
  * @param specifier - The raw Go import path.
  * @param modulePrefix - The project's `go.mod` `module` value, or `undefined`.

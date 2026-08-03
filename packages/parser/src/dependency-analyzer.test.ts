@@ -1,11 +1,16 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import fs from 'fs/promises';
+import os from 'os';
+import path from 'path';
 import {
   analyzeDependencies,
   findReExportedSymbolsForFile,
   chunkImportsFrom,
+  findDependents,
   COMPLEXITY_THRESHOLDS,
 } from './dependency-analyzer.js';
 import { chunkByAST } from './ast/chunker.js';
+import { clearGoModuleCache } from './go-module.js';
 import type { CodeChunk, ChunkMetadata } from './types.js';
 
 describe('analyzeDependencies', () => {
@@ -1157,5 +1162,169 @@ describe('bare crate-relative `use` edges end-to-end (#1028 regression)', () => 
         d => d.filepath,
       ),
     ).toEqual(['Controller.php']);
+  });
+});
+
+describe('findDependents (Go root-package export-lookup recovery, #1039)', () => {
+  const MODULE_PREFIX = 'github.com/go-chi/chi/v5';
+  let workspaceRoot: string;
+
+  function noopLog(): void {
+    // Intentionally empty.
+  }
+
+  function createGoChunk(
+    file: string,
+    opts: { imports?: string[]; exports?: string[]; callSites?: string[] } = {},
+  ): CodeChunk {
+    return {
+      content: opts.callSites?.map(s => `${s}()`).join('\n') ?? '',
+      metadata: {
+        file,
+        startLine: 1,
+        endLine: 10,
+        type: 'function',
+        language: 'go',
+        imports: opts.imports,
+        exports: opts.exports,
+        callSites: opts.callSites?.map((symbol, i) => ({ symbol, line: i + 1 })),
+      } as ChunkMetadata,
+    };
+  }
+
+  beforeEach(async () => {
+    workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-test-dep-analyzer-go-'));
+    await fs.writeFile(path.join(workspaceRoot, 'go.mod'), `module ${MODULE_PREFIX}\n\ngo 1.21\n`);
+  });
+
+  afterEach(async () => {
+    clearGoModuleCache();
+    await fs.rm(workspaceRoot, { recursive: true, force: true }).catch(() => {});
+  });
+
+  it('recovers real dependents for a root-package file via export lookup when the import graph found none (the #1039 chi repro)', () => {
+    const chunks: CodeChunk[] = [
+      createGoChunk('context.go', { exports: ['RouteContext', 'NewRouteContext'] }),
+      createGoChunk('middleware/clean_path.go', {
+        imports: [MODULE_PREFIX],
+        callSites: ['RouteContext'],
+      }),
+      createGoChunk('middleware/get_head.go', {
+        imports: [MODULE_PREFIX],
+        callSites: ['RouteContext', 'NewRouteContext'],
+      }),
+    ];
+
+    const result = findDependents(chunks, 'context.go', noopLog, workspaceRoot);
+
+    expect(result.dependents.map(d => d.filepath).sort()).toEqual([
+      'middleware/clean_path.go',
+      'middleware/get_head.go',
+    ]);
+    expect(result.dependents.every(d => d.confidence === 'inferred')).toBe(true);
+    expect(result.dependentAttributionPartial).toBe(true);
+  });
+
+  it('does NOT fabricate a false hub: two unrelated root files get disjoint dependents (the #1056 failure shape, checked explicitly)', () => {
+    const chunks: CodeChunk[] = [
+      createGoChunk('context.go', { exports: ['RouteContext'] }),
+      createGoChunk('chi.go', { exports: ['NewRouter'] }),
+      createGoChunk('middleware/clean_path.go', {
+        imports: [MODULE_PREFIX],
+        callSites: ['RouteContext'],
+      }),
+      createGoChunk('middleware/profiler.go', {
+        imports: [MODULE_PREFIX],
+        callSites: ['NewRouter'],
+      }),
+    ];
+
+    const contextDeps = findDependents(chunks, 'context.go', noopLog, workspaceRoot).dependents.map(
+      d => d.filepath,
+    );
+    const chiDeps = findDependents(chunks, 'chi.go', noopLog, workspaceRoot).dependents.map(
+      d => d.filepath,
+    );
+
+    expect(contextDeps).toEqual(['middleware/clean_path.go']);
+    expect(chiDeps).toEqual(['middleware/profiler.go']);
+    expect(contextDeps).not.toEqual(chiDeps);
+  });
+
+  it("never guesses when a root export name collides across two root files (chi's own ServeHTTP, declared by both chain.go and mux.go)", () => {
+    const chunks: CodeChunk[] = [
+      createGoChunk('chain.go', { exports: ['ServeHTTP'] }),
+      createGoChunk('mux.go', { exports: ['ServeHTTP'] }),
+      createGoChunk('middleware/whatever.go', {
+        imports: [MODULE_PREFIX],
+        callSites: ['ServeHTTP'],
+      }),
+    ];
+
+    expect(findDependents(chunks, 'chain.go', noopLog, workspaceRoot).dependents).toEqual([]);
+    expect(findDependents(chunks, 'mux.go', noopLog, workspaceRoot).dependents).toEqual([]);
+  });
+
+  it('does not recover anything for a single-segment, non-distinctive export name (the Use/Get/Post false-positive risk)', () => {
+    const chunks: CodeChunk[] = [
+      createGoChunk('mux.go', { exports: ['Use', 'Get', 'Post'] }),
+      createGoChunk('unrelated/builder.go', {
+        imports: [MODULE_PREFIX],
+        callSites: ['Use'],
+      }),
+    ];
+
+    expect(findDependents(chunks, 'mux.go', noopLog, workspaceRoot).dependents).toEqual([]);
+  });
+
+  it('does not run the fallback when the import graph already found real dependents', () => {
+    const chunks: CodeChunk[] = [
+      createGoChunk('context.go', { exports: ['RouteContext'] }),
+      // A real, direct import edge already resolves this one.
+      createGoChunk('direct.go', { imports: ['context'] }),
+      createGoChunk('middleware/clean_path.go', {
+        imports: [MODULE_PREFIX],
+        callSites: ['RouteContext'],
+      }),
+    ];
+
+    const result = findDependents(chunks, 'context.go', noopLog, workspaceRoot);
+    expect(result.dependentAttributionPartial).toBeUndefined();
+  });
+
+  it('does not run the fallback for a SYMBOL-scoped query', () => {
+    const chunks: CodeChunk[] = [
+      createGoChunk('context.go', { exports: ['RouteContext'] }),
+      createGoChunk('middleware/clean_path.go', {
+        imports: [MODULE_PREFIX],
+        callSites: ['RouteContext'],
+      }),
+    ];
+
+    const result = findDependents(chunks, 'context.go', noopLog, workspaceRoot, 'RouteContext');
+    expect(result.dependentAttributionPartial).toBeUndefined();
+  });
+
+  it('does not run the fallback for a non-Go file', () => {
+    const chunks: CodeChunk[] = [
+      {
+        content: '',
+        metadata: {
+          file: 'src/context.ts',
+          startLine: 1,
+          endLine: 10,
+          type: 'function',
+          language: 'typescript',
+          exports: ['RouteContext'],
+        },
+      },
+      createGoChunk('middleware/clean_path.go', {
+        imports: [MODULE_PREFIX],
+        callSites: ['RouteContext'],
+      }),
+    ];
+
+    const result = findDependents(chunks, 'src/context.ts', noopLog, workspaceRoot);
+    expect(result.dependentAttributionPartial).toBeUndefined();
   });
 });

@@ -281,14 +281,21 @@ const TEST_PROJECTS: ProjectConfig[] = [
     expectedMinFiles: 5,
     expectedMinChunks: 20,
     sampleSearchQuery: 'http router middleware',
-    // measured ~11 edges / 94% orphan rate (2026-08) -- #1029/W3 chased this:
-    // it is a REAL GAP, not (only) leaf-heaviness. Filed as #1039:
-    // `resolveGoModuleImport` never resolves a bare root-module self-import
+    // #1039 FIXED: was ~11 edges / 94.2% orphan rate (2026-08) -- #1029/W3
+    // chased this to a verdict: a REAL GAP, not (only) leaf-heaviness.
+    // `resolveGoModuleImport` never resolved a bare root-module self-import
     // (e.g. `import "github.com/go-chi/chi/v5"` from middleware/*.go,
-    // referencing the repo-root package with no trailing path segment) --
-    // 35 such imports exist in this corpus alone and none of them resolve.
-    // Floor stays a collapse detector either way: not raised pending that fix.
-    expectedMinDependencyEdges: 5,
+    // referencing the repo-root package with no trailing path segment).
+    // Fixed via `go-root-package-signals.ts`'s export-lookup recovery
+    // (deliberately NOT a change to `resolveGoModuleImport`/`matchesFile`
+    // themselves -- crediting the whole root-package directory would have
+    // fabricated a false hub, the #1008/#1056 shape). Now measured ~64 edges
+    // / 88.4% orphan rate (2026-08) -- `context.go` alone gained 11 real
+    // dependents (5 real `middleware/*.go` callers of `RouteContext`, 3 of
+    // their own `_test.go` files, 3 `_examples/*/main.go` files). Floor set
+    // to 35 (~55% of measured 64) per #1053 -- tight enough to catch roughly
+    // a 45%+ regression, not just a near-total collapse.
+    expectedMinDependencyEdges: 35,
     expectedMinComplexityViolations: 15, // measured ~72 (2026-08)
     expectedMinTestAssociations: 3, // measured ~20 across 86 files (2026-08)
     expectedMinChunksWithExports: 100, // measured ~662/765 chunks (2026-08)
