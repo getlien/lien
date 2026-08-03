@@ -260,10 +260,21 @@ const TEST_PROJECTS: ProjectConfig[] = [
     expectedMinChunks: 15,
     sampleSearchQuery: 'error handling context',
     // DELIBERATELY VERY LOW, do not raise from a measured snapshot (#1004).
-    // Current Rust edge counts (measured ~39 pre-fix) are INFLATED by #1021
-    // (`mod x;` fabricates edges to every file under `x/`, plus self-edges).
-    // Once #1021 lands, legitimate edges will DROP -- a floor pinned to
-    // today's inflated number would bake the bug in and block its own fix.
+    // History: ~39 pre-#1021 (`mod x;` fabricated edges to every file under
+    // `x/`, plus self-edges) -> 27 post-#1021/pre-#1056 -> ~32 post-#1056.
+    // The #1056 fix (bare crate-root imports, `use anyhow::Symbol;` from
+    // Anyhow's OWN `tests/*.rs` integration tests -- a single-crate project,
+    // so `resolveRustCrateMap`'s crateDir is the ONE-segment `src`, never the
+    // multi-segment `<member>/src` shape that made serde_derive's fabrication
+    // possible) went from resolving to NOTHING (a bare single-segment `src`
+    // specifier only ever exact-matches a file literally named `src`, so it
+    // silently matched zero real files here) to correctly resolving via a
+    // crate-root export lookup -- a genuine, non-fabricated INCREASE, not a
+    // regression. Confirmed: `src/lib.rs` now shows 5 real test-file
+    // dependents (`Error`/`Context`/etc. consumers) that resolved to nothing
+    // before; every other `src/*.rs` file's dependent set is unchanged.
+    // A floor pinned to any of these snapshots would bake today's number in
+    // and block the next legitimate fix from moving it either direction --
     // 1 just proves resolution hasn't collapsed to zero; it is intentionally
     // not a precision target.
     expectedMinDependencyEdges: 1,
