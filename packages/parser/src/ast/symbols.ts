@@ -152,7 +152,8 @@ function collectNestedModImportNodes(node: SyntaxNode, nodeTypeSet: Set<string>)
  * 2. A relative specifier that resolved to a bare DIRECTORY (`#953`) against
  *    that directory's real `index.<ext>` entry file, JS/TS only.
  * 3. Workspace package specifiers (`@scope/pkg`) against the `workspacePackages` map.
- * 4. Manifest-declared import roots (PHP PSR-4, Go module prefix) against `manifestRoots`.
+ * 4. Manifest-declared import roots (PHP PSR-4, Go module prefix, Python
+ *    src-layout, JVM source roots) against `manifestRoots`.
  */
 function resolveImportSpecifier(
   specifier: string,
@@ -188,7 +189,7 @@ function resolveDirectoryIndexIfRelative(
   return resolveJsDirectoryIndex(relResolved, manifestRoots.workspaceRoot);
 }
 
-/** Apply step 3 (manifest-root resolution) of `resolveImportSpecifier`. */
+/** Apply step 4 (manifest-root resolution) of `resolveImportSpecifier`. */
 function resolveManifestRoot(specifier: string, manifestRoots: ManifestRoots | undefined): string {
   if (!manifestRoots) return specifier;
   if (manifestRoots.psr4Map) {
