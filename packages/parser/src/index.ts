@@ -173,6 +173,19 @@ export {
 } from './csharp-type-reference-signals.js';
 export type { CSharpTypeReferenceIndex } from './csharp-type-reference-signals.js';
 
+// #1039: Go's root-package export-lookup dependents signal (see
+// go-root-package-signals.ts's module doc). Mirrors the C# exports
+// immediately above -- `buildGoRootPackageIndex`/`resolveGoRootPackageDependents`
+// let a caller resolving MANY target root files build the project-wide index
+// once and reuse it, instead of calling `findGoRootPackageDependents` (which
+// rebuilds it) per file.
+export {
+  findGoRootPackageDependents,
+  buildGoRootPackageIndex,
+  resolveGoRootPackageDependents,
+} from './go-root-package-signals.js';
+export type { GoRootPackageIndex } from './go-root-package-signals.js';
+
 // =============================================================================
 // GRAPH TRAVERSAL (generic bounded BFS — domain graphs build on this)
 // =============================================================================

@@ -15,6 +15,7 @@ import {
   hasDependentAttributionBlindSpot,
 } from './ast/languages/registry.js';
 import { findCSharpTypeReferenceDependents } from './csharp-type-reference-signals.js';
+import { findGoRootPackageDependents } from './go-root-package-signals.js';
 
 /**
  * Risk level thresholds for dependent count.
@@ -861,15 +862,19 @@ export interface DependentInfo {
   /** Depth at which this dependent was first discovered (1 = direct). */
   hops?: number;
   /**
-   * Present (`'inferred'`) only for a dependent recovered by the C#
-   * type-reference-matching fallback (#930's remaining half -- see
-   * `findCSharpTypeReferenceDependents`'s module doc) instead of a real
-   * import edge: a word-boundary text match against a uniquely-declared
-   * type name, not an import-verified association. Absent for every
-   * ordinary, import-verified dependent (the default, confident tier) -- a
-   * caller that needs to distinguish "verified" from "text-matched, lower
-   * confidence" should filter on this field rather than assuming every
-   * entry in `dependents` came from the import graph.
+   * Present (`'inferred'`) only for a dependent recovered by a non-import
+   * fallback instead of a real import edge -- absent for every ordinary,
+   * import-verified dependent (the default, confident tier). A caller that
+   * needs to distinguish "verified" from "recovered, lower confidence"
+   * should filter on this field rather than assuming every entry in
+   * `dependents` came from the import graph. Two such fallbacks exist today:
+   * - C#'s type-reference-matching fallback (#930's remaining half -- see
+   *   `findCSharpTypeReferenceDependents`'s module doc): a word-boundary text
+   *   match against a uniquely-declared type name.
+   * - Go's root-package export-lookup fallback (#1039 -- see
+   *   `findGoRootPackageDependents`'s module doc): a bare module-root
+   *   self-import plus a matching call-site symbol, resolved to the specific
+   *   root file that exports it.
    */
   confidence?: 'inferred';
 }
@@ -1565,14 +1570,23 @@ function resolveDependents<T extends CodeChunk>(args: {
     ctx.log,
     reExporterPaths,
   );
-  const dependentAttributionPartial = enrichWithCSharpTypeReferenceDependents(
-    ctx,
-    filepath,
-    normalizedTarget,
-    symbol,
-    targetIndexed,
-    dependents,
-  );
+  const dependentAttributionPartial =
+    enrichWithCSharpTypeReferenceDependents(
+      ctx,
+      filepath,
+      normalizedTarget,
+      symbol,
+      targetIndexed,
+      dependents,
+    ) ??
+    enrichWithGoRootPackageDependents(
+      ctx,
+      filepath,
+      normalizedTarget,
+      symbol,
+      targetIndexed,
+      dependents,
+    );
   stampHopsAndSort(dependents, hopsByFile);
 
   return {
@@ -1793,6 +1807,63 @@ function enrichWithCSharpTypeReferenceDependents<T extends CodeChunk>(
   ctx.log(
     `Recovered ${inferredFiles.length} dependent(s) for ${filepath} via C# type-reference ` +
       `matching (inferred from a uniquely-declared type name, not import-verified — #930)`,
+  );
+  return true;
+}
+
+/**
+ * #1039: recover REAL dependents for a Go module's ROOT-package file when the
+ * import graph found none, because a Go file outside the root package that
+ * genuinely uses it can only ever spell that reference as a bare self-import
+ * of the module's own full path (`import "github.com/go-chi/chi/v5"`) --
+ * `resolveGoModuleImport` (`go-module.ts`) deliberately leaves that case
+ * unresolved (#867's own scope), so nothing in the import graph ever names a
+ * specific root-package file. See `go-root-package-signals.ts`'s module doc
+ * for the full mechanism (export lookup keyed off a bare-self-importing
+ * file's own call sites, never "credit the whole root directory" -- the
+ * #1008/#1056 false-hub shape this is deliberately built to avoid).
+ *
+ * Mirrors `enrichWithCSharpTypeReferenceDependents` immediately above in
+ * every structural respect: file-level only (no `symbol`), only attempted
+ * when the import graph found LITERALLY ZERO dependents, only for a
+ * root-level Go file (`findGoRootPackageDependents` itself also checks this,
+ * but checking here too avoids the corpus-wide index rebuild for every
+ * non-Go or non-root query), and recovered entries are tagged
+ * `confidence: 'inferred'` -- not joined against `chunksByFile` for
+ * complexity-metrics purposes, same reasoning as the C# recovery.
+ */
+function enrichWithGoRootPackageDependents<T extends CodeChunk>(
+  ctx: ScanContext<T>,
+  filepath: string,
+  normalizedTarget: string,
+  symbol: string | undefined,
+  targetIndexed: boolean,
+  dependents: DependentInfo[],
+): true | undefined {
+  if (symbol || dependents.length !== 0 || !targetIndexed) return undefined;
+  if (detectLanguage(filepath) !== 'go') return undefined;
+
+  const targetChunks = ctx.allChunksByFile.get(normalizedTarget) ?? [];
+  const targetRawFile = targetChunks[0]?.metadata.file;
+  if (!targetRawFile) return undefined;
+
+  const allChunks = Array.from(ctx.allChunksByFile.values()).flat();
+  const inferredFiles = findGoRootPackageDependents(targetRawFile, allChunks, ctx.workspaceRoot);
+  if (inferredFiles.length === 0) return undefined;
+
+  for (const rawFile of inferredFiles) {
+    const canonicalFile = getCanonicalPath(rawFile, ctx.workspaceRoot);
+    dependents.push({
+      filepath: canonicalFile,
+      isTestFile: isTestFile(canonicalFile),
+      confidence: 'inferred',
+    });
+  }
+
+  ctx.log(
+    `Recovered ${inferredFiles.length} dependent(s) for ${filepath} via Go root-package export ` +
+      `lookup (inferred from a bare module-root self-import + a matching call site, not a ` +
+      `direct import edge — #1039)`,
   );
   return true;
 }
