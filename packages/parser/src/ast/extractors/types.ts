@@ -146,12 +146,19 @@ export interface LanguageImportExtractor {
    * @param node - AST node matching one of importNodeTypes
    * @param rustCrateMap - Rust-only (#903) — see `extractImportPaths`.
    * @param importerFile - Rust-only (#928) — see `extractImportPaths`.
+   * @param workspaceRoot - Rust-only (#1056): absolute project root, needed
+   *   to resolve a bare crate-root import (`use crate_name::Symbol;`, no
+   *   submodule path) to the specific file that declares `Symbol`, via a
+   *   crate-root export lookup (`../../rust-crate-exports.ts`), rather than
+   *   fabricating a match against every file the crate contains. Every
+   *   other language's implementation ignores this parameter.
    * @returns Object with importPath and symbols, or null to skip
    */
   processImportSymbols(
     node: SyntaxNode,
     rustCrateMap?: ReadonlyMap<string, string>,
     importerFile?: string,
+    workspaceRoot?: string,
   ): { importPath: string; symbols: string[] } | null;
 
   /**
@@ -174,12 +181,14 @@ export interface LanguageImportExtractor {
    * @param node - AST node matching one of importNodeTypes
    * @param rustCrateMap - Rust-only (#903) -- see `extractImportPaths`.
    * @param importerFile - Rust-only (#928) -- see `extractImportPaths`.
+   * @param workspaceRoot - Rust-only (#1056) -- see `processImportSymbols`.
    * @returns Every {importPath, symbols} pair declared by this node, in source order (empty if none)
    */
   processImportSymbolsList(
     node: SyntaxNode,
     rustCrateMap?: ReadonlyMap<string, string>,
     importerFile?: string,
+    workspaceRoot?: string,
   ): Array<{ importPath: string; symbols: string[] }>;
 
   /**

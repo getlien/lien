@@ -143,7 +143,11 @@ function buildPythonManifestRoots(workspaceRoot: string): ManifestRoots | undefi
 
 function buildRustManifestRoots(workspaceRoot: string): ManifestRoots | undefined {
   const rustCrateMap = resolveRustCrateMap(workspaceRoot);
-  return rustCrateMap.size > 0 ? { rustCrateMap } : undefined;
+  // `workspaceRoot` is threaded through too (#1056): a bare crate-root
+  // import (`use crate_name::Symbol;`, no submodule path) needs it to read
+  // the target crate's own root file when resolving which specific file
+  // declares `Symbol` -- see `../rust-crate-exports.ts`.
+  return rustCrateMap.size > 0 ? { rustCrateMap, workspaceRoot } : undefined;
 }
 
 function buildJvmManifestRoots(workspaceRoot: string): ManifestRoots | undefined {

@@ -2,6 +2,8 @@ import fs from 'fs';
 import path from 'path';
 import { globSync } from 'glob';
 
+import { resolveRustCrateRootExport } from './rust-crate-exports.js';
+
 /**
  * Resolves Rust Cargo workspace member crate names to their source
  * directories, building a `Map<crateName (underscore form), crateSrcDir>`
@@ -186,12 +188,43 @@ export function resolveRustCrateMap(workspaceRoot: string): Map<string, string> 
  * in the map, so it's dropped exactly as it was before this fix (#868's "no
  * guessing" precedent: only real workspace members ever resolve).
  *
+ * When `modulePath` is a BARE crate name with no further path segment (`rest`
+ * is empty -- e.g. `serde_derive` from `use serde_derive::Deserialize;`,
+ * once `convertRustModulePath`'s callers have stripped the imported symbol
+ * off into `symbolName`), this used to return the crate's bare `crateDir`
+ * directly. That fabricated an identical, crate-WIDE dependent list for
+ * every file the crate contains (#1056): `matchesFile`'s Go-style package-
+ * directory leniency (`singleFileImports: false` on Rust, needed elsewhere
+ * for legitimate `crate::`-relative imports) treats a bare multi-segment
+ * specifier like `serde_derive/src` as matching ANY target continuing past
+ * it at a `/` boundary -- confirmed on a real `serde-rs/serde` clone, where
+ * two unrelated files in `serde_derive` (`de.rs`, `dummy.rs`) both reported
+ * the identical 144-file "dependent" list, sourced from every consumer of
+ * `serde_derive::{Deserialize, Serialize}` (a bare crate-root import with no
+ * submodule path -- the common shape for consuming what a crate's `lib.rs`
+ * re-exports). Now this narrows to the ONE file that actually declares
+ * `symbolName`, via `resolveRustCrateRootExport` (see `./rust-crate-exports.ts`),
+ * or emits nothing (`null`) when that can't be determined from the crate's
+ * own root file alone -- an honest gap beats a fabricated crate-wide match,
+ * per this codebase's index-state-honesty policy.
+ *
  * @param modulePath - The raw (non-crate/self/super) `use` path.
  * @param crateMap - Map of crate name (underscore form) -> crate `src/` dir, from `resolveRustCrateMap`.
+ * @param workspaceRoot - Absolute project root, needed (alongside `symbolName`)
+ *   to attempt the #1056 bare-crate-root export lookup. Omitted callers (or
+ *   any caller with no single `symbolName` to look up, e.g. a wildcard
+ *   `use crate_name::*;`) simply get `null` for this case instead -- still a
+ *   strict improvement over the old crate-wide fabrication.
+ * @param symbolName - The single symbol actually being imported, when
+ *   `modulePath` is a bare crate name (#1056). Ignored (harmlessly) when
+ *   `modulePath` has further path segments of its own (`rest` is non-empty),
+ *   since those already resolve to a specific-enough path without it.
  */
 export function resolveRustCrateImport(
   modulePath: string,
   crateMap: ReadonlyMap<string, string> | undefined,
+  workspaceRoot?: string,
+  symbolName?: string,
 ): string | null {
   if (!crateMap || crateMap.size === 0) return null;
 
@@ -201,5 +234,10 @@ export function resolveRustCrateImport(
   if (!crateDir) return null;
 
   const rest = sepIndex === -1 ? '' : modulePath.slice(sepIndex + 2).replace(/::/g, '/');
-  return rest ? `${crateDir}/${rest}` : crateDir;
+  if (rest) return `${crateDir}/${rest}`;
+
+  if (workspaceRoot && symbolName) {
+    return resolveRustCrateRootExport(workspaceRoot, crateDir, symbolName);
+  }
+  return null;
 }

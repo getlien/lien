@@ -580,11 +580,23 @@ function resolveRustRelativeModulePath(
  *   precisely via `resolveRustRelativeModulePath` instead of the old
  *   directory-less/pseudo-relative string. Omitted callers (and any caller
  *   predating #928) keep the exact previous behavior.
+ * @param workspaceRoot - Absolute project root (#1056). Together with
+ *   `symbolName`, lets a bare crate-root import (`tokio_test` from `use
+ *   tokio_test::Symbol;` -- no further path segment for `resolveRustCrateImport`
+ *   to strip) resolve to the ONE file that actually declares `Symbol`,
+ *   instead of falling back to the crate's whole directory. Ignored (and
+ *   harmless) for the `crate::`/`self::`/`super::`-prefixed branches above,
+ *   which never reach `resolveRustCrateImport` in the first place.
+ * @param symbolName - The single symbol actually being imported (#1056),
+ *   when known at the call site. See `resolveRustCrateImport`'s own doc
+ *   comment for exactly when this matters.
  */
 function convertRustModulePath(
   path: string,
   rustCrateMap?: ReadonlyMap<string, string>,
   importerFile?: string,
+  workspaceRoot?: string,
+  symbolName?: string,
 ): string | null {
   // Remove leading `crate::`, `self::`, or `super::`
   if (path.startsWith('crate::')) {
@@ -600,7 +612,7 @@ function convertRustModulePath(
   }
   // Not crate/self/super-relative — resolve against a known workspace crate
   // (#903), or treat as a genuinely external crate (skip) when it isn't one.
-  return resolveRustCrateImport(path, rustCrateMap);
+  return resolveRustCrateImport(path, rustCrateMap, workspaceRoot, symbolName);
 }
 
 /**
@@ -754,6 +766,7 @@ export class RustImportExtractor implements LanguageImportExtractor {
     node: SyntaxNode,
     rustCrateMap?: ReadonlyMap<string, string>,
     importerFile?: string,
+    workspaceRoot?: string,
   ): { importPath: string; symbols: string[] } | null {
     if (node.type === 'mod_item') {
       // A `mod x;` brings the module NAMESPACE into scope (consumers then
@@ -786,35 +799,39 @@ export class RustImportExtractor implements LanguageImportExtractor {
     const argument = node.childForFieldName('argument');
     if (!argument) return null;
 
-    return this.processUseArgument(argument, rustCrateMap, importerFile);
+    return this.processUseArgument(argument, rustCrateMap, importerFile, workspaceRoot);
   }
 
   processImportSymbolsList(
     node: SyntaxNode,
     rustCrateMap?: ReadonlyMap<string, string>,
     importerFile?: string,
+    workspaceRoot?: string,
   ): Array<{ importPath: string; symbols: string[] }> {
-    return toImportSymbolsArray(this.processImportSymbols(node, rustCrateMap, importerFile));
+    return toImportSymbolsArray(
+      this.processImportSymbols(node, rustCrateMap, importerFile, workspaceRoot),
+    );
   }
 
   private processUseArgument(
     node: SyntaxNode,
     rustCrateMap?: ReadonlyMap<string, string>,
     importerFile?: string,
+    workspaceRoot?: string,
   ): { importPath: string; symbols: string[] } | null {
     // Simple: `use crate::auth::AuthService;`
     if (node.type === 'scoped_identifier') {
-      return this.processScopedIdentifier(node, rustCrateMap, importerFile);
+      return this.processScopedIdentifier(node, rustCrateMap, importerFile, workspaceRoot);
     }
 
     // List: `use crate::auth::{AuthService, AuthError};`
     if (node.type === 'scoped_use_list') {
-      return this.processScopedUseList(node, rustCrateMap, importerFile);
+      return this.processScopedUseList(node, rustCrateMap, importerFile, workspaceRoot);
     }
 
     // Alias: `use crate::auth::Service as Auth;`
     if (node.type === 'use_as_clause') {
-      return this.processUseAsClause(node, rustCrateMap, importerFile);
+      return this.processUseAsClause(node, rustCrateMap, importerFile, workspaceRoot);
     }
 
     // Wildcard: `use crate::models::*;`
@@ -834,6 +851,7 @@ export class RustImportExtractor implements LanguageImportExtractor {
     node: SyntaxNode,
     rustCrateMap?: ReadonlyMap<string, string>,
     importerFile?: string,
+    workspaceRoot?: string,
   ): { importPath: string; symbols: string[] } | null {
     const pathNode = node.childForFieldName('path');
     const nameNode = node.childForFieldName('name');
@@ -846,9 +864,26 @@ export class RustImportExtractor implements LanguageImportExtractor {
     // name itself, so combine root + name before converting (mirrors what
     // `resolveFullPath`/`extractImportPath` already derive from the whole
     // node's text for this same statement).
+    //
+    // The non-bare-root branch ALSO passes `nameNode.text` through as
+    // `symbolName` (#1056): when `pathNode.text` is a bare EXTERNAL/workspace
+    // crate name with no submodule segment of its own (e.g. `serde_derive`
+    // from `use serde_derive::Deserialize;`), `convertRustModulePath` has
+    // nothing else to narrow the crate-root export lookup with. Harmless for
+    // every other shape this branch already handles correctly (a genuine
+    // `crate::auth::AuthService` -- `pathNode.text` is `"crate::auth"`, which
+    // short-circuits on the `crate::` prefix before `symbolName` is ever
+    // consulted; or `tokio_util::codec::Framed` -- `rest` is already
+    // non-empty, so `resolveRustCrateImport` ignores `symbolName` too).
     const modulePath = isBareRootToken(pathNode)
       ? convertRustModulePath(`${pathNode.text}::${nameNode.text}`, rustCrateMap, importerFile)
-      : convertRustModulePath(pathNode.text, rustCrateMap, importerFile);
+      : convertRustModulePath(
+          pathNode.text,
+          rustCrateMap,
+          importerFile,
+          workspaceRoot,
+          nameNode.text,
+        );
     if (!modulePath) return null;
 
     return { importPath: modulePath, symbols: [nameNode.text] };
@@ -858,15 +893,34 @@ export class RustImportExtractor implements LanguageImportExtractor {
     node: SyntaxNode,
     rustCrateMap?: ReadonlyMap<string, string>,
     importerFile?: string,
+    workspaceRoot?: string,
   ): { importPath: string; symbols: string[] } | null {
     const scopePath = extractScopePath(node);
     if (!scopePath) return null;
 
-    const modulePath = convertRustModulePath(scopePath, rustCrateMap, importerFile);
-    if (!modulePath) return null;
-
     const useList = node.namedChildren.find(child => child.type === 'use_list');
     if (!useList) return null;
+
+    // First-wins symbol candidate (mirrors `extractScopePath`'s own
+    // "bare-root groups only resolve from the FIRST item" precedent):
+    // used both for a bare `crate`/`self`/`super` root group's existing
+    // behavior below, and now (#1056) as the crate-root export-lookup hint
+    // for a bare EXTERNAL/workspace crate name with no submodule segment of
+    // its own (e.g. `use serde_derive::{Deserialize, Serialize};` --
+    // `scopePath` is just `"serde_derive"`). Harmless for every other shape
+    // (see `processScopedIdentifier`'s doc comment for why
+    // `convertRustModulePath` ignores it there).
+    const firstItem = useList.namedChildren[0];
+    const firstSymbol = firstItem ? extractUseListItemSymbol(firstItem) : null;
+
+    const modulePath = convertRustModulePath(
+      scopePath,
+      rustCrateMap,
+      importerFile,
+      workspaceRoot,
+      firstSymbol ?? undefined,
+    );
+    if (!modulePath) return null;
 
     // Bare-root groups (`use crate::{auth::AuthService, config::Settings}`)
     // only resolved `modulePath` from the FIRST item (see `extractScopePath`),
@@ -875,8 +929,6 @@ export class RustImportExtractor implements LanguageImportExtractor {
     // items (e.g. `Settings`) to the wrong module (`auth`, not `config`).
     const pathNode = node.childForFieldName('path');
     if (pathNode && isBareRootToken(pathNode)) {
-      const firstItem = useList.namedChildren[0];
-      const firstSymbol = firstItem ? extractUseListItemSymbol(firstItem) : null;
       return firstSymbol ? { importPath: modulePath, symbols: [firstSymbol] } : null;
     }
 
@@ -888,6 +940,7 @@ export class RustImportExtractor implements LanguageImportExtractor {
     node: SyntaxNode,
     rustCrateMap?: ReadonlyMap<string, string>,
     importerFile?: string,
+    workspaceRoot?: string,
   ): { importPath: string; symbols: string[] } | null {
     // `use crate::auth::Service as Auth;`
     // The first child is the path (scoped_identifier), alias field has the alias
@@ -898,10 +951,20 @@ export class RustImportExtractor implements LanguageImportExtractor {
     const scopePathNode = pathChild.childForFieldName('path');
     if (!scopePathNode) return null;
 
-    const modulePath = convertRustModulePath(scopePathNode.text, rustCrateMap, importerFile);
+    // The PRE-alias name is what a crate-root export lookup needs to key on
+    // (#1056) -- the alias is a purely local rename, never part of the
+    // exporting crate's own public API.
+    const originalName = pathChild.childForFieldName('name')?.text;
+    const modulePath = convertRustModulePath(
+      scopePathNode.text,
+      rustCrateMap,
+      importerFile,
+      workspaceRoot,
+      originalName,
+    );
     if (!modulePath) return null;
 
-    const symbol = aliasNode?.text || pathChild.childForFieldName('name')?.text;
+    const symbol = aliasNode?.text || originalName;
     if (!symbol) return null;
 
     return { importPath: modulePath, symbols: [symbol] };
@@ -920,6 +983,11 @@ export class RustImportExtractor implements LanguageImportExtractor {
     const scopedId = node.namedChildren.find(child => child.type === 'scoped_identifier');
     if (!scopedId) return null;
 
+    // No single `symbolName` to pass here (#1056): a wildcard names EVERY
+    // export of the target, not one. A bare EXTERNAL crate wildcard (`use
+    // some_crate::*;`, vanishingly rare in practice) simply resolves to
+    // nothing now instead of the old crate-wide directory fabrication --
+    // still a strict improvement.
     const modulePath = convertRustModulePath(scopedId.text, rustCrateMap, importerFile);
     if (!modulePath) return null;
     return { importPath: modulePath, symbols: ['*'] };

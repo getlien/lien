@@ -67,6 +67,15 @@ export interface ManifestRoots {
    */
   rustCrateMap?: ReadonlyMap<string, string>;
   /**
+   * NOTE: `workspaceRoot` (declared above, shared with PHP/Python/JVM) is
+   * ALSO threaded to Rust's `processImportSymbolsList` for the same reason
+   * `rustCrateMap` is (#1056): resolving a bare crate-root import (`use
+   * crate_name::Symbol;`) needs the absolute project root to read the
+   * target crate's own root file (`../rust-crate-exports.ts`'s
+   * `resolveRustCrateRootExport`) when deciding which specific file declares
+   * `Symbol`, rather than fabricating a match against the whole crate.
+   */
+  /**
    * Java/Kotlin conventional Maven/Gradle source-set directories (#1046 /
    * #1005 Mechanism 1) — e.g. `src/main/java`, `klaxon/src/main/kotlin` for a
    * multi-module build. See `../jvm-source-root.ts`. Consumed by
@@ -379,6 +388,7 @@ function extractSymbolsWithExtractor(
       node,
       manifestRoots?.rustCrateMap,
       rustImporterFile,
+      manifestRoots?.workspaceRoot,
     );
     for (const result of results) {
       const key = resolveImportSpecifier(

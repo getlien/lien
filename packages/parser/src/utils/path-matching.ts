@@ -390,30 +390,38 @@ export function matchesFile(
 }
 
 /**
- * Rust `mod x;` resolution semantics (#1021): the specifier names EXACTLY
- * one of two files -- `x.rs` (exact match) or `x/mod.rs` (the sole
+ * Rust exact-single-file resolution semantics: the specifier names EXACTLY
+ * one of two files -- itself (exact match) or `<specifier>/mod.rs` (the sole
  * directory-module alternative Rust's file-to-module convention allows) --
- * never a grandchild, an unrelated sibling, or the declaring file itself.
+ * never a grandchild, an unrelated sibling, or (for the #1021 `mod x;`
+ * producer specifically) the declaring file itself. Two producers currently
+ * mark a specifier for this treatment -- see `rust-mod-marker.ts`'s doc
+ * comment: a `mod x;` declaration (#1021, `rustModOwningDirectory` in
+ * `../ast/languages/rust.ts`) and a bare crate-root import resolved via
+ * crate-root export lookup (#1056, `resolveRustCrateRootExport` in
+ * `../rust-crate-exports.ts`).
  *
  * Deliberately bypasses every `matchesFile` strategy: those exist to resolve
- * AMBIGUOUS bare/relative specifiers, but a `mod`-derived specifier (see
- * `rustModOwningDirectory` in `../ast/languages/rust.ts`) is already a fully
- * resolved, directory-anchored path with no remaining ambiguity for a
+ * AMBIGUOUS bare/relative specifiers, but a marked specifier is already a
+ * fully resolved, single-file path with no remaining ambiguity for a
  * boundary-matching heuristic to add. That's exactly what let `matchesFile`
  * fabricate edges to any file continuing past the specifier -- Go
- * package-directory semantics wrongly applied to a Rust `mod`, in BOTH
- * directions: Strategy 2's `requireExactTailForMultiSegment` leniency let
- * `src/thing` (from `mod thing;`) match every file under `src/thing/`, not
- * just `src/thing/mod.rs`; and Strategy 1 -- hardcoded to the same
+ * package-directory semantics wrongly applied to a Rust `mod` (#1021), in
+ * BOTH directions: Strategy 2's `requireExactTailForMultiSegment` leniency
+ * let `src/thing` (from `mod thing;`) match every file under `src/thing/`,
+ * not just `src/thing/mod.rs`; and Strategy 1 -- hardcoded to the same
  * leniency regardless of caller/language, since its `pattern` position is
  * normally a concrete target file, never a package name -- let a LEAF
  * file's own `mod helpers;` specifier (`src/engine/helpers`, longer than
  * the file's own path) match back against `src/engine` itself, fabricating
- * a self-edge.
+ * a self-edge. The #1056 producer guards against the same class of bug for
+ * a bare crate-root import (`use crate_name::Symbol;`): resolving it to the
+ * crate's bare directory (rather than the one file that actually declares
+ * `Symbol`) let it match every file the crate contains.
  *
- * Only called for specifiers carrying the #1021 marker (see
- * `rust-mod-marker.ts`) -- i.e. never for `use crate::...`/`self::`/`super::`
- * specifiers, which keep resolving through `matchesFile` exactly as before.
+ * Only called for specifiers carrying the marker (see `rust-mod-marker.ts`)
+ * -- i.e. never for `use crate::...`/`self::`/`super::` specifiers, which
+ * keep resolving through `matchesFile` exactly as before.
  */
 function matchesRustModSpecifier(normalizedImport: string, normalizedTarget: string): boolean {
   return normalizedImport === normalizedTarget || normalizedTarget === `${normalizedImport}/mod`;
@@ -449,15 +457,15 @@ function matchesRustModSpecifier(normalizedImport: string, normalizedTarget: str
  *   doc comment for the real `dtolnay/anyhow` Rust self-edge repro). Derived
  *   from the importer's language via `hasNamespaceMatchingSemantics`, the
  *   same way as the #887/#929 guards, at this same call site.
- * - The #1021 Rust-mod single-file guard (`hasRustModMarker`) -- unlike the
- *   other four, this is derived from the SPECIFIER, not the importer's
- *   language: a single Rust file can have both a `mod x;` (needs
- *   `matchesRustModSpecifier`'s strict semantics) and a `use crate::y;`
- *   (needs `matchesFile`'s existing leniency) among its own imports, so a
- *   per-language flag can't disambiguate between two entries in the same
- *   file's import list the way it can for #887/#929/#1028. When present,
- *   this guard short-circuits entirely -- `matchesFile` never runs at all
- *   for a marked specifier.
+ * - The #1021/#1056 Rust exact-single-file guard (`hasRustModMarker`) --
+ *   unlike the other four, this is derived from the SPECIFIER, not the
+ *   importer's language: a single Rust file can have both a `mod x;` or a
+ *   bare crate-root import (each needing `matchesRustModSpecifier`'s strict
+ *   semantics) and a `use crate::y;` (needing `matchesFile`'s existing
+ *   leniency) among its own imports, so a per-language flag can't
+ *   disambiguate between two entries in the same file's import list the way
+ *   it can for #887/#929/#1028. When present, this guard short-circuits
+ *   entirely -- `matchesFile` never runs at all for a marked specifier.
  *
  * Every match-side reverse-dependency call path that used to open-code
  * `!isUnresolvableWholeModuleImport(imp, f) && matchesFile(normalize(imp), t)`
