@@ -45,9 +45,21 @@ export function requireTargetExists(specifier: string, workspaceRoot: string | u
   const candidate = path.resolve(resolvedRoot, specifier);
   const relativeToRoot = path.relative(resolvedRoot, candidate);
   // A specifier that resolves outside workspaceRoot produces a relative path
-  // starting with '..' (or, if the two are on different Windows drives, an
-  // absolute path) -- either way, never trust it as a real project file.
-  if (relativeToRoot.startsWith('..') || path.isAbsolute(relativeToRoot)) return false;
+  // that IS '..' (candidate is the parent itself) or starts with a '..'
+  // PARENT SEGMENT (`..` + the path separator) -- or, on Windows, an
+  // absolute path when the two are on different drives. Either way, never
+  // trust it as a real project file.
+  //
+  // Deliberately NOT `relativeToRoot.startsWith('..')`: that also matches a
+  // legitimate in-project file whose own NAME happens to start with two
+  // dots (e.g. `..foo.php`) -- `path.relative('/project', '/project/..foo.php')`
+  // returns the literal string `'..foo.php'`, which starts with `'..'` as a
+  // substring without being a parent-directory escape at all. That shape
+  // over-rejects a real file (a correctness bug in the safe direction for a
+  // security check, but still a regression from this function's own
+  // pre-boundary-check behavior, which resolved such a file correctly).
+  const escaped = relativeToRoot === '..' || relativeToRoot.startsWith(`..${path.sep}`);
+  if (escaped || path.isAbsolute(relativeToRoot)) return false;
 
   try {
     return fs.statSync(candidate).isFile();
