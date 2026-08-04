@@ -16,6 +16,7 @@ import {
 } from './ast/languages/registry.js';
 import { findCSharpTypeReferenceDependents } from './csharp-type-reference-signals.js';
 import { findGoRootPackageDependents } from './go-root-package-signals.js';
+import type { InferredDependentMechanism } from './inferred-dependent-mechanisms.js';
 
 /**
  * Risk level thresholds for dependent count.
@@ -850,16 +851,47 @@ export interface DependentInfo {
    * import-verified dependent (the default, confident tier). A caller that
    * needs to distinguish "verified" from "recovered, lower confidence"
    * should filter on this field rather than assuming every entry in
-   * `dependents` came from the import graph. Two such fallbacks exist today:
-   * - C#'s type-reference-matching fallback (#930's remaining half -- see
-   *   `findCSharpTypeReferenceDependents`'s module doc): a word-boundary text
-   *   match against a uniquely-declared type name.
-   * - Go's root-package export-lookup fallback (#1039 -- see
-   *   `findGoRootPackageDependents`'s module doc): a bare module-root
-   *   self-import plus a matching call-site symbol, resolved to the specific
-   *   root file that exports it.
+   * `dependents` came from the import graph.
+   *
+   * Which fallbacks exist is NOT restated here: they are enumerated once, with
+   * their canonical prose, in `./inferred-dependent-mechanisms.ts`, and named
+   * per dependent by `inferredVia` below. This comment used to hand-list them
+   * and was one of six surfaces that still said "C# only" after #1039 added a
+   * second (see that module's doc for the measured consequence).
    */
   confidence?: 'inferred';
+  /**
+   * Which fallback recovered this dependent. Set if and only if `confidence`
+   * is `'inferred'` -- both are written together by `inferredDependent()`
+   * below, which is the only way either is produced.
+   *
+   * Exists so a consumer describing a recovered dependent can say which
+   * mechanism ran instead of assuming one (#1018). Downstream prose must read
+   * `INFERRED_DEPENDENT_MECHANISMS[inferredVia]` rather than restating it.
+   */
+  inferredVia?: InferredDependentMechanism;
+}
+
+/**
+ * The one constructor for a fallback-recovered dependent.
+ *
+ * Writing `confidence` and `inferredVia` together, in one place, is what keeps
+ * the pair from drifting: there is no code path that can produce a
+ * `confidence: 'inferred'` dependent whose mechanism is unknown, so a consumer
+ * may rely on `inferredVia` being present whenever `confidence` is. A third
+ * fallback (#1067) calls this with its own mechanism id and inherits every
+ * prose surface for free.
+ */
+export function inferredDependent(
+  filepath: string,
+  mechanism: InferredDependentMechanism,
+): DependentInfo {
+  return {
+    filepath,
+    isTestFile: isTestFile(filepath),
+    confidence: 'inferred',
+    inferredVia: mechanism,
+  };
 }
 
 /**
@@ -1779,12 +1811,9 @@ function enrichWithCSharpTypeReferenceDependents<T extends CodeChunk>(
   if (inferredFiles.length === 0) return undefined;
 
   for (const rawFile of inferredFiles) {
-    const canonicalFile = getCanonicalPath(rawFile, ctx.workspaceRoot);
-    dependents.push({
-      filepath: canonicalFile,
-      isTestFile: isTestFile(canonicalFile),
-      confidence: 'inferred',
-    });
+    dependents.push(
+      inferredDependent(getCanonicalPath(rawFile, ctx.workspaceRoot), 'csharp-type-reference'),
+    );
   }
 
   ctx.log(
@@ -1835,12 +1864,9 @@ function enrichWithGoRootPackageDependents<T extends CodeChunk>(
   if (inferredFiles.length === 0) return undefined;
 
   for (const rawFile of inferredFiles) {
-    const canonicalFile = getCanonicalPath(rawFile, ctx.workspaceRoot);
-    dependents.push({
-      filepath: canonicalFile,
-      isTestFile: isTestFile(canonicalFile),
-      confidence: 'inferred',
-    });
+    dependents.push(
+      inferredDependent(getCanonicalPath(rawFile, ctx.workspaceRoot), 'go-root-package-export'),
+    );
   }
 
   ctx.log(

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { handleGetDependents } from './get-dependents.js';
 import type { ToolContext } from '../types.js';
 import type { SearchResult } from '@liendev/core';
+import type { InferredDependentMechanism } from '@liendev/parser';
 
 // Mock the dependency-analyzer module
 vi.mock('./dependency-analyzer.js', async importOriginal => {
@@ -47,6 +48,7 @@ describe('handleGetDependents', () => {
         usages?: Array<{ callerSymbol: string; line: number; snippet: string }>;
         hops?: number;
         confidence?: 'inferred';
+        inferredVia?: InferredDependentMechanism;
       }>;
       hitLimit?: boolean;
       complexityMetrics?: {
@@ -793,6 +795,7 @@ describe('handleGetDependents', () => {
               filepath: 'src/Serilog/Rendering/Padding.cs',
               isTestFile: false,
               confidence: 'inferred',
+              inferredVia: 'csharp-type-reference',
             },
           ],
           dependentAttributionPartial: true,
@@ -813,6 +816,70 @@ describe('handleGetDependents', () => {
       expect(parsed.attributionCaveat.reason).toBe('dependent-attribution-partial');
       expect(parsed.attributionCaveat.note).toContain('Alignment.cs');
       expect(parsed.attributionCaveat.note).toContain('lower bound'.toUpperCase());
+      expect(parsed.attributionCaveat.note).toContain('C#');
+      expect(parsed.attributionCaveat.note).toContain('global using');
+    });
+
+    // #1018: this fallback is no longer C#-only. Before this fix the note below
+    // told every recovered Go file "its language, C#" and described a
+    // source-text type-name scan — measured on a real go-chi/chi clone, 24 of
+    // 24 recovered edges across context.go/mux.go/chain.go.
+    it("describes GO's fallback, not C#'s, when Go's root-package lookup recovered the dependents", async () => {
+      vi.mocked(findDependents).mockResolvedValue(
+        createMockAnalysis({
+          dependents: [
+            {
+              filepath: 'middleware/clean_path.go',
+              isTestFile: false,
+              confidence: 'inferred',
+              inferredVia: 'go-root-package-export',
+            },
+          ],
+          dependentAttributionPartial: true,
+        }),
+      );
+
+      const result = await handleGetDependents({ filepath: 'context.go' }, mockCtx);
+
+      const parsed = JSON.parse(result.content![0].text);
+      const note = parsed.attributionCaveat.note as string;
+      expect(parsed.attributionCaveat.reason).toBe('dependent-attribution-partial');
+      expect(note).toContain('its language, Go');
+      // The regression this test exists for, asserted directly.
+      expect(note).not.toContain('C#');
+      expect(note).not.toContain('global using');
+      expect(note).not.toContain('source text');
+      // And it must actually describe Go's real mechanism.
+      expect(note).toContain('import path');
+      expect(note).toContain('exports');
+    });
+
+    it('describes both fallbacks when a response somehow carries both', async () => {
+      vi.mocked(findDependents).mockResolvedValue(
+        createMockAnalysis({
+          dependents: [
+            {
+              filepath: 'a.cs',
+              isTestFile: false,
+              confidence: 'inferred',
+              inferredVia: 'csharp-type-reference',
+            },
+            {
+              filepath: 'b.go',
+              isTestFile: false,
+              confidence: 'inferred',
+              inferredVia: 'go-root-package-export',
+            },
+          ],
+          dependentAttributionPartial: true,
+        }),
+      );
+
+      const result = await handleGetDependents({ filepath: 'target.cs' }, mockCtx);
+
+      const note = JSON.parse(result.content![0].text).attributionCaveat.note as string;
+      expect(note).toContain('its language, C# and Go');
+      expect(note).toContain('2 of the 2 dependent(s)');
     });
 
     it('does not fire alongside dependent-attribution-incomplete', async () => {

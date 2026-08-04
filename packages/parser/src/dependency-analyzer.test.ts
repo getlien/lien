@@ -1228,6 +1228,45 @@ describe('findDependents (Go root-package export-lookup recovery, #1039)', () =>
     ]);
     expect(result.dependents.every(d => d.confidence === 'inferred')).toBe(true);
     expect(result.dependentAttributionPartial).toBe(true);
+    // #1018: every recovered dependent names the mechanism that found it, so a
+    // consumer's prose can describe Go's fallback instead of assuming C#'s.
+    expect(result.dependents.every(d => d.inferredVia === 'go-root-package-export')).toBe(true);
+  });
+
+  it('pairs confidence and inferredVia on every dependent, in both directions (#1018)', () => {
+    // The pair is written by `inferredDependent()` and nowhere else, so neither
+    // half can appear without the other. Asserting BOTH directions is the
+    // point: a `confidence: 'inferred'` with no mechanism sends a consumer back
+    // to guessing (the #1039 defect), and an `inferredVia` on an
+    // import-verified dependent would mark a real import edge as recovered.
+    const chunks: CodeChunk[] = [
+      createGoChunk('context.go', { exports: ['RouteContext'] }),
+      createGoChunk('middleware/clean_path.go', {
+        imports: [MODULE_PREFIX],
+        callSites: ['RouteContext'],
+      }),
+    ];
+
+    const recovered = findDependents(chunks, 'context.go', noopLog, workspaceRoot);
+    expect(recovered.dependents.length).toBeGreaterThan(0);
+    for (const d of recovered.dependents) {
+      expect(d.confidence === 'inferred').toBe(d.inferredVia !== undefined);
+    }
+
+    // An ordinary import-verified dependent carries neither field.
+    const verified = findDependents(
+      [
+        createGoChunk('sub/helper.go', { exports: ['Helper'] }),
+        createGoChunk('sub/caller.go', { imports: [`${MODULE_PREFIX}/sub`] }),
+      ],
+      'sub/helper.go',
+      noopLog,
+      workspaceRoot,
+    );
+    for (const d of verified.dependents) {
+      expect(d.confidence).toBeUndefined();
+      expect(d.inferredVia).toBeUndefined();
+    }
   });
 
   it('does NOT fabricate a false hub: two unrelated root files get disjoint dependents (the #1056 failure shape, checked explicitly)', () => {

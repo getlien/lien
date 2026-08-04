@@ -215,12 +215,7 @@ Get file context for app/Models/User.php without related files
       "score": 0.0
     }
   ],
-  "testAssociations": [
-    {
-      "testFile": "src/utils/auth.test.ts",
-      "confidence": "high"
-    }
-  ],
+  "testAssociations": ["src/utils/auth.test.ts"],
   "relatedChunks": [
     {
       "content": "import { validateToken } from './auth';",
@@ -397,7 +392,7 @@ Five unrelated situations can each make `dependentCount`/`riskLevel` untrustwort
 - **`unresolved-target`** — `filepath` isn't resolvable in the index at all: never indexed, misspelled, or a typo'd directory prefix. `dependentCount: 0` / `riskLevel: "low"` then means "the path is unresolved," not "confirmed zero dependents." (Two independent checks can produce this — the index manifest has no entry for the path at all, or the path resolves in the manifest but has zero chunks in the current scan — but only one `attributionCaveat` is ever returned, never two competing explanations of the same zero.)
 - **`symbol-attribution-degraded`** — `symbol` also accepts a method or constructor name (e.g. `__construct`, `moveUp`); those aren't top-level exports, so when call sites for one can't be confirmed, the response widens `dependentCount`/`riskLevel` to the file-level answer (every file that imports `filepath`) rather than asserting an unverifiable symbol-scoped count. The unconfirmed symbol may genuinely be a method/constructor, or it may be a typo'd/hallucinated/removed name — the `note` field says which.
 - **`type-symbol-attribution-incomplete`** — `symbol` IS a top-level export of `filepath`, but it names a class/struct/interface/enum declaration rather than a function or method (#1015). Usage attribution is call-site-driven, and nothing "calls" a type by its own name the way a function call does — constructor calls, type hints, `extends`/`implements` clauses, generic type arguments, and dependency-injected property access don't reliably surface as a tracked call site. `totalUsageCount`/`usages` are a partial, best-effort floor — often `0` even when real usages exist — never a verified total; `dependentCount`/`dependents` (which files import the symbol) remain reliable.
-- **`dependent-attribution-partial`** — a file-level query (no `symbol`) found zero import-based dependents, but a lower-confidence text-matching fallback (matching a uniquely-declared type name against other files' source text — today only for C#) recovered one or more dependents anyway. Those entries carry `confidence: "inferred"` in `dependents[]`. Treat `dependentCount`/`riskLevel` as a recovered floor, not a verified/complete answer — the fallback can still miss a real dependent reached via an alias, a generic type argument, or reflection.
+- **`dependent-attribution-partial`** — a file-level query (no `symbol`) found zero import-based dependents, but a lower-confidence non-import fallback recovered one or more anyway. Those entries carry `confidence: "inferred"` in `dependents[]`, plus `inferredVia` naming which fallback found them (C# has one, for the `global using` gap; Go has one, for a bare module-root self-import). Treat `dependentCount`/`riskLevel` as a recovered floor, not a verified/complete answer — the `note` spells out what that specific fallback can still miss, and the two miss different things.
 - **`dependent-attribution-incomplete`** — a file-level query (no `symbol`) found zero dependents in a language where the import graph structurally can't see every real usage — C#'s enclosing-namespace access, where a `global using` lets a real caller reach `filepath`'s exports with no per-file import at all (#930); or Java/Kotlin's same-package visibility and Swift's whole-module access (#1005) — even after the `dependent-attribution-partial` fallback above also found nothing. `dependentCount: 0` / `riskLevel: "low"` here means "the import graph found nothing," not "nothing depends on this file."
 
 At most one reason ever applies to a given response. Always check for `attributionCaveat` before treating a low (especially zero) `dependentCount` as a verified all-clear.
@@ -563,32 +558,44 @@ similarity: a match means your query terms appear in the code or its comments.
 
 ## Test Associations
 
-All search results include test association metadata:
+`get_files_context` and `get_complexity` return test associations as a flat
+array of test-file paths:
 
 ```json
 {
   "file": "src/auth/login.ts",
-  "testAssociations": [
-    {
-      "testFile": "src/auth/login.test.ts",
-      "confidence": "high",
-      "method": "convention"
-    }
-  ]
+  "testAssociations": ["src/auth/login.test.ts"]
 }
 ```
 
-### Confidence Levels
+`search_code` does not return this field.
 
-- **high**: Import-based detection or strong naming convention
-- **medium**: Naming convention match
-- **low**: Weak pattern match
+### How associations are found
 
-### Detection Methods
+Every entry is derived statically — nothing here comes from executing tests or
+reading a coverage report:
 
-- **import**: Test imports the source file (most reliable)
-- **convention**: File naming patterns (e.g., `file.test.ts` for `file.ts`)
-- **pattern**: Weak heuristic match
+- **Import-based matching** (all languages): the test file's own import
+  statements resolve to the source file. This is the primary mechanism.
+- **Same-directory basename** (Go): `foo.go` ↔ `foo_test.go`, no import needed.
+- **Same-package basename** (Java): the same pairing across a package's test
+  source set.
+- **Enclosing-namespace type references** (C#): a test referencing a type that
+  exactly one project file declares, for the `global using` case where no import
+  statement names the file.
+
+### There are no per-association confidence levels
+
+Each entry is a path, and every entry in this field is one the mechanisms above
+established. There is no `confidence` or `method` field on an association, so
+don't branch on one.
+
+Some lower-confidence mechanisms deliberately stay out of this field rather than
+being folded in unlabelled — Go package-level fallbacks and Swift symbol-usage
+matching among them. Those surface only in `lien annotate`'s output, which labels
+each tier in prose (for example *"Test coverage inferred from symbol usage (not
+import-verified)"*). A language whose imports structurally cannot answer the
+question says so there too, rather than reporting a bare empty list.
 
 ## Tool Selection Guide
 
