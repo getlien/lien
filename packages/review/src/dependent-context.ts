@@ -6,6 +6,7 @@
  * are used in dependent files within the same PR.
  */
 
+import { findChunkLineIndex } from '@liendev/parser';
 import type { CodeChunk } from '@liendev/parser';
 import type { ComplexityReport } from './types.js';
 
@@ -52,6 +53,14 @@ const MAX_SNIPPETS_PER_FUNCTION = 3;
 const CONTEXT_LINES_BEFORE = 2;
 const CONTEXT_LINES_AFTER = 2;
 const MAX_LINE_LENGTH = 120;
+
+/**
+ * Stands in for the caller's name when the calling chunk is module-level code
+ * and so has no enclosing function to name. Same wording `dependency-graph.ts`
+ * uses for its own version of this (`NO_REPRESENTATIVE_SYMBOL`) and that
+ * `@liendev/parser` reports for `get_dependents` usages.
+ */
+const MODULE_LEVEL_CALLER = '(module-level)';
 
 const RISK_WEIGHTS: Record<string, number> = {
   critical: 4,
@@ -122,13 +131,21 @@ export function findCallSitesForSymbol(
     const callSite = findMatchingCallSite(chunk, symbolName);
     if (!callSite) continue;
 
-    const snippet = extractSnippetWindow(chunk, callSite.line);
+    const snippet = extractSnippetWindow(chunk, callSite.line, symbolName);
     if (!snippet) continue;
 
     seenFiles.add(file);
     results.push({
       filepath: file,
-      callerSymbol: chunk.metadata.symbolName ?? 'unknown',
+      // A 'block' chunk is module-level code — top-level statements, or a
+      // declaration holding no function — so there is no enclosing function to
+      // name. Same wording `dependency-graph.ts` uses (NO_REPRESENTATIVE_SYMBOL)
+      // and `dependency-analyzer.ts` reports for `get_dependents` usages. Since
+      // #1087 widened call-site extraction to module-level code, this is a
+      // common case rather than a rare fallback.
+      callerSymbol:
+        chunk.metadata.symbolName ??
+        (chunk.metadata.type === 'block' ? MODULE_LEVEL_CALLER : 'unknown'),
       line: callSite.line,
       snippet,
       callerComplexity: chunk.metadata.complexity,
@@ -156,14 +173,27 @@ function findMatchingCallSite(chunk: CodeChunk, symbolName: string): { line: num
 
 /**
  * Extract a ~5-line window around a call site line from a chunk's content.
- * Converts the absolute line number to chunk-relative and clamps to bounds.
  * Truncates lines longer than MAX_LINE_LENGTH.
+ *
+ * The absolute-to-relative conversion goes through `findChunkLineIndex` rather
+ * than a bare `callSiteLine - startLine`: for a module-level chunk the content
+ * has had its leading blank lines trimmed while `startLine` still names the
+ * untrimmed start, so the subtraction overshoots — centring the window on a
+ * later statement, or exceeding the content and dropping the snippet entirely.
+ * See that function's module doc. `symbolName` is what lets it find the real
+ * line; without it the old arithmetic is all that is available.
  */
-export function extractSnippetWindow(chunk: CodeChunk, callSiteLine: number): string | null {
+export function extractSnippetWindow(
+  chunk: CodeChunk,
+  callSiteLine: number,
+  symbolName?: string,
+): string | null {
   const lines = chunk.content.split('\n');
-  const relativeLine = callSiteLine - chunk.metadata.startLine;
+  const relativeLine = symbolName
+    ? findChunkLineIndex(lines, callSiteLine, chunk.metadata.startLine, symbolName)
+    : callSiteLine - chunk.metadata.startLine;
 
-  if (relativeLine < 0 || relativeLine >= lines.length) return null;
+  if (relativeLine === null || relativeLine < 0 || relativeLine >= lines.length) return null;
 
   const start = Math.max(0, relativeLine - CONTEXT_LINES_BEFORE);
   const end = Math.min(lines.length - 1, relativeLine + CONTEXT_LINES_AFTER);
@@ -192,7 +222,11 @@ export function formatDependentContext(ctx: DependentContext): string {
   const snippetBlocks = ctx.snippets
     .map(s => {
       const complexityNote = s.callerComplexity ? ` (complexity: ${s.callerComplexity})` : '';
-      return `\`\`\`\n// ${s.filepath}:${s.line} — in ${s.callerSymbol}()${complexityNote}\n${s.snippet}\n\`\`\``;
+      // The `()` reads as "the function named X"; a module-level caller is not
+      // a function, so `in (module-level)()` would be nonsense.
+      const caller =
+        s.callerSymbol === MODULE_LEVEL_CALLER ? s.callerSymbol : `${s.callerSymbol}()`;
+      return `\`\`\`\n// ${s.filepath}:${s.line} — in ${caller}${complexityNote}\n${s.snippet}\n\`\`\``;
     })
     .join('\n\n');
 

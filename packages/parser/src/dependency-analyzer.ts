@@ -14,6 +14,7 @@ import {
   hasEnclosingNamespaceAccess,
   hasDependentAttributionBlindSpot,
 } from './ast/languages/registry.js';
+import { findChunkLineIndex } from './chunk-line-lookup.js';
 import { findCSharpTypeReferenceDependents } from './csharp-type-reference-signals.js';
 import { findGoRootPackageDependents } from './go-root-package-signals.js';
 
@@ -2459,45 +2460,12 @@ function extractSymbolUsagesFromChunks<T extends CodeChunk>(
   return usages;
 }
 
-/** Lines either side of the arithmetic guess that `extractSnippet` will consider. */
-const SNIPPET_SEARCH_RADIUS = 5;
-
-/**
- * Index of the line that actually mentions `symbolName`, searching outward from
- * `lineIndex` (nearest first, earlier line winning a tie). `null` if none does.
- *
- * `callLine - startLine` is only exact when a chunk's `content` starts on
- * exactly the line its `startLine` names, and for a module-level chunk it does
- * not: `createChunkFromRange` trims its range's leading blank lines out of the
- * content while `startLine` still names the untrimmed start, so the arithmetic
- * lands N lines late — where N is however many blank lines the gap opened
- * with. That was unreachable before #1087 (module-level chunks carried no call
- * sites to build a snippet for) and is now the common case, so the snippet has
- * to be found rather than computed.
- *
- * Deliberately corrects the lookup instead of narrowing the chunk's own
- * `startLine`/`endLine` to match its content: `isValidChunk` measures
- * `minChunkSize` from exactly those two fields, so shrinking them would
- * silently drop small module-level chunks from the index — the #772 failure
- * mode. The `line` a usage reports is `callSite.line` throughout, which is the
- * true file line and was never affected.
- */
-function findSymbolLine(lines: string[], lineIndex: number, symbolName: string): number | null {
-  const mentionsSymbol = (i: number) => i >= 0 && i < lines.length && lines[i].includes(symbolName);
-  if (mentionsSymbol(lineIndex)) return lineIndex;
-
-  // Nearest offset first, and within an offset the earlier line first.
-  const nearbyLines = Array.from({ length: SNIPPET_SEARCH_RADIUS }, (_, k) => k + 1).flatMap(
-    offset => [lineIndex - offset, lineIndex + offset],
-  );
-  return nearbyLines.find(mentionsSymbol) ?? null;
-}
-
 /**
  * Extract a code snippet for a call site with bounds checking.
- * Prefers the nearby line that actually mentions the symbol (see
- * `findSymbolLine`); if the target line is blank, searches nearby lines for
- * context.
+ * Locates the line via `findChunkLineIndex` (which corrects for a module-level
+ * chunk's trimmed content — see its module doc) rather than trusting
+ * `callLine - startLine`; if the resulting line is blank, searches nearby lines
+ * for context.
  */
 function extractSnippet(
   lines: string[],
@@ -2505,18 +2473,13 @@ function extractSnippet(
   startLine: number,
   symbolName: string,
 ): string {
-  const lineIndex = callLine - startLine;
   const placeholder = `${symbolName}(...)`;
+  const lineIndex = findChunkLineIndex(lines, callLine, startLine, symbolName);
 
-  if (lineIndex < 0 || lineIndex >= lines.length) {
+  if (lineIndex === null) {
     // This can happen when call site line is outside chunk boundaries (edge case)
     // Not necessarily an error - could be chunk boundary misalignment
     return placeholder;
-  }
-
-  const symbolLine = findSymbolLine(lines, lineIndex, symbolName);
-  if (symbolLine !== null) {
-    return lines[symbolLine].trim();
   }
 
   // Try the direct line first
@@ -2527,7 +2490,7 @@ function extractSnippet(
 
   // If direct line is blank, search for nearby non-blank context
   // Limit search radius to 5 lines to ensure contextual relevance
-  const searchRadius = SNIPPET_SEARCH_RADIUS;
+  const searchRadius = 5;
 
   // Search backwards first (prefer earlier lines)
   for (let i = lineIndex - 1; i >= Math.max(0, lineIndex - searchRadius); i--) {

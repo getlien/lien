@@ -24,6 +24,7 @@ function makeChunk(overrides: {
   callSites?: Array<{ symbol: string; line: number }>;
   imports?: string[];
   exports?: string[];
+  type?: 'function' | 'class' | 'block';
 }): CodeChunk {
   const startLine = overrides.startLine ?? 1;
   const content = overrides.content ?? 'line1\nline2\nline3\nline4\nline5\nline6\nline7';
@@ -34,7 +35,7 @@ function makeChunk(overrides: {
       file: overrides.file,
       startLine,
       endLine: overrides.endLine ?? startLine + lineCount - 1,
-      type: 'function',
+      type: overrides.type ?? 'function',
       language: 'typescript',
       symbolName: overrides.symbolName,
       complexity: overrides.complexity,
@@ -240,6 +241,35 @@ describe('extractSnippetWindow', () => {
     expect(extractSnippetWindow(chunk, 20)).toBeNull();
   });
 
+  it('centres on the real line for a module-level chunk whose content was trimmed (#1087)', () => {
+    // Range was lines 10-16, but line 10 was blank and `createChunkFromRange`
+    // trimmed it away, so content[0] is really file line 11. Bare arithmetic
+    // (13 - 10 = 3) would centre on `filler2`, one line late.
+    const chunk = makeChunk({
+      file: 'src/wiring.ts',
+      type: 'block',
+      startLine: 10,
+      endLine: 16,
+      content: 'import x\nfiller1\nregisterRoute(handler);\nfiller2\nfiller3\nfiller4',
+    });
+
+    expect(extractSnippetWindow(chunk, 13, 'registerRoute')).toContain('registerRoute(handler);');
+  });
+
+  it('drops nothing when the trimmed offset would push past the content end', () => {
+    // Two blank lines trimmed: bare arithmetic gives index 6 for a 5-line
+    // content, which returned null and silently dropped the snippet.
+    const chunk = makeChunk({
+      file: 'src/wiring.ts',
+      type: 'block',
+      startLine: 10,
+      endLine: 20,
+      content: 'a\nb\nc\nd\nregisterRoute(handler);',
+    });
+
+    expect(extractSnippetWindow(chunk, 16, 'registerRoute')).toContain('registerRoute(handler);');
+  });
+
   it('truncates lines longer than 120 characters', () => {
     const longLine = 'x'.repeat(200);
     const chunk = makeChunk({
@@ -282,6 +312,24 @@ describe('findCallSitesForSymbol', () => {
     expect(result[0].callerSymbol).toBe('processInput');
     expect(result[0].line).toBe(2);
     expect(result[0].callerComplexity).toBe(12);
+  });
+
+  it('names a module-level caller "(module-level)", not "unknown" (#1087)', () => {
+    const chunks = [
+      makeChunk({
+        file: 'src/wiring.ts',
+        type: 'block',
+        startLine: 1,
+        content: 'import { validate } from "./validate";\nexport const checked = validate(config);',
+        symbolName: undefined,
+        callSites: [{ symbol: 'validate', line: 2 }],
+      }),
+    ];
+
+    const result = findCallSitesForSymbol('validate', ['src/wiring.ts'], chunks);
+    expect(result).toHaveLength(1);
+    expect(result[0].callerSymbol).toBe('(module-level)');
+    expect(result[0].snippet).toContain('export const checked = validate(config);');
   });
 
   it('returns empty when no matching call sites', () => {
