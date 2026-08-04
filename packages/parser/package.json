@@ -1,6 +1,6 @@
 {
   "name": "@liendev/parser",
-  "version": "0.75.4",
+  "version": "0.75.5",
   "description": "Static analysis over source code: parsing, chunking, complexity, and dependency resolution for Lien",
   "type": "module",
   "main": "./dist/index.js",
