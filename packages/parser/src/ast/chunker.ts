@@ -574,8 +574,9 @@ function createChunk(
   // `shouldCalcComplexity` used to make a top-level `const schema =
   // z.object({...})` or `export const client = createClient(...)` contribute
   // no call-site evidence at all, since neither is a 'function'/'method'
-  // symbol; measured on this repo, that silence covered 94% of the call
-  // expressions in the tree.
+  // symbol. Between this gate and the module-level statements handled by
+  // `withModuleLevelCallSites` below, 81% of the call expressions in this
+  // repo's own tree went unextracted (12,118 of 63,847 emitted).
   //
   // The one exclusion is a container (`nodeEmitsChildChunks`): its range
   // *contains* its members' chunks, and nothing downstream dedupes call sites
