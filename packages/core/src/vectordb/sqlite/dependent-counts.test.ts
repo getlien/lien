@@ -192,10 +192,13 @@ describe('hasComputedDependentCounts', () => {
   // `{ readonly: true }` so `openDatabase`'s `CREATE TABLE IF NOT EXISTS` never
   // runs there. Each clause has to degrade on its own.
 
-  it('is true from ROWS ALONE when `store_meta` does not exist at all (a 0.75.4 base)', () => {
-    // 0.75.4 shipped `dependent_counts`; 0.75.5 added `store_meta`. A missing
-    // flag TABLE must not hide the rows that prove a computation ran — otherwise
-    // every worktree on a 0.75.4 base gets #1085's false note back.
+  it('is true from ROWS ALONE when `store_meta` does not exist at all', () => {
+    // The table-level version of the row-level case two tests up: #1071 added
+    // `dependent_counts` and #1072 added `store_meta`, so a store from between
+    // them has rows and no flag TABLE (both shipped in 0.75.4, so this is a
+    // from-source vintage). A missing flag table must not hide the rows that
+    // prove a computation ran, or a worktree on such a base gets #1085's false
+    // note back.
     db.prepare('INSERT INTO dependent_counts(file, count) VALUES (?, ?)').run('src/a.ts', 4);
     db.exec('DROP TABLE store_meta');
 

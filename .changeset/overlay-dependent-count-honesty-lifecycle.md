@@ -49,9 +49,13 @@ matches — so an overlay that had never composed counts previously had no path 
 them.
 
 `hasComputedDependentCounts` now tolerates either of its tables being absent, each
-clause independently: a base index written by 0.75.4 has real `dependent_counts`
-rows and no `store_meta` table at all, and the base connection is read-only so
-nothing creates it.
+clause independently, because `OverlayBackend` asks it about a base connection
+opened `{ readonly: true }` whose schema is frozen at whatever version wrote it. A
+store from between #1071 (which added `dependent_counts`) and #1072 (which added
+`store_meta`) has real rows and no flag table at all, and a missing flag TABLE must
+not hide the rows that prove a computation ran any more than a missing flag ROW
+does; a store predating both must answer `false` rather than throw, which is the
+crash #1071 already had to fix once.
 
 The note still fires, unchanged, for a store that genuinely never computed
 counts — including a worktree whose base never did either. That property is

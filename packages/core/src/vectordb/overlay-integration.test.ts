@@ -274,13 +274,14 @@ describe('worktree-aware indexing (integration)', () => {
     close(wtDb);
   });
 
-  it('reports hasDependentCounts()=true from a base that has ROWS but no flag — a 0.75.4 base (#1085)', async () => {
-    // 0.75.4 shipped `dependent_counts` (#1071); 0.75.5 added `store_meta`
-    // (#1072). A base written by 0.75.4 therefore has real rows and no
-    // `store_meta` TABLE AT ALL, and the base connection is read-only so nothing
-    // creates it. Both clauses of `hasComputedDependentCounts` must degrade
-    // independently: a missing flag table cannot be allowed to hide the rows
-    // that prove a computation ran.
+  it('reports hasDependentCounts()=true from a base that has ROWS but no flag table (#1085)', async () => {
+    // #1071 added `dependent_counts`; #1072 added `store_meta` (both landed in
+    // 0.75.4, so this vintage is a from-source window, not a published one — but
+    // it is the same vintage `hasComputedDependentCounts`'s row-presence clause
+    // already exists for). The base connection is read-only, so nothing recreates
+    // a missing table behind our back. Both clauses must degrade independently: a
+    // missing flag TABLE cannot be allowed to hide the rows that prove a
+    // computation ran.
     const baseDb = new Database(path.join(getIndexDir(mainRoot), STRUCTURAL_DB_FILENAME));
     baseDb.exec('DROP TABLE IF EXISTS store_meta');
     const baseRows = baseDb.prepare('SELECT count(*) c FROM dependent_counts').get() as {

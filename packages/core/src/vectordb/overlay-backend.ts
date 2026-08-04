@@ -352,8 +352,9 @@ export class OverlayBackend implements VectorDBInterface {
    * suppressing every count does not fix it, it just also lies about why.
    *
    * Read-free in the common case: one small meta lookup on the overlay, then at
-   * most one on the base. Only a base whose schema predates the flag (0.75.4)
-   * costs a count-table scan, and `getDependentCounts` caches that per handle.
+   * most one on the base. Only a base whose schema predates the flag falls
+   * through to a count-table scan, and `getDependentCounts` caches that per
+   * handle.
    */
   async hasDependentCounts(): Promise<boolean> {
     if (this.getMeta(OVERLAY_META.DEPENDENT_COUNTS_COMPOSED) !== null) return true;
