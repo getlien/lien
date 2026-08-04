@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'fs/promises';
 import path from 'path';
 import Database from 'better-sqlite3';
@@ -6,8 +6,10 @@ import { getIndexDir } from '../utils/index-dir.js';
 import { createTestDir, cleanupTestDir } from '../test/helpers/test-db.js';
 import { indexCodebase } from './index.js';
 import { buildOverlay, computeOverlaySignature } from './overlay-index.js';
+import { ManifestManager } from './manifest.js';
 import { OverlayBackend } from '../vectordb/overlay-backend.js';
 import { writeVersionFile } from '../vectordb/version.js';
+import { MAX_INDEXABLE_FILE_SIZE_BYTES } from '../constants.js';
 
 /** Files (relative path -> content) for the base checkout. */
 const BASE_FILES: Record<string, string> = {
@@ -131,6 +133,36 @@ describe('buildOverlay', () => {
     // And the fast path resumes once the current-format signature is stored.
     const again = await buildOverlay(overlay);
     expect(again.changed).toBe(false);
+  });
+
+  it('skips an oversized diverged file instead of chunking it, but still builds the rest of the overlay (#1025)', async () => {
+    const hugePath = path.join(worktreeDir, 'huge.ts');
+    await fs.writeFile(hugePath, 'x'.repeat(MAX_INDEXABLE_FILE_SIZE_BYTES + 1));
+
+    // Proves the size check runs before any content read on the overlay
+    // rebuild path too -- not just that the result ends up empty. (The
+    // content-hash diff pass above always stats+hashes every file via
+    // computeContentHash's fingerprint fast path; what must never happen is
+    // a full fs.readFile of the oversized file during the chunk pass.)
+    const readFileSpy = vi.spyOn(fs, 'readFile');
+    const res = await buildOverlay(overlay);
+    expect(readFileSpy.mock.calls.some(call => call[0] === hugePath)).toBe(false);
+    readFileSpy.mockRestore();
+
+    expect(res.changed).toBe(true);
+    expect(res.added).toBe(2); // d.ts (normal) + huge.ts (oversized), both new vs base
+
+    const files = await filesInIndex(overlay);
+    expect(files.has('d.ts')).toBe(true);
+    // Oversized -- never chunked or served, exactly like the full/incremental
+    // index paths' same size cap.
+    expect(files.has('huge.ts')).toBe(false);
+
+    // Still recorded in the overlay manifest with chunkCount: 0, so it isn't
+    // silently re-attempted as "new" on the next rebuild.
+    const overlayManifest = new ManifestManager(overlay.dbPath);
+    const manifest = await overlayManifest.load();
+    expect(manifest?.files['huge.ts']?.chunkCount).toBe(0);
   });
 });
 

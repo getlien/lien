@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'fs/promises';
 import path from 'path';
 import { indexSingleFile, indexMultipleFiles } from './incremental.js';
@@ -118,9 +118,15 @@ describe('Incremental Indexing', () => {
       // without writing gigabytes to disk in a test.
       await fs.writeFile(testFile, 'x'.repeat(MAX_INDEXABLE_FILE_SIZE_BYTES + 1));
 
+      // Proves the size check runs before any content read -- not just that
+      // the result ends up empty -- by asserting fs.readFile is never even
+      // called with this file's path.
+      const readFileSpy = vi.spyOn(fs, 'readFile');
       await expect(
         indexSingleFile(testFile, vectorDB, { rootDir: testDir }),
       ).resolves.not.toThrow();
+      expect(readFileSpy.mock.calls.some(call => call[0] === testFile)).toBe(false);
+      readFileSpy.mockRestore();
 
       // Recorded as processed (chunkCount: 0) rather than left unindexed --
       // so it doesn't get re-attempted every run -- but no chunks were
@@ -210,6 +216,7 @@ describe('Incremental Indexing', () => {
       await fs.writeFile(normalFile, 'export function normal() {}');
       await fs.writeFile(hugeFile, 'x'.repeat(MAX_INDEXABLE_FILE_SIZE_BYTES + 1));
 
+      const readFileSpy = vi.spyOn(fs, 'readFile');
       const count = await indexMultipleFiles([normalFile, hugeFile], vectorDB, {
         rootDir: testDir,
       });
@@ -217,6 +224,12 @@ describe('Incremental Indexing', () => {
       // Both are still "processed" (the oversized one is recorded, just with
       // 0 chunks) -- this isn't an error path, it's a deliberate skip.
       expect(count).toBe(2);
+
+      // Proves the size check runs before any content read for the batch
+      // path too: the normal file is read, the oversized one never is.
+      expect(readFileSpy.mock.calls.some(call => call[0] === normalFile)).toBe(true);
+      expect(readFileSpy.mock.calls.some(call => call[0] === hugeFile)).toBe(false);
+      readFileSpy.mockRestore();
 
       const manifest = await new ManifestManager(vectorDB.dbPath).load();
       expect(manifest?.files['normal.ts']?.chunkCount).toBeGreaterThan(0);

@@ -10,7 +10,9 @@ import {
   DEFAULT_CHUNK_OVERLAP,
   INDEX_FORMAT_VERSION,
   getParseStageConcurrency,
+  isOversizedForIndexing,
 } from '../constants.js';
+import { formatBytes } from '../gc/dir-size.js';
 import type { OverlayBackend } from '../vectordb/overlay-backend.js';
 import { ManifestManager, type FileEntry } from './manifest.js';
 import { scanFilesToIndex } from './index.js';
@@ -100,6 +102,66 @@ async function reconcileOverlayManifest(
   if (manifestEntries.length > 0) {
     await overlayManifest.updateFiles(manifestEntries);
   }
+}
+
+/** What one diverged file contributes to an overlay rebuild. */
+interface DivergedFileResult {
+  /** Chunk batch to persist, or null for a zero-chunk file (empty, or oversized). */
+  chunkBatch: { metadatas: ChunkMetadata[]; contents: string[] } | null;
+  manifestEntry: FileEntry;
+}
+
+/**
+ * Process one diverged file into its chunk batch plus manifest entry — or,
+ * if it exceeds `MAX_INDEXABLE_FILE_SIZE_BYTES`, skip chunking it and record
+ * it with `chunkCount: 0` instead (#1025's oversized-file backstop, applied
+ * here too: a >5MB modified/added file could otherwise blow up an overlay
+ * rebuild the exact same way a full or incremental index run was already
+ * guarded against). Extracted out of `buildOverlay` to keep that function's
+ * own branching flat.
+ */
+async function processDivergedFile(d: DivergedFile, verbose: boolean): Promise<DivergedFileResult> {
+  const stats = await fs.stat(d.abs);
+
+  if (isOversizedForIndexing(stats.size)) {
+    console.error(
+      `[Lien] overlay: skipped oversized file (${formatBytes(stats.size)} exceeds the indexable cap): ${d.rel}`,
+    );
+    return {
+      chunkBatch: null,
+      manifestEntry: {
+        filepath: d.rel,
+        lastModified: stats.mtimeMs,
+        chunkCount: 0,
+        contentHash: d.hash,
+      },
+    };
+  }
+
+  const content = await fs.readFile(d.abs, 'utf-8');
+  const chunks = chunkFile(d.rel, content, {
+    chunkSize: DEFAULT_CHUNK_SIZE,
+    chunkOverlap: DEFAULT_CHUNK_OVERLAP,
+    useAST: true,
+    astFallback: 'line-based',
+  });
+
+  if (verbose) {
+    console.error(`[Lien] overlay: staged ${d.rel} (${chunks.length} chunks)`);
+  }
+
+  return {
+    chunkBatch:
+      chunks.length > 0
+        ? { metadatas: chunks.map(c => c.metadata), contents: chunks.map(c => c.content) }
+        : null,
+    manifestEntry: {
+      filepath: d.rel,
+      lastModified: stats.mtimeMs,
+      chunkCount: chunks.length,
+      contentHash: d.hash,
+    },
+  };
 }
 
 /**
@@ -204,29 +266,12 @@ export async function buildOverlay(
   await Promise.all(
     diverged.map(d =>
       parseLimit(async () => {
-        const content = await fs.readFile(d.abs, 'utf-8');
-        const chunks = chunkFile(d.rel, content, {
-          chunkSize: DEFAULT_CHUNK_SIZE,
-          chunkOverlap: DEFAULT_CHUNK_OVERLAP,
-          useAST: true,
-          astFallback: 'line-based',
-        });
-        const stats = await fs.stat(d.abs);
-        if (chunks.length > 0) {
-          chunkBatches.push({
-            metadatas: chunks.map(c => c.metadata),
-            contents: chunks.map(c => c.content),
-          });
-        }
-        manifestEntries.push({
-          filepath: d.rel,
-          lastModified: stats.mtimeMs,
-          chunkCount: chunks.length,
-          contentHash: d.hash,
-        });
-        if (options.verbose) {
-          console.error(`[Lien] overlay: staged ${d.rel} (${chunks.length} chunks)`);
-        }
+        const { chunkBatch, manifestEntry } = await processDivergedFile(
+          d,
+          options.verbose ?? false,
+        );
+        if (chunkBatch) chunkBatches.push(chunkBatch);
+        manifestEntries.push(manifestEntry);
       }),
     ),
   );

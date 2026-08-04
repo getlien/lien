@@ -212,6 +212,41 @@ describe('ChunkBatchProcessor', () => {
     });
   });
 
+  describe('recordZeroChunkFile (#1025)', () => {
+    it('records a manifest entry without adding to the chunk accumulator', async () => {
+      const processor = new ChunkBatchProcessor(
+        mockVectorDB,
+        { batchThreshold: 100 },
+        mockProgressTracker,
+      );
+
+      processor.recordZeroChunkFile('huge.ts', 1234, 'hash-huge');
+
+      const results = processor.getResults();
+      expect(results.indexedFiles).toEqual([
+        { filepath: 'huge.ts', chunkCount: 0, mtime: 1234, contentHash: 'hash-huge' },
+      ]);
+      expect(results.processedChunks).toBe(0);
+      expect(mockVectorDB.insertBatch).not.toHaveBeenCalled();
+    });
+
+    it('coexists with addChunks entries in getResults', async () => {
+      const processor = new ChunkBatchProcessor(
+        mockVectorDB,
+        { batchThreshold: 100 },
+        mockProgressTracker,
+      );
+
+      await processor.addChunks([createMockChunk(1)], 'normal.ts', 1000, 'hash-normal');
+      processor.recordZeroChunkFile('huge.ts', 2000, 'hash-huge');
+
+      const results = processor.getResults();
+      expect(results.indexedFiles).toHaveLength(2);
+      expect(results.indexedFiles.map(f => f.filepath).sort()).toEqual(['huge.ts', 'normal.ts']);
+      expect(results.indexedFiles.find(f => f.filepath === 'huge.ts')?.chunkCount).toBe(0);
+    });
+  });
+
   describe('batch processing', () => {
     it('should write accumulated chunks straight to the store on threshold', async () => {
       const processor = new ChunkBatchProcessor(
