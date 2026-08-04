@@ -300,22 +300,52 @@ export class AgentReviewPlugin implements ReviewPlugin {
       maxTokenBudget,
     );
 
-    // Extra passes beyond the main investigation (doc-truth today; see
-    // `EXTRA_PASSES` and `review-pass.ts`'s "N-pass plumbing"). Each pass's
-    // trace/usage fold into the main run, and its findings/result-state
-    // (an unfinished pass, error-severity doc findings lifting the summary's
-    // risk level) fold into `result`/`agentFindings` in list order. A pass
-    // failure never fails the whole review — `runExtraPasses` catches and
-    // reports it, leaving the main-pass output untouched. Every extra pass
-    // is skipped entirely when the main pass never ran (provider down) — a
-    // second request would only fire more doomed calls, and a failure-
-    // isolated pass's own incomplete state must not overwrite the never-ran
-    // marker.
-    //
-    // The main pass's own unspent allocation (issue #836) rolls into every
-    // extra pass's own budget — a docs-heavy PR's main pass often has
-    // nothing to analyze and barely spends, while doc-truth (the pass that
-    // matters most for that PR shape) starves under its own budget alone.
+    return this.runExtraPassesAndAssembleFindings(
+      context,
+      config,
+      provider,
+      apiKey,
+      logger,
+      toolExecutor,
+      result,
+      maxTokenBudget,
+    );
+  }
+
+  /**
+   * Run every extra pass beyond the main investigation, then assemble the
+   * final findings array — the shared tail of `analyze()`'s own (chunks-
+   * driven) path, extracted so `analyze()` itself stays under its own
+   * complexity budget (`lien delta`'s Halstead-effort gate). NOT shared with
+   * `analyzeSummaryOnly()`, which keeps its own inline copy deliberately —
+   * see that method's doc comment for why the two paths stay independent.
+   *
+   * Extra passes today: doc-truth (see `EXTRA_PASSES` and `review-pass.ts`'s
+   * "N-pass plumbing"). Each pass's trace/usage fold into the main run, and
+   * its findings/result-state (an unfinished pass, error-severity doc
+   * findings lifting the summary's risk level) fold into `result`/
+   * `agentFindings` in list order. A pass failure never fails the whole
+   * review — `runExtraPasses` catches and reports it, leaving the main-pass
+   * output untouched. Every extra pass is skipped entirely when the main
+   * pass never ran (provider down) — a second request would only fire more
+   * doomed calls, and a failure-isolated pass's own incomplete state must
+   * not overwrite the never-ran marker.
+   *
+   * The main pass's own unspent allocation (issue #836) rolls into every
+   * extra pass's own budget — a docs-heavy PR's main pass often has nothing
+   * to analyze and barely spends, while doc-truth (the pass that matters
+   * most for that PR shape) starves under its own budget alone.
+   */
+  private async runExtraPassesAndAssembleFindings(
+    context: ReviewContext,
+    config: AgentConfig,
+    provider: string,
+    apiKey: string,
+    logger: Logger,
+    toolExecutor: ToolExecutor,
+    result: AgentResult,
+    maxTokenBudget: number,
+  ): Promise<ReviewFinding[]> {
     const rolledOverBudget = unspentMainBudget(maxTokenBudget, result.usage.totalTokens);
     const { findings: agentFindings, outcomes } = await runExtraPasses(
       EXTRA_PASSES,
