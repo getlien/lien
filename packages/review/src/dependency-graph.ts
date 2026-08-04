@@ -94,24 +94,54 @@ export type EdgeProvenance =
   | 'namespace-inferred';
 
 /**
- * True for the three tiers where the SPECIFIC seed symbol is verifiably
- * imported/declared in the dependent — same-file trivially, import-verified
- * via a named call site, import-only via the import alone (no call site
- * names it, but `resolveOneChunkImports` still confirmed this exact symbol
- * resolves to this exact file through `importMatchesTarget`'s guards — see
- * `EdgeProvenance`'s doc comment). Deliberately excludes `require-only`
- * despite it also being a guarded, resolved import: that tier only verifies
- * a FILE-level relationship (Ruby's `require`/`load` names no symbol at
- * all), never that THIS symbol is the one depended on — see `require-only`'s
- * own doc for why it ranks below `import-only`. The remaining tiers
- * (`symbol-name-match`, `oop-method-import`, `namespace-inferred`) resolve
- * the specific file via a name/namespace convention rather than a verified
- * import, so they stay imprecise regardless of language.
+ * Whether each tier verifies the SPECIFIC seed symbol, as opposed to only the
+ * file — the boundary `isPreciseProvenance` reads, and the one #1030 argued
+ * from evidence.
+ *
+ * `Record<EdgeProvenance, boolean>` is the forcing function: an eighth tier is
+ * a compile error until someone states which side of this line it falls on.
+ * The predicate used to be a hand-written three-way `||`, so a new tier
+ * defaulted silently to "not precise" — the same shape of silent default that
+ * ADR-015 removed from `LanguageDefinition`'s matcher-path fields, and the
+ * same class of drift #1018 found on the parser/CLI side of this axis.
+ *
+ * Note this is the SYMBOL-level reading, and it is deliberately NOT the same
+ * boundary as `@liendev/parser`'s `DependentInfo.confidence`, which answers the
+ * FILE-level question. `require-only` is the proof the two must stay separate:
+ * a Ruby `require_relative` verifiably resolves the file (so parser correctly
+ * treats that dependent as import-verified, no `confidence` marker), while
+ * naming no symbol at all (so this table correctly calls it imprecise). One
+ * shared bucketing would have to make one of the two wrong. See
+ * ADR-0016 for the full argument and for why the two vocabularies were not
+ * merged.
+ */
+const SYMBOL_VERIFIED_BY_PROVENANCE: Record<EdgeProvenance, boolean> = {
+  // Same file — no import needed for the symbol to be in scope.
+  'same-file': true,
+  // A guarded import resolves to this file AND a call site names the symbol.
+  'import-verified': true,
+  // The same guarded import resolved this exact symbol to this exact file;
+  // only the call site is missing (PHP `new Order()`, a type hint).
+  'import-only': true,
+  // A guarded, resolved import of the FILE that names no symbol whatsoever
+  // (Ruby `require`/`load`, #1013) — file-level proof only.
+  'require-only': false,
+  // Same-named symbol imported from a package path; source file never confirmed.
+  'symbol-name-match': false,
+  // Class import is verified; the method-level attribution is inferred.
+  'oop-method-import': false,
+  // No import at all — a name/namespace/directory convention, or C#'s
+  // type-reference fallback.
+  'namespace-inferred': false,
+};
+
+/**
+ * True for the tiers where the SPECIFIC seed symbol is verifiably
+ * imported/declared in the dependent, per `SYMBOL_VERIFIED_BY_PROVENANCE`
+ * above (which carries the per-tier rationale).
  */
 export function isPreciseProvenance(provenance: EdgeProvenance): boolean {
-  return (
-    provenance === 'same-file' || provenance === 'import-verified' || provenance === 'import-only'
-  );
+  return SYMBOL_VERIFIED_BY_PROVENANCE[provenance];
 }
 
 export interface SymbolNode {

@@ -8,6 +8,7 @@ import {
   GetComplexitySchema,
 } from './schemas/index.js';
 import { ATTRIBUTION_CAVEAT_REASON_TEXT } from './attribution-caveat-reasons.js';
+import { summarizeInferredDependentMechanisms } from '@liendev/parser';
 
 /**
  * MCP tool definitions with Zod-generated schemas.
@@ -149,11 +150,13 @@ Returns:
   signal among dependents always lifts this above "low", even when every dependent
   is fully tested (testedness lowers the chance of a *silent* break, it does not
   shrink the blast radius). Check riskReasoning for which signal(s) drove it.
-- dependents[]: { filepath, isTestFile, usages[]?, confidence?: "inferred" }
-  \`confidence: "inferred"\` marks a dependent recovered by text-matching a
-  uniquely-declared type name (C#'s global-using gap, see
-  dependent-attribution-partial below) rather than a real import edge — absent
-  entirely on every ordinary, import-verified dependent.
+- dependents[]: { filepath, isTestFile, usages[]?, confidence?: "inferred", inferredVia? }
+  \`confidence: "inferred"\` marks a dependent recovered by a non-import fallback
+  rather than a real import edge — absent entirely on every ordinary,
+  import-verified dependent. \`inferredVia\` names which fallback found it (today
+  ${summarizeInferredDependentMechanisms()} have one); the attributionCaveat note
+  spells out what that specific fallback can miss. See
+  dependent-attribution-partial below.
 - complexityMetrics: { averageComplexity, maxComplexity, highComplexityDependents[] }
 - totalUsageCount?: number (when symbol parameter provided)
 - attributionCaveat?: { reason, note } — present whenever dependentCount/riskLevel

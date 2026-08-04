@@ -4,7 +4,11 @@ import { GetDependentsSchema } from '../schemas/index.js';
 import { findUnindexedPaths, formatUnindexedPathsNote } from '../utils/unindexed-paths.js';
 import { relabelCallerReasoning } from '../../utils/blast-radius-reasoning.js';
 import type { ToolContext, MCPToolResult } from '../types.js';
-import { computeBlastRadiusRisk, type BlastRadiusRisk } from '@liendev/parser';
+import {
+  computeBlastRadiusRisk,
+  describeInferredDependentRecovery,
+  type BlastRadiusRisk,
+} from '@liendev/parser';
 import type { AttributionCaveatReason } from '../attribution-caveat-reasons.js';
 import {
   findDependents,
@@ -160,6 +164,38 @@ function computeRisk(analysis: DependencyAnalysisResult): BlastRadiusRisk {
 }
 
 /**
+ * The `dependent-attribution-partial` note, describing the fallback(s) that
+ * ACTUALLY recovered these dependents rather than assuming which one ran.
+ *
+ * Every mechanism-specific clause comes from `@liendev/parser`'s
+ * `INFERRED_DEPENDENT_MECHANISMS`, keyed by each dependent's own `inferredVia`.
+ * This sentence previously hard-coded C#'s language and mechanism, so when
+ * #1039 added Go's root-package fallback — same `confidence: 'inferred'` tag,
+ * same caveat reason — every recovered Go file was told "its language, C#" and
+ * that its dependents came from matching a type name against source text.
+ * Measured on a real `go-chi/chi` clone: 24 of 24 recovered edges across
+ * `context.go`/`mux.go`/`chain.go`. See #1018.
+ */
+function buildPartialRecoveryNote(analysis: DependencyAnalysisResult, filepath: string): string {
+  const inferred = analysis.dependents.filter(d => d.confidence === 'inferred');
+  const mechanisms = [
+    ...new Set(
+      inferred.map(d => d.inferredVia).filter((m): m is NonNullable<typeof m> => m !== undefined),
+    ),
+  ];
+  const { languageLabel, importGraphBlindSpot, recovery, residualRisk } =
+    describeInferredDependentRecovery(mechanisms);
+  return (
+    `The import graph found zero import-based dependents for ${filepath} (its language, ` +
+    `${languageLabel}, ${importGraphBlindSpot}), but ${inferred.length} of the ` +
+    `${analysis.dependents.length} dependent(s) below were recovered by ${recovery} ` +
+    `(marked "confidence": "inferred" in \`dependents\`, with \`inferredVia\` naming the ` +
+    `fallback). Treat dependentCount/riskLevel as a recovered LOWER BOUND, not a ` +
+    `verified/complete answer — this heuristic ${residualRisk}.`
+  );
+}
+
+/**
  * Decide which (if any) attribution caveat applies, and build its note.
  *
  * The five reasons are mutually exclusive by construction, so at most one
@@ -252,19 +288,9 @@ function buildAttributionCaveat(
     return { reason: 'type-symbol-attribution-incomplete', note };
   }
   if (analysis.dependentAttributionPartial) {
-    const inferredCount = analysis.dependents.filter(d => d.confidence === 'inferred').length;
     return {
       reason: 'dependent-attribution-partial',
-      note:
-        `The import graph found zero import-based dependents for ${filepath} (its language, C#, ` +
-        `lets real callers use its exports with no per-file import naming it at all — "global ` +
-        `using" / implicit enclosing-namespace member access), but ${inferredCount} of the ` +
-        `${analysis.dependents.length} dependent(s) below were recovered by matching a ` +
-        `uniquely-declared type name against other files' source text (marked ` +
-        `"confidence": "inferred" in \`dependents\`). Treat dependentCount/riskLevel as a ` +
-        `recovered LOWER BOUND, not a verified/complete answer — this heuristic can still miss a ` +
-        `real dependent that references the type via an alias, a generic type argument, or ` +
-        `reflection.`,
+      note: buildPartialRecoveryNote(analysis, filepath),
     };
   }
   if (analysis.dependentAttributionIncomplete) {
