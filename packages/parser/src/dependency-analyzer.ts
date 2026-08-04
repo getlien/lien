@@ -2415,6 +2415,21 @@ function findSymbolUsages<T extends CodeChunk>(
 }
 
 /**
+ * What to call the caller when the calling chunk has no symbol name of its own.
+ *
+ * A `'block'` chunk is module-level code — top-level statements, a declaration
+ * holding no function — so there is no enclosing function to name, and saying
+ * so beats `'unknown'`, which reads as "we failed to work it out". Matches the
+ * `(module-level)` wording `review`'s `dependency-graph.ts` already uses for
+ * the same situation. Since #1087 widened call-site extraction to module-level
+ * code this is a common case, not a rare fallback.
+ */
+function callerSymbolFor(chunk: CodeChunk): string {
+  if (chunk.metadata.symbolName) return chunk.metadata.symbolName;
+  return chunk.metadata.type === 'block' ? '(module-level)' : 'unknown';
+}
+
+/**
  * Extract all usages of a symbol from a file's chunks.
  */
 function extractSymbolUsagesFromChunks<T extends CodeChunk>(
@@ -2433,7 +2448,7 @@ function extractSymbolUsagesFromChunks<T extends CodeChunk>(
     for (const call of callSites) {
       if (call.symbol === targetSymbol) {
         usages.push({
-          callerSymbol: chunk.metadata.symbolName || 'unknown',
+          callerSymbol: callerSymbolFor(chunk),
           line: call.line,
           snippet: extractSnippet(lines, call.line, chunk.metadata.startLine, targetSymbol),
         });
@@ -2444,9 +2459,45 @@ function extractSymbolUsagesFromChunks<T extends CodeChunk>(
   return usages;
 }
 
+/** Lines either side of the arithmetic guess that `extractSnippet` will consider. */
+const SNIPPET_SEARCH_RADIUS = 5;
+
+/**
+ * Index of the line that actually mentions `symbolName`, searching outward from
+ * `lineIndex` (nearest first, earlier line winning a tie). `null` if none does.
+ *
+ * `callLine - startLine` is only exact when a chunk's `content` starts on
+ * exactly the line its `startLine` names, and for a module-level chunk it does
+ * not: `createChunkFromRange` trims its range's leading blank lines out of the
+ * content while `startLine` still names the untrimmed start, so the arithmetic
+ * lands N lines late — where N is however many blank lines the gap opened
+ * with. That was unreachable before #1087 (module-level chunks carried no call
+ * sites to build a snippet for) and is now the common case, so the snippet has
+ * to be found rather than computed.
+ *
+ * Deliberately corrects the lookup instead of narrowing the chunk's own
+ * `startLine`/`endLine` to match its content: `isValidChunk` measures
+ * `minChunkSize` from exactly those two fields, so shrinking them would
+ * silently drop small module-level chunks from the index — the #772 failure
+ * mode. The `line` a usage reports is `callSite.line` throughout, which is the
+ * true file line and was never affected.
+ */
+function findSymbolLine(lines: string[], lineIndex: number, symbolName: string): number | null {
+  const mentionsSymbol = (i: number) => i >= 0 && i < lines.length && lines[i].includes(symbolName);
+  if (mentionsSymbol(lineIndex)) return lineIndex;
+
+  // Nearest offset first, and within an offset the earlier line first.
+  const nearbyLines = Array.from({ length: SNIPPET_SEARCH_RADIUS }, (_, k) => k + 1).flatMap(
+    offset => [lineIndex - offset, lineIndex + offset],
+  );
+  return nearbyLines.find(mentionsSymbol) ?? null;
+}
+
 /**
  * Extract a code snippet for a call site with bounds checking.
- * If the target line is blank, searches nearby lines for context.
+ * Prefers the nearby line that actually mentions the symbol (see
+ * `findSymbolLine`); if the target line is blank, searches nearby lines for
+ * context.
  */
 function extractSnippet(
   lines: string[],
@@ -2463,6 +2514,11 @@ function extractSnippet(
     return placeholder;
   }
 
+  const symbolLine = findSymbolLine(lines, lineIndex, symbolName);
+  if (symbolLine !== null) {
+    return lines[symbolLine].trim();
+  }
+
   // Try the direct line first
   const directLine = lines[lineIndex].trim();
   if (directLine) {
@@ -2471,7 +2527,7 @@ function extractSnippet(
 
   // If direct line is blank, search for nearby non-blank context
   // Limit search radius to 5 lines to ensure contextual relevance
-  const searchRadius = 5;
+  const searchRadius = SNIPPET_SEARCH_RADIUS;
 
   // Search backwards first (prefer earlier lines)
   for (let i = lineIndex - 1; i >= Math.max(0, lineIndex - searchRadius); i--) {

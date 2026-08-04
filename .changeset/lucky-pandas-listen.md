@@ -22,3 +22,10 @@ express 12.1% → 84.4%, sinatra 42.9% → 82.3%, requests 62.2% → 70.3%. Zero
 duplicate attributions anywhere. Complexity metrics, chunk boundaries and
 precomputed `dependentCount` are byte-identical before and after; index size
 grows ~11% and index time is unchanged.
+
+Two knock-on fixes for output that only becomes common once module-level code
+carries call sites: `get_dependents` usages from module-level code now report
+`callerSymbol: "(module-level)"` rather than `"unknown"` (matching the wording
+`review` already uses), and their `snippet` is located by finding the line that
+mentions the symbol instead of computing it, which was landing a line late for
+any chunk whose leading blank lines were trimmed out of its content.
