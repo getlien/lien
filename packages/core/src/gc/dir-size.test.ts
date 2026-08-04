@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
@@ -42,5 +42,15 @@ describe('computeDirSize', () => {
 
   it('returns 0 for a missing directory', async () => {
     expect(await computeDirSize(path.join(dir, 'nope'))).toBe(0);
+  });
+
+  it('skips a malformed entry instead of throwing (e.g. a test double whose readdir mock is not Dirent-shaped)', async () => {
+    const readdirSpy = vi
+      .spyOn(fs, 'readdir')
+      .mockResolvedValueOnce(['not-a-dirent'] as unknown as import('fs').Dirent[]);
+
+    await expect(computeDirSize(dir)).resolves.toBe(0);
+
+    readdirSpy.mockRestore();
   });
 });

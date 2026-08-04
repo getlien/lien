@@ -2,8 +2,10 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs/promises';
 import path from 'path';
 import { indexSingleFile, indexMultipleFiles } from './incremental.js';
+import { ManifestManager } from './manifest.js';
 import { SqliteBackend } from '../vectordb/sqlite/sqlite-backend.js';
 import { createTestDir, cleanupTestDir } from '../test/helpers/test-db.js';
+import { MAX_INDEXABLE_FILE_SIZE_BYTES } from '../constants.js';
 
 describe('Incremental Indexing', () => {
   let testDir: string;
@@ -109,6 +111,36 @@ describe('Incremental Indexing', () => {
       // Should complete without throwing
       await expect(indexSingleFile(testFile, vectorDB)).resolves.not.toThrow();
     });
+
+    it('should skip an oversized file instead of chunking it (#1025)', async () => {
+      const testFile = path.join(testDir, 'huge.ts');
+      // One byte over the cap -- still exercises the boundary precisely
+      // without writing gigabytes to disk in a test.
+      await fs.writeFile(testFile, 'x'.repeat(MAX_INDEXABLE_FILE_SIZE_BYTES + 1));
+
+      await expect(
+        indexSingleFile(testFile, vectorDB, { rootDir: testDir }),
+      ).resolves.not.toThrow();
+
+      // Recorded as processed (chunkCount: 0) rather than left unindexed --
+      // so it doesn't get re-attempted every run -- but no chunks were
+      // actually produced from its content.
+      const manifest = await new ManifestManager(vectorDB.dbPath).load();
+      expect(manifest?.files['huge.ts']?.chunkCount).toBe(0);
+
+      const results = await vectorDB.search('huge');
+      expect(results.filter(r => r.metadata.file === 'huge.ts')).toHaveLength(0);
+    });
+
+    it('should still index a file just under the size cap', async () => {
+      const testFile = path.join(testDir, 'justunder.ts');
+      await fs.writeFile(testFile, `export function underCap() { return "${'y'.repeat(1000)}"; }`);
+
+      await indexSingleFile(testFile, vectorDB, { rootDir: testDir });
+
+      const manifest = await new ManifestManager(vectorDB.dbPath).load();
+      expect(manifest?.files['justunder.ts']?.chunkCount).toBeGreaterThan(0);
+    });
   });
 
   describe('indexMultipleFiles', () => {
@@ -169,6 +201,26 @@ describe('Incremental Indexing', () => {
       });
 
       expect(count).toBe(2);
+    });
+
+    it('should skip an oversized file among a batch instead of chunking it (#1025)', async () => {
+      const normalFile = path.join(testDir, 'normal.ts');
+      const hugeFile = path.join(testDir, 'huge.ts');
+
+      await fs.writeFile(normalFile, 'export function normal() {}');
+      await fs.writeFile(hugeFile, 'x'.repeat(MAX_INDEXABLE_FILE_SIZE_BYTES + 1));
+
+      const count = await indexMultipleFiles([normalFile, hugeFile], vectorDB, {
+        rootDir: testDir,
+      });
+
+      // Both are still "processed" (the oversized one is recorded, just with
+      // 0 chunks) -- this isn't an error path, it's a deliberate skip.
+      expect(count).toBe(2);
+
+      const manifest = await new ManifestManager(vectorDB.dbPath).load();
+      expect(manifest?.files['normal.ts']?.chunkCount).toBeGreaterThan(0);
+      expect(manifest?.files['huge.ts']?.chunkCount).toBe(0);
     });
 
     it('should handle mixed existing and non-existing files', async () => {

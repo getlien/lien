@@ -64,6 +64,10 @@ program
   .description('Index the codebase for lexical (FTS5) search and dependency analysis')
   .option('-f, --force', 'Force full reindex (skip incremental)')
   .option('-v, --verbose', 'Show detailed logging during indexing')
+  .option(
+    '--allow-unsafe-root',
+    'Allow indexing your home directory or a filesystem root (dangerous, see #1025)',
+  )
   .action(indexCommand);
 
 program

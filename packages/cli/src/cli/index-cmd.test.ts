@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import os from 'os';
 
 // Mock @liendev/core
 const mockIndexCodebase = vi.fn();
@@ -152,5 +153,53 @@ describe('indexCommand', () => {
         onProgress: expect.any(Function),
       }),
     );
+  });
+
+  describe('unsafe-root refusal (#1025)', () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('refuses to index the home directory and never calls indexCodebase', async () => {
+      vi.spyOn(os, 'homedir').mockReturnValue('/Users/fakehome');
+      vi.spyOn(process, 'cwd').mockReturnValue('/Users/fakehome');
+
+      await indexCommand({});
+
+      expect(processExitSpy).toHaveBeenCalledWith(1);
+      expect(mockIndexCodebase).not.toHaveBeenCalled();
+      expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('your home directory'));
+      expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('--allow-unsafe-root'));
+    });
+
+    it('refuses to index a filesystem root and never calls indexCodebase', async () => {
+      vi.spyOn(process, 'cwd').mockReturnValue('/');
+
+      await indexCommand({});
+
+      expect(processExitSpy).toHaveBeenCalledWith(1);
+      expect(mockIndexCodebase).not.toHaveBeenCalled();
+      expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('filesystem root'));
+    });
+
+    it('proceeds when --allow-unsafe-root overrides a home-directory refusal', async () => {
+      vi.spyOn(os, 'homedir').mockReturnValue('/Users/fakehome');
+      vi.spyOn(process, 'cwd').mockReturnValue('/Users/fakehome');
+
+      await indexCommand({ allowUnsafeRoot: true });
+
+      expect(processExitSpy).not.toHaveBeenCalled();
+      expect(mockIndexCodebase).toHaveBeenCalled();
+    });
+
+    it('does not refuse an ordinary project directory that lives under $HOME (no over-refusal)', async () => {
+      vi.spyOn(os, 'homedir').mockReturnValue('/Users/fakehome');
+      vi.spyOn(process, 'cwd').mockReturnValue('/Users/fakehome/myproject');
+
+      await indexCommand({});
+
+      expect(processExitSpy).not.toHaveBeenCalled();
+      expect(mockIndexCodebase).toHaveBeenCalled();
+    });
   });
 });

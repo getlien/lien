@@ -366,6 +366,45 @@ describe('FileWatcher', () => {
 
       await fw.stop();
     });
+
+    // #1025: an explicitly-overridden (--allow-unsafe-root) `lien index` at
+    // $HOME, followed by `lien serve`, must have its file watcher apply the
+    // same OS/credential exclusions as the initial scan -- otherwise a
+    // watched change under Library/ or .ssh/ would re-add exactly what the
+    // guard was built to keep out.
+    it('should add home-root-only exclusions when the watched root IS the home directory', async () => {
+      vi.spyOn(os, 'homedir').mockReturnValue(testDir);
+      await mockEcosystems([], []);
+
+      const watchSpy = vi.spyOn(chokidar, 'watch');
+      const fw = new FileWatcher(testDir);
+      await fw.start(vi.fn());
+
+      const options = watchSpy.mock.calls[0][1] as chokidar.WatchOptions;
+      const ignored = options.ignored as string[];
+
+      expect(ignored).toContain('Library/**');
+      expect(ignored).toContain('.ssh/**');
+
+      await fw.stop();
+    });
+
+    it('should NOT add home-root-only exclusions for an ordinary project directory', async () => {
+      vi.spyOn(os, 'homedir').mockReturnValue(path.join(testDir, 'unrelated-home'));
+      await mockEcosystems([], []);
+
+      const watchSpy = vi.spyOn(chokidar, 'watch');
+      const fw = new FileWatcher(testDir);
+      await fw.start(vi.fn());
+
+      const options = watchSpy.mock.calls[0][1] as chokidar.WatchOptions;
+      const ignored = options.ignored as string[];
+
+      expect(ignored).not.toContain('Library/**');
+      expect(ignored).not.toContain('.ssh/**');
+
+      await fw.stop();
+    });
   });
 
   describe('watchGit - Stage 3: Event-Driven Git Detection', () => {

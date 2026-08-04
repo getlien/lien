@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
@@ -361,5 +361,55 @@ describe('scanCodebase — git-tracked-file rescue (#899, #900)', () => {
 
     expect(relative).toContain('src/real.ts');
     expect(relative).not.toContain('build/output.js');
+  });
+
+  // #1025: a full `lien index` scan must apply the same home-root scoping as
+  // createGitignoreFilter (gitignore.test.ts covers the filter in isolation;
+  // this covers the actual scanCodebase entry point `lien index` uses).
+  describe('home-root scoping (#1025)', () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('indexes a real Library/ directory normally in an ordinary project (no over-refusal)', async () => {
+      testDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-test-scanner-home-scoping-'));
+      vi.spyOn(os, 'homedir').mockReturnValue(path.join(testDir, 'unrelated-home'));
+
+      // Arduino/Unity-style project layout: a real, legitimate `Library/`.
+      await fs.mkdir(path.join(testDir, 'Library', 'Sketchbook'), { recursive: true });
+      await fs.writeFile(
+        path.join(testDir, 'Library', 'Sketchbook', 'sketch.h'),
+        '#define VERSION 1\n',
+      );
+
+      const files = await scanCodebase({ rootDir: testDir });
+      const relative = files.map(f => path.relative(testDir, f).replace(/\\/g, '/'));
+
+      expect(relative).toContain('Library/Sketchbook/sketch.h');
+    });
+
+    it('excludes Library/, .ssh/, .npm/ etc. when the scan root IS the home directory', async () => {
+      testDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-test-scanner-home-scoping-'));
+      vi.spyOn(os, 'homedir').mockReturnValue(testDir);
+
+      await fs.mkdir(path.join(testDir, 'Library', 'Caches', 'claude-cli-nodejs'), {
+        recursive: true,
+      });
+      await fs.writeFile(
+        path.join(testDir, 'Library', 'Caches', 'claude-cli-nodejs', 'transcript.md'),
+        '# transcript\n',
+      );
+      await fs.mkdir(path.join(testDir, 'myproject', 'src'), { recursive: true });
+      await fs.writeFile(
+        path.join(testDir, 'myproject', 'src', 'real.ts'),
+        'export const real = true;\n',
+      );
+
+      const files = await scanCodebase({ rootDir: testDir });
+      const relative = files.map(f => path.relative(testDir, f).replace(/\\/g, '/'));
+
+      expect(relative).not.toContain('Library/Caches/claude-cli-nodejs/transcript.md');
+      expect(relative).toContain('myproject/src/real.ts');
+    });
   });
 });

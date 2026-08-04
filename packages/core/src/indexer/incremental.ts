@@ -7,7 +7,9 @@ import {
   DEFAULT_CHUNK_OVERLAP,
   DEFAULT_CONCURRENCY,
   getParseStageConcurrency,
+  isOversizedForIndexing,
 } from '../constants.js';
+import { formatBytes } from '../gc/dir-size.js';
 import { ManifestManager } from './manifest.js';
 import type { Result } from '../utils/result.js';
 import { Ok, Err, isOk } from '../utils/result.js';
@@ -118,6 +120,29 @@ async function processFileContent(
 }
 
 /**
+ * Record a file as indexed with zero chunks — shared by the "genuinely
+ * empty" and "skipped for being oversized" (#1025) cases in
+ * {@link indexSingleFile}. Removes any stale chunks from the vector DB and
+ * records `chunkCount: 0` in the manifest so the file isn't repeatedly
+ * reprocessed as new.
+ */
+async function recordZeroChunkFile(
+  normalizedPath: string,
+  mtime: number,
+  contentHash: string,
+  vectorDB: VectorDBInterface,
+  manifest: ManifestManager,
+): Promise<void> {
+  await vectorDB.deleteByFile(normalizedPath);
+  await manifest.updateFile(normalizedPath, {
+    filepath: normalizedPath,
+    lastModified: mtime,
+    chunkCount: 0,
+    contentHash,
+  });
+}
+
+/**
  * Indexes a single file incrementally by updating its chunks in the vector database.
  * This is the core function for incremental reindexing - it handles file changes,
  * deletions, and additions.
@@ -160,26 +185,29 @@ export async function indexSingleFile(
       return;
     }
 
+    // Stat before reading content, so an oversized file (#1025) can skip the
+    // read+chunk entirely instead of loading a multi-GB blob into memory.
+    const stats = await fs.stat(absolutePath);
+    const contentHash = await computeContentHash(absolutePath);
+    const manifest = new ManifestManager(vectorDB.dbPath);
+
+    if (isOversizedForIndexing(stats.size)) {
+      console.error(
+        `[Lien] Skipped oversized file (${formatBytes(stats.size)} exceeds the indexable cap): ${normalizedPath}`,
+      );
+      await recordZeroChunkFile(normalizedPath, stats.mtimeMs, contentHash, vectorDB, manifest);
+      return;
+    }
+
     // Read file content
     const content = await fs.readFile(absolutePath, 'utf-8');
 
     // Process file content (chunking) - use normalized path for storage
     const result = await processFileContent(normalizedPath, content, verbose || false, rootDir);
 
-    // Get actual file mtime and compute content hash for manifest
-    const stats = await fs.stat(absolutePath);
-    const contentHash = await computeContentHash(absolutePath);
-    const manifest = new ManifestManager(vectorDB.dbPath);
-
     if (result === null) {
       // Empty file - remove from vector DB but keep in manifest with chunkCount: 0
-      await vectorDB.deleteByFile(normalizedPath);
-      await manifest.updateFile(normalizedPath, {
-        filepath: normalizedPath,
-        lastModified: stats.mtimeMs,
-        chunkCount: 0,
-        contentHash,
-      });
+      await recordZeroChunkFile(normalizedPath, stats.mtimeMs, contentHash, vectorDB, manifest);
       return;
     }
 
@@ -227,10 +255,26 @@ async function processSingleFileForIndexing(
       ? filepath
       : path.resolve(rootDir || process.cwd(), filepath);
 
-    // Read file stats and content using the absolute path
+    // Stat before reading content, so an oversized file (#1025) can skip the
+    // read+chunk entirely instead of loading a multi-GB blob into memory.
     const stats = await fs.stat(absolutePath);
-    const content = await fs.readFile(absolutePath, 'utf-8');
     const contentHash = await computeContentHash(absolutePath);
+
+    if (isOversizedForIndexing(stats.size)) {
+      console.error(
+        `[Lien] Skipped oversized file (${formatBytes(stats.size)} exceeds the indexable cap): ${normalizedPath}`,
+      );
+      // Treated like an empty file (result: null) — removed from the vector
+      // DB and recorded in the manifest with chunkCount: 0 by the caller.
+      return Ok({
+        filepath: normalizedPath,
+        result: null,
+        mtime: stats.mtimeMs,
+        contentHash,
+      });
+    }
+
+    const content = await fs.readFile(absolutePath, 'utf-8');
 
     // Process content using normalized path (for storage)
     const result = await processFileContent(normalizedPath, content, verbose, rootDir);

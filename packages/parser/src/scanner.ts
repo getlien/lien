@@ -5,8 +5,8 @@ import fs from 'fs/promises';
 import path from 'path';
 import type { ScanOptions } from './types.js';
 import {
-  ALWAYS_IGNORE_PATTERNS,
-  NEVER_INDEX_EVEN_IF_TRACKED_PATTERNS,
+  getEffectiveAlwaysIgnorePatterns,
+  getEffectiveNeverIndexPatterns,
   getGitTrackedFiles,
 } from './gitignore.js';
 
@@ -47,7 +47,7 @@ function rescueTrackedFiles(
 ): string[] {
   if (trackedFiles.size === 0) return [];
 
-  const neverIndexIg = ignore().add(NEVER_INDEX_EVEN_IF_TRACKED_PATTERNS);
+  const neverIndexIg = ignore().add(getEffectiveNeverIndexPatterns(rootDir));
   const lexicalRelSet = new Set(
     lexicalFiles.map(file => path.relative(rootDir, file).replace(/\\/g, '/')),
   );
@@ -76,7 +76,8 @@ export async function scanCodebase(options: ScanOptions): Promise<string[]> {
   const { rootDir, includePatterns = [], excludePatterns = [] } = options;
 
   const ig = await loadGitignore(rootDir);
-  ig.add([...ALWAYS_IGNORE_PATTERNS, ...excludePatterns]);
+  const alwaysIgnorePatterns = getEffectiveAlwaysIgnorePatterns(rootDir);
+  ig.add([...alwaysIgnorePatterns, ...excludePatterns]);
 
   // Determine patterns to search for. The `.github/**` entry is required
   // alongside the brace pattern because glob's default `dot:false` blocks
@@ -92,7 +93,7 @@ export async function scanCodebase(options: ScanOptions): Promise<string[]> {
         ];
 
   // Combine always-ignored patterns with exclude patterns for glob
-  const globIgnorePatterns = [...ALWAYS_IGNORE_PATTERNS, ...excludePatterns];
+  const globIgnorePatterns = [...alwaysIgnorePatterns, ...excludePatterns];
 
   // Find all code files
   const allFiles: string[] = [];

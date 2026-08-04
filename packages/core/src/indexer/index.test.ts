@@ -4,6 +4,7 @@ import path from 'path';
 import { indexCodebase } from './index.js';
 import { createVectorDB } from '../vectordb/factory.js';
 import { createTestDir, cleanupTestDir, createTestFile } from '../test/helpers/test-db.js';
+import { MAX_INDEXABLE_FILE_SIZE_BYTES } from '../constants.js';
 
 const MATH_TS = `export function add(a: number, b: number): number {
   return a + b;
@@ -90,5 +91,21 @@ describe('indexCodebase (lexical FTS5 structural index)', () => {
     } finally {
       await cleanupTestDir(emptyDir);
     }
+  });
+
+  it('skips an oversized file instead of chunking it, but still indexes the rest (#1025)', async () => {
+    await createTestFile(testDir, 'src/huge.ts', 'x'.repeat(MAX_INDEXABLE_FILE_SIZE_BYTES + 1));
+
+    const result = await indexCodebase({ rootDir: testDir, force: true });
+
+    expect(result.success).toBe(true);
+    expect(result.chunksCreated).toBeGreaterThan(0);
+
+    const db = await createVectorDB(testDir);
+    await db.initialize();
+    const rows = await db.scanAll();
+
+    expect(rows.some(r => r.metadata.file.endsWith('main.ts'))).toBe(true);
+    expect(rows.some(r => r.metadata.file.endsWith('huge.ts'))).toBe(false);
   });
 });

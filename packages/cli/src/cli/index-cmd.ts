@@ -6,6 +6,7 @@ import type { IndexingProgress } from '@liendev/core';
 import { showCompactBanner } from '../utils/banner.js';
 import { getIndexingMessage, getModelLoadingMessage } from '../utils/loading-messages.js';
 import { formatDuration } from './utils.js';
+import { checkRootSafety, formatUnsafeRootMessage } from './unsafe-root.js';
 
 /**
  * Clears the existing index and manifest (for --force flag).
@@ -172,8 +173,23 @@ function displayFinalResult(
   }
 }
 
-export async function indexCommand(options: { verbose?: boolean; force?: boolean }) {
+export async function indexCommand(options: {
+  verbose?: boolean;
+  force?: boolean;
+  allowUnsafeRoot?: boolean;
+}) {
   showCompactBanner();
+
+  // Refuse to index the home directory or a filesystem root unless
+  // explicitly overridden (#1025). `lien index` always indexes
+  // `process.cwd()` — there's no `--root`/`--path` to sanity-check instead —
+  // so this has to run before any scanning starts.
+  const rootSafety = checkRootSafety(process.cwd());
+  if (rootSafety.unsafe && !options.allowUnsafeRoot) {
+    console.error(chalk.red(formatUnsafeRootMessage(rootSafety)));
+    process.exit(1);
+    return;
+  }
 
   try {
     // Clear index if --force flag is set

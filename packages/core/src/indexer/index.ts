@@ -17,7 +17,9 @@ import {
   DEFAULT_CHUNK_OVERLAP,
   DEFAULT_CONCURRENCY,
   getParseStageConcurrency,
+  isOversizedForIndexing,
 } from '../constants.js';
+import { formatBytes } from '../gc/dir-size.js';
 import { createVectorDB } from '../vectordb/factory.js';
 import { writeVersionFile } from '../vectordb/version.js';
 import { ManifestManager } from './manifest.js';
@@ -331,6 +333,17 @@ async function processFileForIndexing(
     const relativePath = normalizeToRelativePath(file, rootDir);
     // Get file stats to capture actual modification time
     const stats = await fs.stat(absolutePath);
+
+    // Size cap (#1025): skip before reading content, so an oversized file
+    // never gets loaded into memory or chunked in the first place.
+    if (isOversizedForIndexing(stats.size)) {
+      console.error(
+        `[indexer] Skipped oversized file (${formatBytes(stats.size)} exceeds the indexable cap): ${relativePath}`,
+      );
+      progressTracker.incrementFiles();
+      return false;
+    }
+
     const content = await fs.readFile(absolutePath, 'utf-8');
 
     const chunks = chunkFile(relativePath, content, {
