@@ -164,6 +164,23 @@ const CORPORA: Corpus[] = [
     // NOT a single-segment package name, which `matchesFile`'s package-
     // directory leniency does not cover; see #1039's root-level-file recovery
     // tier for that separate, narrower case).
+    //
+    // This corpus also carries the harness's one test-file-demotion fixture:
+    // `internal/util/logger_test.go`, a genuine `_test.go` file (isTestFile's
+    // generic suffix convention) sitting alongside the hub `logger.go`. It
+    // deliberately repeats "LogInfo" densely enough to out-bm25 logger.go's
+    // own defining chunk on the corpus's own `queries[0]` -- see the
+    // test-file-demotion assertion below, which is the same "does this lever
+    // actually do anything" hard assertion that assertion (a) above is for
+    // dependentCount, now covering `applyTestFileDemotion`. Without it, this
+    // second ranking lever would ship with zero regression coverage -- no
+    // fixture corpus here contains a test file otherwise, so nothing would
+    // notice it going dark the way #1071 went dark for six languages.
+    // Because `internal/util` now holds two files, Go's package-level (not
+    // per-file) import resolution gives logger_test.go the SAME
+    // dependentCount as logger.go (both 4) -- confirmed below, not assumed --
+    // so the two compete on bm25 alone, isolating the demotion's effect from
+    // the structural boost.
     language: 'go',
     queries: [
       { query: 'LogInfo', expectedFile: 'internal/util/logger.go' },
@@ -335,6 +352,26 @@ async function withStructuralRanking<T>(enabled: boolean, fn: () => Promise<T>):
   }
 }
 
+/**
+ * Same pattern as `withStructuralRanking` above, for the OTHER independent
+ * ranking lever (`LIEN_TEST_FILE_RANKING`, `applyTestFileDemotion` in
+ * fts-search.ts). Kept as its own function rather than a shared
+ * parameterized helper, mirroring `structuralRankingEnabled`/
+ * `testFileRankingEnabled` staying separate functions in fts-search.ts
+ * itself -- one function per independently-togglable lever.
+ */
+async function withTestFileRanking<T>(enabled: boolean, fn: () => Promise<T>): Promise<T> {
+  const previous = process.env.LIEN_TEST_FILE_RANKING;
+  if (enabled) delete process.env.LIEN_TEST_FILE_RANKING;
+  else process.env.LIEN_TEST_FILE_RANKING = 'off';
+  try {
+    return await fn();
+  } finally {
+    if (previous === undefined) delete process.env.LIEN_TEST_FILE_RANKING;
+    else process.env.LIEN_TEST_FILE_RANKING = previous;
+  }
+}
+
 function median(values: number[]): number {
   if (values.length === 0) return 0;
   const sorted = [...values].sort((a, b) => a - b);
@@ -438,6 +475,53 @@ describe('Ranking regression harness (#1071)', () => {
       },
     );
   });
+
+  it(
+    'test-file demotion resolves non-zero AND ties dependentCount with the hub file for ' +
+      "logger_test.go (go) -- confirms the corpus comment's package-level-resolution claim, " +
+      'so the assertion below isolates bm25 alone, not a structural-boost side effect',
+    () => {
+      const runtime = runtimes.get('go')!;
+      // hubDependentCount above already proved logger.go > 0; this is the
+      // other half -- logger_test.go, added to the SAME `internal/util`
+      // package, must resolve to the exact same count (Go resolves imports
+      // per-package, not per-file).
+      expect(runtime.maxDependentCount).toBe(4);
+      expect(runtime.filesWithDependents).toBe(5);
+    },
+  );
+
+  it(
+    'test-file demotion: LIEN_TEST_FILE_RANKING=off lets a genuine test file ' +
+      '(go/internal/util/logger_test.go) outrank the real source file it tests ' +
+      '(logger.go) on their shared "LogInfo" query, and the default (demotion on) flips it ' +
+      'back -- the same "does this lever actually do anything" hard, non-golden proof ' +
+      'assertion (a) above is for dependentCount, now for `applyTestFileDemotion`. This is ' +
+      'deliberately NOT part of the golden diff: whether the lever moves anything at all has ' +
+      'one right answer, and a `UPDATE_RANKING_GOLDEN=1` regeneration must never be able to ' +
+      "paper over it going dark -- exactly the shape of #1071's six-language silent collapse, " +
+      'one lever over.',
+    async () => {
+      const runtime = runtimes.get('go')!;
+      const TEST_FILE = 'internal/util/logger_test.go';
+      const SOURCE_FILE = 'internal/util/logger.go';
+
+      const rankOf = (results: { metadata: { file: string } }[], file: string): number =>
+        results.findIndex(r => r.metadata.file === file) + 1; // 0 => not found
+
+      const offResults = await withTestFileRanking(false, () => runtime.db.search('LogInfo', 5));
+      const testRankOff = rankOf(offResults, TEST_FILE);
+      const sourceRankOff = rankOf(offResults, SOURCE_FILE);
+      expect(testRankOff).toBeGreaterThan(0); // both present
+      expect(sourceRankOff).toBeGreaterThan(0);
+      expect(testRankOff).toBeLessThan(sourceRankOff); // test file outranks real source
+
+      const onResults = await runtime.db.search('LogInfo', 5); // default: demotion ON
+      const testRankOn = rankOf(onResults, TEST_FILE);
+      const sourceRankOn = rankOf(onResults, SOURCE_FILE);
+      expect(sourceRankOn).toBeLessThan(testRankOn); // flips: real source wins by default
+    },
+  );
 
   it(
     'matches the golden ranking-regression stats (regenerate with UPDATE_RANKING_GOLDEN=1 ' +

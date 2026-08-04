@@ -23,8 +23,8 @@ recall@5 (OFF): 1.00
 MRR (OFF): 1.00
 
 === go ===
-files: 5
-filesWithDependents: 4
+files: 6
+filesWithDependents: 5
 maxDependentCount: 4
 medianBoostMultiplier: 1.10
 recall@1 (ON): 1.00
