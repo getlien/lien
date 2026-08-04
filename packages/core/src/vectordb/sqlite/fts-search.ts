@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { isTestFile } from '@liendev/parser';
 import type { SearchResult } from '../types.js';
 import type { RelevanceCategory } from '../relevance.js';
 import { parseRow, buildSearchResultMetadata } from './row-mapping.js';
@@ -94,6 +95,63 @@ export function structuralRankingEnabled(): boolean {
 }
 
 /**
+ * Demotion multiplier applied to a ranking key when the result's file is a
+ * test file (`isTestFile`, `@liendev/parser`'s `utils/path-matching.ts` — the
+ * one existing definition; reused here rather than re-derived, per this
+ * repo's own "one decision implemented at N sites" lesson). Borrowed from
+ * zoekt's ranker, which multiplies a `_test.go` file's score by exactly this
+ * factor.
+ *
+ * Global-centrality measurements across 14 real corpora repeatedly surfaced
+ * test helpers and fixtures ABOVE the real source they exist to test:
+ * `Assert.kt` test helpers at #1 and #2 on Exposed (Kotlin), this repo's own
+ * `lien-review-testbed/rust/*.rs` fixtures at #3 and #4 outranking real
+ * source, a test `NullTextWriter.cs` at #2 on serilog. A test file is often
+ * legitimately well-connected (heavily cross-referenced by other tests) and
+ * lexically strong (it repeats the domain vocabulary it's testing), so
+ * neither `applyStructuralBoost` nor bm25 alone corrects for this — a
+ * targeted demotion does.
+ *
+ * 0.8, matching zoekt exactly rather than re-derived from this repo's own
+ * corpora: it is a deliberately small nudge (constraint: a test file must
+ * remain findable by a query that names it directly, see
+ * `applyTestFileDemotion`'s doc comment), and zoekt's value is the one
+ * existing data point for "how much is enough to fix this class of noise
+ * without overcorrecting." See the ranking-regression harness's golden diff
+ * for whether it holds up on this repo's own fixtures.
+ */
+export const TEST_FILE_DEMOTION_FACTOR = 0.8;
+
+/**
+ * Env escape hatch for the test-file demotion below (`applyTestFileDemotion`,
+ * composed into `computeRankingKey`). Set `LIEN_TEST_FILE_RANKING=off` to
+ * disable it — e.g. to A/B the feature or rule it out while debugging a
+ * search result. Deliberately a SEPARATE flag from `LIEN_STRUCTURAL_RANKING`:
+ * the two ranking levers are independent, so each needs its own kill switch
+ * to keep either effect attributable on its own.
+ */
+export function testFileRankingEnabled(): boolean {
+  return process.env.LIEN_TEST_FILE_RANKING !== 'off';
+}
+
+/**
+ * Multiply `value` (a bm25 ratio, or an already-boosted ranking key) by
+ * `TEST_FILE_DEMOTION_FACTOR` when `filepath` is a test file, else return it
+ * unchanged.
+ *
+ * Demotes, never excludes: the ranking key only ever shrinks by a fixed 20%,
+ * so a test file never drops out of the returned window — and because the
+ * shrink is multiplicative on an already-small set of candidates, a query
+ * that names the test file directly (its own symbol or filename-derived
+ * tokens) still wins on bm25 alone, the same way `applyStructuralBoost` only
+ * ever nudges ties and near-ties rather than overriding a decisive lexical
+ * match.
+ */
+export function applyTestFileDemotion(value: number, filepath: string): number {
+  return isTestFile(filepath) ? value * TEST_FILE_DEMOTION_FACTOR : value;
+}
+
+/**
  * Blend a bm25-derived relevance ratio (`ratio` from `keywordSearch`, in
  * (0, 1], higher = better lexical match) with a structural importance signal
  * (`dependentCount`: how many other files import this chunk's file — see
@@ -119,6 +177,21 @@ export function applyStructuralBoost(
 ): number {
   const multiplier = 1 + alpha * Math.log1p(Math.max(0, dependentCount));
   return ratio * Math.min(MAX_STRUCTURAL_BOOST_MULTIPLIER, multiplier);
+}
+
+/**
+ * Compose the full ranking key from a pure bm25 `ratio` plus the two
+ * independent, independently-togglable ranking signals: structural
+ * importance (`applyStructuralBoost`) and test-file demotion
+ * (`applyTestFileDemotion`). Shared by `keywordSearch`'s within-corpus sort
+ * and `OverlayBackend.mergeRankedHits`'s cross-corpus re-sort (#1071) so the
+ * two ranking call sites can never diverge on how the two levers combine —
+ * exactly the "one decision implemented at N sites" failure mode this
+ * codebase has shipped bugs from before.
+ */
+export function computeRankingKey(ratio: number, dependentCount: number, filepath: string): number {
+  const boosted = structuralRankingEnabled() ? applyStructuralBoost(ratio, dependentCount) : ratio;
+  return testFileRankingEnabled() ? applyTestFileDemotion(boosted, filepath) : boosted;
 }
 
 /** A scored FTS row plus the internal ratio the boost re-sort needs — never returned as-is. */
@@ -166,16 +239,19 @@ function scoreRow(
  * query text. Returns SearchResult[] ordered best-first, trimmed to `limit`.
  *
  * Ordering: bm25 (via the SQL `ORDER BY rank`) picks the overfetched
- * candidate window; within that window, `applyStructuralBoost` re-sorts by
- * bm25-blended-with-dependentCount (see its doc comment) unless
- * `structuralRankingEnabled()` is false, in which case the SQL's pure bm25
+ * candidate window; within that window, `computeRankingKey` re-sorts by
+ * bm25 blended with dependentCount (`applyStructuralBoost`) and nudged down
+ * for test files (`applyTestFileDemotion`) — see each function's own doc
+ * comment — unless BOTH `structuralRankingEnabled()` and
+ * `testFileRankingEnabled()` are false, in which case the SQL's pure bm25
  * order is preserved untouched. `Array.prototype.sort` is stable (ES2019+),
- * so equal-boost rows keep their original bm25 order either way.
+ * so equal-key rows keep their original bm25 order either way.
  *
  * Each result's own `score`/`relevance` fields are NOT recomputed from the
- * boost (see `scoreRow`'s doc comment) — they stay pure bm25, so the list
- * order and each item's own relevance label can legitimately disagree when
- * structural ranking promotes a well-connected file.
+ * ranking key (see `scoreRow`'s doc comment) — they stay pure bm25, so the
+ * list order and each item's own relevance label can legitimately disagree
+ * when structural ranking promotes a well-connected file, or when test-file
+ * demotion pushes a lexically-strong test file down a slot or two.
  *
  * `dependentCountsOverride` exists for `OverlayBackend` (#1071). Overlay mode
  * runs this function once per connection — overlay and base — and each
@@ -229,13 +305,14 @@ export function keywordSearch(
 
   const scored = rows.map(row => scoreRow(row, rankBest, terms, dependentCounts));
 
-  const ranked = structuralRankingEnabled()
-    ? [...scored].sort(
-        (a, b) =>
-          applyStructuralBoost(b.ratio, b.metadata.dependentCount ?? 0) -
-          applyStructuralBoost(a.ratio, a.metadata.dependentCount ?? 0),
-      )
-    : scored;
+  const ranked =
+    structuralRankingEnabled() || testFileRankingEnabled()
+      ? [...scored].sort(
+          (a, b) =>
+            computeRankingKey(b.ratio, b.metadata.dependentCount ?? 0, b.metadata.file) -
+            computeRankingKey(a.ratio, a.metadata.dependentCount ?? 0, a.metadata.file),
+        )
+      : scored;
 
   return ranked.slice(0, limit).map(({ ratio: _ratio, ...result }) => result);
 }

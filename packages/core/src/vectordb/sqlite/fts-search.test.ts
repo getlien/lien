@@ -9,6 +9,9 @@ import {
   applyStructuralBoost,
   STRUCTURAL_BOOST_ALPHA,
   MAX_STRUCTURAL_BOOST_MULTIPLIER,
+  applyTestFileDemotion,
+  TEST_FILE_DEMOTION_FACTOR,
+  computeRankingKey,
 } from './fts-search.js';
 
 function chunk(
@@ -105,6 +108,86 @@ describe('applyStructuralBoost', () => {
       expect(hubBoosted).toBeGreaterThan(unconnectedBoosted);
     },
   );
+});
+
+describe('applyTestFileDemotion', () => {
+  it('is a no-op for a non-test file', () => {
+    expect(applyTestFileDemotion(0.8, 'src/handlers/create.ts')).toBe(0.8);
+  });
+
+  it(`demotes a test file by exactly the ${TEST_FILE_DEMOTION_FACTOR} factor`, () => {
+    expect(applyTestFileDemotion(0.8, 'src/create.test.ts')).toBeCloseTo(0.8 * 0.8, 10);
+  });
+
+  it('recognizes every isTestFile convention (delegates rather than re-deriving)', () => {
+    for (const file of [
+      'src/create.test.ts',
+      'src/create.spec.ts',
+      'user_spec.rb',
+      'math_test.go',
+      'tests/helpers.ts',
+      '__tests__/foo.ts',
+    ]) {
+      expect(applyTestFileDemotion(1, file)).toBeCloseTo(TEST_FILE_DEMOTION_FACTOR, 10);
+    }
+  });
+
+  it('never returns MORE than the input (demotes, never boosts or excludes)', () => {
+    for (const file of ['src/create.ts', 'src/create.test.ts']) {
+      expect(applyTestFileDemotion(0.6, file)).toBeLessThanOrEqual(0.6);
+    }
+  });
+
+  it('never demotes a test file to zero — it stays findable, just nudged', () => {
+    expect(applyTestFileDemotion(0.6, 'src/create.test.ts')).toBeGreaterThan(0);
+  });
+});
+
+describe('computeRankingKey', () => {
+  it('is the identity for a non-test, non-connected file', () => {
+    expect(computeRankingKey(0.8, 0, 'src/create.ts')).toBe(0.8);
+  });
+
+  it('applies structural boost and test-file demotion together, multiplicatively', () => {
+    const key = computeRankingKey(0.6, 50, 'src/create.test.ts');
+    const expected = applyTestFileDemotion(applyStructuralBoost(0.6, 50), 'src/create.test.ts');
+    expect(key).toBeCloseTo(expected, 10);
+  });
+
+  it('LIEN_STRUCTURAL_RANKING=off removes only the structural boost, demotion still applies', () => {
+    process.env.LIEN_STRUCTURAL_RANKING = 'off';
+    try {
+      expect(computeRankingKey(0.8, 200, 'src/create.test.ts')).toBeCloseTo(
+        0.8 * TEST_FILE_DEMOTION_FACTOR,
+        10,
+      );
+    } finally {
+      delete process.env.LIEN_STRUCTURAL_RANKING;
+    }
+  });
+
+  it('LIEN_TEST_FILE_RANKING=off removes only the demotion, structural boost still applies', () => {
+    process.env.LIEN_TEST_FILE_RANKING = 'off';
+    try {
+      expect(computeRankingKey(0.8, 200, 'src/create.test.ts')).toBeCloseTo(
+        applyStructuralBoost(0.8, 200),
+        10,
+      );
+    } finally {
+      delete process.env.LIEN_TEST_FILE_RANKING;
+    }
+  });
+
+  it('both flags off is the raw bm25 ratio, untouched', () => {
+    process.env.LIEN_STRUCTURAL_RANKING = 'off';
+    process.env.LIEN_TEST_FILE_RANKING = 'off';
+    try {
+      expect(computeRankingKey(0.8, 200, 'src/create.test.ts')).toBe(0.8);
+    } finally {
+      delete process.env.LIEN_STRUCTURAL_RANKING;
+      delete process.env.LIEN_TEST_FILE_RANKING;
+    }
+  });
 });
 
 describe('SqliteBackend.search (FTS5)', () => {
@@ -326,4 +409,46 @@ describe('SqliteBackend.search (FTS5)', () => {
       expect(results.indexOf(weak)).toBeLessThan(results.indexOf(strong));
     },
   );
+
+  it(
+    'demotes a bm25-strongest test file below a close-second real source file — the concrete ' +
+      'zoekt-style effect this feature fixes',
+    async () => {
+      const TERM = 'zzztestdemo';
+      // Test file: the single best bm25 hit (most repeats of the term).
+      await insert(
+        db,
+        chunk('src/create.test.ts', `${TERM} ${TERM} ${TERM} ${TERM} ${TERM} ${TERM}`),
+      );
+      // Real source file: a close second — one fewer repeat, still a strong match.
+      await insert(db, chunk('src/create.ts', `${TERM} ${TERM} ${TERM} ${TERM} ${TERM}`));
+
+      // "Before": with test-file demotion off, pure bm25 puts the test file
+      // first — exactly the Assert.kt/NullTextWriter.cs shape from real corpora.
+      process.env.LIEN_TEST_FILE_RANKING = 'off';
+      let before: Awaited<ReturnType<typeof db.search>>;
+      try {
+        before = await db.search(TERM, 5);
+      } finally {
+        delete process.env.LIEN_TEST_FILE_RANKING;
+      }
+      expect(before[0].metadata.file).toBe('src/create.test.ts');
+
+      // "After": default settings (demotion on) flip the order.
+      const after = await db.search(TERM, 5);
+      expect(after[0].metadata.file).toBe('src/create.ts');
+    },
+  );
+
+  it('a test file is still findable by a query naming it directly (demotion nudges, never excludes)', async () => {
+    await insert(
+      db,
+      chunk('src/other.test.ts', 'unrelated filler content around the helper', {
+        symbolName: 'zzzUniqueTestHelper',
+      }),
+    );
+    const results = await db.search('zzzUniqueTestHelper', 5);
+    expect(results[0].metadata.file).toBe('src/other.test.ts');
+    expect(results[0].relevance).toBe('highly_relevant');
+  });
 });

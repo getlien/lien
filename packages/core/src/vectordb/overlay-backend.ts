@@ -32,8 +32,9 @@ import {
 } from './sqlite/write-ops.js';
 import {
   keywordSearch,
-  applyStructuralBoost,
+  computeRankingKey,
   structuralRankingEnabled,
+  testFileRankingEnabled,
 } from './sqlite/fts-search.js';
 import {
   readDependentCounts,
@@ -77,22 +78,27 @@ function isSqliteBusy(error: unknown): boolean {
 /**
  * Merge two corpora's already-ranked hit lists into one order (#1071).
  *
- * `keywordSearch` applies the structural boost WITHIN each corpus, but each
- * result only carries the pure-bm25 `score` it was scored with -- the boosted
- * sort key is internal to that function. Re-sorting the merged list by `score`
- * therefore threw the boost away at exactly the moment both corpora had finally
- * been given one corpus-wide count map to agree on: an overlay-served hub file
- * with 80 dependents could land below a base-served file with a marginally
- * better lexical match, even with ranking enabled. That is the same
+ * `keywordSearch` applies the ranking key (structural boost, test-file
+ * demotion) WITHIN each corpus, but each result only carries the pure-bm25
+ * `score` it was scored with -- the composed sort key is internal to that
+ * function. Re-sorting the merged list by `score` therefore threw both
+ * signals away at exactly the moment both corpora had finally been given one
+ * corpus-wide count map to agree on: an overlay-served hub file with 80
+ * dependents could land below a base-served file with a marginally better
+ * lexical match, even with ranking enabled. That is the same
  * silently-does-nothing failure #1071 is about, one layer up.
  *
- * So the boost is reapplied here over the merged list. `score` is
+ * So `computeRankingKey` -- the exact same composition `keywordSearch` uses --
+ * is reapplied here over the merged list, never a re-derived copy of its
+ * logic (see that function's own doc comment on why this codebase treats a
+ * second definition of one ranking decision as a bug generator). `score` is
  * `round4((1 - ratio) * 2)` (see `scoreRow`), so `ratio` recovers exactly as
  * `1 - score / 2` -- no need to widen `keywordSearch`'s return type to carry an
  * internal sort key across a package boundary.
  *
- * With `LIEN_STRUCTURAL_RANKING=off` this is pure `score` ascending, identical to
- * the pre-#1071 merge, so the escape hatch keeps meaning what it says.
+ * With BOTH `LIEN_STRUCTURAL_RANKING=off` and `LIEN_TEST_FILE_RANKING=off`
+ * this is pure `score` ascending, identical to the pre-#1071 merge, so each
+ * escape hatch keeps meaning what it says independently of the other.
  */
 function mergeRankedHits(
   overlayHits: SearchResult[],
@@ -100,12 +106,12 @@ function mergeRankedHits(
   limit: number,
 ): SearchResult[] {
   const merged = [...overlayHits, ...baseHits];
-  if (!structuralRankingEnabled()) {
+  if (!structuralRankingEnabled() && !testFileRankingEnabled()) {
     return merged.sort((a, b) => a.score - b.score).slice(0, limit);
   }
-  const boosted = (hit: SearchResult): number =>
-    applyStructuralBoost(1 - hit.score / 2, hit.metadata.dependentCount ?? 0);
-  return merged.sort((a, b) => boosted(b) - boosted(a)).slice(0, limit);
+  const rankingKey = (hit: SearchResult): number =>
+    computeRankingKey(1 - hit.score / 2, hit.metadata.dependentCount ?? 0, hit.metadata.file);
+  return merged.sort((a, b) => rankingKey(b) - rankingKey(a)).slice(0, limit);
 }
 
 export class OverlayBackend implements VectorDBInterface {
