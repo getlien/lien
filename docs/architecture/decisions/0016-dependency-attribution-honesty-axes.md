@@ -82,11 +82,18 @@ shared bucketing predicate would have to make one of those two answers
 wrong.
 
 Independently: four of `EdgeProvenance`'s seven tiers (`import-only`,
-`require-only`, `symbol-name-match`, `oop-method-import`) are symbol-level
-distinctions `parser`'s file-level `findDependents` cannot produce. Hoisting
-the enum into `parser` would publish tiers nothing in `parser` emits — a
-vocabulary with dead members, which is worse than two honest ones. So
-`EdgeProvenance` stays `review`'s internal ranking detail.
+`require-only`, `symbol-name-match`, `oop-method-import`) are distinctions
+that only arise *in* a symbol-level analysis — each records something
+different about what could be established for the specific symbol, which is a
+question `parser`'s file-level `findDependents` never asks. Note this is not a
+claim that those four tiers all verify a symbol: `require-only` and
+`symbol-name-match` explicitly do not, which is why
+`SYMBOL_VERIFIED_BY_PROVENANCE` marks them `false`. The point is that a
+file-level pipeline has no way to *draw* the distinction at all, in either
+direction. Hoisting the enum into `parser` would therefore publish tiers
+nothing in `parser` emits — a vocabulary with dead members, which is worse
+than two honest ones. So `EdgeProvenance` stays `review`'s internal ranking
+detail.
 
 ### Why Axis B was already consolidated
 
