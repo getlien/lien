@@ -38,6 +38,7 @@ import {
 } from './sqlite/fts-search.js';
 import type { RankedResult } from './sqlite/fts-search.js';
 import {
+  hasComputedDependentCounts,
   readDependentCounts,
   refreshDependentCounts as refreshOverlayDependentCounts,
 } from './sqlite/dependent-counts.js';
@@ -320,26 +321,44 @@ export class OverlayBackend implements VectorDBInterface {
   }
 
   /**
-   * See `VectorDBInterface.hasDependentCounts`. Presence of the composed flag,
-   * and nothing else — no fallback to "the tables have some rows".
+   * See `VectorDBInterface.hasDependentCounts`. Mirrors the two branches of
+   * `composedDependentCounts` exactly, because the only sound honesty answer is
+   * "whatever the read path this response was actually served from can prove".
    *
-   * `SqliteBackend` DOES accept row presence as secondary proof, and the
-   * asymmetry is deliberate. There, rows can only have been written over that
-   * store's own corpus, so they really are its counts. Here, without the flag,
-   * `composedDependentCounts` falls back to MERGING the base's counts — and per
-   * that method's own doc comment the merge can resurrect an obsolete positive
-   * value, because a file whose count legitimately dropped to 0 in this worktree
-   * (the worktree masked its only base importer) has no overlay row to override
-   * the base's stale count with. Row presence there is not evidence that the
-   * numbers describe this corpus, so reporting `true` would let `search_code`
-   * publish a resurrected count as fact. The honest answer for a pre-#1071
-   * overlay is "counts unavailable" — the field is omitted and the note names
-   * `lien index`, which rebuilds the overlay and writes the composed map.
+   * - Composed flag set → the overlay table alone is the whole truth, and the
+   *   flag is direct proof a composition ran over THIS worktree's corpus.
+   * - Flag absent → `composedDependentCounts` serves the BASE's counts, so the
+   *   honest answer is whatever the base store can prove about its own table.
    *
-   * Read-free either way: one small meta lookup, no count table scan.
+   * #1085 is what happens when this method answers about one of the two
+   * on-disk locations instead of the composition: keyed on the overlay's flag
+   * alone, a fresh linked worktree — every agent session in this repo's own
+   * fleet — got the "this index predates reverse-dependency counting" note and
+   * had 100% of its `dependentCount`s dropped, *while the base's counts were
+   * ranking the very results in that response*. The note and the ordering
+   * cannot both be right, and the base's `dependentCountsComputed|1` says which
+   * one was. Checking one location rather than the composition is the
+   * #1050/#1051 shape; keeping the two in one place is how it stops recurring.
+   *
+   * Not the reasoning review rightly rejected on #1078. That was
+   * `composedDependentCounts().size > 0` — the size of the MERGED map, which is
+   * no evidence at all, since a merge can resurrect a base count for a file
+   * whose last importer this worktree masked. This asks the BASE store whether
+   * IT computed counts over ITS corpus, via the same `hasComputedDependentCounts`
+   * predicate `SqliteBackend` uses, and the base corpus is precisely the corpus
+   * those merged numbers describe. The resurrection hazard is real but it is
+   * staleness, which is #1072's case 4: an accepted trade for a soft ranking
+   * tie-breaker, documented on the field, deliberately not caveated — and
+   * suppressing every count does not fix it, it just also lies about why.
+   *
+   * Read-free in the common case: one small meta lookup on the overlay, then at
+   * most one on the base. Only a base whose schema predates the flag falls
+   * through to a count-table scan, and `getDependentCounts` caches that per
+   * handle.
    */
   async hasDependentCounts(): Promise<boolean> {
-    return this.getMeta(OVERLAY_META.DEPENDENT_COUNTS_COMPOSED) !== null;
+    if (this.getMeta(OVERLAY_META.DEPENDENT_COUNTS_COMPOSED) !== null) return true;
+    return this.baseDb !== null && hasComputedDependentCounts(this.baseDb);
   }
 
   async search(query: string, limit = 5): Promise<SearchResult[]> {
@@ -644,6 +663,46 @@ export class OverlayBackend implements VectorDBInterface {
       this.reclaimSpace();
     }
     return { changed };
+  }
+
+  /**
+   * Compose this overlay's `dependent_counts` if, and only if, it never has
+   * (#1084) — the worktree counterpart of the indexer's
+   * `backfillDependentCounts` for a standalone store. Returns whether it did
+   * any work, so a caller can bump the version stamp exactly when there is
+   * something new for a live `lien serve` to reconnect for.
+   *
+   * Needed because the one existing trigger never reaches an overlay whose
+   * content is already correct: `applyRebuild` refreshes on a real swap, and
+   * `buildOverlay` returns before calling it at all when the signature already
+   * matches. An overlay built by a version predating the composed map therefore
+   * had no path to one, so `lien index` — the remedy #1072's note prints — could
+   * not complete the migration. This is what makes that note's promise true.
+   *
+   * Called from `performOverlayIndex` rather than from inside `buildOverlay`'s
+   * fast path, which is where it would otherwise belong: `buildOverlay` is
+   * already over its cognitive-complexity budget, and #1073 had to relocate a
+   * call out of that same file for the same reason (the review gate counts
+   * ABSOLUTE violations in touched files, not deltas).
+   *
+   * Gated on the stored flag, never on the table looking empty: a composed corpus
+   * whose every count is legitimately 0 must not be recomposed forever, and
+   * (per `composedDependentCounts`) an empty overlay table is also how a real
+   * all-zero composition is stored.
+   */
+  backfillDependentCounts(): boolean {
+    if (this.getMeta(OVERLAY_META.DEPENDENT_COUNTS_COMPOSED) !== null) return false;
+    try {
+      this.refreshDependentCountsSync();
+    } catch (error) {
+      // A peer `lien serve` on this worktree holds the write lock; its own
+      // backfill serves us. Busy-skip rather than fail the index run, exactly as
+      // `applyRebuild` does — piled-up serves on one worktree are a documented
+      // reality here, and this is a soft ranking tie-breaker.
+      if (isSqliteBusy(error)) return false;
+      throw error;
+    }
+    return true;
   }
 
   /**
