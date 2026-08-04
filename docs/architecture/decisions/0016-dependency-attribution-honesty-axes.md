@@ -104,12 +104,16 @@ natural home.
 
 `confidence: 'inferred'` was single-valued, so the mechanism identity was
 discarded at `parser`'s boundary and every prose surface had to name a
-mechanism from memory. When #930 shipped there was one (C#), so six surfaces
-hard-coded C#. #1039/#1064 then added Go's root-package export lookup —
-same marker, same caveat reason — and updated none of them, because nothing
-forced it: `Record<AttributionCaveatReason, string>` guards the set of
-*reasons*, and no reason was added. Only an existing reason's mechanism
-coverage widened.
+mechanism from memory. When #930 shipped there was one (C#), so all six
+surfaces described C#'s mechanism specifically — four of them naming C# by
+name (the runtime caveat note, the `AttributionCaveatReason` doc comment, the
+tool description, the docs page), the other two saying "text-matching
+fallback" (`ATTRIBUTION_CAVEAT_REASON_TEXT` and, by interpolation, the server
+instructions), which is equally wrong for Go. #1039/#1064 then added Go's
+root-package export lookup — same marker, same caveat reason — and updated
+none of them, because nothing forced it:
+`Record<AttributionCaveatReason, string>` guards the set of *reasons*, and no
+reason was added. Only an existing reason's mechanism coverage widened.
 
 Measured on a real `go-chi/chi` clone against `origin/main`, every recovered
 Go root file was told *"its language, C#, lets real callers use its exports

@@ -19,10 +19,14 @@
  *
  * `confidence: 'inferred'` was single-valued, so every prose surface
  * describing it had to name a mechanism from memory. When #930 shipped there
- * was exactly one (C#'s type-reference matching), so five surfaces hard-coded
- * C#: `get_dependents`' runtime caveat note, `ATTRIBUTION_CAVEAT_REASON_TEXT`,
- * the `AttributionCaveatReason` doc comment, `tools.ts`' tool description, and
- * the public docs page.
+ * was exactly one (C#'s type-reference matching), so all six surfaces described
+ * that mechanism specifically -- and four of the six named C# by name:
+ * `get_dependents`' runtime caveat note ("its language, C#"), the
+ * `AttributionCaveatReason` doc comment, `tools.ts`' tool description ("C#'s
+ * global-using gap"), and the public docs page ("today only for C#"). The
+ * remaining two -- `ATTRIBUTION_CAVEAT_REASON_TEXT` and, by interpolating it,
+ * the server instructions -- didn't say "C#" but did say "text-matching
+ * fallback", which is equally wrong for Go.
  *
  * #1039/#1064 then added a SECOND mechanism -- Go's root-package export lookup
  * -- which reuses the same `confidence: 'inferred'` marking and the same
