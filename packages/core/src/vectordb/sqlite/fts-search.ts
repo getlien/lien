@@ -194,8 +194,19 @@ export function computeRankingKey(ratio: number, dependentCount: number, filepat
   return testFileRankingEnabled() ? applyTestFileDemotion(boosted, filepath) : boosted;
 }
 
-/** A scored FTS row plus the internal ratio the boost re-sort needs — never returned as-is. */
-type RankedResult = SearchResult & { ratio: number };
+/**
+ * A scored FTS row plus the internal ratio the boost re-sort needs.
+ *
+ * Exported so `OverlayBackend.mergeRankedHits` can merge two corpora's hits on
+ * the RAW ratio instead of reconstructing one from the public, rounded
+ * `score` (found in review, #1080: `score = round4((1 - ratio) * 2)` is not
+ * invertible, so two hits with close-but-different ratios can round to the
+ * identical `score` and collide into an artificial tie at the merge
+ * boundary). `keywordSearch` still strips `ratio` before returning
+ * `SearchResult[]` — this type never leaves `@liendev/core` as part of a
+ * public result.
+ */
+export type RankedResult = SearchResult & { ratio: number };
 
 /**
  * Score one FTS row into a `RankedResult` (bm25 ratio/relevance/score + dependentCount metadata).
@@ -235,8 +246,11 @@ function scoreRow(
 }
 
 /**
- * FTS5 keyword search. Ignores vectors entirely — the meaningful input is the
- * query text. Returns SearchResult[] ordered best-first, trimmed to `limit`.
+ * FTS5 keyword search, RankedResult-shaped (ratio intact, not yet trimmed of
+ * it). `keywordSearch` below is the public wrapper that strips `ratio` — this
+ * function exists so `OverlayBackend` can merge two corpora's hits on the raw
+ * ratio instead of reconstructing one from the rounded `score` (see
+ * `RankedResult`'s doc comment).
  *
  * Ordering: bm25 (via the SQL `ORDER BY rank`) picks the overfetched
  * candidate window; within that window, `computeRankingKey` re-sorts by
@@ -265,12 +279,12 @@ function scoreRow(
  * therefore the merged ranking — corpus-wide rather than per-connection.
  * `SqliteBackend` omits it and reads its own table.
  */
-export function keywordSearch(
+export function keywordSearchRanked(
   db: Database.Database,
   queryText: string,
   limit: number,
   dependentCountsOverride?: Map<string, number>,
-): SearchResult[] {
+): RankedResult[] {
   const match = orQuery(queryText);
   if (!match) return [];
 
@@ -314,5 +328,23 @@ export function keywordSearch(
         )
       : scored;
 
-  return ranked.slice(0, limit).map(({ ratio: _ratio, ...result }) => result);
+  return ranked.slice(0, limit);
+}
+
+/**
+ * FTS5 keyword search. Ignores vectors entirely — the meaningful input is the
+ * query text. Returns SearchResult[] ordered best-first, trimmed to `limit`.
+ *
+ * A thin wrapper over `keywordSearchRanked` that strips the internal `ratio`
+ * — everything about ordering/scoring is documented there.
+ */
+export function keywordSearch(
+  db: Database.Database,
+  queryText: string,
+  limit: number,
+  dependentCountsOverride?: Map<string, number>,
+): SearchResult[] {
+  return keywordSearchRanked(db, queryText, limit, dependentCountsOverride).map(
+    ({ ratio: _ratio, ...result }) => result,
+  );
 }

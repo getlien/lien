@@ -7,7 +7,8 @@ import { createTestDir, cleanupTestDir } from '../test/helpers/test-db.js';
 import { indexCodebase } from '../indexer/index.js';
 import { buildOverlay } from '../indexer/overlay-index.js';
 import { indexMultipleFiles } from '../indexer/incremental.js';
-import { OverlayBackend } from './overlay-backend.js';
+import { OverlayBackend, mergeRankedHits } from './overlay-backend.js';
+import type { RankedResult } from './sqlite/fts-search.js';
 
 const BASE_FILES: Record<string, string> = {
   'keep.ts': 'export function keepUnchangedSymbol() {\n  return 1;\n}\n',
@@ -284,5 +285,72 @@ describe('OverlayBackend.reconnect()', () => {
     // And a subsequent, successful reconnect still works normally.
     await overlay.reconnect();
     await expect(overlay.scanAll()).resolves.toHaveLength(1);
+  });
+});
+
+describe('mergeRankedHits (#1080: raw-ratio merge, not reconstructed from score)', () => {
+  /** Minimal RankedResult fixture -- ranking-only, content/relevance are irrelevant here. */
+  function rankedResult(file: string, ratio: number, score: number): RankedResult {
+    return {
+      content: '',
+      metadata: {
+        file,
+        startLine: 1,
+        endLine: 1,
+        type: 'function',
+        language: 'typescript',
+        dependentCount: 0,
+      },
+      score,
+      relevance: 'highly_relevant',
+      ratio,
+    };
+  }
+
+  it(
+    'orders by the raw ratio, not a value reconstructed from the rounded score -- a genuine ' +
+      'rounding collision must not let the overlay hit silently win a tie it did not earn ' +
+      '(found in review, #1080)',
+    () => {
+      // Both hits round to the IDENTICAL public score (0.2000) under
+      // `round4((1 - ratio) * 2)`, but their raw ratios genuinely differ --
+      // baseHit is the true (if only very slightly) better bm25 match.
+      // Reconstructing ratio from score (`1 - score / 2`) collapses BOTH to
+      // 0.9 exactly, an artificial tie that a stable sort resolves by array
+      // position: `[...overlayHits, ...baseHits]` puts the overlay hit
+      // first, so the OLD reconstruction silently ranked the objectively
+      // WORSE match first. Verified against the actual pre-fix formula
+      // before writing this test (not assumed): reconstructing these two
+      // scores really does produce two identical 0.9 ratios, and a stable
+      // sort over that tie really does return the overlay hit first --
+      // i.e. this test would have FAILED against the reconstruction this
+      // PR replaces.
+      const overlayHit = rankedResult('overlay-file.ts', 0.89998, 0.2); // true WORSE match
+      const baseHit = rankedResult('base-file.ts', 0.90002, 0.2); // true BETTER match
+
+      // Preconditions for this test to be meaningful.
+      expect(overlayHit.score).toBe(baseHit.score); // genuine collision on the public score
+      expect(overlayHit.ratio).not.toBe(baseHit.ratio); // but the raw ratios really differ
+      expect(1 - overlayHit.score / 2).toBe(1 - baseHit.score / 2); // reconstruction collapses them
+
+      const merged = mergeRankedHits([overlayHit], [baseHit], 5);
+
+      expect(merged[0].metadata.file).toBe('base-file.ts');
+      expect(merged[1].metadata.file).toBe('overlay-file.ts');
+    },
+  );
+
+  it('falls back to plain score-ascending order when both ranking levers are off', () => {
+    process.env.LIEN_STRUCTURAL_RANKING = 'off';
+    process.env.LIEN_TEST_FILE_RANKING = 'off';
+    try {
+      const better = rankedResult('better.ts', 0.9, 0.2);
+      const worse = rankedResult('worse.ts', 0.5, 1.0);
+      const merged = mergeRankedHits([worse], [better], 5);
+      expect(merged.map(r => r.metadata.file)).toEqual(['better.ts', 'worse.ts']);
+    } finally {
+      delete process.env.LIEN_STRUCTURAL_RANKING;
+      delete process.env.LIEN_TEST_FILE_RANKING;
+    }
   });
 });
