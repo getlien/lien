@@ -197,18 +197,36 @@ export class OverlayBackend implements VectorDBInterface {
    *
    * Each connection's own `dependent_counts` table describes only its own
    * corpus, so reading either in isolation is the #1050/#1051 mistake: the
-   * overlay alone reports near-zero for a fresh worktree whose files mostly
-   * live in the shared base, and the base alone can't see the worktree's own
-   * divergences. `refreshDependentCounts()` below writes the FULL composed map
+   * overlay alone reports near-zero for a fresh worktree whose files mostly live
+   * in the shared base, and the base alone cannot see the worktree's own
+   * divergences.
+   *
+   * `refreshDependentCounts()` resolves that by writing the FULL composed map
    * into the overlay table, so once it has run the overlay table is the whole
-   * truth and wins outright. Until then (a worktree whose overlay has been
-   * built but whose counts predate this feature, or an overlay rebuilt by an
-   * older version) the base's own counts still serve every unmasked base file
-   * rather than collapsing to 0 — hence the merge, overlay last.
+   * truth and is used ALONE. It deliberately is not merged over the base, which
+   * would be wrong in a way that is easy to miss (found in review): a zero is
+   * stored as the ABSENCE of a row, so a file whose count legitimately drops to
+   * 0 in this worktree — the worktree masked its only base importer — has no
+   * overlay row to override the base's stale positive value with. Merging would
+   * resurrect that old count as if nothing had changed.
+   *
+   * The base is consulted only when this overlay has never had composed counts
+   * written at all (an overlay built by a version predating #1071). Then the
+   * base's own counts still serve every unmasked base file, which is strictly
+   * better than collapsing the whole worktree to 0 — and, being pre-#1071 data,
+   * it cannot be masking a divergence this overlay knows about.
+   *
+   * Keyed on the presence of the `DEPENDENT_COUNTS_COMPOSED` meta flag rather
+   * than on the table being non-empty, so a composed corpus whose every count is
+   * genuinely 0 (nothing imports anything) is not mistaken for "never computed"
+   * and silently handed the base's numbers.
    */
   private composedDependentCounts(): Map<string, number> {
-    const overlay = readDependentCounts(this.requireOverlay());
-    return new Map([...this.baseDependentCounts(), ...overlay]);
+    const overlay = this.requireOverlay();
+    if (this.getMeta(OVERLAY_META.DEPENDENT_COUNTS_COMPOSED)) {
+      return readDependentCounts(overlay);
+    }
+    return new Map([...this.baseDependentCounts(), ...readDependentCounts(overlay)]);
   }
 
   /**
@@ -539,6 +557,9 @@ export class OverlayBackend implements VectorDBInterface {
   async refreshDependentCounts(): Promise<void> {
     const chunks = this.unionRecords(readAllRecords).map(recordToUnscoredResult);
     refreshOverlayDependentCounts(this.requireOverlay(), chunks, this.worktreeRoot);
+    // Marks the overlay table authoritative from here on — see
+    // `composedDependentCounts` for why presence-of-flag and not non-emptiness.
+    this.setMeta(OVERLAY_META.DEPENDENT_COUNTS_COMPOSED, '1');
   }
 
   /** Best-effort in-place disk reclamation after a content swap (same file

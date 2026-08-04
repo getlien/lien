@@ -72,8 +72,18 @@ real blast radius.
 A `0` means "no import edge resolved", which is not the same as "nothing depends
 on this file". Some languages' import forms name no specific file at all —
 Swift's whole-module `import Foundation` style being the clearest case — so every
-file in such a codebase reads `0`. Unlike `get_dependents`, this field carries no
-`attributionCaveat`, so treat a `0` here as "unknown", never as a verified clear.
+file in such a codebase reads `0`.
+
+The counts are precomputed at index time, not per query, and are refreshed by a
+full index run (and, in a linked worktree, by an overlay rebuild) rather than by
+every incremental single-file update. Two consequences worth knowing: an index
+written before this field existed reports `0` for everything until its next full
+`lien index`, so if *every* result shows `0` you should suspect a stale index
+rather than an unusually disconnected codebase; and a count can lag the working
+tree by at most one full index run.
+
+Unlike `get_dependents`, this field carries no `attributionCaveat`, so treat a
+`0` here as "unknown", never as a verified clear.
 
 ### Best Practices
 

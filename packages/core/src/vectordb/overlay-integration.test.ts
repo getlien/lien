@@ -173,6 +173,32 @@ describe('worktree-aware indexing (integration)', () => {
     close(wtDb);
   });
 
+  it('does not resurrect a stale base count when the worktree masks the last importer', async () => {
+    // Review finding on #1073. A zero is stored as the ABSENCE of a row, so
+    // merging the base map under the overlay map cannot express "this dropped to
+    // 0 here": the base's stale positive value survives the merge. Repro: the
+    // base has `edited.ts` importing `shared.ts` (count 1); the worktree rewrites
+    // `edited.ts` to import nothing and deletes `added.ts`, so nothing imports
+    // `shared.ts` any more and its composed count is 0 — with no overlay row to
+    // override the base's 1 with.
+    await fs.writeFile(
+      path.join(worktreeRoot, 'edited.ts'),
+      'export function editedFnV2() {\n  return 999;\n}\n',
+    );
+    await fs.rm(path.join(worktreeRoot, 'added.ts'));
+
+    const result = await indexCodebase({ rootDir: worktreeRoot });
+    expect(result.success).toBe(true);
+
+    const wtDb = await createVectorDB(worktreeRoot);
+    await wtDb.initialize();
+    const hits = await wtDb.search('sharedFn', 10);
+    const shared = hits.find(h => h.metadata.file === 'shared.ts');
+    expect(shared).toBeDefined();
+    expect(shared!.metadata.dependentCount ?? 0).toBe(0);
+    close(wtDb);
+  });
+
   it('honors the LIEN_WORKTREE_STANDALONE escape hatch through the factory', async () => {
     process.env.LIEN_WORKTREE_STANDALONE = '1';
     const wtDb = await createVectorDB(worktreeRoot);

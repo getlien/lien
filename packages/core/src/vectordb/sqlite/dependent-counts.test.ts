@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs/promises';
-import path from 'path';
 import os from 'os';
+import path from 'path';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type Database from 'better-sqlite3';
 import type { ChunkMetadata } from '@liendev/parser';
 import { openDatabase } from './schema.js';

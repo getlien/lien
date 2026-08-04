@@ -18,6 +18,15 @@ export const OVERLAY_META = {
    *  the version-stamp bump — the guard that breaks the multi-serve rebuild
    *  livelock. */
   SIGNATURE: 'overlaySignature',
+  /**
+   * Set once this overlay's `dependent_counts` table has been written over the
+   * COMPOSED `(base - masked) ∪ overlay` corpus (#1071). Its presence — not the
+   * table being non-empty — is what makes the overlay table authoritative, so a
+   * composed corpus whose every count is genuinely 0 is distinguishable from
+   * "counts were never computed here". See
+   * `OverlayBackend.composedDependentCounts`.
+   */
+  DEPENDENT_COUNTS_COMPOSED: 'dependentCountsComposed',
 } as const;
 
 /**

@@ -25,10 +25,12 @@ real corpora, files with a non-zero count: serilog (C#) 0% → 60%, OrchardCore
 Counts are precomputed into a new `dependent_counts` table at the end of a
 full index instead of being derived per query, so the query path got faster,
 not slower: count acquisition drops from 103 ms to 1.4 ms on a 53k-chunk
-corpus. The table is additive and created on open, so an index built by an
-older version keeps the previous behaviour (every count `0`) until its next
-full index — no forced reindex. In a linked worktree the counts are computed
-over the composed `(base − masked) ∪ overlay` corpus, never the overlay alone.
+corpus. The table is additive and created on open, so a standalone index
+built by an older version keeps the previous behaviour (every count `0`) until
+its next full index — no forced reindex. In a linked worktree the counts are
+computed over the composed `(base − masked) ∪ overlay` corpus, never the
+overlay alone, so a worktree gains real counts as soon as its overlay is
+rebuilt even while the shared base index is still on the old format.
 
 Also makes the C# type-reference dependents tier resolve from a one-pass
 inverted reference index rather than re-scanning every file's content per
