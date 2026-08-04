@@ -40,3 +40,12 @@ target, which is what makes it affordable in a whole-corpus pass and speeds up
 Swift still resolves to `0` for every file: its whole-module `import
 Foundation` form names no specific file, so there is nothing to resolve
 (#884). That is now a documented, tested zero rather than a silent one.
+
+Removes `computeDependentCounts` and `normalizeFileForCounts` from
+`@liendev/core`'s `vectordb/sqlite/dependent-counts` module — the broken
+resolver and the extension-strip that corrupted dotted specifiers. Neither was
+re-exported from the package's entry point (`@liendev/core`'s export map
+exposes only `.` and `./test`), so no external consumer could reach either and
+this is not a breaking change; it is recorded here because deleting a symbol
+should never be silent. `readDependentCounts`, `writeDependentCounts`,
+`getDependentCounts` and `refreshDependentCounts` replace them.
