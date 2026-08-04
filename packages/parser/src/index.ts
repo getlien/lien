@@ -253,7 +253,7 @@ export type {
 // Which non-import fallback recovered a `confidence: 'inferred'` dependent,
 // plus the canonical prose every consumer-facing surface must derive from
 // rather than restate (#1018) -- see inferred-dependent-mechanisms.ts's module
-// doc, and ADR-0016 for the axis model it belongs to.
+// doc, and ADR-016 for the axis model it belongs to.
 export {
   INFERRED_DEPENDENT_MECHANISMS,
   INFERRED_DEPENDENT_MECHANISM_IDS,

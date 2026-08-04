@@ -1,3 +1,5 @@
+import { summarizeInferredDependentMechanisms } from '@liendev/parser';
+
 import { toMCPToolSchema } from './utils/zod-to-json-schema.js';
 import {
   SearchCodeSchema,
@@ -8,7 +10,6 @@ import {
   GetComplexitySchema,
 } from './schemas/index.js';
 import { ATTRIBUTION_CAVEAT_REASON_TEXT } from './attribution-caveat-reasons.js';
-import { summarizeInferredDependentMechanisms } from '@liendev/parser';
 
 /**
  * MCP tool definitions with Zod-generated schemas.

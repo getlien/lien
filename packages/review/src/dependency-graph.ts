@@ -112,7 +112,7 @@ export type EdgeProvenance =
  * treats that dependent as import-verified, no `confidence` marker), while
  * naming no symbol at all (so this table correctly calls it imprecise). One
  * shared bucketing would have to make one of the two wrong. See
- * ADR-0016 for the full argument and for why the two vocabularies were not
+ * ADR-016 for the full argument and for why the two vocabularies were not
  * merged.
  */
 const SYMBOL_VERIFIED_BY_PROVENANCE: Record<EdgeProvenance, boolean> = {
