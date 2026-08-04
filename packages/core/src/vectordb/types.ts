@@ -85,4 +85,19 @@ export interface VectorDBInterface {
    * `OverlayBackend.getIndexedFiles()`.
    */
   getIndexedFiles(): Promise<string[]>;
+  /**
+   * Recompute and persist the per-file reverse-dependency counts that feed
+   * `search_code`'s structural ranking boost (#1071). Whole-corpus and
+   * whole-table: a file's count depends on every other file's imports, so
+   * there is no correct patch for a subset — see
+   * `sqlite/dependent-counts.ts`'s module doc.
+   *
+   * Called at the end of a full index run and after an overlay rebuild, NOT on
+   * every incremental single-file update; the counts are a soft ranking
+   * tie-breaker with an explicit "lags by at most one full index" contract.
+   *
+   * `OverlayBackend` computes over the composed `(base − masked) ∪ overlay`
+   * corpus, never the overlay alone.
+   */
+  refreshDependentCounts(): Promise<void>;
 }

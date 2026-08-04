@@ -45,9 +45,12 @@ describe('worktree-aware indexing (integration)', () => {
       path.join(mainRoot, 'shared.ts'),
       'export function sharedFn() {\n  return 1;\n}\n',
     );
+    // `edited.ts` imports `shared.ts`, so the corpus has an import edge that
+    // crosses the base/overlay boundary once the worktree diverges — the
+    // discriminating fixture for dependent-count composition (#1071).
     await fs.writeFile(
       path.join(mainRoot, 'edited.ts'),
-      'export function editedFn() {\n  return 2;\n}\n',
+      "import { sharedFn } from './shared';\nexport function editedFn() {\n  return sharedFn() + 2;\n}\n",
     );
     await git(mainRoot, 'add', '.');
     await git(mainRoot, 'commit', '-q', '-m', 'init');
@@ -70,11 +73,11 @@ describe('worktree-aware indexing (integration)', () => {
     );
     await fs.writeFile(
       path.join(worktreeRoot, 'edited.ts'),
-      'export function editedFnV2() {\n  return 999;\n}\n',
+      "import { sharedFn } from './shared';\nexport function editedFnV2() {\n  return sharedFn() + 999;\n}\n",
     );
     await fs.writeFile(
       path.join(worktreeRoot, 'added.ts'),
-      'export function addedFn() {\n  return 3;\n}\n',
+      "import { sharedFn } from './shared';\nexport function addedFn() {\n  return sharedFn() + 3;\n}\n",
     );
   });
 
@@ -110,6 +113,35 @@ describe('worktree-aware indexing (integration)', () => {
 
     const shared = (await wtDb.scanWithFilter({ file: 'shared.ts' })).map(r => r.content).join('');
     expect(shared).toContain('sharedFn'); // served from the shared base
+    close(wtDb);
+  });
+
+  it('composes dependentCount over base ∪ overlay, not the overlay alone (#1071)', async () => {
+    const result = await indexCodebase({ rootDir: worktreeRoot });
+    expect(result.success).toBe(true);
+
+    const wtDb = await createVectorDB(worktreeRoot);
+    await wtDb.initialize();
+
+    // `shared.ts` lives ONLY in the base. Both worktree files import it, so the
+    // composed corpus gives it 2 dependents. The two ways to get this wrong are
+    // exactly the #1050/#1051 shape:
+    //   - counting the overlay alone: `shared.ts` has no overlay chunks at all,
+    //     so it would be absent entirely (a bare 0 for the worktree's most
+    //     depended-on file);
+    //   - reading only the base's own stored counts: 1, from the pre-divergence
+    //     `edited.ts`, missing `added.ts` which exists only in the worktree.
+    // Only a pass over `(base − masked) ∪ overlay` yields 2.
+    const hits = await wtDb.search('sharedFn', 10);
+    const shared = hits.find(h => h.metadata.file === 'shared.ts');
+    expect(shared).toBeDefined();
+    expect(shared!.metadata.dependentCount).toBe(2);
+
+    // And a base-served file's count is visible on the BASE connection's hits
+    // too — the composed map is passed to both keywordSearch calls, so this
+    // can't regress into "overlay rows get counts, base rows get 0".
+    const added = hits.find(h => h.metadata.file === 'added.ts');
+    expect(added?.metadata.dependentCount ?? 0).toBe(0); // nothing imports it
     close(wtDb);
   });
 

@@ -412,6 +412,15 @@ async function saveIndexResults(
   // Save git state if in a git repo
   await finalizeManifest(rootDir, vectorDB, manifest);
 
+  // #1071: precompute the per-file reverse-dependency counts that feed
+  // search_code's structural ranking boost. Runs once here, at the end of a
+  // full index, rather than on the query path (see
+  // vectordb/sqlite/dependent-counts.ts for the cost measurements and the
+  // "lags by at most one full index" freshness contract). Before the version
+  // file is written, so a serve that reconnects on the bump never observes a
+  // completed index with counts from the previous run.
+  await vectorDB.refreshDependentCounts();
+
   // Write version file to mark successful completion
   await writeVersionFile(vectorDB.dbPath);
 }

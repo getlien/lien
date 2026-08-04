@@ -3,6 +3,7 @@ import {
   findCSharpTypeReferenceDependents,
   buildCSharpTypeReferenceIndex,
   resolveCSharpTypeReferenceDependents,
+  resolveCSharpTypeReferenceDependentsBruteForce,
 } from './csharp-type-reference-signals.js';
 import type { CodeChunk } from './types.js';
 
@@ -457,5 +458,100 @@ describe('buildCSharpTypeReferenceIndex + resolveCSharpTypeReferenceDependents (
     expect(resolveCSharpTypeReferenceDependents('src/Rendering/Padding.cs', index)).toEqual([
       'test/PaddingTests.cs',
     ]);
+  });
+});
+
+// #1071: `resolveCSharpTypeReferenceDependents` now resolves candidates
+// through a project-wide reference index (`candidateFilesForName`) instead of
+// scanning every file per target. `resolveCSharpTypeReferenceDependentsBruteForce`
+// keeps the never-pruned loop around specifically so this suite can prove the
+// two agree, rather than trusting the pruning argument in the module doc
+// unverified.
+describe('resolveCSharpTypeReferenceDependents matches the brute-force reference implementation (#1071)', () => {
+  // One fixture corpus spanning every resolution path the module doc
+  // describes: a uniquely-declared type (Alignment), an ambiguous type
+  // resolved by namespace scoping + shadowing (Logger, reproducing the
+  // Serilog.Core/Serilog/Serilog.Tests.Support fixture above), a referencer
+  // that declares its own same-named type (ProjectedDestructuringPolicy,
+  // reproducing the nested-type regression fixture above), and a non-C# file
+  // sitting in the same corpus.
+  const chunks: CodeChunk[] = [
+    declChunk('src/Parsing/Alignment.cs', 'Alignment'),
+    usageChunk('src/Rendering/Padding.cs', ['Alignment']),
+
+    declChunk('src/Core/Logger.cs', 'Logger', 'Serilog.Core'),
+    declChunk('src/Logger.cs', 'Logger', 'Serilog'),
+    declChunk('test/Support/Logger.cs', 'Logger', 'Serilog.Tests.Support'),
+    usageChunk('src/Core/Sinks/SomeSink.cs', ['Logger'], 'Serilog.Core.Sinks'),
+    usageChunk('src/Formatting/SomeFormatter.cs', ['Logger'], 'Serilog'),
+    usageChunk('test/Support/LoggerConsumerTests.cs', ['Logger'], 'Serilog.Tests.Support'),
+
+    declChunk('src/Policies/ProjectedDestructuringPolicy.cs', 'ProjectedDestructuringPolicy'),
+    nestedDeclChunk(
+      'test/Configuration/LoggerConfigurationTests.cs',
+      'ProjectedDestructuringPolicy',
+      'LoggerConfigurationTests',
+    ),
+    usageChunk('test/Configuration/LoggerConfigurationTests.cs', ['ProjectedDestructuringPolicy']),
+    usageChunk('src/Configuration/LoggerDestructuringConfiguration.cs', [
+      'ProjectedDestructuringPolicy',
+    ]),
+
+    makeChunk({
+      file: 'src/Rendering/Padding.go',
+      content: 'Alignment.Apply(w, v)\nLogger.Info("x")',
+      symbolName: 'Apply',
+      symbolType: 'function',
+    }),
+  ];
+
+  const index = buildCSharpTypeReferenceIndex(chunks);
+  const everyFile = [...new Set(chunks.map(chunk => chunk.metadata.file))];
+
+  it.each(everyFile)('agrees with the brute-force reference for target %s', target => {
+    expect(resolveCSharpTypeReferenceDependents(target, index)).toEqual(
+      resolveCSharpTypeReferenceDependentsBruteForce(target, index),
+    );
+  });
+
+  it('still returns the real (non-empty) recovered dependents -- the comparison above is not vacuously passing on two empty results', () => {
+    expect(resolveCSharpTypeReferenceDependents('src/Parsing/Alignment.cs', index)).toEqual([
+      'src/Rendering/Padding.cs',
+    ]);
+    expect(resolveCSharpTypeReferenceDependents('src/Core/Logger.cs', index)).toEqual([
+      'src/Core/Sinks/SomeSink.cs',
+    ]);
+    expect(
+      resolveCSharpTypeReferenceDependents('src/Policies/ProjectedDestructuringPolicy.cs', index),
+    ).toEqual(['src/Configuration/LoggerDestructuringConfiguration.cs']);
+  });
+
+  it('falls back to a full C# file scan (never a silent miss) for a type name the reference index could not have tokenized as one token', () => {
+    // `NewÜnicodeType` has a non-ASCII character in the middle -- unusual but
+    // valid in a real C# identifier. `\bNewÜnicodeType\b` genuinely matches it
+    // in normal surrounding punctuation/whitespace (a JS `\b` only anchors at
+    // the very start/end of the whole matched literal, never at a character
+    // in the middle) -- verified directly: `/\bNewÜnicodeType\b/.test(
+    // 'NewÜnicodeType.Apply(x);')` is `true`. But `IDENTIFIER_TOKEN_RE`'s
+    // ASCII-only character class can never tokenize this as ONE token -- it
+    // splits into `New` and `nicodeType` -- so `index.referenceIndex` has no
+    // bucket for the full name at all, and `isPlainAsciiIdentifier` correctly
+    // rejects it. Without `candidateFilesForName`'s `allCSharpFiles`
+    // fallback, this real reference would go silently unrecovered instead of
+    // reproducing the brute-force result.
+    const chunks: CodeChunk[] = [
+      declChunk('src/Weird/NewUnicodeType.cs', 'NewÜnicodeType'),
+      usageChunk('src/Weird/Consumer.cs', ['NewÜnicodeType']),
+    ];
+    const unicodeIndex = buildCSharpTypeReferenceIndex(chunks);
+
+    expect(
+      resolveCSharpTypeReferenceDependents('src/Weird/NewUnicodeType.cs', unicodeIndex),
+    ).toEqual(['src/Weird/Consumer.cs']);
+    expect(
+      resolveCSharpTypeReferenceDependents('src/Weird/NewUnicodeType.cs', unicodeIndex),
+    ).toEqual(
+      resolveCSharpTypeReferenceDependentsBruteForce('src/Weird/NewUnicodeType.cs', unicodeIndex),
+    );
   });
 });

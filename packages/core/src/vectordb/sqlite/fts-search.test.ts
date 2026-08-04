@@ -231,6 +231,11 @@ describe('SqliteBackend.search (FTS5)', () => {
       chunk('consumers/a.ts', 'unrelated content', { imports: ['../utils/logger'] }),
     );
 
+    // #1071: counts are precomputed into the `dependent_counts` table, not
+    // derived on the query path, so a store built by raw `insertBatch` needs an
+    // explicit refresh — exactly what a full index run does at its end.
+    await db.refreshDependentCounts();
+
     const results = await db.search('zzzlogsearch', 5);
     expect(results[0].metadata.file).toBe('utils/logger.ts');
     expect(results[0].metadata.dependentCount).toBe(1);
@@ -250,11 +255,13 @@ describe('SqliteBackend.search (FTS5)', () => {
       expect(new Set(controlOrder)).toEqual(new Set(['unused.ts', 'popular.ts']));
       expect(controlResults.every(r => r.metadata.dependentCount === 0)).toBe(true);
 
-      // Give popular.ts two dependents. Reconnect to force the dependentCounts
-      // cache (keyed on the underlying Database object) to recompute — mirrors
-      // what the MCP server's checkAndReconnect does after any index write.
+      // Give popular.ts two dependents, then refresh the precomputed counts
+      // (#1071) — the step a full index run performs at its end. `reconnect()`
+      // additionally proves the stored counts survive a fresh connection, which
+      // is what the MCP server's checkAndReconnect gets after an index write.
       await insert(db, chunk('importer1.ts', 'unrelated content one', { imports: ['./popular'] }));
       await insert(db, chunk('importer2.ts', 'unrelated content two', { imports: ['./popular'] }));
+      await db.refreshDependentCounts();
       await db.reconnect();
 
       const boostedResults = await db.search(TIED_CONTENT, 5);
@@ -301,6 +308,7 @@ describe('SqliteBackend.search (FTS5)', () => {
           chunk(`importer${i}.ts`, `unrelated filler ${i}`, { imports: ['./weak'] }),
         );
       }
+      await db.refreshDependentCounts();
       await db.reconnect();
 
       const results = await db.search(TERM, 5);

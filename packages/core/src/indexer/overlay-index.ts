@@ -246,6 +246,12 @@ export async function buildOverlay(
     // Provenance for `lien gc`: the overlay's source root is the worktree, so a
     // deleted worktree leaves an orphan-detectable overlay index.
     await overlayManifest.recordSourceRoot(path.resolve(overlay.worktreeRoot));
+    // #1071: recompute the ranking-boost counts over the COMPOSED corpus
+    // ((base - masked) union overlay), before the version bump — a serve that
+    // reconnects on the bump then reads the fresh counts, not the previous
+    // build's. Deliberately outside applyRebuild's swap transaction; see
+    // OverlayBackend.refreshDependentCounts.
+    await overlay.refreshDependentCounts();
     await overlay.bumpVersion();
   }
 

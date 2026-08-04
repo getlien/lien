@@ -1,7 +1,7 @@
 import type { CodeChunk } from './types.js';
 import type { RiskLevel } from './insights/types.js';
 import {
-  normalizePath,
+  createPathNormalizer,
   getCanonicalPath,
   matchesFile,
   isTestFile,
@@ -89,23 +89,6 @@ export interface DependencyAnalysisResult {
  * rather than pushing an optional-chaining burden onto every caller.
  */
 export type ComplexityMetrics = NonNullable<DependencyAnalysisResult['complexityMetrics']>;
-
-/**
- * Creates a cached path normalizer to avoid repeated string operations.
- *
- * @param workspaceRoot - The workspace root directory for path normalization
- * @returns A function that normalizes and caches file paths
- */
-function createPathNormalizer(workspaceRoot: string): (path: string) => string {
-  const cache = new Map<string, string>();
-  return (path: string): string => {
-    const cached = cache.get(path);
-    if (cached !== undefined) return cached;
-    const normalized = normalizePath(path, workspaceRoot);
-    cache.set(path, normalized);
-    return normalized;
-  };
-}
 
 /**
  * One (chunk, raw import specifier) pair in an import index bucket. #994

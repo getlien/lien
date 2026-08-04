@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3';
 import type { SearchResult } from '../types.js';
 import type { RelevanceCategory } from '../relevance.js';
 import { parseRow, buildSearchResultMetadata } from './row-mapping.js';
-import { getDependentCounts, normalizeFileForCounts } from './dependent-counts.js';
+import { getDependentCounts } from './dependent-counts.js';
 
 /**
  * Over-fetch beyond the requested limit before trimming. Gives the caller's
@@ -150,7 +150,7 @@ function scoreRow(
   const record = parseRow(row);
   const exactSymbolMatch = record.symbolName !== '' && terms.has(record.symbolName.toLowerCase());
   const relevance = exactSymbolMatch ? 'highly_relevant' : toRelevance(ratio);
-  const dependentCount = dependentCounts.get(normalizeFileForCounts(record.file)) ?? 0;
+  const dependentCount = dependentCounts.get(record.file) ?? 0;
 
   return {
     content: record.content,
@@ -176,11 +176,24 @@ function scoreRow(
  * boost (see `scoreRow`'s doc comment) — they stay pure bm25, so the list
  * order and each item's own relevance label can legitimately disagree when
  * structural ranking promotes a well-connected file.
+ *
+ * `dependentCountsOverride` exists for `OverlayBackend` (#1071). Overlay mode
+ * runs this function once per connection — overlay and base — and each
+ * connection's own `dependent_counts` table describes only ITS corpus: the base
+ * table is a base-only count, and the overlay table would be an overlay-only
+ * count if each were read in isolation. That is exactly the #1050/#1051 shape
+ * (a worktree consumer reading only the overlay and reporting a near-empty
+ * answer for files that actually live in the shared base). So the overlay
+ * backend composes one count map over `(base − masked) ∪ overlay` and passes
+ * the SAME map to both calls, making every row's `dependentCount` — and
+ * therefore the merged ranking — corpus-wide rather than per-connection.
+ * `SqliteBackend` omits it and reads its own table.
  */
 export function keywordSearch(
   db: Database.Database,
   queryText: string,
   limit: number,
+  dependentCountsOverride?: Map<string, number>,
 ): SearchResult[] {
   const match = orQuery(queryText);
   if (!match) return [];
@@ -212,7 +225,7 @@ export function keywordSearch(
       .filter(Boolean)
       .map(t => t.toLowerCase()),
   );
-  const dependentCounts = getDependentCounts(db);
+  const dependentCounts = dependentCountsOverride ?? getDependentCounts(db);
 
   const scored = rows.map(row => scoreRow(row, rankBest, terms, dependentCounts));
 

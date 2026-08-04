@@ -32,6 +32,10 @@ import {
 } from './sqlite/write-ops.js';
 import { keywordSearch } from './sqlite/fts-search.js';
 import {
+  readDependentCounts,
+  refreshDependentCounts as refreshOverlayDependentCounts,
+} from './sqlite/dependent-counts.js';
+import {
   openOverlayDatabase,
   OVERLAY_META,
   STRUCTURAL_DB_FILENAME,
@@ -188,13 +192,35 @@ export class OverlayBackend implements VectorDBInterface {
 
   // ── Reads ──────────────────────────────────────────────────────────────
 
+  /**
+   * The composed reverse-dependency counts for this worktree (#1071).
+   *
+   * Each connection's own `dependent_counts` table describes only its own
+   * corpus, so reading either in isolation is the #1050/#1051 mistake: the
+   * overlay alone reports near-zero for a fresh worktree whose files mostly
+   * live in the shared base, and the base alone can't see the worktree's own
+   * divergences. `refreshDependentCounts()` below writes the FULL composed map
+   * into the overlay table, so once it has run the overlay table is the whole
+   * truth and wins outright. Until then (a worktree whose overlay has been
+   * built but whose counts predate this feature, or an overlay rebuilt by an
+   * older version) the base's own counts still serve every unmasked base file
+   * rather than collapsing to 0 — hence the merge, overlay last.
+   */
+  private composedDependentCounts(): Map<string, number> {
+    const base = this.baseDb ? readDependentCounts(this.baseDb) : new Map<string, number>();
+    const overlay = readDependentCounts(this.requireOverlay());
+    return new Map([...base, ...overlay]);
+  }
+
   async search(query: string, limit = 5): Promise<SearchResult[]> {
     if (!query || query.trim().length === 0) return [];
+    // One corpus-wide count map for BOTH corpora — see composedDependentCounts.
+    const counts = this.composedDependentCounts();
     const { overlayHits, mask } = this.overlaySnapshot(db => ({
-      overlayHits: keywordSearch(db, query, limit),
+      overlayHits: keywordSearch(db, query, limit, counts),
       mask: this.loadMask(),
     }));
-    const baseHits = this.baseRead(db => keywordSearch(db, query, limit)).filter(
+    const baseHits = this.baseRead(db => keywordSearch(db, query, limit, counts)).filter(
       h => !mask.has(h.metadata.file),
     );
     // BM25 ranks are corpus-relative; merging two corpora yields an approximate
@@ -476,6 +502,23 @@ export class OverlayBackend implements VectorDBInterface {
 
     if (changed) this.reclaimSpace();
     return { changed };
+  }
+
+  /**
+   * Recompute the overlay's `dependent_counts` table over the COMPOSED corpus
+   * (#1071): `unionRecords(readAllRecords)` is `(base − masked) ∪ overlay`, the
+   * exact set every read path here serves. Writing base-derived counts into the
+   * overlay table is correct precisely because the base store is opened
+   * read-only and can never be written from a worktree — the overlay is the only
+   * place a composed answer can live.
+   *
+   * Runs after `applyRebuild`, outside its swap transaction: the swap must stay
+   * the minimal all-or-nothing content exchange, and a stale count is a soft
+   * ranking imprecision, not a corpus inconsistency.
+   */
+  async refreshDependentCounts(): Promise<void> {
+    const chunks = this.unionRecords(readAllRecords).map(recordToUnscoredResult);
+    refreshOverlayDependentCounts(this.requireOverlay(), chunks, this.worktreeRoot);
   }
 
   /** Best-effort in-place disk reclamation after a content swap (same file
