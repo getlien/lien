@@ -1,5 +1,117 @@
 # @liendev/core
 
+## 0.75.4
+
+### Patch Changes
+
+- 643745b: fix(core,parser): resolve `search_code`'s `dependentCount` with the real import matcher (#1071)
+
+  `search_code`'s structural ranking boost was the identity function on most
+  languages. `dependentCount` came from a private ~40-line resolver that
+  understood only `./foo` and `../bar` specifiers, so every C#, Go, Rust and
+  Swift file scored `0` — and `applyStructuralBoost(ratio, 0)` is exactly
+  `ratio`. Its normalizer also treated a specifier's final dotted segment as a
+  file extension, turning `org.junit.Test` into `org.junit`.
+
+  `dependentCount` is now resolved by `importMatchesTarget` — the same guarded
+  decision `get_dependents` makes, carrying the whole-module (#884),
+  single-file-vs-package (#887), Python bare-module (#929), PHP namespace
+  (#1028) and Rust exact-single-file (#1021/#1056) guards, plus the C#
+  type-reference and Go root-package recovery tiers. Measured against pinned
+  real corpora, files with a non-zero count: serilog (C#) 0% → 60%, OrchardCore
+  (C#) 0.3% → 67%, gin (Go) 0% → 11%, anyhow (Rust) 0% → 35%, flask (Python)
+  24% → 36%.
+
+  Counts are precomputed into a new `dependent_counts` table at the end of a
+  full index instead of being derived per query, so the query path got faster,
+  not slower: count acquisition drops from 103 ms to 1.4 ms on a 53k-chunk
+  corpus. The table is additive and created on open, so a standalone index
+  built by an older version keeps the previous behaviour (every count `0`) until
+  its next full index — no forced reindex. In a linked worktree the counts are
+  computed over the composed `(base − masked) ∪ overlay` corpus, never the
+  overlay alone, so a worktree gains real counts as soon as its overlay is
+  rebuilt even while the shared base index is still on the old format.
+
+  Also makes the C# type-reference dependents tier resolve from a one-pass
+  inverted reference index rather than re-scanning every file's content per
+  target, which is what makes it affordable in a whole-corpus pass and speeds up
+  `get_dependents` on large C# repositories by an order of magnitude.
+
+  Swift still resolves to `0` for every file: its whole-module `import
+Foundation` form names no specific file, so there is nothing to resolve
+  (#884). That is now a documented, tested zero rather than a silent one.
+
+  Removes `computeDependentCounts` and `normalizeFileForCounts` from
+  `@liendev/core`'s `vectordb/sqlite/dependent-counts` module — the broken
+  resolver and the extension-strip that corrupted dotted specifiers. Neither was
+  re-exported from the package's entry point (`@liendev/core`'s export map
+  exposes only `.` and `./test`), so no external consumer could reach either and
+  this is not a breaking change; it is recorded here because deleting a symbol
+  should never be silent. `readDependentCounts`, `writeDependentCounts`,
+  `getDependentCounts` and `refreshDependentCounts` replace them.
+
+- 8b16fc3: fix(cli,core): stop `search_code` asserting `dependentCount` as fact (#1072)
+
+  `search_code` published `metadata.dependentCount` on every result with no
+  honesty machinery on any branch — no `attributionCaveat`, no `note`, no degraded
+  marker — while `get_dependents` carried the full vocabulary for the same number.
+  Four different situations rendered as the same bare `0`, and a consumer could not
+  tell them apart.
+
+  Each now gets the disposition it warrants, and only that:
+  - **Genuinely nothing imports this file.** Unchanged: `dependentCount: 0`, no
+    note, no marker. This is a real answer and #1014's cost was a caveat that
+    fired on healthy sessions until it was trained out as noise. There is an
+    explicit negative-control test for it.
+  - **The language's import forms cannot name the file at all** (C#'s
+    `global using` / namespace access, Java's and Kotlin's same-package
+    visibility, Swift's whole-module `import Foundation`). The field is now
+    **omitted** for that result, silently — an absent count is honest, a `0` is
+    not. Gated on the existing `hasDependentAttributionBlindSpot` predicate in
+    conjunction with a zero count, exactly as `get_dependents`'
+    `dependent-attribution-incomplete` caveat is. A _positive_ count in those
+    languages is kept: it is a real recovered floor.
+  - **The counts were never computed for this store** (an index written before the
+    `dependent_counts` table existed, where every count reads `0` for a reason
+    that has nothing to do with the code). One response-level `note` naming
+    `lien index`, plus omission on every result. One note per call, never one per
+    result.
+  - **The counts lag the working tree** by up to one full index run. Deliberately
+    **no** response caveat: it is true on nearly every call and is an accepted
+    trade for a soft ranking tie-breaker. Documented in `search_code`'s tool
+    description and on `SearchResult` instead.
+
+  No new confidence vocabulary: `AttributionCaveatReason`'s five reasons all
+  describe a caller-supplied `filepath`, which neither of the two reported cases
+  is, so this uses the tool's existing response-level `note` channel (#1018 tracks
+  consolidating the three vocabularies that already exist).
+
+  Core adds `VectorDBInterface.hasDependentCounts()`, backed by a new
+  `store_meta` marker row written alongside the counts themselves. Presence of the
+  marker — never the table being non-empty — is what makes a `0` trustworthy: a
+  corpus whose counts are legitimately all zero is byte-identical to one where
+  they were never computed, so the distinction has to come from stored state
+  rather than from the shape of the result. Same reasoning, and same
+  presence-not-emptiness rule, as `OVERLAY_META.DEPENDENT_COUNTS_COMPOSED`. The
+  table is additive with `CREATE TABLE IF NOT EXISTS`, so no
+  `INDEX_FORMAT_VERSION` bump and no forced reindex; an older index simply reports
+  the new note until its next `lien index`.
+
+  `SqliteBackend` accepts row presence as secondary proof (rows can only have been
+  written over that store's own corpus). `OverlayBackend` deliberately does not:
+  without the composed flag its read falls back to merging the base's counts, and
+  that merge can resurrect an obsolete positive value for a file whose last
+  importer this worktree masked, so row presence there is not evidence the numbers
+  describe this corpus.
+
+  Also exports a `simulatePreCountTrackingIndex` test helper from
+  `@liendev/core/test`, so the never-computed state is reachable from
+  `packages/cli`'s index-state matrix without that package taking a
+  `better-sqlite3` dependency.
+
+- Updated dependencies [643745b]
+  - @liendev/parser@0.75.4
+
 ## 0.75.2
 
 ### Patch Changes
