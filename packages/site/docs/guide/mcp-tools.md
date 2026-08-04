@@ -58,13 +58,20 @@ Find code with terms: jwt token validation verify
 
 Results are ordered by BM25, then nudged by structural importance: a file that
 more other files import ranks slightly higher among similarly-relevant matches.
-The nudge is capped and usually only breaks ties, but a very well-connected hub
-file can outrank a marginally better lexical match. Each result's own
-`score`/`relevance` always describe its **pure lexical** match quality and are
-never recomputed from the nudge, so list order and an individual result's
-`relevance` label can legitimately disagree — trust the order for "what to look
-at first", `relevance` for "how good is this specific match". Set
-`LIEN_STRUCTURAL_RANKING=off` to disable the nudge and fall back to pure BM25.
+Results are also nudged **down** slightly when the file is a test file (a fixed
+20% demotion) — test helpers and fixtures otherwise tend to out-rank the real
+source they exist to test, since they're often lexically strong (they repeat
+the vocabulary under test) and well-connected (heavily cross-referenced by
+other tests). This is a nudge, never a filter: a query naming a test file
+directly still finds it. Both nudges are capped/small and usually only break
+ties, but a very well-connected hub file can outrank a marginally better
+lexical match. Each result's own `score`/`relevance` always describe its
+**pure lexical** match quality and are never recomputed from either nudge, so
+list order and an individual result's `relevance` label can legitimately
+disagree — trust the order for "what to look at first", `relevance` for "how
+good is this specific match". Set `LIEN_STRUCTURAL_RANKING=off` or
+`LIEN_TEST_FILE_RANKING=off` to disable either nudge independently and fall
+back toward pure BM25.
 
 `dependentCount` is how many other indexed files import this file, resolved with
 the same import-matching rules `get_dependents` uses. It is a **floor**, not

@@ -31,10 +31,12 @@ import {
   validateBatchLengths,
 } from './sqlite/write-ops.js';
 import {
-  keywordSearch,
-  applyStructuralBoost,
+  keywordSearchRanked,
+  computeRankingKey,
   structuralRankingEnabled,
+  testFileRankingEnabled,
 } from './sqlite/fts-search.js';
+import type { RankedResult } from './sqlite/fts-search.js';
 import {
   readDependentCounts,
   refreshDependentCounts as refreshOverlayDependentCounts,
@@ -77,35 +79,64 @@ function isSqliteBusy(error: unknown): boolean {
 /**
  * Merge two corpora's already-ranked hit lists into one order (#1071).
  *
- * `keywordSearch` applies the structural boost WITHIN each corpus, but each
- * result only carries the pure-bm25 `score` it was scored with -- the boosted
- * sort key is internal to that function. Re-sorting the merged list by `score`
- * therefore threw the boost away at exactly the moment both corpora had finally
- * been given one corpus-wide count map to agree on: an overlay-served hub file
- * with 80 dependents could land below a base-served file with a marginally
- * better lexical match, even with ranking enabled. That is the same
- * silently-does-nothing failure #1071 is about, one layer up.
+ * `keywordSearchRanked` applies the ranking key (structural boost, test-file
+ * demotion) WITHIN each corpus -- the composed sort key is internal to that
+ * function, EXCEPT it is not thrown away here: both `overlayHits` and
+ * `baseHits` are `RankedResult[]`, still carrying the raw bm25 `ratio` each
+ * hit was scored with, not yet trimmed down to the public `SearchResult`
+ * shape. `computeRankingKey` -- the exact same composition
+ * `keywordSearchRanked` uses -- is reapplied here over the merged list on
+ * that RAW ratio, never a re-derived copy of the composition logic (see that
+ * function's own doc comment on why this codebase treats a second definition
+ * of one ranking decision as a bug generator).
  *
- * So the boost is reapplied here over the merged list. `score` is
- * `round4((1 - ratio) * 2)` (see `scoreRow`), so `ratio` recovers exactly as
- * `1 - score / 2` -- no need to widen `keywordSearch`'s return type to carry an
- * internal sort key across a package boundary.
+ * This used to reconstruct `ratio` from the public `score` field
+ * (`1 - hit.score / 2`) instead of carrying it through. That is UNSOUND:
+ * `score = round4((1 - ratio) * 2)` (see `scoreRow`) rounds to 4 decimal
+ * places, so it is not invertible -- two hits, one from each corpus, whose
+ * raw ratios differ by less than the rounding granularity (~0.00005) can
+ * round to the IDENTICAL `score`. Reconstructing from that collided score
+ * produces an artificial tie between two hits that were never actually tied,
+ * which `Array.prototype.sort`'s stability then resolves by ARRAY POSITION --
+ * `overlayHits` is concatenated before `baseHits` in `merged`, so the overlay
+ * hit silently wins regardless of which hit's true ratio was actually better
+ * (found in review, #1080). That silent mis-ordering is concentrated exactly
+ * in the near-tie population `applyStructuralBoost`/`applyTestFileDemotion`
+ * exist to adjudicate correctly -- not a remote corner case. Carrying the raw
+ * `ratio` through instead removes the reconstruction (and the tie it can
+ * fabricate) entirely; see the close-score regression in
+ * `overlay-backend.test.ts`. `ratio` is stripped from the return value at the
+ * very end, exactly where `keywordSearch` itself strips it -- `score`'s
+ * public, rounded meaning is unchanged; only the internal merge decision
+ * stops going through it.
  *
- * With `LIEN_STRUCTURAL_RANKING=off` this is pure `score` ascending, identical to
- * the pre-#1071 merge, so the escape hatch keeps meaning what it says.
+ * With BOTH `LIEN_STRUCTURAL_RANKING=off` and `LIEN_TEST_FILE_RANKING=off`
+ * this is pure `score` ascending, identical to the pre-#1071 merge (ordering
+ * on the public, rounded `score` directly here is fine -- nothing is
+ * reconstructed FROM it), so each escape hatch keeps meaning what it says
+ * independently of the other.
+ *
+ * Exported so this exact merge decision is unit-testable against
+ * hand-constructed `RankedResult` fixtures with precise ratio values --
+ * reproducing a genuine bm25 rounding collision from real indexed content
+ * would mean engineering 5th-decimal-place floating point coincidences,
+ * which is neither reliable nor readable as a test.
  */
-function mergeRankedHits(
-  overlayHits: SearchResult[],
-  baseHits: SearchResult[],
+export function mergeRankedHits(
+  overlayHits: RankedResult[],
+  baseHits: RankedResult[],
   limit: number,
 ): SearchResult[] {
   const merged = [...overlayHits, ...baseHits];
-  if (!structuralRankingEnabled()) {
-    return merged.sort((a, b) => a.score - b.score).slice(0, limit);
-  }
-  const boosted = (hit: SearchResult): number =>
-    applyStructuralBoost(1 - hit.score / 2, hit.metadata.dependentCount ?? 0);
-  return merged.sort((a, b) => boosted(b) - boosted(a)).slice(0, limit);
+  const ranked =
+    structuralRankingEnabled() || testFileRankingEnabled()
+      ? [...merged].sort(
+          (a, b) =>
+            computeRankingKey(b.ratio, b.metadata.dependentCount ?? 0, b.metadata.file) -
+            computeRankingKey(a.ratio, a.metadata.dependentCount ?? 0, a.metadata.file),
+        )
+      : [...merged].sort((a, b) => a.score - b.score);
+  return ranked.slice(0, limit).map(({ ratio: _ratio, ...result }) => result);
 }
 
 export class OverlayBackend implements VectorDBInterface {
@@ -315,11 +346,14 @@ export class OverlayBackend implements VectorDBInterface {
     if (!query || query.trim().length === 0) return [];
     // One corpus-wide count map for BOTH corpora — see composedDependentCounts.
     const counts = this.composedDependentCounts();
+    // RankedResult, not SearchResult -- mergeRankedHits needs the raw ratio
+    // each hit was scored with, not the rounded public `score` (see its doc
+    // comment for why reconstructing from `score` is unsound).
     const { overlayHits, mask } = this.overlaySnapshot(db => ({
-      overlayHits: keywordSearch(db, query, limit, counts),
+      overlayHits: keywordSearchRanked(db, query, limit, counts),
       mask: this.loadMask(),
     }));
-    const baseHits = this.baseRead(db => keywordSearch(db, query, limit, counts)).filter(
+    const baseHits = this.baseRead(db => keywordSearchRanked(db, query, limit, counts)).filter(
       h => !mask.has(h.metadata.file),
     );
     // BM25 ranks are corpus-relative; merging two corpora yields an approximate
