@@ -51,6 +51,13 @@ table is additive with `CREATE TABLE IF NOT EXISTS`, so no
 `INDEX_FORMAT_VERSION` bump and no forced reindex; an older index simply reports
 the new note until its next `lien index`.
 
+`SqliteBackend` accepts row presence as secondary proof (rows can only have been
+written over that store's own corpus). `OverlayBackend` deliberately does not:
+without the composed flag its read falls back to merging the base's counts, and
+that merge can resurrect an obsolete positive value for a file whose last
+importer this worktree masked, so row presence there is not evidence the numbers
+describe this corpus.
+
 Also exports a `simulatePreCountTrackingIndex` test helper from
 `@liendev/core/test`, so the never-computed state is reachable from
 `packages/cli`'s index-state matrix without that package taking a
