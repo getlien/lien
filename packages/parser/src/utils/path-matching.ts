@@ -230,6 +230,92 @@ function matchesSingleSegmentTail(
 }
 
 /**
+ * The four per-importer-file language decisions `importMatchesTarget` needs,
+ * resolved together. Each is a pure function of the importer's file extension
+ * and the static language registry, so the whole record can be memoized per
+ * file path (see `importerLanguageSemantics`).
+ */
+interface ImporterLanguageSemantics {
+  /** #884 — `LanguageDefinition.wholeModuleImports` (Swift). */
+  wholeModuleImports: boolean;
+  /** #887 — `LanguageDefinition.singleFileImports` (Ruby). */
+  singleFileImports: boolean;
+  /** #929 — Python's dotted-module semantics (`matchesFile` strategy 5). */
+  pythonModules: boolean;
+  /** #1028 — `LanguageDefinition.namespaceStyleImports` (PHP). */
+  namespaceStyleImports: boolean;
+}
+
+/** The answer for any path whose extension no registered language claims. */
+const NON_AST_SEMANTICS: ImporterLanguageSemantics = {
+  wholeModuleImports: false,
+  singleFileImports: false,
+  pythonModules: false,
+  namespaceStyleImports: false,
+};
+
+/**
+ * Memoized `importerFile` -> language semantics, and why this cache is
+ * load-bearing rather than a micro-optimization (#1075).
+ *
+ * `importMatchesTarget` needs four language decisions about the importing
+ * file, and every one of them starts with `detectLanguage(importerFile)` --
+ * i.e. `node:path`'s `extname` plus a `slice`/`toLowerCase`/`Map.get` -- for
+ * the SAME path string, four times per (import, target) pair. A single
+ * `findDependents` call on a large corpus asks that question millions of
+ * times over a set of paths bounded by the corpus size, so the derivation
+ * was measured (CPU profile, OrchardCore, 6,356 files) at 42% of the call's
+ * entire wall time: `detectLanguage` 32.5% self, `extname` alone 10.2%.
+ *
+ * Correctness is not at stake: `detectLanguage` and the three
+ * `LanguageDefinition` flag getters read a registry that is frozen at module
+ * load (`registry.ts` builds `extensionMap` once and throws on duplicates),
+ * so the record is a pure function of the path string. Memoizing it can only
+ * change how long the identical answer takes to produce.
+ *
+ * Bounded by an outright `clear()` at `MAX_IMPORTER_SEMANTICS_CACHE` rather
+ * than an LRU: `lien serve` is long-lived and the key space is "every path
+ * string ever passed in," so an unbounded map is a slow leak. A flat clear
+ * keeps the eviction O(1) with no per-hit bookkeeping, and the only cost of
+ * dropping the whole cache is re-deriving entries that are individually
+ * cheap -- there is no correctness cliff at the boundary, unlike an LRU whose
+ * value is in retaining the hot set.
+ */
+const MAX_IMPORTER_SEMANTICS_CACHE = 20_000;
+const importerSemanticsCache = new Map<string, ImporterLanguageSemantics>();
+
+function importerLanguageSemantics(importerFile: string): ImporterLanguageSemantics {
+  const cached = importerSemanticsCache.get(importerFile);
+  if (cached !== undefined) return cached;
+
+  const language = detectLanguage(importerFile);
+  const semantics: ImporterLanguageSemantics =
+    language === null
+      ? NON_AST_SEMANTICS
+      : {
+          wholeModuleImports: hasWholeModuleImports(language),
+          singleFileImports: hasSingleFileImports(language),
+          pythonModules: language === 'python',
+          namespaceStyleImports: hasNamespaceStyleImports(language),
+        };
+
+  if (importerSemanticsCache.size >= MAX_IMPORTER_SEMANTICS_CACHE) {
+    importerSemanticsCache.clear();
+  }
+  importerSemanticsCache.set(importerFile, semantics);
+  return semantics;
+}
+
+/**
+ * Drop the memoized importer-language records. Exported for tests that need
+ * to prove a cold cache and a warm cache give the same answer; production
+ * code never needs it (the registry the cache derives from is immutable).
+ */
+export function clearImporterSemanticsCache(): void {
+  importerSemanticsCache.clear();
+}
+
+/**
  * True when `importSpecifier` is a bare (slash-free) import from a file whose
  * language sets `LanguageDefinition.wholeModuleImports` (Swift today — see
  * `hasWholeModuleImports`'s doc comment for #869's structural background).
@@ -266,8 +352,7 @@ export function isUnresolvableWholeModuleImport(
   importerFile: string,
 ): boolean {
   if (importSpecifier.includes('/')) return false;
-  const language = detectLanguage(importerFile);
-  return language !== null && hasWholeModuleImports(language);
+  return importerLanguageSemantics(importerFile).wholeModuleImports;
 }
 
 /**
@@ -460,7 +545,15 @@ function matchesRustModSpecifier(normalizedImport: string, normalizedTarget: str
  * match-side call site again:
  * - The #884 whole-module guard (`isUnresolvableWholeModuleImport`) --
  *   `matchesFile` is language-agnostic and cannot know the importer's
- *   language, so this MUST run on the RAW specifier first.
+ *   language, so this MUST run on the RAW specifier first. Spelled inline
+ *   here as `semantics.wholeModuleImports && !importSpecifier.includes('/')`
+ *   rather than as a call to that predicate, purely so the shared
+ *   `importerLanguageSemantics` lookup is done once for all four guards
+ *   (#1075); the two conjuncts are both pure, so testing the language flag
+ *   before the slash is the same decision in the other order, and
+ *   `isUnresolvableWholeModuleImport` remains the single definition every
+ *   OTHER call site (`buildImportIndex`, `indexImportEntry`,
+ *   `test-associations.ts`, `get-files-context.ts`) uses.
  * - The #887 single-file-vs-package-directory distinction
  *   (`requireExactTailForMultiSegment`) -- derived from the importer's
  *   language via `hasSingleFileImports`, since that's the only information
@@ -538,7 +631,11 @@ export function importMatchesTarget(
   normalizedTarget: string,
   normalize: (p: string) => string,
 ): boolean {
-  if (isUnresolvableWholeModuleImport(importSpecifier, importerFile)) return false;
+  // One memoized lookup for all four language decisions, rather than the four
+  // separate `detectLanguage` derivations the individual predicates below each
+  // do -- see `importerLanguageSemantics` for why that mattered (#1075).
+  const semantics = importerLanguageSemantics(importerFile);
+  if (semantics.wholeModuleImports && !importSpecifier.includes('/')) return false;
   if (hasRustModMarker(importSpecifier)) {
     return matchesRustModSpecifier(
       normalize(stripRustModMarker(importSpecifier)),
@@ -548,9 +645,9 @@ export function importMatchesTarget(
   return matchesFile(
     normalize(importSpecifier),
     normalizedTarget,
-    hasSingleFileImportSemantics(importerFile),
-    hasPythonModuleSemantics(importerFile),
-    hasNamespaceMatchingSemantics(importerFile),
+    semantics.singleFileImports,
+    semantics.pythonModules,
+    semantics.namespaceStyleImports,
   );
 }
 
@@ -566,8 +663,7 @@ export function importMatchesTarget(
  * in sync with.
  */
 export function hasSingleFileImportSemantics(importerFile: string): boolean {
-  const language = detectLanguage(importerFile);
-  return language !== null && hasSingleFileImports(language);
+  return importerLanguageSemantics(importerFile).singleFileImports;
 }
 
 /**
@@ -583,7 +679,7 @@ export function hasSingleFileImportSemantics(importerFile: string): boolean {
  * against.
  */
 export function hasPythonModuleSemantics(importerFile: string): boolean {
-  return detectLanguage(importerFile) === 'python';
+  return importerLanguageSemantics(importerFile).pythonModules;
 }
 
 /**
@@ -600,8 +696,7 @@ export function hasPythonModuleSemantics(importerFile: string): boolean {
  * `src/error.rs`) this guards against.
  */
 export function hasNamespaceMatchingSemantics(importerFile: string): boolean {
-  const language = detectLanguage(importerFile);
-  return language !== null && hasNamespaceStyleImports(language);
+  return importerLanguageSemantics(importerFile).namespaceStyleImports;
 }
 
 /**

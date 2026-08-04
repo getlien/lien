@@ -219,6 +219,12 @@ export type {
 // DEPENDENCY ANALYSIS
 // =============================================================================
 
+// `hasTestImporterFromChunks`/`hasTestImporterBruteForce` are #1075's fast path
+// and its never-pruned oracle for the "does any test file import this?"
+// predicate behind `uncoveredProductionDependents` -- exported (like
+// `computeDependentCountsBruteForce` above) purely so equivalence can be checked
+// from outside the module against real corpora; never call the brute-force one
+// in production.
 export {
   analyzeDependencies,
   findDependents,
@@ -229,6 +235,8 @@ export {
   chunkImportsFrom,
   fileIsReExporter,
   findReExportedSymbolsForFile,
+  hasTestImporterFromChunks,
+  hasTestImporterBruteForce,
   DEPENDENT_COUNT_THRESHOLDS,
   COMPLEXITY_THRESHOLDS,
 } from './dependency-analyzer.js';
