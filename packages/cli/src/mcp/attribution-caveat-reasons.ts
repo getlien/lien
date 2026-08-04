@@ -1,3 +1,5 @@
+import { summarizeInferredDependentMechanisms } from '@liendev/parser';
+
 /**
  * Why a `get_dependents` answer's counts can't be trusted as a verified
  * clear (#940). Exactly one reason can ever apply to a given response --
@@ -26,16 +28,21 @@
  *   top-level export at all; this one fires when it very much IS one, just
  *   not the kind of export call-site tracking can see through.
  * - `dependent-attribution-partial`: a file-level query (no `symbol`) found
- *   zero import-based dependents, but the C# type-reference-matching
- *   fallback recovered one or more (#930 part 2) -- those entries are
- *   tagged `confidence: 'inferred'` in `dependents`, and the counts are a
- *   recovered lower bound, not a verified/complete answer.
+ *   zero import-based dependents, but ONE OF PARSER'S NON-IMPORT FALLBACKS
+ *   recovered one or more -- those entries are tagged `confidence: 'inferred'`
+ *   in `dependents` and name the mechanism that recovered them in
+ *   `inferredVia`, and the counts are a recovered lower bound, not a
+ *   verified/complete answer. Which fallbacks exist is deliberately NOT listed
+ *   here: `@liendev/parser`'s `INFERRED_DEPENDENT_MECHANISMS` is the single
+ *   source, and this reason's text below derives from it. Listing them here is
+ *   exactly what went stale when #1039 added Go's alongside #930's C# one
+ *   (#1018).
  * - `dependent-attribution-incomplete`: a file-level query (no `symbol`)
  *   came back with zero dependents in a language where the import graph
  *   structurally can't see every real usage, e.g. C#'s `global using` /
  *   implicit enclosing-namespace access (#930, #936), or Java/Kotlin's
  *   same-package visibility and Swift's whole-module access (#1005), EVEN
- *   AFTER the type-reference-matching fallback also found nothing.
+ *   AFTER any applicable fallback above also found nothing.
  *
  * This is the SINGLE SOURCE for the model/user-facing explanation of each
  * reason (`ATTRIBUTION_CAVEAT_REASON_TEXT` below). #941 hand-wrote this
@@ -68,6 +75,13 @@ export type AttributionCaveatReason =
  * object literal unless it has EXACTLY the union's members as keys -- add a
  * fifth reason to the union and this line fails to compile until its text
  * is added here too.
+ *
+ * That guard covers the set of REASONS, and only that. It cannot see a change
+ * in what an existing reason COVERS, which is how #1039's second recovery
+ * mechanism reached production with five surfaces still saying "C#" (#1018).
+ * `dependent-attribution-partial` below therefore derives its mechanism list
+ * from `@liendev/parser`'s own `Record`-guarded table instead of naming any
+ * mechanism itself -- the two forcing functions compose, one per axis.
  */
 export const ATTRIBUTION_CAVEAT_REASON_TEXT: Record<AttributionCaveatReason, string> = {
   'unresolved-target':
@@ -94,18 +108,19 @@ export const ATTRIBUTION_CAVEAT_REASON_TEXT: Record<AttributionCaveatReason, str
 
   'dependent-attribution-partial':
     'a file-level query (no symbol) found zero import-based dependents, but a lower-confidence ' +
-    'text-matching fallback recovered some dependents anyway (those entries carry ' +
-    'confidence: "inferred"). Treat the counts as a recovered floor, not a complete answer — ' +
-    'the fallback can still miss a real dependent reached via an alias, a generic type ' +
-    'argument, or reflection.',
+    'non-import fallback recovered some dependents anyway (those entries carry ' +
+    'confidence: "inferred", and inferredVia names which fallback found them; today ' +
+    `${summarizeInferredDependentMechanisms()} have one). Treat the counts as a recovered ` +
+    'floor, not a complete answer — the note explains what that specific fallback can still ' +
+    'miss.',
 
   'dependent-attribution-incomplete':
     'a file-level query (no symbol) came back with zero dependents in a language where the ' +
     "import graph structurally can't see every real usage (e.g. C#'s global using / implicit " +
     "enclosing-namespace access, Java/Kotlin's same-package visibility, or Swift's " +
-    'whole-module access), even after the text-matching fallback above also found nothing. ' +
-    'Treat dependentCount: 0 and riskLevel: "low" as a floor, not a finding — verify with ' +
-    'grep before concluding the file is unused.',
+    'whole-module access), even after any applicable non-import fallback above also found ' +
+    'nothing. Treat dependentCount: 0 and riskLevel: "low" as a floor, not a finding — verify ' +
+    'with grep before concluding the file is unused.',
 };
 
 /**

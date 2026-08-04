@@ -833,6 +833,8 @@ describe('findDependents', () => {
       expect(result.dependents[0]).toMatchObject({
         filepath: 'Padding.cs',
         confidence: 'inferred',
+        // #1018: names the mechanism so the caveat note need not assume it.
+        inferredVia: 'csharp-type-reference',
       });
       expect(result.productionDependentCount).toBe(1);
       expect(result.dependentAttributionPartial).toBe(true);
