@@ -45,6 +45,23 @@ import type { ToolResult } from './metadata-shaper.js';
  *    shape of the numbers, because a corpus whose counts are legitimately all
  *    zero is indistinguishable from "never computed" on the numbers alone.
  *
+ *    "Clears itself after one index run" is load-bearing prose, and it was
+ *    FALSE as shipped (#1084): the upgrade path that produces this note is
+ *    exactly the one where `lien index` finds no content changes, so the note's
+ *    own instruction did nothing and only `--force` worked. It is true now
+ *    because `core`'s `backfillDependentCounts` makes the counts a MIGRATION
+ *    the next `lien index` completes regardless of whether anything changed.
+ *    If that call is ever removed, this note becomes a lie again — a caveat
+ *    that prescribes a remedy owes the reader a remedy that works, and a failed
+ *    instruction spends more trust than silence would have.
+ *
+ *    It also must not fire when the counts DO exist somewhere the read path
+ *    reaches. #1085: `OverlayBackend` asked only the worktree's own overlay, so
+ *    every fresh linked worktree got this note while the shared base's counts
+ *    ranked the very results it was attached to. That is #1014's failure mode
+ *    with a different sign — a note firing on every agent session gets trained
+ *    out, and takes the true ones with it.
+ *
  * 4. **The count lags the working tree** by up to one full index run, because
  *    incremental single-file updates deliberately don't recompute whole-corpus
  *    counts. Gets NO response caveat at all. It is true on nearly every call,

@@ -138,6 +138,67 @@ async function finalizeManifest(
 }
 
 /**
+ * Complete the `dependent_counts` migration for a standalone store that has never
+ * had its reverse-dependency counts computed (#1084).
+ *
+ * `refreshDependentCounts` runs at the end of a FULL index. That is not the path
+ * a user upgrading from ≤ 0.75.2 actually takes: `lien index` finds no content
+ * changes, reports "Index is up to date", and returns — so the note #1072 prints
+ * ("Run `lien index` to populate them") was advice that provably did not work,
+ * and only `--force` did. A caveat that tells the user how to fix it and is wrong
+ * about how spends their trust on a failed instruction, which is worse than
+ * saying nothing at all.
+ *
+ * So this is a MIGRATION-completion step, not an indexing step, and the
+ * distinction is the whole design:
+ *
+ * - Gated on `hasDependentCounts()` — stored state, never "the table looks
+ *   empty" — so it runs at most once per store, ever. The next `lien index`
+ *   after an upgrade pays it; every one after that skips it on one meta lookup.
+ * - #1071's freshness contract is untouched. Normal incremental editing still
+ *   does NOT recompute whole-corpus counts (that would be absurd for a soft
+ *   ranking tie-breaker: ~1.8 s per save on a 53k-chunk corpus), so counts still
+ *   "lag by at most one full index run". This does not make them fresher, only
+ *   PRESENT — the difference between a wrong answer and a stale one.
+ *
+ * The overlay path has its own equivalent —
+ * `OverlayBackend.backfillDependentCounts` — because a worktree's counts must be
+ * composed over `(base − masked) ∪ overlay` and only that backend can do it.
+ * `performOverlayIndex` calls that instead of this.
+ *
+ * The version file is bumped only when a backfill actually ran, so a live
+ * `lien serve` reconnects and picks the new counts up. Without that its cached
+ * per-connection count map would stay empty while `hasDependentCounts()` started
+ * answering true — clearing the note and then asserting corpus-wide zeros as
+ * fact, which is #1072's defect restored.
+ */
+async function backfillDependentCounts(
+  vectorDB: VectorDBInterface,
+  options: IndexingOptions,
+): Promise<void> {
+  if (await vectorDB.hasDependentCounts()) return;
+
+  options.onProgress?.({
+    phase: 'saving',
+    message: 'Backfilling reverse-dependency counts (one-time)...',
+  });
+  try {
+    await vectorDB.refreshDependentCounts();
+    await writeVersionFile(vectorDB.dbPath);
+  } catch (error) {
+    // Never fail an index run over a soft ranking tie-breaker — this is the
+    // "no changes detected" path, the most frequently executed one there is, and
+    // a peer process holding the write lock would otherwise turn a no-op into a
+    // reported failure. Skipping leaves the migration for the next run, which is
+    // exactly the pre-fix state: no worse, and loud rather than silent so a real
+    // failure here can never quietly re-create #1084.
+    console.error(
+      `[indexer] dependent-count backfill skipped: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+/**
  * Handle file deletions during incremental indexing.
  */
 async function handleDeletions(
@@ -236,6 +297,15 @@ async function tryIncrementalIndex(
   if (!detected) {
     return null;
   }
+
+  // Before the change branches, not after each of them: this is a migration, and
+  // a migration runs whether or not there is anything to index (#1084 — the
+  // "no changes detected" exit below is the exact path that left the note stuck).
+  // One call site covers all three exits, and it lands before any `complete`
+  // progress event so the spinner isn't restarted after it has succeeded.
+  // Ordering costs nothing real: counts computed here miss this run's own edits,
+  // which is precisely the documented "lags by at most one full index run".
+  await backfillDependentCounts(vectorDB, options);
 
   const { changes, manifest } = detected;
   const totalChanges = changes.added.length + changes.modified.length;
@@ -472,6 +542,14 @@ async function performOverlayIndex(
 
   const res = await buildOverlay(overlay, { verbose: options.verbose });
   const filesIndexed = res.added + res.modified;
+
+  // The worktree's half of #1084, and NOT `backfillDependentCounts` above: an
+  // overlay composes its own counts (the base's table can't describe a diverged
+  // corpus), so the migration lives on the backend that owns that composition.
+  // `applyRebuild` only refreshes on a real swap and `buildOverlay` returns
+  // before it when the signature already matches, so an overlay that has never
+  // composed counts had no path to them — see the method's doc comment.
+  if (overlay.backfillDependentCounts()) await overlay.bumpVersion();
 
   options.onProgress?.({
     phase: 'complete',

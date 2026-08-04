@@ -186,4 +186,38 @@ describe('hasComputedDependentCounts', () => {
     expect(readDependentCounts(db).size).toBe(0);
     expect(hasComputedDependentCounts(db)).toBe(true);
   });
+
+  // #1085 opened this predicate to a connection whose SCHEMA may predate either
+  // table: `OverlayBackend` asks it about its shared base, which is opened
+  // `{ readonly: true }` so `openDatabase`'s `CREATE TABLE IF NOT EXISTS` never
+  // runs there. Each clause has to degrade on its own.
+
+  it('is true from ROWS ALONE when `store_meta` does not exist at all (a 0.75.4 base)', () => {
+    // 0.75.4 shipped `dependent_counts`; 0.75.5 added `store_meta`. A missing
+    // flag TABLE must not hide the rows that prove a computation ran — otherwise
+    // every worktree on a 0.75.4 base gets #1085's false note back.
+    db.prepare('INSERT INTO dependent_counts(file, count) VALUES (?, ?)').run('src/a.ts', 4);
+    db.exec('DROP TABLE store_meta');
+
+    expect(hasComputedDependentCounts(db)).toBe(true);
+  });
+
+  it('is false, and does not throw, when NEITHER table exists (a pre-0.75.4 store)', () => {
+    // #1071 learned the throwing half the hard way: an unguarded base read
+    // crashed every overlay `search()` with `no such table: dependent_counts`.
+    db.exec('DROP TABLE dependent_counts');
+    db.exec('DROP TABLE store_meta');
+
+    expect(() => hasComputedDependentCounts(db)).not.toThrow();
+    expect(hasComputedDependentCounts(db)).toBe(false);
+  });
+
+  it('is true from the FLAG ALONE when `dependent_counts` does not exist', () => {
+    // The mirror case, for completeness: the flag is the direct proof, and it
+    // must not be lost because the sibling read would have thrown.
+    setStoreMeta(db, STORE_META.DEPENDENT_COUNTS_COMPUTED, '1');
+    db.exec('DROP TABLE dependent_counts');
+
+    expect(hasComputedDependentCounts(db)).toBe(true);
+  });
 });

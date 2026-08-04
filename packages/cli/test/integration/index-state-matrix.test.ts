@@ -89,7 +89,18 @@ type EntryPointState =
   // detectable from the numbers: a corpus whose counts are legitimately all
   // zero looks identical, which is why the disposition is keyed on a stored
   // flag instead.
-  | 'S2-counts';
+  | 'S2-counts'
+  // The two axes CROSSED (#1085) — the missing row that let the defect ship.
+  // Neither axis alone reaches it: a standalone `S2-counts` store has one place
+  // to look, and `worktree-fresh` was only ever exercised against the `chunks`
+  // table. `worktree-fresh × counts-in-base` = a fresh worktree whose base HAS
+  // computed counts and whose own overlay never has, so the honest answer lives
+  // in the far store and the read path is already serving it.
+  // `worktree-S2-counts` is its negative control: NEITHER store ever computed
+  // them, so the note must still fire — over-correcting a false caveat into
+  // silence would lose what #1072 shipped it for.
+  | 'worktree-fresh × counts-in-base'
+  | 'worktree-S2-counts';
 
 interface TableRow {
   entryPoint: string;
@@ -184,6 +195,21 @@ const TABLE: TableRow[] = [
     state: 'worktree-fresh',
     expected:
       '`path --root` resolves to the WORKTREE itself, never the outer main checkout (#1050 fix)',
+  },
+  {
+    // #1085. The response used to say "the counts were never computed here" and
+    // drop 100% of `dependentCount`, while the base's counts ranked the very
+    // results it was attached to. Checking one of two on-disk locations instead
+    // of the composition — the #1050/#1051 shape, third time in this class.
+    entryPoint: 'search_code',
+    state: 'worktree-fresh × counts-in-base',
+    expected: 'real dependentCount from the shared base, NO note (#1085 fix)',
+  },
+  {
+    // The negative control, and the row whose absence is why #1085 shipped.
+    entryPoint: 'search_code',
+    state: 'worktree-S2-counts',
+    expected: 'note still fires + every count omitted (neither store ever computed them)',
   },
   // --- CLI, index-independent (never touch the structural store at all) ---
   {
@@ -817,6 +843,91 @@ describe('index-state × entry-point matrix (#1029 W1)', () => {
         const printed = allLogged().trim();
         expect(printed).toBe(wtRoot);
         expect(printed).not.toBe(dir);
+      });
+    });
+
+    // ------------------------------------------------------------------------
+    // The layout axis CROSSED with the derived-data axis (#1085). This pair is
+    // the row the matrix was missing: `search_code`'s counts axis had only ever
+    // been exercised against a standalone store, where there is exactly one
+    // place for the state to live, and the worktree axis had only ever been
+    // exercised against the `chunks` table. The defect lived precisely in the
+    // crossing, and every agent session in this repo's own fleet ran through it.
+    // ------------------------------------------------------------------------
+
+    describe('search_code (dependent-count honesty × overlay)', () => {
+      it('worktree-fresh × counts-in-base: real counts, NO note — never a note over counts it is ranking with (#1085)', async () => {
+        await buildHealthyIndex(dir);
+        const wtRoot = await chdirIntoFreshNestedWorktree();
+
+        const vectorDB = await createVectorDB(wtRoot);
+        await vectorDB.initialize();
+        expect(vectorDB.isOverlay).toBe(true);
+        // The composition has counts even though this worktree has never run its
+        // own `lien index` — asked of the backend, not inferred from the results.
+        expect(await vectorDB.hasDependentCounts()).toBe(true);
+
+        const result = await handleSearchCode({ query: 'add' }, makeCtx(vectorDB));
+
+        const parsed = JSON.parse(result.content![0].text) as {
+          note?: string;
+          results: { metadata: { file: string; dependentCount?: number } }[];
+        };
+        const mathHit = parsed.results.find(r => r.metadata.file.endsWith('math.ts'));
+        expect(mathHit).toBeDefined();
+        // Present and real: `index.ts` and `math.test.ts` both import `math.ts`.
+        expect(mathHit!.metadata.dependentCount).toBeGreaterThan(0);
+        expect(parsed.note).toBeUndefined();
+      });
+
+      it('worktree-S2-counts: the note STILL fires when neither store ever computed them (#1085 negative control)', async () => {
+        // Over-correcting #1085 into silence would cost what #1072 shipped: a
+        // genuinely never-computed store must still say so. Both halves of the
+        // composition are rewound here, so nothing anywhere can answer.
+        await buildHealthyIndex(dir);
+        simulatePreCountTrackingIndex(getIndexDir(dir));
+        const wtRoot = await chdirIntoFreshNestedWorktree();
+
+        const vectorDB = await createVectorDB(wtRoot);
+        await vectorDB.initialize();
+        expect(vectorDB.isOverlay).toBe(true);
+        expect(await vectorDB.hasDependentCounts()).toBe(false);
+
+        const result = await handleSearchCode({ query: 'add' }, makeCtx(vectorDB));
+
+        const parsed = JSON.parse(result.content![0].text) as {
+          note?: string;
+          results: { metadata: { file: string; dependentCount?: number } }[];
+        };
+        expect(parsed.results.length).toBeGreaterThan(0);
+        for (const r of parsed.results) {
+          expect(r.metadata).not.toHaveProperty('dependentCount');
+        }
+        expect(parsed.note).toContain('predates reverse-dependency counting');
+      });
+
+      it('worktree-S2-counts: a plain `lien index` in the worktree clears it — the note names a remedy that works (#1084)', async () => {
+        // #1084 on the overlay path. `lien index` is the remedy the note prints,
+        // so it has to work from the state the note fires in.
+        await buildHealthyIndex(dir);
+        simulatePreCountTrackingIndex(getIndexDir(dir));
+        const wtRoot = await chdirIntoFreshNestedWorktree();
+
+        const indexed = await indexCodebase({ rootDir: wtRoot, verbose: false });
+        expect(indexed.success).toBe(true);
+
+        const vectorDB = await createVectorDB(wtRoot);
+        await vectorDB.initialize();
+        expect(await vectorDB.hasDependentCounts()).toBe(true);
+
+        const result = await handleSearchCode({ query: 'add' }, makeCtx(vectorDB));
+        const parsed = JSON.parse(result.content![0].text) as {
+          note?: string;
+          results: { metadata: { file: string; dependentCount?: number } }[];
+        };
+        expect(parsed.note).toBeUndefined();
+        const mathHit = parsed.results.find(r => r.metadata.file.endsWith('math.ts'));
+        expect(mathHit!.metadata.dependentCount).toBeGreaterThan(0);
       });
     });
   });
