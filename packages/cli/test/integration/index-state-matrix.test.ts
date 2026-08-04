@@ -33,7 +33,8 @@ import path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { fileURLToPath } from 'url';
-import { createVectorDB, indexCodebase, type VectorDBInterface } from '@liendev/core';
+import { createVectorDB, indexCodebase, getIndexDir, type VectorDBInterface } from '@liendev/core';
+import { simulatePreCountTrackingIndex } from '@liendev/core/test';
 import { complexityCommand } from '../../src/cli/complexity.js';
 import { apiDeltaCommand } from '../../src/cli/api-delta-cmd.js';
 import { annotateCommand } from '../../src/cli/annotate-cmd.js';
@@ -79,7 +80,16 @@ type EntryPointState =
   // constraint: never turn a real S0 into a false clean, and never turn a
   // real base into a false S0 either).
   | 'worktree-fresh'
-  | 'worktree-none';
+  | 'worktree-none'
+  // Derived-data axis (#1071, #1072) — also orthogonal to the whole-index
+  // states above, and so far unique to `search_code`. The `chunks` table is
+  // healthy and current, but the derived `dependent_counts` table it publishes
+  // `dependentCount` from was never written (an index from a version predating
+  // it). "Stale" in the same sense as S2, over a different table, and NOT
+  // detectable from the numbers: a corpus whose counts are legitimately all
+  // zero looks identical, which is why the disposition is keyed on a stored
+  // flag instead.
+  | 'S2-counts';
 
 interface TableRow {
   entryPoint: string;
@@ -231,6 +241,38 @@ const TABLE: TableRow[] = [
     entryPoint: 'search_code',
     state: 'ok',
     expected: 'dependent_counts populated by the full index; dependentCount reflects real edges',
+  },
+  {
+    // #1072 resolves the honesty gap the row above hands off. Same second axis,
+    // now with named dispositions per cause. This is the "counts were never
+    // computed for this store" cause: chunks healthy, counts absent, so every
+    // count would read 0 for a reason that has nothing to do with the code.
+    // Whole-corpus, therefore ONE response-level note plus omission on every
+    // result — never one caveat per result, which is how #1014 became noise.
+    entryPoint: 'search_code',
+    state: 'S2-counts',
+    expected: 'dependentCount omitted from every result + one note naming "lien index"',
+  },
+  {
+    // #1072's second cause, and the one that must stay SILENT: the language's
+    // import forms cannot name a file at all (Swift's whole-module imports,
+    // C#/Java/Kotlin same-unit access — `hasDependentAttributionBlindSpot`).
+    // The field is dropped for that result and nothing is said, because a note
+    // here would fire on most searches across four whole languages.
+    entryPoint: 'search_code',
+    state: 'ok',
+    expected: 'blind-spot language + zero count: field omitted per result, NO note',
+  },
+  {
+    // The negative control for both rows above, and the reason this file is a
+    // detector rather than a snapshot. A healthy, freshly-indexed corpus with a
+    // GENUINE resolved zero must acquire nothing at all: no note, no omission,
+    // no marker. #1014's cost was a caveat that fired on essentially every
+    // agent session and got trained out as noise; re-earning that would be
+    // worse than the silence #1072 replaced.
+    entryPoint: 'search_code',
+    state: 'ok',
+    expected: 'genuine resolved zero: dependentCount: 0 present, no note (negative control)',
   },
   {
     entryPoint: 'list_functions',
@@ -947,6 +989,134 @@ describe('index-state × entry-point matrix (#1029 W1)', () => {
       const mathHit = parsed.results.find(r => r.metadata.file.endsWith('math.ts'));
       expect(mathHit).toBeDefined();
       expect(mathHit!.metadata.dependentCount).toBeGreaterThan(0);
+    });
+
+    // ------------------------------------------------------------------
+    // #1072: the four indistinguishable `dependentCount: 0`s, each with the
+    // disposition its TABLE row above documents. The negative control comes
+    // FIRST deliberately — it is the assertion that proves the other two
+    // haven't rebuilt #1014.
+    // ------------------------------------------------------------------
+
+    it('ok: a GENUINE resolved zero acquires nothing — no note, no omission (#1072 negative control)', async () => {
+      // `caller.ts` imports `math.ts` and nothing imports `caller.ts`, on a
+      // healthy freshly-indexed TypeScript corpus whose counts WERE computed.
+      // That is a real, useful answer, and CLAUDE.md's hard constraint applies
+      // in full: never turn a genuinely clean, freshly-indexed result into a
+      // false alarm. If this test ever goes red because a caveat appeared, the
+      // caveat is the bug.
+      await buildHealthyIndex(dir);
+      const vectorDB = await createVectorDB(dir);
+      await vectorDB.initialize();
+      expect(await vectorDB.hasDependentCounts()).toBe(true);
+
+      const result = await handleSearchCode({ query: 'useAdd' }, makeCtx(vectorDB));
+
+      const parsed = JSON.parse(result.content![0].text) as {
+        note?: string;
+        results: { metadata: { file: string; dependentCount?: number } }[];
+      };
+      const callerHit = parsed.results.find(r => r.metadata.file.endsWith('caller.ts'));
+      expect(callerHit).toBeDefined();
+      // Present, and zero — the field is NOT dropped for a resolved zero.
+      expect(callerHit!.metadata).toHaveProperty('dependentCount', 0);
+      expect(parsed.note).toBeUndefined();
+    });
+
+    it('S2-counts: omits every dependentCount and notes it once when the counts were never computed (#1072)', async () => {
+      // The same healthy corpus as the negative control, rewound to a
+      // pre-count-tracking index. Nothing about the CODE changed, so any
+      // difference in the response is purely the honesty pass doing its job.
+      await buildHealthyIndex(dir);
+      simulatePreCountTrackingIndex(getIndexDir(dir));
+
+      const vectorDB = await createVectorDB(dir);
+      await vectorDB.initialize();
+      expect(await vectorDB.hasDependentCounts()).toBe(false);
+
+      const result = await handleSearchCode({ query: 'add' }, makeCtx(vectorDB));
+
+      const parsed = JSON.parse(result.content![0].text) as {
+        note?: string;
+        results: { metadata: { file: string; dependentCount?: number } }[];
+      };
+      expect(parsed.results.length).toBeGreaterThan(0);
+      for (const r of parsed.results) {
+        expect(r.metadata).not.toHaveProperty('dependentCount');
+      }
+      expect(parsed.note).toContain('⚠ Lien:');
+      expect(parsed.note).toContain('predates reverse-dependency counting');
+      expect(parsed.note).toContain('lien index');
+      // Exactly one note for the whole response, however many results it has.
+      expect(parsed.note!.match(/predates reverse-dependency counting/g)).toHaveLength(1);
+    });
+
+    it('ok: omits a zero in a blind-spot language SILENTLY, and keeps the zero elsewhere (#1072)', async () => {
+      // Swift's whole-module `import Foundation` names no file, so no import
+      // edge can resolve anywhere in a Swift corpus (#884) — a tested,
+      // documented structural zero, not a defect. The count is dropped rather
+      // than reported as a misleading 0, and NOTHING is said: a note here would
+      // fire on essentially every search in a Swift codebase.
+      await initRepo(dir);
+      await fs.mkdir(path.join(dir, 'Sources'), { recursive: true });
+      await fs.writeFile(
+        path.join(dir, 'Sources', 'Widget.swift'),
+        [
+          'import Foundation',
+          '',
+          'public struct WidgetRenderer {',
+          '  public func renderWidget() -> String {',
+          '    return "widget"',
+          '  }',
+          '}',
+          '',
+        ].join('\n'),
+      );
+      await fs.writeFile(
+        path.join(dir, 'Sources', 'App.swift'),
+        [
+          'import Foundation',
+          '',
+          'public func runWidgetApp() -> String {',
+          '  return WidgetRenderer().renderWidget()',
+          '}',
+          '',
+        ].join('\n'),
+      );
+      // A TypeScript file in the same corpus, also with zero dependents, as the
+      // in-test control: the omission must be keyed on the LANGUAGE, not on the
+      // count being zero.
+      await fs.writeFile(
+        path.join(dir, 'widget-notes.ts'),
+        'export function renderWidget(): string {\n  return "notes";\n}\n',
+      );
+      await commitAll(dir, 'swift fixture');
+      const indexed = await indexCodebase({ rootDir: dir, verbose: false });
+      expect(indexed.success).toBe(true);
+
+      const vectorDB = await createVectorDB(dir);
+      await vectorDB.initialize();
+      expect(await vectorDB.hasDependentCounts()).toBe(true);
+
+      const result = await handleSearchCode(
+        { query: 'renderWidget', limit: 15 },
+        makeCtx(vectorDB),
+      );
+
+      const parsed = JSON.parse(result.content![0].text) as {
+        note?: string;
+        results: { metadata: { file: string; dependentCount?: number } }[];
+      };
+      const swiftHit = parsed.results.find(r => r.metadata.file.endsWith('Widget.swift'));
+      expect(swiftHit).toBeDefined();
+      expect(swiftHit!.metadata).not.toHaveProperty('dependentCount');
+
+      const tsHit = parsed.results.find(r => r.metadata.file.endsWith('widget-notes.ts'));
+      expect(tsHit).toBeDefined();
+      expect(tsHit!.metadata).toHaveProperty('dependentCount', 0);
+
+      // Silence is the disposition, not an oversight.
+      expect(parsed.note).toBeUndefined();
     });
   });
 

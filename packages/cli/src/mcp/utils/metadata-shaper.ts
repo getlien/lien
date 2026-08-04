@@ -40,6 +40,11 @@ export interface ToolResultMetadata {
    * core's vectordb/sqlite/dependent-counts.ts. Only ever populated for
    * search_code (the FTS `search` path); other tools' SearchResults don't
    * carry it, so their allowlists don't include this key.
+   *
+   * Optional for a second reason too: `search_code` deliberately OMITS it where
+   * the number would be meaningless rather than emitting a misleading `0` — see
+   * `dependent-count-honesty.ts` (#1072). Absence there means "not resolvable",
+   * never "zero", so nothing downstream may default it to 0.
    */
   dependentCount?: number;
 }

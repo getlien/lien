@@ -288,6 +288,29 @@ export class OverlayBackend implements VectorDBInterface {
     }
   }
 
+  /**
+   * See `VectorDBInterface.hasDependentCounts`. Presence of the composed flag,
+   * and nothing else — no fallback to "the tables have some rows".
+   *
+   * `SqliteBackend` DOES accept row presence as secondary proof, and the
+   * asymmetry is deliberate. There, rows can only have been written over that
+   * store's own corpus, so they really are its counts. Here, without the flag,
+   * `composedDependentCounts` falls back to MERGING the base's counts — and per
+   * that method's own doc comment the merge can resurrect an obsolete positive
+   * value, because a file whose count legitimately dropped to 0 in this worktree
+   * (the worktree masked its only base importer) has no overlay row to override
+   * the base's stale count with. Row presence there is not evidence that the
+   * numbers describe this corpus, so reporting `true` would let `search_code`
+   * publish a resurrected count as fact. The honest answer for a pre-#1071
+   * overlay is "counts unavailable" — the field is omitted and the note names
+   * `lien index`, which rebuilds the overlay and writes the composed map.
+   *
+   * Read-free either way: one small meta lookup, no count table scan.
+   */
+  async hasDependentCounts(): Promise<boolean> {
+    return this.getMeta(OVERLAY_META.DEPENDENT_COUNTS_COMPOSED) !== null;
+  }
+
   async search(query: string, limit = 5): Promise<SearchResult[]> {
     if (!query || query.trim().length === 0) return [];
     // One corpus-wide count map for BOTH corpora — see composedDependentCounts.

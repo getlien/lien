@@ -4,12 +4,13 @@ import path from 'path';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type Database from 'better-sqlite3';
 import type { ChunkMetadata } from '@liendev/parser';
-import { openDatabase } from './schema.js';
+import { openDatabase, STORE_META, setStoreMeta } from './schema.js';
 import {
   readDependentCounts,
   writeDependentCounts,
   getDependentCounts,
   refreshDependentCounts,
+  hasComputedDependentCounts,
 } from './dependent-counts.js';
 
 /**
@@ -121,5 +122,68 @@ describe('dependent_counts storage', () => {
     ];
     refreshDependentCounts(db, chunks, '/workspace');
     expect(readDependentCounts(db).get('internal/bytesconv/bytesconv.go')).toBe(1);
+  });
+});
+
+/**
+ * #1072: "an older index that never computed counts" and "a corpus whose counts
+ * are all legitimately 0" produce byte-identical tables. Only stored state can
+ * tell them apart, which is what the flag is for — and getting this wrong in
+ * either direction is a shipped defect (#1071's silent zeros one way, #1014's
+ * trained-out false caveat the other).
+ */
+describe('hasComputedDependentCounts', () => {
+  let tmpDir: string;
+  let db: Database.Database;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-depcounts-flag-'));
+    db = openDatabase(path.join(tmpDir, 'structural.db'));
+  });
+
+  afterEach(async () => {
+    db.close();
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('is false on a fresh store that has never had counts written', () => {
+    expect(hasComputedDependentCounts(db)).toBe(false);
+  });
+
+  it('is true after a write that stored rows', () => {
+    writeDependentCounts(db, new Map([['src/a.ts', 2]]));
+    expect(hasComputedDependentCounts(db)).toBe(true);
+  });
+
+  it('is TRUE after a write whose every count was legitimately 0 — the load-bearing case', () => {
+    // A Swift-only corpus: whole-module imports name no file, so nothing
+    // resolves and the table stays empty. Row presence alone would call this
+    // "never computed" and hedge a correct, freshly-indexed answer.
+    writeDependentCounts(db, new Map([['Sources/A.swift', 0]]));
+
+    expect(readDependentCounts(db).size).toBe(0);
+    expect(hasComputedDependentCounts(db)).toBe(true);
+  });
+
+  it('is true for a table with rows but no flag (an index written between #1071 and #1072)', () => {
+    // Simulate that vintage: rows written by the #1071-era writer, which had no
+    // flag to set. Rows can only come from a real computation, so they are
+    // sufficient proof on their own.
+    db.prepare('INSERT INTO dependent_counts(file, count) VALUES (?, ?)').run('src/a.ts', 4);
+    expect(hasComputedDependentCounts(db)).toBe(true);
+  });
+
+  it('survives a rewrite to an all-zero corpus without regressing to false', () => {
+    writeDependentCounts(db, new Map([['src/a.ts', 2]]));
+    writeDependentCounts(db, new Map([['src/a.ts', 0]]));
+
+    expect(readDependentCounts(db).size).toBe(0);
+    expect(hasComputedDependentCounts(db)).toBe(true);
+  });
+
+  it('reads the flag, not just the rows: a flagged empty table is still computed', () => {
+    setStoreMeta(db, STORE_META.DEPENDENT_COUNTS_COMPUTED, '1');
+    expect(readDependentCounts(db).size).toBe(0);
+    expect(hasComputedDependentCounts(db)).toBe(true);
   });
 });

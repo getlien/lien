@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import { computeDependentCountsFromChunks } from '@liendev/parser';
 import type { CodeChunk } from '@liendev/parser';
+import { STORE_META, getStoreMeta, setStoreMeta } from './schema.js';
 
 /**
  * Per-file "how many other files import this file" counts — the structural
@@ -52,8 +53,12 @@ import type { CodeChunk } from '@liendev/parser';
  * therefore lag the corpus by at most one full index run.
  *
  * An index written before this table existed simply has no rows, so every count
- * reads as `0` and the boost degrades to the pre-#1071 identity — a silent
- * no-op, never a wrong answer, until the next full index populates it.
+ * reads as `0` and the boost degrades to the pre-#1071 identity — never a wrong
+ * ranking, until the next full index populates it. It was, however, a wrong
+ * ANSWER for the `dependentCount` field `search_code` publishes, which is why
+ * `hasComputedDependentCounts` below exists: #1072 makes that state nameable so
+ * the MCP layer can omit the field and say so, instead of asserting corpus-wide
+ * zeros as fact.
  */
 
 /** One row of the `dependent_counts` table. */
@@ -115,8 +120,32 @@ export function writeDependentCounts(db: Database.Database, counts: Map<string, 
     for (const [file, count] of counts) {
       if (count > 0) insert.run(file, count);
     }
+    // Inside the transaction, so the flag can never claim counts that a
+    // half-applied write didn't actually store.
+    setStoreMeta(db, STORE_META.DEPENDENT_COUNTS_COMPUTED, '1');
   })();
   CACHE.delete(db);
+}
+
+/**
+ * True when this store's counts were actually computed over its corpus — i.e. a
+ * `dependentCount` of 0 means "no import edge resolved for this file", not
+ * "counts were never computed here" (#1072).
+ *
+ * Two ways to establish it, both sound, neither reading the SHAPE of a count:
+ * - The `DEPENDENT_COUNTS_COMPUTED` flag, written by `writeDependentCounts`
+ *   above. This is the direct proof, and the only one for a corpus whose every
+ *   count is legitimately 0 (a Swift-only codebase, a single-file project).
+ * - Failing that, any stored row at all. Only a real computation writes rows,
+ *   so their presence proves one ran — this covers an index written by a build
+ *   between #1071 (which added the table) and #1072 (which added the flag).
+ *
+ * `getDependentCounts` rather than `readDependentCounts` so the search path
+ * shares the one cached read it already performs.
+ */
+export function hasComputedDependentCounts(db: Database.Database): boolean {
+  if (getStoreMeta(db, STORE_META.DEPENDENT_COUNTS_COMPUTED) !== null) return true;
+  return getDependentCounts(db).size > 0;
 }
 
 /**

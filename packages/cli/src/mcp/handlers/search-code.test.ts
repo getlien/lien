@@ -26,7 +26,9 @@ describe('handleSearchCode', () => {
   function createMockResult(
     overrides: {
       content?: string;
-      metadata?: Partial<typeof defaultMetadata>;
+      // `SearchResult['metadata']` rather than `typeof defaultMetadata` so a
+      // test can set search-path-only fields like `dependentCount` (#1072).
+      metadata?: Partial<SearchResult['metadata']>;
       score?: number;
       relevance?: 'highly_relevant' | 'relevant' | 'loosely_related' | 'not_relevant';
     } = {},
@@ -45,6 +47,7 @@ describe('handleSearchCode', () => {
   let mockVectorDB: {
     search: ReturnType<typeof vi.fn>;
     hasData: ReturnType<typeof vi.fn>;
+    hasDependentCounts: ReturnType<typeof vi.fn>;
   };
 
   let mockCtx: ToolContext;
@@ -57,6 +60,9 @@ describe('handleSearchCode', () => {
       // Healthy-index default; individual tests override to `false` to
       // exercise the "structural store has no data at all" path.
       hasData: vi.fn().mockResolvedValue(true),
+      // Counts-were-computed default (#1072); overridden to `false` to
+      // exercise the "index predates count tracking" path.
+      hasDependentCounts: vi.fn().mockResolvedValue(true),
     };
 
     mockCtx = {
@@ -270,6 +276,86 @@ describe('handleSearchCode', () => {
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.results).toHaveLength(2);
+    });
+  });
+
+  // The four indistinguishable zeros of #1072, exercised through the handler.
+  // `dependent-count-honesty.test.ts` covers the decision function itself; these
+  // pin that the handler actually consults the BACKEND (never the shape of the
+  // results) and that the note reaches the response.
+  describe('dependentCount honesty (#1072)', () => {
+    it('leaves a genuine resolved zero completely alone — no note, no omission', async () => {
+      // The negative control. A healthy store, counts computed, a TypeScript
+      // file (no language blind spot) with zero importers: this is a real
+      // answer and must acquire nothing. #1014's cost was a caveat that fired
+      // on healthy sessions until it was trained out as noise.
+      mockVectorDB.search.mockResolvedValue([
+        createMockResult({ metadata: { file: 'src/orphan.ts', dependentCount: 0 } }),
+      ]);
+
+      const result = await handleSearchCode({ query: 'orphan helper' }, mockCtx);
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.results[0].metadata.dependentCount).toBe(0);
+      expect(parsed.note).toBeUndefined();
+    });
+
+    it('keeps a positive count in a blind-spot language (a real recovered floor)', async () => {
+      mockVectorDB.search.mockResolvedValue([
+        createMockResult({
+          metadata: { file: 'src/Widget.cs', language: 'csharp', dependentCount: 4 },
+        }),
+      ]);
+
+      const result = await handleSearchCode({ query: 'widget' }, mockCtx);
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.results[0].metadata.dependentCount).toBe(4);
+      expect(parsed.note).toBeUndefined();
+    });
+
+    it('omits a zero count in a blind-spot language, silently (no note)', async () => {
+      mockVectorDB.search.mockResolvedValue([
+        createMockResult({
+          metadata: { file: 'Sources/Widget.swift', language: 'swift', dependentCount: 0 },
+        }),
+      ]);
+
+      const result = await handleSearchCode({ query: 'widget' }, mockCtx);
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(Object.keys(parsed.results[0].metadata)).not.toContain('dependentCount');
+      // Silence is the point: a Swift-only corpus would otherwise carry this
+      // note on essentially every search.
+      expect(parsed.note).toBeUndefined();
+    });
+
+    it('omits every count and notes it once when the index predates count tracking', async () => {
+      mockVectorDB.hasDependentCounts.mockResolvedValue(false);
+      mockVectorDB.search.mockResolvedValue([
+        createMockResult({ metadata: { file: 'src/a.ts', dependentCount: 0 } }),
+        createMockResult({ metadata: { file: 'src/b.ts', dependentCount: 0 } }),
+      ]);
+
+      const result = await handleSearchCode({ query: 'anything' }, mockCtx);
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.results).toHaveLength(2);
+      for (const r of parsed.results) {
+        expect(Object.keys(r.metadata)).not.toContain('dependentCount');
+      }
+      expect(parsed.note).toContain('⚠ Lien:');
+      expect(parsed.note).toContain('predates reverse-dependency counting');
+      // One note for the whole response, not one per result.
+      expect(parsed.note.match(/predates reverse-dependency counting/g)).toHaveLength(1);
+    });
+
+    it('never asks the backend when there are no results to be honest about', async () => {
+      mockVectorDB.search.mockResolvedValue([]);
+
+      await handleSearchCode({ query: 'nothing matches this' }, mockCtx);
+
+      expect(mockVectorDB.hasDependentCounts).not.toHaveBeenCalled();
     });
   });
 

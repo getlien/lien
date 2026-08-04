@@ -11,6 +11,7 @@ import type { VectorDBInterface } from './types.js';
 import Database from 'better-sqlite3';
 import { getIndexDir } from '../utils/index-dir.js';
 import { STRUCTURAL_DB_FILENAME } from './sqlite/schema.js';
+import { OVERLAY_META } from './sqlite/overlay-schema.js';
 
 const execFileAsync = promisify(execFile);
 const git = (cwd: string, ...args: string[]) => execFileAsync('git', args, { cwd });
@@ -196,6 +197,59 @@ describe('worktree-aware indexing (integration)', () => {
     const shared = hits.find(h => h.metadata.file === 'shared.ts');
     expect(shared).toBeDefined();
     expect(shared!.metadata.dependentCount ?? 0).toBe(0);
+    close(wtDb);
+  });
+
+  it('reports hasDependentCounts()=true once the overlay has composed counts (#1072)', async () => {
+    await indexCodebase({ rootDir: worktreeRoot });
+
+    const wtDb = await createVectorDB(worktreeRoot);
+    await wtDb.initialize();
+    expect(await wtDb.hasDependentCounts()).toBe(true);
+    close(wtDb);
+  });
+
+  it('reports hasDependentCounts()=false without the composed flag, even though the base still has counts to merge (#1072)', async () => {
+    // Review finding on #1078. A pre-#1071 overlay has no composed flag, so
+    // `composedDependentCounts` falls back to merging the base's own counts —
+    // and that merge can resurrect an obsolete positive value for a file this
+    // worktree masked the last importer of. So "the merged map has rows" is NOT
+    // evidence that the numbers describe this corpus, and reporting `true` would
+    // let `search_code` publish a resurrected count as fact.
+    //
+    // Fixture: the base has `edited.ts` importing `shared.ts` (base count 1).
+    // The worktree rewrites `edited.ts` to import nothing and deletes
+    // `added.ts`, so `shared.ts`'s real composed count is 0 — with no overlay
+    // row to override the base's stale 1 with.
+    await fs.writeFile(
+      path.join(worktreeRoot, 'edited.ts'),
+      'export function editedFnV2() {\n  return 999;\n}\n',
+    );
+    await fs.rm(path.join(worktreeRoot, 'added.ts'));
+    await indexCodebase({ rootDir: worktreeRoot });
+
+    // Rewind to a pre-#1071 overlay: drop its composed counts and the flag,
+    // leaving the base's stale positive count in place. (`overlay_meta` exists
+    // only on the overlay store, never on a standalone one.)
+    const overlayDb = new Database(path.join(getIndexDir(worktreeRoot), STRUCTURAL_DB_FILENAME));
+    overlayDb.exec('DELETE FROM dependent_counts');
+    overlayDb
+      .prepare('DELETE FROM overlay_meta WHERE k = ?')
+      .run(OVERLAY_META.DEPENDENT_COUNTS_COMPOSED);
+    overlayDb.close();
+
+    // The stale positive really is still there — this is what the merge fallback
+    // would serve, and why `false` is the honest answer rather than a pedantic one.
+    const baseDb = new Database(path.join(getIndexDir(mainRoot), STRUCTURAL_DB_FILENAME));
+    const baseCount = baseDb
+      .prepare('SELECT count FROM dependent_counts WHERE file = ?')
+      .get('shared.ts') as { count: number } | undefined;
+    baseDb.close();
+    expect(baseCount?.count).toBe(1);
+
+    const wtDb = await createVectorDB(worktreeRoot);
+    await wtDb.initialize();
+    expect(await wtDb.hasDependentCounts()).toBe(false);
     close(wtDb);
   });
 
