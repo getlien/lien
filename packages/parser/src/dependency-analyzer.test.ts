@@ -8,6 +8,8 @@ import {
   findDependents,
   findReExportedSymbolsForFile,
   chunkImportsFrom,
+  hasTestImporterFromChunks,
+  hasTestImporterBruteForce,
   COMPLEXITY_THRESHOLDS,
 } from './dependency-analyzer.js';
 import { chunkByAST } from './ast/chunker.js';
@@ -1497,5 +1499,198 @@ describe('bare crate-root `use` edges end-to-end (#1056 regression)', () => {
         d => d.filepath,
       ),
     ).toEqual(['lib_macro/src/lib.rs']);
+  });
+});
+
+/**
+ * #1075: `uncoveredProductionDependents` asks "does any test file import this?"
+ * once per production dependent. It used to answer by re-scanning the WHOLE
+ * import index each time -- O(dependents x every indexed import), measured at
+ * 95% of a 166-second `get_dependents` call on a 6,356-file C# corpus. It now
+ * resolves against a test-file-only projection of that index, built once.
+ *
+ * That makes the projection a pruning OPTIMIZATION, and this is the property
+ * that keeps it from quietly becoming a second import-matching dialect: for the
+ * same chunk set, the pruned predicate and the unpruned whole-index scan must
+ * agree for EVERY file. Without it, dropping a real test importer would just
+ * inflate `uncoveredProductionDependents` into a plausible-looking larger
+ * number -- an invented "untested dependents" signal, which is the exact
+ * failure direction #1014 warns about.
+ *
+ * Mirrors `dependent-count-index.test.ts`'s brute-force equivalence block, and
+ * verified out-of-band the same way: exhaustively over every file of the eleven
+ * real corpora the CLI E2E matrix names, plus serilog and OrchardCore.
+ */
+describe('test-importer index is exact (brute-force equivalence, #1075)', () => {
+  const ROOT = '/workspace';
+
+  function chunk(
+    file: string,
+    options: {
+      imports?: string[];
+      importedSymbols?: Record<string, string[]>;
+      language?: string;
+      startLine?: number;
+    } = {},
+  ): CodeChunk {
+    return {
+      content: '// body',
+      metadata: {
+        file,
+        startLine: options.startLine ?? 1,
+        endLine: (options.startLine ?? 1) + 9,
+        type: 'function',
+        language: options.language ?? 'typescript',
+        imports: options.imports ?? [],
+        importedSymbols: options.importedSymbols,
+      } as ChunkMetadata,
+    };
+  }
+
+  /**
+   * Test importers in each language's real specifier shape, as the index
+   * actually stores it after extraction-time resolution -- same sourcing
+   * discipline as `dependent-count-index.test.ts`'s fixture.
+   */
+  const corpora: Record<string, CodeChunk[]> = {
+    'multi-language test importers': [
+      // TypeScript: a relative spec from a co-located .test.ts.
+      chunk('src/utils/logger.ts'),
+      chunk('src/app.ts', { imports: ['./utils/logger'] }),
+      chunk('src/app.test.ts', { imports: ['./app'] }),
+      // ...and a production file with NO test importer at all.
+      chunk('src/orphan.ts'),
+      chunk('src/uses-orphan.ts', { imports: ['./orphan'] }),
+
+      // Python: dotted module from a tests/ directory.
+      chunk('src/flask/app.py', { language: 'python' }),
+      chunk('tests/test_app.py', { language: 'python', imports: ['src.flask.app'] }),
+
+      // Go: an external test file importing the package directory.
+      chunk('internal/bytesconv/bytesconv.go', { language: 'go' }),
+      chunk('router_test.go', { language: 'go', imports: ['internal/bytesconv'] }),
+
+      // PHP: PSR-4 namespace from a capitalized Tests/ directory (#925).
+      chunk('app/Models/Order.php', { language: 'php' }),
+      chunk('Tests/OrderTest.php', { language: 'php', imports: ['App\\Models\\Order'] }),
+
+      // Java: an already-source-root-resolved path from src/test (#1046).
+      chunk('src/main/java/com/example/Widget.java', { language: 'java' }),
+      chunk('src/test/java/com/example/WidgetTest.java', {
+        language: 'java',
+        imports: ['src/main/java/com/example/Widget.java'],
+      }),
+
+      // Ruby: a bare multi-segment require from spec/ (#887 -- names ONE file).
+      chunk('lib/rack/protection.rb', { language: 'ruby' }),
+      chunk('lib/rack/protection/base.rb', { language: 'ruby' }),
+      chunk('spec/protection_spec.rb', { language: 'ruby', imports: ['rack/protection'] }),
+
+      // Swift: a whole-module import from XCTest -- deliberately unresolvable
+      // per file (#884), so the .swift source must come back uncovered.
+      chunk('Sources/App/Feature.swift', { language: 'swift' }),
+      chunk('Tests/AppTests/FeatureTests.swift', { language: 'swift', imports: ['App'] }),
+
+      // C#: a dotted namespace from a *Tests.cs file. `matchesFile` genuinely
+      // can't resolve this shape (the #930 type-reference tier exists for it),
+      // so this is a negative the two implementations must agree on.
+      chunk('src/Serilog.Core/Enrichers.cs', { language: 'csharp' }),
+      chunk('test/Serilog.Tests/EnricherTests.cs', {
+        language: 'csharp',
+        imports: ['Serilog.Core.Enrichers'],
+      }),
+    ],
+
+    // Where the 15x dedup happens: one test file chunked many times, each chunk
+    // replicating the file's whole import list.
+    'a test file with many chunks sharing one import list': [
+      chunk('src/target.ts'),
+      chunk('src/other.ts'),
+      ...[1, 11, 21, 31, 41].map(startLine =>
+        chunk('src/target.test.ts', { imports: ['./target', './other'], startLine }),
+      ),
+    ],
+
+    // Only the direct-bucket branch fires: the stored specifier normalizes to
+    // exactly the target key, so neither implementation runs a fuzzy match.
+    'exact-key direct bucket only': [
+      chunk('src/deep/nested/thing.ts'),
+      chunk('src/deep/nested/thing.test.ts', { imports: ['src/deep/nested/thing.ts'] }),
+    ],
+
+    // importedSymbols-only importer (no `imports` entry) -- the second half of
+    // what `addChunkToImportIndex` feeds the index.
+    'test importer via importedSymbols only': [
+      chunk('src/service.ts'),
+      chunk('src/service.spec.ts', { importedSymbols: { './service': ['Service'] } }),
+    ],
+
+    // Near-miss names that must NOT resolve: a boundary bug in either
+    // implementation would light these up.
+    'boundary near-misses': [
+      chunk('src/logger.ts'),
+      chunk('src/logger-utils.ts'),
+      chunk('src/logger-utils.test.ts', { imports: ['./logger-utils'] }),
+      chunk('src/contest.ts', { imports: ['./logger'] }),
+    ],
+
+    // A test file that is itself imported by another test file.
+    'test importing test': [
+      chunk('test/helpers/factory.ts'),
+      chunk('test/user.test.ts', { imports: ['./helpers/factory'] }),
+    ],
+
+    // Degenerate metadata: empty file string, empty specifier.
+    'degenerate metadata': [
+      chunk('', { imports: [''] }),
+      chunk('src/real.ts'),
+      chunk('src/real.test.ts', { imports: ['./real'] }),
+    ],
+  };
+
+  for (const [name, chunks] of Object.entries(corpora)) {
+    it(`agrees with the unpruned whole-index scan for every file: ${name}`, () => {
+      const files = [...new Set(chunks.map(c => c.metadata.file))];
+      const verdicts = files.map(file => {
+        const pruned = hasTestImporterFromChunks(chunks, file, ROOT);
+        expect(pruned, `${name} -> ${file}`).toBe(hasTestImporterBruteForce(chunks, file, ROOT));
+        return pruned;
+      });
+      // A corpus where nothing has a test importer would make the equivalence
+      // above vacuously true, so require each fixture to exercise both answers.
+      expect(verdicts, `${name} produced no covered file`).toContain(true);
+      expect(verdicts, `${name} produced no uncovered file`).toContain(false);
+    });
+  }
+
+  it('counts uncovered production dependents from the projected index', () => {
+    const chunks = [
+      chunk('src/target.ts'),
+      // Covered: has a test importer of its own.
+      chunk('src/covered.ts', { imports: ['./target'] }),
+      chunk('src/covered.test.ts', { imports: ['./covered'] }),
+      // Uncovered: production dependent with no test importer.
+      chunk('src/uncovered.ts', { imports: ['./target'] }),
+      // A test file that depends on the target directly is not a *production*
+      // dependent at all, so it never enters the count.
+      chunk('src/target.test.ts', { imports: ['./target'] }),
+    ];
+
+    const result = findDependents(chunks, 'src/target.ts', () => {}, ROOT);
+
+    expect(result.dependents.map(d => d.filepath).sort()).toEqual([
+      'src/covered.ts',
+      'src/target.test.ts',
+      'src/uncovered.ts',
+    ]);
+    expect(result.productionDependentCount).toBe(2);
+    expect(result.uncoveredProductionDependents).toBe(1);
+  });
+
+  it('returns zero without building the projection when every dependent is a test file', () => {
+    const chunks = [chunk('src/target.ts'), chunk('src/target.test.ts', { imports: ['./target'] })];
+    const result = findDependents(chunks, 'src/target.ts', () => {}, ROOT);
+    expect(result.productionDependentCount).toBe(0);
+    expect(result.uncoveredProductionDependents).toBe(0);
   });
 });

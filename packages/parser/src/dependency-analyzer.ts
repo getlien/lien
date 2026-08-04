@@ -2136,31 +2136,218 @@ function mergeDiscovered<T extends CodeChunk>(args: {
 }
 
 /**
+ * One distinct (test file, raw import specifier) pair from the import index.
+ *
+ * Deliberately drops the chunk `ImportIndexEntry` carries: `hasTestImporter`
+ * asks a pure existence question, and the match decision
+ * (`importMatchesTarget`) reads nothing from a chunk beyond
+ * `metadata.file` -- which is `importerFile` here. So many chunks of the same
+ * test file that each replicate the file's import list collapse to a single
+ * entry, which is where most of the reduction comes from (measured 15x on
+ * OrchardCore: 15,339 test import entries -> 1,026 distinct pairs).
+ */
+interface TestImporterEntry {
+  /** Raw (pre-normalization) specifier, as `importMatchesTarget` wants it. */
+  rawSpecifier: string;
+  /** The importing test file's raw path (the language-detection input). */
+  importerFile: string;
+}
+
+/**
+ * The test-file-only slice of an import index: same keys (normalized import
+ * specifiers), entries restricted to test-file importers and deduplicated.
+ */
+type TestImporterIndex = Map<string, TestImporterEntry[]>;
+
+/**
+ * Project an import index down to its test-file importers, once per
+ * `findDependents` call (#1075).
+ *
+ * `countUncoveredProductionDependents` asks "does any test file import this?"
+ * once per production dependent. It used to answer that by running a full
+ * `findDependentChunks` scan of the WHOLE import index per dependent, which is
+ * O(dependents x every indexed import) -- and on a corpus with a high-fan-out
+ * target that product is what made a single `get_dependents` call take two
+ * minutes: 1,131 dependents x 119k+ entries = ~135M `importMatchesTarget`
+ * calls, 95% of a 166s profile. Nothing about the answer needed those 135M
+ * questions; the non-test importers were all discarded immediately after being
+ * matched.
+ *
+ * So this is the same build-once/resolve-many split #1073
+ * (`buildCSharpTypeReferenceIndex`) and #1071 (`computeDependentCountsFromChunks`)
+ * already use: pay one pass over the index, then answer each dependent against
+ * a set ~100x smaller. It is a projection, not a different matching dialect --
+ * the surviving entries go through the identical `importMatchesTarget`
+ * decision, in the identical two-branch (direct bucket, then fuzzy) order.
+ *
+ * Iterates the already-built `importIndex` rather than the raw chunks on
+ * purpose: its keys are the normalized specifiers this index needs anyway, and
+ * its entries have already had the build-time #884 whole-module drop applied,
+ * so re-deriving either from chunks would be a second implementation of a
+ * decision that is already made.
+ */
+function buildTestImporterIndex<T extends CodeChunk>(
+  importIndex: Map<string, ImportIndexEntry<T>[]>,
+): TestImporterIndex {
+  const testIndex: TestImporterIndex = new Map();
+  const isTest = createIsTestFileMemo();
+
+  for (const [normalizedImport, entries] of importIndex.entries()) {
+    const bucket = collectTestImporterBucket(entries, isTest);
+    if (bucket.length > 0) testIndex.set(normalizedImport, bucket);
+  }
+
+  return testIndex;
+}
+
+/**
+ * The test-file importers of one import-index bucket, deduplicated by
+ * (importer file, raw specifier) -- see `TestImporterEntry` for why the chunk
+ * itself is dropped. NUL joins the two halves of the dedup key because it is
+ * the one byte a file path cannot contain, so no (importer, specifier) pair can
+ * collide with a different one by straddling the separator.
+ */
+function collectTestImporterBucket<T extends CodeChunk>(
+  entries: ImportIndexEntry<T>[],
+  isTest: (filepath: string) => boolean,
+): TestImporterEntry[] {
+  const bucket: TestImporterEntry[] = [];
+  const seen = new Set<string>();
+
+  for (const entry of entries) {
+    const importerFile = entry.chunk.metadata.file;
+    if (!isTest(importerFile)) continue;
+    const pairKey = `${importerFile}\u0000${entry.rawSpecifier}`;
+    if (seen.has(pairKey)) continue;
+    seen.add(pairKey);
+    bucket.push({ rawSpecifier: entry.rawSpecifier, importerFile });
+  }
+
+  return bucket;
+}
+
+/**
+ * Memoized `isTestFile`, for one index build. The import index holds an entry
+ * per (chunk, specifier), so the same file path is asked about many times over;
+ * `isTestFile` is a battery of regexes and its answer per path never changes.
+ */
+function createIsTestFileMemo(): (filepath: string) => boolean {
+  const cache = new Map<string, boolean>();
+  return (filepath: string): boolean => {
+    const cached = cache.get(filepath);
+    if (cached !== undefined) return cached;
+    const result = isTestFile(filepath);
+    cache.set(filepath, result);
+    return result;
+  };
+}
+
+/**
+ * Does any test file import `normalizedTarget`?
+ *
+ * Mirrors `findDependentChunks`'s two branches exactly, which is what makes
+ * this equivalent to the previous "scan every importer, then ask which ones
+ * were test files":
+ * - A bucket keyed exactly `normalizedTarget` counts unconditionally. Those
+ *   keys were built with the same normalizer and already passed the build-time
+ *   #884 prune, so `findDependentChunks` never re-guards them either.
+ * - Every other bucket's entries go through `importMatchesTarget`, once per
+ *   distinct (importer, specifier) pair.
+ *
+ * Returns on the first hit instead of materializing every importer, since the
+ * caller only ever needed the boolean.
+ */
+function hasTestImporter(
+  normalizedTarget: string,
+  testIndex: TestImporterIndex,
+  normalizePathCached: (path: string) => string,
+): boolean {
+  const direct = testIndex.get(normalizedTarget);
+  if (direct !== undefined && direct.length > 0) return true;
+
+  for (const [normalizedImport, entries] of testIndex.entries()) {
+    if (normalizedImport === normalizedTarget) continue;
+    // `.some` short-circuits, so this stops at the first matching importer
+    // exactly as an early-returning loop would.
+    const matched = entries.some(entry =>
+      importMatchesTarget(
+        entry.rawSpecifier,
+        entry.importerFile,
+        normalizedTarget,
+        normalizePathCached,
+      ),
+    );
+    if (matched) return true;
+  }
+  return false;
+}
+
+/**
  * For each production dependent, check whether any test file imports it.
- * Reuses the existing `importIndex` — no fresh scan.
+ * Builds the test-file-only projection of `ctx.importIndex` once (see
+ * `buildTestImporterIndex`) and resolves every dependent against that, rather
+ * than re-scanning the whole index per dependent.
  */
 function countUncoveredProductionDependents<T extends CodeChunk>(
   dependents: DependentInfo[],
   ctx: ScanContext<T>,
 ): number {
+  const productionDependents = dependents.filter(d => !d.isTestFile);
+  if (productionDependents.length === 0) return 0;
+
+  const testIndex = buildTestImporterIndex(ctx.importIndex);
   let uncovered = 0;
-  for (const d of dependents) {
-    if (d.isTestFile) continue;
-    if (!hasTestImporter(d.filepath, ctx)) uncovered += 1;
+  for (const d of productionDependents) {
+    if (!hasTestImporter(ctx.normalizePathCached(d.filepath), testIndex, ctx.normalizePathCached)) {
+      uncovered += 1;
+    }
   }
   return uncovered;
 }
 
-function hasTestImporter<T extends CodeChunk>(filepath: string, ctx: ScanContext<T>): boolean {
+/**
+ * Unpruned reference implementation of the `hasTestImporter` predicate: the
+ * whole-import-index scan `countUncoveredProductionDependents` did before
+ * #1075, expressed over a raw chunk set.
+ *
+ * Exists solely as the brute-force oracle the equivalence test checks the
+ * fast path against -- the same role `computeDependentCountsBruteForce` plays
+ * for `dependent-count-index.ts` (#1071). Production code must never call it:
+ * it rebuilds the scan index per query and is O(every indexed import) per
+ * question, which is precisely the cost #1075 removed.
+ */
+export function hasTestImporterBruteForce<T extends CodeChunk>(
+  chunks: Iterable<T>,
+  filepath: string,
+  workspaceRoot: string,
+): boolean {
+  const normalizePathCached = createPathNormalizer(workspaceRoot);
+  const { importIndex } = buildScanIndex(chunks, normalizePathCached);
   const importers = findDependentChunks(
-    ctx.normalizePathCached(filepath),
-    ctx.importIndex,
-    ctx.normalizePathCached,
+    normalizePathCached(filepath),
+    importIndex,
+    normalizePathCached,
   );
-  for (const chunk of importers) {
-    if (isTestFile(chunk.metadata.file)) return true;
-  }
-  return false;
+  return importers.some(chunk => isTestFile(chunk.metadata.file));
+}
+
+/**
+ * The fast path `hasTestImporterBruteForce` is checked against, over the same
+ * raw chunk-set input. Test-facing counterpart only -- `findDependents` builds
+ * its scan index once per call and goes straight to `buildTestImporterIndex`.
+ */
+export function hasTestImporterFromChunks<T extends CodeChunk>(
+  chunks: Iterable<T>,
+  filepath: string,
+  workspaceRoot: string,
+): boolean {
+  const normalizePathCached = createPathNormalizer(workspaceRoot);
+  const { importIndex } = buildScanIndex(chunks, normalizePathCached);
+  return hasTestImporter(
+    normalizePathCached(filepath),
+    buildTestImporterIndex(importIndex),
+    normalizePathCached,
+  );
 }
 
 /**

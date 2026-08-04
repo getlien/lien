@@ -10,6 +10,7 @@ import {
   hasSingleFileImportSemantics,
   hasPythonModuleSemantics,
   hasNamespaceMatchingSemantics,
+  clearImporterSemanticsCache,
 } from './path-matching.js';
 import { markRustModSpecifier } from './rust-mod-marker.js';
 
@@ -1337,4 +1338,119 @@ describe('resolveWorkspaceImport', () => {
       'packages/parser/src/foo',
     );
   });
+});
+
+/**
+ * #1075 memoized the four per-importer-file language decisions
+ * (`importerLanguageSemantics`) because deriving them cost 42% of a large
+ * `findDependents` call. The registry those decisions read is frozen at module
+ * load, so a warm cache must be indistinguishable from a cold one -- these are
+ * the tests that hold that line, since a stale or cross-contaminated record
+ * would silently change which `matchesFile` strategies run for a whole
+ * language.
+ */
+describe('importer language semantics are memoized without changing any answer', () => {
+  const normalize = (p: string): string => normalizePath(p, '/fake/workspace');
+
+  /** One representative importer path per registered language, plus non-AST shapes. */
+  const importers = [
+    'src/app.ts',
+    'src/app.tsx',
+    'src/app.js',
+    'src/app.mjs',
+    'app/Models/User.php',
+    'src/flask/app.py',
+    'src/error.rs',
+    'internal/fs/fs.go',
+    'src/main/java/com/example/Widget.java',
+    'src/Serilog.Core/Enrichers.cs',
+    'lib/rack/protection.rb',
+    'src/main/kotlin/com/example/Json.kt',
+    'Source/Alamofire.swift',
+    // Non-AST / degenerate shapes: no extension, unknown extension, empty.
+    'Makefile',
+    'docs/readme.md',
+    'src/no-extension-here',
+    '',
+  ];
+
+  /** The four predicates, each asked directly. */
+  const answersFor = (importerFile: string) => ({
+    wholeModuleBare: isUnresolvableWholeModuleImport('Foundation', importerFile),
+    wholeModuleSlashed: isUnresolvableWholeModuleImport('a/b', importerFile),
+    singleFile: hasSingleFileImportSemantics(importerFile),
+    python: hasPythonModuleSemantics(importerFile),
+    namespace: hasNamespaceMatchingSemantics(importerFile),
+  });
+
+  it('answers identically cold, warm, and after a clear', () => {
+    clearImporterSemanticsCache();
+    const cold = importers.map(answersFor);
+    const warm = importers.map(answersFor);
+    clearImporterSemanticsCache();
+    const afterClear = importers.map(answersFor);
+
+    expect(warm).toEqual(cold);
+    expect(afterClear).toEqual(cold);
+  });
+
+  it('keeps each language distinct rather than serving a neighbour cache entry', () => {
+    clearImporterSemanticsCache();
+    // Interleave languages so a per-file cache miss/hit ordering bug would show.
+    for (const importerFile of [...importers, ...importers.slice().reverse()]) {
+      expect(answersFor(importerFile)).toEqual(expectedFor(importerFile));
+    }
+  });
+
+  it('gives importMatchesTarget the same verdict cold and warm, per language shape', () => {
+    const cases: Array<[string, string, string]> = [
+      // [specifier, importerFile, normalizedTarget]
+      ['./utils/logger', 'src/app.ts', 'src/utils/logger'],
+      ['src.flask.app', 'tests/test_app.py', 'src/flask/app'],
+      ['App\\Models\\Order', 'app/Services/OrderService.php', 'app/Models/Order'],
+      ['rack/protection', 'lib/sinatra/base.rb', 'rack/protection/base'],
+      ['internal/bytesconv', 'tree.go', 'internal/bytesconv/bytesconv'],
+      ['Alamofire', 'Source/Request.swift', 'Source/Alamofire'],
+      ['Serilog.Core.Enrichers', 'src/App.cs', 'src/Serilog.Core/Enrichers'],
+      ['crate::Error', 'src/context.rs', 'src/error'],
+    ];
+
+    clearImporterSemanticsCache();
+    const cold = cases.map(([s, f, t]) => importMatchesTarget(s, f, t, normalize));
+    const warm = cases.map(([s, f, t]) => importMatchesTarget(s, f, t, normalize));
+    expect(warm).toEqual(cold);
+    // Pin the actual verdicts too, so a cache that memoized the WRONG record
+    // consistently can't pass by being consistently wrong. Each value was read
+    // off the pre-#1075 build, not guessed: Ruby's `rack/protection` correctly
+    // refuses the "child file" (#887), Swift's bare `Alamofire` refuses the
+    // basename coincidence (#884), a C# dotted namespace is genuinely
+    // unresolvable by `matchesFile` (which is why the #930 type-reference tier
+    // exists), and a Rust bare `crate::Error` no longer self-matches
+    // `src/error.rs` (#1028).
+    expect(cold).toEqual([true, true, true, false, true, false, false, false]);
+  });
+
+  it('survives eviction at the cache bound', () => {
+    clearImporterSemanticsCache();
+    const before = answersFor('lib/rack/protection.rb');
+    // The cache clears wholesale at 20_000 entries; overflow it and re-ask.
+    for (let i = 0; i < 20_050; i++) hasSingleFileImportSemantics(`src/generated/f${i}.ts`);
+    expect(answersFor('lib/rack/protection.rb')).toEqual(before);
+    expect(answersFor('src/flask/app.py').python).toBe(true);
+  });
+
+  /** Independent expectations, derived from each language's documented flags. */
+  function expectedFor(importerFile: string) {
+    const ruby = importerFile.endsWith('.rb');
+    const php = importerFile.endsWith('.php');
+    const python = importerFile.endsWith('.py');
+    const swift = importerFile.endsWith('.swift');
+    return {
+      wholeModuleBare: swift,
+      wholeModuleSlashed: false,
+      singleFile: ruby,
+      python,
+      namespace: php,
+    };
+  }
 });
