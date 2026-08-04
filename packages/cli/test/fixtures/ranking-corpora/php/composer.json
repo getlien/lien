@@ -1,0 +1,8 @@
+{
+  "name": "lien-fixtures/ranking-php",
+  "autoload": {
+    "psr-4": {
+      "RankingPhp\\": "src/"
+    }
+  }
+}

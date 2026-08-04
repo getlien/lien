@@ -40,15 +40,53 @@ Find code with terms: jwt token validation verify
   "results": [
     {
       "content": "async function authenticateUser(credentials) { ... }",
-      "file": "src/auth/authenticate.ts",
-      "startLine": 23,
-      "endLine": 45,
       "score": 0.94,
-      "relevance": "highly_relevant"
+      "relevance": "highly_relevant",
+      "metadata": {
+        "file": "src/auth/authenticate.ts",
+        "startLine": 23,
+        "endLine": 45,
+        "symbolName": "authenticateUser",
+        "dependentCount": 12
+      }
     }
   ]
 }
 ```
+
+### Ranking, and what `dependentCount` means
+
+Results are ordered by BM25, then nudged by structural importance: a file that
+more other files import ranks slightly higher among similarly-relevant matches.
+The nudge is capped and usually only breaks ties, but a very well-connected hub
+file can outrank a marginally better lexical match. Each result's own
+`score`/`relevance` always describe its **pure lexical** match quality and are
+never recomputed from the nudge, so list order and an individual result's
+`relevance` label can legitimately disagree — trust the order for "what to look
+at first", `relevance` for "how good is this specific match". Set
+`LIEN_STRUCTURAL_RANKING=off` to disable the nudge and fall back to pure BM25.
+
+`dependentCount` is how many other indexed files import this file, resolved with
+the same import-matching rules `get_dependents` uses. It is a **floor**, not
+`get_dependents`' authoritative count: it is file-level only and does not follow
+re-export/barrel chains, so a module fronted by a barrel can read lower than its
+real blast radius.
+
+A `0` means "no import edge resolved", which is not the same as "nothing depends
+on this file". Some languages' import forms name no specific file at all —
+Swift's whole-module `import Foundation` style being the clearest case — so every
+file in such a codebase reads `0`.
+
+The counts are precomputed at index time, not per query, and are refreshed by a
+full index run (and, in a linked worktree, by an overlay rebuild) rather than by
+every incremental single-file update. Two consequences worth knowing: an index
+written before this field existed reports `0` for everything until its next full
+`lien index`, so if *every* result shows `0` you should suspect a stale index
+rather than an unusually disconnected codebase; and a count can lag the working
+tree by at most one full index run.
+
+Unlike `get_dependents`, this field carries no `attributionCaveat`, so treat a
+`0` here as "unknown", never as a verified clear.
 
 ### Best Practices
 

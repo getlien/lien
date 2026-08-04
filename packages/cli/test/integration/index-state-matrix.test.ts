@@ -216,6 +216,23 @@ const TABLE: TableRow[] = [
   },
   { entryPoint: 'search_code', state: 'ok', expected: 'real hit, no note' },
   {
+    // #1071 added a SECOND index-state axis to this one tool: `dependentCount`
+    // (and the ranking boost derived from it) now comes from the precomputed
+    // `dependent_counts` table, not from a resolution pass on the query path.
+    // That table is written at the end of a full index, so an index built by a
+    // pre-#1071 version has a healthy `chunks` table and an EMPTY counts table
+    // — a state no other entry point has. It degrades to the pre-#1071
+    // behaviour (every count 0, boost = identity), which is a silent no-op
+    // rather than a wrong answer; the honesty gap of asserting a bare `0` is
+    // tracked separately in #1072, which owns the caveat vocabulary for it.
+    // The row exists so that "healthy index, empty counts" is a documented
+    // state rather than a discovery, and so the `ok` assertion below pins that
+    // a genuinely fresh index does NOT land in it.
+    entryPoint: 'search_code',
+    state: 'ok',
+    expected: 'dependent_counts populated by the full index; dependentCount reflects real edges',
+  },
+  {
     entryPoint: 'list_functions',
     state: 'S1',
     expected: 'note: "⚠ Lien: ... no data"',
@@ -903,6 +920,33 @@ describe('index-state × entry-point matrix (#1029 W1)', () => {
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.results.length).toBeGreaterThan(0);
       expect(parsed.note).toBeUndefined();
+    });
+
+    it('ok: a full index leaves dependent_counts POPULATED, not silently empty (#1071)', async () => {
+      // The state this pins shut: `dependent_counts` is written by
+      // `indexCodebase` at the end of a full run. If that call were ever
+      // dropped, every `search_code` result would carry `dependentCount: 0`
+      // and the structural ranking boost would silently degrade to the
+      // identity function — indistinguishable, from the outside, from a
+      // codebase where nothing imports anything. That is precisely how the
+      // #1071 defect survived from #773: a broken count reads as a plausible
+      // count. `buildHealthyIndex` seeds a fixture with a real import edge, so
+      // a populated table is the only correct outcome here.
+      await buildHealthyIndex(dir);
+      const vectorDB = await createVectorDB(dir);
+      await vectorDB.initialize();
+
+      // Asserted through the public surface an agent actually sees, not the
+      // table: `math.ts` is imported by both `index.ts` and `math.test.ts` in
+      // `writeHealthyFixture`, so a working pipeline reports a positive count
+      // for it.
+      const result = await handleSearchCode({ query: 'add' }, makeCtx(vectorDB));
+      const parsed = JSON.parse(result.content![0].text) as {
+        results: { metadata: { file: string; dependentCount?: number } }[];
+      };
+      const mathHit = parsed.results.find(r => r.metadata.file.endsWith('math.ts'));
+      expect(mathHit).toBeDefined();
+      expect(mathHit!.metadata.dependentCount).toBeGreaterThan(0);
     });
   });
 

@@ -31,6 +31,7 @@ import {
   validateBatchLengths,
 } from './write-ops.js';
 import { keywordSearch } from './fts-search.js';
+import { refreshDependentCounts } from './dependent-counts.js';
 
 /**
  * SQLite + FTS5 structural backend implementing VectorDBInterface.
@@ -47,7 +48,7 @@ export class SqliteBackend implements VectorDBInterface {
   private lastVersionCheck = 0;
   private currentVersion = 0;
 
-  constructor(projectRoot: string) {
+  constructor(private readonly projectRoot: string) {
     const repoId = extractRepoId(projectRoot);
     // The manifest and .lien-index-version file live in this directory
     // too and must stay put.
@@ -89,6 +90,19 @@ export class SqliteBackend implements VectorDBInterface {
     const db = this.requireDb();
     validateBatchLengths(metadatas, contents);
     insertChunks(db, metadatas, contents);
+  }
+
+  /**
+   * Recompute the `dependent_counts` table over this store's entire chunk set
+   * (#1071). `readAllRecords` is the same full read `scanAll()` already performs,
+   * so this adds one corpus read plus the resolution pass — measured at ~120 ms
+   * for 11k chunks and ~1.8 s for 53k, paid once per full index rather than on
+   * the query path.
+   */
+  async refreshDependentCounts(): Promise<void> {
+    const db = this.requireDb();
+    const chunks = readAllRecords(db).map(recordToUnscoredResult);
+    refreshDependentCounts(db, chunks, this.projectRoot);
   }
 
   async search(query: string, limit: number = 5): Promise<SearchResult[]> {

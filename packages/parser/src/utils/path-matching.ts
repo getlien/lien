@@ -79,6 +79,31 @@ export function normalizePath(path: string, workspaceRoot: string): string {
 }
 
 /**
+ * Creates a cached `normalizePath` wrapper, to avoid repeating the same string
+ * work for a path (or import specifier) seen many times in one analysis pass.
+ *
+ * Lives here rather than in `dependency-analyzer.ts` (its original home) so the
+ * batch reverse-dependency pass in `dependent-count-index.ts` shares the exact
+ * same normalizer construction as `analyzeDependencies`/`findDependents` --
+ * `importMatchesTarget` takes the caller's normalizer as a parameter, and two
+ * call sites building it differently is precisely how a "same decision,
+ * implemented at N sites" divergence starts.
+ *
+ * @param workspaceRoot - The workspace root directory for path normalization
+ * @returns A function that normalizes and caches file paths
+ */
+export function createPathNormalizer(workspaceRoot: string): (path: string) => string {
+  const cache = new Map<string, string>();
+  return (p: string): string => {
+    const cached = cache.get(p);
+    if (cached !== undefined) return cached;
+    const normalized = normalizePath(p, workspaceRoot);
+    cache.set(p, normalized);
+    return normalized;
+  };
+}
+
+/**
  * Checks if a pattern matches at path component boundaries.
  *
  * Ensures matches occur at proper path boundaries (/) to avoid false positives like:

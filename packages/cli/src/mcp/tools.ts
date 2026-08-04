@@ -31,7 +31,7 @@ Ranking: results are ordered by BM25, then nudged by structural importance — f
 
 Returns:
 - results[]: { content, score, relevance, metadata: { file, startLine, endLine, language?, symbolName?, symbolType?, signature?, enclosingSymbol?, dependentCount? } }
-- dependentCount: how many other indexed files import this file — a cheap approximation (not get_dependents' authoritative count); higher means riskier to change carelessly
+- dependentCount: how many other indexed files import this file, resolved with the same import-matching rules get_dependents uses. Still a FLOOR, not get_dependents' authoritative count: it is file-level only, and it does not follow re-export/barrel chains, so a barrel-fronted module can read lower than its real blast radius. Higher means riskier to change carelessly. A 0 means "no import edge resolved", which is not the same as "nothing depends on this" — some languages' import forms (notably Swift's whole-module \`import Foundation\` style) are not resolvable to a specific file at all, so every file in such a corpus reads 0. An index written before this field was precomputed also reads 0 everywhere until the next full \`lien index\`, so if EVERY result shows 0, suspect a stale index before concluding anything about the codebase
 - enclosingSymbol: "Class.method" for methods, "functionName" for standalone functions, absent for block chunks
 - relevance: "highly_relevant" | "relevant" | "loosely_related" (not_relevant auto-filtered) — pure lexical match quality, independent of ranking order`,
   ),

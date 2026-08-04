@@ -38,6 +38,7 @@ export {
 
 export {
   normalizePath,
+  createPathNormalizer,
   matchesFile,
   getCanonicalPath,
   isTestFile,
@@ -166,10 +167,15 @@ export {
 // files (e.g. `get_files_context`'s `findTestAssociations`) build the
 // project-wide index once and reuse it, instead of calling
 // `findCSharpTypeReferenceDependents` (which rebuilds it) per file.
+// `resolveCSharpTypeReferenceDependentsBruteForce` is #1071's never-pruned
+// oracle -- exported (like `dependent-count-index.ts`'s
+// `computeDependentCountsBruteForce`) purely so equivalence can be checked
+// from outside the module; never call it in production.
 export {
   findCSharpTypeReferenceDependents,
   buildCSharpTypeReferenceIndex,
   resolveCSharpTypeReferenceDependents,
+  resolveCSharpTypeReferenceDependentsBruteForce,
 } from './csharp-type-reference-signals.js';
 export type { CSharpTypeReferenceIndex } from './csharp-type-reference-signals.js';
 
@@ -186,6 +192,17 @@ export {
   isRootLevelGoFile,
 } from './go-root-package-signals.js';
 export type { GoRootPackageIndex } from './go-root-package-signals.js';
+
+// #1071: batch reverse-dependency counts for EVERY file in one pass, resolving
+// through the same guarded `importMatchesTarget` decision `findDependents` uses
+// (plus the C#/Go recovery tiers above) rather than a private relative-only
+// matcher. Feeds `search_code`'s structural ranking boost, precomputed at index
+// time -- see dependent-count-index.ts's module doc for the candidate-index
+// pruning argument and for what is deliberately not counted.
+export {
+  computeDependentCountsFromChunks,
+  computeDependentCountsBruteForce,
+} from './dependent-count-index.js';
 
 // =============================================================================
 // GRAPH TRAVERSAL (generic bounded BFS — domain graphs build on this)

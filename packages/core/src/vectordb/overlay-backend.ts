@@ -30,7 +30,15 @@ import {
   deleteFileChunks,
   validateBatchLengths,
 } from './sqlite/write-ops.js';
-import { keywordSearch } from './sqlite/fts-search.js';
+import {
+  keywordSearch,
+  applyStructuralBoost,
+  structuralRankingEnabled,
+} from './sqlite/fts-search.js';
+import {
+  readDependentCounts,
+  refreshDependentCounts as refreshOverlayDependentCounts,
+} from './sqlite/dependent-counts.js';
 import {
   openOverlayDatabase,
   OVERLAY_META,
@@ -66,6 +74,40 @@ function isSqliteBusy(error: unknown): boolean {
  *   - `insertBatch` / `updateFile`: write overlay rows; `updateFile` also masks
  *     `f` when `f ∈ base`.
  */
+/**
+ * Merge two corpora's already-ranked hit lists into one order (#1071).
+ *
+ * `keywordSearch` applies the structural boost WITHIN each corpus, but each
+ * result only carries the pure-bm25 `score` it was scored with -- the boosted
+ * sort key is internal to that function. Re-sorting the merged list by `score`
+ * therefore threw the boost away at exactly the moment both corpora had finally
+ * been given one corpus-wide count map to agree on: an overlay-served hub file
+ * with 80 dependents could land below a base-served file with a marginally
+ * better lexical match, even with ranking enabled. That is the same
+ * silently-does-nothing failure #1071 is about, one layer up.
+ *
+ * So the boost is reapplied here over the merged list. `score` is
+ * `round4((1 - ratio) * 2)` (see `scoreRow`), so `ratio` recovers exactly as
+ * `1 - score / 2` -- no need to widen `keywordSearch`'s return type to carry an
+ * internal sort key across a package boundary.
+ *
+ * With `LIEN_STRUCTURAL_RANKING=off` this is pure `score` ascending, identical to
+ * the pre-#1071 merge, so the escape hatch keeps meaning what it says.
+ */
+function mergeRankedHits(
+  overlayHits: SearchResult[],
+  baseHits: SearchResult[],
+  limit: number,
+): SearchResult[] {
+  const merged = [...overlayHits, ...baseHits];
+  if (!structuralRankingEnabled()) {
+    return merged.sort((a, b) => a.score - b.score).slice(0, limit);
+  }
+  const boosted = (hit: SearchResult): number =>
+    applyStructuralBoost(1 - hit.score / 2, hit.metadata.dependentCount ?? 0);
+  return merged.sort((a, b) => boosted(b) - boosted(a)).slice(0, limit);
+}
+
 export class OverlayBackend implements VectorDBInterface {
   public readonly dbPath: string;
   public readonly isOverlay = true;
@@ -188,18 +230,78 @@ export class OverlayBackend implements VectorDBInterface {
 
   // ── Reads ──────────────────────────────────────────────────────────────
 
+  /**
+   * The composed reverse-dependency counts for this worktree (#1071).
+   *
+   * Each connection's own `dependent_counts` table describes only its own
+   * corpus, so reading either in isolation is the #1050/#1051 mistake: the
+   * overlay alone reports near-zero for a fresh worktree whose files mostly live
+   * in the shared base, and the base alone cannot see the worktree's own
+   * divergences.
+   *
+   * `refreshDependentCounts()` resolves that by writing the FULL composed map
+   * into the overlay table, so once it has run the overlay table is the whole
+   * truth and is used ALONE. It deliberately is not merged over the base, which
+   * would be wrong in a way that is easy to miss (found in review): a zero is
+   * stored as the ABSENCE of a row, so a file whose count legitimately drops to
+   * 0 in this worktree — the worktree masked its only base importer — has no
+   * overlay row to override the base's stale positive value with. Merging would
+   * resurrect that old count as if nothing had changed.
+   *
+   * The base is consulted only when this overlay has never had composed counts
+   * written at all (an overlay built by a version predating #1071). Then the
+   * base's own counts still serve every unmasked base file, which is strictly
+   * better than collapsing the whole worktree to 0 — and, being pre-#1071 data,
+   * it cannot be masking a divergence this overlay knows about.
+   *
+   * Keyed on the presence of the `DEPENDENT_COUNTS_COMPOSED` meta flag rather
+   * than on the table being non-empty, so a composed corpus whose every count is
+   * genuinely 0 (nothing imports anything) is not mistaken for "never computed"
+   * and silently handed the base's numbers.
+   */
+  private composedDependentCounts(): Map<string, number> {
+    const overlay = this.requireOverlay();
+    if (this.getMeta(OVERLAY_META.DEPENDENT_COUNTS_COMPOSED)) {
+      return readDependentCounts(overlay);
+    }
+    return new Map([...this.baseDependentCounts(), ...readDependentCounts(overlay)]);
+  }
+
+  /**
+   * The base store's own stored counts, or an empty map if it has none to give.
+   *
+   * The base connection is opened `{ readonly: true }` by `openBase()`, so
+   * `openDatabase`'s `CREATE TABLE IF NOT EXISTS` never runs against it — a base
+   * index written by a pre-#1071 version genuinely has no `dependent_counts`
+   * table, and the read throws `SQLITE_ERROR: no such table`. That must degrade
+   * to "no base counts" (the pre-#1071 behaviour: every count 0, boost =
+   * identity), never crash `search()`. Mirrors `baseRead`'s existing
+   * swallow-to-empty resilience, which exists because the base can also vanish
+   * mid-serve.
+   */
+  private baseDependentCounts(): Map<string, number> {
+    if (!this.baseDb) return new Map();
+    try {
+      return readDependentCounts(this.baseDb);
+    } catch {
+      return new Map();
+    }
+  }
+
   async search(query: string, limit = 5): Promise<SearchResult[]> {
     if (!query || query.trim().length === 0) return [];
+    // One corpus-wide count map for BOTH corpora — see composedDependentCounts.
+    const counts = this.composedDependentCounts();
     const { overlayHits, mask } = this.overlaySnapshot(db => ({
-      overlayHits: keywordSearch(db, query, limit),
+      overlayHits: keywordSearch(db, query, limit, counts),
       mask: this.loadMask(),
     }));
-    const baseHits = this.baseRead(db => keywordSearch(db, query, limit)).filter(
+    const baseHits = this.baseRead(db => keywordSearch(db, query, limit, counts)).filter(
       h => !mask.has(h.metadata.file),
     );
     // BM25 ranks are corpus-relative; merging two corpora yields an approximate
-    // global order (documented v1 caveat). score is lower-is-better.
-    return [...overlayHits, ...baseHits].sort((a, b) => a.score - b.score).slice(0, limit);
+    // global order (documented v1 caveat).
+    return mergeRankedHits(overlayHits, baseHits, limit);
   }
 
   async scanWithFilter(options: {
@@ -474,8 +576,46 @@ export class OverlayBackend implements VectorDBInterface {
       throw error;
     }
 
-    if (changed) this.reclaimSpace();
+    if (changed) {
+      // Derived-data refresh belongs with the swap that invalidates it, not with
+      // the caller: `buildOverlay` should not have to remember that a content
+      // change makes the ranking counts stale (#1071). Deliberately AFTER the
+      // commit rather than inside the swap transaction -- the swap must stay the
+      // minimal all-or-nothing content exchange, and a stale count is a soft
+      // ranking imprecision, not a corpus inconsistency.
+      this.refreshDependentCountsSync();
+      this.reclaimSpace();
+    }
     return { changed };
+  }
+
+  /**
+   * Recompute the overlay's `dependent_counts` table over the COMPOSED corpus
+   * (#1071): `unionRecords(readAllRecords)` is `(base − masked) ∪ overlay`, the
+   * exact set every read path here serves. Writing base-derived counts into the
+   * overlay table is correct precisely because the base store is opened
+   * read-only and can never be written from a worktree — the overlay is the only
+   * place a composed answer can live.
+   *
+   * Runs after `applyRebuild`, outside its swap transaction: the swap must stay
+   * the minimal all-or-nothing content exchange, and a stale count is a soft
+   * ranking imprecision, not a corpus inconsistency.
+   */
+  async refreshDependentCounts(): Promise<void> {
+    this.refreshDependentCountsSync();
+  }
+
+  /**
+   * The actual work behind `refreshDependentCounts`, synchronous so
+   * `applyRebuild` (which is sync, and is the point at which the counts become
+   * stale) can call it directly.
+   */
+  private refreshDependentCountsSync(): void {
+    const chunks = this.unionRecords(readAllRecords).map(recordToUnscoredResult);
+    refreshOverlayDependentCounts(this.requireOverlay(), chunks, this.worktreeRoot);
+    // Marks the overlay table authoritative from here on — see
+    // `composedDependentCounts` for why presence-of-flag and not non-emptiness.
+    this.setMeta(OVERLAY_META.DEPENDENT_COUNTS_COMPOSED, '1');
   }
 
   /** Best-effort in-place disk reclamation after a content swap (same file

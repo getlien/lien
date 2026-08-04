@@ -82,6 +82,11 @@ CREATE TABLE IF NOT EXISTS chunks (
 
 CREATE INDEX IF NOT EXISTS idx_chunks_file ON chunks(file);
 
+CREATE TABLE IF NOT EXISTS dependent_counts (
+  file TEXT PRIMARY KEY,
+  count INTEGER NOT NULL
+) WITHOUT ROWID;
+
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
   symbolName, symbolTokens, content,
   content='chunks', content_rowid='id',
@@ -105,6 +110,32 @@ CREATE TRIGGER IF NOT EXISTS chunks_au AFTER UPDATE ON chunks BEGIN
   VALUES (new.id, new.symbolName, new.symbolTokens, new.content);
 END;
 `;
+
+/**
+ * `dependent_counts` (added #1071) is the one non-chunk, non-FTS table: a
+ * precomputed per-file reverse-dependency count keyed on the same raw
+ * `chunks.file` string, so `fts-search.ts`'s ranking boost is a single indexed
+ * `SELECT` rather than a whole-corpus resolution pass on the query path. See
+ * dependent-counts.ts's module doc for why the count cannot be computed cheaply
+ * enough to stay lazy, and for the freshness contract.
+ *
+ * `WITHOUT ROWID` because the table is exactly a `file -> count` map and is
+ * always read whole; the implicit rowid would be pure overhead.
+ *
+ * Additive, and `CREATE TABLE IF NOT EXISTS`, so an index written by an older
+ * version gains an EMPTY table on next open rather than needing a migration.
+ * An empty table reads as "every count is 0", which is precisely the pre-#1071
+ * behaviour (the boost degrades to the identity function) — a silent no-op
+ * until the next full index populates it, never a wrong answer. That is why no
+ * `INDEX_FORMAT_VERSION` bump (and therefore no forced whole-repo reindex) ships
+ * with this change.
+ *
+ * That empty-table guarantee holds only for connections that actually run this
+ * DDL. `OverlayBackend.openBase()` opens the shared base store
+ * `{ readonly: true }`, so a pre-#1071 base index keeps NO `dependent_counts`
+ * table at all and reading it throws rather than returning nothing — see
+ * `OverlayBackend.baseDependentCounts`, which swallows that to an empty map.
+ */
 
 /**
  * Deliberately OMITTED (YAGNI): the spike's `chunk_imports` child table +

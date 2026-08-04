@@ -5,12 +5,30 @@ export interface SearchResult {
   content: string;
   metadata: ChunkMetadata & {
     /**
-     * How many other indexed files import this chunk's file — a cheap
-     * structural signal (see vectordb/sqlite/dependent-counts.ts), NOT the
-     * authoritative get_dependents count (no re-export chains, no fuzzy path
-     * matching). Only populated by the FTS `search` path today; other
-     * VectorDBInterface methods (scanAll, querySymbols, ...) leave it
-     * undefined.
+     * How many other indexed files import this chunk's file — a structural
+     * ranking signal (see vectordb/sqlite/dependent-counts.ts). Resolved with
+     * the same guarded `importMatchesTarget` decision `get_dependents` makes
+     * (#1071), but still NOT the authoritative `get_dependents` count: it is
+     * file-level only and does not follow re-export/barrel chains, so it is a
+     * FLOOR.
+     *
+     * Two staleness properties a consumer must know, because neither is visible
+     * in the value itself:
+     * - It is read from the precomputed `dependent_counts` table, refreshed by a
+     *   full index run (and an overlay rebuild), NOT by every incremental
+     *   single-file update. So a count can lag the working tree by at most one
+     *   full index run — an accepted trade for a soft ranking tie-breaker, see
+     *   dependent-counts.ts's "Freshness contract".
+     * - An index written before that table existed has no rows, so every count
+     *   reads 0. A uniformly-zero corpus therefore means "stale index" at least
+     *   as often as it means "nothing imports anything".
+     *
+     * Consequently a `0` means "no import edge resolved", never a verified
+     * "nothing depends on this" — and unlike `get_dependents` this path carries
+     * no `attributionCaveat` to say which (#1072 owns that gap).
+     *
+     * Only populated by the FTS `search` path today; other VectorDBInterface
+     * methods (scanAll, querySymbols, ...) leave it undefined.
      */
     dependentCount?: number;
   };
@@ -85,4 +103,19 @@ export interface VectorDBInterface {
    * `OverlayBackend.getIndexedFiles()`.
    */
   getIndexedFiles(): Promise<string[]>;
+  /**
+   * Recompute and persist the per-file reverse-dependency counts that feed
+   * `search_code`'s structural ranking boost (#1071). Whole-corpus and
+   * whole-table: a file's count depends on every other file's imports, so
+   * there is no correct patch for a subset — see
+   * `sqlite/dependent-counts.ts`'s module doc.
+   *
+   * Called at the end of a full index run and after an overlay rebuild, NOT on
+   * every incremental single-file update; the counts are a soft ranking
+   * tie-breaker with an explicit "lags by at most one full index" contract.
+   *
+   * `OverlayBackend` computes over the composed `(base − masked) ∪ overlay`
+   * corpus, never the overlay alone.
+   */
+  refreshDependentCounts(): Promise<void>;
 }

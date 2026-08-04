@@ -149,6 +149,25 @@
  * `buildCSharpTypeReferenceIndex`/`resolveCSharpTypeReferenceDependents`
  * directly, filtering the recovered dependents down to the test-file subset
  * -- see those call sites for the measured MediatR corpus numbers.
+ *
+ * #1071 batches the per-target cost above away. Both tiers, as originally
+ * written, resolved one target by looping over EVERY file in the project and
+ * running `identifierBoundaryRe(typeName).test(chunk.content)` against it --
+ * fine for a single `get_dependents` call, but O(target's type names x files
+ * x chunk content) makes sweeping every file in a project (`dependent-count-
+ * index.ts`'s batch reverse-dependency pass, and any future "annotate every
+ * file" caller) cost minutes on a real corpus (measured: 54.5s to sweep all
+ * 5423 C# files of a real OrchardCore clone one target at a time). Neither
+ * tier's MATCHING DECISION changes: `buildCSharpReferenceIndex` inverts "does
+ * file F contain type name T as a complete identifier" into one project-wide
+ * tokenizing pass (159ms on that same corpus), and `candidateFilesForName`
+ * uses it to narrow WHICH files each tier asks `identifierBoundaryRe` about --
+ * every file it returns is still confirmed with the exact same regex (or, for
+ * tier 2, the exact same `resolvesToTargetViaNamespace` predicate) before it
+ * can affect the result. `resolveCSharpTypeReferenceDependentsBruteForce`
+ * keeps the original never-pruned loop alongside the fast path specifically so
+ * `csharp-type-reference-signals.test.ts` can assert the two always agree,
+ * rather than trusting the pruning argument unverified.
  */
 
 import type { CodeChunk } from './types.js';
@@ -168,6 +187,60 @@ function escapeForRegex(s: string): string {
  */
 function identifierBoundaryRe(name: string): RegExp {
   return new RegExp(`\\b${escapeForRegex(name)}\\b`);
+}
+
+/**
+ * Every identifier-shaped run of characters in source text -- the same
+ * character class a plain (non-`u`-flagged) JS `\b` treats as a "word"
+ * (`[A-Za-z0-9_]`, never starting with a digit). Matching this globally over
+ * a chunk's content tokenizes it into exactly the substrings an
+ * `identifierBoundaryRe(name).test(...)` call could ever match, for any
+ * `name` composed entirely of that same character class -- see
+ * `isPlainAsciiIdentifier`'s doc comment for why that equivalence holds.
+ */
+const IDENTIFIER_TOKEN_RE = /[A-Za-z_][A-Za-z0-9_]*/g;
+
+/**
+ * True iff `name` is composed ENTIRELY of the character class
+ * `IDENTIFIER_TOKEN_RE` tokenizes on (equivalently, the class a plain JS `\b`
+ * treats as "word"). For such a `name`, `\bname\b` can only ever match a
+ * MAXIMAL run of that character class equal to `name` -- any word character
+ * immediately before or after would mean no boundary exists there, and any
+ * non-word character is exactly where `IDENTIFIER_TOKEN_RE` itself stops a
+ * token. So tokenizing content once with `IDENTIFIER_TOKEN_RE` and checking
+ * whether `name` is one of the tokens is EXACTLY equivalent to
+ * `identifierBoundaryRe(name).test(content)` -- not an approximation of it --
+ * which is what lets `candidateFilesForName` treat an index lookup as a safe
+ * replacement for a regex scan, for names in this class.
+ *
+ * A `name` outside this class (a verbatim `@` identifier, a name containing
+ * an escaped/literal Unicode character) can never equal one of
+ * `IDENTIFIER_TOKEN_RE`'s tokens, so it would never be found via the index --
+ * not "found imprecisely", but silently not found at all. `candidateFilesForName`
+ * falls back to scanning every C# file directly for those, exactly as this
+ * module did before #1071, rather than risk a false "no candidates".
+ */
+function isPlainAsciiIdentifier(name: string): boolean {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name);
+}
+
+const EMPTY_FILE_SET: ReadonlySet<string> = new Set();
+
+/**
+ * The C# files worth regex-confirming for a reference to `name` -- a
+ * SUPERSET of the files `identifierBoundaryRe(name)` could ever match against,
+ * never a subset. For a plain ASCII identifier this is
+ * `index.referenceIndex.get(name)`, which `isPlainAsciiIdentifier`'s doc
+ * comment shows is exactly (not approximately) that set; for anything else
+ * -- a name the index can't have tokenized -- this falls back to every C#
+ * file in the corpus, the same set the original per-file scan considered.
+ * Every caller still runs the real predicate (a regex test, or for tier 2
+ * `resolvesToTargetViaNamespace`) against each file this returns -- this
+ * function only narrows WHICH files get asked, never decides the answer.
+ */
+function candidateFilesForName(name: string, index: CSharpTypeReferenceIndex): ReadonlySet<string> {
+  if (isPlainAsciiIdentifier(name)) return index.referenceIndex.get(name) ?? EMPTY_FILE_SET;
+  return index.allCSharpFiles;
 }
 
 /**
@@ -427,13 +500,15 @@ function resolvesToTargetViaNamespace(
 }
 
 /**
- * TIER 2: for one ambiguous (globally multiply-declared) `typeName` that
- * `targetFile` declares in `targetNamespace`, find every OTHER C# file that
- * resolves a bare reference to `typeName` back to `targetFile` specifically
- * -- via real C# namespace-enclosure AND shadowing -- see the module doc's
- * TIER 2 section for the full rule.
+ * BRUTE-FORCE reference implementation of TIER 2's per-name resolution: the
+ * body `findNamespaceScopedDependents` had before #1071, unchanged -- loops
+ * over EVERY file in `chunksByFile`, no candidate pruning at all. Kept as
+ * `resolveCSharpTypeReferenceDependentsBruteForce`'s tier-2 half so
+ * `csharp-type-reference-signals.test.ts` has a real (if slow) oracle to
+ * check the pruned `findNamespaceScopedDependents` against, rather than
+ * trusting the pruning argument unverified.
  */
-function findNamespaceScopedDependents(
+function findNamespaceScopedDependentsBruteForce(
   targetFile: string,
   targetNamespace: string,
   typeName: string,
@@ -446,6 +521,52 @@ function findNamespaceScopedDependents(
 
   for (const [file, fileChunks] of chunksByFile) {
     if (file === targetFile) continue;
+    if (
+      resolvesToTargetViaNamespace(
+        file,
+        fileChunks,
+        targetFile,
+        targetNamespace,
+        typeName,
+        matcher,
+        candidates,
+        namespaceByFile,
+      )
+    ) {
+      found.push(file);
+    }
+  }
+
+  return found;
+}
+
+/**
+ * TIER 2, pruned (#1071): for one ambiguous (globally multiply-declared)
+ * `typeName` that `targetFile` declares in `targetNamespace`, find every
+ * OTHER C# file that resolves a bare reference to `typeName` back to
+ * `targetFile` specifically -- via real C# namespace-enclosure AND shadowing
+ * -- see the module doc's TIER 2 section for the full rule. Identical
+ * decision to `findNamespaceScopedDependentsBruteForce` -- same
+ * `resolvesToTargetViaNamespace` call, same arguments -- except the file loop
+ * runs over `candidateFilesForName(typeName, index)` instead of every file in
+ * `chunksByFile`; see that function's doc comment for why the narrower set
+ * can never drop a real match.
+ */
+function findNamespaceScopedDependents(
+  targetFile: string,
+  targetNamespace: string,
+  typeName: string,
+  candidates: ReadonlyArray<AmbiguousCandidate>,
+  index: CSharpTypeReferenceIndex,
+): string[] {
+  const { chunksByFile, namespaceByFile } = index;
+  const matcher = identifierBoundaryRe(typeName);
+  const found: string[] = [];
+
+  for (const file of candidateFilesForName(typeName, index)) {
+    if (file === targetFile) continue;
+    const fileChunks = chunksByFile.get(file);
+    if (!fileChunks) continue;
     if (
       resolvesToTargetViaNamespace(
         file,
@@ -478,8 +599,14 @@ function buildCSharpNamespaceIndex(
   return namespaceByFile;
 }
 
-/** TIER 1: every C# file referencing one of `targetFile`'s globally-unique declared type names. */
-function resolveTier1UniqueDependents(
+/**
+ * BRUTE-FORCE reference implementation of TIER 1: the body
+ * `resolveTier1UniqueDependents` had before #1071, unchanged -- loops over
+ * EVERY file in `chunksByFile` for every unique target name, no candidate
+ * pruning. See `findNamespaceScopedDependentsBruteForce`'s doc comment for
+ * why this is kept rather than deleted.
+ */
+function resolveTier1UniqueDependentsBruteForce(
   targetFile: string,
   defMap: Map<string, Set<string>>,
   chunksByFile: Map<string, CodeChunk[]>,
@@ -506,8 +633,66 @@ function resolveTier1UniqueDependents(
   return found;
 }
 
-/** TIER 2: every C# file resolving one of `targetFile`'s AMBIGUOUS declared type names back to it via namespace scoping + shadowing. */
-function resolveTier2NamespaceScopedDependents(
+/**
+ * For one globally-unique type name `typeName` (declared in `targetFile`),
+ * the candidate files (see `candidateFilesForName`) that pass every predicate
+ * TIER 1 requires -- same `fileDeclaresTypeName` + regex-confirm decision
+ * `resolveTier1UniqueDependentsBruteForce` applies to every file in the
+ * corpus, just applied to the narrower candidate set instead. Split out
+ * purely to keep `resolveTier1UniqueDependents`'s own cognitive complexity
+ * low.
+ */
+function collectTier1DependentsForName(
+  targetFile: string,
+  typeName: string,
+  index: CSharpTypeReferenceIndex,
+): string[] {
+  const re = identifierBoundaryRe(typeName);
+  const found: string[] = [];
+  for (const file of candidateFilesForName(typeName, index)) {
+    if (file === targetFile || detectLanguage(file) !== 'csharp') continue;
+    const fileChunks = index.chunksByFile.get(file);
+    // A referencer that declares its OWN same-named type is unresolvable
+    // from text alone -- see `fileDeclaresTypeName`'s doc comment.
+    if (!fileChunks || fileDeclaresTypeName(fileChunks, typeName)) continue;
+    if (fileChunks.some(c => re.test(c.content))) found.push(file);
+  }
+  return found;
+}
+
+/**
+ * TIER 1, pruned (#1071): every C# file referencing one of `targetFile`'s
+ * globally-unique declared type names. Identical per-name decision to
+ * `resolveTier1UniqueDependentsBruteForce` (see
+ * `collectTier1DependentsForName`) -- pruning is PER NAME (each name has its
+ * own candidate set), so this loops name-outer and unions each name's
+ * dependents into `found` -- the same final set the brute-force version's
+ * single `matchers.some(...)` pass reaches, since a file belongs in it if ANY
+ * name's predicate holds, regardless of which name is visited first.
+ */
+function resolveTier1UniqueDependents(
+  targetFile: string,
+  index: CSharpTypeReferenceIndex,
+): Set<string> {
+  const found = new Set<string>();
+  const owners = uniqueCSharpTypeOwners(index.defMap);
+  const uniqueTargetNames = [...owners.entries()]
+    .filter(([, file]) => file === targetFile)
+    .map(([typeName]) => typeName);
+
+  for (const typeName of uniqueTargetNames) {
+    for (const file of collectTier1DependentsForName(targetFile, typeName, index)) found.add(file);
+  }
+  return found;
+}
+
+/**
+ * BRUTE-FORCE reference implementation of TIER 2: the body
+ * `resolveTier2NamespaceScopedDependents` had before #1071, unchanged except
+ * for calling `findNamespaceScopedDependentsBruteForce` instead of the pruned
+ * `findNamespaceScopedDependents`.
+ */
+function resolveTier2NamespaceScopedDependentsBruteForce(
   targetFile: string,
   declarations: CSharpTypeDeclaration[],
   defMap: Map<string, Set<string>>,
@@ -524,7 +709,7 @@ function resolveTier2NamespaceScopedDependents(
 
   for (const typeName of ambiguousTargetNames) {
     const candidates = declarations.filter(decl => decl.typeName === typeName);
-    const extra = findNamespaceScopedDependents(
+    const extra = findNamespaceScopedDependentsBruteForce(
       targetFile,
       targetNamespace,
       typeName,
@@ -538,35 +723,130 @@ function resolveTier2NamespaceScopedDependents(
 }
 
 /**
+ * TIER 2, pruned (#1071): every C# file resolving one of `targetFile`'s
+ * AMBIGUOUS declared type names back to it via namespace scoping + shadowing.
+ * Identical decision to `resolveTier2NamespaceScopedDependentsBruteForce`,
+ * just calling the pruned `findNamespaceScopedDependents` (which takes the
+ * whole `index` so it can reach `candidateFilesForName`) instead of the
+ * brute-force loop.
+ */
+function resolveTier2NamespaceScopedDependents(
+  targetFile: string,
+  index: CSharpTypeReferenceIndex,
+): Set<string> {
+  const { declarations, defMap, namespaceByFile } = index;
+  const found = new Set<string>();
+  const targetNamespace = namespaceByFile.get(targetFile);
+  if (targetNamespace === undefined) return found;
+
+  const ambiguousTargetNames = declarations
+    .filter(decl => decl.file === targetFile && (defMap.get(decl.typeName)?.size ?? 0) > 1)
+    .map(decl => decl.typeName);
+
+  for (const typeName of ambiguousTargetNames) {
+    const candidates = declarations.filter(decl => decl.typeName === typeName);
+    const extra = findNamespaceScopedDependents(
+      targetFile,
+      targetNamespace,
+      typeName,
+      candidates,
+      index,
+    );
+    for (const file of extra) found.add(file);
+  }
+  return found;
+}
+
+/**
+ * #1071: file -> set of C# files whose content contains that name as a
+ * complete identifier, restricted to `declaredNames` (the keys of `defMap`,
+ * i.e. names either tier will ever actually look up) -- a name nobody
+ * declares doesn't need a bucket. Built once per `buildCSharpTypeReferenceIndex`
+ * call by tokenizing every C# file's chunk content with `IDENTIFIER_TOKEN_RE`,
+ * which `isPlainAsciiIdentifier`'s doc comment shows is an exact restatement
+ * of `identifierBoundaryRe`'s `\b` semantics for any plain-ASCII name.
+ *
+ * Measured on a real clone of OrchardCore (5423 C# files, 40594 chunks): 159ms
+ * to build, 128722 (name, file) pairs retained -- versus 54.5s to sweep every
+ * file through the old per-target regex scan. See `candidateFilesForName` for
+ * how a lookup here is used as a pruning superset, never as the match
+ * decision itself.
+ */
+function buildCSharpReferenceIndex(
+  chunksByFile: Map<string, CodeChunk[]>,
+  declaredNames: ReadonlySet<string>,
+): Map<string, Set<string>> {
+  const referenceIndex = new Map<string, Set<string>>();
+  for (const [file, fileChunks] of chunksByFile) {
+    if (detectLanguage(file) !== 'csharp') continue;
+    for (const chunk of fileChunks) {
+      for (const [token] of chunk.content.matchAll(IDENTIFIER_TOKEN_RE)) {
+        if (!declaredNames.has(token)) continue;
+        const files = referenceIndex.get(token) ?? new Set<string>();
+        files.add(file);
+        referenceIndex.set(token, files);
+      }
+    }
+  }
+  return referenceIndex;
+}
+
+/**
+ * Every C# file in `chunksByFile` -- the fallback candidate set
+ * `candidateFilesForName` uses for a type name outside `isPlainAsciiIdentifier`'s
+ * class, i.e. the exact set the original per-file scan considered for such a
+ * name.
+ */
+function collectAllCSharpFiles(chunksByFile: Map<string, CodeChunk[]>): Set<string> {
+  const files = new Set<string>();
+  for (const file of chunksByFile.keys()) {
+    if (detectLanguage(file) === 'csharp') files.add(file);
+  }
+  return files;
+}
+
+/**
  * Everything `resolveCSharpTypeReferenceDependents` needs to resolve any
  * number of target files against ONE project-wide scan -- built once by
  * `buildCSharpTypeReferenceIndex` and reused per target, so a caller
  * resolving many target files (e.g. `test-associations.ts`'s per-file loop,
- * #1040) doesn't re-scan the full chunk set for every one of them, the same
- * "build the index once, resolve many" discipline
- * `go-same-directory-tests.ts`/`java-same-package-tests.ts` already use for
- * their own directory/package indexes.
+ * #1040, or `dependent-count-index.ts`'s whole-corpus sweep, #1071) doesn't
+ * re-scan the full chunk set for every one of them, the same "build the index
+ * once, resolve many" discipline `go-same-directory-tests.ts`/
+ * `java-same-package-tests.ts` already use for their own directory/package
+ * indexes.
+ *
+ * `referenceIndex` and `allCSharpFiles` are #1071's candidate-pruning
+ * addition -- see `buildCSharpReferenceIndex` and `candidateFilesForName`.
+ * Nothing in either tier's MATCH decision reads them directly; only
+ * `candidateFilesForName` does, to narrow which files the unchanged
+ * predicates get asked about.
  */
 export interface CSharpTypeReferenceIndex {
   chunksByFile: Map<string, CodeChunk[]>;
   namespaceByFile: Map<string, string | undefined>;
   declarations: CSharpTypeDeclaration[];
   defMap: Map<string, Set<string>>;
+  referenceIndex: Map<string, Set<string>>;
+  allCSharpFiles: Set<string>;
 }
 
 /**
  * Build the project-wide index `resolveCSharpTypeReferenceDependents` needs
- * (file->chunks, file->derived namespace, every type declaration, and the
- * type-name->declaring-files map) from `chunks` once. `chunks` should be the
- * FULL project chunk set -- uniqueness (tier 1) and namespace scoping (tier 2)
- * are both project-wide properties, not scoped to any one target file.
+ * (file->chunks, file->derived namespace, every type declaration, the
+ * type-name->declaring-files map, and the #1071 candidate-pruning indexes)
+ * from `chunks` once. `chunks` should be the FULL project chunk set --
+ * uniqueness (tier 1) and namespace scoping (tier 2) are both project-wide
+ * properties, not scoped to any one target file.
  */
 export function buildCSharpTypeReferenceIndex(chunks: CodeChunk[]): CSharpTypeReferenceIndex {
   const chunksByFile = groupCSharpChunksByFile(chunks);
   const namespaceByFile = buildCSharpNamespaceIndex(chunksByFile);
   const declarations = collectCSharpTypeDeclarations(chunks, namespaceByFile);
   const defMap = buildCSharpTypeOwnerMap(declarations);
-  return { chunksByFile, namespaceByFile, declarations, defMap };
+  const referenceIndex = buildCSharpReferenceIndex(chunksByFile, new Set(defMap.keys()));
+  const allCSharpFiles = collectAllCSharpFiles(chunksByFile);
+  return { chunksByFile, namespaceByFile, declarations, defMap, referenceIndex, allCSharpFiles };
 }
 
 /**
@@ -590,10 +870,37 @@ export function resolveCSharpTypeReferenceDependents(
   targetFile: string,
   index: CSharpTypeReferenceIndex,
 ): string[] {
+  const tier1 = resolveTier1UniqueDependents(targetFile, index);
+  const tier2 = resolveTier2NamespaceScopedDependents(targetFile, index);
+
+  return [...new Set([...tier1, ...tier2])].sort();
+}
+
+/**
+ * BRUTE-FORCE reference implementation of `resolveCSharpTypeReferenceDependents`:
+ * the exact tier 1 + tier 2 logic this module used before #1071, with no
+ * candidate-index pruning anywhere -- every file in `index.chunksByFile` is
+ * tested directly against `identifierBoundaryRe`, for every target name.
+ * Exported for `csharp-type-reference-signals.test.ts`, which asserts the
+ * pruned `resolveCSharpTypeReferenceDependents` agrees with this exactly
+ * across a fixture corpus spanning every resolution path (a uniquely-declared
+ * type, an ambiguous type resolved by namespace scoping, a shadowed type, a
+ * referencer that declares its own same-named type, a non-C# file, and the
+ * target itself) -- the property that makes the reference index a pruning
+ * optimization rather than a second matching dialect. Mirrors
+ * `dependent-count-index.ts`'s `computeDependentCountsBruteForce` convention.
+ *
+ * Never call this in production: it is precisely the O(target's type names x
+ * files x chunk content) cost the reference index exists to avoid.
+ */
+export function resolveCSharpTypeReferenceDependentsBruteForce(
+  targetFile: string,
+  index: CSharpTypeReferenceIndex,
+): string[] {
   const { chunksByFile, namespaceByFile, declarations, defMap } = index;
 
-  const tier1 = resolveTier1UniqueDependents(targetFile, defMap, chunksByFile);
-  const tier2 = resolveTier2NamespaceScopedDependents(
+  const tier1 = resolveTier1UniqueDependentsBruteForce(targetFile, defMap, chunksByFile);
+  const tier2 = resolveTier2NamespaceScopedDependentsBruteForce(
     targetFile,
     declarations,
     defMap,

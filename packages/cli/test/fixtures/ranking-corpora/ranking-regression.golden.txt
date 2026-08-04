@@ -1,0 +1,107 @@
+=== typescript ===
+files: 5
+filesWithDependents: 2
+maxDependentCount: 4
+medianBoostMultiplier: 1.00
+recall@1 (ON): 1.00
+recall@5 (ON): 1.00
+MRR (ON): 1.00
+recall@1 (OFF): 1.00
+recall@5 (OFF): 1.00
+MRR (OFF): 1.00
+
+=== python ===
+files: 5
+filesWithDependents: 2
+maxDependentCount: 4
+medianBoostMultiplier: 1.00
+recall@1 (ON): 1.00
+recall@5 (ON): 1.00
+MRR (ON): 1.00
+recall@1 (OFF): 1.00
+recall@5 (OFF): 1.00
+MRR (OFF): 1.00
+
+=== go ===
+files: 5
+filesWithDependents: 4
+maxDependentCount: 4
+medianBoostMultiplier: 1.10
+recall@1 (ON): 1.00
+recall@5 (ON): 1.00
+MRR (ON): 1.00
+recall@1 (OFF): 1.00
+recall@5 (OFF): 1.00
+MRR (OFF): 1.00
+
+=== rust ===
+files: 5
+filesWithDependents: 4
+maxDependentCount: 4
+medianBoostMultiplier: 1.10
+recall@1 (ON): 1.00
+recall@5 (ON): 1.00
+MRR (ON): 1.00
+recall@1 (OFF): 1.00
+recall@5 (OFF): 1.00
+MRR (OFF): 1.00
+
+=== java ===
+files: 5
+filesWithDependents: 2
+maxDependentCount: 4
+medianBoostMultiplier: 1.00
+recall@1 (ON): 1.00
+recall@5 (ON): 1.00
+MRR (ON): 1.00
+recall@1 (OFF): 1.00
+recall@5 (OFF): 1.00
+MRR (OFF): 1.00
+
+=== kotlin ===
+files: 5
+filesWithDependents: 2
+maxDependentCount: 4
+medianBoostMultiplier: 1.00
+recall@1 (ON): 1.00
+recall@5 (ON): 1.00
+MRR (ON): 1.00
+recall@1 (OFF): 1.00
+recall@5 (OFF): 1.00
+MRR (OFF): 1.00
+
+=== csharp ===
+files: 5
+filesWithDependents: 2
+maxDependentCount: 4
+medianBoostMultiplier: 1.00
+recall@1 (ON): 1.00
+recall@5 (ON): 1.00
+MRR (ON): 1.00
+recall@1 (OFF): 1.00
+recall@5 (OFF): 1.00
+MRR (OFF): 1.00
+
+=== php ===
+files: 5
+filesWithDependents: 2
+maxDependentCount: 4
+medianBoostMultiplier: 1.00
+recall@1 (ON): 1.00
+recall@5 (ON): 1.00
+MRR (ON): 1.00
+recall@1 (OFF): 1.00
+recall@5 (OFF): 1.00
+MRR (OFF): 1.00
+
+=== swift ===
+files: 6
+filesWithDependents: 0
+maxDependentCount: 0
+medianBoostMultiplier: 1.00
+recall@1 (ON): 1.00
+recall@5 (ON): 1.00
+MRR (ON): 1.00
+recall@1 (OFF): 1.00
+recall@5 (OFF): 1.00
+MRR (OFF): 1.00
