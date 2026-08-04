@@ -31,7 +31,7 @@ import {
   validateBatchLengths,
 } from './write-ops.js';
 import { keywordSearch } from './fts-search.js';
-import { refreshDependentCounts } from './dependent-counts.js';
+import { refreshDependentCounts, hasComputedDependentCounts } from './dependent-counts.js';
 
 /**
  * SQLite + FTS5 structural backend implementing VectorDBInterface.
@@ -103,6 +103,11 @@ export class SqliteBackend implements VectorDBInterface {
     const db = this.requireDb();
     const chunks = readAllRecords(db).map(recordToUnscoredResult);
     refreshDependentCounts(db, chunks, this.projectRoot);
+  }
+
+  /** See `VectorDBInterface.hasDependentCounts`. */
+  async hasDependentCounts(): Promise<boolean> {
+    return hasComputedDependentCounts(this.requireDb());
   }
 
   async search(query: string, limit: number = 5): Promise<SearchResult[]> {

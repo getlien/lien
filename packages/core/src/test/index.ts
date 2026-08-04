@@ -3,4 +3,5 @@ export {
   cleanupTestDir,
   createTestVectorDB,
   createTestFile,
+  simulatePreCountTrackingIndex,
 } from './helpers/test-db.js';

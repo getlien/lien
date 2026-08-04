@@ -11,6 +11,7 @@ import type { VectorDBInterface } from './types.js';
 import Database from 'better-sqlite3';
 import { getIndexDir } from '../utils/index-dir.js';
 import { STRUCTURAL_DB_FILENAME } from './sqlite/schema.js';
+import { OVERLAY_META } from './sqlite/overlay-schema.js';
 
 const execFileAsync = promisify(execFile);
 const git = (cwd: string, ...args: string[]) => execFileAsync('git', args, { cwd });
@@ -196,6 +197,41 @@ describe('worktree-aware indexing (integration)', () => {
     const shared = hits.find(h => h.metadata.file === 'shared.ts');
     expect(shared).toBeDefined();
     expect(shared!.metadata.dependentCount ?? 0).toBe(0);
+    close(wtDb);
+  });
+
+  it('reports hasDependentCounts()=true once the overlay has composed counts (#1072)', async () => {
+    await indexCodebase({ rootDir: worktreeRoot });
+
+    const wtDb = await createVectorDB(worktreeRoot);
+    await wtDb.initialize();
+    expect(await wtDb.hasDependentCounts()).toBe(true);
+    close(wtDb);
+  });
+
+  it('reports hasDependentCounts()=false for an overlay with neither composed counts nor a base to fall back on (#1072)', async () => {
+    // The state search_code must be able to name: nothing computed anywhere, so
+    // every dependentCount would read 0 for a reason that has nothing to do
+    // with the code. Reproduced by clearing the overlay's composed flag AND
+    // both stores' count tables — i.e. an index written before the table
+    // existed at all.
+    await indexCodebase({ rootDir: worktreeRoot });
+
+    const overlayDb = new Database(path.join(getIndexDir(worktreeRoot), STRUCTURAL_DB_FILENAME));
+    overlayDb.exec('DELETE FROM dependent_counts');
+    // `overlay_meta` exists only on the overlay store, never on a standalone one.
+    overlayDb.exec(
+      `DELETE FROM overlay_meta WHERE k = '${OVERLAY_META.DEPENDENT_COUNTS_COMPOSED}'`,
+    );
+    overlayDb.close();
+
+    const baseDb = new Database(path.join(getIndexDir(mainRoot), STRUCTURAL_DB_FILENAME));
+    baseDb.exec('DELETE FROM dependent_counts');
+    baseDb.close();
+
+    const wtDb = await createVectorDB(worktreeRoot);
+    await wtDb.initialize();
+    expect(await wtDb.hasDependentCounts()).toBe(false);
     close(wtDb);
   });
 

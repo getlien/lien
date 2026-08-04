@@ -288,6 +288,21 @@ export class OverlayBackend implements VectorDBInterface {
     }
   }
 
+  /**
+   * See `VectorDBInterface.hasDependentCounts`. Keyed on this overlay's own
+   * composed flag first — the strong, read-free proof, and the only one that
+   * holds for a composed corpus whose every count is legitimately 0.
+   *
+   * Without it (an overlay built before #1071), `composedDependentCounts` falls
+   * back to merging the base's own stored counts, so the honest answer is
+   * whether that fallback has anything at all to serve: rows exist only where
+   * some version really did compute them.
+   */
+  async hasDependentCounts(): Promise<boolean> {
+    if (this.getMeta(OVERLAY_META.DEPENDENT_COUNTS_COMPOSED)) return true;
+    return this.composedDependentCounts().size > 0;
+  }
+
   async search(query: string, limit = 5): Promise<SearchResult[]> {
     if (!query || query.trim().length === 0) return [];
     // One corpus-wide count map for BOTH corpora — see composedDependentCounts.

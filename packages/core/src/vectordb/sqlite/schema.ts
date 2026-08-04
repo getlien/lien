@@ -87,6 +87,11 @@ CREATE TABLE IF NOT EXISTS dependent_counts (
   count INTEGER NOT NULL
 ) WITHOUT ROWID;
 
+CREATE TABLE IF NOT EXISTS store_meta (
+  k TEXT PRIMARY KEY,
+  v TEXT
+);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
   symbolName, symbolTokens, content,
   content='chunks', content_rowid='id',
@@ -135,7 +140,47 @@ END;
  * `{ readonly: true }`, so a pre-#1071 base index keeps NO `dependent_counts`
  * table at all and reading it throws rather than returning nothing — see
  * `OverlayBackend.baseDependentCounts`, which swallows that to an empty map.
+ *
+ * `store_meta` (added #1072) is the standalone store's counterpart to
+ * `overlay_meta`: a one-key/value-row table recording facts ABOUT this store
+ * that its data tables cannot express. It exists because the empty-table
+ * degradation above is silent in a way that matters to a consumer — an empty
+ * `dependent_counts` means either "an older version wrote this index and never
+ * computed counts" or "counts were computed and every file genuinely has zero
+ * resolved importers", and those two need different answers from
+ * `search_code`. The row is written by the same call that writes the counts
+ * (`writeDependentCounts`), so presence-of-flag — never table non-emptiness —
+ * is what makes a `0` count trustworthy. Same reasoning, and same
+ * presence-not-emptiness rule, as `OVERLAY_META.DEPENDENT_COUNTS_COMPOSED`.
  */
+
+/** `store_meta` keys. */
+export const STORE_META = {
+  /**
+   * Set once this store's `dependent_counts` table has actually been written
+   * over its corpus (#1072). Its ABSENCE on a store that has chunks means the
+   * counts were never computed here, so every `dependentCount` reads 0 for a
+   * reason that has nothing to do with the code — which `search_code` reports
+   * rather than asserting the zeros as fact.
+   */
+  DEPENDENT_COUNTS_COMPUTED: 'dependentCountsComputed',
+} as const;
+
+/** A `store_meta` key. */
+export type StoreMetaKey = (typeof STORE_META)[keyof typeof STORE_META];
+
+/** The value stored at `key`, or `null` when the key was never written. */
+export function getStoreMeta(db: Database.Database, key: StoreMetaKey): string | null {
+  const row = db.prepare('SELECT v FROM store_meta WHERE k = ?').get(key) as
+    | { v: string | null }
+    | undefined;
+  return row?.v ?? null;
+}
+
+/** Write (or overwrite) `key`. */
+export function setStoreMeta(db: Database.Database, key: StoreMetaKey, value: string): void {
+  db.prepare('INSERT OR REPLACE INTO store_meta(k, v) VALUES (?, ?)').run(key, value);
+}
 
 /**
  * Deliberately OMITTED (YAGNI): the spike's `chunk_imports` child table +

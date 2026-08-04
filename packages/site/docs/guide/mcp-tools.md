@@ -72,21 +72,29 @@ the same import-matching rules `get_dependents` uses. It is a **floor**, not
 re-export/barrel chains, so a module fronted by a barrel can read lower than its
 real blast radius.
 
-A `0` means "no import edge resolved", which is not the same as "nothing depends
-on this file". Some languages' import forms name no specific file at all —
-Swift's whole-module `import Foundation` style being the clearest case — so every
-file in such a codebase reads `0`.
+A **present** `0` means "resolved, and no other indexed file imports this file" —
+a real answer, though still a floor. The field is **absent** whenever that number
+would not mean anything, because an omitted count is honest and a wrong one
+isn't. Absence means "unknown", never `0`, and happens in two situations:
+
+- **This file's language cannot name it in an import at all.** C#'s
+  `global using` / enclosing-namespace access, Java's and Kotlin's same-package
+  visibility, and Swift's whole-module `import Foundation` style all let a real
+  caller reach a file with no import statement naming it. These are the same
+  languages `get_dependents` flags with `dependent-attribution-incomplete`, and
+  the omission fires under the same condition: a zero count in one of them. A
+  *positive* count in those languages is kept — it is a genuine recovered floor.
+- **The whole index predates count tracking**, so nothing was ever computed and
+  every count would read `0`. This one also comes with an explicit `note`
+  telling you to run `lien index`; it clears permanently after one index run.
 
 The counts are precomputed at index time, not per query, and are refreshed by a
 full index run (and, in a linked worktree, by an overlay rebuild) rather than by
-every incremental single-file update. Two consequences worth knowing: an index
-written before this field existed reports `0` for everything until its next full
-`lien index`, so if *every* result shows `0` you should suspect a stale index
-rather than an unusually disconnected codebase; and a count can lag the working
-tree by at most one full index run.
-
-Unlike `get_dependents`, this field carries no `attributionCaveat`, so treat a
-`0` here as "unknown", never as a verified clear.
+every incremental single-file update — so a count can lag your working tree by at
+most one full index run. That is an accepted trade for a soft ranking
+tie-breaker, and it is deliberately *not* warned about per call. When you need an
+authoritative, current answer, call `get_dependents`, which resolves on demand
+and carries its own `attributionCaveat` vocabulary.
 
 ### Best Practices
 

@@ -21,11 +21,15 @@ export interface SearchResult {
      *   dependent-counts.ts's "Freshness contract".
      * - An index written before that table existed has no rows, so every count
      *   reads 0. A uniformly-zero corpus therefore means "stale index" at least
-     *   as often as it means "nothing imports anything".
+     *   as often as it means "nothing imports anything". Ask
+     *   `hasDependentCounts()` rather than inferring it from the zeros — that
+     *   inference is unsound for a corpus whose counts are legitimately all 0.
      *
      * Consequently a `0` means "no import edge resolved", never a verified
-     * "nothing depends on this" — and unlike `get_dependents` this path carries
-     * no `attributionCaveat` to say which (#1072 owns that gap).
+     * "nothing depends on this". This type keeps the raw number in both cases;
+     * distinguishing them for a consumer is the MCP layer's job (#1072), and
+     * `search_code` now omits the field outright where it cannot be resolved —
+     * see `mcp/utils/dependent-count-honesty.ts` in the cli package.
      *
      * Only populated by the FTS `search` path today; other VectorDBInterface
      * methods (scanAll, querySymbols, ...) leave it undefined.
@@ -118,4 +122,18 @@ export interface VectorDBInterface {
    * corpus, never the overlay alone.
    */
   refreshDependentCounts(): Promise<void>;
+  /**
+   * True when the `dependentCount` values this backend serves were actually
+   * computed over its corpus, so a `0` means "no import edge resolved for this
+   * file" (#1072). False when they were never computed here at all — an index
+   * written before `refreshDependentCounts` existed — in which case every count
+   * reads 0 for a reason that has nothing to do with the code.
+   *
+   * Deliberately NOT derivable from the counts themselves: a corpus whose every
+   * count is legitimately 0 (Swift's whole-module imports name no file, so no
+   * edge resolves anywhere) is indistinguishable from "never computed" on the
+   * numbers alone. That is the distinction #1014 got wrong in the other
+   * direction, so this is answered from stored state, never from result shape.
+   */
+  hasDependentCounts(): Promise<boolean>;
 }

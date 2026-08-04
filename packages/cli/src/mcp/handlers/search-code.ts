@@ -1,7 +1,8 @@
 import { wrapToolHandler } from '../utils/tool-wrapper.js';
 import { SearchCodeSchema } from '../schemas/index.js';
-import { shapeResults, deduplicateResults } from '../utils/metadata-shaper.js';
+import { shapeResults, deduplicateResults, type ToolResult } from '../utils/metadata-shaper.js';
 import { formatNoIndexNote } from '../utils/unindexed-paths.js';
+import { applyDependentCountHonesty } from '../utils/dependent-count-honesty.js';
 import type { ToolContext, MCPToolResult, LogFn } from '../types.js';
 import type { VectorDBInterface, SearchResult } from '@liendev/core';
 
@@ -44,6 +45,31 @@ function processResults(
 }
 
 /**
+ * Shape the results for the response and apply the `dependentCount` honesty
+ * pass (#1072), appending its one possible note to `notes`.
+ *
+ * Whether the counts are trustworthy is ASKED OF THE BACKEND, never inferred
+ * from the results: a corpus whose counts are legitimately all zero and one
+ * whose counts were never computed produce identical numbers. See
+ * `../utils/dependent-count-honesty.ts` for which of the four indistinguishable
+ * zeros gets a note, which gets omission, and which gets deliberate silence.
+ */
+async function shapeWithDependentCountHonesty(
+  results: SearchResult[],
+  vectorDB: VectorDBInterface,
+  notes: string[],
+): Promise<ToolResult[]> {
+  const shaped = shapeResults(results, 'search_code');
+  // No results means no `dependentCount` to be honest about — and no reason to
+  // pay the backend read either.
+  if (shaped.length === 0) return shaped;
+
+  const honesty = applyDependentCountHonesty(shaped, await vectorDB.hasDependentCounts());
+  if (honesty.note) notes.push(honesty.note);
+  return honesty.results;
+}
+
+/**
  * Handle search_code tool calls.
  *
  * Runs lexical full-text (FTS5/BM25) search over code, docstrings, and
@@ -64,7 +90,7 @@ export async function handleSearchCode(args: unknown, ctx: ToolContext): Promise
 
     log(`Returning ${results.length} results`);
 
-    const shaped = shapeResults(results, 'search_code');
+    const shaped = await shapeWithDependentCountHonesty(results, vectorDB, notes);
 
     if (shaped.length === 0) {
       // Same reasoning as list_functions: only assert the harder "no index at
