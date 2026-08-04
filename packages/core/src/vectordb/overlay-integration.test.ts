@@ -8,6 +8,9 @@ import { indexCodebase } from '../indexer/index.js';
 import { createVectorDB } from './factory.js';
 import { _resetWarnMemo } from './overlay-resolution.js';
 import type { VectorDBInterface } from './types.js';
+import Database from 'better-sqlite3';
+import { getIndexDir } from '../utils/index-dir.js';
+import { STRUCTURAL_DB_FILENAME } from './sqlite/schema.js';
 
 const execFileAsync = promisify(execFile);
 const git = (cwd: string, ...args: string[]) => execFileAsync('git', args, { cwd });
@@ -142,6 +145,31 @@ describe('worktree-aware indexing (integration)', () => {
     // can't regress into "overlay rows get counts, base rows get 0".
     const added = hits.find(h => h.metadata.file === 'added.ts');
     expect(added?.metadata.dependentCount ?? 0).toBe(0); // nothing imports it
+    close(wtDb);
+  });
+
+  it('survives a pre-#1071 base index that has no dependent_counts table at all', async () => {
+    // Regression for a review finding on #1073: `openBase()` opens the shared
+    // base store `{ readonly: true }`, so `openDatabase`'s
+    // `CREATE TABLE IF NOT EXISTS` never runs against it. A base index written
+    // by a version that predates the table therefore genuinely does not have
+    // it, and an unguarded read throws `SQLITE_ERROR: no such table`, crashing
+    // every overlay search rather than degrading to "no base counts".
+    await indexCodebase({ rootDir: worktreeRoot });
+
+    // Simulate the pre-#1071 base by dropping the table from the base store.
+    const baseIndexDir = getIndexDir(mainRoot);
+    const baseDb = new Database(path.join(baseIndexDir, STRUCTURAL_DB_FILENAME));
+    baseDb.exec('DROP TABLE IF EXISTS dependent_counts');
+    baseDb.close();
+
+    const wtDb = await createVectorDB(worktreeRoot);
+    await wtDb.initialize();
+    const hits = await wtDb.search('sharedFn', 10);
+    expect(hits.length).toBeGreaterThan(0);
+    // The overlay's own composed table still has the answer, so this is not a
+    // degradation in practice — the point is that it does not throw.
+    expect(hits.find(h => h.metadata.file === 'shared.ts')?.metadata.dependentCount).toBe(2);
     close(wtDb);
   });
 

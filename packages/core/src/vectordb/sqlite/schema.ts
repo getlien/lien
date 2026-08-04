@@ -129,6 +129,12 @@ END;
  * until the next full index populates it, never a wrong answer. That is why no
  * `INDEX_FORMAT_VERSION` bump (and therefore no forced whole-repo reindex) ships
  * with this change.
+ *
+ * That empty-table guarantee holds only for connections that actually run this
+ * DDL. `OverlayBackend.openBase()` opens the shared base store
+ * `{ readonly: true }`, so a pre-#1071 base index keeps NO `dependent_counts`
+ * table at all and reading it throws rather than returning nothing — see
+ * `OverlayBackend.baseDependentCounts`, which swallows that to an empty map.
  */
 
 /**

@@ -207,9 +207,29 @@ export class OverlayBackend implements VectorDBInterface {
    * rather than collapsing to 0 — hence the merge, overlay last.
    */
   private composedDependentCounts(): Map<string, number> {
-    const base = this.baseDb ? readDependentCounts(this.baseDb) : new Map<string, number>();
     const overlay = readDependentCounts(this.requireOverlay());
-    return new Map([...base, ...overlay]);
+    return new Map([...this.baseDependentCounts(), ...overlay]);
+  }
+
+  /**
+   * The base store's own stored counts, or an empty map if it has none to give.
+   *
+   * The base connection is opened `{ readonly: true }` by `openBase()`, so
+   * `openDatabase`'s `CREATE TABLE IF NOT EXISTS` never runs against it — a base
+   * index written by a pre-#1071 version genuinely has no `dependent_counts`
+   * table, and the read throws `SQLITE_ERROR: no such table`. That must degrade
+   * to "no base counts" (the pre-#1071 behaviour: every count 0, boost =
+   * identity), never crash `search()`. Mirrors `baseRead`'s existing
+   * swallow-to-empty resilience, which exists because the base can also vanish
+   * mid-serve.
+   */
+  private baseDependentCounts(): Map<string, number> {
+    if (!this.baseDb) return new Map();
+    try {
+      return readDependentCounts(this.baseDb);
+    } catch {
+      return new Map();
+    }
   }
 
   async search(query: string, limit = 5): Promise<SearchResult[]> {
