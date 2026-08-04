@@ -333,7 +333,7 @@ export class AgentReviewPlugin implements ReviewPlugin {
 
     const pluginId = this.id;
     const findings = agentFindings.map(f => mapToReviewFinding(f, pluginId));
-    appendSummaryFinding(findings, pluginId, result.summary);
+    appendSummaryFinding(findings, pluginId, result.summary, outcomes);
     appendIncompleteNotice(findings, pluginId, result);
 
     return findings;
@@ -409,7 +409,7 @@ export class AgentReviewPlugin implements ReviewPlugin {
 
     const pluginId = this.id;
     const findings = agentFindings.map(f => mapToReviewFinding(f, pluginId));
-    appendSummaryFinding(findings, pluginId, result.summary);
+    appendSummaryFinding(findings, pluginId, result.summary, outcomes);
     appendIncompleteNotice(findings, pluginId, result);
 
     return findings;
@@ -582,11 +582,22 @@ function reportPassOutcomes(context: ReviewContext, outcomes: PassOutcome[]): vo
  * Append the agent's summary as a special finding so `present()` can
  * render it. No-op when the agent didn't return a summary (e.g.,
  * budget exhausted before the wrap-up turn).
+ *
+ * `extraPassOutcomes` (issue #1077) is stamped onto this finding's metadata
+ * UNCONDITIONALLY — every extra pass's own RAW `stopReason`, straight from
+ * `PassOutcome` (`review-pass.ts`'s `buildPassOutcome`), never gated on
+ * whether that pass ended up `incomplete`. This is the exact same ground
+ * truth `computeVerdict` (`attestation.ts`) reads for its `passes[]` (via
+ * `telemetry.extraPasses` in `review-pr.ts`, populated by this same
+ * `outcomes` array through `context.reportPassResult`) — see
+ * `derivePresentTimeVerdict`'s doc comment for why the gated `incomplete`
+ * flag alone isn't enough to keep the two in sync.
  */
-function appendSummaryFinding(
+export function appendSummaryFinding(
   findings: ReviewFinding[],
   pluginId: string,
   summary: AgentResult['summary'],
+  extraPassOutcomes: PassOutcome[],
 ): void {
   if (!summary) return;
   findings.push({
@@ -600,6 +611,10 @@ function appendSummaryFinding(
       riskLevel: summary.riskLevel,
       overview: summary.overview,
       keyChanges: summary.keyChanges,
+      extraPassStopReasons: extraPassOutcomes.map(o => ({
+        name: o.name,
+        stopReason: o.stopReason,
+      })),
     },
   });
 }
@@ -972,6 +987,43 @@ export type PresentTimeVerdict = Extract<
  * pass's own bug-finding coverage (a separate concern `buildDescription`'s
  * headline already tracks via `hasIncompleteMainPass`).
  *
+ * ## The #1077 fix: a forced summary-retry can hide a starved EXTRA pass
+ *
+ * The `incomplete`-metadata check above is not, on its own, enough to match
+ * `computeVerdict`. Both `anthropic-client.ts` and `openai-client.ts` run a
+ * forced summary-retry after a pass hits its token/turn ceiling
+ * (`runSummaryRetry`) — if that retry recovers a parseable verdict, the
+ * pass's `incomplete` flag clears (`incomplete = !parsed.summary`) even
+ * though its `stopReason` STAYS `'budget'`/`'max_turns'` (never reset to
+ * `'completed'`). For an EXTRA pass (doc-truth, incomplete-handling-loop,
+ * …), that means `mergeResultState` (e.g. `mergeDocPassIntoResult`) never
+ * fires — its `if (passResult.incomplete && !main.incomplete)` guard only
+ * propagates a GENUINELY incomplete pass — so `appendIncompleteNotice` never
+ * runs and NO metadata reaches `findings` at all. Meanwhile `computeVerdict`
+ * still sees it: `buildPassOutcome` (`review-pass.ts`) reports every extra
+ * pass's RAW `stopReason` into the attestation UNCONDITIONALLY, never gated
+ * on `incomplete`. Result: a PR whose doc-truth (or incomplete-handling-loop)
+ * pass burned through its whole budget but limped to a plausible-looking
+ * verdict got `Trust: Delivered` here while the attestation correctly read
+ * `degraded:budget_starved` (#1073, #1078) — the exact bug #1077 reports.
+ *
+ * The fix: `appendSummaryFinding` now stamps `extraPassStopReasons` on the
+ * main summary finding UNCONDITIONALLY (every extra pass's own raw
+ * `stopReason`, mirroring `buildPassOutcome`'s own ungated field) — this
+ * function checks that BEFORE returning `'delivered'`, giving it the same
+ * two-tier read `computeVerdict` has: the MAIN pass's entry stays gated on
+ * `mainPassIncomplete`/`incomplete` (matching `deriveMainPassAttestation`'s
+ * OWN gate exactly, so this function can never read the main pass's outcome
+ * more strictly than the attestation does — no NEW divergence introduced),
+ * while every EXTRA pass's entry is ungated raw `stopReason` (matching
+ * `buildPassOutcome`'s own ungated field). One residual, accepted gap: if
+ * two DIFFERENT extra passes both degrade, one genuinely incomplete (caught
+ * by the metadata check) and an EARLIER one only retry-rescued (caught by
+ * `extraPassStopReasons`), `computeVerdict`'s own pass-array order might
+ * attribute the verdict to a different pass than the metadata check
+ * surfaces here — both still land in SOME degraded bucket, never a false
+ * `'delivered'`, which is the property #1077 actually requires.
+ *
  * Returns `null` when the agent-review plugin didn't run this review at all
  * (no summary finding of any kind) — nothing to attest to. This is a
  * DELIBERATE, documented divergence from `computeVerdict`: fed the
@@ -985,6 +1037,18 @@ export type PresentTimeVerdict = Extract<
  * suite pins both sides so a future change to either taxonomy fails a test
  * instead of silently drifting.
  *
+ * Two further, ALSO deliberate non-representable cases (same suite pins
+ * both): `degraded:comments_dropped`/`degraded:delivery_incomplete` depend
+ * on delivery outcomes (comments landing, the description write itself
+ * succeeding) that haven't happened yet at `present()` time — this function
+ * can only ever return `'delivered'` for those inputs, which is not a false
+ * claim (the review DID complete within budget; a SEPARATE post-hoc
+ * mechanism, `syncAttestationBadge`, still surfaces the delivery problem via
+ * its own `Attested: …` line). `failed:analysis_error` is a pre-engine
+ * pipeline failure — the agent plugin never runs at all, so `summaryFindings`
+ * is `[]` and this function returns `null`, matching (no line renders to
+ * disagree with anything).
+ *
  * Exported (alongside `PresentTimeVerdict`) solely so that consistency
  * suite can call this function directly rather than re-deriving it from
  * rendered markdown.
@@ -997,10 +1061,30 @@ export function derivePresentTimeVerdict(
   const incompleteFinding = summaryFindings.find(
     f => (f.metadata as { incomplete?: boolean } | undefined)?.incomplete === true,
   );
-  if (!incompleteFinding) return 'delivered';
-  const stopReason = (incompleteFinding.metadata as { stopReason?: AgentStopReason } | undefined)
-    ?.stopReason;
-  return stopReason === 'budget' ? 'degraded:budget_starved' : 'degraded:provider_partial';
+  if (incompleteFinding) {
+    const stopReason = (incompleteFinding.metadata as { stopReason?: AgentStopReason } | undefined)
+      ?.stopReason;
+    return stopReason === 'budget' ? 'degraded:budget_starved' : 'degraded:provider_partial';
+  }
+  // Nothing was marked incomplete — but an extra pass's own raw stop reason
+  // (stamped unconditionally by `appendSummaryFinding`, see this function's
+  // own doc comment) can still show resource exhaustion a forced
+  // summary-retry papered over. Mirrors `computeVerdict`'s ungated read of
+  // each extra pass's `PassOutcome.stopReason`.
+  const starvedExtraPass = summaryFindings
+    .flatMap(
+      f =>
+        (
+          f.metadata as
+            | { extraPassStopReasons?: { name: string; stopReason: AgentStopReason }[] }
+            | undefined
+        )?.extraPassStopReasons ?? [],
+    )
+    .find(p => p.stopReason !== 'completed');
+  if (!starvedExtraPass) return 'delivered';
+  return starvedExtraPass.stopReason === 'budget'
+    ? 'degraded:budget_starved'
+    : 'degraded:provider_partial';
 }
 
 /** Copy for each `PresentTimeVerdict` bucket — label, emoji, and the actionable detail. */
