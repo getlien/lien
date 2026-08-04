@@ -40,12 +40,15 @@ Find code with terms: jwt token validation verify
   "results": [
     {
       "content": "async function authenticateUser(credentials) { ... }",
-      "file": "src/auth/authenticate.ts",
-      "startLine": 23,
-      "endLine": 45,
       "score": 0.94,
       "relevance": "highly_relevant",
-      "dependentCount": 12
+      "metadata": {
+        "file": "src/auth/authenticate.ts",
+        "startLine": 23,
+        "endLine": 45,
+        "symbolName": "authenticateUser",
+        "dependentCount": 12
+      }
     }
   ]
 }

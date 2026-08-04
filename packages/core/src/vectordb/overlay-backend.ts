@@ -30,7 +30,11 @@ import {
   deleteFileChunks,
   validateBatchLengths,
 } from './sqlite/write-ops.js';
-import { keywordSearch } from './sqlite/fts-search.js';
+import {
+  keywordSearch,
+  applyStructuralBoost,
+  structuralRankingEnabled,
+} from './sqlite/fts-search.js';
 import {
   readDependentCounts,
   refreshDependentCounts as refreshOverlayDependentCounts,
@@ -70,6 +74,40 @@ function isSqliteBusy(error: unknown): boolean {
  *   - `insertBatch` / `updateFile`: write overlay rows; `updateFile` also masks
  *     `f` when `f ∈ base`.
  */
+/**
+ * Merge two corpora's already-ranked hit lists into one order (#1071).
+ *
+ * `keywordSearch` applies the structural boost WITHIN each corpus, but each
+ * result only carries the pure-bm25 `score` it was scored with -- the boosted
+ * sort key is internal to that function. Re-sorting the merged list by `score`
+ * therefore threw the boost away at exactly the moment both corpora had finally
+ * been given one corpus-wide count map to agree on: an overlay-served hub file
+ * with 80 dependents could land below a base-served file with a marginally
+ * better lexical match, even with ranking enabled. That is the same
+ * silently-does-nothing failure #1071 is about, one layer up.
+ *
+ * So the boost is reapplied here over the merged list. `score` is
+ * `round4((1 - ratio) * 2)` (see `scoreRow`), so `ratio` recovers exactly as
+ * `1 - score / 2` -- no need to widen `keywordSearch`'s return type to carry an
+ * internal sort key across a package boundary.
+ *
+ * With `LIEN_STRUCTURAL_RANKING=off` this is pure `score` ascending, identical to
+ * the pre-#1071 merge, so the escape hatch keeps meaning what it says.
+ */
+function mergeRankedHits(
+  overlayHits: SearchResult[],
+  baseHits: SearchResult[],
+  limit: number,
+): SearchResult[] {
+  const merged = [...overlayHits, ...baseHits];
+  if (!structuralRankingEnabled()) {
+    return merged.sort((a, b) => a.score - b.score).slice(0, limit);
+  }
+  const boosted = (hit: SearchResult): number =>
+    applyStructuralBoost(1 - hit.score / 2, hit.metadata.dependentCount ?? 0);
+  return merged.sort((a, b) => boosted(b) - boosted(a)).slice(0, limit);
+}
+
 export class OverlayBackend implements VectorDBInterface {
   public readonly dbPath: string;
   public readonly isOverlay = true;
@@ -262,8 +300,8 @@ export class OverlayBackend implements VectorDBInterface {
       h => !mask.has(h.metadata.file),
     );
     // BM25 ranks are corpus-relative; merging two corpora yields an approximate
-    // global order (documented v1 caveat). score is lower-is-better.
-    return [...overlayHits, ...baseHits].sort((a, b) => a.score - b.score).slice(0, limit);
+    // global order (documented v1 caveat).
+    return mergeRankedHits(overlayHits, baseHits, limit);
   }
 
   async scanWithFilter(options: {
@@ -538,7 +576,16 @@ export class OverlayBackend implements VectorDBInterface {
       throw error;
     }
 
-    if (changed) this.reclaimSpace();
+    if (changed) {
+      // Derived-data refresh belongs with the swap that invalidates it, not with
+      // the caller: `buildOverlay` should not have to remember that a content
+      // change makes the ranking counts stale (#1071). Deliberately AFTER the
+      // commit rather than inside the swap transaction -- the swap must stay the
+      // minimal all-or-nothing content exchange, and a stale count is a soft
+      // ranking imprecision, not a corpus inconsistency.
+      this.refreshDependentCountsSync();
+      this.reclaimSpace();
+    }
     return { changed };
   }
 
@@ -555,6 +602,15 @@ export class OverlayBackend implements VectorDBInterface {
    * ranking imprecision, not a corpus inconsistency.
    */
   async refreshDependentCounts(): Promise<void> {
+    this.refreshDependentCountsSync();
+  }
+
+  /**
+   * The actual work behind `refreshDependentCounts`, synchronous so
+   * `applyRebuild` (which is sync, and is the point at which the counts become
+   * stale) can call it directly.
+   */
+  private refreshDependentCountsSync(): void {
     const chunks = this.unionRecords(readAllRecords).map(recordToUnscoredResult);
     refreshOverlayDependentCounts(this.requireOverlay(), chunks, this.worktreeRoot);
     // Marks the overlay table authoritative from here on — see
