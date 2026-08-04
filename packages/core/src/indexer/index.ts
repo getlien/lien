@@ -171,6 +171,18 @@ async function finalizeManifest(
  * per-connection count map would stay empty while `hasDependentCounts()` started
  * answering true — clearing the note and then asserting corpus-wide zeros as
  * fact, which is #1072's defect restored.
+ *
+ * Deliberately NOT error-tolerant, unlike `OverlayBackend.backfillDependentCounts`
+ * (review finding on this PR, and correct — the asymmetry it flagged was real, and
+ * the swallow was the wrong half). `refreshDependentCounts` is the same call
+ * `saveIndexResults` makes uncaught at the end of every full index, so a genuine
+ * failure here must surface exactly as it already does there rather than leaving
+ * `success: true` over a migration that did not happen. The overlay's busy-skip is
+ * specific and earns itself: piled-up `lien serve` processes on one worktree are a
+ * documented reality, and a peer holding the write lock is doing this very work on
+ * our behalf. Neither is true of a standalone store, whose incremental path already
+ * writes (and can already contend) on any run that indexes anything at all — and
+ * this runs at most once per store, ever.
  */
 async function backfillDependentCounts(
   vectorDB: VectorDBInterface,
@@ -182,20 +194,8 @@ async function backfillDependentCounts(
     phase: 'saving',
     message: 'Backfilling reverse-dependency counts (one-time)...',
   });
-  try {
-    await vectorDB.refreshDependentCounts();
-    await writeVersionFile(vectorDB.dbPath);
-  } catch (error) {
-    // Never fail an index run over a soft ranking tie-breaker — this is the
-    // "no changes detected" path, the most frequently executed one there is, and
-    // a peer process holding the write lock would otherwise turn a no-op into a
-    // reported failure. Skipping leaves the migration for the next run, which is
-    // exactly the pre-fix state: no worse, and loud rather than silent so a real
-    // failure here can never quietly re-create #1084.
-    console.error(
-      `[indexer] dependent-count backfill skipped: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
+  await vectorDB.refreshDependentCounts();
+  await writeVersionFile(vectorDB.dbPath);
 }
 
 /**
