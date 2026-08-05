@@ -387,11 +387,30 @@ export function chunkByAST(
   const topLevelNodes = findTopLevelNodes(rootNode, context.traverser);
   const topLevelChunks = processTopLevelNodes(topLevelNodes, filepath, content, context, language);
 
-  // Extract uncovered code (imports, exports, top-level statements)
-  const coveredRanges = topLevelNodes.map(n => ({
-    start: n.startPosition.row,
-    end: n.endPosition.row,
-  }));
+  // Extract uncovered code (imports, exports, top-level statements).
+  //
+  // Transparent containers (e.g. Ruby's `module`) are excluded here even
+  // though `findTopLevelNodes` pushes them: `emitsChildChunks` voids their
+  // OWN chunk's call sites specifically because `extractCallSites` recurses
+  // unscoped, so keeping the module's own [start,end] "covered" would only
+  // have suppressed double-counting for it, not for anything genuinely
+  // extracted here. But a bare statement directly inside the module — not
+  // wrapped in any further declaration, so it gets no chunk of its own
+  // either — has no extractor claiming it at all, and covering the module's
+  // full range (which is only ever right for a REAL container, whose own
+  // chunk deliberately claims nothing precisely because its children do)
+  // silently marked that statement's line "already handled". Dropping
+  // transparent containers from this list lets `withModuleLevelCallSites`
+  // reach those lines the same way it reaches any other module-level code;
+  // real children nested inside (a class, its methods) still cover their
+  // own ranges via their own entries in `topLevelNodes`, so nothing here
+  // gets double-counted.
+  const coveredRanges = topLevelNodes
+    .filter(n => !context.traverser.transparentContainerTypes?.includes(n.type))
+    .map(n => ({
+      start: n.startPosition.row,
+      end: n.endPosition.row,
+    }));
   const uncoveredChunks = withModuleLevelCallSites(
     extractUncoveredCode(
       context.lines,

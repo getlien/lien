@@ -1411,6 +1411,34 @@ class Service:
       expect(entries).toHaveLength(new Set(entries).size);
       expect(symbolsOf(chunks).has('helper')).toBe(true);
     });
+
+    it('records a bare call directly inside a transparent container (Ruby module)', () => {
+      // Review finding on #1087/#1088: `emitsChildChunks` deliberately voids a
+      // transparent container's OWN call sites (extractCallSites recurses
+      // unscoped, so extracting on the module node would double-count its real
+      // children), but that container's full range used to sit in
+      // `coveredRanges` too -- so a bare statement directly inside the module,
+      // wrapped in no further declaration of its own, was silently dropped:
+      // neither the module's chunk nor any child chunk claimed it.
+      const content = `module Foo
+  configure()
+
+  class Bar
+    def method1
+      helper_call()
+    end
+  end
+end
+`;
+      const chunks = chunkByAST('foo.rb', content);
+      const symbols = symbolsOf(chunks);
+
+      expect(symbols.has('configure')).toBe(true);
+      expect(symbols.has('helper_call')).toBe(true);
+
+      const entries = allCallSites(chunks);
+      expect(entries).toHaveLength(new Set(entries).size);
+    });
   });
 
   describe('error handling', () => {

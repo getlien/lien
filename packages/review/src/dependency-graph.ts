@@ -41,6 +41,7 @@ import {
   normalizePath,
   detectLanguage,
   findCSharpTypeReferenceDependents,
+  callerSymbolFor,
 } from '@liendev/parser';
 
 // ---------------------------------------------------------------------------
@@ -779,7 +780,12 @@ function addEdge(
   existing.push({
     caller: {
       filepath: callerChunk.metadata.file,
-      symbolName: callerChunk.metadata.symbolName ?? 'unknown',
+      // #1087 widened call-site extraction to module-level code, so a caller
+      // with no symbolName is now common, not rare -- `callerSymbolFor` reports
+      // `(module-level)` for it rather than `'unknown'`, matching the wording
+      // `dependent-context.ts` and `dependency-analyzer.ts` already use (review
+      // finding on #1087: this site had fallen out of sync with those two).
+      symbolName: callerSymbolFor(callerChunk),
       chunk: callerChunk,
     },
     callSiteLine,

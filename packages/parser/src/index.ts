@@ -237,6 +237,7 @@ export {
   findReExportedSymbolsForFile,
   hasTestImporterFromChunks,
   hasTestImporterBruteForce,
+  callerSymbolFor,
   DEPENDENT_COUNT_THRESHOLDS,
   COMPLEXITY_THRESHOLDS,
 } from './dependency-analyzer.js';

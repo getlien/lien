@@ -6,7 +6,7 @@
  * are used in dependent files within the same PR.
  */
 
-import { findChunkLineIndex } from '@liendev/parser';
+import { callerSymbolFor, findChunkLineIndex } from '@liendev/parser';
 import type { CodeChunk } from '@liendev/parser';
 import type { ComplexityReport } from './types.js';
 
@@ -56,9 +56,9 @@ const MAX_LINE_LENGTH = 120;
 
 /**
  * Stands in for the caller's name when the calling chunk is module-level code
- * and so has no enclosing function to name. Same wording `dependency-graph.ts`
- * uses for its own version of this (`NO_REPRESENTATIVE_SYMBOL`) and that
- * `@liendev/parser` reports for `get_dependents` usages.
+ * and so has no enclosing function to name. Produced by `callerSymbolFor`
+ * (`@liendev/parser`) below; kept as its own constant only for the equality
+ * check further down, so this file doesn't hardcode the string a second time.
  */
 const MODULE_LEVEL_CALLER = '(module-level)';
 
@@ -137,15 +137,7 @@ export function findCallSitesForSymbol(
     seenFiles.add(file);
     results.push({
       filepath: file,
-      // A 'block' chunk is module-level code — top-level statements, or a
-      // declaration holding no function — so there is no enclosing function to
-      // name. Same wording `dependency-graph.ts` uses (NO_REPRESENTATIVE_SYMBOL)
-      // and `dependency-analyzer.ts` reports for `get_dependents` usages. Since
-      // #1087 widened call-site extraction to module-level code, this is a
-      // common case rather than a rare fallback.
-      callerSymbol:
-        chunk.metadata.symbolName ??
-        (chunk.metadata.type === 'block' ? MODULE_LEVEL_CALLER : 'unknown'),
+      callerSymbol: callerSymbolFor(chunk),
       line: callSite.line,
       snippet,
       callerComplexity: chunk.metadata.complexity,
