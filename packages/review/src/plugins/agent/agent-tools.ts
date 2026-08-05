@@ -12,7 +12,7 @@ import fs from 'fs/promises';
 import type { Dirent } from 'fs';
 import path from 'path';
 
-import type { BlastRadiusRisk, CodeChunk } from '@liendev/parser';
+import type { BlastRadiusRisk, CodeChunk, CallerEdge } from '@liendev/parser';
 import {
   analyzeComplexityFromChunks,
   createGitignoreFilter,
@@ -21,7 +21,6 @@ import {
 } from '@liendev/parser';
 
 import type { AgentToolContext } from './types.js';
-import type { CallerEdge } from '../../dependency-graph.js';
 
 // ---------------------------------------------------------------------------
 // Constants

@@ -1,7 +1,33 @@
 import { describe, it, expect } from 'vitest';
-import { buildDependencyGraph, isPreciseProvenance } from '../src/dependency-graph.js';
-import type { EdgeProvenance } from '../src/dependency-graph.js';
-import { createTestChunk } from '../src/test-helpers.js';
+import { buildDependencyGraph, isPreciseProvenance } from './dependency-graph.js';
+import type { EdgeProvenance } from './dependency-graph.js';
+import type { CodeChunk } from '../types.js';
+
+/**
+ * Create a minimal CodeChunk for testing.
+ *
+ * Local copy of review's `test-helpers.ts` factory of the same name — kept
+ * as a small non-exported duplicate here rather than importing across the
+ * package boundary, since this test moved into parser (#994-adjacent lift)
+ * while that shared review-only test helper stays in `@liendev/review`
+ * (still used by 3 other review test files).
+ */
+function createTestChunk(overrides?: Partial<CodeChunk>): CodeChunk {
+  const { metadata: metadataOverrides, ...rest } = overrides ?? {};
+  return {
+    content: 'function test() { return true; }',
+    metadata: {
+      file: 'test.ts',
+      startLine: 1,
+      endLine: 1,
+      type: 'function',
+      symbolName: 'test',
+      language: 'typescript',
+      ...metadataOverrides,
+    },
+    ...rest,
+  } as CodeChunk;
+}
 
 // ---------------------------------------------------------------------------
 // buildDependencyGraph

@@ -1,9 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import type { CodeChunk } from '@liendev/parser';
-import { computeBlastRadiusRisk } from '@liendev/parser';
+import { computeBlastRadiusRisk, buildDependencyGraph } from '@liendev/parser';
 
 import { getDependents } from '../src/plugins/agent/agent-tools.js';
-import { buildDependencyGraph } from '../src/dependency-graph.js';
 import { computeBlastRadius } from '../src/blast-radius.js';
 import { createTestChunk, silentLogger } from '../src/test-helpers.js';
 import type { AgentToolContext } from '../src/plugins/agent/types.js';

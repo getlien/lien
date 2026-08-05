@@ -18,7 +18,7 @@ dialects:
 | vocabulary | home | shape |
 |---|---|---|
 | `confidence?: 'inferred'` | `packages/parser/src/dependency-analyzer.ts` | single-valued, per dependent |
-| `EdgeProvenance` | `packages/review/src/dependency-graph.ts` | 7 ranked tiers, per caller edge |
+| `EdgeProvenance` | `packages/parser/src/graph/dependency-graph.ts` | 7 ranked tiers, per caller edge |
 | `AttributionCaveatReason` | `packages/cli/src/mcp/attribution-caveat-reasons.ts` | 5 reasons, per response |
 
 The pressure was real. Four consumers had been blocked or had bent around
@@ -255,7 +255,7 @@ further edits.
   `inferredVia` and `inferredDependent()`, the single constructor for the pair
 - `packages/cli/src/mcp/attribution-caveat-reasons.ts`: Axis B's reasons and
   the #984 `Record<>` forcing function, plus why the two guards compose
-- `packages/review/src/dependency-graph.ts`:
+- `packages/parser/src/graph/dependency-graph.ts`:
   `SYMBOL_VERIFIED_BY_PROVENANCE` and `isPreciseProvenance`
 - `docs/architecture/index-state-honesty.md`: the scope-3 policy this ADR
   routes to rather than duplicates

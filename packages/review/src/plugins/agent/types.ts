@@ -5,8 +5,7 @@
  * used across the agent's anthropic client, tools, and system prompt modules.
  */
 
-import type { CodeChunk } from '@liendev/parser';
-import type { DependencyGraph } from '../../dependency-graph.js';
+import type { CodeChunk, DependencyGraph } from '@liendev/parser';
 import type { Logger } from '../../logger.js';
 
 /** Configuration for the blast-radius context injection. */

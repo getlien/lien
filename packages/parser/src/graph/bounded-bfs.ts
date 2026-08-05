@@ -1,8 +1,10 @@
 /**
  * Generic bounded level-BFS over an arbitrary graph.
  *
- * Extracted from the caller-graph BFS in `@liendev/review`'s
- * `dependency-graph.ts` (`bfsTransitiveCallers` / `expandFrontier`). This file
+ * Extracted from the caller-graph BFS in this package's own
+ * `dependency-graph.ts` (`bfsTransitiveCallers` / `expandFrontier`, since
+ * lifted here from `@liendev/review` — it never imported anything
+ * review-specific to begin with). This file
  * keeps the traversal *shape* — frontier expansion, dedup, depth cap, maxNodes
  * truncation — generic and domain-agnostic. Callers supply the domain (what a
  * "node" and an "edge" are, and how to get from one to the other); this module

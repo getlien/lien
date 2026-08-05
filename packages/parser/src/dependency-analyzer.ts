@@ -2447,11 +2447,12 @@ function findSymbolUsages<T extends CodeChunk>(
  * A `'block'` chunk is module-level code — top-level statements, a declaration
  * holding no function — so there is no enclosing function to name, and saying
  * so beats `'unknown'`, which reads as "we failed to work it out". Matches the
- * `(module-level)` wording `review`'s `dependency-graph.ts` and
- * `dependent-context.ts` also use for the same situation — exported so those
- * two sites (and this one) share one implementation instead of three
- * independently-maintained copies of the same ternary (review finding on
- * #1087: the `dependency-graph.ts` copy had fallen out of sync with the other
+ * `(module-level)` wording `graph/dependency-graph.ts` (this package, since
+ * lifted from `@liendev/review`) and `review`'s own `dependent-context.ts`
+ * also use for the same situation — exported so those two sites (and this
+ * one) share one implementation instead of three independently-maintained
+ * copies of the same ternary (review finding on #1087: the
+ * `dependency-graph.ts` copy had fallen out of sync with the other
  * two, still returning `'unknown'` for a module-level caller). Since #1087
  * widened call-site extraction to module-level code this is a common case,
  * not a rare fallback.

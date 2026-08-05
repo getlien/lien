@@ -8,13 +8,14 @@
 
 import { z } from 'zod';
 
+import { buildDependencyGraph } from '@liendev/parser';
+
 import type {
   ReviewPlugin,
   ReviewContext,
   ReviewFinding,
   PresentContext,
 } from '../../plugin-types.js';
-import { buildDependencyGraph } from '../../dependency-graph.js';
 import { computeBlastRadius } from '../../blast-radius.js';
 import type { Logger } from '../../logger.js';
 import type { AttestationVerdict } from '../../attestation.js';

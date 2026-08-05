@@ -6,9 +6,14 @@
  * risk-scored report ready for rendering into the agent's initial message.
  */
 
-import type { CodeChunk, RiskLevel, BlastRadiusRisk } from '@liendev/parser';
+import type {
+  CodeChunk,
+  RiskLevel,
+  BlastRadiusRisk,
+  DependencyGraph,
+  EdgeProvenance,
+} from '@liendev/parser';
 import { findTestAssociationsFromChunks, computeBlastRadiusRisk } from '@liendev/parser';
-import type { DependencyGraph, EdgeProvenance } from './dependency-graph.js';
 
 // ---------------------------------------------------------------------------
 // Types
