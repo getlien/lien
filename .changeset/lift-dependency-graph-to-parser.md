@@ -2,7 +2,7 @@
 '@liendev/parser': minor
 ---
 
-Export the call-site-level dependency graph (`buildDependencyGraph`, `isPreciseProvenance`, and the `DependencyGraph`/`SymbolNode`/`CallerEdge`/`EdgeProvenance` types) from `@liendev/parser`.
+Export the call-site-level dependency graph (`buildDependencyGraph`, `isPreciseProvenance`, and the `DependencyGraph`/`SymbolNode`/`CallerEdge`/`EdgeProvenance`/`TransitiveCallerEdge`/`TransitiveResult`/`TransitiveOptions` types) from `@liendev/parser`.
 
 This graph previously lived inside the private `@liendev/review` package,
 even though it imported nothing review-specific — only parser's own

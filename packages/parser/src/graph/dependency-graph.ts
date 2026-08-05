@@ -541,7 +541,6 @@ function buildExportFileMap(exportIndex: ExportIndex): Map<string, Set<string>> 
  * and `Order.php` also defines `findById`, the chunk can call `findById`.
  */
 function chunkImportsFromFile(
-  _chunk: CodeChunk,
   targetFile: string,
   pkgSymbols: Set<string> | undefined,
   exportFileMap: Map<string, Set<string>>,
@@ -719,7 +718,7 @@ function addOopMethodEdges(
   let matched = false;
   for (const loc of exportLocations) {
     if (loc.filepath === callerFile) continue;
-    if (chunkImportsFromFile(chunk, loc.filepath, pkgSymbols, ctx.exportFileMap)) {
+    if (chunkImportsFromFile(loc.filepath, pkgSymbols, ctx.exportFileMap)) {
       addEdge(
         ctx.edges,
         `${loc.filepath}::${callSite.symbol}`,
