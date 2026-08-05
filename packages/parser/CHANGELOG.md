@@ -1,5 +1,98 @@
 # @liendev/parser
 
+## 0.75.6
+
+### Patch Changes
+
+- 206127d: fix(parser,cli,review): name the fallback behind an inferred dependent (#1018)
+
+  `get_dependents`' `dependent-attribution-partial` caveat described C#'s
+  type-reference fallback in every case, because `confidence: 'inferred'` was
+  single-valued and the mechanism identity was discarded at the parser boundary.
+  When #1039 added Go's root-package export lookup — same marker, same caveat
+  reason — every recovered Go file was told _"its language, C#, lets real callers
+  use its exports with no per-file import naming it at all"_ and that its
+  dependents came from _"matching a uniquely-declared type name against other
+  files' source text"_. Both false; measured on a real `go-chi/chi` clone, 24 of
+  24 recovered edges across `context.go`/`mux.go`/`chain.go`.
+
+  `@liendev/parser` now owns `INFERRED_DEPENDENT_MECHANISMS`, a `Record`-guarded
+  table of the non-import recovery fallbacks and their canonical prose, and
+  `DependentInfo.inferredVia` names the mechanism per dependent. Every
+  consumer-facing surface — the caveat note, the caveat-reason text, the server
+  instructions, the tool description and the docs page — derives from the table
+  instead of restating it, so a third fallback is a compile error until its prose
+  exists and then correct everywhere at once.
+
+  `DependentInfo.confidence` is unchanged and still marks exactly what it did;
+  `inferredVia` is additive. `review`'s `isPreciseProvenance` returns exactly what
+  it returned for all seven tiers, now via a `Record<EdgeProvenance, boolean>` so
+  an eighth tier can't default silently.
+
+  Also fixes two doc-truth defects on the MCP tools page found while mapping the
+  surfaces: `dependent-attribution-partial` was documented as C#-only, and
+  `testAssociations[]` was documented as `{ testFile, confidence, method }` with a
+  "Confidence Levels" section — a shape and vocabulary that exist nowhere in the
+  code (the real field is `string[]`), attributed to a tool that never emitted the
+  field.
+
+  ADR-016 records why the three vocabularies #1018 named were not merged into one,
+  and the routing rule for where a new honesty signal belongs.
+
+- 761b3bc: Extract call sites from module-level code, not just function and method bodies (#1087)
+
+  `ast/chunker.ts` gated call-site extraction behind `shouldCalcComplexity` — the
+  same flag as cognitive/Halstead metrics — so anything that wasn't a function or
+  method body contributed no call-site evidence at all: `export const client =
+createClient(loadConfig())`, route/DI registration, config objects built from
+  factory calls, and (because a test file is almost entirely bare top-level
+  statements) every test that calls the function it tests.
+
+  Call sites are now extracted for every chunk whose line range no other chunk
+  overlaps, plus the module-level "uncovered" chunks that previously had no AST
+  node to extract from. Containers stay excluded, because a class chunk's range
+  contains its methods' and nothing downstream dedupes across a file's chunks.
+
+  Measured across 12 real corpora, the share of files referencing an identifier
+  declared in the same corpus: this repo 53.6% → 87.5%, zod 26.9% → 85.4%,
+  express 12.1% → 84.4%, sinatra 42.9% → 82.3%, requests 62.2% → 70.3%. Zero
+  duplicate attributions anywhere. Complexity metrics, chunk boundaries and
+  precomputed `dependentCount` are byte-identical before and after; index size
+  grows ~11% and index time is unchanged.
+
+  Two knock-on fixes for output that only becomes common once module-level code
+  carries call sites: `get_dependents` usages from module-level code now report
+  `callerSymbol: "(module-level)"` rather than `"unknown"` (matching the wording
+  `review` already uses), and their `snippet` is located by finding the line that
+  mentions the symbol instead of computing it, which was landing a line late for
+  any chunk whose leading blank lines were trimmed out of its content.
+
+- 8b573b2: `lien index` now refuses to index your home directory or a filesystem root (`/`, `C:\`, a Windows user-profile root) unless explicitly overridden with `--allow-unsafe-root`. This closes the incident behind #1025: running `lien index` from `$HOME` swept macOS Keychain databases, `.npm` debug logs, and Claude Code agent caches into a 10.5 GB index with no warning. The refusal names the exact path and the override flag; a genuine reason to index an unusual root is always one flag away.
+
+  As defense in depth, an extra set of OS/credential exclusions (`Library/`, `AppData/`, `.npm/`, `.cache/`, `.claude/`, `.ssh/`, `.aws/`, `.gnupg/`, `*.keychain`/`*.keychain-db`) now applies whenever the indexed root IS the home directory itself — scoped so an ordinary project is never affected, even one with its own legitimate `Library/` directory (Arduino, Unity, some Java layouts) or one that simply lives directly under `$HOME` (`~/myproject`).
+
+  Indexing also now skips any single file over 5 MB instead of chunking it whole — a backstop against the same disk-blowup class independent of path filtering, for a legitimately huge binary in an otherwise ordinary project just as much as for an overridden home-root scan.
+
+  `lien status` now reports the index's on-disk size (`Index size:` in text output, `indexSizeBytes` in `--format json`), so an anomalously large index is visible instead of sitting unnoticed.
+
+- 761b3bc: Share one chunk-line lookup between `get_dependents` usage snippets and review's dependent context (#1087)
+
+  Both computed a snippet's position as `callSiteLine - chunk.metadata.startLine`,
+  which is only exact when a chunk's content starts on the line `startLine` names.
+  A module-level chunk's does not — `createChunkFromRange` trims its range's
+  leading blank lines out of the content while `startLine` keeps naming the
+  untrimmed start — so the subtraction overshoots: `get_dependents` returned a
+  neighbouring statement as the snippet, and review's `extractSnippetWindow`
+  either centred its window a line late or, once the overshoot exceeded the
+  content, returned `null` and dropped the snippet from the review prompt
+  entirely.
+
+  Both now go through `findChunkLineIndex`, which locates the line by finding the
+  nearby one that mentions the symbol. `review`'s module-level callers are also
+  labelled `(module-level)` rather than `unknown`, matching what parser already
+  reports, and the `()` suffix is dropped for them since module-level code is not
+  a function.
+
 ## 0.75.5
 
 ### Patch Changes
