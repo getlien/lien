@@ -117,6 +117,7 @@ export {
   isHomeDirectory,
   getEffectiveAlwaysIgnorePatterns,
   getEffectiveNeverIndexPatterns,
+  toComparablePath,
 } from './gitignore.js';
 
 // =============================================================================

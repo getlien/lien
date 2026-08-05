@@ -87,9 +87,12 @@ export const HOME_ROOT_ONLY_IGNORE_PATTERNS = [
  * so a path built from an unresolved `$HOME`/`cwd` can differ textually from
  * the same real directory reached another way, causing this exact
  * comparison to silently miss a true match (a false negative in a safety
- * check is worse than a false positive).
+ * check is worse than a false positive). Exported so `checkRootSafety`
+ * (`@liendev/lien`'s `unsafe-root.ts`) can apply the same symlink-safe
+ * resolution to its filesystem-root check, matching what `isHomeDirectory`
+ * below already does for the home-directory half of the same guard.
  */
-function toComparablePath(p: string): string {
+export function toComparablePath(p: string): string {
   try {
     return realpathSync(p);
   } catch {

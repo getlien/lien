@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
+import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { checkRootSafety, formatUnsafeRootMessage } from './unsafe-root.js';
@@ -56,6 +57,32 @@ describe('checkRootSafety (#1025)', () => {
     const result = checkRootSafety('/some/project');
 
     expect(result.resolved).toBe(path.resolve('/some/project'));
+  });
+
+  describe('symlink to the filesystem root (review finding)', () => {
+    const tmpDirs: string[] = [];
+
+    afterEach(() => {
+      for (const dir of tmpDirs.splice(0)) {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('refuses a symlink whose target is the filesystem root, not just a literal "/"', () => {
+      // A plain path.resolve() only normalizes '.'/'..' segments -- it does
+      // not resolve a symlink target, so a cwd that is itself a symlink to
+      // '/' would lexically read as this link's own path and slip past the
+      // fsRoot check.
+      const base = fs.mkdtempSync(path.join(os.tmpdir(), 'lien-unsafe-root-'));
+      tmpDirs.push(base);
+      const link = path.join(base, 'root-link');
+      fs.symlinkSync(path.parse(base).root, link, 'dir');
+
+      const result = checkRootSafety(link);
+
+      expect(result.unsafe).toBe(true);
+      expect(result.unsafe && result.kind).toBe('filesystem-root');
+    });
   });
 });
 

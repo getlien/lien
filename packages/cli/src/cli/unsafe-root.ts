@@ -1,5 +1,5 @@
 import path from 'path';
-import { isHomeDirectory } from '@liendev/parser';
+import { isHomeDirectory, toComparablePath } from '@liendev/parser';
 
 /** Why `checkRootSafety` refused a root. */
 export type UnsafeRootKind = 'home' | 'filesystem-root';
@@ -28,9 +28,18 @@ export type RootSafetyResult =
  * The home check delegates to {@link isHomeDirectory} (`@liendev/parser`) —
  * the same symlink-safe comparison `getEffectiveAlwaysIgnorePatterns` uses —
  * rather than a second, parallel `os.homedir()` comparison here.
+ *
+ * `resolved` comes from {@link toComparablePath} (`@liendev/parser`), not a
+ * plain `path.resolve`: the latter only normalizes `.`/`..` segments and
+ * leaves a symlink target unresolved, so a `cwd` that is itself a symlink to
+ * `/` would lexically read as some other path and slip past the
+ * `resolved === fsRoot` check below (review finding — a false negative in a
+ * safety check is worse than a false positive, same rationale
+ * `toComparablePath`'s own doc comment gives for the home-directory half of
+ * this same guard).
  */
 export function checkRootSafety(dir: string): RootSafetyResult {
-  const resolved = path.resolve(dir);
+  const resolved = toComparablePath(dir);
   const fsRoot = path.parse(resolved).root;
 
   if (resolved === fsRoot) {
