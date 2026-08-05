@@ -48,35 +48,35 @@ export const ALWAYS_IGNORE_PATTERNS = [
  * names anywhere in a path avoids false positives: `Library/` is a
  * legitimate source directory in some ecosystems (Arduino sketches, Unity
  * projects, some Java layouts), so a universal `**\/Library/**` exclusion
- * would silently blind those projects. The only place these OS/credential
- * directories can appear as an indexing root's own top-level entries is when
- * the root really is `$HOME` — the exact shape that swept macOS Keychain
- * databases, `.npm` debug logs, and Claude Code caches into a 10.5 GB index
- * on a maintainer's machine (#1025). Also fed into
- * {@link getEffectiveNeverIndexPatterns} so a dotfiles repo that happens to
- * track one of these (e.g. `.ssh/config`) is never rescued back in either.
+ * would silently blind those projects. Deliberately root-anchored only —
+ * no `**\/` variants: the directory patterns contain a mid-pattern slash
+ * (`Library/**`) and the two basename globs carry an explicit leading slash
+ * (`/*.keychain`), both of which anchor to the root of the `ignore()`
+ * instance under gitignore semantics — i.e. `rootDir`, which this array is
+ * only ever added under when `rootDir` IS home (see
+ * {@link getEffectiveAlwaysIgnorePatterns}/{@link getEffectiveNeverIndexPatterns}).
+ * A bare `*.keychain` (no leading slash) or a `**\/`-prefixed sibling would
+ * both match these names at any depth, ignoring e.g. `~/myproject/Library/`
+ * too — exactly the false positive this pattern set exists to avoid. The
+ * only place these OS/credential directories can appear as an indexing
+ * root's own top-level entries is when the root really is `$HOME` — the
+ * exact shape that swept macOS Keychain databases, `.npm` debug logs, and
+ * Claude Code caches into a 10.5 GB index on a maintainer's machine (#1025).
+ * Also fed into {@link getEffectiveNeverIndexPatterns} so a dotfiles repo
+ * that happens to track one of these (e.g. `.ssh/config`) is never rescued
+ * back in either.
  */
 export const HOME_ROOT_ONLY_IGNORE_PATTERNS = [
   'Library/**',
-  '**/Library/**',
   'AppData/**',
-  '**/AppData/**',
   '.npm/**',
-  '**/.npm/**',
   '.cache/**',
-  '**/.cache/**',
   '.claude/**',
-  '**/.claude/**',
   '.ssh/**',
-  '**/.ssh/**',
   '.aws/**',
-  '**/.aws/**',
   '.gnupg/**',
-  '**/.gnupg/**',
-  '*.keychain-db',
-  '**/*.keychain-db',
-  '*.keychain',
-  '**/*.keychain',
+  '/*.keychain-db',
+  '/*.keychain',
 ];
 
 /**

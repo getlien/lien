@@ -381,6 +381,12 @@ describe('createGitignoreFilter', () => {
       expect(isIgnored('random.keychain-db')).toBe(true);
       // Ordinary files at the home root are unaffected.
       expect(isIgnored('myproject/src/index.ts')).toBe(false);
+      // A project living directly under $HOME (root IS home, so this path is
+      // reachable) must keep its own nested Library/ and keychain-named
+      // files -- these patterns are root-anchored (no `**/` variant), so
+      // they must not match at any depth below the home root.
+      expect(isIgnored('myproject/Library/Sketchbook/sketch.ino')).toBe(false);
+      expect(isIgnored('myproject/notes.keychain-db')).toBe(false);
     });
 
     it('never rescues a tracked .ssh/config at the home root, even though tracked files are normally rescued', async () => {
