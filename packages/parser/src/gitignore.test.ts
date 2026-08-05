@@ -1,10 +1,17 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { createGitignoreFilter } from './gitignore.js';
+import {
+  createGitignoreFilter,
+  isHomeDirectory,
+  getEffectiveAlwaysIgnorePatterns,
+  getEffectiveNeverIndexPatterns,
+  ALWAYS_IGNORE_PATTERNS,
+  NEVER_INDEX_EVEN_IF_TRACKED_PATTERNS,
+} from './gitignore.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -315,6 +322,85 @@ describe('createGitignoreFilter', () => {
       const isIgnored = await createGitignoreFilter(testDir);
 
       expect(isIgnored('node_modules/leftpad/index.js')).toBe(true);
+    });
+  });
+
+  // #1025: `lien index` run from $HOME swept macOS Keychain databases, .npm
+  // debug logs, and Claude Code caches into a 10.5 GB index. These extra
+  // patterns are scoped to "the indexed root IS the home directory" so an
+  // ordinary project is never affected, even one containing a real `Library/`
+  // directory (Arduino/Unity/some Java layouts) or living directly under
+  // `$HOME` (`~/myproject`).
+  describe('home-root scoping (#1025)', () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('isHomeDirectory matches the home dir exactly but not a project under it', () => {
+      vi.spyOn(os, 'homedir').mockReturnValue(testDir);
+
+      expect(isHomeDirectory(testDir)).toBe(true);
+      expect(isHomeDirectory(path.join(testDir, 'myproject'))).toBe(false);
+      expect(isHomeDirectory(path.dirname(testDir))).toBe(false);
+    });
+
+    it('getEffectiveAlwaysIgnorePatterns/getEffectiveNeverIndexPatterns are unchanged for a non-home root', () => {
+      vi.spyOn(os, 'homedir').mockReturnValue(path.join(testDir, 'unrelated-home'));
+
+      expect(getEffectiveAlwaysIgnorePatterns(testDir)).toEqual(ALWAYS_IGNORE_PATTERNS);
+      expect(getEffectiveNeverIndexPatterns(testDir)).toEqual(NEVER_INDEX_EVEN_IF_TRACKED_PATTERNS);
+    });
+
+    it('does NOT exclude Library/, .ssh/, or .npm/ for an ordinary project root (no over-refusal)', async () => {
+      // testDir is a plain project directory here -- home is somewhere else.
+      vi.spyOn(os, 'homedir').mockReturnValue(path.join(testDir, 'unrelated-home'));
+
+      const isIgnored = await createGitignoreFilter(testDir);
+
+      // A legitimate project's own Library/ directory (Arduino, Unity, some
+      // Java layouts) must be indexed normally.
+      expect(isIgnored('Library/Sketchbook/sketch.ino')).toBe(false);
+      expect(isIgnored('.npm/README.md')).toBe(false);
+      expect(isIgnored('.ssh/notes.md')).toBe(false);
+      expect(isIgnored('src/index.ts')).toBe(false);
+    });
+
+    it('excludes OS caches and credential directories when the root IS the home directory', async () => {
+      vi.spyOn(os, 'homedir').mockReturnValue(testDir);
+
+      const isIgnored = await createGitignoreFilter(testDir);
+
+      expect(isIgnored('Library/Keychains/login.keychain-db')).toBe(true);
+      expect(isIgnored('Library/Caches/claude-cli-nodejs/transcript.json')).toBe(true);
+      expect(isIgnored('.npm/_logs/debug-0.log')).toBe(true);
+      expect(isIgnored('.cache/some-tool/data')).toBe(true);
+      expect(isIgnored('.claude/projects/session.jsonl')).toBe(true);
+      expect(isIgnored('.ssh/id_rsa')).toBe(true);
+      expect(isIgnored('.aws/credentials')).toBe(true);
+      expect(isIgnored('.gnupg/secring.gpg')).toBe(true);
+      expect(isIgnored('random.keychain-db')).toBe(true);
+      // Ordinary files at the home root are unaffected.
+      expect(isIgnored('myproject/src/index.ts')).toBe(false);
+      // A project living directly under $HOME (root IS home, so this path is
+      // reachable) must keep its own nested Library/ and keychain-named
+      // files -- these patterns are root-anchored (no `**/` variant), so
+      // they must not match at any depth below the home root.
+      expect(isIgnored('myproject/Library/Sketchbook/sketch.ino')).toBe(false);
+      expect(isIgnored('myproject/notes.keychain-db')).toBe(false);
+    });
+
+    it('never rescues a tracked .ssh/config at the home root, even though tracked files are normally rescued', async () => {
+      vi.spyOn(os, 'homedir').mockReturnValue(testDir);
+
+      await fs.mkdir(path.join(testDir, '.ssh'), { recursive: true });
+      await fs.writeFile(path.join(testDir, '.ssh', 'config'), 'Host example.com\n');
+
+      await initGitRepo(testDir);
+      await gitCommitAll(testDir);
+
+      const isIgnored = await createGitignoreFilter(testDir);
+
+      expect(isIgnored('.ssh/config')).toBe(true);
     });
   });
 });

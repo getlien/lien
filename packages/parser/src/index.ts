@@ -110,7 +110,15 @@ export { chunkJSONTemplate } from './json-template-chunker.js';
 // GITIGNORE
 // =============================================================================
 
-export { createGitignoreFilter, ALWAYS_IGNORE_PATTERNS } from './gitignore.js';
+export {
+  createGitignoreFilter,
+  ALWAYS_IGNORE_PATTERNS,
+  HOME_ROOT_ONLY_IGNORE_PATTERNS,
+  isHomeDirectory,
+  getEffectiveAlwaysIgnorePatterns,
+  getEffectiveNeverIndexPatterns,
+  toComparablePath,
+} from './gitignore.js';
 
 // =============================================================================
 // ECOSYSTEM PRESETS

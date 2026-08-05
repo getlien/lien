@@ -3,7 +3,7 @@ import path from 'path';
 import {
   detectEcosystems,
   getEcosystemExcludePatterns,
-  ALWAYS_IGNORE_PATTERNS,
+  getEffectiveAlwaysIgnorePatterns,
 } from '@liendev/parser';
 
 /**
@@ -77,7 +77,8 @@ export class FileWatcher {
     try {
       const ecosystems = await detectEcosystems(this.rootDir);
       const ecosystemExcludes = getEcosystemExcludePatterns(ecosystems);
-      const mergedExcludes = [...new Set([...ALWAYS_IGNORE_PATTERNS, ...ecosystemExcludes])];
+      const alwaysIgnorePatterns = getEffectiveAlwaysIgnorePatterns(this.rootDir);
+      const mergedExcludes = [...new Set([...alwaysIgnorePatterns, ...ecosystemExcludes])];
       return { include: ['**/*'], exclude: mergedExcludes };
     } catch {
       return this.getDefaultPatterns();
@@ -90,7 +91,7 @@ export class FileWatcher {
   private getDefaultPatterns(): WatchPatterns {
     return {
       include: ['**/*'],
-      exclude: [...ALWAYS_IGNORE_PATTERNS],
+      exclude: getEffectiveAlwaysIgnorePatterns(this.rootDir),
     };
   }
 

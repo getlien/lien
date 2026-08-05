@@ -1,4 +1,5 @@
 import fs from 'fs/promises';
+import type { Stats } from 'fs';
 import path from 'path';
 import pLimit from 'p-limit';
 import type { VectorDBInterface } from '../vectordb/types.js';
@@ -7,7 +8,9 @@ import {
   DEFAULT_CHUNK_OVERLAP,
   DEFAULT_CONCURRENCY,
   getParseStageConcurrency,
+  isOversizedForIndexing,
 } from '../constants.js';
+import { formatBytes } from '../gc/dir-size.js';
 import { ManifestManager } from './manifest.js';
 import type { Result } from '../utils/result.js';
 import { Ok, Err, isOk } from '../utils/result.js';
@@ -118,6 +121,51 @@ async function processFileContent(
 }
 
 /**
+ * Record a file as indexed with zero chunks — shared by the "genuinely
+ * empty" and "skipped for being oversized" (#1025) cases in
+ * {@link indexSingleFile}. Removes any stale chunks from the vector DB and
+ * records `chunkCount: 0` in the manifest so the file isn't repeatedly
+ * reprocessed as new.
+ */
+async function recordZeroChunkFile(
+  normalizedPath: string,
+  mtime: number,
+  contentHash: string,
+  vectorDB: VectorDBInterface,
+  manifest: ManifestManager,
+): Promise<void> {
+  await vectorDB.deleteByFile(normalizedPath);
+  await manifest.updateFile(normalizedPath, {
+    filepath: normalizedPath,
+    lastModified: mtime,
+    chunkCount: 0,
+    contentHash,
+  });
+}
+
+/**
+ * Handle the #1025 size-cap case for {@link indexSingleFile}: log the skip,
+ * then record the file with zero chunks. Hashing here still uses
+ * `computeContentHash`'s >1MB fingerprint fast path (first/last 8KB, never
+ * the whole file), so this never reads an oversized file's full content —
+ * only the size check itself needs to run before anything else. Extracted
+ * so `indexSingleFile`'s own branching stays flat.
+ */
+async function handleOversizedFile(
+  normalizedPath: string,
+  absolutePath: string,
+  stats: Stats,
+  vectorDB: VectorDBInterface,
+  manifest: ManifestManager,
+): Promise<void> {
+  console.error(
+    `[Lien] Skipped oversized file (${formatBytes(stats.size)} exceeds the indexable cap): ${normalizedPath}`,
+  );
+  const contentHash = await computeContentHash(absolutePath);
+  await recordZeroChunkFile(normalizedPath, stats.mtimeMs, contentHash, vectorDB, manifest);
+}
+
+/**
  * Indexes a single file incrementally by updating its chunks in the vector database.
  * This is the core function for incremental reindexing - it handles file changes,
  * deletions, and additions.
@@ -160,26 +208,27 @@ export async function indexSingleFile(
       return;
     }
 
+    // Stat FIRST, and check the size cap before anything else touches the
+    // file's content -- including hashing -- so an oversized file (#1025)
+    // never gets read at all, not even for its content hash.
+    const stats = await fs.stat(absolutePath);
+    const manifest = new ManifestManager(vectorDB.dbPath);
+
+    if (isOversizedForIndexing(stats.size)) {
+      await handleOversizedFile(normalizedPath, absolutePath, stats, vectorDB, manifest);
+      return;
+    }
+
     // Read file content
     const content = await fs.readFile(absolutePath, 'utf-8');
 
     // Process file content (chunking) - use normalized path for storage
     const result = await processFileContent(normalizedPath, content, verbose || false, rootDir);
-
-    // Get actual file mtime and compute content hash for manifest
-    const stats = await fs.stat(absolutePath);
     const contentHash = await computeContentHash(absolutePath);
-    const manifest = new ManifestManager(vectorDB.dbPath);
 
     if (result === null) {
       // Empty file - remove from vector DB but keep in manifest with chunkCount: 0
-      await vectorDB.deleteByFile(normalizedPath);
-      await manifest.updateFile(normalizedPath, {
-        filepath: normalizedPath,
-        lastModified: stats.mtimeMs,
-        chunkCount: 0,
-        contentHash,
-      });
+      await recordZeroChunkFile(normalizedPath, stats.mtimeMs, contentHash, vectorDB, manifest);
       return;
     }
 
@@ -208,6 +257,27 @@ export async function indexSingleFile(
 }
 
 /**
+ * Build the #1025 size-cap skip result for {@link processSingleFileForIndexing}:
+ * treated like an empty file (`result: null`) so the caller removes any
+ * stale chunks and records `chunkCount: 0`. Hashing still uses
+ * `computeContentHash`'s >1MB fingerprint fast path (first/last 8KB, never
+ * the whole file) -- the size check itself is what has to run before
+ * anything else touches the file. Extracted so
+ * `processSingleFileForIndexing`'s own branching stays flat.
+ */
+async function buildOversizedSkipResult(
+  normalizedPath: string,
+  absolutePath: string,
+  stats: Stats,
+): Promise<Result<FileProcessResult, string>> {
+  console.error(
+    `[Lien] Skipped oversized file (${formatBytes(stats.size)} exceeds the indexable cap): ${normalizedPath}`,
+  );
+  const contentHash = await computeContentHash(absolutePath);
+  return Ok({ filepath: normalizedPath, result: null, mtime: stats.mtimeMs, contentHash });
+}
+
+/**
  * Process a single file, returning a Result type.
  * This helper makes error handling explicit and testable.
  *
@@ -227,8 +297,15 @@ async function processSingleFileForIndexing(
       ? filepath
       : path.resolve(rootDir || process.cwd(), filepath);
 
-    // Read file stats and content using the absolute path
+    // Stat FIRST, and check the size cap before anything else touches the
+    // file -- including hashing -- so an oversized file (#1025) never gets
+    // read at all, not even for its content hash.
     const stats = await fs.stat(absolutePath);
+
+    if (isOversizedForIndexing(stats.size)) {
+      return buildOversizedSkipResult(normalizedPath, absolutePath, stats);
+    }
+
     const content = await fs.readFile(absolutePath, 'utf-8');
     const contentHash = await computeContentHash(absolutePath);
 

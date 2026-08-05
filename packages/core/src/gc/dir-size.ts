@@ -22,8 +22,12 @@ export async function computeDirSize(dir: string): Promise<number> {
   }
 
   for (const entry of entries) {
-    const full = path.join(dir, entry.name);
+    // The whole per-entry body — including path.join(entry.name) — is inside
+    // this try: an entry that vanishes mid-walk, can't be stat'd, or isn't a
+    // well-formed Dirent (e.g. a caller/test double that isn't the real fs)
+    // must contribute 0 rather than throw, matching this function's contract.
     try {
+      const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         total += await computeDirSize(full);
       } else if (entry.isFile()) {

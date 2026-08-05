@@ -225,6 +225,8 @@ export {
   DEFAULT_GIT_POLL_INTERVAL_MS,
   INDEX_FORMAT_VERSION,
   MAX_CHUNKS_PER_FILE,
+  MAX_INDEXABLE_FILE_SIZE_BYTES,
+  isOversizedForIndexing,
 } from './constants.js';
 
 // =============================================================================

@@ -18,6 +18,8 @@ import {
   getLienHome,
   getIndexDir,
   ManifestManager,
+  computeDirSize,
+  formatBytes,
 } from '@liendev/core';
 import { DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP } from '@liendev/parser';
 import { showCompactBanner } from '../utils/banner.js';
@@ -118,6 +120,10 @@ async function printIndexStatus(indexPath: string) {
   console.log(chalk.dim('Index status:'), chalk.green('✓ Exists'));
 
   console.log(chalk.dim('Index files:'), await getIndexedFileCount(indexPath));
+  // Store size on disk (#1025): the 10.5 GB home-directory index this issue
+  // was filed over sat unnoticed for three days — this is the signal that
+  // would have surfaced it immediately.
+  console.log(chalk.dim('Index size:'), formatBytes(await computeDirSize(indexPath)));
 
   console.log(chalk.dim('Last modified:'), stats.mtime.toLocaleString());
 
@@ -286,6 +292,7 @@ async function outputJson(rootDir: string, indexPath: string) {
     indexPath,
     indexStatus: 'not_indexed',
     indexFiles: 0,
+    indexSizeBytes: 0,
     lastModified: null as string | null,
     lastReindex: null as string | null,
     git: { enabled: false, branch: null, commit: null },
@@ -304,6 +311,7 @@ async function outputJson(rootDir: string, indexPath: string) {
     data.indexStatus = 'exists';
     data.lastModified = stats.mtime.toISOString();
     data.indexFiles = await getIndexedFileCount(indexPath);
+    data.indexSizeBytes = await computeDirSize(indexPath);
 
     const reindexTs = await getLastReindex(indexPath);
     if (reindexTs !== null) {

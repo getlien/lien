@@ -1,6 +1,8 @@
 import ignore, { type Ignore } from 'ignore';
 import fs from 'fs/promises';
 import type fsSync from 'fs';
+import { realpathSync } from 'fs';
+import os from 'os';
 import path from 'path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -38,6 +40,91 @@ export const ALWAYS_IGNORE_PATTERNS = [
   '**/pnpm-lock.yaml',
 ];
 
+/**
+ * Extra always-ignore patterns applied ONLY when the indexed root IS the
+ * user's home directory itself (see {@link isHomeDirectory}) — never applied
+ * to an ordinary project, even one that lives directly under `$HOME`
+ * (`~/myproject`). Scoping to "root IS home" rather than matching these
+ * names anywhere in a path avoids false positives: `Library/` is a
+ * legitimate source directory in some ecosystems (Arduino sketches, Unity
+ * projects, some Java layouts), so a universal `**\/Library/**` exclusion
+ * would silently blind those projects. Deliberately root-anchored only —
+ * no `**\/` variants: the directory patterns contain a mid-pattern slash
+ * (`Library/**`) and the two basename globs carry an explicit leading slash
+ * (`/*.keychain`), both of which anchor to the root of the `ignore()`
+ * instance under gitignore semantics — i.e. `rootDir`, which this array is
+ * only ever added under when `rootDir` IS home (see
+ * {@link getEffectiveAlwaysIgnorePatterns}/{@link getEffectiveNeverIndexPatterns}).
+ * A bare `*.keychain` (no leading slash) or a `**\/`-prefixed sibling would
+ * both match these names at any depth, ignoring e.g. `~/myproject/Library/`
+ * too — exactly the false positive this pattern set exists to avoid. The
+ * only place these OS/credential directories can appear as an indexing
+ * root's own top-level entries is when the root really is `$HOME` — the
+ * exact shape that swept macOS Keychain databases, `.npm` debug logs, and
+ * Claude Code caches into a 10.5 GB index on a maintainer's machine (#1025).
+ * Also fed into {@link getEffectiveNeverIndexPatterns} so a dotfiles repo
+ * that happens to track one of these (e.g. `.ssh/config`) is never rescued
+ * back in either.
+ */
+export const HOME_ROOT_ONLY_IGNORE_PATTERNS = [
+  'Library/**',
+  'AppData/**',
+  '.npm/**',
+  '.cache/**',
+  '.claude/**',
+  '.ssh/**',
+  '.aws/**',
+  '.gnupg/**',
+  '/*.keychain-db',
+  '/*.keychain',
+];
+
+/**
+ * Resolve `p` to its real, symlink-free path for comparison purposes,
+ * falling back to a plain lexical resolve when `p` doesn't exist on disk yet
+ * (e.g. a string used in a unit test) or can't be stat'd. `path.resolve`
+ * alone is not enough: on macOS `/tmp` is itself a symlink to `/private/tmp`,
+ * so a path built from an unresolved `$HOME`/`cwd` can differ textually from
+ * the same real directory reached another way, causing this exact
+ * comparison to silently miss a true match (a false negative in a safety
+ * check is worse than a false positive). Exported so `checkRootSafety`
+ * (`@liendev/lien`'s `unsafe-root.ts`) can apply the same symlink-safe
+ * resolution to its filesystem-root check, matching what `isHomeDirectory`
+ * below already does for the home-directory half of the same guard.
+ */
+export function toComparablePath(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
+}
+
+/**
+ * Whether `dir` IS the current user's home directory itself — not merely
+ * somewhere underneath it. Exact-match only: a real project living directly
+ * under `$HOME` (`~/myproject`) must never match, or an entirely ordinary
+ * project layout would start losing files the moment a caller applies
+ * {@link HOME_ROOT_ONLY_IGNORE_PATTERNS} (#1025's over-refusal requirement).
+ * Compares real (symlink-resolved) paths — see {@link toComparablePath}.
+ */
+export function isHomeDirectory(dir: string): boolean {
+  const homeDir = os.homedir();
+  if (!homeDir) return false;
+  return toComparablePath(dir) === toComparablePath(homeDir);
+}
+
+/**
+ * The always-ignore pattern set to apply for `rootDir`: the universal
+ * {@link ALWAYS_IGNORE_PATTERNS}, plus {@link HOME_ROOT_ONLY_IGNORE_PATTERNS}
+ * when (and only when) `rootDir` IS the home directory itself (#1025).
+ */
+export function getEffectiveAlwaysIgnorePatterns(rootDir: string): string[] {
+  return isHomeDirectory(rootDir)
+    ? [...ALWAYS_IGNORE_PATTERNS, ...HOME_ROOT_ONLY_IGNORE_PATTERNS]
+    : ALWAYS_IGNORE_PATTERNS;
+}
+
 /** Directories to skip during .gitignore discovery (no useful .gitignore inside) */
 const SKIP_DIRS = new Set(['node_modules', 'vendor', '.git', '.lien', 'dist', 'build']);
 
@@ -63,6 +150,20 @@ export const NEVER_INDEX_EVEN_IF_TRACKED_PATTERNS = [
   '.claude/worktrees/**',
   '**/.claude/worktrees/**',
 ];
+
+/**
+ * The never-index-even-if-tracked pattern set to apply for `rootDir`: the
+ * universal {@link NEVER_INDEX_EVEN_IF_TRACKED_PATTERNS}, plus
+ * {@link HOME_ROOT_ONLY_IGNORE_PATTERNS} when `rootDir` is the home
+ * directory itself — a dotfiles repo that legitimately tracks `.ssh/config`
+ * or a GPG key must still never have it rescued back into the index; the
+ * severity here outweighs the tracked-file exemption's usual rationale.
+ */
+export function getEffectiveNeverIndexPatterns(rootDir: string): string[] {
+  return isHomeDirectory(rootDir)
+    ? [...NEVER_INDEX_EVEN_IF_TRACKED_PATTERNS, ...HOME_ROOT_ONLY_IGNORE_PATTERNS]
+    : NEVER_INDEX_EVEN_IF_TRACKED_PATTERNS;
+}
 
 // git ls-files output can be large for repos with hundreds of thousands of
 // tracked files; keep the buffer generous so large repos never truncate
@@ -191,6 +292,10 @@ function isRescuedByGitTracking(
  * match the full scan behavior in scanner.ts. In a git repository, a path
  * git tracks is exempted from all of the above (see {@link getGitTrackedFiles})
  * except the narrow {@link NEVER_INDEX_EVEN_IF_TRACKED_PATTERNS} carve-out.
+ * When `rootDir` IS the user's home directory itself, the OS/credential
+ * carve-out in {@link HOME_ROOT_ONLY_IGNORE_PATTERNS} is layered on top of
+ * both sets (#1025) — see {@link getEffectiveAlwaysIgnorePatterns} and
+ * {@link getEffectiveNeverIndexPatterns}.
  *
  * Limitation: scoped evaluation is OR across .gitignore files, so a nested
  * .gitignore cannot un-ignore a pattern from a parent. Cross-scope negation
@@ -205,10 +310,10 @@ export async function createGitignoreFilter(
 ): Promise<(relativePath: string) => boolean> {
   // Always-ignore patterns in a separate instance (cannot be negated)
   const alwaysIg = ignore();
-  alwaysIg.add(ALWAYS_IGNORE_PATTERNS);
+  alwaysIg.add(getEffectiveAlwaysIgnorePatterns(rootDir));
 
   const neverIndexIg = ignore();
-  neverIndexIg.add(NEVER_INDEX_EVEN_IF_TRACKED_PATTERNS);
+  neverIndexIg.add(getEffectiveNeverIndexPatterns(rootDir));
 
   // Discover all .gitignore files and the tracked-file set in parallel --
   // independent I/O, no reason to serialize them.

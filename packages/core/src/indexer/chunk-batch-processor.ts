@@ -137,6 +137,22 @@ export class ChunkBatchProcessor {
   }
 
   /**
+   * Record a file that produced zero chunks — a genuinely empty file, or one
+   * skipped for being oversized (see `isOversizedForIndexing`, #1025) —
+   * directly in the manifest bookkeeping, without adding anything to the
+   * chunk accumulator. Distinct from `addChunks` (itself a no-op for
+   * `chunks.length === 0`) so a caller can explicitly choose to persist the
+   * zero-chunk fact instead of silently omitting the file from the manifest:
+   * otherwise the very next incremental run would see it as "new" and
+   * reprocess it for no reason. A single synchronous array push — unlike
+   * `addChunks`, nothing here ever yields to the event loop mid-mutation, so
+   * no mutex is needed.
+   */
+  recordZeroChunkFile(filepath: string, mtime: number, contentHash: string): void {
+    this.indexedFiles.push({ filepath, chunkCount: 0, mtime, contentHash });
+  }
+
+  /**
    * Get processing results.
    */
   getResults(): { processedChunks: number; indexedFiles: FileIndexEntry[] } {

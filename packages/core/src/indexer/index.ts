@@ -17,7 +17,9 @@ import {
   DEFAULT_CHUNK_OVERLAP,
   DEFAULT_CONCURRENCY,
   getParseStageConcurrency,
+  isOversizedForIndexing,
 } from '../constants.js';
+import { formatBytes } from '../gc/dir-size.js';
 import { createVectorDB } from '../vectordb/factory.js';
 import { writeVersionFile } from '../vectordb/version.js';
 import { ManifestManager } from './manifest.js';
@@ -401,6 +403,23 @@ async function processFileForIndexing(
     const relativePath = normalizeToRelativePath(file, rootDir);
     // Get file stats to capture actual modification time
     const stats = await fs.stat(absolutePath);
+
+    // Size cap (#1025): skip before reading content, so an oversized file
+    // never gets loaded into memory or chunked in the first place. Still
+    // recorded with chunkCount: 0 (like a genuinely empty file below), so a
+    // full index doesn't leave it silently absent from the manifest --
+    // otherwise the very next incremental run would see it as "new" and
+    // reprocess it for no reason.
+    if (isOversizedForIndexing(stats.size)) {
+      console.error(
+        `[indexer] Skipped oversized file (${formatBytes(stats.size)} exceeds the indexable cap): ${relativePath}`,
+      );
+      const contentHash = await computeContentHash(absolutePath);
+      batchProcessor.recordZeroChunkFile(relativePath, stats.mtimeMs, contentHash);
+      progressTracker.incrementFiles();
+      return false;
+    }
+
     const content = await fs.readFile(absolutePath, 'utf-8');
 
     const chunks = chunkFile(relativePath, content, {
@@ -411,13 +430,15 @@ async function processFileForIndexing(
       workspaceRoot: rootDir,
     });
 
+    // Compute content hash for change detection -- needed for both the
+    // empty and non-empty outcomes below, so computed once regardless.
+    const contentHash = await computeContentHash(absolutePath);
+
     if (chunks.length === 0) {
+      batchProcessor.recordZeroChunkFile(relativePath, stats.mtimeMs, contentHash);
       progressTracker.incrementFiles();
       return false;
     }
-
-    // Compute content hash for change detection
-    const contentHash = await computeContentHash(absolutePath);
 
     // Add chunks to batch processor (handles mutex internally)
     await batchProcessor.addChunks(chunks, relativePath, stats.mtimeMs, contentHash);
