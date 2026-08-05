@@ -209,28 +209,51 @@ describe('worktree-aware indexing (integration)', () => {
     close(wtDb);
   });
 
-  it('reports hasDependentCounts()=false without the composed flag, even though the base still has counts to merge (#1072)', async () => {
-    // Review finding on #1078. A pre-#1071 overlay has no composed flag, so
-    // `composedDependentCounts` falls back to merging the base's own counts —
-    // and that merge can resurrect an obsolete positive value for a file this
-    // worktree masked the last importer of. So "the merged map has rows" is NOT
-    // evidence that the numbers describe this corpus, and reporting `true` would
-    // let `search_code` publish a resurrected count as fact.
+  it('reports hasDependentCounts()=true on a FRESH worktree whose base has counts, and serves them (#1085)', async () => {
+    // The defect, exactly as dogfooded: a linked worktree that has never
+    // completed its own `lien index` has an empty overlay and no composed flag,
+    // so keying the honesty answer on the overlay alone reported "the counts
+    // were never computed here" — while `composedDependentCounts` handed the
+    // base's counts straight to the ranking in the same call. The note and the
+    // ordering cannot both be right.
     //
-    // Fixture: the base has `edited.ts` importing `shared.ts` (base count 1).
-    // The worktree rewrites `edited.ts` to import nothing and deletes
-    // `added.ts`, so `shared.ts`'s real composed count is 0 — with no overlay
-    // row to override the base's stale 1 with.
-    await fs.writeFile(
-      path.join(worktreeRoot, 'edited.ts'),
-      'export function editedFnV2() {\n  return 999;\n}\n',
+    // No `indexCodebase({ rootDir: worktreeRoot })` here on purpose: the whole
+    // point is the state BEFORE the worktree's first local index.
+    const wtDb = await createVectorDB(worktreeRoot);
+    await wtDb.initialize();
+    expect(wtDb.isOverlay).toBe(true);
+
+    // Preconditions: the overlay genuinely has no composed counts...
+    const overlayProbe = new Database(
+      path.join(getIndexDir(worktreeRoot), STRUCTURAL_DB_FILENAME),
+      { readonly: true },
     );
-    await fs.rm(path.join(worktreeRoot, 'added.ts'));
+    expect(
+      (overlayProbe.prepare('SELECT count(*) c FROM dependent_counts').get() as { c: number }).c,
+    ).toBe(0);
+    expect(
+      overlayProbe
+        .prepare('SELECT v FROM overlay_meta WHERE k = ?')
+        .get(OVERLAY_META.DEPENDENT_COUNTS_COMPOSED),
+    ).toBeUndefined();
+    overlayProbe.close();
+    // ...and the base genuinely does.
+    expect(await wtDb.hasDependentCounts()).toBe(true);
+
+    // And the numbers it is honest about are really there: `shared.ts` carries
+    // the base's real count, not an omission.
+    const hits = await wtDb.search('sharedFn', 10);
+    expect(hits.find(h => h.metadata.file === 'shared.ts')?.metadata.dependentCount).toBe(1);
+    close(wtDb);
+  });
+
+  it('reports hasDependentCounts()=false when NEITHER the overlay nor the base ever computed them (#1085 negative control)', async () => {
+    // The row whose absence let #1085 ship. Over-correcting into silence would
+    // be the other failure: #1072's note exists for a genuinely never-computed
+    // store, and it must still fire for one. Both stores are rewound here, so
+    // there is no composition anywhere that could answer.
     await indexCodebase({ rootDir: worktreeRoot });
 
-    // Rewind to a pre-#1071 overlay: drop its composed counts and the flag,
-    // leaving the base's stale positive count in place. (`overlay_meta` exists
-    // only on the overlay store, never on a standalone one.)
     const overlayDb = new Database(path.join(getIndexDir(worktreeRoot), STRUCTURAL_DB_FILENAME));
     overlayDb.exec('DELETE FROM dependent_counts');
     overlayDb
@@ -238,8 +261,73 @@ describe('worktree-aware indexing (integration)', () => {
       .run(OVERLAY_META.DEPENDENT_COUNTS_COMPOSED);
     overlayDb.close();
 
-    // The stale positive really is still there — this is what the merge fallback
-    // would serve, and why `false` is the honest answer rather than a pedantic one.
+    // A base written before either table existed — `openBase()` opens it
+    // `{ readonly: true }`, so nothing recreates them behind our back.
+    const baseDb = new Database(path.join(getIndexDir(mainRoot), STRUCTURAL_DB_FILENAME));
+    baseDb.exec('DROP TABLE IF EXISTS dependent_counts');
+    baseDb.exec('DROP TABLE IF EXISTS store_meta');
+    baseDb.close();
+
+    const wtDb = await createVectorDB(worktreeRoot);
+    await wtDb.initialize();
+    expect(await wtDb.hasDependentCounts()).toBe(false);
+    close(wtDb);
+  });
+
+  it('reports hasDependentCounts()=true from a base that has ROWS but no flag table (#1085)', async () => {
+    // #1071 added `dependent_counts`; #1072 added `store_meta` (both landed in
+    // 0.75.4, so this vintage is a from-source window, not a published one — but
+    // it is the same vintage `hasComputedDependentCounts`'s row-presence clause
+    // already exists for). The base connection is read-only, so nothing recreates
+    // a missing table behind our back. Both clauses must degrade independently: a
+    // missing flag TABLE cannot be allowed to hide the rows that prove a
+    // computation ran.
+    const baseDb = new Database(path.join(getIndexDir(mainRoot), STRUCTURAL_DB_FILENAME));
+    baseDb.exec('DROP TABLE IF EXISTS store_meta');
+    const baseRows = baseDb.prepare('SELECT count(*) c FROM dependent_counts').get() as {
+      c: number;
+    };
+    baseDb.close();
+    expect(baseRows.c).toBeGreaterThan(0);
+
+    const wtDb = await createVectorDB(worktreeRoot);
+    await wtDb.initialize();
+    expect(await wtDb.hasDependentCounts()).toBe(true);
+    close(wtDb);
+  });
+
+  it('a stale base count the worktree masked is served as stale, not suppressed as "never computed" (#1085)', async () => {
+    // The hazard review raised on #1078, with the disposition #1085 corrects.
+    //
+    // A zero is stored as the ABSENCE of a row, so merging the base map under an
+    // un-composed overlay cannot express "this dropped to 0 here": the base's
+    // stale 1 survives. That is real, and it is why `composedDependentCounts`
+    // stops merging the moment the overlay has its own composed map.
+    //
+    // What it is NOT is grounds for the never-computed note. Reporting `false`
+    // did not stop the stale number reaching the ranking — `search()` had
+    // already applied it — it only added a false claim about the store and threw
+    // away every OTHER count in the response. A count that lags the worktree is
+    // #1072's case 4: documented on the field, deliberately uncaveated, cleared
+    // by the worktree's own `lien index`.
+    //
+    // Fixture: base has `edited.ts` importing `shared.ts` (count 1); the
+    // worktree rewrites `edited.ts` to import nothing and deletes `added.ts`, so
+    // `shared.ts`'s true composed count is 0.
+    await fs.writeFile(
+      path.join(worktreeRoot, 'edited.ts'),
+      'export function editedFnV2() {\n  return 999;\n}\n',
+    );
+    await fs.rm(path.join(worktreeRoot, 'added.ts'));
+    await indexCodebase({ rootDir: worktreeRoot });
+
+    const overlayDb = new Database(path.join(getIndexDir(worktreeRoot), STRUCTURAL_DB_FILENAME));
+    overlayDb.exec('DELETE FROM dependent_counts');
+    overlayDb
+      .prepare('DELETE FROM overlay_meta WHERE k = ?')
+      .run(OVERLAY_META.DEPENDENT_COUNTS_COMPOSED);
+    overlayDb.close();
+
     const baseDb = new Database(path.join(getIndexDir(mainRoot), STRUCTURAL_DB_FILENAME));
     const baseCount = baseDb
       .prepare('SELECT count FROM dependent_counts WHERE file = ?')
@@ -249,7 +337,49 @@ describe('worktree-aware indexing (integration)', () => {
 
     const wtDb = await createVectorDB(worktreeRoot);
     await wtDb.initialize();
-    expect(await wtDb.hasDependentCounts()).toBe(false);
+    // Honest about having counts...
+    expect(await wtDb.hasDependentCounts()).toBe(true);
+    // ...and the resurrected 1 is exactly what the read path was serving all
+    // along, with or without this method's answer.
+    const hits = await wtDb.search('sharedFn', 10);
+    expect(hits.find(h => h.metadata.file === 'shared.ts')?.metadata.dependentCount).toBe(1);
+    close(wtDb);
+
+    // And one `lien index` in the worktree replaces it with the true 0 — the
+    // staleness has a remedy, which is what makes leaving it uncaveated honest.
+    await indexCodebase({ rootDir: worktreeRoot });
+    const refreshed = await createVectorDB(worktreeRoot);
+    await refreshed.initialize();
+    const after = await refreshed.search('sharedFn', 10);
+    expect(after.find(h => h.metadata.file === 'shared.ts')?.metadata.dependentCount ?? 0).toBe(0);
+    close(refreshed);
+  });
+
+  it('completes the dependent-count migration on a plain `lien index` with no content changes (#1084)', async () => {
+    // The upgrade path that produced #1072's note is the one where nothing
+    // changed: `lien index` reported "Index is up to date" and returned, so the
+    // note's own instruction did nothing and only `--force` worked. The counts
+    // are now a migration the next `lien index` completes regardless.
+    await indexCodebase({ rootDir: worktreeRoot });
+
+    const overlayPath = path.join(getIndexDir(worktreeRoot), STRUCTURAL_DB_FILENAME);
+    const rewound = new Database(overlayPath);
+    rewound.exec('DELETE FROM dependent_counts');
+    rewound
+      .prepare('DELETE FROM overlay_meta WHERE k = ?')
+      .run(OVERLAY_META.DEPENDENT_COUNTS_COMPOSED);
+    rewound.close();
+
+    // Byte-identical corpus — the swap reports `changed: false`, which is exactly
+    // why `changed` alone was not a sufficient trigger for the refresh.
+    const again = await indexCodebase({ rootDir: worktreeRoot });
+    expect(again.success).toBe(true);
+
+    const wtDb = await createVectorDB(worktreeRoot);
+    await wtDb.initialize();
+    expect(await wtDb.hasDependentCounts()).toBe(true);
+    const hits = await wtDb.search('sharedFn', 10);
+    expect(hits.find(h => h.metadata.file === 'shared.ts')?.metadata.dependentCount).toBe(2);
     close(wtDb);
   });
 

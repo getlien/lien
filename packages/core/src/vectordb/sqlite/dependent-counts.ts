@@ -142,10 +142,33 @@ export function writeDependentCounts(db: Database.Database, counts: Map<string, 
  *
  * `getDependentCounts` rather than `readDependentCounts` so the search path
  * shares the one cached read it already performs.
+ *
+ * Both reads tolerate their table being ABSENT, and each degrades on its own
+ * (#1085). `SqliteBackend`'s own store always has both — `openDatabase` creates
+ * them — but `OverlayBackend` opens its shared base `{ readonly: true }`, so
+ * `CREATE TABLE IF NOT EXISTS` never runs there and the schema is frozen at
+ * whatever version wrote it:
+ * - No `store_meta` at all, but real `dependent_counts` rows: a store written by
+ *   a build between #1071 (which added the table) and #1072 (which added the
+ *   flag) — the same vintage the row-presence clause above already exists for.
+ *   Both shipped in 0.75.4, so this is a from-source window rather than a
+ *   published one, but a missing flag TABLE must not hide the rows that prove a
+ *   computation ran any more than a missing flag ROW does.
+ * - Neither table: any store written before 0.75.4. Must answer `false`, not
+ *   throw — #1071 learned that half the hard way, when an unguarded base read
+ *   crashed every overlay `search()` with `no such table: dependent_counts`.
  */
 export function hasComputedDependentCounts(db: Database.Database): boolean {
-  if (getStoreMeta(db, STORE_META.DEPENDENT_COUNTS_COMPUTED) !== null) return true;
-  return getDependentCounts(db).size > 0;
+  try {
+    if (getStoreMeta(db, STORE_META.DEPENDENT_COUNTS_COMPUTED) !== null) return true;
+  } catch {
+    // No `store_meta` table on this connection at all — fall through to the rows.
+  }
+  try {
+    return getDependentCounts(db).size > 0;
+  } catch {
+    return false; // No `dependent_counts` either: a store predating #1071.
+  }
 }
 
 /**

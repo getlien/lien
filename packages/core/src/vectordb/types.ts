@@ -114,8 +114,9 @@ export interface VectorDBInterface {
    * there is no correct patch for a subset — see
    * `sqlite/dependent-counts.ts`'s module doc.
    *
-   * Called at the end of a full index run and after an overlay rebuild, NOT on
-   * every incremental single-file update; the counts are a soft ranking
+   * Called at the end of a full index run, after an overlay rebuild, and once as
+   * a migration backfill when `hasDependentCounts()` is false (#1084) — but NOT
+   * on every incremental single-file update; the counts are a soft ranking
    * tie-breaker with an explicit "lags by at most one full index" contract.
    *
    * `OverlayBackend` computes over the composed `(base − masked) ∪ overlay`
@@ -134,6 +135,12 @@ export interface VectorDBInterface {
    * edge resolves anywhere) is indistinguishable from "never computed" on the
    * numbers alone. That is the distinction #1014 got wrong in the other
    * direction, so this is answered from stored state, never from result shape.
+   *
+   * An implementation must answer about the state the READ PATH actually serves
+   * from, not about one of the places that state can live. `OverlayBackend`
+   * composes two stores, and #1085 is what answering about only the near one
+   * costs: a fresh worktree claimed its counts were never computed while ranking
+   * the same response by the base's.
    */
   hasDependentCounts(): Promise<boolean>;
 }
