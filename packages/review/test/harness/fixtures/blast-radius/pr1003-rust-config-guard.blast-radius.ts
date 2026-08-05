@@ -79,7 +79,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-import { buildDependencyGraph } from '../../../../src/dependency-graph.js';
+import { buildDependencyGraph } from '@liendev/parser';
 import { computeBlastRadius } from '../../../../src/blast-radius.js';
 import type { BlastRadiusEntry, BlastRadiusReport } from '../../../../src/blast-radius.js';
 import type { ReviewContext } from '../../../../src/plugin-types.js';

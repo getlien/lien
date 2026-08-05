@@ -66,16 +66,6 @@ export {
   hasIncompleteMainPass,
 } from './plugins/agent/index.js';
 
-// Dependency graph
-export {
-  buildDependencyGraph,
-  isPreciseProvenance,
-  type DependencyGraph,
-  type SymbolNode,
-  type CallerEdge,
-  type EdgeProvenance,
-} from './dependency-graph.js';
-
 // Output adapters
 export { TerminalAdapter } from './adapters/terminal.js';
 export { SARIFAdapter } from './adapters/sarif.js';

@@ -5,8 +5,8 @@
  * without touching compute logic.
  */
 
+import { isPreciseProvenance } from '@liendev/parser';
 import type { BlastRadiusReport, BlastRadiusEntry, BlastRadiusDependent } from './blast-radius.js';
-import { isPreciseProvenance } from './dependency-graph.js';
 
 const LEVEL_LABEL: Record<string, string> = {
   low: 'LOW',

@@ -37,7 +37,7 @@
  * the identical string), with no room for a second field to carry this
  * distinction alongside each specifier -- and every match-side consumer
  * (`buildImportIndex`/`findDependentChunks`, `test-associations.ts`,
- * `get_files_context`'s handler, `packages/review`'s `dependency-graph.ts`)
+ * `get_files_context`'s handler, this package's own `graph/dependency-graph.ts`)
  * reads that array as a plain list of strings, with no per-entry metadata
  * slot. Widening that shared shape for one language's one import form would
  * ripple through the scanner, the SQLite row mapping, and every one of those

@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import type { CodeChunk } from '@liendev/parser';
+import { buildDependencyGraph } from '@liendev/parser';
 
 import { listFunctions } from '../src/plugins/agent/agent-tools.js';
-import { buildDependencyGraph } from '../src/dependency-graph.js';
 import { createTestChunk, silentLogger } from '../src/test-helpers.js';
 import type { AgentToolContext } from '../src/plugins/agent/types.js';
 

@@ -223,6 +223,21 @@ export type {
   BoundedBfsResult,
 } from './graph/bounded-bfs.js';
 
+// Call-site-level dependency graph (lifted from `@liendev/review` — it never
+// imported anything review-specific, only the parser primitives above, and
+// `cli`'s `get_dependents`/`lien api-delta` want this symbol/call-site
+// resolution too, not just the file-level `findDependents` below).
+export { buildDependencyGraph, isPreciseProvenance } from './graph/dependency-graph.js';
+export type {
+  DependencyGraph,
+  SymbolNode,
+  CallerEdge,
+  TransitiveCallerEdge,
+  TransitiveResult,
+  TransitiveOptions,
+  EdgeProvenance,
+} from './graph/dependency-graph.js';
+
 // =============================================================================
 // DEPENDENCY ANALYSIS
 // =============================================================================

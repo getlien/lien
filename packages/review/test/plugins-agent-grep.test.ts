@@ -3,8 +3,9 @@ import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 
+import { buildDependencyGraph } from '@liendev/parser';
+
 import { grepCodebase } from '../src/plugins/agent/agent-tools.js';
-import { buildDependencyGraph } from '../src/dependency-graph.js';
 import { silentLogger } from '../src/test-helpers.js';
 import type { AgentToolContext } from '../src/plugins/agent/types.js';
 

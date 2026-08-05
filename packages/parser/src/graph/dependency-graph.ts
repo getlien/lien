@@ -34,15 +34,12 @@
  * now continues via the symbol actually being traced, not the placeholder.
  */
 
-import type { CodeChunk } from '@liendev/parser';
-import {
-  walkBounded,
-  importMatchesTarget,
-  normalizePath,
-  detectLanguage,
-  findCSharpTypeReferenceDependents,
-  callerSymbolFor,
-} from '@liendev/parser';
+import type { CodeChunk } from '../types.js';
+import { walkBounded } from './bounded-bfs.js';
+import { importMatchesTarget, normalizePath } from '../utils/path-matching.js';
+import { detectLanguage } from '../ast/parser.js';
+import { findCSharpTypeReferenceDependents } from '../csharp-type-reference-signals.js';
+import { callerSymbolFor } from '../dependency-analyzer.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -544,7 +541,7 @@ function buildExportFileMap(exportIndex: ExportIndex): Map<string, Set<string>> 
  * and `Order.php` also defines `findById`, the chunk can call `findById`.
  */
 function chunkImportsFromFile(
-  chunk: CodeChunk,
+  _chunk: CodeChunk,
   targetFile: string,
   pkgSymbols: Set<string> | undefined,
   exportFileMap: Map<string, Set<string>>,
