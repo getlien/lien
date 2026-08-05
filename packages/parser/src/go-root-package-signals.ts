@@ -165,7 +165,7 @@ function fileImportsBareModuleRoot(fileChunks: CodeChunk[], modulePrefix: string
   return fileChunks.some(c => (c.metadata.imports ?? []).includes(modulePrefix));
 }
 
-/** Every distinctive symbol referenced anywhere in `fileChunks`' own `callSites` (aggregated across all of that file's chunks -- each chunk only carries the call sites made within its own function/method body). */
+/** Every distinctive symbol referenced anywhere in `fileChunks`' own `callSites` (aggregated across all of that file's chunks -- a function/method chunk carries the calls made in its own body, and a module-level chunk the ones made in the top-level statements it spans; the two never overlap, see `ast/chunker.ts`'s `withModuleLevelCallSites`). */
 function collectCallSiteSymbols(fileChunks: CodeChunk[]): Set<string> {
   const symbols = new Set<string>();
   for (const chunk of fileChunks) {

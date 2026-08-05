@@ -14,6 +14,7 @@ import {
   hasEnclosingNamespaceAccess,
   hasDependentAttributionBlindSpot,
 } from './ast/languages/registry.js';
+import { findChunkLineIndex } from './chunk-line-lookup.js';
 import { findCSharpTypeReferenceDependents } from './csharp-type-reference-signals.js';
 import { findGoRootPackageDependents } from './go-root-package-signals.js';
 import type { InferredDependentMechanism } from './inferred-dependent-mechanisms.js';
@@ -2441,6 +2442,26 @@ function findSymbolUsages<T extends CodeChunk>(
 }
 
 /**
+ * What to call the caller when the calling chunk has no symbol name of its own.
+ *
+ * A `'block'` chunk is module-level code — top-level statements, a declaration
+ * holding no function — so there is no enclosing function to name, and saying
+ * so beats `'unknown'`, which reads as "we failed to work it out". Matches the
+ * `(module-level)` wording `review`'s `dependency-graph.ts` and
+ * `dependent-context.ts` also use for the same situation — exported so those
+ * two sites (and this one) share one implementation instead of three
+ * independently-maintained copies of the same ternary (review finding on
+ * #1087: the `dependency-graph.ts` copy had fallen out of sync with the other
+ * two, still returning `'unknown'` for a module-level caller). Since #1087
+ * widened call-site extraction to module-level code this is a common case,
+ * not a rare fallback.
+ */
+export function callerSymbolFor(chunk: CodeChunk): string {
+  if (chunk.metadata.symbolName) return chunk.metadata.symbolName;
+  return chunk.metadata.type === 'block' ? '(module-level)' : 'unknown';
+}
+
+/**
  * Extract all usages of a symbol from a file's chunks.
  */
 function extractSymbolUsagesFromChunks<T extends CodeChunk>(
@@ -2459,7 +2480,7 @@ function extractSymbolUsagesFromChunks<T extends CodeChunk>(
     for (const call of callSites) {
       if (call.symbol === targetSymbol) {
         usages.push({
-          callerSymbol: chunk.metadata.symbolName || 'unknown',
+          callerSymbol: callerSymbolFor(chunk),
           line: call.line,
           snippet: extractSnippet(lines, call.line, chunk.metadata.startLine, targetSymbol),
         });
@@ -2472,7 +2493,10 @@ function extractSymbolUsagesFromChunks<T extends CodeChunk>(
 
 /**
  * Extract a code snippet for a call site with bounds checking.
- * If the target line is blank, searches nearby lines for context.
+ * Locates the line via `findChunkLineIndex` (which corrects for a module-level
+ * chunk's trimmed content — see its module doc) rather than trusting
+ * `callLine - startLine`; if the resulting line is blank, searches nearby lines
+ * for context.
  */
 function extractSnippet(
   lines: string[],
@@ -2480,10 +2504,10 @@ function extractSnippet(
   startLine: number,
   symbolName: string,
 ): string {
-  const lineIndex = callLine - startLine;
   const placeholder = `${symbolName}(...)`;
+  const lineIndex = findChunkLineIndex(lines, callLine, startLine, symbolName);
 
-  if (lineIndex < 0 || lineIndex >= lines.length) {
+  if (lineIndex === null) {
     // This can happen when call site line is outside chunk boundaries (edge case)
     // Not necessarily an error - could be chunk boundary misalignment
     return placeholder;

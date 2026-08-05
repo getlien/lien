@@ -237,6 +237,7 @@ export {
   findReExportedSymbolsForFile,
   hasTestImporterFromChunks,
   hasTestImporterBruteForce,
+  callerSymbolFor,
   DEPENDENT_COUNT_THRESHOLDS,
   COMPLEXITY_THRESHOLDS,
 } from './dependency-analyzer.js';
@@ -317,3 +318,11 @@ export type { BlastRadiusRiskInput, BlastRadiusRisk } from './risk/blast-radius-
 // =============================================================================
 
 export { wordBoundaryRe, isDistinctiveToken } from './doc-reference-matching.js';
+
+// =============================================================================
+// CHUNK LINE LOOKUP (shared by `get_dependents`' usage snippets and review's
+// dependent-context snippets — see chunk-line-lookup.ts's own docstring for
+// why the obvious arithmetic is wrong for a module-level chunk)
+// =============================================================================
+
+export { findChunkLineIndex } from './chunk-line-lookup.js';

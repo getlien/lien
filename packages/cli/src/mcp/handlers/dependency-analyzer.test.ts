@@ -15,6 +15,7 @@ function createChunk(
     callSites: Array<{ symbol: string; line: number }>;
     symbolName: string;
     symbolType: 'function' | 'method' | 'class' | 'interface';
+    type: 'function' | 'class' | 'block';
     content: string;
     startLine: number;
     endLine: number;
@@ -359,6 +360,39 @@ describe('findDependents', () => {
         callerSymbol: 'handleRequest',
         line: 3,
         snippet: 'doWork(data);',
+      });
+    });
+
+    it('finds the right snippet line for a module-level chunk whose content was trimmed (#1087)', async () => {
+      // A module-level chunk's range starts on the blank line after the
+      // preceding chunk, and `createChunkFromRange` trims that line out of
+      // `content` while `startLine` keeps naming it -- so `line - startLine`
+      // lands one line late. The reported `line` is the true file line either
+      // way; the snippet has to be found, not computed.
+      const chunk = createChunk('src/wiring.ts', {
+        imports: ['src/target.ts'],
+        importedSymbols: { 'src/target': ['doWork'] },
+        callSites: [{ symbol: 'doWork', line: 11 }],
+        symbolName: undefined,
+        type: 'block',
+        startLine: 10,
+        endLine: 13,
+      });
+      // Range was lines 10-13, but line 10 was blank and got trimmed away, so
+      // content[0] is really file line 11.
+      chunk.content = 'export const wired = doWork(config);\n\nexport const other = 1;';
+
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/target.ts', { exports: ['doWork'] }),
+        chunk,
+      ]);
+
+      const result = await findDependents(mockDB as any, 'src/target.ts', mockLog, 'doWork');
+
+      expect(result.dependents[0].usages![0]).toEqual({
+        callerSymbol: '(module-level)',
+        line: 11,
+        snippet: 'export const wired = doWork(config);',
       });
     });
   });

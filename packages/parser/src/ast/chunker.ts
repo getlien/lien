@@ -304,9 +304,40 @@ function processTopLevelNode(
     symbolInfo,
     fileImports,
     language,
+    emitsChildChunks(node, traverser),
     fileExports,
     importedSymbols,
   );
+}
+
+/**
+ * Does `findTopLevelNodes` emit chunks for this node's members as well as for
+ * the node itself?
+ *
+ * Mirrors exactly the two branches there that push a node and keep descending:
+ * a container it can actually descend INTO (`shouldExtractChildren` *and* a
+ * non-null `getContainerBody` — e.g. a class, whose methods each become their
+ * own chunk), and a transparent container (`transparentContainerTypes`, e.g.
+ * Ruby's `module`). Every other top-level node is a leaf of the chunk tree —
+ * `findTopLevelNodes` returns on match without descending — so its line range
+ * overlaps no other chunk's.
+ *
+ * The `getContainerBody` half is load-bearing, not belt-and-braces:
+ * `shouldExtractChildren` states an *intent* to descend that a language may
+ * then decline per node. Python's `decorated_definition` is in
+ * `containerTypes`, but `getContainerBody` returns null for a decorated
+ * FUNCTION (only a decorated class has a body worth recursing into) — so a
+ * `@decorator`-ed top-level function is a leaf, and treating it as a container
+ * silently dropped its call sites. Measured on psf/requests: 384 of 2580
+ * references, i.e. this predicate getting it wrong looks like a 15%
+ * *regression*, not a missing improvement.
+ *
+ * Only used to decide call-site extraction (see `createChunk`), where the
+ * overlap would mean double-counting.
+ */
+function emitsChildChunks(node: SyntaxNode, traverser: ReturnType<typeof getTraverser>): boolean {
+  if (traverser.transparentContainerTypes?.includes(node.type)) return true;
+  return traverser.shouldExtractChildren(node) && traverser.getContainerBody(node) !== null;
 }
 
 /**
@@ -356,26 +387,50 @@ export function chunkByAST(
   const topLevelNodes = findTopLevelNodes(rootNode, context.traverser);
   const topLevelChunks = processTopLevelNodes(topLevelNodes, filepath, content, context, language);
 
-  // Extract uncovered code (imports, exports, top-level statements)
-  const coveredRanges = topLevelNodes.map(n => ({
-    start: n.startPosition.row,
-    end: n.endPosition.row,
-  }));
-  const uncoveredChunks = extractUncoveredCode(
-    context.lines,
-    coveredRanges,
-    filepath,
-    minChunkSize,
-    context.fileImports,
+  // Extract uncovered code (imports, exports, top-level statements).
+  //
+  // Transparent containers (e.g. Ruby's `module`) are excluded here even
+  // though `findTopLevelNodes` pushes them: `emitsChildChunks` voids their
+  // OWN chunk's call sites specifically because `extractCallSites` recurses
+  // unscoped, so keeping the module's own [start,end] "covered" would only
+  // have suppressed double-counting for it, not for anything genuinely
+  // extracted here. But a bare statement directly inside the module — not
+  // wrapped in any further declaration, so it gets no chunk of its own
+  // either — has no extractor claiming it at all, and covering the module's
+  // full range (which is only ever right for a REAL container, whose own
+  // chunk deliberately claims nothing precisely because its children do)
+  // silently marked that statement's line "already handled". Dropping
+  // transparent containers from this list lets `withModuleLevelCallSites`
+  // reach those lines the same way it reaches any other module-level code;
+  // real children nested inside (a class, its methods) still cover their
+  // own ranges via their own entries in `topLevelNodes`, so nothing here
+  // gets double-counted.
+  const coveredRanges = topLevelNodes
+    .filter(n => !context.traverser.transparentContainerTypes?.includes(n.type))
+    .map(n => ({
+      start: n.startPosition.row,
+      end: n.endPosition.row,
+    }));
+  const uncoveredChunks = withModuleLevelCallSites(
+    extractUncoveredCode(
+      context.lines,
+      coveredRanges,
+      filepath,
+      minChunkSize,
+      context.fileImports,
+      language,
+      context.fileExports,
+      context.importedSymbols,
+      // When no top-level node was recognized (e.g. a file containing only bare
+      // statements/calls, like a single `test(...)` block with no exported
+      // declaration), coveredRanges is empty and the single "uncovered" range
+      // below is the entire file — the file's only chance at a chunk. See
+      // extractUncoveredCode for why minChunkSize must not apply there.
+      topLevelNodes.length === 0,
+    ),
+    rootNode,
     language,
-    context.fileExports,
-    context.importedSymbols,
-    // When no top-level node was recognized (e.g. a file containing only bare
-    // statements/calls, like a single `test(...)` block with no exported
-    // declaration), coveredRanges is empty and the single "uncovered" range
-    // below is the entire file — the file's only chance at a chunk. See
-    // extractUncoveredCode for why minChunkSize must not apply there.
-    topLevelNodes.length === 0,
+    coveredRanges,
   );
 
   // Combine and sort by line number
@@ -520,6 +575,7 @@ function createChunk(
   symbolInfo: ReturnType<typeof extractSymbolInfo>,
   imports: string[],
   language: SupportedLanguage,
+  nodeEmitsChildChunks: boolean,
   fileExports?: string[],
   importedSymbols?: Record<string, string[]>,
 ): ASTChunk {
@@ -532,8 +588,21 @@ function createChunk(
   // Calculate Halstead metrics only for functions and methods
   const halstead = shouldCalcComplexity ? calculateHalstead(node, language) : undefined;
 
-  // Extract call sites for functions and methods
-  const callSites = shouldCalcComplexity ? extractCallSites(node, language) : undefined;
+  // Call sites, on the other hand, are extracted for EVERY chunk whose range
+  // no other chunk overlaps — not just functions and methods (#1087). Sharing
+  // `shouldCalcComplexity` used to make a top-level `const schema =
+  // z.object({...})` or `export const client = createClient(...)` contribute
+  // no call-site evidence at all, since neither is a 'function'/'method'
+  // symbol. Between this gate and the module-level statements handled by
+  // `withModuleLevelCallSites` below, 81% of the call expressions in this
+  // repo's own tree went unextracted (12,118 of 63,847 emitted).
+  //
+  // The one exclusion is a container (`nodeEmitsChildChunks`): its range
+  // *contains* its members' chunks, and nothing downstream dedupes call sites
+  // across a file's chunks, so extracting here would report every method's
+  // calls a second time under the class. Module-level code no chunk covers is
+  // handled by `withModuleLevelCallSites` below.
+  const callSites = nodeEmitsChildChunks ? undefined : extractCallSites(node, language);
 
   return {
     content,
@@ -642,6 +711,59 @@ function createChunkFromRange(
       ...(importedSymbols && Object.keys(importedSymbols).length > 0 && { importedSymbols }),
     },
   };
+}
+
+/** Is this 1-based line inside any of these 0-based-row ranges? */
+function lineIsCovered(line: number, coveredRanges: LineRange[]): boolean {
+  const row = line - 1;
+  return coveredRanges.some(r => row >= r.start && row <= r.end);
+}
+
+/**
+ * Attach call sites to the module-level ("uncovered") chunks — the top-level
+ * statements no function/class chunk covers (#1087).
+ *
+ * `createChunk` needs a `SyntaxNode` and only ever sees the top-level nodes
+ * `findTopLevelNodes` recognized, so bare top-level statements — the ones that
+ * reach `createChunkFromRange` from a raw line range instead — had no path to
+ * call-site extraction at all: route/DI registration, `app.use(...)`, and
+ * (because a Vitest/Jest file is almost entirely bare top-level statements)
+ * every `expect(chunkByAST(...))` in the test suite. Together with the widened
+ * gate in `createChunk`, this took the share of TypeScript files in this repo
+ * that reference a locally-declared identifier from 52.0% to 88.5%.
+ *
+ * Works from the whole-file `rootNode` — there is no node to hand a line
+ * range — and drops anything `coveredRanges` already claims, so a call site is
+ * attributed exactly once even though `findUncoveredRanges` can return a range
+ * that overlaps a container's (it rewinds past nested covered ranges, e.g. a
+ * class plus its own methods). That single-attribution property is the
+ * constraint, not a nicety: neither `dependency-analyzer.ts`'s
+ * `extractSymbolUsagesFromChunks` nor `review`'s `buildCallerEdges` dedupes
+ * across a file's chunks, so a doubled attribution would inflate
+ * `totalUsageCount` and caller-edge counts.
+ *
+ * Complexity metrics are untouched — `shouldCalcComplexity` still gates
+ * cognitive/Halstead exactly as before; only call sites widen.
+ */
+function withModuleLevelCallSites(
+  chunks: ASTChunk[],
+  rootNode: SyntaxNode,
+  language: SupportedLanguage,
+  coveredRanges: LineRange[],
+): ASTChunk[] {
+  if (chunks.length === 0) return chunks;
+
+  const all = extractCallSites(rootNode, language);
+  const moduleLevel =
+    coveredRanges.length === 0 ? all : all.filter(cs => !lineIsCovered(cs.line, coveredRanges));
+  if (moduleLevel.length === 0) return chunks;
+
+  return chunks.map(chunk => {
+    const { startLine, endLine } = chunk.metadata;
+    const callSites = moduleLevel.filter(cs => cs.line >= startLine && cs.line <= endLine);
+    if (callSites.length === 0) return chunk;
+    return { ...chunk, metadata: { ...chunk.metadata, callSites } };
+  });
 }
 
 /**

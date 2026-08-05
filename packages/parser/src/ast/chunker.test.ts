@@ -1267,6 +1267,180 @@ test('does something', () => {
     });
   });
 
+  describe('module-level call sites (#1087)', () => {
+    /** Every (symbol, line) pair the whole file's chunks report. */
+    const allCallSites = (chunks: ReturnType<typeof chunkByAST>) =>
+      chunks.flatMap(c => (c.metadata.callSites ?? []).map(cs => `${cs.symbol}:${cs.line}`));
+
+    const symbolsOf = (chunks: ReturnType<typeof chunkByAST>) =>
+      new Set(chunks.flatMap(c => (c.metadata.callSites ?? []).map(cs => cs.symbol)));
+
+    it('records call sites in a top-level declaration that contains no function', () => {
+      // The shape this fix exists for: `export const x = createThing(...)` is
+      // not a 'function'/'method' symbol, so sharing the complexity gate meant
+      // it contributed no call-site evidence at all.
+      const content = `import { createClient } from './client.js';
+import { loadConfig } from './config.js';
+
+export const client = createClient(loadConfig());
+`;
+      const chunks = chunkByAST('wiring.ts', content);
+
+      expect(symbolsOf(chunks)).toEqual(new Set(['createClient', 'loadConfig']));
+    });
+
+    it('records call sites in bare top-level statements', () => {
+      const content = `import { app } from './app.js';
+import { authRoutes, userRoutes } from './routes.js';
+
+app.use(authRoutes());
+app.use(userRoutes());
+`;
+      const chunks = chunkByAST('server.ts', content);
+      const symbols = symbolsOf(chunks);
+
+      expect(symbols.has('use')).toBe(true);
+      expect(symbols.has('authRoutes')).toBe(true);
+      expect(symbols.has('userRoutes')).toBe(true);
+    });
+
+    it('records call sites in a test file with no top-level declaration at all', () => {
+      const content = `import { describe, it, expect } from 'vitest';
+import { chunkByAST } from './chunker.js';
+
+describe('chunker', () => {
+  it('chunks', () => {
+    expect(chunkByAST('a.ts', 'x')).toHaveLength(1);
+  });
+});
+`;
+      const chunks = chunkByAST('chunker.test.ts', content);
+
+      expect(symbolsOf(chunks).has('chunkByAST')).toBe(true);
+    });
+
+    it('never attributes the same call site to two chunks of one file', () => {
+      // Nothing downstream dedupes call sites across a file's chunks, so an
+      // overlapping attribution would inflate get_dependents' totalUsageCount
+      // and review's caller-edge counts.
+      const content = `import { helper, decorate } from './util.js';
+
+export const table = { a: helper(1), b: helper(2) };
+
+export class Service {
+  private dep = helper(3);
+
+  run() {
+    return helper(4);
+  }
+
+  also() {
+    return decorate(helper(5));
+  }
+}
+
+register(table);
+`;
+      const chunks = chunkByAST('service.ts', content);
+      const entries = allCallSites(chunks);
+
+      expect(entries).toHaveLength(new Set(entries).size);
+    });
+
+    it('leaves complexity metrics untouched', () => {
+      const content = `import { helper } from './util.js';
+
+export const wired = helper(configure());
+
+export function branchy(n: number): number {
+  if (n > 1) {
+    for (let i = 0; i < n; i++) {
+      if (i % 2 === 0) return i;
+    }
+  }
+  return n;
+}
+`;
+      const chunks = chunkByAST('metrics.ts', content);
+      const wired = chunks.find(c => c.content.includes('export const wired'))!;
+      const branchy = chunks.find(c => c.metadata.symbolName === 'branchy')!;
+
+      // The module-level chunk gains call sites but stays metric-free: only
+      // functions and methods get cognitive/Halstead numbers.
+      expect(wired.metadata.callSites?.map(cs => cs.symbol)).toEqual(['helper', 'configure']);
+      expect(wired.metadata.cognitiveComplexity).toBeUndefined();
+      expect(wired.metadata.halsteadVolume).toBeUndefined();
+
+      expect(branchy.metadata.cognitiveComplexity).toBeGreaterThan(0);
+      expect(branchy.metadata.halsteadVolume).toBeGreaterThan(0);
+    });
+
+    it('keeps a decorated Python function as a leaf, not a container', () => {
+      // `decorated_definition` is in Python's containerTypes, but
+      // getContainerBody() returns null for a decorated FUNCTION. Treating it
+      // as a container dropped its whole body's call sites -- measured at 384
+      // of 2580 references on psf/requests.
+      const content = `from .util import helper, cache
+
+
+@cache
+def run(n):
+    return helper(n)
+`;
+      const chunks = chunkByAST('run.py', content);
+      const symbols = symbolsOf(chunks);
+
+      expect(symbols.has('helper')).toBe(true);
+      expect(symbols.has('cache')).toBe(false); // a bare decorator is not a call
+    });
+
+    it('does not double-count a decorated Python class', () => {
+      const content = `from .util import helper
+
+
+@register
+class Service:
+    dep = helper(1)
+
+    def run(self):
+        return helper(2)
+`;
+      const chunks = chunkByAST('service.py', content);
+      const entries = allCallSites(chunks);
+
+      expect(entries).toHaveLength(new Set(entries).size);
+      expect(symbolsOf(chunks).has('helper')).toBe(true);
+    });
+
+    it('records a bare call directly inside a transparent container (Ruby module)', () => {
+      // Review finding on #1087/#1088: `emitsChildChunks` deliberately voids a
+      // transparent container's OWN call sites (extractCallSites recurses
+      // unscoped, so extracting on the module node would double-count its real
+      // children), but that container's full range used to sit in
+      // `coveredRanges` too -- so a bare statement directly inside the module,
+      // wrapped in no further declaration of its own, was silently dropped:
+      // neither the module's chunk nor any child chunk claimed it.
+      const content = `module Foo
+  configure()
+
+  class Bar
+    def method1
+      helper_call()
+    end
+  end
+end
+`;
+      const chunks = chunkByAST('foo.rb', content);
+      const symbols = symbolsOf(chunks);
+
+      expect(symbols.has('configure')).toBe(true);
+      expect(symbols.has('helper_call')).toBe(true);
+
+      const entries = allCallSites(chunks);
+      expect(entries).toHaveLength(new Set(entries).size);
+    });
+  });
+
   describe('error handling', () => {
     it('should throw error for unsupported language', () => {
       const content = 'print("Hello")';
