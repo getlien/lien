@@ -965,12 +965,12 @@ export interface FindDependentsResult<T extends CodeChunk = CodeChunk> {
    */
   typeSymbolAttributionIncomplete?: boolean;
   /**
-   * True for a FILE-level query (no `symbol` requested) that came back with
-   * zero dependents for a language where `hasDependentAttributionBlindSpot`
-   * is set (C#, Java, Kotlin, and Swift as of #1005 -- see that predicate's
-   * doc comment for why each qualifies for its own reason), EVEN AFTER
-   * attempting the type-reference-matching recovery below
-   * (`dependentAttributionPartial`, still C#-only -- see
+   * True for a query -- file-level (no `symbol`) OR symbol-level -- that
+   * came back with zero dependents for a language where
+   * `hasDependentAttributionBlindSpot` is set (C#, Java, Kotlin, and Swift
+   * as of #1005 -- see that predicate's doc comment for why each qualifies
+   * for its own reason), EVEN AFTER attempting the type-reference-matching
+   * recovery below (`dependentAttributionPartial`, still C#-only -- see
    * `enrichWithCSharpTypeReferenceDependents`). Those languages let a real
    * caller use `filepath`'s exports with no per-file import statement naming
    * it at all (C#'s `global using` / implicit enclosing-namespace member
@@ -978,11 +978,22 @@ export interface FindDependentsResult<T extends CodeChunk = CodeChunk> {
    * whole-module access), so the import-graph scan this function runs has
    * no signal for that usage shape. `dependentCount: 0` / `riskLevel: "low"`
    * in this case means "neither scan found anything," not "nothing depends
-   * on this file" -- the same false-all-clear risk `symbolAttributionDegraded`
-   * guards against for symbol queries, just for the file-level answer
-   * instead. Mutually exclusive with `dependentAttributionPartial`: this
-   * requires the final `dependents.length` to be zero; that one requires it
-   * to be positive.
+   * on this file."
+   *
+   * Widened to symbol-level queries by #1097: until then,
+   * `checkDependentAttributionIncomplete` unconditionally skipped this
+   * determination whenever `symbol` was set, which is exactly the shape of
+   * `get_dependents({filepath, symbol})` and every `lien api-delta` check --
+   * so a symbol-scoped query in one of these languages could report a bare,
+   * uncaveated zero even when the file-level query on the identical file
+   * correctly carried this same flag. Skipped for a symbol query when
+   * `typeSymbolAttributionIncomplete` already explains the same zero (its
+   * own, more specific caveat), so the two never contradict each other on
+   * one response; no explicit exclusion is needed for
+   * `symbolAttributionDegraded`, since that one only ever fires with a
+   * nonzero final `dependents.length` (it widens to the file-level answer,
+   * which requires at least one file to begin with) -- the zero-count guard
+   * here already excludes it.
    */
   dependentAttributionIncomplete?: boolean;
   /**
@@ -1731,6 +1742,7 @@ export function findDependents<T extends CodeChunk>(
     dependents.length,
     targetIndexed,
     log,
+    Boolean(typeSymbolAttributionIncomplete),
   );
 
   return {
@@ -1879,14 +1891,12 @@ function enrichWithGoRootPackageDependents<T extends CodeChunk>(
 }
 
 /**
- * True for a file-level query (no `symbol` -- that case has its own
- * `symbolAttributionDegraded` handling above) that found zero dependents in
- * a language where the import graph structurally cannot see every real
- * usage, EVEN AFTER `enrichWithCSharpTypeReferenceDependents` above already
- * had a chance to recover some (see
- * `FindDependentsResult.dependentAttributionIncomplete`'s doc comment).
- * Logs a warning when it fires, matching the logging `buildDependentsList`
- * already does for its own degradation case.
+ * Found zero dependents (file-level OR symbol-level) in a language where the
+ * import graph structurally cannot see every real usage, EVEN AFTER
+ * `enrichWithCSharpTypeReferenceDependents` above already had a chance to
+ * recover some (see `FindDependentsResult.dependentAttributionIncomplete`'s
+ * doc comment). Logs a warning when it fires, matching the logging
+ * `buildDependentsList` already does for its own degradation case.
  *
  * Gated by `hasDependentAttributionBlindSpot` (#1005's Mechanism 2), not
  * `hasEnclosingNamespaceAccess` directly -- C# is one of four languages this
@@ -1902,6 +1912,25 @@ function enrichWithGoRootPackageDependents<T extends CodeChunk>(
  * produce two notes competing to explain the same zero, one of them
  * describing a language nuance that's moot when the file was never found
  * in the index at all.
+ *
+ * `symbolCaveatAlreadyExplained` (#1097): true when the SAME call already
+ * set `typeSymbolAttributionIncomplete` for this symbol -- that caveat is
+ * strictly more specific (it names the actual symbol and why call-site
+ * tracking can't see through a type declaration), so this wider, language-
+ * level determination steps aside rather than layering a second,
+ * differently-worded explanation of the identical zero onto one response.
+ * Before #1097 this function's guard was `symbol || ...`, which skipped the
+ * whole determination for EVERY symbol-scoped query unconditionally --
+ * exactly the shape of `get_dependents({filepath, symbol})` and every `lien
+ * api-delta` check, so a real blind-spot zero on a plain (non-type) symbol
+ * query -- e.g. a Java method with genuine same-package callers the import
+ * graph can't see -- came back with no caveat at all, even though the
+ * identical file's file-level query correctly carried this flag. No
+ * equivalent guard is needed against `symbolAttributionDegraded`: that one
+ * only ever fires with a nonzero final `dependents.length` (it widens to
+ * the file-level dependents list, which requires at least one file to
+ * begin with), so the `dependentCount !== 0` check below already excludes
+ * it structurally.
  */
 function checkDependentAttributionIncomplete(
   filepath: string,
@@ -1909,19 +1938,21 @@ function checkDependentAttributionIncomplete(
   dependentCount: number,
   targetIndexed: boolean,
   log: (message: string, level?: 'warning') => void,
+  symbolCaveatAlreadyExplained: boolean = false,
 ): true | undefined {
-  if (symbol || dependentCount !== 0 || !targetIndexed) return undefined;
+  if (dependentCount !== 0 || !targetIndexed || symbolCaveatAlreadyExplained) return undefined;
 
   const targetLanguage = detectLanguage(filepath);
   if (targetLanguage === null || !hasDependentAttributionBlindSpot(targetLanguage)) {
     return undefined;
   }
 
+  const symbolSuffix = symbol ? ` (symbol: "${symbol}")` : '';
   log(
-    `No import-based dependents found for ${filepath} -- ${targetLanguage} has a known ` +
-      `import-invisible same-unit access shape (e.g. C#'s enclosing-namespace access, ` +
+    `No import-based dependents found for ${filepath}${symbolSuffix} -- ${targetLanguage} has a ` +
+      `known import-invisible same-unit access shape (e.g. C#'s enclosing-namespace access, ` +
       `Java/Kotlin's same-package access, or Swift's whole-module access), so this scan ` +
-      `has no signal for a real caller that reaches it without a per-file import (#930, #1005)`,
+      `has no signal for a real caller that reaches it without a per-file import (#930, #1005, #1097)`,
     'warning',
   );
   return true;

@@ -784,6 +784,32 @@ describe('handleGetDependents', () => {
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.attributionCaveat).toBeUndefined();
     });
+
+    // #1097: `dependentAttributionIncomplete` used to only ever fire for a
+    // file-level query -- `checkDependentAttributionIncomplete` (parser
+    // side) unconditionally skipped this determination whenever `symbol`
+    // was set, which is exactly the shape of every `get_dependents({filepath,
+    // symbol})` call. Now that the parser-level flag can also be true for a
+    // symbol query, this handler must actually surface it as an
+    // attributionCaveat -- the same reason and note wording as the
+    // file-level case, just naming the queried symbol too.
+    it('surfaces attributionCaveat for a zero-dependent SYMBOL query in a blind-spot language (the #1097 missing-caveat fix)', async () => {
+      vi.mocked(findDependents).mockResolvedValue(
+        createMockAnalysis({ dependents: [], dependentAttributionIncomplete: true }),
+      );
+
+      const result = await handleGetDependents(
+        { filepath: 'src/main/java/Logger.java', symbol: 'logInfo' },
+        mockCtx,
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.dependentCount).toBe(0);
+      expect(parsed.attributionCaveat.reason).toBe('dependent-attribution-incomplete');
+      expect(parsed.attributionCaveat.note).toContain('logInfo');
+      expect(parsed.attributionCaveat.note).toContain('Logger.java');
+      expect(parsed.attributionCaveat.note).toContain('the scan found nothing');
+    });
   });
 
   describe('attributionCaveat: dependent-attribution-partial (C# type-reference recovery, #930 part 2)', () => {

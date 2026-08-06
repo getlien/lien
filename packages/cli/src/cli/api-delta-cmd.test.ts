@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 import * as coreModule from '@liendev/core';
 import { apiDeltaCommand, formatApiDeltaText, type ApiDeltaOptions } from './api-delta-cmd.js';
 import { readBlastEvents } from '../utils/blast-events.js';
+import { clearDependencyCache } from '../mcp/handlers/dependency-analyzer.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -48,6 +49,7 @@ describe('formatApiDeltaText', () => {
                 enriched: true,
                 docRefCount: null,
                 docRefPaths: [],
+                attributionCaveat: null,
               },
             ],
           },
@@ -79,6 +81,7 @@ describe('formatApiDeltaText', () => {
                 enriched: false,
                 docRefCount: null,
                 docRefPaths: [],
+                attributionCaveat: null,
               },
             ],
           },
@@ -106,6 +109,7 @@ describe('formatApiDeltaText', () => {
                 enriched: true,
                 docRefCount: 5,
                 docRefPaths: ['CLAUDE.md', 'docs/architecture/README.md', 'docs/guide.md'],
+                attributionCaveat: null,
               },
             ],
           },
@@ -115,6 +119,48 @@ describe('formatApiDeltaText', () => {
     );
     expect(text).toContain(
       '5 docs reference createVectorDB: CLAUDE.md, docs/architecture/README.md, docs/guide.md (+2 more)',
+    );
+  });
+
+  // #1097: a bare "0 dependents, risk low" is a false-all-clear when the
+  // underlying language has a known import-invisible access shape (C#,
+  // Java, Kotlin, Swift) — the text renderer must surface the same caveat
+  // get_dependents exposes as attributionCaveat, not silently drop it.
+  it('renders the attributionCaveat note as a trailing warning line (#1097)', () => {
+    const text = stripAnsi(
+      formatApiDeltaText(
+        [
+          {
+            filepath: 'src/main/java/Logger.java',
+            changes: [
+              {
+                symbol: 'logInfo',
+                symbolName: 'logInfo',
+                kind: 'signature-changed',
+                beforeSignature: 'a',
+                afterSignature: 'b',
+                dependentCount: 0,
+                untestedDependentCount: 0,
+                riskLevel: 'low',
+                enriched: true,
+                docRefCount: null,
+                docRefPaths: [],
+                attributionCaveat: {
+                  reason: 'dependent-attribution-incomplete',
+                  note: 'No import-based dependents were found for src/main/java/Logger.java (symbol: "logInfo"), but its language lets real callers use its exports with no per-file import naming it at all.',
+                },
+              },
+            ],
+          },
+        ],
+        'HEAD',
+      ),
+    );
+    expect(text).toContain('Logger.java');
+    expect(text).toContain('0 dependents, 0 untested, risk low');
+    expect(text).toContain('logInfo');
+    expect(text).toContain(
+      'No import-based dependents were found for src/main/java/Logger.java (symbol: "logInfo")',
     );
   });
 
@@ -135,6 +181,7 @@ describe('formatApiDeltaText', () => {
                 enriched: true,
                 docRefCount: 0,
                 docRefPaths: [],
+                attributionCaveat: null,
               },
             ],
           },
@@ -364,6 +411,13 @@ describe('apiDeltaCommand — enrichment when an index is present', () => {
   }
 
   beforeEach(async () => {
+    // `findDependents`'s scan cache (`dependency-analyzer.ts`) is keyed by
+    // `indexVersion` alone and lives at module scope — several tests below
+    // reuse `getCurrentVersion: () => 1`, so without clearing it here, a
+    // later test's stub `scanAll` would be silently skipped in favor of an
+    // earlier test's cached chunks at the same version.
+    clearDependencyCache();
+
     dir = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-api-delta-enrich-'));
     dir = await fs.realpath(dir);
     originalCwd = process.cwd();
@@ -589,5 +643,129 @@ describe('apiDeltaCommand — enrichment when an index is present', () => {
       docRefCount: null,
       docRefPaths: [],
     });
+  });
+
+  // #1097: `enrichOneChange` always calls `findDependents` with
+  // `change.symbolName` set (symbol-scoped), which is exactly the shape
+  // that used to make `checkDependentAttributionIncomplete` (parser-side)
+  // skip its whole determination unconditionally. A Java method with zero
+  // import-graph-visible dependents (the same-package access shape #1005
+  // already flags at the file level) must now surface the same caveat here
+  // too, instead of a bare "0 dependents, risk low" false-all-clear.
+  it('surfaces attributionCaveat for a zero-dependent Java SYMBOL query (same-package blind spot, #1097)', async () => {
+    await write(
+      'src/main/java/Logger.java',
+      'public class Logger {\n  public void logInfo(String msg) {\n    System.out.println(msg);\n  }\n}\n',
+    );
+    await git('add', '-A');
+    await git('-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'init');
+    await write(
+      'src/main/java/Logger.java',
+      'public class Logger {\n  public void logInfo(String msg, String tag) {\n    System.out.println(msg);\n  }\n}\n',
+    );
+
+    const { getIndexDir } = await import('@liendev/core');
+    const realIndexDir = getIndexDir(dir);
+    await fs.mkdir(realIndexDir, { recursive: true });
+    await fs.writeFile(path.join(realIndexDir, 'structural.db'), '', 'utf-8');
+
+    // The stub index carries ONLY the target file's own chunk — no other
+    // file's chunk anywhere in the corpus references it. This is the real
+    // shape of #1005's Java same-package blind spot: real callers exist in
+    // the same package with no import statement naming Logger at all, so
+    // the import graph has zero candidate importers, not "some importers
+    // that don't call logInfo specifically".
+    const targetChunk = {
+      content: 'public void logInfo(String msg) { System.out.println(msg); }',
+      metadata: {
+        file: 'src/main/java/Logger.java',
+        startLine: 1,
+        endLine: 5,
+        type: 'function',
+        language: 'java',
+        symbolName: 'logInfo',
+        symbolType: 'method',
+        parentClass: 'Logger',
+        exports: ['Logger'],
+      },
+      score: 0,
+      relevance: 'not_relevant',
+    };
+    vi.mocked(coreModule.createVectorDB).mockResolvedValueOnce({
+      initialize: vi.fn().mockResolvedValue(undefined),
+      hasData: vi.fn().mockResolvedValue(true),
+      getCurrentVersion: vi.fn().mockReturnValue(1),
+      scanAll: vi.fn().mockResolvedValue([targetChunk]),
+    } as unknown as Awaited<ReturnType<typeof coreModule.createVectorDB>>);
+
+    await expect(
+      apiDeltaCommand({ format: 'json', file: 'src/main/java/Logger.java' }),
+    ).rejects.toThrow('__exit__:0');
+
+    const result = lastJsonLog() as {
+      changes: Array<{
+        symbol: string;
+        symbolName: string;
+        kind: string;
+        enriched: boolean;
+        dependentCount: number | null;
+        attributionCaveat: { reason: string; note: string } | null;
+      }>;
+    };
+    expect(result.changes[0].symbolName).toBe('logInfo');
+    expect(result.changes[0].enriched).toBe(true);
+    expect(result.changes[0].dependentCount).toBe(0);
+    expect(result.changes[0].attributionCaveat).not.toBeNull();
+    expect(result.changes[0].attributionCaveat?.reason).toBe('dependent-attribution-incomplete');
+    expect(result.changes[0].attributionCaveat?.note).toContain('logInfo');
+  });
+
+  // Control: the identical shape (symbol query, zero import-graph
+  // dependents, targetIndexed) in a NON-blind-spot language (TypeScript)
+  // must NOT start getting a spurious caveat — #1014's whole point is that
+  // an over-firing caveat gets trained out as noise.
+  it('does NOT surface attributionCaveat for a zero-dependent TypeScript SYMBOL query (control, #1097)', async () => {
+    await write('a.ts', 'export function unusedHelper(x) { return x; }');
+    await git('add', '-A');
+    await git('-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'init');
+    await write('a.ts', 'export function unusedHelper(x, y) { return x; }');
+
+    const { getIndexDir } = await import('@liendev/core');
+    const realIndexDir = getIndexDir(dir);
+    await fs.mkdir(realIndexDir, { recursive: true });
+    await fs.writeFile(path.join(realIndexDir, 'structural.db'), '', 'utf-8');
+
+    const targetChunk = {
+      content: 'export function unusedHelper(x) { return x; }',
+      metadata: {
+        file: 'a.ts',
+        startLine: 1,
+        endLine: 1,
+        type: 'function',
+        language: 'typescript',
+        symbolName: 'unusedHelper',
+        symbolType: 'function',
+        exports: ['unusedHelper'],
+      },
+      score: 0,
+      relevance: 'not_relevant',
+    };
+    vi.mocked(coreModule.createVectorDB).mockResolvedValueOnce({
+      initialize: vi.fn().mockResolvedValue(undefined),
+      hasData: vi.fn().mockResolvedValue(true),
+      getCurrentVersion: vi.fn().mockReturnValue(1),
+      scanAll: vi.fn().mockResolvedValue([targetChunk]),
+    } as unknown as Awaited<ReturnType<typeof coreModule.createVectorDB>>);
+
+    await expect(apiDeltaCommand({ format: 'json', file: 'a.ts' })).rejects.toThrow('__exit__:0');
+
+    const result = lastJsonLog() as {
+      changes: Array<{
+        dependentCount: number | null;
+        attributionCaveat: { reason: string; note: string } | null;
+      }>;
+    };
+    expect(result.changes[0].dependentCount).toBe(0);
+    expect(result.changes[0].attributionCaveat).toBeNull();
   });
 });

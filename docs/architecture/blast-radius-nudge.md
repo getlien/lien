@@ -531,6 +531,115 @@ sentence that has nothing to do with docRefs. After the fix
 The path list renders empty but the count and the base warning both survive —
 never a silent total loss over one malformed field.
 
+## F. attributionCaveat: closing the symbol-scoped honesty gap (#1097)
+
+`lien api-delta`'s enrichment (`enrichOneChange`, section B above) is
+symbol-scoped by construction — it always calls `findDependents(vectorDB,
+filepath, log, change.symbolName, indexVersion)`. Found by an adversarial-
+review agent stress-testing this exact code path: `checkDependentAttributionIncomplete`
+(`@liendev/parser`'s `dependency-analyzer.ts`) used to guard on `symbol ||
+...`, unconditionally skipping its whole "does this language have a known
+import-invisible access shape" determination whenever a query was
+symbol-scoped — precisely the shape both `get_dependents({filepath, symbol})`
+and every `lien api-delta` check use. A real, non-type-declaration exported
+symbol with zero import-graph-visible dependents in a `hasDependentAttributionBlindSpot`
+language (C#, Java, Kotlin, Swift — #1005) came back with no caveat at all,
+even though the identical file's file-level query correctly carried
+`dependentAttributionIncomplete`. This surfaced as `lien api-delta` printing
+a bare `0 dependents, 0 untested, risk low` for e.g. a Java class's method
+with genuine same-package callers the import graph structurally can't see —
+a false-all-clear, the exact #1014 shape this repo's index-state-honesty
+policy exists to prevent, just triggered by `symbol` truthiness instead of
+index state.
+
+**The fix**: `checkDependentAttributionIncomplete` now runs its blind-spot
+determination for a symbol-scoped query too, gated on the exact same facts
+already used for the file-level case (`hasDependentAttributionBlindSpot` +
+zero final dependents + `targetIndexed`) — reusing the existing decision
+rather than inventing new criteria. The one guard added: it skips when
+`typeSymbolAttributionIncomplete` already explains the same zero (a
+type-declaration symbol query, e.g. querying a class name itself rather than
+one of its methods), so the two caveats never contradict each other on one
+response. `symbolAttributionDegraded` needs no equivalent guard — it only
+ever fires with a nonzero final dependent count, so the shared zero-count
+check already excludes it structurally.
+
+**Surface**: `EnrichedExportedSymbolChange` (`api-delta-cmd.ts`) gains
+`attributionCaveat: AttributionCaveat | null` — the identical five-reason
+vocabulary `get_dependents` exposes, computed by the same shared
+`buildAttributionCaveatFromAnalysis` (extracted from `get-dependents.ts`'s
+`buildAttributionCaveat`) so the two surfaces can never disagree about when
+to hedge. `null` when there's nothing to hedge, or when enrichment failed
+entirely (`enriched: false`). The text renderer (`formatApiDeltaText`) prints
+the note as a trailing warning line; the PostToolUse hook
+(`api-delta-write.sh`) appends it to the single-change warning sentence
+(`attributionCaveatClause`, mirroring `docRefsClause`'s shape) and a terse
+", attribution incomplete" marker to the 2-3-change combined line.
+
+```jsonc
+// lien api-delta --file src/main/java/com/example/util/Logger.java --format json
+// (a REAL same-package Java caller with no import statement -- App.java in the
+// same package calls Logger.logInfo() with no `import` at all, valid Java)
+{
+  "filepath": "src/main/java/com/example/util/Logger.java",
+  "changes": [
+    {
+      "symbol": "Logger.logInfo",
+      "symbolName": "logInfo",
+      "kind": "signature-changed",
+      "dependentCount": 0,
+      "untestedDependentCount": 0,
+      "riskLevel": "low",
+      "enriched": true,
+      "attributionCaveat": {
+        "reason": "dependent-attribution-incomplete",
+        "note": "No import-based dependents were found for src/main/java/com/example/util/Logger.java (symbol: \"logInfo\"), but its language lets real callers use its exports with no per-file import naming it at all ..."
+      }
+    }
+  ]
+}
+```
+
+### Dogfood evidence
+
+**Real PostToolUse stdin shape, piped through the actual hook script**
+(`api-delta-write.sh`), against the fixture above:
+
+```
+⚠ lien: exported signature changed — Logger.logInfo (0 dependents, 0 untested, risk low). Run get_dependents before relying on callers. ⚠ No import-based dependents were found for src/main/java/com/example/util/Logger.java (symbol: "logInfo"), but its language lets real callers use its exports with no per-file import naming it at all (e.g. C#'s "global using" / implicit enclosing-namespace access, Java/Kotlin's same-package visibility, or Swift's whole-module access). The import graph has no signal for that usage shape, so dependentCount: 0 and riskLevel: "low" here mean "the scan found nothing," not "nothing depends on this file" — don't treat this as a verified clear.
+```
+
+**A real `lien serve` process, real MCP `tools/call` over stdio** (`get_dependents({filepath, symbol: "logInfo"})` against the same fixture) returns `dependentCount: 0` with the identical `attributionCaveat` — the file-level and symbol-level queries now agree.
+
+**All 11 real per-language corpora this repo's own E2E suite tracks** (`packages/cli/test/e2e/real-projects.test.ts`'s projects, freshly cloned and indexed), each queried with a real exported symbol via a live `get_dependents` MCP call:
+
+| Project | Language | Symbol queried | dependentCount | attributionCaveat |
+|---|---|---|---|---|
+| Requests | Python | `get_encoding_from_headers` | 3 | none |
+| Zod | TypeScript | `$ZodString` | 64 | `type-symbol-attribution-incomplete` (pre-existing #1015 mechanism, unrelated to this fix) |
+| Express | JavaScript | `Router` | 0 | none |
+| Monolog | PHP | `pushHandler` | 15 | `symbol-attribution-degraded` (pre-existing #931 mechanism) |
+| Anyhow | Rust | `Error` | 5 | `type-symbol-attribution-incomplete` (pre-existing) |
+| Chi | Go | `RouteContext` | 0 | none (Go is deliberately excluded from the blind-spot set — #1005) |
+| **JavaPoet** | **Java** | `hasModifier` | **0** | **`dependent-attribution-incomplete` — the #1097 fix firing on a real, unmodified open-source method** |
+| MediatR | C# | `IRequestHandler` | 0 | `type-symbol-attribution-incomplete` (interface — the double-caveat guard correctly suppresses the new flag) |
+| Sinatra | Ruby | `dispatch!` | 20 | `symbol-attribution-degraded` (pre-existing) |
+| Klaxon | Kotlin | `JsonObject` | 0 | `type-symbol-attribution-incomplete` (data class — same guard as MediatR) |
+| **SwiftyJSON** | **Swift** | `rawString` | **0** | **`dependent-attribution-incomplete` — the #1097 fix firing on a real, unmodified open-source method** |
+
+Two corpora (JavaPoet, SwiftyJSON) reproduce the exact reported bug shape on
+real, unmodified upstream code: a real method with zero import-graph-visible
+dependents in a blind-spot language now correctly carries the caveat.
+Two more (MediatR, Klaxon) confirm the double-caveat guard: a type-shaped
+symbol query in the same languages correctly keeps its existing, more
+specific `type-symbol-attribution-incomplete` caveat rather than also
+setting the new flag. The remaining five (Python, TypeScript, JavaScript,
+Rust, Go, Ruby) confirm no over-firing: identical query shape, non-blind-spot
+languages, no spurious caveat. `lien api-delta --file <path> --format json`
+was additionally run against real, unmodified-then-reverted signature edits
+on both JavaPoet's `TypeSpec.hasModifier` and SwiftyJSON's `JSON.rawString`,
+confirming the CLI surface (not just the MCP tool) carries the same caveat.
+
 ## Known limitations
 
 All of these are silent misses (safe direction — the nudge under-fires, it
