@@ -218,11 +218,17 @@ function buildPartialRecoveryNote(analysis: DependencyAnalysisResult, filepath: 
  *   `symbol` names a type declaration; `dependentAttributionIncomplete`
  *   skips a call where that flag is already set (#1097) -- so those two
  *   never co-occur.
- * - `symbolAttributionDegraded` only ever fires with a nonzero final
- *   `dependents.length` (it widens to the file-level dependents list, which
- *   requires at least one file to begin with), so it can never coincide
- *   with `dependentAttributionPartial`/`dependentAttributionIncomplete`,
- *   both of which require the final count to be zero.
+ * - `symbolAttributionDegraded` can never coincide with either
+ *   `dependentAttributionPartial` or `dependentAttributionIncomplete`, for
+ *   two INDEPENDENT reasons rather than one shared count check: it can't
+ *   coincide with `dependentAttributionIncomplete` because it only ever
+ *   fires with a nonzero final `dependents.length` (it widens to the
+ *   file-level dependents list, which requires at least one file to begin
+ *   with) while that one requires the final count to be zero; it can't
+ *   coincide with `dependentAttributionPartial` because that one only ever
+ *   fires for a file-level query (`symbol` unset), while
+ *   `symbolAttributionDegraded` only ever fires for a symbol query -- the
+ *   two are mutually exclusive on `symbol` alone, independent of any count.
  * - `symbolAttributionDegraded` and `typeSymbolAttributionIncomplete` are
  *   themselves mutually exclusive: `buildDependentsList` (parser-side) only
  *   ever checks `isTypeDeclarationSymbol` in the branch where `symbol`
