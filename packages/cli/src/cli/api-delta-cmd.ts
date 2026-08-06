@@ -232,6 +232,7 @@ function buildBlastEvent(delta: EnrichedSignatureDelta, now: Date): BlastEvent {
       untestedDependentCount: c.untestedDependentCount,
       riskLevel: c.riskLevel,
       docRefCount: c.docRefCount,
+      attributionCaveat: c.attributionCaveat,
     })),
     enriched: delta.changes.some(c => c.enriched),
   };

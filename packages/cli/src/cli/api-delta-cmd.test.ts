@@ -718,6 +718,16 @@ describe('apiDeltaCommand — enrichment when an index is present', () => {
     expect(result.changes[0].attributionCaveat).not.toBeNull();
     expect(result.changes[0].attributionCaveat?.reason).toBe('dependent-attribution-incomplete');
     expect(result.changes[0].attributionCaveat?.note).toContain('logInfo');
+
+    // #1097 (Lien Review finding on this same PR): the persisted ledger
+    // record must carry the same caveat as the live CLI output — dropping
+    // it here would make `lien stats`/`readBlastEvents` see a false
+    // verified-clear for a run that actually surfaced this exact hedge.
+    const events = await readBlastEvents(dir);
+    expect(events).toHaveLength(1);
+    expect(events[0].changes[0].attributionCaveat).toMatchObject({
+      reason: 'dependent-attribution-incomplete',
+    });
   });
 
   // Control: the identical shape (symbol query, zero import-graph

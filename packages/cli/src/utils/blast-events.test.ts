@@ -229,6 +229,103 @@ describe('recordBlastEvent + readBlastEvents', () => {
     expect(events[0].changes[0].docRefCount).toBeUndefined();
   });
 
+  // #1097: `buildBlastEvent` used to drop `attributionCaveat` entirely when
+  // persisting to blast-events.jsonl, so a run that surfaced
+  // `dependent-attribution-incomplete` in the live CLI/MCP output was
+  // recorded as if it never happened -- a false verified-clear in history.
+  it('round-trips a change carrying an attributionCaveat', async () => {
+    const event = sampleEvent({
+      changes: [
+        {
+          symbol: 'Logger.logInfo',
+          kind: 'signature-changed',
+          dependentCount: 0,
+          untestedDependentCount: 0,
+          riskLevel: 'low',
+          attributionCaveat: {
+            reason: 'dependent-attribution-incomplete',
+            note: 'No import-based dependents were found ...',
+          },
+        },
+      ],
+    });
+    await recordBlastEvent(rootDir, event);
+
+    expect(await readBlastEvents(rootDir)).toEqual([event]);
+  });
+
+  it('round-trips attributionCaveat: null (checked, nothing to hedge) distinctly from absent', async () => {
+    const event = sampleEvent({
+      changes: [
+        {
+          symbol: 'formatUser',
+          kind: 'signature-changed',
+          dependentCount: 4,
+          untestedDependentCount: 1,
+          riskLevel: 'medium',
+          attributionCaveat: null,
+        },
+      ],
+    });
+    await recordBlastEvent(rootDir, event);
+
+    const [read] = await readBlastEvents(rootDir);
+    expect(read).toEqual(event);
+    expect(read.changes[0].attributionCaveat).toBeNull();
+  });
+
+  it('accepts an older event recorded before attributionCaveat existed (field absent, not just null)', async () => {
+    const filePath = blastEventsFilePath(rootDir);
+    const preExisting = {
+      timestamp: new Date().toISOString(),
+      filepath: 'src/legacy.ts',
+      changes: [
+        {
+          symbol: 'legacyFn',
+          kind: 'removed',
+          dependentCount: 1,
+          untestedDependentCount: 0,
+          riskLevel: 'low',
+        },
+      ],
+      enriched: true,
+    };
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.appendFile(filePath, `${JSON.stringify(preExisting)}\n`, 'utf-8');
+
+    const events = await readBlastEvents(rootDir);
+    expect(events).toHaveLength(1);
+    expect(events[0].changes[0].attributionCaveat).toBeUndefined();
+  });
+
+  it('skips a line whose attributionCaveat is malformed (missing note)', async () => {
+    const good = sampleEvent();
+    await recordBlastEvent(rootDir, good);
+
+    const filePath = blastEventsFilePath(rootDir);
+    const malformed = {
+      timestamp: new Date().toISOString(),
+      filepath: 'x.ts',
+      changes: [
+        {
+          symbol: 'foo',
+          kind: 'removed',
+          dependentCount: 0,
+          untestedDependentCount: 0,
+          riskLevel: 'low',
+          attributionCaveat: { reason: 'dependent-attribution-incomplete' }, // missing `note`
+        },
+      ],
+      enriched: true,
+    };
+    await fs.appendFile(filePath, `${JSON.stringify(malformed)}\n`, 'utf-8');
+    await recordBlastEvent(rootDir, sampleEvent({ filepath: 'src/bar.ts' }));
+
+    const events = await readBlastEvents(rootDir);
+    expect(events).toHaveLength(2);
+    expect(events[0]).toEqual(good);
+  });
+
   it('skips a line whose docRefCount is the wrong type', async () => {
     const good = sampleEvent();
     await recordBlastEvent(rootDir, good);

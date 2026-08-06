@@ -22,6 +22,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { getIndexDir } from '@liendev/core';
 import type { ExportedSymbolChangeKind } from './signature-delta.js';
+import type { AttributionCaveat } from '../mcp/handlers/get-dependents.js';
 
 export const BLAST_EVENTS_FILENAME = 'blast-events.jsonl';
 
@@ -45,6 +46,17 @@ export interface BlastEventChange {
    * (unknown/not computed), never as "zero references".
    */
   docRefCount?: number | null;
+  /**
+   * Same five-reason vocabulary `get_dependents` exposes as
+   * `attributionCaveat` (#1097) -- present when `dependentCount`/`riskLevel`
+   * above can't be trusted as a verified clear (e.g. a Java/Kotlin/Swift/C#
+   * same-unit-access blind spot). `null` when enrichment found nothing to
+   * hedge. `undefined` on any event recorded before this field existed;
+   * readers must treat that the same as `null` (unknown/not computed),
+   * never as "verified clear" -- an older line's absence of this key says
+   * nothing about whether a caveat would have applied.
+   */
+  attributionCaveat?: AttributionCaveat | null;
 }
 
 export interface BlastEvent {
@@ -117,6 +129,20 @@ function isValidOptionalNumber(value: unknown): boolean {
   return value === undefined || isValidNumberOrNull(value);
 }
 
+/**
+ * `attributionCaveat` is `undefined` (a pre-#1097 line), `null` (nothing to
+ * hedge), or an object shaped like `AttributionCaveat` -- checked loosely
+ * (string `reason`/`note`) rather than against the exact `AttributionCaveatReason`
+ * union, so a future sixth reason doesn't retroactively invalidate history
+ * already on disk.
+ */
+function isValidAttributionCaveat(value: unknown): boolean {
+  if (value === undefined || value === null) return true;
+  if (typeof value !== 'object') return false;
+  const c = value as Record<string, unknown>;
+  return typeof c.reason === 'string' && typeof c.note === 'string';
+}
+
 function isValidBlastEventChange(value: unknown): value is BlastEventChange {
   if (typeof value !== 'object' || value === null) return false;
   const c = value as Record<string, unknown>;
@@ -126,6 +152,7 @@ function isValidBlastEventChange(value: unknown): value is BlastEventChange {
   if (!isValidNumberOrNull(c.untestedDependentCount)) return false;
   if (typeof c.riskLevel !== 'string' && c.riskLevel !== null) return false;
   if (!isValidOptionalNumber(c.docRefCount)) return false;
+  if (!isValidAttributionCaveat(c.attributionCaveat)) return false;
   return true;
 }
 

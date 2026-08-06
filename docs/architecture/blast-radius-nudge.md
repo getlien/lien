@@ -605,7 +605,7 @@ the note as a trailing warning line; the PostToolUse hook
 **Real PostToolUse stdin shape, piped through the actual hook script**
 (`api-delta-write.sh`), against the fixture above:
 
-```
+```text
 ⚠ lien: exported signature changed — Logger.logInfo (0 dependents, 0 untested, risk low). Run get_dependents before relying on callers. ⚠ No import-based dependents were found for src/main/java/com/example/util/Logger.java (symbol: "logInfo"), but its language lets real callers use its exports with no per-file import naming it at all (e.g. C#'s "global using" / implicit enclosing-namespace access, Java/Kotlin's same-package visibility, or Swift's whole-module access). The import graph has no signal for that usage shape, so dependentCount: 0 and riskLevel: "low" here mean "the scan found nothing," not "nothing depends on this file" — don't treat this as a verified clear.
 ```
 
@@ -629,16 +629,21 @@ the note as a trailing warning line; the PostToolUse hook
 
 Two corpora (JavaPoet, SwiftyJSON) reproduce the exact reported bug shape on
 real, unmodified upstream code: a real method with zero import-graph-visible
-dependents in a blind-spot language now correctly carries the caveat.
-Two more (MediatR, Klaxon) confirm the double-caveat guard: a type-shaped
-symbol query in the same languages correctly keeps its existing, more
-specific `type-symbol-attribution-incomplete` caveat rather than also
-setting the new flag. The remaining five (Python, TypeScript, JavaScript,
-Rust, Go, Ruby) confirm no over-firing: identical query shape, non-blind-spot
-languages, no spurious caveat. `lien api-delta --file <path> --format json`
-was additionally run against real, unmodified-then-reverted signature edits
-on both JavaPoet's `TypeSpec.hasModifier` and SwiftyJSON's `JSON.rawString`,
-confirming the CLI surface (not just the MCP tool) carries the same caveat.
+dependents in a blind-spot language now correctly carries the caveat. Two
+more (MediatR, Klaxon) confirm the double-caveat guard: a type-shaped symbol
+query in the same languages correctly keeps its existing, more specific
+`type-symbol-attribution-incomplete` caveat rather than also setting the new
+flag. Three (Requests/Python, Express/JavaScript, Chi/Go) confirm no
+over-firing with no caveat at all — non-blind-spot languages (Go
+deliberately so, per #1005), genuinely clean zero. The remaining four
+(Zod/TypeScript, Monolog/PHP, Anyhow/Rust, Sinatra/Ruby) confirm the two
+PRE-EXISTING, unrelated caveat mechanisms (`type-symbol-attribution-incomplete`,
+`symbol-attribution-degraded`) still fire exactly as they did before this
+change — this fix touches neither their conditions nor their wording.
+`lien api-delta --file <path> --format json` was additionally run against
+real, unmodified-then-reverted signature edits on both JavaPoet's
+`TypeSpec.hasModifier` and SwiftyJSON's `JSON.rawString`, confirming the CLI
+surface (not just the MCP tool) carries the same caveat.
 
 ## Known limitations
 
