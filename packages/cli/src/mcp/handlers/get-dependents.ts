@@ -7,11 +7,18 @@ import type { ToolContext, MCPToolResult } from '../types.js';
 import {
   computeBlastRadiusRisk,
   describeInferredDependentRecovery,
+  detectLanguage,
+  hasDependentAttributionBlindSpot,
+  isPreciseProvenance,
+  getCanonicalPath,
   type BlastRadiusRisk,
+  type DependencyGraph,
+  type EdgeProvenance,
 } from '@liendev/parser';
 import type { AttributionCaveatReason } from '../attribution-caveat-reasons.js';
 import {
   findDependents,
+  getOrBuildDependencyGraph,
   type DependencyAnalysisResult,
   type DependentInfo,
   type ComplexityMetrics,
@@ -81,6 +88,26 @@ interface DependentsResponse {
    * explanation. Absent entirely on a normal, fully-attributed answer.
    */
   attributionCaveat?: AttributionCaveat;
+  /**
+   * Files (a subset of `dependents`) that the call-site-level dependency
+   * graph (`@liendev/parser`'s `buildDependencyGraph`) can VERIFY import
+   * `symbol` even though no literal call site names it -- e.g. a
+   * constructor call, a type hint, or a generic type argument, none of
+   * which surface as a tracked `callSite`. Only ever present for a
+   * type-symbol query (`attributionCaveat.reason ===
+   * 'type-symbol-attribution-incomplete'`); present as `[]` (not omitted)
+   * whenever that caveat fires, so its presence always means "checked",
+   * never "not applicable" -- see `computeImportOnlyEvidence`.
+   *
+   * Deliberately carries NO line number: unlike `dependents[].usages`
+   * (`{callerSymbol, line, snippet}`, a real call site), this evidence's
+   * only verified fact is "this file imports the symbol" -- attaching a
+   * line here would either have to fabricate one or reuse an unrelated
+   * chunk's line, which an earlier draft of this fix did and which
+   * adversarial review found wrong in every case tested (see #1015's PR
+   * body). `importedBy` stays file-level, on purpose.
+   */
+  importedBy?: string[];
 }
 
 /**
@@ -196,6 +223,129 @@ function buildPartialRecoveryNote(analysis: DependencyAnalysisResult, filepath: 
 }
 
 /**
+ * Provenance tiers safe to surface as "this file verifiably imports the
+ * symbol" evidence (#1015 fix direction 2) -- a DELIBERATELY narrower set
+ * than `isPreciseProvenance`'s own true/false split:
+ *
+ * - `same-file` is precise but excluded: `findDependents` never counts an
+ *   intra-file caller as a dependent (a file doesn't "depend on" itself) --
+ *   surfacing it here would contradict that policy.
+ * - `require-only` and `symbol-name-match` are excluded even though
+ *   "precise" alone might look like the right bar. Both are already
+ *   `false` under `isPreciseProvenance` (so the gate below already drops
+ *   them), but they're named here explicitly, on purpose: an adversarial
+ *   review of an earlier version of this fix measured `require-only`
+ *   fabricating 68 edges for a TypeScript interface actually used in
+ *   exactly one file (it is NOT language-gated to Ruby despite being
+ *   Ruby-motivated -- see `EdgeProvenance`'s own doc comment), and
+ *   `symbol-name-match` resolving to the WRONG file 4 of 5 times when
+ *   multiple languages declare a same-named class. A future change to
+ *   `isPreciseProvenance` alone must not silently let either back in here.
+ */
+function isImportOnlyEvidenceTier(provenance: EdgeProvenance): boolean {
+  if (
+    provenance === 'same-file' ||
+    provenance === 'require-only' ||
+    provenance === 'symbol-name-match'
+  ) {
+    return false;
+  }
+  return isPreciseProvenance(provenance);
+}
+
+/**
+ * Real, non-call-site evidence that files verifiably import a type-shaped
+ * symbol, recovered from `@liendev/parser`'s call-site-level dependency
+ * graph -- filling exactly the gap `typeSymbolAttributionIncomplete` names:
+ * nothing "calls" a class/struct/interface/enum by its own name, so
+ * `totalUsageCount`/`usages` structurally miss constructor calls, type
+ * hints, and `extends`/`implements` clauses (the graph's `import-only`
+ * tier -- see `EdgeProvenance`'s doc comment in `@liendev/parser`).
+ *
+ * `canonicalFilepath` MUST already be canonicalized (`getCanonicalPath`)
+ * before calling this: the graph's `getCallers` keys on the RAW
+ * `chunk.metadata.file` string it was built from, not on whatever form the
+ * MCP caller happened to type -- passing the raw argument through
+ * unchanged silently returns `[]` on any path that needed normalizing
+ * (backslashes, an accidental absolute prefix).
+ *
+ * Structurally always a SUBSET of `analysis.dependents` (see this fix's PR
+ * body for the proof, and `get-dependents.test.ts`'s "subset property"
+ * test for the enforced invariant) -- but callers should not rely on
+ * ordering matching `dependents`; this returns whatever the graph found,
+ * sorted for a stable response.
+ */
+function computeImportOnlyEvidence(
+  graph: DependencyGraph,
+  canonicalFilepath: string,
+  symbol: string,
+): string[] {
+  const files = new Set<string>();
+  for (const edge of graph.getCallers(canonicalFilepath, symbol)) {
+    if (isImportOnlyEvidenceTier(edge.provenance)) {
+      files.add(edge.caller.filepath);
+    }
+  }
+  return [...files].sort();
+}
+
+/**
+ * Build the `type-symbol-attribution-incomplete` note. Two independently
+ * true facts can both apply to the SAME response, so both are folded into
+ * this ONE note rather than a second caveat -- the five
+ * `AttributionCaveatReason`s stay mutually exclusive (#980, see
+ * `buildAttributionCaveat`'s doc comment below):
+ *
+ * - #1015: whether the graph recovered real, non-call-site import evidence
+ *   for the symbol (`importedBy.length > 0`) or genuinely found nothing.
+ * - #1057: whether `filepath`'s language ALSO has a
+ *   `hasDependentAttributionBlindSpot` (C#, Java, Kotlin, Swift -- #1005).
+ *   The note used to assert "dependentCount/dependents ... remain
+ *   reliable" unconditionally; for these languages that reassurance is
+ *   false -- the identical file's file-level (no `symbol`) query gets a
+ *   DIFFERENT caveat (`dependent-attribution-incomplete`) whose own text
+ *   says the opposite. Hedging both counts together for these languages,
+ *   instead of asserting one is fine while the other isn't, is what #1057
+ *   asked for.
+ */
+function buildTypeSymbolCaveatNote(
+  symbol: string | undefined,
+  filepath: string,
+  importedBy: string[],
+  isBlindSpotLanguage: boolean,
+): string {
+  const intro =
+    `"${symbol}" is a class/struct/interface/enum declaration in ${filepath}, not a ` +
+    `function or method. Usage attribution here is call-site-driven, and nothing "calls" ` +
+    `a type by its own name the way a function call does — constructor calls, type hints, ` +
+    `extends/implements clauses, generic type arguments, and dependency-injected property ` +
+    `access don't reliably surface as a tracked call site. totalUsageCount/usages below ` +
+    `are a partial, best-effort floor — often 0 even when real usages exist — not a ` +
+    `verified total.`;
+
+  const evidence =
+    importedBy.length > 0
+      ? ` ${importedBy.length} file(s) among the dependents below verifiably import ` +
+        `"${symbol}" per the dependency graph even though no literal call site names it ` +
+        `(see \`importedBy\`) — real usage there is likely, just not call-site-attributable.`
+      : ` The dependency graph found no non-call-site import evidence either (checked — ` +
+        `\`importedBy\` is empty), which is a genuine absence of signal, not a confirmed 0 usages.`;
+
+  const dependentCountClause = isBlindSpotLanguage
+    ? ` dependentCount/dependents (which files import "${symbol}") aren't a verified clear ` +
+      `either — this file's language has an import-invisible same-unit access shape (e.g. ` +
+      `C#'s enclosing-namespace access, Java/Kotlin's same-package access, or Swift's ` +
+      `whole-module access) the import graph can't see, so a real caller could exist with no ` +
+      `import naming "${symbol}" at all.`
+    : ` dependentCount/dependents (which files import "${symbol}") remain reliable.`;
+
+  return (
+    `${intro}${evidence}${dependentCountClause} Verify with grep before concluding "${symbol}" ` +
+    `is unused or safe to rename.`
+  );
+}
+
+/**
  * Decide which (if any) attribution caveat applies, and build its note.
  *
  * The five reasons are mutually exclusive by construction, so at most one
@@ -233,6 +383,7 @@ function buildAttributionCaveat(
   filepath: string,
   symbol: string | undefined,
   unresolvedTargetNote: string | undefined,
+  importedBy: string[] | undefined,
 ): AttributionCaveat | undefined {
   if (unresolvedTargetNote) {
     return { reason: 'unresolved-target', note: unresolvedTargetNote };
@@ -276,15 +427,9 @@ function buildAttributionCaveat(
     return { reason: 'symbol-attribution-degraded', note };
   }
   if (analysis.typeSymbolAttributionIncomplete) {
-    const note =
-      `"${symbol}" is a class/struct/interface/enum declaration in ${filepath}, not a ` +
-      `function or method. Usage attribution here is call-site-driven, and nothing "calls" ` +
-      `a type by its own name the way a function call does — constructor calls, type hints, ` +
-      `extends/implements clauses, generic type arguments, and dependency-injected property ` +
-      `access don't reliably surface as a tracked call site. totalUsageCount/usages below ` +
-      `are a partial, best-effort floor — often 0 even when real usages exist — not a ` +
-      `verified total; dependentCount/dependents (which files import "${symbol}") remain ` +
-      `reliable. Verify with grep before concluding "${symbol}" is unused or safe to rename.`;
+    const language = detectLanguage(filepath);
+    const isBlindSpotLanguage = language !== null && hasDependentAttributionBlindSpot(language);
+    const note = buildTypeSymbolCaveatNote(symbol, filepath, importedBy ?? [], isBlindSpotLanguage);
     return { reason: 'type-symbol-attribution-incomplete', note };
   }
   if (analysis.dependentAttributionPartial) {
@@ -317,6 +462,7 @@ function buildDependentsResponse(
   risk: BlastRadiusRisk,
   indexInfo: IndexInfo,
   unresolvedTargetNote?: string,
+  importedBy?: string[],
 ): DependentsResponse {
   const { symbol, filepath, depth } = args;
   // Symbol queries always run at depth 1 (see `depth`'s doc comment above) —
@@ -344,11 +490,15 @@ function buildDependentsResponse(
   if (analysis.totalUsageCount !== undefined) {
     response.totalUsageCount = analysis.totalUsageCount;
   }
+  if (importedBy !== undefined) {
+    response.importedBy = importedBy;
+  }
   const attributionCaveat = buildAttributionCaveat(
     analysis,
     filepath,
     symbol,
     unresolvedTargetNote,
+    importedBy,
   );
   if (attributionCaveat) {
     response.attributionCaveat = attributionCaveat;
@@ -414,7 +564,30 @@ export async function handleGetDependents(args: unknown, ctx: ToolContext): Prom
     // Log results with risk assessment
     logRiskAssessment(analysis, risk.level, symbol, log);
 
+    // #1015 fix direction 2: a type-symbol query with zero call-site usages
+    // may still have real, non-call-site import evidence in the call-graph
+    // (`import-only`/`import-verified` edges — a constructor call, a type
+    // hint, an `extends`/`implements` clause). Only built lazily here, for
+    // this one query shape — see `getOrBuildDependencyGraph`'s doc comment.
+    const importedBy = analysis.typeSymbolAttributionIncomplete
+      ? computeImportOnlyEvidence(
+          await getOrBuildDependencyGraph(vectorDB, log, indexInfo.indexVersion),
+          getCanonicalPath(filepath, workspaceRoot),
+          // Invariant: `typeSymbolAttributionIncomplete` is only ever set
+          // for a symbol-scoped query (see `FindDependentsResult`'s doc
+          // comment in `@liendev/parser`), so `symbol` is defined here.
+          symbol as string,
+        )
+      : undefined;
+
     // Build and return response
-    return buildDependentsResponse(analysis, validatedArgs, risk, indexInfo, unindexedNote);
+    return buildDependentsResponse(
+      analysis,
+      validatedArgs,
+      risk,
+      indexInfo,
+      unindexedNote,
+      importedBy,
+    );
   })(args);
 }

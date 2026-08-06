@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { handleGetDependents } from './get-dependents.js';
 import type { ToolContext } from '../types.js';
 import type { SearchResult } from '@liendev/core';
-import type { InferredDependentMechanism } from '@liendev/parser';
+import type { InferredDependentMechanism, EdgeProvenance, DependencyGraph } from '@liendev/parser';
 
 // Mock the dependency-analyzer module
 vi.mock('./dependency-analyzer.js', async importOriginal => {
@@ -10,10 +10,11 @@ vi.mock('./dependency-analyzer.js', async importOriginal => {
   return {
     ...(original as Record<string, unknown>),
     findDependents: vi.fn(),
+    getOrBuildDependencyGraph: vi.fn(),
   };
 });
 
-import { findDependents } from './dependency-analyzer.js';
+import { findDependents, getOrBuildDependencyGraph } from './dependency-analyzer.js';
 
 vi.mock('../utils/unindexed-paths.js', async importOriginal => {
   const original = await importOriginal();
@@ -104,6 +105,28 @@ describe('handleGetDependents', () => {
     };
   }
 
+  // Helper to build a fake `DependencyGraph` for `getOrBuildDependencyGraph`,
+  // keyed the same way the real `getCallers` is: `${filepath}::${symbolName}`.
+  // `edgesByKey` lets a test say exactly which provenance tier each caller
+  // file should come back tagged with, so tests can prove the evidence
+  // filter (`isImportOnlyEvidenceTier`) keeps the safe tiers and drops the
+  // unsafe ones (`require-only`, `symbol-name-match`, `same-file`).
+  function createMockGraph(
+    edgesByKey: Record<string, Array<{ filepath: string; provenance: EdgeProvenance }>> = {},
+  ): DependencyGraph {
+    return {
+      getCallers: vi.fn((filepath: string, symbolName: string) => {
+        const entries = edgesByKey[`${filepath}::${symbolName}`] ?? [];
+        return entries.map(({ filepath: callerFile, provenance }) => ({
+          caller: { filepath: callerFile, symbolName: '(module-level)', chunk: {} as any },
+          callSiteLine: 0,
+          provenance,
+        }));
+      }),
+      getCallersTransitive: vi.fn(() => ({ callers: [], truncated: false, visitedSymbols: 0 })),
+    };
+  }
+
   beforeEach(() => {
     vi.clearAllMocks();
 
@@ -128,6 +151,9 @@ describe('handleGetDependents', () => {
     // Default mock for findDependents
     vi.mocked(findDependents).mockResolvedValue(createMockAnalysis());
     vi.mocked(findUnindexedPaths).mockResolvedValue([]);
+    // Default: the graph exists but has no edges for anything -- most tests
+    // never exercise a type-symbol query, and the ones that do override this.
+    vi.mocked(getOrBuildDependencyGraph).mockResolvedValue(createMockGraph());
   });
 
   describe('basic functionality', () => {
@@ -755,6 +781,164 @@ describe('handleGetDependents', () => {
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.attributionCaveat).toBeUndefined();
       expect(parsed.totalUsageCount).toBe(5);
+      expect(parsed.importedBy).toBeUndefined();
+    });
+  });
+
+  describe('importedBy: real import-only evidence for a type-symbol query (#1015 fix direction 2)', () => {
+    it('surfaces importedBy and folds the count into the caveat note when the graph has real import-only evidence', async () => {
+      vi.mocked(findDependents).mockResolvedValue({
+        ...createMockAnalysis({
+          dependents: [
+            { filepath: 'src/api/users.ts', isTestFile: false },
+            { filepath: 'src/api/orders.ts', isTestFile: false },
+          ],
+          typeSymbolAttributionIncomplete: true,
+        }),
+        totalUsageCount: 0,
+      });
+      vi.mocked(getOrBuildDependencyGraph).mockResolvedValue(
+        createMockGraph({
+          'src/types.ts::User': [{ filepath: 'src/api/users.ts', provenance: 'import-only' }],
+        }),
+      );
+
+      const result = await handleGetDependents(
+        { filepath: 'src/types.ts', symbol: 'User' },
+        mockCtx,
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.importedBy).toEqual(['src/api/users.ts']);
+      expect(parsed.attributionCaveat.note).toContain('1 file(s)');
+      expect(parsed.attributionCaveat.note).toContain('verifiably import');
+      expect(parsed.attributionCaveat.note).toContain('importedBy');
+      // Non-blind-spot language (TypeScript): the original file-level
+      // reassurance stays intact (#1057 only hedges it for the four
+      // blind-spot languages).
+      expect(parsed.attributionCaveat.note).toContain('remain reliable');
+    });
+
+    it('reports importedBy: [] and an honest "checked, found nothing" note when the graph genuinely has no evidence', async () => {
+      vi.mocked(findDependents).mockResolvedValue({
+        ...createMockAnalysis({
+          dependents: [{ filepath: 'src/api/users.ts', isTestFile: false }],
+          typeSymbolAttributionIncomplete: true,
+        }),
+        totalUsageCount: 0,
+      });
+      // Default mock graph (set in beforeEach) has no edges for anything.
+
+      const result = await handleGetDependents(
+        { filepath: 'src/types.ts', symbol: 'User' },
+        mockCtx,
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.importedBy).toEqual([]);
+      expect(parsed.attributionCaveat.note).toContain('checked');
+      expect(parsed.attributionCaveat.note).toContain('importedBy');
+      expect(parsed.attributionCaveat.note).toContain('is empty');
+    });
+
+    it('never surfaces require-only, symbol-name-match, or same-file edges through importedBy, even when the graph has them', async () => {
+      vi.mocked(findDependents).mockResolvedValue({
+        ...createMockAnalysis({
+          dependents: [
+            { filepath: 'src/a.ts', isTestFile: false },
+            { filepath: 'src/b.ts', isTestFile: false },
+            { filepath: 'src/c.ts', isTestFile: false },
+            { filepath: 'src/types.ts', isTestFile: false },
+          ],
+          typeSymbolAttributionIncomplete: true,
+        }),
+        totalUsageCount: 0,
+      });
+      vi.mocked(getOrBuildDependencyGraph).mockResolvedValue(
+        createMockGraph({
+          'src/types.ts::User': [
+            { filepath: 'src/a.ts', provenance: 'require-only' },
+            { filepath: 'src/b.ts', provenance: 'symbol-name-match' },
+            { filepath: 'src/types.ts', provenance: 'same-file' },
+            { filepath: 'src/c.ts', provenance: 'import-only' },
+          ],
+        }),
+      );
+
+      const result = await handleGetDependents(
+        { filepath: 'src/types.ts', symbol: 'User' },
+        mockCtx,
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.importedBy).toEqual(['src/c.ts']);
+    });
+
+    it('hedges dependentCount/dependents reliability too for a #1005 blind-spot language (Java)', async () => {
+      vi.mocked(findDependents).mockResolvedValue({
+        ...createMockAnalysis({
+          dependents: [
+            { filepath: 'src/main/java/com/example/UserService.java', isTestFile: false },
+          ],
+          typeSymbolAttributionIncomplete: true,
+        }),
+        totalUsageCount: 0,
+      });
+
+      const result = await handleGetDependents(
+        { filepath: 'src/main/java/com/example/User.java', symbol: 'User' },
+        mockCtx,
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.attributionCaveat.note).toContain("aren't a verified clear");
+      expect(parsed.attributionCaveat.note).toContain('same-package');
+      expect(parsed.attributionCaveat.note).not.toContain('remain reliable');
+    });
+
+    it('does not compute importedBy at all for a non-type-symbol query', async () => {
+      vi.mocked(findDependents).mockResolvedValue({
+        ...createMockAnalysis({ dependents: [{ filepath: 'src/consumer.ts', isTestFile: false }] }),
+        totalUsageCount: 3,
+      });
+
+      const result = await handleGetDependents(
+        { filepath: 'src/utils/validate.ts', symbol: 'validateEmail' },
+        mockCtx,
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.importedBy).toBeUndefined();
+      expect(getOrBuildDependencyGraph).not.toHaveBeenCalled();
+    });
+
+    it('passes the CANONICALIZED filepath to the graph, not the raw argument (backslashes must resolve to the graph key form)', async () => {
+      vi.mocked(findDependents).mockResolvedValue({
+        ...createMockAnalysis({
+          dependents: [{ filepath: 'src/api/users.ts', isTestFile: false }],
+          typeSymbolAttributionIncomplete: true,
+        }),
+        totalUsageCount: 0,
+      });
+      const mockGraph = createMockGraph({
+        'src/types.ts::User': [{ filepath: 'src/api/users.ts', provenance: 'import-only' }],
+      });
+      vi.mocked(getOrBuildDependencyGraph).mockResolvedValue(mockGraph);
+
+      // Schema requires a relative path (absolute paths and ".." are
+      // rejected outright — see dependents.schema.ts), so the realistic
+      // canonicalization case that can actually reach the handler is a
+      // backslash-separated (Windows-style) relative path, not an absolute
+      // one. `getCanonicalPath` must still normalize it to match the
+      // graph's forward-slash key form.
+      const result = await handleGetDependents(
+        { filepath: 'src\\types.ts', symbol: 'User' },
+        mockCtx,
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(mockGraph.getCallers).toHaveBeenCalledWith('src/types.ts', 'User');
+      expect(parsed.importedBy).toEqual(['src/api/users.ts']);
     });
   });
 

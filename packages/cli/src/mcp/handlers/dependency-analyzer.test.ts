@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { SearchResult } from '@liendev/core';
-import { findDependents, clearDependencyCache } from './dependency-analyzer.js';
+import {
+  findDependents,
+  getOrBuildDependencyGraph,
+  clearDependencyCache,
+} from './dependency-analyzer.js';
 
 /**
  * Helper to create a mock SearchResult chunk with sensible defaults.
@@ -1615,6 +1619,88 @@ describe('findDependents', () => {
       // Second call without indexVersion: should scan again
       mockDB.scanAll.mockResolvedValue(chunks);
       await findDependents(mockDB as any, 'src/target.ts', mockLog);
+      expect(mockDB.scanAll).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('getOrBuildDependencyGraph (#1015 fix direction 2)', () => {
+    it('builds a graph that resolves a real import-only caller', async () => {
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/types.ts', {
+          exports: ['User'],
+          symbolName: 'User',
+          symbolType: 'class',
+        }),
+        createChunk('src/consumer.ts', {
+          importedSymbols: { 'src/types.ts': ['User'] },
+        }),
+      ]);
+
+      const graph = await getOrBuildDependencyGraph(mockDB as any, mockLog, 100);
+      const callers = graph.getCallers('src/types.ts', 'User');
+
+      expect(callers).toHaveLength(1);
+      expect(callers[0].caller.filepath).toBe('src/consumer.ts');
+      expect(callers[0].provenance).toBe('import-only');
+    });
+
+    it('reuses the cached scan (no extra vectorDB.scanAll) for the same indexVersion', async () => {
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/target.ts', { exports: ['foo'] }),
+        createChunk('src/consumer.ts', { imports: ['src/target.ts'] }),
+      ]);
+
+      // findDependents populates scanCache first...
+      await findDependents(mockDB as any, 'src/target.ts', mockLog, undefined, 300);
+      expect(mockDB.scanAll).toHaveBeenCalledTimes(1);
+
+      // ...and getOrBuildDependencyGraph reuses it rather than re-scanning.
+      await getOrBuildDependencyGraph(mockDB as any, mockLog, 300);
+      expect(mockDB.scanAll).toHaveBeenCalledTimes(1);
+    });
+
+    it('caches the built graph itself: a second call at the same indexVersion does not re-scan or rebuild', async () => {
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/types.ts', { exports: ['User'], symbolName: 'User', symbolType: 'class' }),
+      ]);
+
+      const graph1 = await getOrBuildDependencyGraph(mockDB as any, mockLog, 400);
+      expect(mockDB.scanAll).toHaveBeenCalledTimes(1);
+
+      mockDB.scanAll.mockResolvedValue([]);
+      const graph2 = await getOrBuildDependencyGraph(mockDB as any, mockLog, 400);
+      expect(mockDB.scanAll).toHaveBeenCalledTimes(1); // not called again
+      expect(graph2).toBe(graph1); // the identical cached graph instance
+    });
+
+    it('invalidates the graph cache when indexVersion changes', async () => {
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/types.ts', { exports: ['User'], symbolName: 'User', symbolType: 'class' }),
+        createChunk('src/consumer.ts', { importedSymbols: { 'src/types.ts': ['User'] } }),
+      ]);
+      const graph1 = await getOrBuildDependencyGraph(mockDB as any, mockLog, 500);
+      expect(graph1.getCallers('src/types.ts', 'User')).toHaveLength(1);
+
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/types.ts', { exports: ['User'], symbolName: 'User', symbolType: 'class' }),
+      ]);
+      const graph2 = await getOrBuildDependencyGraph(mockDB as any, mockLog, 600);
+      expect(graph2.getCallers('src/types.ts', 'User')).toHaveLength(0);
+    });
+
+    it('invalidates the graph cache via clearDependencyCache()', async () => {
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/types.ts', { exports: ['User'], symbolName: 'User', symbolType: 'class' }),
+      ]);
+      await getOrBuildDependencyGraph(mockDB as any, mockLog, 700);
+      expect(mockDB.scanAll).toHaveBeenCalledTimes(1);
+
+      clearDependencyCache();
+
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/types.ts', { exports: ['User'], symbolName: 'User', symbolType: 'class' }),
+      ]);
+      await getOrBuildDependencyGraph(mockDB as any, mockLog, 700);
       expect(mockDB.scanAll).toHaveBeenCalledTimes(2);
     });
   });
