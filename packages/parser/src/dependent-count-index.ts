@@ -115,6 +115,10 @@ import {
   buildGoRootPackageIndex,
   resolveGoRootPackageDependents,
 } from './go-root-package-signals.js';
+import {
+  buildJvmSamePackageIndex,
+  resolveJvmSamePackageDependents,
+} from './jvm-same-package-signals.js';
 
 /** One distinct (importer file, raw import specifier) pair. */
 interface SpecifierEntry {
@@ -326,21 +330,26 @@ function buildReverseEdges(
 }
 
 /**
- * Lazily-built project-wide indexes for the two non-import recovery tiers.
- * Built on first use, so a corpus with no zero-dependent C#/Go file pays
- * nothing for either.
+ * Lazily-built project-wide indexes for the three non-import recovery tiers.
+ * Built on first use, so a corpus with no zero-dependent C#/Go/JVM file pays
+ * nothing for any of them.
  */
 interface RecoveryIndexes {
   csharp?: ReturnType<typeof buildCSharpTypeReferenceIndex>;
   go?: ReturnType<typeof buildGoRootPackageIndex>;
+  jvm?: ReturnType<typeof buildJvmSamePackageIndex>;
 }
 
 /**
  * Files recovered for `rawFile` by whichever recovery tier its language has, or
- * `[]` for a language with none. Both tiers already ship the
+ * `[]` for a language with none. All three tiers already ship the
  * build-once/resolve-many split this needs (`CSharpTypeReferenceIndex`,
- * `GoRootPackageIndex`), so this reuses their resolvers rather than re-deriving
- * either signal.
+ * `GoRootPackageIndex`, `JvmSamePackageIndex`), so this reuses their resolvers
+ * rather than re-deriving any of the three signals. The `jvm` index is built
+ * fresh, lazily, from this call's own `chunks` snapshot -- deliberately NOT
+ * `jvm-source-root.ts`'s module-level cache-keyed-by-workspace-root pattern,
+ * which goes stale for the life of a long-running `lien serve`; this index is
+ * scoped to one `computeDependentCountsFromChunks` call and discarded after.
  */
 function recoverDependentsForFile(
   rawFile: string,
@@ -357,16 +366,21 @@ function recoverDependentsForFile(
     indexes.go ??= buildGoRootPackageIndex(chunks, workspaceRoot);
     return resolveGoRootPackageDependents(rawFile, indexes.go);
   }
+  if (language === 'java' || language === 'kotlin') {
+    indexes.jvm ??= buildJvmSamePackageIndex(chunks);
+    return resolveJvmSamePackageDependents(rawFile, indexes.jvm);
+  }
   return [];
 }
 
 /**
- * Apply the two non-import recovery tiers `findDependents` applies, under the
- * same precondition it uses: only for a target the import graph found LITERALLY
- * ZERO dependents for -- see `enrichWithCSharpTypeReferenceDependents` (#930/
- * #943) and `enrichWithGoRootPackageDependents` (#1039).
+ * Apply the three non-import recovery tiers `findDependents` applies, under
+ * the same precondition it uses: only for a target the import graph found
+ * LITERALLY ZERO dependents for -- see `enrichWithCSharpTypeReferenceDependents`
+ * (#930/#943), `enrichWithGoRootPackageDependents` (#1039), and
+ * `enrichWithJvmSamePackageDependents` (#1005).
  *
- * Mutates `reverse` in place, matching those two functions' own convention.
+ * Mutates `reverse` in place, matching those three functions' own convention.
  */
 function applyRecoveryTiers(ctx: {
   table: TargetTable;

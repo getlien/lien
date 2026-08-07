@@ -201,12 +201,30 @@ export {
 } from './go-root-package-signals.js';
 export type { GoRootPackageIndex } from './go-root-package-signals.js';
 
+// #1005 (Mechanism 3, Phase 1): Java/Kotlin's same-package non-import
+// dependents signal (see jvm-same-package-signals.ts's module doc). Mirrors
+// the C#/Go exports immediately above -- `buildJvmSamePackageIndex`/
+// `resolveJvmSamePackageDependents` let a caller resolving MANY target files
+// build the project-wide index once and reuse it, instead of calling
+// `findJvmSamePackageDependents` (which rebuilds it) per file.
+// `resolveJvmSamePackageDependentsBruteForce` is the never-pruned oracle --
+// exported purely so equivalence can be checked from outside the module;
+// never call it in production.
+export {
+  findJvmSamePackageDependents,
+  buildJvmSamePackageIndex,
+  resolveJvmSamePackageDependents,
+  resolveJvmSamePackageDependentsBruteForce,
+} from './jvm-same-package-signals.js';
+export type { JvmSamePackageIndex } from './jvm-same-package-signals.js';
+
 // #1071: batch reverse-dependency counts for EVERY file in one pass, resolving
 // through the same guarded `importMatchesTarget` decision `findDependents` uses
-// (plus the C#/Go recovery tiers above) rather than a private relative-only
-// matcher. Feeds `search_code`'s structural ranking boost, precomputed at index
-// time -- see dependent-count-index.ts's module doc for the candidate-index
-// pruning argument and for what is deliberately not counted.
+// (plus the C#/Go/JVM recovery tiers above) rather than a private
+// relative-only matcher. Feeds `search_code`'s structural ranking boost,
+// precomputed at index time -- see dependent-count-index.ts's module doc for
+// the candidate-index pruning argument and for what is deliberately not
+// counted.
 export {
   computeDependentCountsFromChunks,
   computeDependentCountsBruteForce,

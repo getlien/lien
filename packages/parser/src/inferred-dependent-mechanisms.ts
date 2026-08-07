@@ -57,7 +57,10 @@
  * dependent. Add a member here and `INFERRED_DEPENDENT_MECHANISMS` below fails
  * to compile until its prose is written.
  */
-export type InferredDependentMechanism = 'csharp-type-reference' | 'go-root-package-export';
+export type InferredDependentMechanism =
+  | 'csharp-type-reference'
+  | 'go-root-package-export'
+  | 'jvm-same-package';
 
 /** The canonical prose for one mechanism. Every prose surface reads these. */
 export interface InferredDependentMechanismDescriptor {
@@ -112,6 +115,22 @@ export const INFERRED_DEPENDENT_MECHANISMS: Record<
       'cannot distinguish a genuine root-package reference from an unrelated call that merely ' +
       'shares the same distinctive name, and recovers nothing for a root file whose entire ' +
       'exported surface is single-segment',
+  },
+  'jvm-same-package': {
+    languageLabel: 'Java/Kotlin',
+    importGraphBlindSpot:
+      'grants every top-level type unqualified access to every other top-level type in the ' +
+      'SAME package, with nothing in a per-file import ever naming the reference at all',
+    recovery:
+      "matching a package-locally-unique declared type name against other same-package files' " +
+      'source text, excluding a candidate whose own single-type/single-static import binds the ' +
+      'name to something else (#1005 Mechanism 3) — the name is only trusted when exactly one ' +
+      "file in the target's OWN package declares it",
+    residualRisk:
+      'cannot see a reference that resolves to an unindexed third-party type via an ' +
+      'import-on-demand where a same-package type of the identical name also exists — measured ' +
+      "as zero occurrences across this fix's validation corpora, but not structurally " +
+      'impossible',
   },
 };
 
