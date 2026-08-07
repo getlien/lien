@@ -109,9 +109,13 @@ export const ATTRIBUTION_CAVEAT_REASON_TEXT: Record<AttributionCaveatReason, str
     'way a function call does (constructor calls, type hints, extends/implements clauses, ' +
     "generic type arguments, and dependency-injected property access don't reliably surface " +
     'as a tracked call site). totalUsageCount/usages are a partial, best-effort floor — often ' +
-    '0 even when real usages exist — never a verified total; dependentCount/dependents ' +
-    '(which files import symbol) remain reliable. Verify with grep before concluding the ' +
-    'type is unused or safe to rename.',
+    '0 even when real usages exist — never a verified total. When the dependency graph can ' +
+    'verify a non-call-site import for the symbol anyway (#1015), the response names those ' +
+    'files in importedBy, with no line number attached (that would be fabricated). ' +
+    "dependentCount/dependents (which files import symbol) remain reliable UNLESS filepath's " +
+    'language also has an import-invisible same-unit access shape (C#/Java/Kotlin/Swift, ' +
+    '#1005) — the note says so explicitly when that applies (#1057). Verify with grep before ' +
+    'concluding the type is unused or safe to rename.',
 
   'dependent-attribution-partial':
     'a file-level query (no symbol) found zero import-based dependents, but a lower-confidence ' +

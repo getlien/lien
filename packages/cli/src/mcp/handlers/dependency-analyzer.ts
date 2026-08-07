@@ -1,7 +1,9 @@
 import type { SearchResult, VectorDBInterface } from '@liendev/core';
 import {
   findDependents as findDependentsFromChunks,
+  buildDependencyGraph,
   type FindDependentsResult,
+  type DependencyGraph,
 } from '@liendev/parser';
 
 export type { ComplexityMetrics, DependentInfo, SymbolUsage } from '@liendev/parser';
@@ -30,10 +32,26 @@ export type DependencyAnalysisResult = FindDependentsResult<SearchResult>;
 let scanCache: { indexVersion: number; chunks: SearchResult[] } | null = null;
 
 /**
- * Clear the dependency scan cache. Exported for testing.
+ * Cached call-site-level dependency graph (`@liendev/parser`'s
+ * `buildDependencyGraph`), keyed by the same `indexVersion` as `scanCache`.
+ * Safe to share that key: the graph is a pure function of the identical
+ * chunk set `scanCache` already holds, so "index hasn't changed" invalidates
+ * both together. Kept as a SEPARATE cache slot (not folded into `scanCache`)
+ * because most `findDependents` calls never need it -- function/method
+ * symbol queries already get exact call-site attribution from the chunk
+ * scan alone. The graph is only built lazily, on demand, by
+ * `getOrBuildDependencyGraph` below, for the one consumer that needs it:
+ * `get-dependents.ts`'s type-symbol import-only evidence (#1015 fix
+ * direction 2).
+ */
+let graphCache: { indexVersion: number; graph: DependencyGraph } | null = null;
+
+/**
+ * Clear the dependency scan and graph caches. Exported for testing.
  */
 export function clearDependencyCache(): void {
   scanCache = null;
+  graphCache = null;
 }
 
 /**
@@ -61,6 +79,40 @@ async function getOrScanChunks(
   }
   log(`Scanned ${chunks.length} chunks for imports...`);
   return chunks;
+}
+
+/**
+ * Get (or build) the in-memory, call-site-level dependency graph for the
+ * current chunk set -- `@liendev/parser`'s `buildDependencyGraph`, cached
+ * alongside the raw chunk scan (see `graphCache`'s doc comment above).
+ *
+ * Reuses `getOrScanChunks` rather than re-fetching from the vectorDB, so a
+ * call that misses the graph cache but hits the scan cache still avoids a
+ * second `vectorDB.scanAll()`. The build itself (`buildDependencyGraph`'s
+ * five-pass algorithm) is O(chunks) and NOT free on a monorepo-scale index,
+ * which is exactly why this is a lazy, on-demand cache rather than something
+ * `findDependents` above builds unconditionally on every call.
+ */
+export async function getOrBuildDependencyGraph(
+  vectorDB: VectorDBInterface,
+  log: (message: string, level?: 'warning') => void,
+  indexVersion?: number,
+): Promise<DependencyGraph> {
+  if (
+    indexVersion !== undefined &&
+    graphCache !== null &&
+    graphCache.indexVersion === indexVersion
+  ) {
+    return graphCache.graph;
+  }
+
+  const chunks = await getOrScanChunks(vectorDB, log, indexVersion);
+  const workspaceRoot = process.cwd().replace(/\\/g, '/');
+  const graph = buildDependencyGraph(chunks, workspaceRoot);
+  if (indexVersion !== undefined) {
+    graphCache = { indexVersion, graph };
+  }
+  return graph;
 }
 
 /**

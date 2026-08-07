@@ -7,11 +7,17 @@ import type { ToolContext, MCPToolResult } from '../types.js';
 import {
   computeBlastRadiusRisk,
   describeInferredDependentRecovery,
+  detectLanguage,
+  hasDependentAttributionBlindSpot,
+  isImportOnlyEvidenceTier,
+  getCanonicalPath,
   type BlastRadiusRisk,
+  type DependencyGraph,
 } from '@liendev/parser';
 import type { AttributionCaveatReason } from '../attribution-caveat-reasons.js';
 import {
   findDependents,
+  getOrBuildDependencyGraph,
   type DependencyAnalysisResult,
   type DependentInfo,
   type ComplexityMetrics,
@@ -81,6 +87,30 @@ interface DependentsResponse {
    * explanation. Absent entirely on a normal, fully-attributed answer.
    */
   attributionCaveat?: AttributionCaveat;
+  /**
+   * Files that the call-site-level dependency graph (`@liendev/parser`'s
+   * `buildDependencyGraph`) can VERIFY import `symbol` even though no
+   * literal call site names it -- e.g. a constructor call, a type hint, or
+   * a generic type argument, none of which surface as a tracked `callSite`.
+   * Always a subset of `dependents` BY CONSTRUCTION -- `computeImportOnlyEvidence`
+   * intersects the graph's candidates against `analysis.dependents` before
+   * returning, rather than trusting the two mechanisms to keep agreeing.
+   * Only ever present for a type-symbol query where `attributionCaveat.reason`
+   * (the FINAL decided reason, via `decideAttributionCaveatReason` -- not the
+   * raw `typeSymbolAttributionIncomplete` flag, which an earlier-priority
+   * reason can still override) is `'type-symbol-attribution-incomplete'`;
+   * present as `[]` (not omitted) whenever that caveat fires, so its
+   * presence always means "checked", never "not applicable".
+   *
+   * Deliberately carries NO line number: unlike `dependents[].usages`
+   * (`{callerSymbol, line, snippet}`, a real call site), this evidence's
+   * only verified fact is "this file imports the symbol" -- attaching a
+   * line here would either have to fabricate one or reuse an unrelated
+   * chunk's line, which an earlier draft of this fix did and which
+   * adversarial review found wrong in every case tested (see #1015's PR
+   * body). `importedBy` stays file-level, on purpose.
+   */
+  importedBy?: string[];
 }
 
 /**
@@ -196,17 +226,132 @@ function buildPartialRecoveryNote(analysis: DependencyAnalysisResult, filepath: 
 }
 
 /**
- * Decide which (if any) attribution caveat applies from the analysis-owned
- * flags alone (including `targetIndexed`, #928's chunk-based unresolved-
- * target check), and build its note. Split out from `buildAttributionCaveat`
- * (which additionally handles #927's MCP-specific, manifest-based
- * `unresolvedTargetNote` -- built from `findUnindexedPaths` against the
- * vectorDB manifest, something `lien api-delta` doesn't have) so `lien
- * api-delta` (`api-delta-cmd.ts`) can reuse the exact same composition/
- * priority rules instead of re-deriving them -- both surfaces call
- * `findDependents` and get back the same `DependencyAnalysisResult` shape,
- * so the decision of which caveat wins should never live in two places
- * (#1097).
+ * Real, non-call-site evidence that files verifiably import a type-shaped
+ * symbol, recovered from `@liendev/parser`'s call-site-level dependency
+ * graph -- filling exactly the gap `typeSymbolAttributionIncomplete` names:
+ * nothing "calls" a class/struct/interface/enum by its own name, so
+ * `totalUsageCount`/`usages` structurally miss constructor calls, type
+ * hints, and `extends`/`implements` clauses (the graph's `import-only`
+ * tier -- see `EdgeProvenance`'s doc comment in `@liendev/parser`).
+ *
+ * `canonicalFilepath` MUST already be canonicalized (`getCanonicalPath`)
+ * before calling this: the graph's `getCallers` keys on the RAW
+ * `chunk.metadata.file` string it was built from, not on whatever form the
+ * MCP caller happened to type -- passing the raw argument through
+ * unchanged silently returns `[]` on any path that needed normalizing
+ * (backslashes, an accidental absolute prefix).
+ *
+ * `dependentFiles` is `analysis.dependents`'s filepaths, and every candidate
+ * the graph reports is INTERSECTED against it before being returned. The
+ * two mechanisms verify the same import specifier via the same guarded
+ * `importMatchesTarget` primitive (see `dependency-graph.test.ts`'s "subset
+ * property" tests for the structural argument for why the graph's output is
+ * expected to already be a subset in practice), but that argument is a
+ * belief about how two independently-evolving algorithms currently behave,
+ * not a language-level guarantee -- so this function enforces the subset
+ * property BY CONSTRUCTION rather than trusting the two to keep agreeing
+ * (CodeRabbit finding on this PR: the earlier version returned the graph's
+ * raw output unintersected). Ordering is not guaranteed to match
+ * `dependents`; this returns whatever survives the intersection, sorted for
+ * a stable response.
+ */
+function computeImportOnlyEvidence(
+  graph: DependencyGraph,
+  canonicalFilepath: string,
+  symbol: string,
+  dependents: DependentInfo[],
+): string[] {
+  const dependentFiles = new Set(dependents.map(d => d.filepath));
+  const files = new Set<string>();
+  for (const edge of graph.getCallers(canonicalFilepath, symbol)) {
+    if (isImportOnlyEvidenceTier(edge.provenance) && dependentFiles.has(edge.caller.filepath)) {
+      files.add(edge.caller.filepath);
+    }
+  }
+  return [...files].sort();
+}
+
+/**
+ * Build the `type-symbol-attribution-incomplete` note. Two independently
+ * true facts can both apply to the SAME response, so both are folded into
+ * this ONE note rather than a second caveat -- the five
+ * `AttributionCaveatReason`s stay mutually exclusive (#980, see
+ * `buildAttributionCaveatFromAnalysis`'s doc comment below):
+ *
+ * - #1015: whether the graph recovered real, non-call-site import evidence
+ *   for the symbol (`importedBy.length > 0`) or genuinely found nothing.
+ * - #1057: whether `filepath`'s language ALSO has a
+ *   `hasDependentAttributionBlindSpot` (C#, Java, Kotlin, Swift -- #1005).
+ *   The note used to assert "dependentCount/dependents ... remain
+ *   reliable" unconditionally; for these languages that reassurance is
+ *   false -- the identical file's file-level (no `symbol`) query gets a
+ *   DIFFERENT caveat (`dependent-attribution-incomplete`) whose own text
+ *   says the opposite. Hedging both counts together for these languages,
+ *   instead of asserting one is fine while the other isn't, is what #1057
+ *   asked for.
+ */
+function buildTypeSymbolCaveatNote(
+  symbol: string | undefined,
+  filepath: string,
+  importedBy: string[],
+  isBlindSpotLanguage: boolean,
+): string {
+  const intro =
+    `"${symbol}" is a class/struct/interface/enum declaration in ${filepath}, not a ` +
+    `function or method. Usage attribution here is call-site-driven, and nothing "calls" ` +
+    `a type by its own name the way a function call does — constructor calls, type hints, ` +
+    `extends/implements clauses, generic type arguments, and dependency-injected property ` +
+    `access don't reliably surface as a tracked call site. totalUsageCount/usages below ` +
+    `are a partial, best-effort floor — often 0 even when real usages exist — not a ` +
+    `verified total.`;
+
+  const evidence =
+    importedBy.length > 0
+      ? ` ${importedBy.length} file(s) among the dependents below verifiably import ` +
+        `"${symbol}" per the dependency graph even though no literal call site names it ` +
+        `(see \`importedBy\`) — real usage there is likely, just not call-site-attributable.`
+      : ` The dependency graph found no non-call-site import evidence either (checked — ` +
+        `\`importedBy\` is empty), which is a genuine absence of signal, not a confirmed 0 usages.`;
+
+  const dependentCountClause = isBlindSpotLanguage
+    ? ` dependentCount/dependents (which files import "${symbol}") aren't a verified clear ` +
+      `either — this file's language has an import-invisible same-unit access shape (e.g. ` +
+      `C#'s enclosing-namespace access, Java/Kotlin's same-package access, or Swift's ` +
+      `whole-module access) the import graph can't see, so a real caller could exist with no ` +
+      `import naming "${symbol}" at all.`
+    : ` dependentCount/dependents (which files import "${symbol}") remain reliable.`;
+
+  return (
+    `${intro}${evidence}${dependentCountClause} Verify with grep before concluding "${symbol}" ` +
+    `is unused or safe to rename.`
+  );
+}
+
+/**
+ * Which attribution caveat reason wins, from the analysis-owned flags alone
+ * (`targetIndexed`, #928's chunk-based unresolved-target check, plus the
+ * other four). Extracted out of `buildAttributionCaveatFromAnalysis` below
+ * for two INDEPENDENT reasons that happened to land in the same PR:
+ *
+ * - #1097: `lien api-delta` (`api-delta-cmd.ts`) needs the exact same
+ *   priority/composition rules `get_dependents` uses, so the decision of
+ *   which caveat wins must never live in two places. `buildAttributionCaveatFromAnalysis`
+ *   reuses this to decide, then builds that reason's note.
+ * - #1015: `handleGetDependents` needs to know WHICH reason will win
+ *   *before* bothering to compute `importedBy`'s call-graph evidence --
+ *   only when this decides `'type-symbol-attribution-incomplete'` actually
+ *   WINS, not whenever the raw `analysis.typeSymbolAttributionIncomplete`
+ *   flag happens to be true. An earlier-priority reason can still win even
+ *   when that flag is set -- concretely, `unresolved-target` via
+ *   `unresolvedTargetNote` (see `decideAttributionCaveatReason` below):
+ *   that note comes from #927's manifest-based check, which runs
+ *   independently of (and before) `findDependents`'s own #928 chunk-based
+ *   scan, so the two can disagree on the same path (that disagreement is
+ *   the entire reason both checks exist). Gating `importedBy` on the raw
+ *   flag instead of this decision would let a response carry a populated
+ *   `importedBy` while `attributionCaveat.reason` names something else
+ *   entirely -- contradicting the field's own documented contract (found
+ *   and fixed after CodeRabbit flagged it on this PR).
  *
  * The five reasons here are mutually exclusive by construction, so at most
  * one ever fires:
@@ -251,107 +396,152 @@ function buildPartialRecoveryNote(analysis: DependencyAnalysisResult, filepath: 
  * doc comment on `FindDependentsResult` in `@liendev/parser`'s
  * `dependency-analyzer.ts`.
  */
-export function buildAttributionCaveatFromAnalysis(
+function decideAttributionCaveatReasonFromAnalysis(
   analysis: DependencyAnalysisResult,
-  filepath: string,
-  symbol: string | undefined,
-): AttributionCaveat | undefined {
-  if (!analysis.targetIndexed) {
-    return {
-      reason: 'unresolved-target',
-      note:
-        `⚠ Lien: "${filepath}" has no chunks anywhere in the index — every count above ` +
-        'is a deliberate 0, not a confirmed empty dependency graph. This can mean the ' +
-        'path was never indexed, is misspelled (wrong directory prefix, wrong case), or ' +
-        'genuinely has no extractable content. Do not treat this as a low-risk or ' +
-        'dependency-free file; check for a typo before editing, try search_code or ' +
-        'list_functions to find the real path, or run "lien index" if the file was added ' +
-        'recently.',
-    };
-  }
-  if (analysis.symbolAttributionDegraded) {
-    // "Not a top-level export, no confirmed call sites" has more than one
-    // real cause: a genuine method/constructor and a typo'd/hallucinated/
-    // removed symbol look identical on that signal alone.
-    // `symbolFoundInFile` is the cheap, already-scanned check that tells them
-    // apart (does `symbol` match ANY chunk in the file, not just its
-    // top-level exports) — only assert the method/constructor reading when
-    // it's actually backed by a hit; otherwise hedge across the real
-    // possibilities instead of confidently naming the wrong one. The second
-    // sentence (file-level answer, not a verified per-symbol count) holds
-    // either way and stays identical.
-    const note = analysis.symbolFoundInFile
-      ? `"${symbol}" doesn't appear in ${filepath}'s tracked top-level exports (likely a ` +
-        `method or constructor — no import statement names one of those independently of ` +
-        `its class/package). Symbol-level call sites couldn't be confirmed, so dependentCount, ` +
-        `riskLevel, and dependents below are the file-level answer (every file that imports ` +
-        `${filepath}) rather than a verified count of callers of "${symbol}" specifically.`
-      : `"${symbol}" doesn't appear anywhere in ${filepath} — not as a top-level export, nor in ` +
-        `any indexed chunk of the file. This may be a typo, a hallucinated name, or a symbol ` +
-        `that used to exist and was removed. Symbol-level call sites couldn't be confirmed, so ` +
-        `dependentCount, riskLevel, and dependents below are the file-level answer (every file ` +
-        `that imports ${filepath}) rather than a verified count of callers of "${symbol}" ` +
-        `specifically.`;
-    return { reason: 'symbol-attribution-degraded', note };
-  }
-  if (analysis.typeSymbolAttributionIncomplete) {
-    const note =
-      `"${symbol}" is a class/struct/interface/enum declaration in ${filepath}, not a ` +
-      `function or method. Usage attribution here is call-site-driven, and nothing "calls" ` +
-      `a type by its own name the way a function call does — constructor calls, type hints, ` +
-      `extends/implements clauses, generic type arguments, and dependency-injected property ` +
-      `access don't reliably surface as a tracked call site. totalUsageCount/usages below ` +
-      `are a partial, best-effort floor — often 0 even when real usages exist — not a ` +
-      `verified total; dependentCount/dependents (which files import "${symbol}") remain ` +
-      `reliable. Verify with grep before concluding "${symbol}" is unused or safe to rename.`;
-    return { reason: 'type-symbol-attribution-incomplete', note };
-  }
-  if (analysis.dependentAttributionPartial) {
-    return {
-      reason: 'dependent-attribution-partial',
-      note: buildPartialRecoveryNote(analysis, filepath),
-    };
-  }
-  if (analysis.dependentAttributionIncomplete) {
-    // #1097: `symbol` may or may not be set here -- unlike the other four
-    // branches above, this one now fires for both a file-level query AND a
-    // symbol-scoped query on a real, non-type-declaration export. Name the
-    // symbol when present so the note doesn't read as file-level-only when
-    // it isn't.
-    const symbolSuffix = symbol ? ` (symbol: "${symbol}")` : '';
-    return {
-      reason: 'dependent-attribution-incomplete',
-      note:
-        `No import-based dependents were found for ${filepath}${symbolSuffix}, but its ` +
-        `language lets real callers use its exports with no per-file import naming it at ` +
-        `all (e.g. C#'s "global using" / implicit enclosing-namespace access, Java/Kotlin's ` +
-        `same-package visibility, or Swift's whole-module access). The import graph has no ` +
-        `signal for that usage shape, so dependentCount: 0 and riskLevel: "low" here mean ` +
-        `"the scan found nothing," not "nothing depends on this file" — don't treat this as ` +
-        `a verified clear.`,
-    };
-  }
+): AttributionCaveatReason | undefined {
+  if (!analysis.targetIndexed) return 'unresolved-target';
+  if (analysis.symbolAttributionDegraded) return 'symbol-attribution-degraded';
+  if (analysis.typeSymbolAttributionIncomplete) return 'type-symbol-attribution-incomplete';
+  if (analysis.dependentAttributionPartial) return 'dependent-attribution-partial';
+  if (analysis.dependentAttributionIncomplete) return 'dependent-attribution-incomplete';
   return undefined;
 }
 
 /**
- * MCP-only entry point: #927's manifest-based unresolved-target note takes
- * precedence over #928's chunk-based one where both could apply (a
- * typo'd/nonexistent path trips both for the same underlying reason);
- * `unresolvedTargetNote` already encodes that precedence before this
- * function sees it. Falls through to `buildAttributionCaveatFromAnalysis`
- * for every other reason, including #928's own `!targetIndexed` check.
+ * Decide which (if any) attribution caveat applies from the analysis-owned
+ * flags alone, and build its note. Exported so `lien api-delta`
+ * (`api-delta-cmd.ts`) can reuse the exact same composition/priority rules
+ * instead of re-deriving them (#1097) -- both surfaces call `findDependents`
+ * and get back the same `DependencyAnalysisResult` shape.
+ *
+ * `importedBy` is optional and only ever read in the
+ * `type-symbol-attribution-incomplete` case (#1015). `lien api-delta` has
+ * no dependency graph to consult and omits it, getting the "checked, found
+ * nothing" phrasing; only the MCP `get_dependents` handler (via
+ * `buildAttributionCaveat` below) supplies real evidence.
+ */
+export function buildAttributionCaveatFromAnalysis(
+  analysis: DependencyAnalysisResult,
+  filepath: string,
+  symbol: string | undefined,
+  importedBy?: string[],
+): AttributionCaveat | undefined {
+  const reason = decideAttributionCaveatReasonFromAnalysis(analysis);
+
+  switch (reason) {
+    case undefined:
+      return undefined;
+
+    case 'unresolved-target':
+      return {
+        reason,
+        note:
+          `⚠ Lien: "${filepath}" has no chunks anywhere in the index — every count above ` +
+          'is a deliberate 0, not a confirmed empty dependency graph. This can mean the ' +
+          'path was never indexed, is misspelled (wrong directory prefix, wrong case), or ' +
+          'genuinely has no extractable content. Do not treat this as a low-risk or ' +
+          'dependency-free file; check for a typo before editing, try search_code or ' +
+          'list_functions to find the real path, or run "lien index" if the file was added ' +
+          'recently.',
+      };
+
+    case 'symbol-attribution-degraded': {
+      // "Not a top-level export, no confirmed call sites" has more than one
+      // real cause: a genuine method/constructor and a typo'd/hallucinated/
+      // removed symbol look identical on that signal alone.
+      // `symbolFoundInFile` is the cheap, already-scanned check that tells them
+      // apart (does `symbol` match ANY chunk in the file, not just its
+      // top-level exports) — only assert the method/constructor reading when
+      // it's actually backed by a hit; otherwise hedge across the real
+      // possibilities instead of confidently naming the wrong one. The second
+      // sentence (file-level answer, not a verified per-symbol count) holds
+      // either way and stays identical.
+      const note = analysis.symbolFoundInFile
+        ? `"${symbol}" doesn't appear in ${filepath}'s tracked top-level exports (likely a ` +
+          `method or constructor — no import statement names one of those independently of ` +
+          `its class/package). Symbol-level call sites couldn't be confirmed, so dependentCount, ` +
+          `riskLevel, and dependents below are the file-level answer (every file that imports ` +
+          `${filepath}) rather than a verified count of callers of "${symbol}" specifically.`
+        : `"${symbol}" doesn't appear anywhere in ${filepath} — not as a top-level export, nor in ` +
+          `any indexed chunk of the file. This may be a typo, a hallucinated name, or a symbol ` +
+          `that used to exist and was removed. Symbol-level call sites couldn't be confirmed, so ` +
+          `dependentCount, riskLevel, and dependents below are the file-level answer (every file ` +
+          `that imports ${filepath}) rather than a verified count of callers of "${symbol}" ` +
+          `specifically.`;
+      return { reason, note };
+    }
+
+    case 'type-symbol-attribution-incomplete': {
+      const language = detectLanguage(filepath);
+      const isBlindSpotLanguage = language !== null && hasDependentAttributionBlindSpot(language);
+      const note = buildTypeSymbolCaveatNote(
+        symbol,
+        filepath,
+        importedBy ?? [],
+        isBlindSpotLanguage,
+      );
+      return { reason, note };
+    }
+
+    case 'dependent-attribution-partial':
+      return { reason, note: buildPartialRecoveryNote(analysis, filepath) };
+
+    case 'dependent-attribution-incomplete': {
+      // #1097: `symbol` may or may not be set here -- unlike the other four
+      // branches above, this one now fires for both a file-level query AND a
+      // symbol-scoped query on a real, non-type-declaration export. Name the
+      // symbol when present so the note doesn't read as file-level-only when
+      // it isn't.
+      const symbolSuffix = symbol ? ` (symbol: "${symbol}")` : '';
+      return {
+        reason,
+        note:
+          `No import-based dependents were found for ${filepath}${symbolSuffix}, but its ` +
+          `language lets real callers use its exports with no per-file import naming it at ` +
+          `all (e.g. C#'s "global using" / implicit enclosing-namespace access, Java/Kotlin's ` +
+          `same-package visibility, or Swift's whole-module access). The import graph has no ` +
+          `signal for that usage shape, so dependentCount: 0 and riskLevel: "low" here mean ` +
+          `"the scan found nothing," not "nothing depends on this file" — don't treat this as ` +
+          `a verified clear.`,
+      };
+    }
+  }
+}
+
+/**
+ * MCP-only: #927's manifest-based unresolved-target note takes precedence
+ * over #928's chunk-based one where both could apply (a typo'd/nonexistent
+ * path trips both for the same underlying reason). Used by
+ * `handleGetDependents` to know the FINAL reason (not just the raw
+ * `typeSymbolAttributionIncomplete` flag) before deciding whether to compute
+ * `importedBy` -- see `decideAttributionCaveatReasonFromAnalysis`'s doc
+ * comment for why that distinction matters.
+ */
+function decideAttributionCaveatReason(
+  analysis: DependencyAnalysisResult,
+  unresolvedTargetNote: string | undefined,
+): AttributionCaveatReason | undefined {
+  if (unresolvedTargetNote) return 'unresolved-target';
+  return decideAttributionCaveatReasonFromAnalysis(analysis);
+}
+
+/**
+ * MCP-only entry point: layers #927's manifest-based unresolved-target note
+ * on top of `buildAttributionCaveatFromAnalysis`'s analysis-only decision
+ * (see `decideAttributionCaveatReason`'s doc comment for the precedence).
+ * `importedBy` is threaded through for the one case that needs it.
  */
 function buildAttributionCaveat(
   analysis: DependencyAnalysisResult,
   filepath: string,
   symbol: string | undefined,
   unresolvedTargetNote: string | undefined,
+  importedBy: string[] | undefined,
 ): AttributionCaveat | undefined {
   if (unresolvedTargetNote) {
     return { reason: 'unresolved-target', note: unresolvedTargetNote };
   }
-  return buildAttributionCaveatFromAnalysis(analysis, filepath, symbol);
+  return buildAttributionCaveatFromAnalysis(analysis, filepath, symbol, importedBy);
 }
 
 /**
@@ -363,6 +553,7 @@ function buildDependentsResponse(
   risk: BlastRadiusRisk,
   indexInfo: IndexInfo,
   unresolvedTargetNote?: string,
+  importedBy?: string[],
 ): DependentsResponse {
   const { symbol, filepath, depth } = args;
   // Symbol queries always run at depth 1 (see `depth`'s doc comment above) —
@@ -390,11 +581,15 @@ function buildDependentsResponse(
   if (analysis.totalUsageCount !== undefined) {
     response.totalUsageCount = analysis.totalUsageCount;
   }
+  if (importedBy !== undefined) {
+    response.importedBy = importedBy;
+  }
   const attributionCaveat = buildAttributionCaveat(
     analysis,
     filepath,
     symbol,
     unresolvedTargetNote,
+    importedBy,
   );
   if (attributionCaveat) {
     response.attributionCaveat = attributionCaveat;
@@ -460,7 +655,40 @@ export async function handleGetDependents(args: unknown, ctx: ToolContext): Prom
     // Log results with risk assessment
     logRiskAssessment(analysis, risk.level, symbol, log);
 
+    // #1015 fix direction 2: a type-symbol query with zero call-site usages
+    // may still have real, non-call-site import evidence in the call-graph
+    // (`import-only`/`import-verified` edges — a constructor call, a type
+    // hint, an `extends`/`implements` clause). Only built lazily here, for
+    // this one query shape — see `getOrBuildDependencyGraph`'s doc comment.
+    //
+    // Gated on `decideAttributionCaveatReason`'s ACTUAL winner, not the raw
+    // `analysis.typeSymbolAttributionIncomplete` flag: an earlier-priority
+    // reason (`unresolved-target`, when the #927 manifest check and #928's
+    // chunk-based scan disagree) can still win even when that flag is set,
+    // and `importedBy` must never populate for a response whose surfaced
+    // `attributionCaveat.reason` says something else.
+    const attributionReason = decideAttributionCaveatReason(analysis, unindexedNote);
+    const importedBy =
+      attributionReason === 'type-symbol-attribution-incomplete'
+        ? computeImportOnlyEvidence(
+            await getOrBuildDependencyGraph(vectorDB, log, indexInfo.indexVersion),
+            getCanonicalPath(filepath, workspaceRoot),
+            // Invariant: `typeSymbolAttributionIncomplete` is only ever set
+            // for a symbol-scoped query (see `FindDependentsResult`'s doc
+            // comment in `@liendev/parser`), so `symbol` is defined here.
+            symbol as string,
+            analysis.dependents,
+          )
+        : undefined;
+
     // Build and return response
-    return buildDependentsResponse(analysis, validatedArgs, risk, indexInfo, unindexedNote);
+    return buildDependentsResponse(
+      analysis,
+      validatedArgs,
+      risk,
+      indexInfo,
+      unindexedNote,
+      importedBy,
+    );
   })(args);
 }

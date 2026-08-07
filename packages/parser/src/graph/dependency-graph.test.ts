@@ -1,7 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { buildDependencyGraph, isPreciseProvenance } from './dependency-graph.js';
+import {
+  buildDependencyGraph,
+  isPreciseProvenance,
+  isImportOnlyEvidenceTier,
+} from './dependency-graph.js';
 import type { EdgeProvenance } from './dependency-graph.js';
 import type { CodeChunk } from '../types.js';
+import { findDependents } from '../dependency-analyzer.js';
 
 /**
  * Create a minimal CodeChunk for testing.
@@ -1434,5 +1439,253 @@ describe('isPreciseProvenance', () => {
     ['namespace-inferred', false],
   ])('%s -> %s', (provenance, expected) => {
     expect(isPreciseProvenance(provenance)).toBe(expected);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Subset property (#1015 fix direction 2) — the safety guarantee
+// `get-dependents.ts`'s `importedBy` evidence field relies on: every file the
+// graph can name as a caller via a SAFE tier (`isImportOnlyEvidenceTier`,
+// exported above next to `isPreciseProvenance` so this test and the CLI
+// handler share ONE definition -- a test-local mirror couldn't detect the
+// predicate it's checking drifting out from under it) is already present in
+// `findDependents`'s own `dependents` list. Both mechanisms ultimately
+// verify an import specifier against the SAME guarded `importMatchesTarget`
+// primitive, but the graph additionally requires the resolved file to
+// appear in its own `exportIndex` under the exact symbol name -- a strictly
+// narrower (never wider) condition than `findDependents`'s
+// `fileImportsSymbolFromAny`. That asymmetry is what makes the graph's
+// precise-tier output always a SUBSET, never a superset: this test proves
+// it end-to-end instead of just asserting it. (The CLI handler additionally
+// enforces the subset by construction -- an explicit intersection against
+// `analysis.dependents`, not just this shared predicate -- see
+// `computeImportOnlyEvidence` in `get-dependents.ts`.)
+// ---------------------------------------------------------------------------
+describe('buildDependencyGraph <-> findDependents subset property (#1015 fix direction 2)', () => {
+  // Alias kept local to this describe block purely for brevity at call
+  // sites below; same function, no re-implementation.
+  const isSafeEvidenceTier = isImportOnlyEvidenceTier;
+
+  function noopLog(): void {
+    // Intentionally empty.
+  }
+
+  // NOTE: `getCallers` returns the FIRST non-empty tier for a given
+  // `file::symbol` key (`callerEdges` -- which is where `import-verified` AND
+  // `symbol-name-match` both land, since both are written during the same
+  // build pass -- then `importOnlyEdges`, then the C# fallback, then
+  // require-only, last). That means `import-only` and a real call-site edge
+  // for the identical key can never BOTH appear in one `getCallers` result
+  // (`buildImportOnlyEdges` explicitly skips any key already covered by a
+  // real edge -- see its own doc comment), and likewise `require-only` never
+  // appears when a stronger tier already resolved the same key. Each tier is
+  // therefore exercised in its OWN minimal fixture below rather than one
+  // combined scenario -- forcing two tiers into a single `getCallers` call
+  // would just prove which one wins the priority order, not the subset
+  // property this describe block exists to check.
+
+  it('import-only: the recovered caller file is already present in dependents (PHP PricingService shape)', () => {
+    const classChunk = createTestChunk({
+      metadata: {
+        file: 'app/Services/PricingService.php',
+        startLine: 1,
+        endLine: 50,
+        type: 'class',
+        symbolName: 'PricingService',
+        symbolType: 'class',
+        language: 'php',
+        exports: ['PricingService'],
+      },
+    });
+
+    // import-only: constructor-injected property, never calls a site
+    // literally named 'PricingService'.
+    const importOnlyCaller = createTestChunk({
+      content:
+        'function formatTotal($total) { return $this->pricingService->formatPrice($total); }',
+      metadata: {
+        file: 'app/Http/Controllers/ProductController.php',
+        startLine: 1,
+        endLine: 30,
+        type: 'class',
+        symbolName: 'ProductController',
+        symbolType: 'class',
+        language: 'php',
+        exports: ['ProductController'],
+        importedSymbols: { 'App\\Services\\PricingService': ['PricingService'] },
+        callSites: [{ symbol: 'formatPrice', line: 10 }],
+      },
+    });
+
+    const chunks: CodeChunk[] = [classChunk, importOnlyCaller];
+
+    const graph = buildDependencyGraph(chunks);
+    const rawCallers = graph.getCallers('app/Services/PricingService.php', 'PricingService');
+    expect(rawCallers.map(c => c.provenance)).toEqual(['import-only']);
+
+    const graphFiles = rawCallers
+      .filter(edge => isSafeEvidenceTier(edge.provenance))
+      .map(edge => edge.caller.filepath);
+    expect(graphFiles).toEqual(['app/Http/Controllers/ProductController.php']);
+
+    const result = findDependents(
+      chunks,
+      'app/Services/PricingService.php',
+      noopLog,
+      '',
+      'PricingService',
+    );
+    const dependentFiles = new Set(result.dependents.map(d => d.filepath));
+    for (const file of graphFiles) {
+      expect(dependentFiles.has(file)).toBe(true);
+    }
+  });
+
+  it('import-verified: the recovered caller file is already present in dependents', () => {
+    const classChunk = createTestChunk({
+      metadata: {
+        file: 'app/Services/PricingService.php',
+        startLine: 1,
+        endLine: 50,
+        type: 'class',
+        symbolName: 'PricingService',
+        symbolType: 'class',
+        language: 'php',
+        exports: ['PricingService'],
+      },
+    });
+
+    // import-verified: a real call site names the class directly (`new
+    // PricingService(...)`, tracked as a callSite on the constructing chunk).
+    const importVerifiedCaller = createTestChunk({
+      content: 'function make() { return new PricingService(); }',
+      metadata: {
+        file: 'app/Factories/PricingServiceFactory.php',
+        startLine: 1,
+        endLine: 10,
+        type: 'class',
+        symbolName: 'PricingServiceFactory',
+        symbolType: 'class',
+        language: 'php',
+        exports: ['PricingServiceFactory'],
+        importedSymbols: { 'App\\Services\\PricingService': ['PricingService'] },
+        callSites: [{ symbol: 'PricingService', line: 2 }],
+      },
+    });
+
+    const chunks: CodeChunk[] = [classChunk, importVerifiedCaller];
+
+    const graph = buildDependencyGraph(chunks);
+    const rawCallers = graph.getCallers('app/Services/PricingService.php', 'PricingService');
+    expect(rawCallers.map(c => c.provenance)).toEqual(['import-verified']);
+
+    const graphFiles = rawCallers
+      .filter(edge => isSafeEvidenceTier(edge.provenance))
+      .map(edge => edge.caller.filepath);
+    expect(graphFiles).toEqual(['app/Factories/PricingServiceFactory.php']);
+
+    const result = findDependents(
+      chunks,
+      'app/Services/PricingService.php',
+      noopLog,
+      '',
+      'PricingService',
+    );
+    const dependentFiles = new Set(result.dependents.map(d => d.filepath));
+    for (const file of graphFiles) {
+      expect(dependentFiles.has(file)).toBe(true);
+    }
+  });
+
+  it('excludes a require-only edge, even when it is the ONLY thing the graph found for the seed', () => {
+    const classChunk = createTestChunk({
+      metadata: {
+        file: 'src/models/order.rb',
+        startLine: 1,
+        endLine: 20,
+        type: 'class',
+        symbolName: 'Order',
+        symbolType: 'class',
+        language: 'ruby',
+        exports: ['Order'],
+      },
+    });
+
+    // require-only: names the FILE, never the symbol (Ruby's require_relative).
+    const requireOnlyCaller = createTestChunk({
+      content: 'class Checkout; end',
+      metadata: {
+        file: 'src/checkout.rb',
+        startLine: 1,
+        endLine: 10,
+        type: 'class',
+        symbolName: 'Checkout',
+        language: 'ruby',
+        exports: ['Checkout'],
+        imports: ['./models/order'],
+        // Ruby's real extractor guesses a lowercase symbol name from the
+        // require path (see dependency-graph.ts's require-only module doc);
+        // that guess never matches the real export 'Order'.
+        importedSymbols: { './models/order': ['order'] },
+      },
+    });
+
+    const graph = buildDependencyGraph([classChunk, requireOnlyCaller]);
+    const rawCallers = graph.getCallers('src/models/order.rb', 'Order');
+
+    // Confirms the fixture actually produced the tier this test exists to
+    // exclude -- otherwise the assertion below would pass vacuously.
+    expect(rawCallers.map(c => c.provenance)).toEqual(['require-only']);
+
+    const graphFiles = rawCallers
+      .filter(edge => isSafeEvidenceTier(edge.provenance))
+      .map(edge => edge.caller.filepath);
+    expect(graphFiles).toEqual([]);
+  });
+
+  it('excludes a symbol-name-match edge, even when it is the ONLY thing the graph found for the seed', () => {
+    const classChunk = createTestChunk({
+      metadata: {
+        file: 'src/models/order.rb',
+        startLine: 1,
+        endLine: 20,
+        type: 'class',
+        symbolName: 'Order',
+        symbolType: 'class',
+        language: 'ruby',
+        exports: ['Order'],
+      },
+    });
+
+    // symbol-name-match: a same-named symbol imported from a non-relative
+    // package specifier that verifiably resolves to NEITHER real file --
+    // unverified against a specific file, so it can only ever resolve via
+    // this weakest cross-package tier.
+    const symbolNameMatchCaller = createTestChunk({
+      content: 'class ReportBuilder { def run; Order.new; end; end',
+      metadata: {
+        file: 'src/report_builder.rb',
+        startLine: 1,
+        endLine: 10,
+        type: 'class',
+        symbolName: 'ReportBuilder',
+        language: 'ruby',
+        exports: ['ReportBuilder'],
+        importedSymbols: { totally_unrelated_gem: ['Order'] },
+        callSites: [{ symbol: 'Order', line: 5 }],
+      },
+    });
+
+    const graph = buildDependencyGraph([classChunk, symbolNameMatchCaller]);
+    const rawCallers = graph.getCallers('src/models/order.rb', 'Order');
+
+    // Confirms the fixture actually produced the tier this test exists to
+    // exclude -- otherwise the assertion below would pass vacuously.
+    expect(rawCallers.map(c => c.provenance)).toEqual(['symbol-name-match']);
+
+    const graphFiles = rawCallers
+      .filter(edge => isSafeEvidenceTier(edge.provenance))
+      .map(edge => edge.caller.filepath);
+    expect(graphFiles).toEqual([]);
   });
 });
