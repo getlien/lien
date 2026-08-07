@@ -874,6 +874,88 @@ describe('handleGetDependents', () => {
       expect(parsed.importedBy).toEqual(['src/c.ts']);
     });
 
+    it('enforces the subset property BY CONSTRUCTION: a graph-reported caller absent from dependents is dropped, not trusted', async () => {
+      // `findDependents` (mocked here) is the authority on `dependents`; the
+      // graph is a SEPARATE mechanism that must never widen it. Simulates the
+      // two disagreeing -- e.g. a future change to one resolver's guards
+      // drifting from the other's -- to prove `computeImportOnlyEvidence`
+      // intersects against `analysis.dependents` rather than trusting the
+      // graph's raw output (CodeRabbit finding on this PR: the earlier
+      // version returned the graph's output unintersected, relying on the
+      // two algorithms' properties continuing to line up instead of
+      // enforcing it).
+      vi.mocked(findDependents).mockResolvedValue({
+        ...createMockAnalysis({
+          dependents: [{ filepath: 'src/api/users.ts', isTestFile: false }],
+          typeSymbolAttributionIncomplete: true,
+        }),
+        totalUsageCount: 0,
+      });
+      vi.mocked(getOrBuildDependencyGraph).mockResolvedValue(
+        createMockGraph({
+          'src/types.ts::User': [
+            { filepath: 'src/api/users.ts', provenance: 'import-only' },
+            // NOT in `dependents` above -- must never reach `importedBy`.
+            { filepath: 'src/api/orphaned-not-a-real-dependent.ts', provenance: 'import-only' },
+          ],
+        }),
+      );
+
+      const result = await handleGetDependents(
+        { filepath: 'src/types.ts', symbol: 'User' },
+        mockCtx,
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.importedBy).toEqual(['src/api/users.ts']);
+      expect(parsed.importedBy).not.toContain('src/api/orphaned-not-a-real-dependent.ts');
+      // The actual subset assertion, on the parsed response as a whole --
+      // not just this one fixture's expected value above.
+      const dependentFiles = new Set(
+        parsed.dependents.map((d: { filepath: string }) => d.filepath),
+      );
+      for (const file of parsed.importedBy) {
+        expect(dependentFiles.has(file)).toBe(true);
+      }
+    });
+
+    it('gates importedBy on the FINAL decided attributionCaveat reason, not the raw typeSymbolAttributionIncomplete flag', async () => {
+      // The #927 manifest-based check and #928's chunk-based scan can
+      // disagree on the same path (that disagreement is why both exist) --
+      // simulate it by having `findUnindexedPaths` report the path as
+      // unindexed while `findDependents`'s own chunk scan (mocked here)
+      // independently found a type-symbol match. `unresolved-target` has
+      // priority over `type-symbol-attribution-incomplete`
+      // (`decideAttributionCaveatReason`), so `importedBy` must NOT populate
+      // even though the raw flag is true -- CodeRabbit finding on this PR:
+      // the earlier version gated on the raw flag alone, so a response could
+      // carry a populated `importedBy` while `attributionCaveat.reason` named
+      // something else entirely.
+      vi.mocked(findUnindexedPaths).mockResolvedValue(['src/types.ts']);
+      vi.mocked(findDependents).mockResolvedValue({
+        ...createMockAnalysis({
+          dependents: [{ filepath: 'src/api/users.ts', isTestFile: false }],
+          typeSymbolAttributionIncomplete: true,
+        }),
+        totalUsageCount: 0,
+      });
+      vi.mocked(getOrBuildDependencyGraph).mockResolvedValue(
+        createMockGraph({
+          'src/types.ts::User': [{ filepath: 'src/api/users.ts', provenance: 'import-only' }],
+        }),
+      );
+
+      const result = await handleGetDependents(
+        { filepath: 'src/types.ts', symbol: 'User' },
+        mockCtx,
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.attributionCaveat.reason).toBe('unresolved-target');
+      expect(parsed.importedBy).toBeUndefined();
+      expect(getOrBuildDependencyGraph).not.toHaveBeenCalled();
+    });
+
     it('hedges dependentCount/dependents reliability too for a #1005 blind-spot language (Java)', async () => {
       vi.mocked(findDependents).mockResolvedValue({
         ...createMockAnalysis({
