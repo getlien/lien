@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { buildDependencyGraph, isPreciseProvenance } from './dependency-graph.js';
+import {
+  buildDependencyGraph,
+  isPreciseProvenance,
+  isImportOnlyEvidenceTier,
+} from './dependency-graph.js';
 import type { EdgeProvenance } from './dependency-graph.js';
 import type { CodeChunk } from '../types.js';
 import { findDependents } from '../dependency-analyzer.js';
@@ -1441,29 +1445,26 @@ describe('isPreciseProvenance', () => {
 // ---------------------------------------------------------------------------
 // Subset property (#1015 fix direction 2) — the safety guarantee
 // `get-dependents.ts`'s `importedBy` evidence field relies on: every file the
-// graph can name as a caller via a SAFE tier (precise, minus `same-file`,
-// `require-only`, and `symbol-name-match` -- see `isImportOnlyEvidenceTier`
-// in that file) is already present in `findDependents`'s own `dependents`
-// list. Both mechanisms ultimately verify an import specifier against the
-// SAME guarded `importMatchesTarget` primitive, but the graph additionally
-// requires the resolved file to appear in its own `exportIndex` under the
-// exact symbol name -- a strictly narrower (never wider) condition than
-// `findDependents`'s `fileImportsSymbolFromAny`. That asymmetry is what
-// makes the graph's precise-tier output always a SUBSET, never a superset:
-// this test proves it end-to-end instead of just asserting it.
+// graph can name as a caller via a SAFE tier (`isImportOnlyEvidenceTier`,
+// exported above next to `isPreciseProvenance` so this test and the CLI
+// handler share ONE definition -- a test-local mirror couldn't detect the
+// predicate it's checking drifting out from under it) is already present in
+// `findDependents`'s own `dependents` list. Both mechanisms ultimately
+// verify an import specifier against the SAME guarded `importMatchesTarget`
+// primitive, but the graph additionally requires the resolved file to
+// appear in its own `exportIndex` under the exact symbol name -- a strictly
+// narrower (never wider) condition than `findDependents`'s
+// `fileImportsSymbolFromAny`. That asymmetry is what makes the graph's
+// precise-tier output always a SUBSET, never a superset: this test proves
+// it end-to-end instead of just asserting it. (The CLI handler additionally
+// enforces the subset by construction -- an explicit intersection against
+// `analysis.dependents`, not just this shared predicate -- see
+// `computeImportOnlyEvidence` in `get-dependents.ts`.)
 // ---------------------------------------------------------------------------
 describe('buildDependencyGraph <-> findDependents subset property (#1015 fix direction 2)', () => {
-  /** Mirrors get-dependents.ts's `isImportOnlyEvidenceTier`, using only parser-level primitives (no cli import). */
-  function isSafeEvidenceTier(provenance: EdgeProvenance): boolean {
-    if (
-      provenance === 'same-file' ||
-      provenance === 'require-only' ||
-      provenance === 'symbol-name-match'
-    ) {
-      return false;
-    }
-    return isPreciseProvenance(provenance);
-  }
+  // Alias kept local to this describe block purely for brevity at call
+  // sites below; same function, no re-implementation.
+  const isSafeEvidenceTier = isImportOnlyEvidenceTier;
 
   function noopLog(): void {
     // Intentionally empty.

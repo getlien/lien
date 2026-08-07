@@ -9,11 +9,10 @@ import {
   describeInferredDependentRecovery,
   detectLanguage,
   hasDependentAttributionBlindSpot,
-  isPreciseProvenance,
+  isImportOnlyEvidenceTier,
   getCanonicalPath,
   type BlastRadiusRisk,
   type DependencyGraph,
-  type EdgeProvenance,
 } from '@liendev/parser';
 import type { AttributionCaveatReason } from '../attribution-caveat-reasons.js';
 import {
@@ -224,37 +223,6 @@ function buildPartialRecoveryNote(analysis: DependencyAnalysisResult, filepath: 
     `fallback). Treat dependentCount/riskLevel as a recovered LOWER BOUND, not a ` +
     `verified/complete answer — this heuristic ${residualRisk}.`
   );
-}
-
-/**
- * Provenance tiers safe to surface as "this file verifiably imports the
- * symbol" evidence (#1015 fix direction 2) -- a DELIBERATELY narrower set
- * than `isPreciseProvenance`'s own true/false split:
- *
- * - `same-file` is precise but excluded: `findDependents` never counts an
- *   intra-file caller as a dependent (a file doesn't "depend on" itself) --
- *   surfacing it here would contradict that policy.
- * - `require-only` and `symbol-name-match` are excluded even though
- *   "precise" alone might look like the right bar. Both are already
- *   `false` under `isPreciseProvenance` (so the gate below already drops
- *   them), but they're named here explicitly, on purpose: an adversarial
- *   review of an earlier version of this fix measured `require-only`
- *   fabricating 68 edges for a TypeScript interface actually used in
- *   exactly one file (it is NOT language-gated to Ruby despite being
- *   Ruby-motivated -- see `EdgeProvenance`'s own doc comment), and
- *   `symbol-name-match` resolving to the WRONG file 4 of 5 times when
- *   multiple languages declare a same-named class. A future change to
- *   `isPreciseProvenance` alone must not silently let either back in here.
- */
-function isImportOnlyEvidenceTier(provenance: EdgeProvenance): boolean {
-  if (
-    provenance === 'same-file' ||
-    provenance === 'require-only' ||
-    provenance === 'symbol-name-match'
-  ) {
-    return false;
-  }
-  return isPreciseProvenance(provenance);
 }
 
 /**

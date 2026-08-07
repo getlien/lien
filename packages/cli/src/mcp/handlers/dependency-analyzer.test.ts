@@ -1703,5 +1703,23 @@ describe('findDependents', () => {
       await getOrBuildDependencyGraph(mockDB as any, mockLog, 700);
       expect(mockDB.scanAll).toHaveBeenCalledTimes(2);
     });
+
+    it('never caches, and always re-scans, when indexVersion is not provided', async () => {
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/types.ts', { exports: ['User'], symbolName: 'User', symbolType: 'class' }),
+        createChunk('src/consumer.ts', { importedSymbols: { 'src/types.ts': ['User'] } }),
+      ]);
+
+      const graph1 = await getOrBuildDependencyGraph(mockDB as any, mockLog);
+      expect(mockDB.scanAll).toHaveBeenCalledTimes(1);
+      expect(graph1.getCallers('src/types.ts', 'User')).toHaveLength(1);
+
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/types.ts', { exports: ['User'], symbolName: 'User', symbolType: 'class' }),
+      ]);
+      const graph2 = await getOrBuildDependencyGraph(mockDB as any, mockLog);
+      expect(mockDB.scanAll).toHaveBeenCalledTimes(2); // re-scanned, no cache hit
+      expect(graph2.getCallers('src/types.ts', 'User')).toHaveLength(0); // built from the fresh scan
+    });
   });
 });

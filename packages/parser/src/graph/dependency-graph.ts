@@ -142,6 +142,45 @@ export function isPreciseProvenance(provenance: EdgeProvenance): boolean {
   return SYMBOL_VERIFIED_BY_PROVENANCE[provenance];
 }
 
+/**
+ * Provenance tiers safe to surface as "this file verifiably imports the
+ * symbol" evidence when a type-symbol query's call-site attribution comes
+ * back empty (`@liendev/lien`'s `get_dependents` `importedBy` field, #1015
+ * fix direction 2) -- a DELIBERATELY narrower set than `isPreciseProvenance`
+ * alone:
+ *
+ * - `same-file` is precise but excluded: `findDependents` never counts an
+ *   intra-file caller as a dependent (a file doesn't "depend on" itself) --
+ *   surfacing it here would contradict that policy.
+ * - `require-only` and `symbol-name-match` are excluded even though
+ *   "precise" alone might look like the right bar. Both are already
+ *   `false` under `isPreciseProvenance` (so the gate below already drops
+ *   them), but they're named here explicitly, on purpose: an adversarial
+ *   review of an earlier version of this fix measured `require-only`
+ *   fabricating 68 edges for a TypeScript interface actually used in
+ *   exactly one file (it is NOT language-gated to Ruby despite being
+ *   Ruby-motivated -- see `EdgeProvenance`'s own doc comment), and
+ *   `symbol-name-match` resolving to the WRONG file 4 of 5 times when
+ *   multiple languages declare a same-named class. A future change to
+ *   `isPreciseProvenance` alone must not silently let either back in here.
+ *
+ * Exported from the parser (not left as a CLI-local/test-local copy) so
+ * `get-dependents.ts` and `dependency-graph.test.ts` share ONE definition --
+ * a review finding on this same PR: a test-local mirror of this predicate
+ * can't detect the predicate it's supposed to be checking drifting out from
+ * under it.
+ */
+export function isImportOnlyEvidenceTier(provenance: EdgeProvenance): boolean {
+  if (
+    provenance === 'same-file' ||
+    provenance === 'require-only' ||
+    provenance === 'symbol-name-match'
+  ) {
+    return false;
+  }
+  return isPreciseProvenance(provenance);
+}
+
 export interface SymbolNode {
   filepath: string;
   symbolName: string;
