@@ -217,7 +217,12 @@ export interface LanguageDefinition {
    * `hasDependentAttributionBlindSpot` (registry.ts) can give Kotlin the
    * same GENERAL `get_dependents` honesty caveat C#/Java/Swift already get
    * (#1005's Mechanism 2 fix is scoped to the caveat only, not real
-   * resolution) without implying a recovery mechanism exists.
+   * resolution) without implying a recovery mechanism exists. A real
+   * resolution mechanism for this exact gap now exists SEPARATELY --
+   * `jvm-same-package-signals.ts` (#1005's Mechanism 3, Phase 1) -- but this
+   * flag's own meaning stays caveat-only; it is not repurposed to gate that
+   * resolver (see that module's doc comment for why it gates on a literal
+   * `detectLanguage` check instead).
    *
    * Absent/false (the default for every language except Kotlin) means this
    * flag contributes nothing; only set it where the same-unit-without-import

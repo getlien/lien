@@ -557,11 +557,13 @@ export const kotlinDefinition: LanguageDefinition = {
   // resolve to real directories (`com/beust/klaxon/internal/`,
   // `com/beust/klaxon/token/`, confirmed on disk). Note this is orthogonal to
   // #1005's Mechanism 2 (`sameUnitAccessWithoutImport` below,
-  // same-package-with-no-import-at-all -- still out of scope for this fix)
-  // -- these three matcher-path fields are unaffected either way, since
-  // Mechanism 1's fix (#1046 -- Kotlin's dotted specifiers, like Java's, now
-  // resolve to a concrete slash path UPSTREAM of `matchesFile`, via
-  // `../../jvm-source-root.ts`) doesn't touch any of the three flags below.
+  // same-package-with-no-import-at-all -- resolved by
+  // `../../jvm-same-package-signals.ts`, Phase 1 of #1005's fix; no longer
+  // out of scope) -- these three matcher-path fields are unaffected either
+  // way, since Mechanism 1's fix (#1046 -- Kotlin's dotted specifiers, like
+  // Java's, now resolve to a concrete slash path UPSTREAM of `matchesFile`,
+  // via `../../jvm-source-root.ts`) doesn't touch any of the three flags
+  // below.
   wholeModuleImports: false,
   // `singleFileImports: false`: inapplicable, not merely unconfirmed --
   // `KotlinImportExtractor` stores the raw DOTTED path (mirrors Java's

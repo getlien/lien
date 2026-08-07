@@ -17,6 +17,7 @@ import {
 import { findChunkLineIndex } from './chunk-line-lookup.js';
 import { findCSharpTypeReferenceDependents } from './csharp-type-reference-signals.js';
 import { findGoRootPackageDependents } from './go-root-package-signals.js';
+import { findJvmSamePackageDependents } from './jvm-same-package-signals.js';
 import type { InferredDependentMechanism } from './inferred-dependent-mechanisms.js';
 
 /**
@@ -1613,6 +1614,14 @@ function resolveDependents<T extends CodeChunk>(args: {
       symbol,
       targetIndexed,
       dependents,
+    ) ??
+    enrichWithJvmSamePackageDependents(
+      ctx,
+      filepath,
+      normalizedTarget,
+      symbol,
+      targetIndexed,
+      dependents,
     );
   stampHopsAndSort(dependents, hopsByFile);
 
@@ -1886,6 +1895,55 @@ function enrichWithGoRootPackageDependents<T extends CodeChunk>(
     `Recovered ${inferredFiles.length} dependent(s) for ${filepath} via Go root-package export ` +
       `lookup (inferred from a bare module-root self-import + a matching call site, not a ` +
       `direct import edge — #1039)`,
+  );
+  return true;
+}
+
+/**
+ * #1005 (Mechanism 3, Phase 1): recover REAL dependents for a Java/Kotlin
+ * file when the import graph found none, because same-package visibility
+ * lets a real caller reach it with no per-file import at all -- see
+ * `jvm-same-package-signals.ts`'s module doc for the full six-gate mechanism.
+ *
+ * Mirrors `enrichWithCSharpTypeReferenceDependents`/
+ * `enrichWithGoRootPackageDependents` in every structural respect: file-level
+ * only (no `symbol`), only attempted when the import graph found LITERALLY
+ * ZERO dependents, gated on a literal `detectLanguage` check (not a
+ * capability flag -- see the module doc's own note on why this follows the
+ * Go RESOLVER precedent, not the caveat-flag one), and recovered entries are
+ * tagged `confidence: 'inferred'` -- not joined against `chunksByFile` for
+ * complexity-metrics purposes, same reasoning as the other two.
+ */
+function enrichWithJvmSamePackageDependents<T extends CodeChunk>(
+  ctx: ScanContext<T>,
+  filepath: string,
+  normalizedTarget: string,
+  symbol: string | undefined,
+  targetIndexed: boolean,
+  dependents: DependentInfo[],
+): true | undefined {
+  if (symbol || dependents.length !== 0 || !targetIndexed) return undefined;
+  const targetLanguage = detectLanguage(filepath);
+  if (targetLanguage !== 'java' && targetLanguage !== 'kotlin') return undefined;
+
+  const targetChunks = ctx.allChunksByFile.get(normalizedTarget) ?? [];
+  const targetRawFile = targetChunks[0]?.metadata.file;
+  if (!targetRawFile) return undefined;
+
+  const allChunks = Array.from(ctx.allChunksByFile.values()).flat();
+  const inferredFiles = findJvmSamePackageDependents(targetRawFile, allChunks);
+  if (inferredFiles.length === 0) return undefined;
+
+  for (const rawFile of inferredFiles) {
+    dependents.push(
+      inferredDependent(getCanonicalPath(rawFile, ctx.workspaceRoot), 'jvm-same-package'),
+    );
+  }
+
+  ctx.log(
+    `Recovered ${inferredFiles.length} dependent(s) for ${filepath} via JVM same-package ` +
+      `matching (inferred from a package-locally-unique declared type name, not import-verified ` +
+      `— #1005)`,
   );
   return true;
 }

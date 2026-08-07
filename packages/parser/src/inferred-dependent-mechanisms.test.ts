@@ -64,7 +64,7 @@ describe('summarizeInferredDependentMechanisms', () => {
   it('enumerates the languages that have a fallback, joined for prose', () => {
     // Interpolated into the tool description, the server instructions, the
     // caveat-reason text and the docs page — so this is what an agent reads.
-    expect(summarizeInferredDependentMechanisms()).toBe('C# and Go');
+    expect(summarizeInferredDependentMechanisms()).toBe('C#, Go and Java/Kotlin');
   });
 
   it('stays in sync with the table by construction', () => {

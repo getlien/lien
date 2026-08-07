@@ -323,17 +323,23 @@ const TEST_PROJECTS: ProjectConfig[] = [
     sampleSearchQuery: 'generate java source code',
     // #1046 (#1005 Mechanism 1 fix): measured 18 edges / 40 orphans out of 43
     // files (93.0% orphan rate), stable across 5 repeated index+measure runs
-    // (2026-08). Floor is ~50% of measured (9), tight enough to catch a
-    // roughly-half collapse, not just a total-collapse-to-zero (#1053).
-    // JavaPoet's own package (`com/squareup/javapoet`) is a single flat
-    // directory -- ALL 43 files share one package, so most cross-file
-    // references carry no import at all (Mechanism 2, #1005's OTHER,
-    // out-of-scope gap) and this corpus stays mostly orphaned even with a
-    // perfect Mechanism-1 fix; do not misread the still-high orphan rate as
-    // this fix not working. The resolved edges are real: JavaPoet's ~13 test
-    // files DO cross-package-import their subjects under `src/test/java` ->
-    // `src/main/java`, and those now resolve.
-    expectedMinDependencyEdges: 9,
+    // (2026-08).
+    //
+    // #1005 Mechanism 3, Phase 1 (jvm-same-package-signals.ts) fix: JavaPoet's
+    // own package (`com/squareup/javapoet`) IS a single flat directory -- ALL
+    // 43 files share one package, so Mechanism 2's gap (same-package
+    // references carrying no import at all) is exactly what this corpus was
+    // orphaned BY, not a separate unaddressed cause. Measured 152 edges / 23
+    // orphans out of 43 files (53.5% orphan rate, 2026-08) with this fix.
+    // Hand-verified: the 23 remaining orphans are every non-source file
+    // (`.github/*`, `*.md`), one no-package test file, and every real
+    // `*Test.java` file (a JUnit test class has no real dependents in ANY
+    // language -- nothing imports a test class) -- EVERY production
+    // `com/squareup/javapoet/*.java` file with a top-level type declaration
+    // now has at least one resolved dependent. Floor is ~50% of measured
+    // (76), tight enough to catch a roughly-half collapse, not just a
+    // total-collapse-to-zero (#1053).
+    expectedMinDependencyEdges: 76,
     expectedMinComplexityViolations: 5, // measured ~19 (2026-08)
     // NOT a KNOWN_ZERO_TESTASSOC_LANGUAGES tripwire: `samePackageTestConvention`
     // (#925) covers test association only, not dependents -- measured ~13
@@ -406,27 +412,25 @@ const TEST_PROJECTS: ProjectConfig[] = [
     sampleSearchQuery: 'parse json string into an object',
     // #1046 (#1005 Mechanism 1 fix): measured 4 edges / 97 orphans out of a
     // 100-file sample (97.0% orphan rate), stable across 5 repeated
-    // index+measure runs (2026-08). Floor is 2 (~50% of measured), tight
-    // enough to catch a roughly-half collapse rather than only total
-    // collapse-to-zero (#1053).
+    // index+measure runs (2026-08).
     //
-    // The orphan rate stays high even with a correct fix, for two DIFFERENT
-    // reasons neither of which this fix addresses: (1) Klaxon's ~104 files
-    // sit almost entirely in one package (`com.beust.klaxon`), so most
-    // cross-file references carry no import at all -- #1005's Mechanism 2,
-    // out of scope here; (2) of Klaxon's own real cross-package `import`
-    // lines, most are either wildcard (`import com.beust.klaxon.token.*`,
-    // 3 occurrences) or a top-level-function import
-    // (`import com.beust.klaxon.internal.firstNotNullResult`) rather than a
-    // class -- both deliberately unresolved: a wildcard names a package
-    // directory, not a single file, and Kotlin's import extractor has no
-    // static-member-style fallback to tell a function import apart from a
-    // truncated package path (see `KotlinImportExtractor`'s own doc comment
-    // in `ast/languages/kotlin.ts`), so guessing either would risk exactly
-    // the #928 fabrication this fix was built to avoid. The 4 resolved edges
-    // are the real, verified count of Klaxon's class-level cross-package
-    // imports (`ConverterFinder`, `Token`, `Converter`).
-    expectedMinDependencyEdges: 2,
+    // #1005 Mechanism 3, Phase 1 (jvm-same-package-signals.ts) fix: Klaxon's
+    // ~104 files sit almost entirely in one package (`com.beust.klaxon`) --
+    // exactly Mechanism 2's gap, now resolved for the class/interface case
+    // (bare top-level `fun`/`val` stay out of scope, deferred to Phase 3).
+    // Measured 224 edges / 67 orphans out of a 100-file sample (67.0% orphan
+    // rate, 2026-08) with this fix. Hand-verified: the remaining orphans are
+    // build scripts (`buildSrc/`, `kobalt/`), files with no top-level
+    // class/interface (top-level-function-only files -- deliberately out of
+    // Phase-1 scope), one genuinely-unreferenced production annotation type
+    // (`KlaxonDoc`), one genuine cross-package edge unreachable by EITHER
+    // mechanism (`JacksonParser.kt`'s `KlaxonJson` receiver, reached only via
+    // `import com.beust.klaxon.*` -- an on-demand import, deliberately never
+    // resolved by Mechanism 1 or this fix), and every real `*Test.kt`
+    // regression-test file (a JUnit test class has no real dependents in ANY
+    // language). Floor is ~50% of measured (112), tight enough to catch a
+    // roughly-half collapse, not just a total-collapse-to-zero (#1053).
+    expectedMinDependencyEdges: 112,
     expectedMinComplexityViolations: 3, // measured ~16 (2026-08)
     // KNOWN GAP: #1005's `sameUnitAccessWithoutImport` -- "no verified
     // Kotlin Gradle test-source recovery exists". See
