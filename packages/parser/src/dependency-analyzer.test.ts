@@ -1733,3 +1733,135 @@ describe('test-importer index is exact (brute-force equivalence, #1075)', () => 
     expect(result.uncoveredProductionDependents).toBe(0);
   });
 });
+
+/**
+ * #1097: `checkDependentAttributionIncomplete` used to guard on `symbol ||
+ * ...`, unconditionally skipping its whole blind-spot determination for
+ * every symbol-scoped query -- exactly the shape of `get_dependents({filepath,
+ * symbol})` and every `lien api-delta` check. A real, non-type-declaration
+ * exported symbol with zero import-graph-visible dependents in one of
+ * `hasDependentAttributionBlindSpot`'s languages (C#, Java, Kotlin, Swift)
+ * came back with no caveat at all, even though the identical file's
+ * file-level query correctly carried `dependentAttributionIncomplete`.
+ */
+describe('dependentAttributionIncomplete widening to symbol-scoped queries (#1097)', () => {
+  const workspaceRoot = '/test/workspace';
+
+  function createChunk(
+    file: string,
+    options: {
+      exports?: string[];
+      imports?: string[];
+      importedSymbols?: Record<string, string[]>;
+      symbolName?: string;
+      symbolType?: 'function' | 'method' | 'class' | 'interface';
+      content?: string;
+    } = {},
+  ): CodeChunk {
+    return {
+      content: options.content ?? 'test content',
+      metadata: {
+        file,
+        startLine: 1,
+        endLine: 10,
+        type: 'function',
+        language: 'typescript',
+        imports: options.imports,
+        exports: options.exports,
+        importedSymbols: options.importedSymbols,
+        symbolName: options.symbolName,
+        symbolType: options.symbolType,
+      } as ChunkMetadata,
+    };
+  }
+
+  it('flags a zero-dependent Java SYMBOL query for a method with no candidate importers at all', () => {
+    const chunks = [createChunk('Logger.java', { exports: ['Logger'] })];
+
+    const result = findDependents(chunks, 'Logger.java', () => {}, workspaceRoot, 'logInfo');
+
+    expect(result.dependents).toHaveLength(0);
+    expect(result.symbolAttributionDegraded).toBeUndefined();
+    expect(result.dependentAttributionIncomplete).toBe(true);
+  });
+
+  it('flags a zero-dependent Kotlin SYMBOL query on a plain (non-type) exported symbol', () => {
+    const chunks = [createChunk('Util.kt', { exports: ['formatName'] })];
+
+    const result = findDependents(chunks, 'Util.kt', () => {}, workspaceRoot, 'formatName');
+
+    expect(result.dependents).toHaveLength(0);
+    expect(result.dependentAttributionIncomplete).toBe(true);
+  });
+
+  it('flags a zero-dependent Swift SYMBOL query on a plain (non-type) exported symbol', () => {
+    const chunks = [createChunk('Util.swift', { exports: ['formatName'] })];
+
+    const result = findDependents(chunks, 'Util.swift', () => {}, workspaceRoot, 'formatName');
+
+    expect(result.dependents).toHaveLength(0);
+    expect(result.dependentAttributionIncomplete).toBe(true);
+  });
+
+  it('does not double-caveat a type-declaration SYMBOL query (typeSymbolAttributionIncomplete already explains the same zero)', () => {
+    const chunks = [
+      createChunk('Alignment.cs', {
+        exports: ['Alignment'],
+        symbolName: 'Alignment',
+        symbolType: 'class',
+        content: 'public class Alignment { }',
+      }),
+    ];
+
+    const result = findDependents(chunks, 'Alignment.cs', () => {}, workspaceRoot, 'Alignment');
+
+    expect(result.dependents).toHaveLength(0);
+    expect(result.typeSymbolAttributionIncomplete).toBe(true);
+    expect(result.dependentAttributionIncomplete).toBeUndefined();
+  });
+
+  it('does not flag a SYMBOL query with real dependents (dependentCount !== 0 already guards it)', () => {
+    const chunks = [
+      createChunk('Logger.java', { exports: ['Logger'] }),
+      createChunk('Consumer.java', {
+        imports: ['Logger.java'],
+        importedSymbols: { 'Logger.java': ['Logger'] },
+      }),
+    ];
+
+    const result = findDependents(chunks, 'Logger.java', () => {}, workspaceRoot, 'Logger');
+
+    expect(result.dependents.length).toBeGreaterThan(0);
+    expect(result.dependentAttributionIncomplete).toBeUndefined();
+  });
+
+  // Controls: the identical symbol-query shape in a NON-blind-spot language
+  // must NOT start getting a spurious caveat -- #1014's whole point is that
+  // an over-firing caveat gets trained out as noise and is worse than none.
+  it('does NOT widen to a TypeScript SYMBOL query (control)', () => {
+    const chunks = [createChunk('src/util.ts', { exports: ['formatName'] })];
+
+    const result = findDependents(chunks, 'src/util.ts', () => {}, workspaceRoot, 'formatName');
+
+    expect(result.dependents).toHaveLength(0);
+    expect(result.dependentAttributionIncomplete).toBeUndefined();
+  });
+
+  it('does NOT widen to a Python SYMBOL query (control)', () => {
+    const chunks = [createChunk('src/util.py', { exports: ['format_name'] })];
+
+    const result = findDependents(chunks, 'src/util.py', () => {}, workspaceRoot, 'format_name');
+
+    expect(result.dependents).toHaveLength(0);
+    expect(result.dependentAttributionIncomplete).toBeUndefined();
+  });
+
+  it('does NOT widen to a Go SYMBOL query (deliberate exclusion, same as the file-level widening)', () => {
+    const chunks = [createChunk('pkg/thing.go', { exports: ['Thing'] })];
+
+    const result = findDependents(chunks, 'pkg/thing.go', () => {}, workspaceRoot, 'Thing');
+
+    expect(result.dependents).toHaveLength(0);
+    expect(result.dependentAttributionIncomplete).toBeUndefined();
+  });
+});

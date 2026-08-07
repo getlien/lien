@@ -25,6 +25,27 @@ import type { ExportedSymbolChangeKind } from './signature-delta.js';
 
 export const BLAST_EVENTS_FILENAME = 'blast-events.jsonl';
 
+/**
+ * The persisted shape of an attribution caveat — structurally identical to
+ * `get-dependents.ts`'s `AttributionCaveat`, but `reason` is a plain
+ * `string`, not that type's closed `AttributionCaveatReason` union. A JSONL
+ * line on disk was written by whatever version of Lien ran at the time, so
+ * a `reason` here is only ever verified to be A string, never verified to
+ * be a CURRENT member of that union — a reason added in a later version
+ * (read by an older `lien stats`), or one retired since, both round-trip
+ * here as an honest but unrecognized string, rather than being silently
+ * dropped or miscoerced into a value that was never actually recorded.
+ * `isValidAttributionCaveat` below enforces exactly this and nothing more.
+ * A consumer that keys on `.reason` must handle an unrecognized value
+ * explicitly — the same defensive-read idiom `riskBucket`
+ * (`blast-stats.ts`) already uses for `riskLevel`, never an assumption that
+ * it's one of today's five.
+ */
+export interface PersistedAttributionCaveat {
+  reason: string;
+  note: string;
+}
+
 /** Trigger: once the log exceeds this many bytes, trim it down. */
 export const MAX_BYTES_BEFORE_TRIM = 2 * 1024 * 1024; // 2 MB
 /** How many of the most recent lines survive a trim (oldest lines are dropped). */
@@ -45,6 +66,17 @@ export interface BlastEventChange {
    * (unknown/not computed), never as "zero references".
    */
   docRefCount?: number | null;
+  /**
+   * Same five-reason vocabulary `get_dependents` exposes as
+   * `attributionCaveat` (#1097) -- present when `dependentCount`/`riskLevel`
+   * above can't be trusted as a verified clear (e.g. a Java/Kotlin/Swift/C#
+   * same-unit-access blind spot). `null` when enrichment found nothing to
+   * hedge. `undefined` on any event recorded before this field existed;
+   * readers must treat that the same as `null` (unknown/not computed),
+   * never as "verified clear" -- an older line's absence of this key says
+   * nothing about whether a caveat would have applied.
+   */
+  attributionCaveat?: PersistedAttributionCaveat | null;
 }
 
 export interface BlastEvent {
@@ -117,6 +149,23 @@ function isValidOptionalNumber(value: unknown): boolean {
   return value === undefined || isValidNumberOrNull(value);
 }
 
+/**
+ * `attributionCaveat` is `undefined` (a pre-#1097 line), `null` (nothing to
+ * hedge), or a `PersistedAttributionCaveat` -- a plain string `reason` plus
+ * a string `note`, deliberately NOT checked against the current
+ * `AttributionCaveatReason` union (see that type's own doc comment): this
+ * validator's job is only to reject a shape that couldn't have come from
+ * `recordBlastEvent` at all (a torn write, a hand-edited line, a wrong
+ * type), not to reject a foreign-but-honest reason string written by a
+ * different version of Lien.
+ */
+function isValidAttributionCaveat(value: unknown): boolean {
+  if (value === undefined || value === null) return true;
+  if (typeof value !== 'object') return false;
+  const c = value as Record<string, unknown>;
+  return typeof c.reason === 'string' && typeof c.note === 'string';
+}
+
 function isValidBlastEventChange(value: unknown): value is BlastEventChange {
   if (typeof value !== 'object' || value === null) return false;
   const c = value as Record<string, unknown>;
@@ -126,6 +175,7 @@ function isValidBlastEventChange(value: unknown): value is BlastEventChange {
   if (!isValidNumberOrNull(c.untestedDependentCount)) return false;
   if (typeof c.riskLevel !== 'string' && c.riskLevel !== null) return false;
   if (!isValidOptionalNumber(c.docRefCount)) return false;
+  if (!isValidAttributionCaveat(c.attributionCaveat)) return false;
   return true;
 }
 

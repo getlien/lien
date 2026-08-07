@@ -15,6 +15,10 @@ import {
   type DependencyAnalysisResult,
 } from '../mcp/handlers/dependency-analyzer.js';
 import {
+  buildAttributionCaveatFromAnalysis,
+  type AttributionCaveat,
+} from '../mcp/handlers/get-dependents.js';
+import {
   computeExportedSignatureDelta,
   type ExportedSignatureDelta,
   type ExportedSymbolChange,
@@ -52,6 +56,16 @@ export interface EnrichedExportedSymbolChange extends ExportedSymbolChange {
   docRefCount: number | null;
   /** Up to `MAX_DOC_REF_PATHS` file paths backing `docRefCount`. Empty when `docRefCount` is null or 0. */
   docRefPaths: string[];
+  /**
+   * Present when `dependentCount`/`riskLevel` can't be trusted as a
+   * verified clear -- the same five-reason vocabulary `get_dependents`
+   * exposes as `attributionCaveat` (`AttributionCaveatReason`), computed by
+   * the same shared `buildAttributionCaveatFromAnalysis` so the two
+   * surfaces can never disagree about when to hedge (#1097). `null` when
+   * enrichment found no reason to hedge, or when enrichment failed entirely
+   * (`enriched: false`) and there was nothing to evaluate a caveat against.
+   */
+  attributionCaveat: AttributionCaveat | null;
 }
 
 export interface EnrichedSignatureDelta {
@@ -82,6 +96,7 @@ function degradedChange(change: ExportedSymbolChange): EnrichedExportedSymbolCha
     enriched: false,
     docRefCount: null,
     docRefPaths: [],
+    attributionCaveat: null,
   };
 }
 
@@ -132,12 +147,19 @@ async function enrichOneChange(
     const log = (): void => undefined;
     const analysis = await findDependents(vectorDB, filepath, log, change.symbolName, indexVersion);
     const docRefs = await resolveDocRefs(vectorDB, change);
+    // Same composition/priority rules `get_dependents` uses for its own
+    // `attributionCaveat` -- both surfaces call `findDependents` and get
+    // back the same `DependencyAnalysisResult`, so whether this count can
+    // be trusted as a verified clear must never be decided twice (#1097).
+    const attributionCaveat =
+      buildAttributionCaveatFromAnalysis(analysis, filepath, change.symbolName) ?? null;
     return {
       ...change,
       dependentCount: analysis.dependents.length,
       untestedDependentCount: analysis.uncoveredProductionDependents,
       riskLevel: computeRisk(analysis),
       enriched: true,
+      attributionCaveat,
       ...docRefs,
     };
   } catch {
@@ -210,6 +232,7 @@ function buildBlastEvent(delta: EnrichedSignatureDelta, now: Date): BlastEvent {
       untestedDependentCount: c.untestedDependentCount,
       riskLevel: c.riskLevel,
       docRefCount: c.docRefCount,
+      attributionCaveat: c.attributionCaveat,
     })),
     enriched: delta.changes.some(c => c.enriched),
   };
@@ -224,12 +247,25 @@ function fmtDocRefs(c: EnrichedExportedSymbolChange): string {
   return chalk.dim(` — ${c.docRefCount} docs reference ${c.symbol}: ${shown}${more}`);
 }
 
+/**
+ * A trailing warning line when `dependentCount`/`riskLevel` can't be
+ * trusted as a verified clear (#1097) — the same signal `get_dependents`
+ * surfaces as `attributionCaveat`. Without this, a Java/Kotlin/Swift/C#
+ * same-unit-access blind spot renders identically to a genuinely verified
+ * "0 dependents, risk low", which is exactly the false-all-clear CLAUDE.md's
+ * index-state-honesty policy exists to prevent.
+ */
+function fmtAttributionCaveat(c: EnrichedExportedSymbolChange): string {
+  if (!c.attributionCaveat) return '';
+  return chalk.yellow(`\n      ⚠ ${c.attributionCaveat.note}`);
+}
+
 function fmtChange(c: EnrichedExportedSymbolChange): string {
   const label = c.kind === 'removed' ? chalk.red('✗ removed  ') : chalk.yellow('⚠ changed  ');
   const detail = c.enriched
     ? ` — ${c.dependentCount} dependents, ${c.untestedDependentCount} untested, risk ${c.riskLevel}`
     : chalk.dim(' — index unavailable for counts');
-  return `    ${label}${c.symbol}${detail}${fmtDocRefs(c)}`;
+  return `    ${label}${c.symbol}${detail}${fmtDocRefs(c)}${fmtAttributionCaveat(c)}`;
 }
 
 /** Render the human-readable report. Pure — no I/O, no process state. */

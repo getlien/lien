@@ -737,11 +737,94 @@ describe('findDependents', () => {
       expect(result.dependentAttributionIncomplete).toBeUndefined();
     });
 
-    it('does not flag a zero-dependent C# SYMBOL query (that is symbolAttributionDegraded/real-empty territory instead)', async () => {
+    // #1097: before this fix, `checkDependentAttributionIncomplete`'s guard
+    // was `symbol || ...`, which skipped this whole determination for EVERY
+    // symbol-scoped query unconditionally -- so a real, non-type-declaration
+    // exported symbol with zero import-graph-visible dependents in a
+    // blind-spot language (e.g. a C# extension method, or the shape this
+    // fixture exercises: `Alignment` resolves as a top-level export but
+    // isn't detected as a type declaration) came back with NO caveat at
+    // all, even though the identical file's file-level query correctly
+    // carried `dependentAttributionIncomplete`.
+    it('flags a zero-dependent C# SYMBOL query on a plain exported symbol (the #1097 missing-caveat fix)', async () => {
       mockDB.scanAll.mockResolvedValue([createChunk('Alignment.cs', { exports: ['Alignment'] })]);
 
       const result = await findDependents(mockDB as any, 'Alignment.cs', mockLog, 'Alignment');
 
+      expect(result.dependents).toHaveLength(0);
+      expect(result.dependentAttributionIncomplete).toBe(true);
+      expect(result.typeSymbolAttributionIncomplete).toBeUndefined();
+      expect(mockLog).toHaveBeenCalledWith(expect.stringContaining('#1097'), 'warning');
+    });
+
+    // The reported bug's exact shape: a METHOD name (never a file-level
+    // export -- no language's import statement names a class member
+    // independently of its class), where the import graph found literally
+    // ZERO candidate files at all (`chunksByFile.size === 0`), so
+    // `symbolAttributionDegraded`'s file-level fallback never engages
+    // either (that branch requires `chunksByFile.size > 0` -- see
+    // `buildDependentsList`'s doc comment). Before #1097 this fell straight
+    // through to a bare, uncaveated zero.
+    it('flags a zero-dependent C# SYMBOL query for a method-shaped symbol when the import graph found zero candidate files (#1097 bug shape)', async () => {
+      mockDB.scanAll.mockResolvedValue([createChunk('Logger.cs', { exports: ['Logger'] })]);
+
+      const result = await findDependents(mockDB as any, 'Logger.cs', mockLog, 'logInfo');
+
+      expect(result.dependents).toHaveLength(0);
+      expect(result.symbolAttributionDegraded).toBeUndefined();
+      expect(result.dependentAttributionIncomplete).toBe(true);
+    });
+
+    // The one case that must NOT also gain the wider caveat: a type
+    // declaration already carries its own, more specific
+    // `typeSymbolAttributionIncomplete` explaining the identical zero (its
+    // note even names the symbol) -- layering `dependentAttributionIncomplete`
+    // on top would contradict nothing, but would duplicate the same fact in
+    // two differently-worded flags on one response, which
+    // `checkDependentAttributionIncomplete`'s `symbolCaveatAlreadyExplained`
+    // guard exists to prevent (#1097).
+    it('does not ALSO set dependentAttributionIncomplete for a type-declaration SYMBOL query (typeSymbolAttributionIncomplete already explains the same zero)', async () => {
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('Alignment.cs', {
+          exports: ['Alignment'],
+          symbolName: 'Alignment',
+          symbolType: 'class',
+          content: 'public class Alignment { }',
+        }),
+      ]);
+
+      const result = await findDependents(mockDB as any, 'Alignment.cs', mockLog, 'Alignment');
+
+      expect(result.dependents).toHaveLength(0);
+      expect(result.typeSymbolAttributionIncomplete).toBe(true);
+      expect(result.dependentAttributionIncomplete).toBeUndefined();
+    });
+
+    it('does not flag a C# SYMBOL query that has real dependents', async () => {
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('Alignment.cs', { exports: ['Alignment'] }),
+        createChunk('Consumer.cs', {
+          imports: ['Alignment.cs'],
+          importedSymbols: { 'Alignment.cs': ['Alignment'] },
+        }),
+      ]);
+
+      const result = await findDependents(mockDB as any, 'Alignment.cs', mockLog, 'Alignment');
+
+      expect(result.dependents.length).toBeGreaterThan(0);
+      expect(result.dependentAttributionIncomplete).toBeUndefined();
+    });
+
+    // Control: the identical symbol-query shape in a NON-blind-spot
+    // language (TypeScript) must NOT start getting a spurious caveat --
+    // #1014's whole point is that an over-firing caveat gets trained out
+    // as noise and is worse than not having one.
+    it('does not flag a zero-dependent TypeScript SYMBOL query (control, #1097)', async () => {
+      mockDB.scanAll.mockResolvedValue([createChunk('src/target.ts', { exports: ['doStuff'] })]);
+
+      const result = await findDependents(mockDB as any, 'src/target.ts', mockLog, 'doStuff');
+
+      expect(result.dependents).toHaveLength(0);
       expect(result.dependentAttributionIncomplete).toBeUndefined();
     });
   });
@@ -805,6 +888,77 @@ describe('findDependents', () => {
       mockDB.scanAll.mockResolvedValue([createChunk('src/unused.py', { exports: ['Unused'] })]);
 
       const result = await findDependents(mockDB as any, 'src/unused.py', mockLog);
+
+      expect(result.dependents).toHaveLength(0);
+      expect(result.dependentAttributionIncomplete).toBeUndefined();
+    });
+
+    // #1097: the reproduction from the adversarial-review finding that
+    // motivated this fix -- a Java class's METHOD (e.g. `Logger.logInfo`)
+    // can have real same-package callers the import graph structurally
+    // can't see (#1005 Mechanism 2), so a SYMBOL-scoped query on it must
+    // carry the identical caveat the file-level query already did, instead
+    // of a bare, uncaveated "dependentCount: 0" that reads as verified.
+    it('flags a zero-dependent Java SYMBOL query for a method (Logger.logInfo shape, #1097)', async () => {
+      mockDB.scanAll.mockResolvedValue([createChunk('Logger.java', { exports: ['Logger'] })]);
+
+      const result = await findDependents(mockDB as any, 'Logger.java', mockLog, 'logInfo');
+
+      expect(result.dependents).toHaveLength(0);
+      expect(result.dependentAttributionIncomplete).toBe(true);
+      expect(mockLog).toHaveBeenCalledWith(
+        expect.stringContaining('import-invisible same-unit access'),
+        'warning',
+      );
+    });
+
+    it('flags a zero-dependent Kotlin SYMBOL query for a method (same shape, #1097)', async () => {
+      mockDB.scanAll.mockResolvedValue([createChunk('Logger.kt', { exports: ['Logger'] })]);
+
+      const result = await findDependents(mockDB as any, 'Logger.kt', mockLog, 'logInfo');
+
+      expect(result.dependentAttributionIncomplete).toBe(true);
+    });
+
+    it('flags a zero-dependent Swift SYMBOL query for a method (same shape, #1097)', async () => {
+      mockDB.scanAll.mockResolvedValue([createChunk('Logger.swift', { exports: ['Logger'] })]);
+
+      const result = await findDependents(mockDB as any, 'Logger.swift', mockLog, 'logInfo');
+
+      expect(result.dependentAttributionIncomplete).toBe(true);
+    });
+
+    it('does not flag a Java SYMBOL query that has real dependents', async () => {
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('TypeName.java', { exports: ['TypeName'] }),
+        createChunk('Consumer.java', {
+          imports: ['TypeName.java'],
+          importedSymbols: { 'TypeName.java': ['TypeName'] },
+        }),
+      ]);
+
+      const result = await findDependents(mockDB as any, 'TypeName.java', mockLog, 'TypeName');
+
+      expect(result.dependents.length).toBeGreaterThan(0);
+      expect(result.dependentAttributionIncomplete).toBeUndefined();
+    });
+
+    // Controls, symbol-scoped: the same two negative cases as the
+    // file-level describe above, now for a SYMBOL query -- must NOT start
+    // getting a spurious caveat (#1014's over-firing-caveat-as-noise cost).
+    it('does NOT widen to a Go SYMBOL query (deliberate exclusion, same as file-level)', async () => {
+      mockDB.scanAll.mockResolvedValue([createChunk('pkg/thing.go', { exports: ['Thing'] })]);
+
+      const result = await findDependents(mockDB as any, 'pkg/thing.go', mockLog, 'Thing');
+
+      expect(result.dependents).toHaveLength(0);
+      expect(result.dependentAttributionIncomplete).toBeUndefined();
+    });
+
+    it('does NOT widen to a Python SYMBOL query (genuinely unused symbol, clean confident 0)', async () => {
+      mockDB.scanAll.mockResolvedValue([createChunk('src/unused.py', { exports: ['Unused'] })]);
+
+      const result = await findDependents(mockDB as any, 'src/unused.py', mockLog, 'Unused');
 
       expect(result.dependents).toHaveLength(0);
       expect(result.dependentAttributionIncomplete).toBeUndefined();
