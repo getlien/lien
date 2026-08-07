@@ -326,6 +326,43 @@ describe('recordBlastEvent + readBlastEvents', () => {
     expect(events[0]).toEqual(good);
   });
 
+  // `attributionCaveat.reason` is persisted as a plain string, not validated
+  // against the live `AttributionCaveatReason` union (see
+  // `PersistedAttributionCaveat`'s doc comment) — a line written by a NEWER
+  // Lien version with a sixth reason must still round-trip honestly through
+  // an OLDER version's `readBlastEvents`, not get silently dropped or
+  // coerced into a value that was never actually recorded.
+  it('round-trips a line whose attributionCaveat.reason is not (yet, or no longer) a known reason', async () => {
+    const filePath = blastEventsFilePath(rootDir);
+    const futureVersionLine = {
+      timestamp: new Date().toISOString(),
+      filepath: 'src/future.ts',
+      changes: [
+        {
+          symbol: 'newHelper',
+          kind: 'signature-changed',
+          dependentCount: 0,
+          untestedDependentCount: 0,
+          riskLevel: 'low',
+          attributionCaveat: {
+            reason: 'some-reason-added-in-a-later-lien-version',
+            note: 'a caveat this version of Lien has never heard of',
+          },
+        },
+      ],
+      enriched: true,
+    };
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.appendFile(filePath, `${JSON.stringify(futureVersionLine)}\n`, 'utf-8');
+
+    const events = await readBlastEvents(rootDir);
+    expect(events).toHaveLength(1);
+    expect(events[0].changes[0].attributionCaveat).toEqual({
+      reason: 'some-reason-added-in-a-later-lien-version',
+      note: 'a caveat this version of Lien has never heard of',
+    });
+  });
+
   it('skips a line whose docRefCount is the wrong type', async () => {
     const good = sampleEvent();
     await recordBlastEvent(rootDir, good);

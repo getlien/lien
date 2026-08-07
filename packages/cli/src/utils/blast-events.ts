@@ -22,9 +22,29 @@ import fs from 'fs/promises';
 import path from 'path';
 import { getIndexDir } from '@liendev/core';
 import type { ExportedSymbolChangeKind } from './signature-delta.js';
-import type { AttributionCaveat } from '../mcp/handlers/get-dependents.js';
 
 export const BLAST_EVENTS_FILENAME = 'blast-events.jsonl';
+
+/**
+ * The persisted shape of an attribution caveat — structurally identical to
+ * `get-dependents.ts`'s `AttributionCaveat`, but `reason` is a plain
+ * `string`, not that type's closed `AttributionCaveatReason` union. A JSONL
+ * line on disk was written by whatever version of Lien ran at the time, so
+ * a `reason` here is only ever verified to be A string, never verified to
+ * be a CURRENT member of that union — a reason added in a later version
+ * (read by an older `lien stats`), or one retired since, both round-trip
+ * here as an honest but unrecognized string, rather than being silently
+ * dropped or miscoerced into a value that was never actually recorded.
+ * `isValidAttributionCaveat` below enforces exactly this and nothing more.
+ * A consumer that keys on `.reason` must handle an unrecognized value
+ * explicitly — the same defensive-read idiom `riskBucket`
+ * (`blast-stats.ts`) already uses for `riskLevel`, never an assumption that
+ * it's one of today's five.
+ */
+export interface PersistedAttributionCaveat {
+  reason: string;
+  note: string;
+}
 
 /** Trigger: once the log exceeds this many bytes, trim it down. */
 export const MAX_BYTES_BEFORE_TRIM = 2 * 1024 * 1024; // 2 MB
@@ -56,7 +76,7 @@ export interface BlastEventChange {
    * never as "verified clear" -- an older line's absence of this key says
    * nothing about whether a caveat would have applied.
    */
-  attributionCaveat?: AttributionCaveat | null;
+  attributionCaveat?: PersistedAttributionCaveat | null;
 }
 
 export interface BlastEvent {
@@ -131,10 +151,13 @@ function isValidOptionalNumber(value: unknown): boolean {
 
 /**
  * `attributionCaveat` is `undefined` (a pre-#1097 line), `null` (nothing to
- * hedge), or an object shaped like `AttributionCaveat` -- checked loosely
- * (string `reason`/`note`) rather than against the exact `AttributionCaveatReason`
- * union, so a future sixth reason doesn't retroactively invalidate history
- * already on disk.
+ * hedge), or a `PersistedAttributionCaveat` -- a plain string `reason` plus
+ * a string `note`, deliberately NOT checked against the current
+ * `AttributionCaveatReason` union (see that type's own doc comment): this
+ * validator's job is only to reject a shape that couldn't have come from
+ * `recordBlastEvent` at all (a torn write, a hand-edited line, a wrong
+ * type), not to reject a foreign-but-honest reason string written by a
+ * different version of Lien.
  */
 function isValidAttributionCaveat(value: unknown): boolean {
   if (value === undefined || value === null) return true;
