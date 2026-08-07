@@ -333,9 +333,20 @@ function buildNonImportContentIndex(chunksByFile: Map<string, CodeChunk[]>): Map
  * line's end leaves no way for the rest of the pattern to also match -- this
  * is what makes "on-demand never shadows" (G6) fall out for free rather than
  * needing an explicit `.endsWith('.*')` check.
+ *
+ * The trailing `(?:\/\/.*)?[ \t\r]*$` (not just `[ \t]*$`) is load-bearing,
+ * not cosmetic: `collectShadowBindings` below splits chunk content on `'\n'`
+ * only, so a CRLF source file leaves every line ending in a literal `\r` --
+ * without `\r` in the final character class, `[ \t]*$` never matches on such
+ * a file, `.exec` returns `null` for EVERY import line in it, and G6 silently
+ * never fires for that file at all (the exact `Cache.kt`-shaped fabrication
+ * this gate exists to prevent, reappearing silently on a plausible real-world
+ * input). The optional `// trailing comment` is the same failure mode from a
+ * different direction: `import a.b.Foo; // legacy` has real trailing text
+ * after the `;` that the old anchor also rejected outright.
  */
 const SINGLE_IMPORT_LINE_RE =
-  /^[ \t]*import[ \t]+(?:static[ \t]+)?([\w.]+)(?:[ \t]+as[ \t]+([A-Za-z_$][\w$]*))?[ \t]*;?[ \t]*$/;
+  /^[ \t]*import[ \t]+(?:static[ \t]+)?([\w.]+)(?:[ \t]+as[ \t]+([A-Za-z_$][\w$]*))?[ \t]*;?[ \t]*(?:\/\/.*)?[ \t\r]*$/;
 
 /**
  * Every simple name -> FQN binding a FILE's own single-type/single-static

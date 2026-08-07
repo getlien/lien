@@ -222,6 +222,41 @@ describe('findJvmSamePackageDependents', () => {
     ]);
   });
 
+  it('G6 regression: a CRLF source file still detects the shadowing import (the regex must not require \\n-only line endings)', () => {
+    const chunks: CodeChunk[] = [
+      declChunk('src/main/java/a/b/Foo.java', 'Foo', 'a.b'),
+      // Every line ends in a literal \r (as it would after `chunk.content
+      // .split('\n')` on a real CRLF file) -- exercises the PRODUCTION
+      // regex/binding path (via findJvmSamePackageDependents), not a
+      // re-declared copy, so a regression here fails this test even if a
+      // future edit only changes the exported behavior.
+      makeChunk({
+        file: 'src/main/java/a/b/Bar.java',
+        content:
+          'package a.b\r\n\r\nimport x.y.Foo;\r\n\r\nvoid method() { Foo.doSomething(); }\r\n',
+        symbolName: 'method',
+        symbolType: 'method',
+      }),
+    ];
+    // Bar shadows Foo via a single-type import to a DIFFERENT package --
+    // must be excluded (G6) despite the CRLF line endings.
+    expect(findJvmSamePackageDependents('src/main/java/a/b/Foo.java', chunks)).toEqual([]);
+  });
+
+  it('G6 regression: a trailing line comment on the import line does not defeat shadow detection', () => {
+    const chunks: CodeChunk[] = [
+      declChunk('src/main/java/a/b/Foo.java', 'Foo', 'a.b'),
+      makeChunk({
+        file: 'src/main/java/a/b/Bar.java',
+        content:
+          'package a.b\n\nimport x.y.Foo; // legacy alias, TODO remove\n\nvoid method() { Foo.doSomething(); }\n',
+        symbolName: 'method',
+        symbolType: 'method',
+      }),
+    ];
+    expect(findJvmSamePackageDependents('src/main/java/a/b/Foo.java', chunks)).toEqual([]);
+  });
+
   it('G7: a non-test candidate is not credited as a dependent of a test target', () => {
     const chunks: CodeChunk[] = [
       declChunk('src/test/java/a/b/Foo.java', 'Foo', 'a.b'),
