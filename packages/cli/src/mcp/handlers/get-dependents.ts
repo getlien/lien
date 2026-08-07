@@ -276,7 +276,7 @@ function computeImportOnlyEvidence(
  * true facts can both apply to the SAME response, so both are folded into
  * this ONE note rather than a second caveat -- the five
  * `AttributionCaveatReason`s stay mutually exclusive (#980, see
- * `buildAttributionCaveat`'s doc comment below):
+ * `buildAttributionCaveatFromAnalysis`'s doc comment below):
  *
  * - #1015: whether the graph recovered real, non-call-site import evidence
  *   for the symbol (`importedBy.length > 0`) or genuinely found nothing.
@@ -328,41 +328,52 @@ function buildTypeSymbolCaveatNote(
 }
 
 /**
- * Which attribution caveat reason wins, per the priority order documented on
- * `buildAttributionCaveat` below -- extracted into its own function so a
- * caller can find out WHICH reason will be surfaced before that reason's
- * note is built, without duplicating the priority order at a second site.
+ * Which attribution caveat reason wins, from the analysis-owned flags alone
+ * (`targetIndexed`, #928's chunk-based unresolved-target check, plus the
+ * other four). Extracted out of `buildAttributionCaveatFromAnalysis` below
+ * for two INDEPENDENT reasons that happened to land in the same PR:
  *
- * `handleGetDependents` needs exactly this for #1015's `importedBy`: it must
- * only be computed/attached when this decides `'type-symbol-attribution-
- * incomplete'` actually WINS, not whenever the raw
- * `analysis.typeSymbolAttributionIncomplete` flag happens to be true. An
- * earlier-priority reason can still win even when that flag is set --
- * concretely, `unresolved-target` via `unresolvedTargetNote`: that note
- * comes from #927's manifest-based check, which runs independently of (and
- * before) `findDependents`'s own #928 chunk-based scan, so the two can
- * disagree on the same path (that disagreement is the entire reason both
- * checks exist). Gating `importedBy` on the raw flag instead of this
- * decision would let a response carry a populated `importedBy` while
- * `attributionCaveat.reason` names something else entirely -- contradicting
- * the field's own documented contract (found and fixed after CodeRabbit
- * flagged it on this PR).
+ * - #1097: `lien api-delta` (`api-delta-cmd.ts`) needs the exact same
+ *   priority/composition rules `get_dependents` uses, so the decision of
+ *   which caveat wins must never live in two places. `buildAttributionCaveatFromAnalysis`
+ *   reuses this to decide, then builds that reason's note.
+ * - #1015: `handleGetDependents` needs to know WHICH reason will win
+ *   *before* bothering to compute `importedBy`'s call-graph evidence --
+ *   only when this decides `'type-symbol-attribution-incomplete'` actually
+ *   WINS, not whenever the raw `analysis.typeSymbolAttributionIncomplete`
+ *   flag happens to be true. An earlier-priority reason can still win even
+ *   when that flag is set -- concretely, `unresolved-target` via
+ *   `unresolvedTargetNote` (see `decideAttributionCaveatReason` below):
+ *   that note comes from #927's manifest-based check, which runs
+ *   independently of (and before) `findDependents`'s own #928 chunk-based
+ *   scan, so the two can disagree on the same path (that disagreement is
+ *   the entire reason both checks exist). Gating `importedBy` on the raw
+ *   flag instead of this decision would let a response carry a populated
+ *   `importedBy` while `attributionCaveat.reason` names something else
+ *   entirely -- contradicting the field's own documented contract (found
+ *   and fixed after CodeRabbit flagged it on this PR).
  *
- * The five reasons are mutually exclusive by construction, so at most one
- * ever fires:
- * - `unresolvedTargetNote` is only non-empty when `filepath` has no chunks
- *   anywhere in the index, in which case `findDependents` returns an empty
- *   `chunksByFile` up front -- so `symbolAttributionDegraded`/
- *   `typeSymbolAttributionIncomplete` (both of which require
- *   `chunksByFile.size > 0` or a resolved target to fire), and
- *   `dependentAttributionPartial`/`dependentAttributionIncomplete` (both of
- *   which explicitly skip when `!targetIndexed`) can never also be set.
- * - `symbolAttributionDegraded`/`typeSymbolAttributionIncomplete` only fire
- *   for a `symbol` query; `dependentAttributionPartial`/
- *   `dependentAttributionIncomplete` only fire for a file-level query (no
- *   `symbol`) -- see `enrichWithCSharpTypeReferenceDependents`/
- *   `checkDependentAttributionIncomplete` in `@liendev/parser`'s
- *   `dependency-analyzer.ts`. So those two pairs can never co-occur.
+ * The five reasons here are mutually exclusive by construction, so at most
+ * one ever fires:
+ * - `!targetIndexed` (#928) means `dependents` was deliberately left empty
+ *   rather than fuzzy-matched (see `seedIfTargetIndexed`), so every other
+ *   flag below is moot and was never computed against real data in the
+ *   first place -- checked first, unconditionally.
+ * - `typeSymbolAttributionIncomplete` only fires for a `symbol` query where
+ *   `symbol` names a type declaration; `dependentAttributionIncomplete`
+ *   skips a call where that flag is already set (#1097) -- so those two
+ *   never co-occur.
+ * - `symbolAttributionDegraded` can never coincide with either
+ *   `dependentAttributionPartial` or `dependentAttributionIncomplete`, for
+ *   two INDEPENDENT reasons rather than one shared count check: it can't
+ *   coincide with `dependentAttributionIncomplete` because it only ever
+ *   fires with a nonzero final `dependents.length` (it widens to the
+ *   file-level dependents list, which requires at least one file to begin
+ *   with) while that one requires the final count to be zero; it can't
+ *   coincide with `dependentAttributionPartial` because that one only ever
+ *   fires for a file-level query (`symbol` unset), while
+ *   `symbolAttributionDegraded` only ever fires for a symbol query -- the
+ *   two are mutually exclusive on `symbol` alone, independent of any count.
  * - `symbolAttributionDegraded` and `typeSymbolAttributionIncomplete` are
  *   themselves mutually exclusive: `buildDependentsList` (parser-side) only
  *   ever checks `isTypeDeclarationSymbol` in the branch where `symbol`
@@ -373,16 +384,22 @@ function buildTypeSymbolCaveatNote(
  *   `dependentAttributionIncomplete` requires that same final count to be
  *   zero. So those two can never both be set.
  *
- * #927's manifest-based unresolved-target note takes precedence over #928's
- * chunk-based one where both could apply (a typo'd/nonexistent path trips
- * both for the same underlying reason); `unresolvedTargetNote` already
- * encodes that precedence before this function sees it.
+ * Until #1097, `dependentAttributionIncomplete` only ever fired for a
+ * file-level query (no `symbol`) -- `checkDependentAttributionIncomplete`
+ * (parser-side) unconditionally skipped its whole determination whenever
+ * `symbol` was set, which silently dropped the caveat for exactly the two
+ * real call paths that ARE symbol-scoped by construction:
+ * `get_dependents({filepath, symbol})` and every `lien api-delta` check. It
+ * can now also fire for a symbol query (a real, non-type-declaration
+ * exported symbol with zero import-graph-visible dependents in one of
+ * `hasDependentAttributionBlindSpot`'s languages) -- see that flag's updated
+ * doc comment on `FindDependentsResult` in `@liendev/parser`'s
+ * `dependency-analyzer.ts`.
  */
-function decideAttributionCaveatReason(
+function decideAttributionCaveatReasonFromAnalysis(
   analysis: DependencyAnalysisResult,
-  unresolvedTargetNote: string | undefined,
 ): AttributionCaveatReason | undefined {
-  if (unresolvedTargetNote || !analysis.targetIndexed) return 'unresolved-target';
+  if (!analysis.targetIndexed) return 'unresolved-target';
   if (analysis.symbolAttributionDegraded) return 'symbol-attribution-degraded';
   if (analysis.typeSymbolAttributionIncomplete) return 'type-symbol-attribution-incomplete';
   if (analysis.dependentAttributionPartial) return 'dependent-attribution-partial';
@@ -391,19 +408,25 @@ function decideAttributionCaveatReason(
 }
 
 /**
- * Build the note for whichever reason `decideAttributionCaveatReason`
- * chose. `importedBy` is only ever read in the `type-symbol-attribution-
- * incomplete` case -- see that function's doc comment for why the caller
- * (`handleGetDependents`) only computes it when that reason has already won.
+ * Decide which (if any) attribution caveat applies from the analysis-owned
+ * flags alone, and build its note. Exported so `lien api-delta`
+ * (`api-delta-cmd.ts`) can reuse the exact same composition/priority rules
+ * instead of re-deriving them (#1097) -- both surfaces call `findDependents`
+ * and get back the same `DependencyAnalysisResult` shape.
+ *
+ * `importedBy` is optional and only ever read in the
+ * `type-symbol-attribution-incomplete` case (#1015). `lien api-delta` has
+ * no dependency graph to consult and omits it, getting the "checked, found
+ * nothing" phrasing; only the MCP `get_dependents` handler (via
+ * `buildAttributionCaveat` below) supplies real evidence.
  */
-function buildAttributionCaveat(
+export function buildAttributionCaveatFromAnalysis(
   analysis: DependencyAnalysisResult,
   filepath: string,
   symbol: string | undefined,
-  unresolvedTargetNote: string | undefined,
-  importedBy: string[] | undefined,
+  importedBy?: string[],
 ): AttributionCaveat | undefined {
-  const reason = decideAttributionCaveatReason(analysis, unresolvedTargetNote);
+  const reason = decideAttributionCaveatReasonFromAnalysis(analysis);
 
   switch (reason) {
     case undefined:
@@ -413,14 +436,13 @@ function buildAttributionCaveat(
       return {
         reason,
         note:
-          unresolvedTargetNote ??
           `⚠ Lien: "${filepath}" has no chunks anywhere in the index — every count above ` +
-            'is a deliberate 0, not a confirmed empty dependency graph. This can mean the ' +
-            'path was never indexed, is misspelled (wrong directory prefix, wrong case), or ' +
-            'genuinely has no extractable content. Do not treat this as a low-risk or ' +
-            'dependency-free file; check for a typo before editing, try search_code or ' +
-            'list_functions to find the real path, or run "lien index" if the file was added ' +
-            'recently.',
+          'is a deliberate 0, not a confirmed empty dependency graph. This can mean the ' +
+          'path was never indexed, is misspelled (wrong directory prefix, wrong case), or ' +
+          'genuinely has no extractable content. Do not treat this as a low-risk or ' +
+          'dependency-free file; check for a typo before editing, try search_code or ' +
+          'list_functions to find the real path, or run "lien index" if the file was added ' +
+          'recently.',
       };
 
     case 'symbol-attribution-degraded': {
@@ -464,18 +486,62 @@ function buildAttributionCaveat(
     case 'dependent-attribution-partial':
       return { reason, note: buildPartialRecoveryNote(analysis, filepath) };
 
-    case 'dependent-attribution-incomplete':
+    case 'dependent-attribution-incomplete': {
+      // #1097: `symbol` may or may not be set here -- unlike the other four
+      // branches above, this one now fires for both a file-level query AND a
+      // symbol-scoped query on a real, non-type-declaration export. Name the
+      // symbol when present so the note doesn't read as file-level-only when
+      // it isn't.
+      const symbolSuffix = symbol ? ` (symbol: "${symbol}")` : '';
       return {
         reason,
         note:
-          `No import-based dependents were found for ${filepath}, but its language lets real ` +
-          `callers use its exports with no per-file import naming it at all (e.g. C#'s "global ` +
-          `using" / implicit enclosing-namespace access, Java/Kotlin's same-package visibility, ` +
-          `or Swift's whole-module access). The import graph has no signal for that usage shape, ` +
-          `so dependentCount: 0 and riskLevel: "low" here mean "the scan found nothing," not ` +
-          `"nothing depends on this file" — don't treat this as a verified clear.`,
+          `No import-based dependents were found for ${filepath}${symbolSuffix}, but its ` +
+          `language lets real callers use its exports with no per-file import naming it at ` +
+          `all (e.g. C#'s "global using" / implicit enclosing-namespace access, Java/Kotlin's ` +
+          `same-package visibility, or Swift's whole-module access). The import graph has no ` +
+          `signal for that usage shape, so dependentCount: 0 and riskLevel: "low" here mean ` +
+          `"the scan found nothing," not "nothing depends on this file" — don't treat this as ` +
+          `a verified clear.`,
       };
+    }
   }
+}
+
+/**
+ * MCP-only: #927's manifest-based unresolved-target note takes precedence
+ * over #928's chunk-based one where both could apply (a typo'd/nonexistent
+ * path trips both for the same underlying reason). Used by
+ * `handleGetDependents` to know the FINAL reason (not just the raw
+ * `typeSymbolAttributionIncomplete` flag) before deciding whether to compute
+ * `importedBy` -- see `decideAttributionCaveatReasonFromAnalysis`'s doc
+ * comment for why that distinction matters.
+ */
+function decideAttributionCaveatReason(
+  analysis: DependencyAnalysisResult,
+  unresolvedTargetNote: string | undefined,
+): AttributionCaveatReason | undefined {
+  if (unresolvedTargetNote) return 'unresolved-target';
+  return decideAttributionCaveatReasonFromAnalysis(analysis);
+}
+
+/**
+ * MCP-only entry point: layers #927's manifest-based unresolved-target note
+ * on top of `buildAttributionCaveatFromAnalysis`'s analysis-only decision
+ * (see `decideAttributionCaveatReason`'s doc comment for the precedence).
+ * `importedBy` is threaded through for the one case that needs it.
+ */
+function buildAttributionCaveat(
+  analysis: DependencyAnalysisResult,
+  filepath: string,
+  symbol: string | undefined,
+  unresolvedTargetNote: string | undefined,
+  importedBy: string[] | undefined,
+): AttributionCaveat | undefined {
+  if (unresolvedTargetNote) {
+    return { reason: 'unresolved-target', note: unresolvedTargetNote };
+  }
+  return buildAttributionCaveatFromAnalysis(analysis, filepath, symbol, importedBy);
 }
 
 /**

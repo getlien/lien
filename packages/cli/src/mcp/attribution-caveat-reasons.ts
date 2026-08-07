@@ -37,12 +37,19 @@ import { summarizeInferredDependentMechanisms } from '@liendev/parser';
  *   source, and this reason's text below derives from it. Listing them here is
  *   exactly what went stale when #1039 added Go's alongside #930's C# one
  *   (#1018).
- * - `dependent-attribution-incomplete`: a file-level query (no `symbol`)
- *   came back with zero dependents in a language where the import graph
- *   structurally can't see every real usage, e.g. C#'s `global using` /
- *   implicit enclosing-namespace access (#930, #936), or Java/Kotlin's
- *   same-package visibility and Swift's whole-module access (#1005), EVEN
- *   AFTER any applicable fallback above also found nothing.
+ * - `dependent-attribution-incomplete`: a query -- file-level (no `symbol`)
+ *   OR symbol-level -- came back with zero dependents in a language where
+ *   the import graph structurally can't see every real usage, e.g. C#'s
+ *   `global using` / implicit enclosing-namespace access (#930, #936), or
+ *   Java/Kotlin's same-package visibility and Swift's whole-module access
+ *   (#1005), EVEN AFTER any applicable fallback above also found nothing.
+ *   Widened to symbol-level queries by #1097 (a real, non-type-declaration
+ *   exported symbol -- e.g. a Java method with genuine same-package callers
+ *   the import graph can't see -- used to come back with NO caveat at all
+ *   for a symbol-scoped query, even though the identical file's file-level
+ *   query correctly carried this reason); skipped when
+ *   `type-symbol-attribution-incomplete` already explains the same zero, so
+ *   the two never contradict each other on one response.
  *
  * This is the SINGLE SOURCE for the model/user-facing explanation of each
  * reason (`ATTRIBUTION_CAVEAT_REASON_TEXT` below). #941 hand-wrote this
@@ -119,12 +126,12 @@ export const ATTRIBUTION_CAVEAT_REASON_TEXT: Record<AttributionCaveatReason, str
     'miss.',
 
   'dependent-attribution-incomplete':
-    'a file-level query (no symbol) came back with zero dependents in a language where the ' +
-    "import graph structurally can't see every real usage (e.g. C#'s global using / implicit " +
-    "enclosing-namespace access, Java/Kotlin's same-package visibility, or Swift's " +
-    'whole-module access), even after any applicable non-import fallback above also found ' +
-    'nothing. Treat dependentCount: 0 and riskLevel: "low" as a floor, not a finding — verify ' +
-    'with grep before concluding the file is unused.',
+    'a query — file-level (no symbol) or symbol-level — came back with zero dependents in a ' +
+    "language where the import graph structurally can't see every real usage (e.g. C#'s " +
+    "global using / implicit enclosing-namespace access, Java/Kotlin's same-package " +
+    "visibility, or Swift's whole-module access), even after any applicable non-import " +
+    'fallback above also found nothing. Treat dependentCount: 0 and riskLevel: "low" as a ' +
+    'floor, not a finding — verify with grep before concluding the file or symbol is unused.',
 };
 
 /**

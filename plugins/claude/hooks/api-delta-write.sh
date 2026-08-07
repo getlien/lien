@@ -66,6 +66,13 @@ fi
 # signature-changed row, so this is a no-op there) appends the docs-drift-
 # shifted-left signal: which indexed doc chunks still name a symbol this edit
 # just removed. See docs/architecture/blast-radius-nudge.md's docRefs section.
+#
+# attributionCaveatClause (#1097; single-change only) appends the honesty
+# signal get_dependents surfaces as attributionCaveat: dependentCount/riskLevel
+# above can't be trusted as a verified clear (e.g. a Java/Kotlin/Swift/C#
+# same-package-access blind spot). Without this, that case renders
+# identically to a genuinely verified "0 dependents, risk low" — the exact
+# false-all-clear CLAUDE.md's index-state-honesty policy exists to prevent.
 msg="$(printf '%s' "$json" | jq -r '
   def docRefsClause:
     if (.docRefCount // 0) > 0 then
@@ -76,6 +83,8 @@ msg="$(printf '%s' "$json" | jq -r '
            then " (+\(.docRefCount - ($paths|length)) more)" else "" end)
         + "."
     else "" end;
+  def attributionCaveatClause:
+    if .attributionCaveat then " ⚠ " + .attributionCaveat.note else "" end;
   (.changes // []) as $c
   | ($c | length) as $n
   | if $n == 0 then empty
@@ -89,9 +98,9 @@ msg="$(printf '%s' "$json" | jq -r '
           else
             "⚠ lien: exported symbol removed — " + $x.symbol + "."
               + " Check get_dependents (index unavailable for counts)."
-          end) + ($x | docRefsClause)
+          end) + ($x | docRefsClause) + ($x | attributionCaveatClause)
         else
-          if $x.enriched then
+          (if $x.enriched then
             "⚠ lien: exported signature changed — " + $x.symbol
               + " (" + ($x.dependentCount|tostring) + " dependents, "
               + ($x.untestedDependentCount|tostring) + " untested, risk " + $x.riskLevel + ")."
@@ -99,7 +108,7 @@ msg="$(printf '%s' "$json" | jq -r '
           else
             "⚠ lien: exported signature changed — " + $x.symbol + "."
               + " Check get_dependents (index unavailable for counts)."
-          end
+          end) + ($x | attributionCaveatClause)
         end
     else
       ( [ $c[0:3][]
@@ -107,9 +116,11 @@ msg="$(printf '%s' "$json" | jq -r '
               "removed " + .symbol
                 + (if .enriched then " (" + (.dependentCount|tostring) + " dependents, risk " + .riskLevel + ")" else " (index unavailable for counts)" end)
                 + (if (.docRefCount // 0) > 0 then ", " + (.docRefCount|tostring) + " docs" else "" end)
+                + (if .attributionCaveat then ", attribution incomplete" else "" end)
             else
               .symbol
                 + (if .enriched then " (" + (.dependentCount|tostring) + " dependents, " + (.untestedDependentCount|tostring) + " untested, risk " + .riskLevel + ")" else " (index unavailable for counts)" end)
+                + (if .attributionCaveat then ", attribution incomplete" else "" end)
             end
         ] | join("; ") ) as $joined
       | "⚠ lien: " + ($n|tostring) + " exported-signature changes — " + $joined
