@@ -1,5 +1,108 @@
 # @liendev/parser
 
+## 0.77.0
+
+### Minor Changes
+
+- 8fc218a: Extract Java annotation declarations (`@interface Foo {}`,
+  `annotation_type_declaration`) as real chunks (#1005 Phase 3, Item B).
+  Previously absent from the Java extractor entirely — an annotation-only file
+  produced NO chunk at all, so `get_files_context`, `list_functions`, and
+  `search_code` returned nothing for it.
+
+  Maps to `symbolType: 'interface'`, mirroring the existing
+  `record_declaration` → `'class'` precedent rather than adding a new
+  `'annotation'` member to `ChunkMetadata['symbolType']`'s closed union.
+  Annotation MEMBERS (`String value();`-style element declarations) are
+  deliberately not extracted as their own chunks or exports — only the
+  annotation's own declared name. A nested annotation reports `parentClass`
+  via the same existing traversal machinery any other nested declaration
+  does, and can therefore never become a same-package-resolution owner (G1'
+  only considers top-level declarations).
+
+  The justification is context-quality, not recall: measured across 5 real
+  Java corpora (javapoet, gson, retrofit, moshi, okhttp), only a handful of
+  genuine same-package edges newly resolve through a top-level annotation
+  (single digits) — the real gap this closes is that annotation-only files
+  were previously invisible to every symbol-aware tool.
+
+- 85ef96f: Add a Java/Kotlin same-package resolution tier to `buildDependencyGraph`'s
+  call-graph (`getCallers`/`getCallersTransitive`), closing the #1005 Phase 2
+  gap between Phase 1's file-level `findDependents` recovery (#1100) and the
+  symbol/call-site-level call graph used by blast-radius and the MCP
+  `get_dependents` tool's `importedBy` evidence.
+
+  Java and Kotlin's same-package visibility rule lets one top-level type
+  reference another in the same package with no import statement at all — the
+  call graph previously had no way to see that reference for a declared
+  class/interface symbol, only for the exact same-directory heuristic PHP/
+  Python/Rust already used (`addSameNamespaceEdges`, unchanged and still firing
+  for JVM method/function seeds it structurally can't reach). The new tier is
+  per-type-scoped (`resolveJvmSamePackageDependentsForType`, exported from
+  `@liendev/parser`) so a multi-type Kotlin file doesn't misattribute a
+  sibling declaration's callers, unioned onto the existing result (never
+  replacing it), and tagged `namespace-inferred` — never `import-only` — so it
+  is correctly excluded from the MCP tool's "verifiably imports" evidence.
+
+  Measured against a real OkHttp clone: `getCallers` for `Cache` (Kotlin, same
+  package `okhttp3`) went from 16 to 33 edges, with 17 real same-package
+  callers (`OkHttpClient`, `Request`, `Response`, `EventListener`, several
+  test files, etc.) recovered that were previously invisible to the call
+  graph entirely.
+
+- 5846748: Fix a chunker bug (#1005 Phase 3, Item D) that silently dropped a file's
+  leading (header) uncovered range whenever it was shorter than `minChunkSize`
+  and the file had no `export`-recognized declaration — a package-private
+  Java/Kotlin file's `package` line, or a C# file's file-scoped `namespace`
+  line, could sit in exactly that gap. Losing the range didn't just shrink a
+  chunk, it made the file's package/namespace undetectable anywhere else in
+  the index, silently disabling same-package/namespace dependent resolution
+  (`jvm-same-package-signals.ts`, `csharp-type-reference-signals.ts`) for that
+  file as both target and candidate.
+
+  The fix (`isLeadingHeaderRange` in `ast/chunker.ts`) bypasses `minChunkSize`
+  specifically for a file's leading uncovered range, evaluated per-range so an
+  unrelated short gap elsewhere in the same file is still dropped as noise.
+  Measured against real Java/Kotlin/C# corpora (kotlinx-coroutines, klaxon,
+  javapoet, retrofit, okhttp, serilog), a content-aware variant restricted to
+  package/namespace-declaration-matching ranges added at most 1-2 extra chunks
+  per corpus beyond this simpler position-based rule — and every one of those
+  extras was an unrelated non-JVM/non-C# file, never a real miss — so the
+  simpler, regex-free rule ships.
+
+  Also strips `package` declaration lines (in addition to the existing
+  `import`-line stripping) from `jvm-same-package-signals.ts`'s text-match
+  corpus, closing a fabrication risk this fix newly exposes: a header chunk
+  that previously never reached the match corpus now always does, and a
+  package whose own last segment collides with a real type name could
+  otherwise read as a textual self-reference.
+
+  Bumps `INDEX_FORMAT_VERSION` 5 → 6 so existing indexes pick up the fix on
+  next `lien index` rather than silently keeping stale package derivation
+  until a manual full reindex.
+
+- 2d2bb2b: Add a Kotlin same-package test-association mechanism (#1005 Phase 2, Item 2), shipped in both `@liendev/parser`'s `findTestAssociationsFromChunks` (the shared engine — feeds `lien annotate`, blast-radius test-coverage risk, and the agent-review plugin) and `@liendev/lien`'s `get_files_context` MCP tool (its own separate implementation, mirroring the existing C# tier there).
+
+  Like Java's own same-package test convention, a Kotlin test class commonly lives in the same package as its subject with no import connecting them at all — Kotlin's same-package visibility rule needs none. This reuses Phase 1's file-level `resolveJvmSamePackageDependents` (#1100), gated strictly to Kotlin (Java keeps its existing, separate path-based mechanism), and explicitly canonicalizes the query path against the index before resolving — a mismatched path form now resolves correctly instead of silently returning zero associations.
+
+  Measured against a real Klaxon (Kotlin) clone: `lien annotate` on `Klaxon.kt`, the library's central class, went from reporting "No test coverage" to 53 real, same-package test files.
+
+### Patch Changes
+
+- 03f33b8: Fix a precision gap in the Java/Kotlin same-package dependent resolver
+  (#1005 Phase 3, Item E): a same-package file whose ONLY textual reference to
+  a target type sat inside a Javadoc/KDoc comment (not real code) was counted
+  as a genuine dependent. `jvm-same-package-signals.ts`'s text-match corpus now
+  strips Javadoc/KDoc and block comments, plus whole comment-only lines, in
+  addition to the existing `import`/`package` line stripping — closing a gap
+  larger than Item D's entire measured gain (2.4%–19.6% of currently-shipped
+  same-package edges across 7 real corpora rested solely on a comment-only
+  match). Deliberately does not also strip a trailing same-line comment after
+  real code — measured to recover only 0-2 additional edges per corpus against
+  100+ comment-only-line fabrications already caught, not worth the added risk
+  of a bare `//` inside a string literal truncating a real code line. Query-time
+  only; no `INDEX_FORMAT_VERSION` bump needed.
+
 ## 0.76.0
 
 ### Minor Changes
