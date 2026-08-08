@@ -246,7 +246,13 @@ describe('computeBlastRadius', () => {
 
     // 35 same-package callers -- more than DEFAULT_MAX_NODES (30) -- each a
     // real, textual same-package reference with no import at all (the exact
-    // shape the new tier exists to resolve).
+    // shape the new tier exists to resolve). `exports` is set on each so
+    // `Caller0` specifically is a real, resolvable target for the hop-2
+    // fixture below (review finding on this PR: without it, `Caller0` was
+    // never in `exportIndex` at all, so the "positive control" import-only
+    // edge from Consumer could never resolve -- the zero-hop-2-reach
+    // assertion was passing for the wrong reason, an unreachable fixture
+    // rather than a genuine budget effect).
     const sameCallers = Array.from({ length: 35 }, (_, i) =>
       createTestChunk({
         content: `package a.b;\n\nclass Caller${i} { void run() { Target.doSomething(); } }`,
@@ -258,6 +264,7 @@ describe('computeBlastRadius', () => {
           symbolName: `Caller${i}`,
           symbolType: 'class',
           language: 'java',
+          exports: [`Caller${i}`],
         },
       }),
     );
@@ -299,5 +306,18 @@ describe('computeBlastRadius', () => {
     // survived the budget.
     expect(entry.dependents.every(d => d.hops === 1)).toBe(true);
     expect(entry.dependents.find(d => d.filepath.includes('Consumer'))).toBeUndefined();
+
+    // Positive control (review finding on this PR): the assertion above is
+    // only meaningful if Consumer is genuinely reachable at hop 2 when the
+    // budget doesn't truncate -- otherwise it would pass for the wrong
+    // reason (an unreachable fixture, not a budget effect). With a budget
+    // large enough for the whole hop-1 frontier, the walk does expand
+    // Caller0 and finds Consumer at hop 2 via the import-only tier (Consumer
+    // verifiably imports Caller0 via the extension-less resolved-form key;
+    // its own callSite names 'run', which resolves nothing on its own, so
+    // this path is real, not a call-site coincidence).
+    const generous = computeBlastRadius([target], graph, repoChunks, { maxNodes: 200 });
+    const consumer = generous.entries[0].dependents.find(d => d.filepath.includes('Consumer'));
+    expect(consumer?.hops).toBe(2);
   });
 });
