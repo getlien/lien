@@ -229,6 +229,12 @@ export {
   computeDependentCountsFromChunks,
   computeDependentCountsBruteForce,
 } from './dependent-count-index.js';
+// `RecoveryIndexes` is the shared batch-scoped bag for the C#/Go/JVM
+// recovery-tier indexes -- shared with `dependency-analyzer.ts`'s
+// `findDependents` (#1101) so a caller looping `findDependents` over many
+// FILE-LEVEL (no `symbol`) targets in one process invocation can build each
+// language's index once and reuse it, instead of paying a rebuild per call.
+export type { RecoveryIndexes } from './dependent-count-index.js';
 
 // =============================================================================
 // GRAPH TRAVERSAL (generic bounded BFS — domain graphs build on this)

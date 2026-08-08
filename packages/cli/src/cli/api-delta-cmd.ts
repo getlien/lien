@@ -8,7 +8,11 @@
 
 import chalk from 'chalk';
 import { createVectorDB } from '@liendev/core';
-import { computeBlastRadiusRisk, type FileContentChange } from '@liendev/parser';
+import {
+  computeBlastRadiusRisk,
+  type FileContentChange,
+  type RecoveryIndexes,
+} from '@liendev/parser';
 import { getRepoRoot, collectFileChanges, collectFileChange } from './delta-git.js';
 import {
   findDependents,
@@ -142,10 +146,21 @@ async function enrichOneChange(
   filepath: string,
   change: ExportedSymbolChange,
   indexVersion: number,
+  recoveryIndexes: RecoveryIndexes,
 ): Promise<EnrichedExportedSymbolChange> {
   try {
     const log = (): void => undefined;
-    const analysis = await findDependents(vectorDB, filepath, log, change.symbolName, indexVersion);
+    const analysis = await findDependents(
+      vectorDB,
+      filepath,
+      log,
+      change.symbolName,
+      indexVersion,
+      1,
+      500,
+      false,
+      recoveryIndexes,
+    );
     const docRefs = await resolveDocRefs(vectorDB, change);
     // Same composition/priority rules `get_dependents` uses for its own
     // `attributionCaveat` -- both surfaces call `findDependents` and get
@@ -205,11 +220,34 @@ async function enrichDeltas(
     // Captured once so every symbol in this run shares the scan cache inside
     // findDependents — only the first symbol in the batch pays the scanAll.
     const indexVersion = vectorDB.getCurrentVersion();
+    // #1101: one recovery-index bag for the WHOLE batch, threaded into every
+    // findDependents call below. Each of the three non-import recovery tiers
+    // (C# type-reference, Go root-package, JVM same-package) would then be
+    // built at most once for this entire `lien api-delta` invocation, however
+    // many zero-dependent C#/Go/Java/Kotlin symbols the diff touches, instead
+    // of once per symbol.
+    //
+    // Measured honesty note (dogfooded against a real OkHttp diff touching 3
+    // zero-import-dependent Kotlin symbols, see the PR for the full numbers):
+    // `enrichOneChange` below always calls `findDependents` with
+    // `change.symbolName` set, and all three `enrichWith*Dependents` recovery
+    // tiers (`dependency-analyzer.ts`) unconditionally skip whenever `symbol`
+    // is truthy -- that gate predates this PR and isn't relaxed here. So
+    // today this bag never actually gets populated from THIS call site (a
+    // real before/after run showed byte-identical output and no wall-clock
+    // change). It's still threaded through because it's the shape #1101
+    // asks for, costs nothing, and is exactly correct if a future change ever
+    // extends recovery to symbol-scoped queries -- the actually-measurable
+    // win today is any FILE-LEVEL (symbol-omitted) caller looping
+    // `findDependents`, which this repo doesn't have one of yet.
+    const recoveryIndexes: RecoveryIndexes = {};
 
     const results: EnrichedSignatureDelta[] = [];
     for (const delta of deltas) {
       const changes = await Promise.all(
-        delta.changes.map(c => enrichOneChange(vectorDB, delta.filepath, c, indexVersion)),
+        delta.changes.map(c =>
+          enrichOneChange(vectorDB, delta.filepath, c, indexVersion, recoveryIndexes),
+        ),
       );
       results.push({ filepath: delta.filepath, changes });
     }
