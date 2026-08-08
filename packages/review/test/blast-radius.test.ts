@@ -214,4 +214,110 @@ describe('computeBlastRadius', () => {
     expect(report.truncated).toBe(true);
     expect(report.entries[0].dependents).toHaveLength(2);
   });
+
+  // #1005 Phase 2, AC10: a disclosed, NOT-fixed-here limitation. The JVM
+  // same-package call-graph tier (dependency-graph.ts's `getCallers`) can
+  // legitimately surface far more same-package callers for a popular
+  // declared type than any TS/JS seed typically has -- a real fan-in
+  // increase, not a bug. Once that fan-in exceeds `computeBlastRadius`'s
+  // DEFAULT maxNodes (30, not overridden below -- the point is that this is
+  // a realistic budget, not an artificially small one), the walk saturates
+  // at hop 1 and NEVER reaches hop 2 for that seed at all, even for a caller
+  // sitting right at hop 1 with its own further caller waiting one hop away.
+  // This test pins that as the CURRENT, EXPECTED behavior (the existing
+  // `maxNodes`/depth policy trading recall for a bounded walk), so a future
+  // change doesn't silently alter this semantics without a test noticing --
+  // see the #1005 Phase 2 PR body for the filed follow-up asking whether
+  // this file's defaults should be revisited now that JVM recall improved.
+  it('AC10 (disclosed limitation, not fixed here): a very-high-fan-in JVM type seed saturates the default maxNodes at hop 1, losing all hop-2 reach for that seed', () => {
+    const target = createTestChunk({
+      content: 'package a.b;\n\npublic class Target { }',
+      metadata: {
+        file: 'src/main/java/a/b/Target.java',
+        startLine: 1,
+        endLine: 3,
+        type: 'class',
+        symbolName: 'Target',
+        symbolType: 'class',
+        language: 'java',
+        exports: ['Target'],
+      },
+    });
+
+    // 35 same-package callers -- more than DEFAULT_MAX_NODES (30) -- each a
+    // real, textual same-package reference with no import at all (the exact
+    // shape the new tier exists to resolve). `exports` is set on each so
+    // `Caller0` specifically is a real, resolvable target for the hop-2
+    // fixture below (review finding on this PR: without it, `Caller0` was
+    // never in `exportIndex` at all, so the "positive control" import-only
+    // edge from Consumer could never resolve -- the zero-hop-2-reach
+    // assertion was passing for the wrong reason, an unreachable fixture
+    // rather than a genuine budget effect).
+    const sameCallers = Array.from({ length: 35 }, (_, i) =>
+      createTestChunk({
+        content: `package a.b;\n\nclass Caller${i} { void run() { Target.doSomething(); } }`,
+        metadata: {
+          file: `src/main/java/a/b/Caller${i}.java`,
+          startLine: 1,
+          endLine: 3,
+          type: 'class',
+          symbolName: `Caller${i}`,
+          symbolType: 'class',
+          language: 'java',
+          exports: [`Caller${i}`],
+        },
+      }),
+    );
+
+    // A real, verified hop-2 caller of Caller0 specifically -- reachable
+    // only if the BFS gets past hop 1 for that particular node, which the
+    // default budget (saturated by the other 34 same-package siblings at
+    // hop 1) never lets it do.
+    const hop2Caller = createTestChunk({
+      content:
+        'package x.y;\n\nimport a.b.Caller0;\n\nclass Consumer { void run() { Caller0.run(); } }',
+      metadata: {
+        file: 'src/main/java/x/y/Consumer.java',
+        startLine: 1,
+        endLine: 3,
+        type: 'class',
+        symbolName: 'Consumer',
+        symbolType: 'class',
+        language: 'java',
+        importedSymbols: { 'src/main/java/a/b/Caller0': ['Caller0'] },
+        callSites: [{ symbol: 'run', line: 3 }],
+      },
+    });
+
+    const repoChunks = [target, ...sameCallers, hop2Caller];
+    const graph = buildDependencyGraph(repoChunks);
+
+    // Confirm the fan-in is real before blaming the budget for anything.
+    expect(graph.getCallers('src/main/java/a/b/Target.java', 'Target')).toHaveLength(35);
+
+    const report = computeBlastRadius([target], graph, repoChunks); // default maxNodes (30)
+
+    expect(report.entries).toHaveLength(1);
+    const entry = report.entries[0];
+    expect(entry.truncated).toBe(true);
+    expect(entry.dependents).toHaveLength(30);
+    // Zero hop-2 reach: truncation halts the walk before ANY hop-1 node is
+    // expanded to hop 2, regardless of which 30 of the 35 hop-1 callers
+    // survived the budget.
+    expect(entry.dependents.every(d => d.hops === 1)).toBe(true);
+    expect(entry.dependents.find(d => d.filepath.includes('Consumer'))).toBeUndefined();
+
+    // Positive control (review finding on this PR): the assertion above is
+    // only meaningful if Consumer is genuinely reachable at hop 2 when the
+    // budget doesn't truncate -- otherwise it would pass for the wrong
+    // reason (an unreachable fixture, not a budget effect). With a budget
+    // large enough for the whole hop-1 frontier, the walk does expand
+    // Caller0 and finds Consumer at hop 2 via the import-only tier (Consumer
+    // verifiably imports Caller0 via the extension-less resolved-form key;
+    // its own callSite names 'run', which resolves nothing on its own, so
+    // this path is real, not a call-site coincidence).
+    const generous = computeBlastRadius([target], graph, repoChunks, { maxNodes: 200 });
+    const consumer = generous.entries[0].dependents.find(d => d.filepath.includes('Consumer'));
+    expect(consumer?.hops).toBe(2);
+  });
 });

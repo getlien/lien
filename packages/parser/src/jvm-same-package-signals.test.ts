@@ -562,4 +562,103 @@ describe('cross-check: content-derived package agrees with path-derived package'
     expect(index.packageByFile.get(file)).toBe('com.beust.klaxon');
     expect(javaPackageRelativePath(file.replace(/\.kt$/, ''))).toBeNull();
   });
+
+  // #1005 Phase 2 AC7: the two tests above only ever assert AGREEMENT on the
+  // subset of files where BOTH notions already derive something -- a weak
+  // canary, since it can't distinguish "the two mechanisms are consistent"
+  // from "we only ever checked the cases where they were never going to
+  // disagree". This test instead classifies a small representative fixture
+  // set into the four possible outcomes and pins the exact COUNT/shape of
+  // each bucket, so a future change that shifts which bucket a file falls
+  // into (e.g. a `derivePackage` regex tweak, or a `javaPackageRelativePath`
+  // layout extension) trips this test instead of passing silently.
+  it('pins the exact shape of the residual set where path-derived and content-derived package notions disagree or one is undefined', () => {
+    function pathDerivedPackage(file: string): string | null {
+      const relative = javaPackageRelativePath(file.replace(/\.(java|kt)$/, ''));
+      if (relative === null) return null;
+      const segments = relative.split('/').slice(0, -1);
+      return segments.length > 0 ? segments.join('.') : null;
+    }
+
+    const cases: Array<{ label: string; file: string; content: string }> = [
+      {
+        // Both derivable, and they agree -- the case the earlier "weak
+        // canary" tests already cover.
+        label: 'agree-both-derivable',
+        file: 'src/main/java/a/b/Foo.java',
+        content: 'package a.b;\n\nclass Foo { }',
+      },
+      {
+        // Content-derivable (a `package` line is present), but NOT under
+        // the Standard Directory Layout `javaPackageRelativePath` requires
+        // -- path-derivation fails.
+        label: 'content-only',
+        file: 'flat/NoSourceRoot.java',
+        content: 'package a.b;\n\nclass NoSourceRoot { }',
+      },
+      {
+        // Under the Standard Directory Layout (path-derivable), but its
+        // chunk content carries no `package` line at all (e.g. a stale
+        // extraction, or Java's legal-but-rare unnamed/default package) --
+        // content-derivation fails (G3).
+        label: 'path-only',
+        file: 'src/main/java/a/b/NoPackageStatement.java',
+        content: 'class NoPackageStatement { }',
+      },
+      {
+        // Neither notion can derive a package at all.
+        label: 'neither-derivable',
+        file: 'NoPackageNoRoot.java',
+        content: 'class NoPackageNoRoot { }',
+      },
+    ];
+
+    const chunks: CodeChunk[] = cases.map(({ file, content }) =>
+      makeChunk({
+        file,
+        content,
+        symbolName: file
+          .split('/')
+          .pop()!
+          .replace(/\.java$/, ''),
+        symbolType: 'class',
+      }),
+    );
+    const index = buildJvmSamePackageIndex(chunks);
+
+    const buckets = { agreeBothDerivable: 0, contentOnly: 0, pathOnly: 0, neitherDerivable: 0 };
+    for (const { label, file } of cases) {
+      const contentDerived = index.packageByFile.get(file);
+      const pathDerived = pathDerivedPackage(file);
+
+      if (contentDerived !== undefined && pathDerived !== null) {
+        expect(contentDerived).toBe(pathDerived); // the "agree" half of this bucket
+        buckets.agreeBothDerivable += 1;
+      } else if (contentDerived !== undefined && pathDerived === null) {
+        buckets.contentOnly += 1;
+      } else if (contentDerived === undefined && pathDerived !== null) {
+        buckets.pathOnly += 1;
+      } else {
+        buckets.neitherDerivable += 1;
+      }
+
+      // Cross-check the fixture is actually shaped the way its label claims.
+      expect(label).toBe(
+        contentDerived !== undefined && pathDerived !== null
+          ? 'agree-both-derivable'
+          : contentDerived !== undefined
+            ? 'content-only'
+            : pathDerived !== null
+              ? 'path-only'
+              : 'neither-derivable',
+      );
+    }
+
+    expect(buckets).toEqual({
+      agreeBothDerivable: 1,
+      contentOnly: 1,
+      pathOnly: 1,
+      neitherDerivable: 1,
+    });
+  });
 });
