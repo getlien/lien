@@ -665,3 +665,44 @@ export function findJvmSamePackageDependents(targetFile: string, chunks: CodeChu
   if (!isJvmLanguage(targetFile)) return [];
   return resolveJvmSamePackageDependents(targetFile, buildJvmSamePackageIndex(chunks));
 }
+
+/**
+ * #1005 Phase 2: the PER-TYPE twin of `resolveJvmSamePackageDependents`, for
+ * `graph/dependency-graph.ts`'s call-graph tier (`getCallers(filepath,
+ * symbolName)` is always scoped to ONE symbol, never "every dependent of this
+ * file"). Wraps the same `collectDependentsForName` the file-level resolver
+ * already unions across all of `targetFile`'s declared types -- this is an
+ * ADDITION, not a modification: the file-level resolver's contract and
+ * callers (`findDependents`'s recovery tier) are untouched.
+ *
+ * Scoping matters: a JVM file can top-level-declare MORE than one
+ * class/interface (idiomatic for sealed hierarchies or grouped data
+ * classes), and the file-level resolver's union means "the set of files that
+ * reference ANY of this file's declared types" -- correct for "who depends
+ * on this FILE", but wrong for "who calls THIS type": a reference to a
+ * sibling type declared in the same file would be misattributed as a
+ * reference to `typeName`. This function applies the exact same G3
+ * (package-derivable) and target-is-test gates the file-level resolver does,
+ * but resolves candidates for `typeName` alone -- returning `[]` immediately
+ * when `typeName` isn't one of `targetFile`'s own TOP-LEVEL declared
+ * class/interface names (G5's type-only restriction still applies; a bare
+ * method/function seed is never resolvable here, by construction).
+ */
+export function resolveJvmSamePackageDependentsForType(
+  targetFile: string,
+  typeName: string,
+  index: JvmSamePackageIndex,
+): string[] {
+  if (!isJvmLanguage(targetFile)) return [];
+
+  const targetPackage = index.packageByFile.get(targetFile);
+  if (targetPackage === undefined) return []; // G3
+
+  const isOwnDeclaredType = index.declarations.some(
+    decl => decl.file === targetFile && decl.typeName === typeName,
+  );
+  if (!isOwnDeclaredType) return [];
+
+  const targetIsTest = index.isTestByFile.get(targetFile) ?? false;
+  return collectDependentsForName(targetFile, targetPackage, targetIsTest, typeName, index).sort();
+}

@@ -40,6 +40,11 @@ import { importMatchesTarget, normalizePath } from '../utils/path-matching.js';
 import { detectLanguage } from '../ast/parser.js';
 import { findCSharpTypeReferenceDependents } from '../csharp-type-reference-signals.js';
 import { callerSymbolFor } from '../dependency-analyzer.js';
+import {
+  buildJvmSamePackageIndex,
+  resolveJvmSamePackageDependentsForType,
+  type JvmSamePackageIndex,
+} from '../jvm-same-package-signals.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -78,9 +83,15 @@ import { callerSymbolFor } from '../dependency-analyzer.js';
  *   method whose name matches one declared on it; the class import is solid,
  *   the specific method attribution is inferred.
  * - `namespace-inferred`: no import at all — resolved via a same-namespace/
- *   same-directory convention (PHP/Python/Rust) or, for C#, the #930/#971
- *   type-reference-matching fallback (`findCSharpTypeReferenceDependents`).
- *   The weakest tier: a real structural signal, never an import edge.
+ *   same-directory convention (PHP/Python/Rust), for C#, the #930/#971
+ *   type-reference-matching fallback (`findCSharpTypeReferenceDependents`),
+ *   OR, for Java/Kotlin (#1005 Phase 2), the type-scoped same-package
+ *   resolver (`resolveJvmSamePackageDependentsForType`) — a same-package
+ *   reference needs NO import statement at all (JLS §6.5.5.1), so this tier
+ *   is pinned here and never `import-only`: tagging it `import-only` would
+ *   fabricate the exact claim `import-only`/`isImportOnlyEvidenceTier` exist
+ *   to make honestly (see that predicate's doc comment). The weakest tier: a
+ *   real structural signal, never an import edge.
  */
 export type EdgeProvenance =
   | 'same-file'
@@ -294,6 +305,12 @@ function createNormalizer(workspaceRoot: string): (p: string) => string {
  *    for languages (Ruby) whose import statement names a FILE, never a
  *    symbol, so passes 2-4 (all keyed on `importedSymbols`) have nothing to
  *    match on at all — see `buildRawImportsByFile`/`resolveRequireOnlyFallback`.
+ *
+ * `getCallers` itself resolves in two stages (#1005 Phase 2): `resolveBaseTier`
+ * runs the ENTIRE chain above (unchanged), then `resolveJvmSamePackageTier`
+ * (Java/Kotlin only) is UNIONED on top rather than tried as another
+ * early-return branch — see `unionJvmSamePackageTier`'s doc comment for why a
+ * single union point, not one at each intermediate step, is load-bearing.
  */
 export function buildDependencyGraph(chunks: CodeChunk[], workspaceRoot = ''): DependencyGraph {
   const normalize = createNormalizer(workspaceRoot);
@@ -302,36 +319,36 @@ export function buildDependencyGraph(chunks: CodeChunk[], workspaceRoot = ''): D
   const callerEdges = buildCallerEdges(chunks, chunkImportMaps, exportIndex);
   const importOnlyEdges = buildImportOnlyEdges(chunkImportMaps, callerEdges, chunksByFile);
   const rawImportsByFile = buildRawImportsByFile(chunks);
-  const csharpDependentFilesCache = new Map<string, string[] | null>();
-  const requireOnlyCache = new Map<string, string[] | null>();
+  const baseTierCtx: BaseTierContext = {
+    chunks,
+    chunksByFile,
+    callerEdges,
+    importOnlyEdges,
+    rawImportsByFile,
+    normalize,
+    csharpDependentFilesCache: new Map<string, string[] | null>(),
+    requireOnlyCache: new Map<string, string[] | null>(),
+  };
+  // Lazily built at most once per `buildDependencyGraph` call (#1005 Phase 2
+  // §5-f) -- never per-filepath-per-call. Mirrors #1101's
+  // `ctx.recoveryIndexes.jvm ??= buildJvmSamePackageIndex(...)` discipline in
+  // `dependency-analyzer.ts`, just scoped to this one build instead of a
+  // caller-supplied bag: a project-wide index rebuild costs tens of
+  // milliseconds, so paying it once per query here (as the C# fallback's
+  // OLDER per-filepath cache does — see `getCSharpDependentFiles`) would not
+  // scale to a project-wide BFS or blast-radius walk.
+  const jvmTierCache: JvmTierCache = {};
 
   const getCallers = (filepath: string, symbolName: string): CallerEdge[] => {
-    const key = `${filepath}::${symbolName}`;
-    const direct = callerEdges.get(key);
-    if (direct && direct.length > 0) return direct;
-
-    const importOnly = importOnlyEdges.get(key);
-    if (importOnly && importOnly.length > 0) return importOnly;
-
-    const csharpFallback = resolveCSharpFallback(
+    const base = resolveBaseTier(filepath, symbolName, baseTierCtx);
+    const jvmExtra = resolveJvmSamePackageTier(
       filepath,
       symbolName,
       chunks,
       chunksByFile,
-      csharpDependentFilesCache,
+      jvmTierCache,
     );
-    if (csharpFallback && csharpFallback.length > 0) return csharpFallback;
-
-    return (
-      resolveRequireOnlyFallback(
-        filepath,
-        symbolName,
-        rawImportsByFile,
-        chunksByFile,
-        normalize,
-        requireOnlyCache,
-      ) ?? []
-    );
+    return unionJvmSamePackageTier(base, jvmExtra);
   };
 
   return {
@@ -339,6 +356,121 @@ export function buildDependencyGraph(chunks: CodeChunk[], workspaceRoot = ''): D
     getCallersTransitive: (filepath, symbolName, opts = {}) =>
       bfsTransitiveCallers(getCallers, filepath, symbolName, opts),
   };
+}
+
+/** Everything `resolveBaseTier` needs — the pre-#1005 `getCallers` chain, unchanged, just threaded explicitly instead of closed over. */
+interface BaseTierContext {
+  chunks: CodeChunk[];
+  chunksByFile: Map<string, CodeChunk[]>;
+  callerEdges: Map<string, CallerEdge[]>;
+  importOnlyEdges: Map<string, CallerEdge[]>;
+  rawImportsByFile: Map<string, string[]>;
+  normalize: (p: string) => string;
+  csharpDependentFilesCache: Map<string, string[] | null>;
+  requireOnlyCache: Map<string, string[] | null>;
+}
+
+/**
+ * The ENTIRE pre-#1005 `getCallers` resolution chain, verbatim: direct
+ * call-site edges → import-only edges → C# namespace fallback → require-only
+ * fallback, each an early return at the first non-empty tier. Unchanged by
+ * #1005 Phase 2 — the new JVM tier is unioned on top of this function's
+ * result by `getCallers`, never mixed into this chain — see
+ * `unionJvmSamePackageTier`'s doc comment for why.
+ */
+function resolveBaseTier(filepath: string, symbolName: string, ctx: BaseTierContext): CallerEdge[] {
+  const key = `${filepath}::${symbolName}`;
+  const direct = ctx.callerEdges.get(key);
+  if (direct && direct.length > 0) return direct;
+
+  const importOnly = ctx.importOnlyEdges.get(key);
+  if (importOnly && importOnly.length > 0) return importOnly;
+
+  const csharpFallback = resolveCSharpFallback(
+    filepath,
+    symbolName,
+    ctx.chunks,
+    ctx.chunksByFile,
+    ctx.csharpDependentFilesCache,
+  );
+  if (csharpFallback && csharpFallback.length > 0) return csharpFallback;
+
+  return (
+    resolveRequireOnlyFallback(
+      filepath,
+      symbolName,
+      ctx.rawImportsByFile,
+      ctx.chunksByFile,
+      ctx.normalize,
+      ctx.requireOnlyCache,
+    ) ?? []
+  );
+}
+
+/** Holds the lazily-built JVM index for one `buildDependencyGraph` call — see that function's doc comment on why this must be built at most once. */
+interface JvmTierCache {
+  index?: JvmSamePackageIndex;
+}
+
+/**
+ * The new tier (#1005 Phase 2): Java/Kotlin same-package callers of a
+ * declared TYPE symbol, via `resolveJvmSamePackageDependentsForType`
+ * (per-type-scoped — see that function's doc comment for why the file-level
+ * resolver would misattribute callers across sibling declarations in a
+ * multi-type file). `[]` for every non-JVM language, or when `symbolName`
+ * isn't one of `filepath`'s own declared top-level class/interface names (G5
+ * — a method/function seed structurally can't resolve here). Cheap language
+ * check first so a non-JVM corpus never pays the index build at all, not
+ * even once.
+ */
+function resolveJvmSamePackageTier(
+  filepath: string,
+  symbolName: string,
+  chunks: CodeChunk[],
+  chunksByFile: Map<string, CodeChunk[]>,
+  cache: JvmTierCache,
+): CallerEdge[] {
+  const language = detectLanguage(filepath);
+  if (language !== 'java' && language !== 'kotlin') return [];
+
+  cache.index ??= buildJvmSamePackageIndex(chunks);
+  const dependentFiles = resolveJvmSamePackageDependentsForType(filepath, symbolName, cache.index);
+  if (dependentFiles.length === 0) return [];
+
+  return dependentFiles.map(file =>
+    buildRepresentativeEdge(file, chunksByFile, 'namespace-inferred', symbolName),
+  );
+}
+
+/**
+ * ONE union point over the FINAL result of `resolveBaseTier`, not one at each
+ * of its intermediate early-return branches. An earlier draft of this design
+ * unioned the new tier in at three separate points in that chain; that shape
+ * left the import-only union point completely untested, and a variant that
+ * silently dropped just that one point still passed every other check while
+ * losing real edges. Collapsing to one union point makes that defect class
+ * structurally impossible instead of something a test has to catch.
+ *
+ * The dedup predicate is deliberately NOT "unique by filepath" (a single file
+ * legitimately appears more than once in `base` — one entry per real call
+ * site — and collapsing that would destroy real edges) and NOT a plain
+ * concat (every downstream consumer counts EDGES, not distinct files:
+ * `agent-tools.ts` reads `callers.length` directly, and `blast-radius.ts`
+ * dedupes on `` `${filepath}::${symbolName}` ``, under which the same file
+ * could survive as two distinct "dependents" — one via a real call-site
+ * edge, one via `jvmExtra`'s representative-chunk symbolName — inflating
+ * `dependentCount`). The correct predicate: drop any `jvmExtra` entry whose
+ * caller filepath ALREADY appears anywhere in `base`, regardless of that
+ * entry's symbolName; `base` itself is never touched. `jvmExtra` is appended
+ * LAST (not prepended) so a BFS budget (`bounded-bfs.ts`'s `expandFrontier`)
+ * spends on the existing, typically more precise tiers first when `maxNodes`
+ * truncates mid-array.
+ */
+function unionJvmSamePackageTier(base: CallerEdge[], jvmExtra: CallerEdge[]): CallerEdge[] {
+  if (jvmExtra.length === 0) return base;
+
+  const seenFilepaths = new Set(base.map(e => e.caller.filepath));
+  return [...base, ...jvmExtra.filter(e => !seenFilepaths.has(e.caller.filepath))];
 }
 
 // ---------------------------------------------------------------------------

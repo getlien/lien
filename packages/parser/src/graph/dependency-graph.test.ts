@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   buildDependencyGraph,
   isPreciseProvenance,
@@ -7,6 +7,7 @@ import {
 import type { EdgeProvenance } from './dependency-graph.js';
 import type { CodeChunk } from '../types.js';
 import { findDependents } from '../dependency-analyzer.js';
+import * as jvmSignals from '../jvm-same-package-signals.js';
 
 /**
  * Create a minimal CodeChunk for testing.
@@ -1421,6 +1422,479 @@ describe('buildDependencyGraph — barrel transitive-walk regression (post-#1011
 });
 
 // ---------------------------------------------------------------------------
+// JVM same-package call-graph tier (#1005 Phase 2, Item 1) — the type-scoped
+// twin of Phase 1's file-level `findDependents` recovery (#1100), unioned
+// into `getCallers`'s result rather than tried as another early-return
+// branch in `resolveBaseTier`'s chain. See `unionJvmSamePackageTier`'s doc
+// comment in dependency-graph.ts for the full reasoning; the tests below are
+// the acceptance criteria from the design review that preceded this tier.
+// ---------------------------------------------------------------------------
+
+describe('buildDependencyGraph — JVM same-package call-graph tier (#1005 Phase 2)', () => {
+  it('AC1 per-type scoping: a same-package referrer that only textually references ONE of two sibling top-level types is not misattributed to the other', () => {
+    const fooChunk = createTestChunk({
+      content: 'package a.b\n\nclass Foo { }',
+      metadata: {
+        file: 'src/main/kotlin/a/b/FooBar.kt',
+        startLine: 1,
+        endLine: 3,
+        type: 'class',
+        symbolName: 'Foo',
+        symbolType: 'class',
+        language: 'kotlin',
+        exports: ['Foo'],
+      },
+    });
+    const barChunk = createTestChunk({
+      content: 'package a.b\n\nclass Bar { }',
+      metadata: {
+        file: 'src/main/kotlin/a/b/FooBar.kt',
+        startLine: 5,
+        endLine: 7,
+        type: 'class',
+        symbolName: 'Bar',
+        symbolType: 'class',
+        language: 'kotlin',
+        exports: ['Bar'],
+      },
+    });
+    // References ONLY Foo, textually — no import, no call site.
+    const referrerChunk = createTestChunk({
+      content: 'package a.b\n\nfun run() { Foo().doSomething() }',
+      metadata: {
+        file: 'src/main/kotlin/a/b/Ref.kt',
+        startLine: 1,
+        endLine: 3,
+        type: 'function',
+        symbolName: 'run',
+        symbolType: 'function',
+        language: 'kotlin',
+      },
+    });
+
+    const graph = buildDependencyGraph([fooChunk, barChunk, referrerChunk]);
+
+    const barCallers = graph.getCallers('src/main/kotlin/a/b/FooBar.kt', 'Bar');
+    expect(
+      barCallers.find(c => c.caller.filepath === 'src/main/kotlin/a/b/Ref.kt'),
+    ).toBeUndefined();
+
+    const fooCallers = graph.getCallers('src/main/kotlin/a/b/FooBar.kt', 'Foo');
+    const fooRef = fooCallers.find(c => c.caller.filepath === 'src/main/kotlin/a/b/Ref.kt');
+    expect(fooRef).toBeDefined();
+    expect(fooRef?.provenance).toBe('namespace-inferred');
+  });
+
+  it("AC2 provenance pinned: the NEW tier tags its own contribution namespace-inferred, distinct from a blanket check over a result that also carries the pre-existing directory heuristic's namespace-inferred edge", () => {
+    const targetChunk = createTestChunk({
+      content: 'package a.b;\n\npublic class Target { }',
+      metadata: {
+        file: 'src/main/java/a/b/Target.java',
+        startLine: 1,
+        endLine: 3,
+        type: 'class',
+        symbolName: 'Target',
+        symbolType: 'class',
+        language: 'java',
+        exports: ['Target'],
+      },
+    });
+    // Resolves via the PRE-EXISTING `addSameNamespaceEdges` directory
+    // heuristic: same directory as Target, a real call site literally
+    // naming 'Target', no import.
+    const dirCallerChunk = createTestChunk({
+      content: 'package a.b;\n\nclass DirCaller { void run() { new Target(); } }',
+      metadata: {
+        file: 'src/main/java/a/b/DirCaller.java',
+        startLine: 1,
+        endLine: 3,
+        type: 'class',
+        symbolName: 'DirCaller',
+        symbolType: 'class',
+        language: 'java',
+        callSites: [{ symbol: 'Target', line: 3 }],
+      },
+    });
+    // Resolvable ONLY via the NEW per-type tier: same PACKAGE (content-derived),
+    // a DIFFERENT directory (so the directory heuristic can't explain it), no
+    // import, no call site (so no import-based tier can explain it either).
+    const pkgCallerChunk = createTestChunk({
+      content: 'package a.b;\n\nclass PkgCaller { private Target target; }',
+      metadata: {
+        file: 'src/main/java/a/other/PkgCaller.java',
+        startLine: 1,
+        endLine: 3,
+        type: 'class',
+        symbolName: 'PkgCaller',
+        symbolType: 'class',
+        language: 'java',
+      },
+    });
+
+    const graph = buildDependencyGraph([targetChunk, dirCallerChunk, pkgCallerChunk]);
+    const callers = graph.getCallers('src/main/java/a/b/Target.java', 'Target');
+
+    expect(callers).toHaveLength(2);
+
+    const dirEdge = callers.find(c => c.caller.filepath === 'src/main/java/a/b/DirCaller.java');
+    expect(dirEdge?.provenance).toBe('namespace-inferred'); // the OLD heuristic's contribution
+
+    // The assertion that actually matters: the NEW tier's OWN edge, isolated
+    // from the pre-existing heuristic's edge above (which also happens to be
+    // 'namespace-inferred' — a blanket "every edge is namespace-inferred"
+    // check would pass even if the new tier tagged its edge wrong, as long
+    // as it tagged it SOMETHING that happened to coincide; this checks the
+    // specific edge that can only have come from the new tier).
+    const pkgEdge = callers.find(c => c.caller.filepath === 'src/main/java/a/other/PkgCaller.java');
+    expect(pkgEdge).toBeDefined();
+    expect(pkgEdge?.provenance).toBe('namespace-inferred');
+    expect(isImportOnlyEvidenceTier(pkgEdge!.provenance)).toBe(false);
+  });
+
+  it('AC3 no method/function-seed regression: a same-directory call site to a plain METHOD (not a type reference) still resolves via the retained directory heuristic, unchanged — the new tier structurally cannot touch it (G5)', () => {
+    const methodChunk = createTestChunk({
+      content: 'package app.services;\n\nclass PaymentService { void charge() { } }',
+      metadata: {
+        file: 'app/services/PaymentService.java',
+        startLine: 1,
+        endLine: 10,
+        type: 'function',
+        symbolName: 'charge',
+        symbolType: 'method',
+        language: 'java',
+        exports: ['PaymentService'],
+      },
+    });
+
+    const callerChunk = createTestChunk({
+      content: 'package app.services;\n\nclass OrderService { void processOrder() { charge(); } }',
+      metadata: {
+        file: 'app/services/OrderService.java',
+        startLine: 1,
+        endLine: 10,
+        type: 'function',
+        symbolName: 'processOrder',
+        symbolType: 'method',
+        language: 'java',
+        callSites: [{ symbol: 'charge', line: 10 }],
+      },
+    });
+
+    const graph = buildDependencyGraph([methodChunk, callerChunk]);
+    const callers = graph.getCallers('app/services/PaymentService.java', 'charge');
+
+    // Exactly what `resolveBaseTier`'s `addSameNamespaceEdges` produced
+    // before this tier existed — no additional edge from the new tier,
+    // because 'charge' is a method, never one of PaymentService.java's
+    // declared top-level class/interface names.
+    expect(callers).toHaveLength(1);
+    expect(callers[0].caller.filepath).toBe('app/services/OrderService.java');
+    expect(callers[0].caller.symbolName).toBe('processOrder');
+    expect(callers[0].provenance).toBe('namespace-inferred');
+  });
+
+  it('AC4 the import-only union point: getCallers unions the new tier even when resolveBaseTier resolved via the import-only fallback specifically (not just the empty-base or direct-edge cases)', () => {
+    // Zero call sites anywhere name 'Target' — every dependent below is
+    // recovered through a non-call-site path.
+    const targetChunk = createTestChunk({
+      content: 'package a.b;\n\npublic class Target { }',
+      metadata: {
+        file: 'src/main/java/a/b/Target.java',
+        startLine: 1,
+        endLine: 3,
+        type: 'class',
+        symbolName: 'Target',
+        symbolType: 'class',
+        language: 'java',
+        exports: ['Target'],
+      },
+    });
+    // Same package, NO import, references Target only via a field
+    // declaration (never a call site) -- resolvable ONLY by the new tier.
+    const samePackageCaller = createTestChunk({
+      content: 'package a.b;\n\nclass SamePackageCaller { private Target target; }',
+      metadata: {
+        file: 'src/main/java/a/b/SamePackageCaller.java',
+        startLine: 1,
+        endLine: 3,
+        type: 'class',
+        symbolName: 'SamePackageCaller',
+        symbolType: 'class',
+        language: 'java',
+      },
+    });
+    // Different package, a VERIFIED import (already resolved to a slash
+    // path — the shape jvm-source-root.ts's #1046 resolution produces, see
+    // path-matching.test.ts's "#1046 Java/Kotlin dotted-FQN specifiers"),
+    // referenced only via a field declaration, never a call site -- resolves
+    // via resolveBaseTier's IMPORT-ONLY fallback specifically.
+    const importVerifiedCaller = createTestChunk({
+      content:
+        'package x.y;\n\nimport a.b.Target;\n\nclass ImportVerifiedCaller { private Target target; }',
+      metadata: {
+        file: 'src/main/java/x/y/ImportVerifiedCaller.java',
+        startLine: 1,
+        endLine: 3,
+        type: 'class',
+        symbolName: 'ImportVerifiedCaller',
+        symbolType: 'class',
+        language: 'java',
+        importedSymbols: { 'src/main/java/a/b/Target': ['Target'] },
+      },
+    });
+
+    const graph = buildDependencyGraph([targetChunk, samePackageCaller, importVerifiedCaller]);
+    const callers = graph.getCallers('src/main/java/a/b/Target.java', 'Target');
+
+    // Confirms the fixture actually exercises resolveBaseTier's import-only
+    // branch (not e.g. a direct call-site edge) -- otherwise this test
+    // wouldn't discriminate the import-only union point from the trivial
+    // empty-base case AC1-AC3 already cover. Reverting the single union
+    // point in `getCallers` back to "only union after direct edges" (an
+    // earlier, rejected multi-union-point draft) makes THIS assertion fail
+    // while AC1/AC2/AC3 above would still pass unchanged.
+    const importOnlyEdge = callers.find(
+      c => c.caller.filepath === 'src/main/java/x/y/ImportVerifiedCaller.java',
+    );
+    expect(importOnlyEdge?.provenance).toBe('import-only');
+
+    const samePackageEdge = callers.find(
+      c => c.caller.filepath === 'src/main/java/a/b/SamePackageCaller.java',
+    );
+    expect(samePackageEdge?.provenance).toBe('namespace-inferred');
+
+    expect(callers).toHaveLength(2);
+  });
+
+  it('AC5 union predicate correctness: two real call sites in one already-resolved caller file are preserved unchanged, and the new tier does not add a duplicate entry for that same file', () => {
+    const targetChunk = createTestChunk({
+      content: 'package a.b;\n\npublic class Target { }',
+      metadata: {
+        file: 'src/main/java/a/b/Target.java',
+        startLine: 1,
+        endLine: 3,
+        type: 'class',
+        symbolName: 'Target',
+        symbolType: 'class',
+        language: 'java',
+        exports: ['Target'],
+      },
+    });
+    // Two DISTINCT call sites in the SAME file, both resolving via the
+    // pre-existing directory heuristic (same directory, no import) -- this
+    // is what a real multi-method caller class looks like in `base`.
+    const callerMethodOne = createTestChunk({
+      content: 'package a.b;\n\nclass Caller { void methodOne() { Target.doSomething(); } }',
+      metadata: {
+        file: 'src/main/java/a/b/Caller.java',
+        startLine: 1,
+        endLine: 3,
+        type: 'function',
+        symbolName: 'methodOne',
+        symbolType: 'method',
+        language: 'java',
+        callSites: [{ symbol: 'Target', line: 3 }],
+      },
+    });
+    const callerMethodTwo = createTestChunk({
+      content: 'package a.b;\n\nclass Caller { void methodTwo() { Target.doSomethingElse(); } }',
+      metadata: {
+        file: 'src/main/java/a/b/Caller.java',
+        startLine: 5,
+        endLine: 7,
+        type: 'function',
+        symbolName: 'methodTwo',
+        symbolType: 'method',
+        language: 'java',
+        callSites: [{ symbol: 'Target', line: 7 }],
+      },
+    });
+
+    const graph = buildDependencyGraph([targetChunk, callerMethodOne, callerMethodTwo]);
+    const callers = graph.getCallers('src/main/java/a/b/Target.java', 'Target');
+
+    // Caller.java is ALSO a valid same-package referrer for the new tier
+    // (same package, textually references 'Target') -- so `jvmExtra` WOULD
+    // resolve it too, if the filter in `unionJvmSamePackageTier` were
+    // missing or wrong. The assertion below is deliberately NOT "no
+    // duplicate filepaths" (two real call sites legitimately sharing one
+    // filepath is normal and expected, both before and after this change) —
+    // it specifically checks that `base`'s two ORIGINAL entries (their real
+    // symbolNames and call-site lines) survive untouched, and that no THIRD,
+    // jvmExtra-shaped entry (which would carry a different, representative-
+    // chunk symbolName/line — see `buildRepresentativeEdge`) was added.
+    expect(callers).toHaveLength(2);
+    expect(callers.every(c => c.caller.filepath === 'src/main/java/a/b/Caller.java')).toBe(true);
+    expect(callers.map(c => c.caller.symbolName).sort()).toEqual(['methodOne', 'methodTwo']);
+    expect(callers.map(c => c.callSiteLine).sort((a, b) => a - b)).toEqual([3, 7]);
+    expect(callers.every(c => c.provenance === 'namespace-inferred')).toBe(true);
+  });
+
+  it('AC6 the inverted-gate divergence is intentional: findDependents (symbol-level) and getCallers legitimately disagree for the identical declared-type symbol', () => {
+    const targetChunk = createTestChunk({
+      content: 'package a.b;\n\npublic class Target { }',
+      metadata: {
+        file: 'src/main/java/a/b/Target.java',
+        startLine: 1,
+        endLine: 3,
+        type: 'class',
+        symbolName: 'Target',
+        symbolType: 'class',
+        language: 'java',
+        exports: ['Target'],
+      },
+    });
+    // A REAL import-verified caller with a real call site.
+    const importCaller = createTestChunk({
+      content:
+        'package x.y;\n\nimport a.b.Target;\n\nclass ImportCaller { void run() { Target.doSomething(); } }',
+      metadata: {
+        file: 'src/main/java/x/y/ImportCaller.java',
+        startLine: 1,
+        endLine: 3,
+        type: 'class',
+        symbolName: 'ImportCaller',
+        symbolType: 'class',
+        language: 'java',
+        importedSymbols: { 'src/main/java/a/b/Target': ['Target'] },
+        callSites: [{ symbol: 'Target', line: 3 }],
+      },
+    });
+    // A same-package caller with NO import, textual reference only.
+    const samePkgCaller = createTestChunk({
+      content: 'package a.b;\n\nclass SamePkgCaller { private Target target; }',
+      metadata: {
+        file: 'src/main/java/a/b/SamePkgCaller.java',
+        startLine: 1,
+        endLine: 3,
+        type: 'class',
+        symbolName: 'SamePkgCaller',
+        symbolType: 'class',
+        language: 'java',
+      },
+    });
+
+    const chunks = [targetChunk, importCaller, samePkgCaller];
+    const graph = buildDependencyGraph(chunks);
+
+    // getCallers (this PR's new tier) finds BOTH: the import-verified caller
+    // via the ordinary chain, AND the same-package caller via the new tier
+    // (fires unconditionally for a JVM type-symbol query, regardless of
+    // whether the base tier already found something).
+    const callers = graph.getCallers('src/main/java/a/b/Target.java', 'Target');
+    expect(callers.map(c => c.caller.filepath).sort()).toEqual([
+      'src/main/java/a/b/SamePkgCaller.java',
+      'src/main/java/x/y/ImportCaller.java',
+    ]);
+
+    // findDependents (Phase 1's file-level JVM recovery, `dependency-analyzer.ts`)
+    // finds ONLY the import-verified caller here — its JVM same-package
+    // recovery (`enrichWithJvmSamePackageDependents`) is gated to fire ONLY
+    // when `symbol` is undefined AND the import graph found LITERALLY ZERO
+    // dependents; neither holds here (a `symbol` was passed, AND the import
+    // graph already found `importCaller`), so it never runs and
+    // `samePkgCaller` is never recovered at the findDependents layer.
+    //
+    // This is a DELIBERATE, disclosed divergence, not a bug: the two
+    // mechanisms' firing conditions are exact inverses of each other by
+    // design (findDependents' recovery only fires on a zero-result miss;
+    // getCallers' new tier fires unconditionally for any JVM type symbol) —
+    // see dependency-analyzer.ts's `enrichWithJvmSamePackageDependents` doc
+    // comment and the "What does NOT change" section of #1005 Phase 2's
+    // design. A future reader must not "fix" this as an inconsistency.
+    const result = findDependents(
+      chunks,
+      'src/main/java/a/b/Target.java',
+      () => {
+        // Intentionally empty -- no log assertions in this test.
+      },
+      '',
+      'Target',
+    );
+    expect(result.dependents.map(d => d.filepath)).toEqual(['src/main/java/x/y/ImportCaller.java']);
+  });
+});
+
+describe('buildDependencyGraph — JVM same-package index built once per build (#1005 Phase 2 §5-f)', () => {
+  it('invokes buildJvmSamePackageIndex at most once across many distinct getCallers queries within one buildDependencyGraph call', () => {
+    const spy = vi.spyOn(jvmSignals, 'buildJvmSamePackageIndex');
+    spy.mockClear();
+
+    const chunks: CodeChunk[] = ['One', 'Two', 'Three'].map(name =>
+      createTestChunk({
+        content: `package a.b;\n\npublic class ${name} { }`,
+        metadata: {
+          file: `src/main/java/a/b/${name}.java`,
+          startLine: 1,
+          endLine: 3,
+          type: 'class',
+          symbolName: name,
+          symbolType: 'class',
+          language: 'java',
+          exports: [name],
+        },
+      }),
+    );
+
+    const graph = buildDependencyGraph(chunks);
+
+    // Never queried before this point -- the index must be built lazily on
+    // the FIRST of these, not eagerly inside buildDependencyGraph itself.
+    expect(spy).not.toHaveBeenCalled();
+
+    graph.getCallers('src/main/java/a/b/One.java', 'One');
+    graph.getCallers('src/main/java/a/b/Two.java', 'Two');
+    graph.getCallers('src/main/java/a/b/Three.java', 'Three');
+    graph.getCallers('src/main/java/a/b/One.java', 'One'); // repeat query
+
+    // Built once, then REUSED for every subsequent query in this same
+    // buildDependencyGraph call -- never rebuilt per filepath, per call, or
+    // even on a repeat query for the same filepath. Mirrors #1101's
+    // RecoveryIndexes discipline for findDependents.
+    expect(spy).toHaveBeenCalledTimes(1);
+
+    spy.mockRestore();
+  });
+
+  it('never builds the JVM index at all for a non-JVM query, even across a build that also contains JVM chunks', () => {
+    const spy = vi.spyOn(jvmSignals, 'buildJvmSamePackageIndex');
+    spy.mockClear();
+
+    const jvmChunk = createTestChunk({
+      content: 'package a.b;\n\npublic class Target { }',
+      metadata: {
+        file: 'src/main/java/a/b/Target.java',
+        startLine: 1,
+        endLine: 3,
+        type: 'class',
+        symbolName: 'Target',
+        symbolType: 'class',
+        language: 'java',
+        exports: ['Target'],
+      },
+    });
+    const tsChunk = createTestChunk({
+      metadata: {
+        file: 'src/utils/validate.ts',
+        startLine: 1,
+        endLine: 5,
+        type: 'function',
+        symbolName: 'validateEmail',
+        symbolType: 'function',
+        language: 'typescript',
+        exports: ['validateEmail'],
+      },
+    });
+
+    const graph = buildDependencyGraph([jvmChunk, tsChunk]);
+    graph.getCallers('src/utils/validate.ts', 'validateEmail');
+
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // isPreciseProvenance — the "verified vs. inferred" boundary consumed by
 // blast-radius-render.ts's Confidence column. `import-only` is precise: the
 // import IS verified for this exact symbol (see resolveOneChunkImports), it
@@ -1470,19 +1944,28 @@ describe('buildDependencyGraph <-> findDependents subset property (#1015 fix dir
     // Intentionally empty.
   }
 
-  // NOTE: `getCallers` returns the FIRST non-empty tier for a given
-  // `file::symbol` key (`callerEdges` -- which is where `import-verified` AND
+  // NOTE: within `resolveBaseTier` (the pre-#1005 chain), `getCallers`
+  // returns the FIRST non-empty tier for a given `file::symbol` key
+  // (`callerEdges` -- which is where `import-verified` AND
   // `symbol-name-match` both land, since both are written during the same
   // build pass -- then `importOnlyEdges`, then the C# fallback, then
   // require-only, last). That means `import-only` and a real call-site edge
-  // for the identical key can never BOTH appear in one `getCallers` result
-  // (`buildImportOnlyEdges` explicitly skips any key already covered by a
-  // real edge -- see its own doc comment), and likewise `require-only` never
-  // appears when a stronger tier already resolved the same key. Each tier is
-  // therefore exercised in its OWN minimal fixture below rather than one
-  // combined scenario -- forcing two tiers into a single `getCallers` call
-  // would just prove which one wins the priority order, not the subset
-  // property this describe block exists to check.
+  // for the identical key can never BOTH appear in one `resolveBaseTier`
+  // result (`buildImportOnlyEdges` explicitly skips any key already covered
+  // by a real edge -- see its own doc comment), and likewise `require-only`
+  // never appears when a stronger tier already resolved the same key. Each
+  // tier is therefore exercised in its OWN minimal fixture below rather than
+  // one combined scenario -- forcing two BASE tiers into a single
+  // `getCallers` call would just prove which one wins the priority order,
+  // not the subset property this describe block exists to check.
+  //
+  // #1005 Phase 2 makes this UNION -- not "first non-empty wins" -- true one
+  // level up: `getCallers` itself unions `resolveBaseTier`'s result with the
+  // JVM same-package tier (`resolveJvmSamePackageTier`), so a `namespace-inferred`
+  // JVM edge and an `import-verified` base edge for the SAME key legitimately
+  // can both appear in one `getCallers` result now -- see the
+  // "buildDependencyGraph — JVM same-package call-graph tier (#1005 Phase 2)"
+  // describe block below for that behavior, which is intentional, not a bug.
 
   it('import-only: the recovered caller file is already present in dependents (PHP PricingService shape)', () => {
     const classChunk = createTestChunk({
