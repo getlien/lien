@@ -300,12 +300,36 @@ function buildFilesByPackage(
 const IMPORT_LINE_RE = /^[ \t]*import\b/;
 
 /**
- * `content` with every `import` AND `package` declaration line removed.
- * Feeds the reference-matching body text (`nonImportContentByFile`) -- see
- * the module doc's G6 section and `collectShadowBindings`'s doc comment for
- * why import lines are excluded from the TEXT-MATCH corpus specifically: any
- * edge whose only textual evidence is an import line is a DOTTED-FQN import
- * Mechanism 1 (`jvm-source-root.ts`) already owns (confirmed for Java's
+ * Matches an entire Javadoc/KDoc or block comment (`/** ... *\/` or
+ * `/* ... *\/`), possibly spanning multiple lines -- `/**` is still just
+ * `/*` as far as this pattern cares, so no special case is needed for
+ * Javadoc/KDoc specifically. Non-greedy (`[\s\S]*?`) so two SEPARATE block
+ * comments on the same file don't collapse into one match spanning the real
+ * code between them.
+ *
+ * A `/*`-shaped sequence inside a STRING LITERAL (vanishingly rare in real
+ * Java/Kotlin source) would be misread as a real comment opener -- an
+ * accepted, fail-safe-direction limitation shared by any regex-based
+ * comment stripper: it can only over-strip (suppress a genuine match),
+ * never fabricate one.
+ */
+const BLOCK_COMMENT_RE = /\/\*[\s\S]*?\*\//g;
+
+/**
+ * A line whose ENTIRE trimmed text is a `//` line comment. Deliberately
+ * does NOT match a line with a TRAILING comment after real code (`foo(); //
+ * note`) -- see `stripCommentsImportsAndPackageLines`'s doc comment for why.
+ */
+const COMMENT_ONLY_LINE_RE = /^[ \t]*\/\//;
+
+/**
+ * `content` with every Javadoc/KDoc comment, `import` line, and `package`
+ * line removed. Feeds the reference-matching body text
+ * (`nonImportContentByFile`) -- see the module doc's G6 section and
+ * `collectShadowBindings`'s doc comment for why import lines are excluded
+ * from the TEXT-MATCH corpus specifically: any edge whose only textual
+ * evidence is an import line is a DOTTED-FQN import Mechanism 1
+ * (`jvm-source-root.ts`) already owns (confirmed for Java's
  * `import`/`import static` forms via `staticMemberClassPath`; Kotlin has no
  * equivalent static-member-import fallback -- see this module's own doc
  * comment on that gap).
@@ -323,18 +347,44 @@ const IMPORT_LINE_RE = /^[ \t]*import\b/;
  * reference to that type purely from the file's own header -- reusing
  * `PACKAGE_DECLARATION_RE` (the same single source of truth `derivePackage`
  * already uses) rather than a second copy of the pattern.
+ *
+ * Comments are stripped for a THIRD, PRE-EXISTING reason (#1005 Phase 3
+ * Item E, independent of Item D): a same-package file whose ONLY textual
+ * reference to a target type sits inside a Javadoc/KDoc comment (not real
+ * code) was counted as a genuine dependent by the already-shipped Phase 1
+ * resolver (#1100). Measured across 6 real Java/Kotlin corpora: 2.4%-19.6%
+ * of the resolver's currently-shipped edges rest SOLELY on a comment-only
+ * match (see the PR body for the exact per-corpus numbers) -- larger than
+ * Item D's entire measured gain.
+ *
+ * Deliberately stops at whole COMMENT-ONLY lines and full block comments,
+ * and does NOT also strip a trailing `// comment` that follows real code on
+ * the same line: measured (same 6 corpora) that recovering trailing
+ * same-line comments on top of this gains only 0-2 ADDITIONAL edges per
+ * corpus, against 100+ comment-only-line fabrications this already catches
+ * -- not worth the extra risk of a bare `//` inside a string literal (e.g. a
+ * URL) truncating a real code line if stripped blindly.
  */
-function stripImportAndPackageLines(content: string): string {
-  return content
+function stripCommentsImportsAndPackageLines(content: string): string {
+  const withoutBlockComments = content.replace(BLOCK_COMMENT_RE, '');
+  return withoutBlockComments
     .split('\n')
-    .filter(line => !IMPORT_LINE_RE.test(line) && !PACKAGE_DECLARATION_RE.test(line))
+    .filter(
+      line =>
+        !IMPORT_LINE_RE.test(line) &&
+        !PACKAGE_DECLARATION_RE.test(line) &&
+        !COMMENT_ONLY_LINE_RE.test(line),
+    )
     .join('\n');
 }
 
 function buildNonImportContentIndex(chunksByFile: Map<string, CodeChunk[]>): Map<string, string> {
   const out = new Map<string, string>();
   for (const [file, fileChunks] of chunksByFile) {
-    out.set(file, fileChunks.map(chunk => stripImportAndPackageLines(chunk.content)).join('\n'));
+    out.set(
+      file,
+      fileChunks.map(chunk => stripCommentsImportsAndPackageLines(chunk.content)).join('\n'),
+    );
   }
   return out;
 }
@@ -428,7 +478,7 @@ export interface JvmSamePackageIndex {
   pkgLocalOwners: Map<string, Set<string>>;
   /** package -> every JVM file with that derived package (G2 candidate set). */
   filesByPackage: Map<string, string[]>;
-  /** file -> its own content with `import` lines stripped (the G6/text-match corpus). */
+  /** file -> its own content with `import`/`package` lines and comments stripped (the G6/text-match corpus). */
   nonImportContentByFile: Map<string, string>;
   /** file -> its own single-type/single-static import bindings (G6). */
   shadowBindingsByFile: Map<string, Map<string, string>>;

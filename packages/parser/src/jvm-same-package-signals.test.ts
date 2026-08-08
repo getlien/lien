@@ -321,6 +321,81 @@ describe('findJvmSamePackageDependents', () => {
     );
   });
 
+  it('#1005 Phase 3 Item E: a candidate whose ONLY occurrence of the type name is inside a Javadoc/KDoc comment is not counted', () => {
+    const chunks: CodeChunk[] = [
+      declChunk('src/main/java/a/b/Foo.java', 'Foo', 'a.b'),
+      makeChunk({
+        file: 'src/main/java/a/b/Bar.java',
+        content:
+          'package a.b\n\n/**\n * See {@link Foo} for details.\n */\nclass Bar { void method() {} }',
+        symbolName: 'Bar',
+        symbolType: 'class',
+      }),
+    ];
+    expect(findJvmSamePackageDependents('src/main/java/a/b/Foo.java', chunks)).toEqual([]);
+  });
+
+  it('#1005 Phase 3 Item E: a candidate whose ONLY occurrence of the type name is inside a whole-line `//` comment is not counted', () => {
+    const chunks: CodeChunk[] = [
+      declChunk('src/main/java/a/b/Foo.java', 'Foo', 'a.b'),
+      makeChunk({
+        file: 'src/main/kotlin/a/b/Bar.kt',
+        content:
+          'package a.b\n\n// TODO: migrate this to use Foo once it stabilizes\nclass Bar { fun method() {} }',
+        symbolName: 'Bar',
+        symbolType: 'class',
+      }),
+    ];
+    expect(findJvmSamePackageDependents('src/main/java/a/b/Foo.java', chunks)).toEqual([]);
+  });
+
+  it('#1005 Phase 3 Item E: a multi-line block comment is fully removed without bleeding into the real code that follows it', () => {
+    const chunks: CodeChunk[] = [
+      declChunk('src/main/java/a/b/Foo.java', 'Foo', 'a.b'),
+      makeChunk({
+        file: 'src/main/java/a/b/Bar.java',
+        content:
+          'package a.b\n\n/*\n * Multi-line block comment mentioning Foo,\n * spanning several lines.\n */\nclass Bar { void method() {} }',
+        symbolName: 'Bar',
+        symbolType: 'class',
+      }),
+    ];
+    // The ONLY mention of "Foo" is inside the block comment -- must not resolve.
+    expect(findJvmSamePackageDependents('src/main/java/a/b/Foo.java', chunks)).toEqual([]);
+  });
+
+  it('#1005 Phase 3 Item E: a REAL code reference still resolves even when a nearby comment ALSO mentions the same name (comment-stripping must not eat adjacent real code)', () => {
+    const chunks: CodeChunk[] = [
+      declChunk('src/main/java/a/b/Foo.java', 'Foo', 'a.b'),
+      makeChunk({
+        file: 'src/main/java/a/b/Bar.java',
+        content:
+          'package a.b\n\n/**\n * Uses {@link Foo} internally.\n */\nclass Bar { void method() { Foo.doSomething(); } }',
+        symbolName: 'Bar',
+        symbolType: 'class',
+      }),
+    ];
+    expect(findJvmSamePackageDependents('src/main/java/a/b/Foo.java', chunks)).toEqual([
+      'src/main/java/a/b/Bar.java',
+    ]);
+  });
+
+  it('#1005 Phase 3 Item E: a REAL code reference before a TRAILING same-line comment still resolves (stripping never eats the code portion of a line, only whole comment-only lines/blocks)', () => {
+    const chunks: CodeChunk[] = [
+      declChunk('src/main/java/a/b/Foo.java', 'Foo', 'a.b'),
+      makeChunk({
+        file: 'src/main/java/a/b/Bar.java',
+        content:
+          'package a.b\n\nclass Bar { void method() { Foo.doSomething(); // legacy, TODO remove\n } }',
+        symbolName: 'Bar',
+        symbolType: 'class',
+      }),
+    ];
+    expect(findJvmSamePackageDependents('src/main/java/a/b/Foo.java', chunks)).toEqual([
+      'src/main/java/a/b/Bar.java',
+    ]);
+  });
+
   it('excludes the target file itself even when it references its own name', () => {
     const chunks: CodeChunk[] = [
       makeChunk({
