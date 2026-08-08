@@ -333,8 +333,17 @@ function buildReverseEdges(
  * Lazily-built project-wide indexes for the three non-import recovery tiers.
  * Built on first use, so a corpus with no zero-dependent C#/Go/JVM file pays
  * nothing for any of them.
+ *
+ * Exported so `dependency-analyzer.ts`'s `findDependents` can thread the
+ * exact same bag shape through its own `ScanContext` (#1101) -- this is the
+ * one shared home for "which of the three recovery indexes has been built
+ * so far in the current batch", rather than two structurally-identical
+ * interfaces declared separately. The two call sites' caching logic stays
+ * separate (`recoverDependentsForFile` below vs. the three
+ * `enrichWith*Dependents` functions) since their call shapes genuinely
+ * differ; only the bag's TYPE is shared.
  */
-interface RecoveryIndexes {
+export interface RecoveryIndexes {
   csharp?: ReturnType<typeof buildCSharpTypeReferenceIndex>;
   go?: ReturnType<typeof buildGoRootPackageIndex>;
   jvm?: ReturnType<typeof buildJvmSamePackageIndex>;

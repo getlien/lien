@@ -15,9 +15,20 @@ import {
   hasDependentAttributionBlindSpot,
 } from './ast/languages/registry.js';
 import { findChunkLineIndex } from './chunk-line-lookup.js';
-import { findCSharpTypeReferenceDependents } from './csharp-type-reference-signals.js';
-import { findGoRootPackageDependents } from './go-root-package-signals.js';
-import { findJvmSamePackageDependents } from './jvm-same-package-signals.js';
+import {
+  buildCSharpTypeReferenceIndex,
+  resolveCSharpTypeReferenceDependents,
+} from './csharp-type-reference-signals.js';
+import {
+  buildGoRootPackageIndex,
+  resolveGoRootPackageDependents,
+  isRootLevelGoFile,
+} from './go-root-package-signals.js';
+import {
+  buildJvmSamePackageIndex,
+  resolveJvmSamePackageDependents,
+} from './jvm-same-package-signals.js';
+import type { RecoveryIndexes } from './dependent-count-index.js';
 import type { InferredDependentMechanism } from './inferred-dependent-mechanisms.js';
 
 /**
@@ -1490,6 +1501,12 @@ function mergeChunksByFile<T extends CodeChunk>(
 /**
  * Shared context for a single `findDependents` call. These values always
  * travel together, so grouping them removes parameter noise from helpers.
+ *
+ * `recoveryIndexes` (#1101) is always populated by `findDependents` itself --
+ * either the caller-supplied batch-scoped bag, or a fresh `{}` scoped to just
+ * this one call -- so every one of the three `enrichWith*Dependents` helpers
+ * below can unconditionally read/write through it (`ctx.recoveryIndexes.jvm
+ * ??= buildJvmSamePackageIndex(...)`) with no extra undefined-check.
  */
 interface ScanContext<T extends CodeChunk> {
   importIndex: Map<string, ImportIndexEntry<T>[]>;
@@ -1497,6 +1514,7 @@ interface ScanContext<T extends CodeChunk> {
   normalizePathCached: (p: string) => string;
   log: (message: string, level?: 'warning') => void;
   workspaceRoot: string;
+  recoveryIndexes: RecoveryIndexes;
 }
 
 /**
@@ -1655,6 +1673,29 @@ function resolveDependents<T extends CodeChunk>(args: {
  * read from `process.cwd()` internally -- same reasoning as
  * `analyzeDependencies` above: keeps this function pure and independently
  * testable, with no hidden environment read.
+ *
+ * `recoveryIndexes` (#1101) is an optional, caller-threaded bag for the three
+ * non-import recovery tiers' project-wide indexes (C# type-reference, Go
+ * root-package, JVM same-package -- see the `enrichWith*Dependents`
+ * functions below). Omit it (the default) for a one-off call -- this
+ * function builds and discards a fresh, empty bag internally, identical to
+ * today's behavior for every existing caller. A caller that invokes this
+ * function in a loop over many FILE-LEVEL targets (no `symbol`) within ONE
+ * outer batch should construct ONE `{}` bag before the loop and pass the
+ * SAME object into every call -- each of the three tiers is then built at
+ * most once per batch and reused for the rest of it, mirroring
+ * `dependent-count-index.ts`'s own `RecoveryIndexes` batching discipline.
+ * Note the "FILE-LEVEL" qualifier is load-bearing: all three
+ * `enrichWith*Dependents` functions unconditionally no-op whenever `symbol`
+ * is set (see their shared `if (symbol || ...)` guard), so a caller that
+ * always queries with a `symbol` (`lien api-delta`'s `enrichDeltas`, which
+ * always passes `change.symbolName`) never reaches this tier at all,
+ * batched or not -- threading the bag through such a caller is still
+ * correct and harmless, just not currently observable as a speedup there
+ * (measured; see #1101's PR for the real before/after). Never a
+ * module-level cache keyed by workspace root: see `jvm-source-root.ts`'s own
+ * doc comment for why that goes stale under a long-running `lien serve` --
+ * this bag must stay scoped to one batch/call.
  */
 export function findDependents<T extends CodeChunk>(
   chunks: Iterable<T>,
@@ -1671,6 +1712,7 @@ export function findDependents<T extends CodeChunk>(
    * Default `false` keeps memory cost down for the common MCP path.
    */
   includeAllChunks: boolean = false,
+  recoveryIndexes?: RecoveryIndexes,
 ): FindDependentsResult<T> {
   const normalizePathCached = createPathNormalizer(workspaceRoot);
   const normalizedTarget = normalizePathCached(filepath);
@@ -1682,6 +1724,7 @@ export function findDependents<T extends CodeChunk>(
     normalizePathCached,
     log,
     workspaceRoot,
+    recoveryIndexes: recoveryIndexes ?? {},
   };
 
   const { targetIndexed, chunksByFile, reExporterPaths } = seedIfTargetIndexed(
@@ -1828,8 +1871,20 @@ function enrichWithCSharpTypeReferenceDependents<T extends CodeChunk>(
   const targetRawFile = targetChunks[0]?.metadata.file;
   if (!targetRawFile) return undefined;
 
+  // Build once per batch (#1101): a caller looping `findDependents` over many
+  // targets in one outer batch (`lien api-delta`'s `enrichDeltas`) threads
+  // the same `ctx.recoveryIndexes` bag through every call, so this only pays
+  // the project-wide index build for the FIRST zero-dependent C# target it
+  // reaches -- every subsequent one in the same batch reuses it. A one-off
+  // caller (the common `get_dependents` MCP path) gets a fresh, empty bag
+  // from `findDependents` itself, so this still builds exactly once per call,
+  // identical to before.
   const allChunks = Array.from(ctx.allChunksByFile.values()).flat();
-  const inferredFiles = findCSharpTypeReferenceDependents(targetRawFile, allChunks);
+  ctx.recoveryIndexes.csharp ??= buildCSharpTypeReferenceIndex(allChunks);
+  const inferredFiles = resolveCSharpTypeReferenceDependents(
+    targetRawFile,
+    ctx.recoveryIndexes.csharp,
+  );
   if (inferredFiles.length === 0) return undefined;
 
   for (const rawFile of inferredFiles) {
@@ -1860,9 +1915,10 @@ function enrichWithCSharpTypeReferenceDependents<T extends CodeChunk>(
  * Mirrors `enrichWithCSharpTypeReferenceDependents` immediately above in
  * every structural respect: file-level only (no `symbol`), only attempted
  * when the import graph found LITERALLY ZERO dependents, only for a
- * root-level Go file (`findGoRootPackageDependents` itself also checks this,
- * but checking here too avoids the corpus-wide index rebuild for every
- * non-Go or non-root query), and recovered entries are tagged
+ * root-level Go file (checked explicitly below via `isRootLevelGoFile`,
+ * mirroring `findGoRootPackageDependents`'s own guard -- kept here too so a
+ * non-root-level Go query never triggers `buildGoRootPackageIndex`'s
+ * corpus-wide scan, #1101), and recovered entries are tagged
  * `confidence: 'inferred'` -- not joined against `chunksByFile` for
  * complexity-metrics purposes, same reasoning as the C# recovery.
  */
@@ -1879,10 +1935,13 @@ function enrichWithGoRootPackageDependents<T extends CodeChunk>(
 
   const targetChunks = ctx.allChunksByFile.get(normalizedTarget) ?? [];
   const targetRawFile = targetChunks[0]?.metadata.file;
-  if (!targetRawFile) return undefined;
+  if (!targetRawFile || !isRootLevelGoFile(targetRawFile)) return undefined;
 
+  // Build once per batch (#1101) -- see the C# recovery's identical comment
+  // immediately above for the full reasoning.
   const allChunks = Array.from(ctx.allChunksByFile.values()).flat();
-  const inferredFiles = findGoRootPackageDependents(targetRawFile, allChunks, ctx.workspaceRoot);
+  ctx.recoveryIndexes.go ??= buildGoRootPackageIndex(allChunks, ctx.workspaceRoot);
+  const inferredFiles = resolveGoRootPackageDependents(targetRawFile, ctx.recoveryIndexes.go);
   if (inferredFiles.length === 0) return undefined;
 
   for (const rawFile of inferredFiles) {
@@ -1930,8 +1989,13 @@ function enrichWithJvmSamePackageDependents<T extends CodeChunk>(
   const targetRawFile = targetChunks[0]?.metadata.file;
   if (!targetRawFile) return undefined;
 
+  // Build once per batch (#1101) -- see the C# recovery's identical comment
+  // near the top of this file for the full reasoning. This is the tier the
+  // issue's own measurement targeted: ~37-40ms per rebuild on OkHttp
+  // (682 files / 9033 chunks).
   const allChunks = Array.from(ctx.allChunksByFile.values()).flat();
-  const inferredFiles = findJvmSamePackageDependents(targetRawFile, allChunks);
+  ctx.recoveryIndexes.jvm ??= buildJvmSamePackageIndex(allChunks);
+  const inferredFiles = resolveJvmSamePackageDependents(targetRawFile, ctx.recoveryIndexes.jvm);
   if (inferredFiles.length === 0) return undefined;
 
   for (const rawFile of inferredFiles) {

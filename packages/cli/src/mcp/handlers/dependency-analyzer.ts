@@ -4,6 +4,7 @@ import {
   buildDependencyGraph,
   type FindDependentsResult,
   type DependencyGraph,
+  type RecoveryIndexes,
 } from '@liendev/parser';
 
 export type { ComplexityMetrics, DependentInfo, SymbolUsage } from '@liendev/parser';
@@ -125,6 +126,20 @@ export async function getOrBuildDependencyGraph(
  * result). This wrapper's only jobs are: fetch (and cache) the chunk set
  * from the vectorDB via `getOrScanChunks`, and hand it to the parser's
  * pure, chunk-based engine.
+ *
+ * `recoveryIndexes` (#1101) is a pure pass-through -- this wrapper does no
+ * caching of its own, it just forwards whatever it's given (or `undefined`)
+ * to the parser-level call. A caller looping this function over many
+ * FILE-LEVEL (no `symbol`) targets within one process invocation should
+ * construct one `{}` bag and pass the same object on every call -- see the
+ * parser-level `findDependents`'s own doc comment for why the "FILE-LEVEL"
+ * qualifier matters (the three recovery tiers unconditionally skip whenever
+ * `symbol` is set, so `lien api-delta`'s `enrichDeltas` -- which always
+ * passes `change.symbolName` -- still threads this bag through per #1101's
+ * asked-for shape, but measured against a real corpus it doesn't currently
+ * change that command's output or wall-clock time). Every other caller (the
+ * MCP `get_dependents` handler,
+ * `lien annotate`) omits it and gets today's per-call-fresh behavior.
  */
 export async function findDependents(
   vectorDB: VectorDBInterface,
@@ -141,6 +156,7 @@ export async function findDependents(
    * Default `false` keeps memory cost down for the common MCP path.
    */
   includeAllChunks: boolean = false,
+  recoveryIndexes?: RecoveryIndexes,
 ): Promise<DependencyAnalysisResult> {
   const chunks = await getOrScanChunks(vectorDB, log, indexVersion);
   const workspaceRoot = process.cwd().replace(/\\/g, '/');
@@ -153,5 +169,6 @@ export async function findDependents(
     depth,
     maxNodes,
     includeAllChunks,
+    recoveryIndexes,
   );
 }

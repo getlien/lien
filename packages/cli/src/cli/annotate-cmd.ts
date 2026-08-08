@@ -436,6 +436,14 @@ async function computeAnnotationData(
   const log = () => undefined;
   // includeAllChunks=true: annotator needs the chunks for test-association
   // and complexity lookups. The default (false) keeps the MCP path cheap.
+  //
+  // No `recoveryIndexes` bag (#1101): `lien annotate <file>` takes exactly
+  // ONE file per process invocation (`.command('annotate <file>')` in
+  // `cli/index.ts`) and this is the only `findDependents` call in that
+  // invocation -- there is no loop here for a shared bag to amortize across,
+  // unlike `api-delta-cmd.ts`'s `enrichDeltas`. A fresh, call-scoped bag
+  // (built internally by `findDependents` when this param is omitted) is
+  // exactly as cheap as a shared one would be for a batch of one.
   const result = await findDependents(
     vectorDB,
     filepath,

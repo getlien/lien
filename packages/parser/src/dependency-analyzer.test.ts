@@ -17,6 +17,7 @@ import { clearGoModuleCache } from './go-module.js';
 import { clearRustCrateMapCache } from './rust-crate-map.js';
 import { clearRustCrateExportCache } from './rust-crate-exports.js';
 import type { CodeChunk, ChunkMetadata } from './types.js';
+import type { RecoveryIndexes } from './dependent-count-index.js';
 
 describe('analyzeDependencies', () => {
   const workspaceRoot = '/test/workspace';
@@ -1267,6 +1268,110 @@ describe('findDependents (Go root-package export-lookup recovery, #1039)', () =>
       expect(d.confidence).toBeUndefined();
       expect(d.inferredVia).toBeUndefined();
     }
+  });
+
+  it('reuses a caller-supplied recoveryIndexes bag across multiple findDependents calls in one batch (#1101)', () => {
+    // The exact shape `lien api-delta`'s `enrichDeltas` needs: one bag built
+    // before the loop, threaded into every `findDependents` call inside it.
+    // Asserting object identity (not just "same answer") is the point --
+    // the fix is specifically that `buildGoRootPackageIndex` runs at most
+    // ONCE for the whole batch, not once per call.
+    const chunks: CodeChunk[] = [
+      createGoChunk('context.go', { exports: ['RouteContext', 'NewRouteContext'] }),
+      createGoChunk('middleware/clean_path.go', {
+        imports: [MODULE_PREFIX],
+        callSites: ['RouteContext'],
+      }),
+    ];
+    const recoveryIndexes: RecoveryIndexes = {};
+
+    const first = findDependents(
+      chunks,
+      'context.go',
+      noopLog,
+      workspaceRoot,
+      undefined,
+      1,
+      500,
+      false,
+      recoveryIndexes,
+    );
+    expect(first.dependents.map(d => d.filepath)).toEqual(['middleware/clean_path.go']);
+    const builtIndex = recoveryIndexes.go;
+    expect(builtIndex).toBeDefined();
+
+    const second = findDependents(
+      chunks,
+      'context.go',
+      noopLog,
+      workspaceRoot,
+      undefined,
+      1,
+      500,
+      false,
+      recoveryIndexes,
+    );
+    // Same object reference reused -- proof the second call never rebuilt it.
+    expect(recoveryIndexes.go).toBe(builtIndex);
+    expect(second.dependents.map(d => d.filepath)).toEqual(['middleware/clean_path.go']);
+  });
+
+  it('produces identical results whether or not a recoveryIndexes bag is threaded through (batching only caches, never changes the answer)', () => {
+    const chunks: CodeChunk[] = [
+      createGoChunk('context.go', { exports: ['RouteContext', 'NewRouteContext'] }),
+      createGoChunk('middleware/clean_path.go', {
+        imports: [MODULE_PREFIX],
+        callSites: ['RouteContext'],
+      }),
+      createGoChunk('middleware/get_head.go', {
+        imports: [MODULE_PREFIX],
+        callSites: ['RouteContext', 'NewRouteContext'],
+      }),
+    ];
+
+    const withoutBag = findDependents(chunks, 'context.go', noopLog, workspaceRoot);
+    const sharedBag: RecoveryIndexes = {};
+    const withBag = findDependents(
+      chunks,
+      'context.go',
+      noopLog,
+      workspaceRoot,
+      undefined,
+      1,
+      500,
+      false,
+      sharedBag,
+    );
+
+    expect(withBag.dependents).toEqual(withoutBag.dependents);
+    expect(withBag.dependentAttributionPartial).toBe(withoutBag.dependentAttributionPartial);
+  });
+
+  it('never builds the Go root-package index for a non-root-level Go file, even when a shared recoveryIndexes bag is supplied (preserves the single-shot short-circuit)', () => {
+    // `enrichWithGoRootPackageDependents` must check `isRootLevelGoFile`
+    // BEFORE touching `ctx.recoveryIndexes.go` -- otherwise a single MCP
+    // query for a zero-dependent, non-root-level Go file would start paying
+    // the corpus-wide index build it never paid before #1101.
+    const chunks: CodeChunk[] = [
+      createGoChunk('sub/helper.go', { exports: ['Helper'] }),
+      createGoChunk('sub/unrelated.go', {}),
+    ];
+    const recoveryIndexes: RecoveryIndexes = {};
+
+    const result = findDependents(
+      chunks,
+      'sub/helper.go',
+      noopLog,
+      workspaceRoot,
+      undefined,
+      1,
+      500,
+      false,
+      recoveryIndexes,
+    );
+
+    expect(result.dependents).toEqual([]);
+    expect(recoveryIndexes.go).toBeUndefined();
   });
 
   it('does NOT fabricate a false hub: two unrelated root files get disjoint dependents (the #1056 failure shape, checked explicitly)', () => {
