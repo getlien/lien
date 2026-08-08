@@ -37,6 +37,7 @@ export class JavaTraverser implements LanguageTraverser {
     'interface_declaration',
     'enum_declaration',
     'record_declaration',
+    'annotation_type_declaration',
   ];
 
   declarationTypes = ['local_variable_declaration'];
@@ -53,6 +54,17 @@ export class JavaTraverser implements LanguageTraverser {
   }
 
   getContainerBody(node: SyntaxNode): SyntaxNode | null {
+    // Annotation declarations (`@interface Foo {}`) deliberately never
+    // descend into their own body -- #1005 Phase 3 Item B explicitly
+    // excludes annotation MEMBERS (`String value();`-style element
+    // declarations) from extraction. `annotation_type_declaration` is a
+    // container only for `shouldExtractChildren` (so it still becomes its
+    // own top-level chunk the normal way); this early return is what stops
+    // `findTopLevelNodes` from ever traversing into `annotation_type_body`.
+    // Mirrors the Python `decorated_definition` precedent `emitsChildChunks`'s
+    // doc comment (ast/chunker.ts) describes: a node type can state
+    // `shouldExtractChildren`'s intent to descend and then decline it here.
+    if (node.type === 'annotation_type_declaration') return null;
     if (this.containerTypes.includes(node.type)) {
       return node.childForFieldName('body');
     }
@@ -138,14 +150,17 @@ export class JavaExportExtractor implements LanguageExportExtractor {
       case 'class_declaration':
       case 'interface_declaration':
       case 'enum_declaration':
-      case 'record_declaration': {
-        if (hasPublicModifier(node)) {
-          const nameNode = node.childForFieldName('name');
-          if (nameNode) addExport(nameNode.text);
-        }
+      case 'record_declaration':
+        exportNameIfPublic(node, addExport);
         this.extractPublicMembers(node, addExport);
         break;
-      }
+      case 'annotation_type_declaration':
+        // #1005 Phase 3 Item B: only the annotation's OWN name is exported
+        // when public -- annotation MEMBERS (`String value();`-style
+        // element declarations) are deliberately excluded, so unlike the
+        // type declarations above this never calls `extractPublicMembers`.
+        exportNameIfPublic(node, addExport);
+        break;
     }
   }
 
@@ -357,6 +372,7 @@ export class JavaSymbolExtractor implements LanguageSymbolExtractor {
     'interface_declaration',
     'enum_declaration',
     'record_declaration',
+    'annotation_type_declaration',
   ];
 
   extractSymbol(node: SyntaxNode, content: string, parentClass?: string): SymbolInfo | null {
@@ -373,6 +389,8 @@ export class JavaSymbolExtractor implements LanguageSymbolExtractor {
         return this.extractEnumInfo(node, parentClass);
       case 'record_declaration':
         return this.extractRecordInfo(node, parentClass);
+      case 'annotation_type_declaration':
+        return this.extractAnnotationInfo(node, parentClass);
       default:
         return null;
     }
@@ -498,6 +516,31 @@ export class JavaSymbolExtractor implements LanguageSymbolExtractor {
       signature: clampSignatureLength(`record ${nameNode.text}${typeParamsAndHeritage(node)}`),
     };
   }
+
+  /**
+   * #1005 Phase 3 Item B: `@interface Foo {}` maps to `symbolType: 'interface'`
+   * -- mirrors the existing `record_declaration` -> `'class'` precedent
+   * directly above rather than introducing a new `'annotation'` member to
+   * `ChunkMetadata['symbolType']`'s closed union (rejected: ~14 hand-maintained
+   * duplicate-union-site updates with no compiler safety net, for a purely
+   * cosmetic distinction -- `'interface'` already works everywhere). An
+   * annotation declaration has no type parameters and no
+   * extends/implements heritage, so unlike the other type-declaration
+   * handlers this doesn't call `typeParamsAndHeritage` at all.
+   */
+  private extractAnnotationInfo(node: SyntaxNode, parentClass?: string): SymbolInfo | null {
+    const nameNode = node.childForFieldName('name');
+    if (!nameNode) return null;
+
+    return {
+      name: nameNode.text,
+      type: 'interface',
+      startLine: node.startPosition.row + 1,
+      endLine: node.endPosition.row + 1,
+      parentClass,
+      signature: clampSignatureLength(`@interface ${nameNode.text}`),
+    };
+  }
 }
 
 // =============================================================================
@@ -513,6 +556,19 @@ function hasPublicModifier(node: SyntaxNode): boolean {
   const modifiers = node.children.find(child => child.type === 'modifiers');
   if (!modifiers) return false;
   return modifiers.children.some(child => child.type === 'public');
+}
+
+/**
+ * `addExport(node's name)` iff `node` has a `public` modifier and a `name`
+ * field -- the shared "export the declaration's own name" step every
+ * top-level type-declaration case in `extractFromNode` needs, factored out
+ * so adding the annotation case (#1005 Phase 3 Item B) didn't have to
+ * duplicate it a third time.
+ */
+function exportNameIfPublic(node: SyntaxNode, addExport: (name: string) => void): void {
+  if (!hasPublicModifier(node)) return;
+  const nameNode = node.childForFieldName('name');
+  if (nameNode) addExport(nameNode.text);
 }
 
 const ACCESS_MODIFIER_TYPES = new Set(['public', 'private', 'protected']);
