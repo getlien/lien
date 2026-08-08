@@ -20,6 +20,8 @@ import {
   hasEnclosingNamespaceAccess,
   buildCSharpTypeReferenceIndex,
   resolveCSharpTypeReferenceDependents,
+  buildJvmSamePackageIndex,
+  resolveJvmSamePackageDependents,
   MAX_CHUNKS_PER_FILE,
   DEFAULT_COMPLEXITY_DELTA_THRESHOLDS,
   type GoTestCandidate,
@@ -27,6 +29,7 @@ import {
   type JavaTestCandidate,
   type JavaTestDirIndex,
   type CSharpTypeReferenceIndex,
+  type JvmSamePackageIndex,
 } from '@liendev/parser';
 import type { SearchResult, VectorDBInterface } from '@liendev/core';
 
@@ -444,6 +447,66 @@ function collectCSharpNamespaceTestFiles(
 }
 
 /**
+ * #1005 Phase 2, Item 2: true only for Kotlin -- deliberately NOT a
+ * registry-flag predicate like `hasGoSameDirectoryConvention`/
+ * `hasJavaSamePackageConvention`/`hasCSharpEnclosingNamespaceConvention`
+ * above. Java already owns `samePackageTestConvention` and its own
+ * PATH-derived mechanism; this is a SEPARATE, CONTENT-derived mechanism for
+ * Kotlin specifically -- see `@liendev/parser`'s `test-associations.ts`
+ * (`isKotlinFile`) for the full reasoning this mirrors.
+ */
+function isKotlinFile(filepath: string): boolean {
+  return detectLanguage(filepath) === 'kotlin';
+}
+
+/**
+ * #1005 Phase 2, Item 2: Kotlin's same-package type-reference index, built
+ * once per `findTestAssociations` call and reused for every target file
+ * below — mirrors `buildCSharpTestIndexFromChunks` immediately above
+ * exactly, including the same canonicalization: `resolveJvmSamePackageDependents`
+ * needs each chunk's file keyed EXACTLY as it appears in the index (see
+ * that function's doc comment in `@liendev/parser`), and `chunk.metadata.file`
+ * can be absolute here.
+ */
+function buildJvmTestIndexFromChunks(
+  allChunks: SearchResult[],
+  workspaceRoot: string,
+): JvmSamePackageIndex {
+  const canonicalChunks = allChunks.map(chunk => ({
+    ...chunk,
+    metadata: { ...chunk.metadata, file: getCanonicalPath(chunk.metadata.file, workspaceRoot) },
+  }));
+  return buildJvmSamePackageIndex(canonicalChunks);
+}
+
+/**
+ * #1005 Phase 2, Item 2: Kotlin's same-package test convention has no
+ * basename pairing to fall back on the way Java's does (Java keeps its own,
+ * separate `pairJavaBasenameTest` tier above -- this doesn't replace it,
+ * and doesn't apply to Java at all). Reuses `resolveJvmSamePackageDependents`
+ * -- Phase 1's FILE-LEVEL resolver (#1100), the SAME signal `get_dependents`'s
+ * file-level recovery already relies on -- filtered to the test-file subset
+ * of `filepath`'s recovered dependents. Deliberately the file-level
+ * resolver, not #1005 Phase 2 Item 1's per-type
+ * `resolveJvmSamePackageDependentsForType`: "which tests exercise this
+ * file" is inherently a file-level question, and this tool's per-file
+ * `testAssociations` field is file-keyed, not type-keyed. See
+ * `@liendev/parser`'s `test-associations.ts`
+ * (`collectKotlinSamePackageTests`) for the full precision reasoning; this
+ * is `get_files_context`'s own separate implementation of the identical
+ * tier (mirrors `collectCSharpNamespaceTestFiles` immediately above).
+ */
+function collectKotlinSamePackageTestFiles(
+  filepath: string,
+  jvmIndex: JvmSamePackageIndex,
+  workspaceRoot: string,
+): string[] {
+  if (!isKotlinFile(filepath)) return [];
+  const canonicalTarget = getCanonicalPath(filepath, workspaceRoot);
+  return resolveJvmSamePackageDependents(canonicalTarget, jvmIndex).filter(isTestFile);
+}
+
+/**
  * Find test files that import the given source files.
  *
  * Scans all indexed chunks to find test files that have import
@@ -478,6 +541,7 @@ export function findTestAssociations(
   const goTestDirIndex = buildGoTestDirIndexFromChunks(allChunks, workspaceRoot, normalize);
   const javaTestDirIndex = buildJavaTestDirIndexFromChunks(allChunks, workspaceRoot, normalize);
   const csharpIndex = buildCSharpTestIndexFromChunks(allChunks, workspaceRoot);
+  const jvmIndex = buildJvmTestIndexFromChunks(allChunks, workspaceRoot);
 
   return filepaths.map(filepath => {
     const normalizedTarget = normalize(filepath);
@@ -486,6 +550,7 @@ export function findTestAssociations(
       ...collectGoBasenameTestFiles(filepath, normalizedTarget, goTestDirIndex),
       ...collectJavaBasenameTestFiles(filepath, normalizedTarget, javaTestDirIndex),
       ...collectCSharpNamespaceTestFiles(filepath, csharpIndex, workspaceRoot),
+      ...collectKotlinSamePackageTestFiles(filepath, jvmIndex, workspaceRoot),
     ]);
 
     return Array.from(testFiles);
