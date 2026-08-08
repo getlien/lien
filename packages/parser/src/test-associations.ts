@@ -8,6 +8,7 @@ import {
   normalizePath,
   importMatchesTarget,
   isUnresolvableWholeModuleImport,
+  getCanonicalPath,
 } from './utils/path-matching.js';
 import {
   detectLanguage,
@@ -33,6 +34,11 @@ import {
   resolveCSharpTypeReferenceDependents,
   type CSharpTypeReferenceIndex,
 } from './csharp-type-reference-signals.js';
+import {
+  buildJvmSamePackageIndex,
+  resolveJvmSamePackageDependents,
+  type JvmSamePackageIndex,
+} from './jvm-same-package-signals.js';
 import type { CodeChunk } from './types.js';
 
 /**
@@ -63,6 +69,25 @@ function hasJavaSamePackageConvention(filepath: string): boolean {
 function hasCSharpEnclosingNamespaceConvention(filepath: string): boolean {
   const language = detectLanguage(filepath);
   return language !== null && hasEnclosingNamespaceAccess(language);
+}
+
+/**
+ * #1005 Phase 2, Item 2: true only for Kotlin, deliberately NOT a
+ * registry-flag predicate like the three helpers above. Java already owns
+ * `samePackageTestConvention` (`hasJavaSamePackageConvention`) and its own
+ * PATH-derived mechanism (`java-same-package-tests.ts`, keyed on the
+ * `src/<sourceSet>/java/` Standard Directory Layout marker, which is
+ * Kotlin-blind by construction -- see `jvm-same-package-signals.test.ts`'s
+ * "cross-check" describe block). This is a SEPARATE, CONTENT-derived
+ * mechanism (Phase 1's `package` declaration scan) for Kotlin specifically:
+ * measurement during the plan review found a Kotlin-targeted path-regex
+ * extension of Java's mechanism contributes little beyond what this
+ * content-derived tier alone already finds, and never fires at all on
+ * heavily-multiplatform-Kotlin layouts -- so Kotlin gets ONLY this
+ * mechanism, not a second one layered on top.
+ */
+function isKotlinFile(filepath: string): boolean {
+  return detectLanguage(filepath) === 'kotlin';
 }
 
 /**
@@ -194,6 +219,69 @@ function collectCSharpNamespaceTests(
 }
 
 /**
+ * `getCanonicalPath(rawFile, workspaceRoot)` -> `rawFile`, for every JVM
+ * (Java+Kotlin) file `jvmIndex` knows about -- built once and reused for
+ * every target file below, mirroring `buildJvmSamePackageIndex` itself
+ * being built once.
+ *
+ * `resolveJvmSamePackageDependents` requires `targetFile` to be the EXACT
+ * `chunk.metadata.file` string used when `jvmIndex` was built (see that
+ * function's doc comment). `findTestAssociationsFromChunks` is reached with
+ * several different path forms from different callers (some
+ * workspace-relative with an explicit `rootDir`, at least one --
+ * `insights/chunk-complexity.ts` -- with NO root passed at all, defaulting
+ * to `process.cwd()`), so comparing a caller's raw `filepath`
+ * against the raw index directly risks a silent `[]` on any form mismatch --
+ * exactly the "clean-looking zero" this repo's index-state-honesty policy
+ * forbids. `collectCSharpNamespaceTests` immediately above has exactly this
+ * latent gap (no canonicalization at all against `csharpIndex`); deliberately
+ * NOT copied forward here. Canonicalizing via `getCanonicalPath` on BOTH the
+ * index-build side (this map) and the query side
+ * (`collectKotlinSamePackageTests`) closes it for the new tier, while
+ * `resolveJvmSamePackageDependents`'s OWN raw-form output (and therefore
+ * this module's whole `testFiles` Set convention, which every other tier
+ * here already returns in raw `chunk.metadata.file` form) stays unchanged --
+ * `jvmIndex` itself is still built from the untouched, raw `chunks` array.
+ */
+function buildRawJvmFileByCanonical(
+  jvmIndex: JvmSamePackageIndex,
+  workspaceRoot: string,
+): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const rawFile of jvmIndex.chunksByFile.keys()) {
+    out.set(getCanonicalPath(rawFile, workspaceRoot), rawFile);
+  }
+  return out;
+}
+
+/**
+ * #1005 Phase 2, Item 2: Kotlin's same-package test convention -- like
+ * Java's (#925) and C#'s (#1040), a Kotlin test class commonly lives in the
+ * same package as its subject with no import connecting them at all.
+ * Deliberately reuses Phase 1's FILE-LEVEL `resolveJvmSamePackageDependents`
+ * (#1100) -- NOT #1005 Phase 2 Item 1's per-type
+ * `resolveJvmSamePackageDependentsForType` -- because "which tests exercise
+ * this file" is inherently a file-level question, and this module's
+ * consumer (`hasTestCoverage` in `@liendev/review`'s `blast-radius.ts`,
+ * file-keyed) needs a file-level answer, not a type-scoped one.
+ *
+ * See `buildRawJvmFileByCanonical`'s doc comment for why `filepath` is
+ * canonicalized before ever touching `jvmIndex`, rather than compared
+ * directly the way `collectCSharpNamespaceTests` does.
+ */
+function collectKotlinSamePackageTests(
+  filepath: string,
+  jvmIndex: JvmSamePackageIndex,
+  rawJvmFileByCanonical: ReadonlyMap<string, string>,
+  workspaceRoot: string,
+): string[] {
+  if (!isKotlinFile(filepath)) return [];
+  const rawFile = rawJvmFileByCanonical.get(getCanonicalPath(filepath, workspaceRoot));
+  if (!rawFile) return [];
+  return resolveJvmSamePackageDependents(rawFile, jvmIndex).filter(isTestFile);
+}
+
+/**
  * #902: Go's dominant same-package test convention emits no import statement
  * at all, so `collectImportMatchedTests` is structurally blind to it. Builds
  * a directory index of same-directory-test-convention (Go) test chunks --
@@ -268,6 +356,13 @@ export function findTestAssociationsFromChunks(
   // needs every declaration) and reused for every target file below, same
   // "build once" discipline as the two indexes above.
   const csharpIndex = buildCSharpTypeReferenceIndex(chunks);
+  // #1005 Phase 2, Item 2: Kotlin's same-package test-association index,
+  // same "build once, project-wide" discipline -- see
+  // `buildRawJvmFileByCanonical`'s doc comment for why the canonical-path
+  // lookup is a SEPARATE map built alongside it, not folded into
+  // `JvmSamePackageIndex` itself.
+  const jvmIndex = buildJvmSamePackageIndex(chunks);
+  const rawJvmFileByCanonical = buildRawJvmFileByCanonical(jvmIndex, workspaceRoot);
 
   for (const filepath of filepaths) {
     const normalizedTarget = normalize(filepath);
@@ -276,6 +371,7 @@ export function findTestAssociationsFromChunks(
       ...collectGoBasenameTests(filepath, normalizedTarget, goTestDirIndex),
       ...collectJavaBasenameTests(filepath, normalizedTarget, javaTestDirIndex),
       ...collectCSharpNamespaceTests(filepath, csharpIndex),
+      ...collectKotlinSamePackageTests(filepath, jvmIndex, rawJvmFileByCanonical, workspaceRoot),
     ]);
 
     if (testFiles.size > 0) {

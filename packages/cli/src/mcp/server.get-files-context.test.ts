@@ -68,6 +68,41 @@ function mockCSharpChunk(opts: {
 }
 
 /**
+ * #1005 Phase 2, Item 2: a real Kotlin type declaration/usage `SearchResult`,
+ * with a `package X` line in content (Phase 1's content-derived package
+ * scan) -- mirrors `mockCSharpChunk` above, needed because
+ * `findTestAssociations`'s Kotlin tier (`collectKotlinSamePackageTestFiles`)
+ * reads `content`/`symbolType`/`symbolName`, not just
+ * `metadata.file`/`imports` like the plain `mockSearchResult` above.
+ */
+function mockKotlinChunk(opts: {
+  file: string;
+  symbolName: string;
+  pkg?: string;
+  declares?: boolean;
+  references?: string[];
+}): SearchResult {
+  const pkgPrefix = opts.pkg ? `package ${opts.pkg}\n\n` : '';
+  const body = opts.declares
+    ? `class ${opts.symbolName} { }`
+    : (opts.references ?? []).map(name => `val x = ${name}()`).join('\n');
+  return {
+    content: `${pkgPrefix}${body}`,
+    metadata: {
+      file: opts.file,
+      startLine: 1,
+      endLine: 10,
+      type: opts.declares ? 'class' : 'function',
+      language: 'kotlin',
+      symbolName: opts.symbolName,
+      symbolType: opts.declares ? 'class' : 'method',
+    },
+    score: 0,
+    relevance: 'not_relevant',
+  };
+}
+
+/**
  * Unit tests for get_files_context handler and helper functions.
  *
  * Tests cover:
@@ -463,6 +498,80 @@ describe('get_files_context - Helper Functions', () => {
       const result = findTestAssociations(['src/MediatR/IRequestHandler.cs'], mockChunks, ctx);
 
       expect(result[0]).toEqual(['test/MediatR.Tests/PipelineTests.cs']);
+    });
+
+    // #1005 Phase 2, Item 2: Kotlin's same-package test convention -- like
+    // C#'s above, no import statement AND (unlike Java's) no basename
+    // relationship required.
+    it('associates a Kotlin test file with its subject via same-package access, with no import at all (#1005 Phase 2)', () => {
+      const mockChunks = [
+        mockKotlinChunk({
+          file: 'src/main/kotlin/a/b/Foo.kt',
+          symbolName: 'Foo',
+          pkg: 'a.b',
+          declares: true,
+        }),
+        mockKotlinChunk({
+          file: 'src/test/kotlin/a/b/FooCoverage.kt',
+          symbolName: 'testMethod',
+          pkg: 'a.b',
+          references: ['Foo'],
+        }),
+      ];
+
+      const ctx = {
+        vectorDB: {} as any,
+        embeddings: {} as any,
+        log: vi.fn(),
+        workspaceRoot,
+      };
+
+      const result = findTestAssociations(['src/main/kotlin/a/b/Foo.kt'], mockChunks, ctx);
+
+      expect(result[0]).toEqual(['src/test/kotlin/a/b/FooCoverage.kt']);
+    });
+
+    // #1005 Phase 2, Item 2, AC8: `resolveJvmSamePackageDependents` requires
+    // an EXACT `chunk.metadata.file` string match. Without canonicalizing
+    // both the index-build side and the query side (see
+    // `buildJvmTestIndexFromChunks`/`collectKotlinSamePackageTestFiles`),
+    // a query filepath in a different (but equivalent, under the same
+    // workspaceRoot) form than the chunk's own ABSOLUTE `metadata.file`
+    // would silently return zero associations -- exactly the kind of
+    // clean-looking-but-wrong zero this repo's index-state-honesty policy
+    // forbids. This proves it does not.
+    it('does not silently return zero associations when the query filepath form differs from an absolute chunk.metadata.file (#1005 Phase 2 AC8)', () => {
+      const mockChunks = [
+        mockKotlinChunk({
+          file: `${workspaceRoot}/src/main/kotlin/a/b/Foo.kt`,
+          symbolName: 'Foo',
+          pkg: 'a.b',
+          declares: true,
+        }),
+        mockKotlinChunk({
+          file: `${workspaceRoot}/src/test/kotlin/a/b/FooCoverage.kt`,
+          symbolName: 'testMethod',
+          pkg: 'a.b',
+          references: ['Foo'],
+        }),
+      ];
+
+      const ctx = {
+        vectorDB: {} as any,
+        embeddings: {} as any,
+        log: vi.fn(),
+        workspaceRoot,
+      };
+
+      // Query with the WORKSPACE-RELATIVE form -- a different raw string
+      // than the chunks' absolute `metadata.file` above, but the same file
+      // once canonicalized against workspaceRoot. This file's convention
+      // (unlike `@liendev/parser`'s `test-associations.ts`) canonicalizes
+      // every tier's output, so the expected result is the CANONICAL
+      // (workspace-relative) form, not the chunks' raw absolute one.
+      const result = findTestAssociations(['src/main/kotlin/a/b/Foo.kt'], mockChunks, ctx);
+
+      expect(result[0]).toEqual(['src/test/kotlin/a/b/FooCoverage.kt']);
     });
   });
 

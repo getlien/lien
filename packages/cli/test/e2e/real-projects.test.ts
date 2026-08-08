@@ -159,9 +159,6 @@ const KNOWN_ZERO_EDGE_LANGUAGES = new Set(['swift']);
  * skip, so a real fix makes this fail loudly instead of staying silently
  * green).
  *
- * - **kotlin**: documented and accepted -- see `sameUnitAccessWithoutImport`
- *   in `ast/languages/kotlin.ts`: "no verified Kotlin Gradle test-source
- *   recovery exists" (#1005). Measured: Klaxon, 0/100 sampled files.
  * - **swift**: documented and accepted, #869 ("whole-module-import
  *   languages have no per-file test-association signal -- structural gap,
  *   not a matching bug"). Measured: SwiftyJSON, 0/27 files.
@@ -177,12 +174,22 @@ const KNOWN_ZERO_EDGE_LANGUAGES = new Set(['swift']);
  * associations across all 160; see MediatR's own `expectedMinTestAssociations`
  * for the 100-file-sampled floor this test actually asserts).
  *
+ * **kotlin is FIXED (#1005 Phase 2, Item 2)** and no longer belongs in this
+ * set: `test-associations.ts` now reuses `resolveJvmSamePackageDependents`
+ * (the SAME same-package signal Phase 1's `findDependents` file-level
+ * recovery already relies on, #1100) filtered to test files, recovering
+ * Kotlin's same-package test convention -- a Kotlin test class references
+ * its subject with no import at all, the same structural gap Go/Java/C#
+ * each had their own version of. Measured: Klaxon, 0/100 -> 22/100 sampled
+ * files (142 associations; see Klaxon's own `expectedMinTestAssociations`
+ * for the floor this test actually asserts).
+ *
  * Note this is a DIFFERENT set from `KNOWN_ZERO_EDGE_LANGUAGES`: Java is
  * zero-edge (#1005) but NOT zero-test-association -- `samePackageTestConvention`
  * covers test association only, not dependents, exactly as #1005 documents.
  * Measured: JavaPoet, 13/43 files, real non-zero test associations.
  */
-const KNOWN_ZERO_TESTASSOC_LANGUAGES = new Set(['kotlin', 'swift']);
+const KNOWN_ZERO_TESTASSOC_LANGUAGES = new Set(['swift']);
 
 /**
  * Test projects for each supported language
@@ -432,11 +439,16 @@ const TEST_PROJECTS: ProjectConfig[] = [
     // roughly-half collapse, not just a total-collapse-to-zero (#1053).
     expectedMinDependencyEdges: 112,
     expectedMinComplexityViolations: 3, // measured ~16 (2026-08)
-    // KNOWN GAP: #1005's `sameUnitAccessWithoutImport` -- "no verified
-    // Kotlin Gradle test-source recovery exists". See
-    // KNOWN_ZERO_TESTASSOC_LANGUAGES: exact-zero tripwire, not a floor, used
-    // instead of this value.
-    expectedMinTestAssociations: 0,
+    // #1005 Phase 2, Item 2 fix: Kotlin's same-package test convention
+    // (no import at all connecting a test class to its subject) is now
+    // recovered via `resolveJvmSamePackageDependents`, the same mechanism
+    // Phase 1 already uses for `findDependents`. Measured 142 associations
+    // across the 100-file sample (22/100 files with at least one, 2026-08).
+    // Floor is ~50% of measured, the same "catch a roughly-half collapse"
+    // guideline `expectedMinDependencyEdges` above already uses for this
+    // project -- not a floor tight enough to double as an exact-count
+    // regression test.
+    expectedMinTestAssociations: 70,
     expectedMinChunksWithExports: 100, // measured ~938/987 chunks (2026-08)
     knownSymbolQuery: 'JsonObject',
     knownSymbolFile: 'klaxon/src/main/kotlin/com/beust/klaxon/JsonObject.kt',

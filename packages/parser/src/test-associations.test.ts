@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { findTestAssociationsFromChunks } from './test-associations.js';
+import { findJvmSamePackageDependents } from './jvm-same-package-signals.js';
 import type { CodeChunk } from './types.js';
 
 function makeChunk(file: string, imports: string[] = []): CodeChunk {
@@ -375,6 +376,146 @@ describe('findTestAssociationsFromChunks', () => {
       expect(result.get('src/MediatR/IRequestHandler.cs')).toContain(
         'test/MediatR.Tests/OtherTests.cs',
       );
+    });
+  });
+
+  describe('Kotlin same-package test convention (#1005 Phase 2, Item 2)', () => {
+    // A real Kotlin/Java type declaration chunk, packaged via a `package X`
+    // content line (Phase 1's content-derived package scan) -- mirrors
+    // `csharpDecl` above.
+    function jvmDecl(file: string, symbolName: string, pkg: string, language: string): CodeChunk {
+      return {
+        content: `package ${pkg}\n\nclass ${symbolName} { }`,
+        metadata: {
+          file,
+          startLine: 1,
+          endLine: 10,
+          type: 'class',
+          language,
+          symbolName,
+          symbolType: 'class',
+        },
+      };
+    }
+
+    // A JVM usage chunk (e.g. a test method) that references `references` by
+    // bare name, with no import at all -- mirrors `csharpUsage` above.
+    function jvmUsage(
+      file: string,
+      references: string[],
+      pkg: string,
+      language: string,
+    ): CodeChunk {
+      return {
+        content: `package ${pkg}\n\n${references.map(name => `val x = ${name}()`).join('\n')}`,
+        metadata: {
+          file,
+          startLine: 1,
+          endLine: 10,
+          type: 'function',
+          language,
+          symbolName: 'testMethod',
+          symbolType: 'method',
+        },
+      };
+    }
+
+    it('associates a Kotlin test file with its subject via same-package access, with NO import and NO basename relationship', () => {
+      const chunks: CodeChunk[] = [
+        jvmDecl('src/main/kotlin/a/b/Foo.kt', 'Foo', 'a.b', 'kotlin'),
+        jvmUsage('src/test/kotlin/a/b/FooCoverage.kt', ['Foo'], 'a.b', 'kotlin'),
+      ];
+
+      const result = findTestAssociationsFromChunks(['src/main/kotlin/a/b/Foo.kt'], chunks);
+
+      expect(result.get('src/main/kotlin/a/b/Foo.kt')).toEqual([
+        'src/test/kotlin/a/b/FooCoverage.kt',
+      ]);
+    });
+
+    it('does not apply the same-package convention to Java, gated strictly on Kotlin, even though the underlying resolver would otherwise find it (Java keeps its own separate path-based mechanism)', () => {
+      const chunks: CodeChunk[] = [
+        jvmDecl('src/main/java/a/b/Foo.java', 'Foo', 'a.b', 'java'),
+        // Same package, no import, but a DIFFERENT basename than 'Foo' --
+        // Java's own tier 1 (`collectJavaBasenameTests`) can't pair this,
+        // so if the Kotlin gate is doing real work, this must find nothing.
+        jvmUsage('src/test/java/a/b/DifferentNameTest.java', ['Foo'], 'a.b', 'java'),
+      ];
+
+      // Confirms the fixture actually discriminates: the underlying
+      // resolver WOULD find this association if the language gate were
+      // removed -- otherwise this test would pass vacuously (no real signal
+      // at all), not because the Kotlin-only gate is doing anything.
+      expect(findJvmSamePackageDependents('src/main/java/a/b/Foo.java', chunks)).toContain(
+        'src/test/java/a/b/DifferentNameTest.java',
+      );
+
+      const result = findTestAssociationsFromChunks(['src/main/java/a/b/Foo.java'], chunks);
+
+      expect(result.has('src/main/java/a/b/Foo.java')).toBe(false);
+    });
+
+    it('composes with a real import-based match without duplicating the test file', () => {
+      const chunks: CodeChunk[] = [
+        jvmDecl('src/main/kotlin/a/b/Foo.kt', 'Foo', 'a.b', 'kotlin'),
+        jvmUsage('src/test/kotlin/a/b/FooCoverage.kt', ['Foo'], 'a.b', 'kotlin'),
+        makeChunk('src/test/kotlin/a/b/OtherTest.kt', ['src/main/kotlin/a/b/Foo']),
+      ];
+
+      const result = findTestAssociationsFromChunks(['src/main/kotlin/a/b/Foo.kt'], chunks);
+
+      expect(result.get('src/main/kotlin/a/b/Foo.kt')).toHaveLength(2);
+      expect(result.get('src/main/kotlin/a/b/Foo.kt')).toContain(
+        'src/test/kotlin/a/b/FooCoverage.kt',
+      );
+      expect(result.get('src/main/kotlin/a/b/Foo.kt')).toContain(
+        'src/test/kotlin/a/b/OtherTest.kt',
+      );
+    });
+
+    // AC8: `resolveJvmSamePackageDependents` requires an EXACT
+    // `chunk.metadata.file` string match. Without canonicalizing both the
+    // index-build side and the query side (see
+    // `buildRawJvmFileByCanonical`/`collectKotlinSamePackageTests`), a query
+    // filepath in a different (but equivalent, under the same
+    // `workspaceRoot`) form than the chunk's own ABSOLUTE `metadata.file`
+    // would silently return zero associations -- exactly the kind of
+    // clean-looking-but-wrong zero this repo's index-state-honesty policy
+    // forbids. This proves it does not.
+    it('does not silently return zero associations when the query filepath form differs from an absolute chunk.metadata.file (AC8)', () => {
+      const workspaceRoot = '/repo';
+      const chunks: CodeChunk[] = [
+        jvmDecl(`${workspaceRoot}/src/main/kotlin/a/b/Foo.kt`, 'Foo', 'a.b', 'kotlin'),
+        jvmUsage(`${workspaceRoot}/src/test/kotlin/a/b/FooCoverage.kt`, ['Foo'], 'a.b', 'kotlin'),
+      ];
+
+      // Query with the WORKSPACE-RELATIVE form -- a different raw string
+      // than the chunks' absolute `metadata.file` above, but the same file
+      // once canonicalized against `workspaceRoot`.
+      const result = findTestAssociationsFromChunks(
+        ['src/main/kotlin/a/b/Foo.kt'],
+        chunks,
+        workspaceRoot,
+      );
+
+      expect(result.get('src/main/kotlin/a/b/Foo.kt')).toEqual([
+        `${workspaceRoot}/src/test/kotlin/a/b/FooCoverage.kt`,
+      ]);
+    });
+
+    it('honestly finds no association when the paths genuinely refer to different files (not a canonicalization bug)', () => {
+      const workspaceRoot = '/repo';
+      const chunks: CodeChunk[] = [
+        jvmDecl(`${workspaceRoot}/src/main/kotlin/a/b/Foo.kt`, 'Foo', 'a.b', 'kotlin'),
+      ];
+
+      const result = findTestAssociationsFromChunks(
+        ['completely/different/path/Bar.kt'],
+        chunks,
+        workspaceRoot,
+      );
+
+      expect(result.has('completely/different/path/Bar.kt')).toBe(false);
     });
   });
 

@@ -692,8 +692,17 @@ export const kotlinDefinition: LanguageDefinition = {
   // file's declarations with zero `import` statements (Klaxon's 104 files
   // sit in one package with 0 recorded edges) -- the same underlying fact
   // `samePackageTestConvention` documents for Java, but that flag is scoped
-  // to TEST association specifically (no verified Kotlin Gradle test-source
-  // recovery exists), so this is its own flag -- see
-  // `LanguageDefinition.sameUnitAccessWithoutImport`'s doc comment.
+  // to TEST association specifically, and Kotlin doesn't set it here: Phase 2
+  // (Item 2) DOES now recover Kotlin's same-package test convention, but via
+  // its own separate, CONTENT-derived mechanism
+  // (`test-associations.ts`'s `collectKotlinSamePackageTests`, gated on
+  // `detectLanguage(filepath) === 'kotlin'` directly), not by wiring this
+  // registry flag -- Java's PATH-derived `samePackageTestConvention`
+  // mechanism (`java-same-package-tests.ts`) is hard-coded to the
+  // `src/<sourceSet>/java/` Standard Directory Layout marker and is
+  // Kotlin-blind by construction, so setting this flag for Kotlin would be a
+  // no-op, not a second real mechanism. See
+  // `LanguageDefinition.sameUnitAccessWithoutImport`'s doc comment for what
+  // THIS flag covers (dependency edges, not test association).
   sameUnitAccessWithoutImport: true,
 };
