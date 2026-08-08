@@ -1267,6 +1267,64 @@ test('does something', () => {
     });
   });
 
+  describe('leading header range is never dropped by minChunkSize, regardless of content (#1005 Phase 3 Item D)', () => {
+    // Same production boundary as the "small files" block above.
+    const PROD_MIN_CHUNK_SIZE = 7;
+
+    it('keeps a short package-private Kotlin header (package line) that would otherwise fall under minChunkSize', () => {
+      // No `export`-recognized declaration (internal, not public), so the
+      // OLD file-global `skipMinSize` never bypassed minChunkSize here --
+      // the 2-line header (package + blank) is well under the 7-line
+      // production threshold and used to be silently dropped, taking the
+      // file's only `package` line with it (#1005 Phase 3 Item D).
+      const content = `package com.example.internal
+
+internal class Foo {
+    fun a() {}
+}
+`;
+
+      const chunks = chunkByAST('Foo.kt', content, { minChunkSize: PROD_MIN_CHUNK_SIZE });
+
+      const header = chunks.find(c => c.content.includes('package com.example.internal'));
+      expect(header).toBeDefined();
+      expect(header!.metadata.startLine).toBe(1);
+    });
+
+    it('keeps ONLY the leading header range -- a second, unrelated short uncovered gap elsewhere in the same file is still dropped as noise', () => {
+      // Deliberately has TWO short uncovered ranges: the leading header
+      // (package line, must survive) and a short comment-only gap BETWEEN
+      // two internal declarations (must still be dropped) -- this is the
+      // per-range distinction the fix must make. A one-line diff that
+      // widened the OLD file-global `skipMinSize` predicate instead would
+      // have kept BOTH ranges, which this test would catch.
+      const content = `package com.example.internal
+
+internal class Foo {
+    fun a() {}
+}
+
+// short gap, not a header
+
+internal class Bar {
+    fun b() {}
+}
+`;
+
+      const chunks = chunkByAST('Foo.kt', content, { minChunkSize: PROD_MIN_CHUNK_SIZE });
+
+      const header = chunks.find(c => c.content.includes('package com.example.internal'));
+      expect(header).toBeDefined();
+      expect(header!.metadata.startLine).toBe(1);
+
+      const midGap = chunks.find(c => c.content.includes('short gap, not a header'));
+      expect(midGap).toBeUndefined();
+
+      expect(chunks.some(c => c.metadata.symbolName === 'Foo')).toBe(true);
+      expect(chunks.some(c => c.metadata.symbolName === 'Bar')).toBe(true);
+    });
+  });
+
   describe('module-level call sites (#1087)', () => {
     /** Every (symbol, line) pair the whole file's chunks report. */
     const allCallSites = (chunks: ReturnType<typeof chunkByAST>) =>

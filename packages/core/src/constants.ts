@@ -49,4 +49,10 @@ export function isOversizedForIndexing(sizeBytes: number): boolean {
 // v3: Added cognitiveComplexity field to schema
 // v4: Added Halstead metrics (volume, difficulty, effort, bugs)
 // v5: Resolved relative imports to workspace-relative paths in chunk metadata (#525)
-export const INDEX_FORMAT_VERSION = 5;
+// v6: A file's leading (header) uncovered range is no longer dropped by
+//     `minChunkSize` regardless of content -- a package-private Java/Kotlin
+//     file's `package` line (or a C# file's `namespace` line) can sit in a
+//     leading gap shorter than `minChunkSize`, and dropping it made the
+//     file's package/namespace undetectable everywhere else in the index
+//     (#1005 Phase 3 Item D, `ast/chunker.ts`'s `isLeadingHeaderRange`).
+export const INDEX_FORMAT_VERSION = 6;

@@ -300,27 +300,41 @@ function buildFilesByPackage(
 const IMPORT_LINE_RE = /^[ \t]*import\b/;
 
 /**
- * `content` with every `import` line removed. Feeds the reference-matching
- * body text (`nonImportContentByFile`) -- see the module doc's G6 section
- * and `collectShadowBindings`'s doc comment for why import lines are
- * excluded from the TEXT-MATCH corpus specifically: any edge whose only
- * textual evidence is an import line is a DOTTED-FQN import Mechanism 1
- * (`jvm-source-root.ts`) already owns (confirmed for Java's
+ * `content` with every `import` AND `package` declaration line removed.
+ * Feeds the reference-matching body text (`nonImportContentByFile`) -- see
+ * the module doc's G6 section and `collectShadowBindings`'s doc comment for
+ * why import lines are excluded from the TEXT-MATCH corpus specifically: any
+ * edge whose only textual evidence is an import line is a DOTTED-FQN import
+ * Mechanism 1 (`jvm-source-root.ts`) already owns (confirmed for Java's
  * `import`/`import static` forms via `staticMemberClassPath`; Kotlin has no
  * equivalent static-member-import fallback -- see this module's own doc
  * comment on that gap).
+ *
+ * `package` lines are stripped for a related but distinct reason (#1005
+ * Phase 3 Item D): before that fix, a file's `package` line usually never
+ * reached the match corpus at all in the exact short/non-exported-header
+ * cases this gate cares about, because `chunker.ts` dropped that whole range.
+ * That fix makes the header a real, always-present chunk -- which newly
+ * exposes the literal `package a.b.Foo;`-style text to
+ * `identifierBoundaryRe`'s plain `\b` boundary for the FIRST time. A package
+ * whose LAST segment happens to collide with a real package-locally-unique
+ * type name declared elsewhere (e.g. `package a.b.Foo;` alongside a
+ * top-level `class Foo` in package `a.b`) would then read as a textual
+ * reference to that type purely from the file's own header -- reusing
+ * `PACKAGE_DECLARATION_RE` (the same single source of truth `derivePackage`
+ * already uses) rather than a second copy of the pattern.
  */
-function stripImportLines(content: string): string {
+function stripImportAndPackageLines(content: string): string {
   return content
     .split('\n')
-    .filter(line => !IMPORT_LINE_RE.test(line))
+    .filter(line => !IMPORT_LINE_RE.test(line) && !PACKAGE_DECLARATION_RE.test(line))
     .join('\n');
 }
 
 function buildNonImportContentIndex(chunksByFile: Map<string, CodeChunk[]>): Map<string, string> {
   const out = new Map<string, string>();
   for (const [file, fileChunks] of chunksByFile) {
-    out.set(file, fileChunks.map(chunk => stripImportLines(chunk.content)).join('\n'));
+    out.set(file, fileChunks.map(chunk => stripImportAndPackageLines(chunk.content)).join('\n'));
   }
   return out;
 }

@@ -775,23 +775,60 @@ function isValidChunk(chunk: ASTChunk, minChunkSize: number): boolean {
 }
 
 /**
+ * True iff `range` is the file's own LEADING uncovered range -- the gap
+ * before the first recognized top-level node, when one exists.
+ * `findUncoveredRanges` only ever emits a range starting at line 0 for the
+ * one that precedes everything else (if the first covered range itself
+ * starts at line 0, there IS no leading gap and nothing here fires) -- so
+ * `range.start === 0` unambiguously identifies "this file's header", not
+ * merely "some short range early in the file". See `extractUncoveredCode`'s
+ * doc comment for why this range specifically must never be dropped by
+ * `minChunkSize`, independent of what it contains.
+ */
+function isLeadingHeaderRange(range: LineRange): boolean {
+  return range.start === 0;
+}
+
+/**
  * Extract code that wasn't covered by function/class chunks
  * (imports, exports, top-level statements)
  *
  * `minChunkSize` exists to avoid emitting noise chunks for small leftover
  * gaps *alongside* real function/class chunks in an otherwise normal file
  * (e.g. a lone blank-line gap between two functions). It must not apply when
- * the resulting chunk is the sole representation of the file's content —
- * doing so wouldn't shrink a chunk, it would silently drop the whole file
- * from the index. Two cases bypass it, both via `skipMinSize` below:
+ * the resulting chunk is the sole representation of some information the
+ * file will otherwise never expose anywhere else in the index. Three cases
+ * bypass it, via `skipMinSize` below, evaluated PER-RANGE (not as one
+ * file-global decision) so that only the specific range each case is about
+ * gets the bypass -- an unrelated short gap elsewhere in the very same file
+ * still gets dropped as noise:
  *   - `hasExports`: barrel/re-export-only files (see "barrel/re-export
- *     files" tests in chunker.test.ts).
+ *     files" tests in chunker.test.ts). File-global: applies to every
+ *     uncovered range in such a file, because the whole file IS the export
+ *     surface.
  *   - `fileHasNoTopLevelChunks`: files with zero recognized top-level nodes
  *     at all — e.g. a file containing only a bare `test(...)` call with no
  *     exported declaration. `coveredRanges` is empty in that case, so there
- *     is exactly one uncovered range and it spans the entire file.
- * Either way, `chunk.content.length > 0` still filters out empty/whitespace-
- * only files.
+ *     is exactly one uncovered range and it spans the entire file. Also
+ *     file-global, for the same reason (there is only ever one range).
+ *   - `isLeadingHeaderRange`: the file's own header -- a package-private
+ *     Java/Kotlin file's `package` line, or a C#'s file-scoped `namespace`
+ *     line, can sit in a leading gap shorter than `minChunkSize` when the
+ *     file's own declarations aren't `public` (so `hasExports` is false).
+ *     Dropping that range doesn't just shrink a chunk, it makes the file's
+ *     package/namespace UNDERIVABLE anywhere else in the index (nothing else
+ *     ever carries that line), silently disabling same-package/namespace
+ *     resolution (`jvm-same-package-signals.ts`,
+ *     `csharp-type-reference-signals.ts`) for that file as both target and
+ *     candidate — see #1005 Phase 3 Item D. This bypass is PER-RANGE and
+ *     content-blind by design (checked once during the plan for this fix:
+ *     measured against real Java/Kotlin/C# corpora, a content-aware variant
+ *     restricted to ranges that actually match a package/namespace
+ *     declaration regex added at most 1-2 extra chunks per corpus beyond this
+ *     simpler position-based rule, and every one of those extras was an
+ *     unrelated non-JVM file — not worth a language-specific regex to avoid).
+ * Every case still requires `chunk.content.length > 0`, which filters out
+ * empty/whitespace-only ranges regardless of which bypass applies.
  */
 function extractUncoveredCode(
   lines: string[],
@@ -807,13 +844,26 @@ function extractUncoveredCode(
   const uncoveredRanges = findUncoveredRanges(coveredRanges, lines.length);
 
   const hasExports = fileExports && fileExports.length > 0;
-  const skipMinSize = hasExports || fileHasNoTopLevelChunks;
+  const fileLevelSkipMinSize = hasExports || fileHasNoTopLevelChunks;
 
   return uncoveredRanges
-    .map(range =>
-      createChunkFromRange(range, lines, filepath, language, imports, fileExports, importedSymbols),
-    )
-    .filter(chunk => (skipMinSize ? chunk.content.length > 0 : isValidChunk(chunk, minChunkSize)));
+    .map(range => ({
+      range,
+      chunk: createChunkFromRange(
+        range,
+        lines,
+        filepath,
+        language,
+        imports,
+        fileExports,
+        importedSymbols,
+      ),
+    }))
+    .filter(({ range, chunk }) => {
+      const skipMinSize = fileLevelSkipMinSize || isLeadingHeaderRange(range);
+      return skipMinSize ? chunk.content.length > 0 : isValidChunk(chunk, minChunkSize);
+    })
+    .map(({ chunk }) => chunk);
 }
 
 /**
