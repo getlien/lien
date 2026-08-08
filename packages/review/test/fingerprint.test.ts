@@ -77,6 +77,32 @@ describe('computeFingerprint', () => {
       expect(fp.paradigm.ratio).toBe(0.5);
       expect(fp.paradigm.dominantStyle).toBe('mixed');
     });
+
+    // #1005 Phase 3 Item B: a Java `@interface Foo {}` annotation declaration
+    // now produces a chunk with `symbolType: 'interface'` (mirrors the
+    // pre-existing `record_declaration` -> `'class'` precedent). This
+    // computation already counts symbolType 'interface' toward `classCount`
+    // (the OOP side) for ANY interface, so an annotation-heavy Java file
+    // reads as more "OOP" than before -- confirming that reads as sensible,
+    // not a regression: an annotation declaration IS a type declaration in
+    // the OOP-paradigm sense this metric is modeling, same as a real
+    // interface. Real corpora measurement (#1005 Phase 3 Item B PR body):
+    // annotation declarations are a small fraction of total classes/methods
+    // even in annotation-heavy repos (74 across 737 real Java files spanning
+    // 5 corpora, vs thousands of methods/classes), so this shift is a
+    // rounding-level nudge in practice, not a paradigm-flipping one.
+    it('counts a Java annotation declaration (symbolType interface) toward classCount, same as any interface -- confirms no nonsensical paradigm shift', () => {
+      const chunks = [
+        makeChunk({ symbolName: 'Foo', symbolType: 'interface', language: 'java' }),
+        ...Array.from({ length: 8 }, (_, i) =>
+          makeChunk({ symbolName: `method${i}`, symbolType: 'method', language: 'java' }),
+        ),
+      ];
+      const fp = computeFingerprint(chunks);
+      expect(fp.paradigm.classCount).toBe(1);
+      expect(fp.paradigm.ratio).toBe(0.0);
+      expect(fp.paradigm.dominantStyle).toBe('oop');
+    });
   });
 
   describe('naming', () => {

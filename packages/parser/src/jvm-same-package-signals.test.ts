@@ -409,6 +409,48 @@ describe('findJvmSamePackageDependents', () => {
   });
 });
 
+describe('#1005 Phase 3 Item B: nested Java annotation declarations can never become G1prime owners', () => {
+  it("a nested annotation sharing a top-level type's name does not interfere with that type's package-local uniqueness", () => {
+    const chunks: CodeChunk[] = [
+      declChunk('src/main/java/a/b/Foo.java', 'Foo', 'a.b'), // top-level, package-locally-unique
+      usageChunk('src/main/java/a/b/Bar.java', ['Foo'], 'a.b'),
+      // Baz.java declares an UNRELATED NESTED annotation also named "Foo" --
+      // must not be counted as a second top-level owner of "Foo" in this
+      // package: `collectTopLevelDeclarations` (the G1' seed) explicitly
+      // skips any chunk with `parentClass` set, and a nested annotation
+      // reports `parentClass` via the same existing traversal machinery any
+      // other nested declaration does (confirmed in java.test.ts).
+      makeChunk({
+        file: 'src/main/java/a/b/Baz.java',
+        content: 'package a.b\n\nclass Baz { @interface Foo {} }',
+        symbolName: 'Foo',
+        symbolType: 'interface',
+        parentClass: 'Baz',
+      }),
+    ];
+    expect(findJvmSamePackageDependents('src/main/java/a/b/Foo.java', chunks)).toEqual([
+      'src/main/java/a/b/Bar.java',
+    ]);
+  });
+
+  it('a file whose ONLY declared type is a nested annotation can never itself be resolved as a same-package target (no top-level declaration to key off)', () => {
+    const chunks: CodeChunk[] = [
+      makeChunk({
+        file: 'src/main/java/a/b/Container.java',
+        content: 'package a.b\n\nclass Container { @interface Marker {} }',
+        symbolName: 'Marker',
+        symbolType: 'interface',
+        parentClass: 'Container',
+      }),
+      usageChunk('src/main/java/a/b/Other.java', ['Marker'], 'a.b'),
+    ];
+    // `resolveJvmSamePackageDependents` keys off `targetFile`'s TOP-LEVEL
+    // declared type names (`index.declarations`) -- empty here, since
+    // "Marker" is the only chunk for this file and it's nested.
+    expect(findJvmSamePackageDependents('src/main/java/a/b/Container.java', chunks)).toEqual([]);
+  });
+});
+
 describe('resolveJvmSamePackageDependentsBruteForce (P1: brute-force oracle)', () => {
   /** A varied fixture spanning every gate: G1'/G2/G4/G6/G7, Java and Kotlin, multiple packages. */
   function fixture(): CodeChunk[] {

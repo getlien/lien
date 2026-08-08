@@ -21,11 +21,28 @@ describe('Java Language', () => {
       expect(traverser.targetNodeTypes).toContain('constructor_declaration');
     });
 
-    it('should identify class/interface/enum/record as container types', () => {
+    it('should identify class/interface/enum/record/annotation as container types', () => {
       expect(traverser.containerTypes).toContain('class_declaration');
       expect(traverser.containerTypes).toContain('interface_declaration');
       expect(traverser.containerTypes).toContain('enum_declaration');
       expect(traverser.containerTypes).toContain('record_declaration');
+      expect(traverser.containerTypes).toContain('annotation_type_declaration');
+    });
+
+    // #1005 Phase 3 Item B: `annotation_type_declaration` is a container only
+    // for `shouldExtractChildren` (so it still becomes its own top-level
+    // chunk) -- `getContainerBody` deliberately returns null for it so
+    // `findTopLevelNodes` never descends into `annotation_type_body` and
+    // extracts annotation MEMBERS (`String value();`-style element
+    // declarations) as separate chunks. Mirrors the Python
+    // `decorated_definition` precedent `emitsChildChunks`'s doc comment
+    // (ast/chunker.ts) describes.
+    it('should extract children (shouldExtractChildren) from an annotation declaration but decline a body to descend into (getContainerBody)', () => {
+      const code = 'public @interface Foo { String value(); }';
+      const root = mustParse(code, 'java');
+      const annotationNode = findNode(root, 'annotation_type_declaration')!;
+      expect(traverser.shouldExtractChildren(annotationNode)).toBe(true);
+      expect(traverser.getContainerBody(annotationNode)).toBeNull();
     });
 
     it('should extract children from class declarations', () => {
@@ -199,6 +216,33 @@ describe('Java Language', () => {
       expect(exports).toContain('run');
       expect(exports).toContain('status');
       expect(exports).not.toContain('init');
+    });
+
+    // #1005 Phase 3 Item B
+    it('should extract a public annotation declaration', () => {
+      const code = 'public @interface Foo { String value(); }';
+      const root = mustParse(code, 'java');
+      const exports = exportExtractor.extractExports(root);
+      expect(exports).toContain('Foo');
+    });
+
+    it('should not export a package-private annotation declaration', () => {
+      const code = '@interface Foo { String value(); }';
+      const root = mustParse(code, 'java');
+      const exports = exportExtractor.extractExports(root);
+      expect(exports).not.toContain('Foo');
+    });
+
+    it('should not export annotation MEMBERS even when the annotation itself is public (explicitly excluded, #1005 Phase 3 Item B)', () => {
+      const code = `public @interface Foo {
+    String value();
+    int count() default 1;
+}`;
+      const root = mustParse(code, 'java');
+      const exports = exportExtractor.extractExports(root);
+      expect(exports).toContain('Foo');
+      expect(exports).not.toContain('value');
+      expect(exports).not.toContain('count');
     });
   });
 
@@ -479,6 +523,31 @@ describe('Java Language', () => {
       const recordNode = root.namedChild(0)!;
       const symbol = symbolExtractor.extractSymbol(recordNode, code);
       expect(symbol!.signature).toBe('record Person implements Foo');
+    });
+
+    // #1005 Phase 3 Item B: `@interface Foo {}` maps to `symbolType:
+    // 'interface'` -- mirrors the `record_declaration` -> `'class'`
+    // precedent immediately above rather than a bespoke `'annotation'`
+    // symbolType.
+    it('should extract annotation_type_declaration info as an interface-typed symbol', () => {
+      const code = 'public @interface Foo { String value(); }';
+      const root = mustParse(code, 'java');
+      const annotationNode = findNode(root, 'annotation_type_declaration')!;
+      const symbol = symbolExtractor.extractSymbol(annotationNode, code);
+      expect(symbol).not.toBeNull();
+      expect(symbol!.name).toBe('Foo');
+      expect(symbol!.type).toBe('interface');
+      expect(symbol!.signature).toBe('@interface Foo');
+    });
+
+    it('should attach the enclosing type as parentClass for a nested annotation declaration', () => {
+      const code = 'public class Outer { @interface Nested { String value(); } }';
+      const root = mustParse(code, 'java');
+      const annotationNode = findNode(root, 'annotation_type_declaration')!;
+      const symbol = symbolExtractor.extractSymbol(annotationNode, code, 'Outer');
+      expect(symbol!.name).toBe('Nested');
+      expect(symbol!.type).toBe('interface');
+      expect(symbol!.parentClass).toBe('Outer');
     });
 
     // #949: a nested type declaration (class/interface/enum/record declared
@@ -795,6 +864,72 @@ public class App {
       expect(distanceChunk).toBeDefined();
       expect(distanceChunk?.metadata.symbolType).toBe('method');
       expect(distanceChunk?.metadata.parentClass).toBe('Point');
+    });
+
+    // #1005 Phase 3 Item B: `annotation_type_declaration` was previously
+    // absent from `symbolNodeTypes`/`containerTypes` entirely, so an
+    // annotation-only file produced NO chunk at all -- `get_files_context`/
+    // `list_functions`/`search_code` returned nothing for it.
+    describe('annotation declarations (#1005 Phase 3 Item B)', () => {
+      it('should chunk a public top-level annotation declaration', () => {
+        const content = `package a.b;
+
+public @interface Foo {
+    String value();
+    int count() default 1;
+}
+`;
+        const chunks = chunkByAST('Foo.java', content);
+        const annotationChunk = chunks.find(c => c.metadata.symbolName === 'Foo');
+        expect(annotationChunk).toBeDefined();
+        expect(annotationChunk?.metadata.symbolType).toBe('interface');
+        expect(annotationChunk?.metadata.exports).toContain('Foo');
+        expect(annotationChunk?.metadata.symbols?.interfaces).toContain('Foo');
+      });
+
+      it('should still chunk a package-private annotation-only file (context-quality, not recall -- the file must not be invisible)', () => {
+        const content = `package a.b;
+
+@interface Foo {
+    String value();
+}
+`;
+        const chunks = chunkByAST('Foo.java', content);
+        const annotationChunk = chunks.find(c => c.metadata.symbolName === 'Foo');
+        expect(annotationChunk).toBeDefined();
+        expect(annotationChunk?.metadata.symbolType).toBe('interface');
+      });
+
+      it('should NOT extract annotation MEMBERS as their own chunks (explicitly excluded)', () => {
+        const content = `public @interface Foo {
+    String value();
+    int count() default 1;
+    Class<?> type();
+}
+`;
+        const chunks = chunkByAST('Foo.java', content);
+        // Exactly one chunk for the whole annotation -- no separate chunks
+        // for `value`, `count`, or `type`.
+        expect(chunks).toHaveLength(1);
+        expect(chunks[0].metadata.symbolName).toBe('Foo');
+        expect(chunks.some(c => c.metadata.symbolName === 'value')).toBe(false);
+        expect(chunks.some(c => c.metadata.symbolName === 'count')).toBe(false);
+        expect(chunks.some(c => c.metadata.symbolName === 'type')).toBe(false);
+      });
+
+      it('should attach parentClass for a nested annotation and never emit it as its own file-level chunk boundary issue', () => {
+        const content = `public class Outer {
+    @interface Nested {
+        String value();
+    }
+}
+`;
+        const chunks = chunkByAST('Outer.java', content);
+        const nestedChunk = chunks.find(c => c.metadata.symbolName === 'Nested');
+        expect(nestedChunk).toBeDefined();
+        expect(nestedChunk?.metadata.symbolType).toBe('interface');
+        expect(nestedChunk?.metadata.parentClass).toBe('Outer');
+      });
     });
   });
 });
