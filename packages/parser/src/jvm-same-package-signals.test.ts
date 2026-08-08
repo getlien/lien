@@ -302,6 +302,25 @@ describe('findJvmSamePackageDependents', () => {
     expect(findJvmSamePackageDependents('src/main/java/a/b/Foo.java', chunks)).toEqual([]);
   });
 
+  it('package lines are excluded from the text-match corpus (#1005 Phase 3 Item D bundled rider): a candidate whose ONLY occurrence of the type name is in its OWN package declaration is not counted', () => {
+    const chunks: CodeChunk[] = [
+      // Package-locally-unique "Foo" declared in a package whose OWN last
+      // segment happens to be spelled "Foo" too -- deliberately contrived so
+      // that EVERY file in this package's `package a.b.Foo` line textually
+      // contains the word "Foo", independent of anything the file's real
+      // code does.
+      declChunk('src/main/java/a/b/Foo/Container.java', 'Foo', 'a.b.Foo'),
+      // Unrelated.java's actual code makes NO reference to Foo at all --
+      // its ONLY textual occurrence of "Foo" is its own `package a.b.Foo`
+      // line, newly exposed to the match corpus by #1005 Phase 3 Item D's
+      // header-chunking fix.
+      usageChunk('src/main/java/a/b/Foo/Unrelated.java', [], 'a.b.Foo'),
+    ];
+    expect(findJvmSamePackageDependents('src/main/java/a/b/Foo/Container.java', chunks)).toEqual(
+      [],
+    );
+  });
+
   it('excludes the target file itself even when it references its own name', () => {
     const chunks: CodeChunk[] = [
       makeChunk({
