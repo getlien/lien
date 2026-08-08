@@ -1,5 +1,39 @@
 # @liendev/parser
 
+## 0.77.0
+
+### Minor Changes
+
+- 85ef96f: Add a Java/Kotlin same-package resolution tier to `buildDependencyGraph`'s
+  call-graph (`getCallers`/`getCallersTransitive`), closing the #1005 Phase 2
+  gap between Phase 1's file-level `findDependents` recovery (#1100) and the
+  symbol/call-site-level call graph used by blast-radius and the MCP
+  `get_dependents` tool's `importedBy` evidence.
+
+  Java and Kotlin's same-package visibility rule lets one top-level type
+  reference another in the same package with no import statement at all — the
+  call graph previously had no way to see that reference for a declared
+  class/interface symbol, only for the exact same-directory heuristic PHP/
+  Python/Rust already used (`addSameNamespaceEdges`, unchanged and still firing
+  for JVM method/function seeds it structurally can't reach). The new tier is
+  per-type-scoped (`resolveJvmSamePackageDependentsForType`, exported from
+  `@liendev/parser`) so a multi-type Kotlin file doesn't misattribute a
+  sibling declaration's callers, unioned onto the existing result (never
+  replacing it), and tagged `namespace-inferred` — never `import-only` — so it
+  is correctly excluded from the MCP tool's "verifiably imports" evidence.
+
+  Measured against a real OkHttp clone: `getCallers` for `Cache` (Kotlin, same
+  package `okhttp3`) went from 16 to 33 edges, with 17 real same-package
+  callers (`OkHttpClient`, `Request`, `Response`, `EventListener`, several
+  test files, etc.) recovered that were previously invisible to the call
+  graph entirely.
+
+- 2d2bb2b: Add a Kotlin same-package test-association mechanism (#1005 Phase 2, Item 2), shipped in both `@liendev/parser`'s `findTestAssociationsFromChunks` (the shared engine — feeds `lien annotate`, blast-radius test-coverage risk, and the agent-review plugin) and `@liendev/lien`'s `get_files_context` MCP tool (its own separate implementation, mirroring the existing C# tier there).
+
+  Like Java's own same-package test convention, a Kotlin test class commonly lives in the same package as its subject with no import connecting them at all — Kotlin's same-package visibility rule needs none. This reuses Phase 1's file-level `resolveJvmSamePackageDependents` (#1100), gated strictly to Kotlin (Java keeps its existing, separate path-based mechanism), and explicitly canonicalizes the query path against the index before resolving — a mismatched path form now resolves correctly instead of silently returning zero associations.
+
+  Measured against a real Klaxon (Kotlin) clone: `lien annotate` on `Klaxon.kt`, the library's central class, went from reporting "No test coverage" to 53 real, same-package test files.
+
 ## 0.76.0
 
 ### Minor Changes
