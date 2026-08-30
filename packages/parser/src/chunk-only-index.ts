@@ -39,6 +39,14 @@ export interface ChunkOnlyResult {
    * misleading reason when the real reason is "every file was oversized".
    */
   filesSkipped: number;
+  /**
+   * Files whose stat/read/chunk threw and were swallowed per-file.
+   *
+   * One unreadable file must not abort a whole run, but it must not vanish
+   * either: a gate that passes while files silently failed to parse is the
+   * false-clean bug wearing a different hat.
+   */
+  filesErrored: number;
   chunksCreated: number;
   durationMs: number;
   chunks: CodeChunk[];
@@ -72,7 +80,7 @@ async function chunkFileForCollection(
   file: string,
   rootDir: string,
   config: { chunkSize: number; chunkOverlap: number },
-): Promise<{ chunks: CodeChunk[]; skipped: boolean }> {
+): Promise<{ chunks: CodeChunk[]; skipped: boolean; errored: boolean }> {
   try {
     const absolutePath = path.isAbsolute(file) ? file : path.join(rootDir, file);
     const relativePath = normalizeToRelativePath(file, rootDir);
@@ -84,7 +92,7 @@ async function chunkFileForCollection(
     // are meaningless. `lien index` has always skipped these; the pure path
     // must too, or `lien complexity` reports on files `lien index` excluded.
     const { size } = await fs.stat(absolutePath);
-    if (isOversizedForIndexing(size)) return { chunks: [], skipped: true };
+    if (isOversizedForIndexing(size)) return { chunks: [], skipped: true, errored: false };
 
     const content = await fs.readFile(absolutePath, 'utf-8');
 
@@ -96,7 +104,7 @@ async function chunkFileForCollection(
       workspaceRoot: rootDir,
     });
 
-    return { chunks, skipped: false };
+    return { chunks, skipped: false, errored: false };
   } catch (error) {
     // A native-binding load failure is systemic, not per-file: the binding
     // can't load for ANY file, so every AST-language file throws the same
@@ -112,7 +120,7 @@ async function chunkFileForCollection(
     console.error(
       `[parser] Failed to process ${file}: ${error instanceof Error ? error.message : String(error)}`,
     );
-    return { chunks: [], skipped: false };
+    return { chunks: [], skipped: false, errored: true };
   }
 }
 
@@ -137,10 +145,16 @@ async function chunkAllFiles(
   files: string[],
   rootDir: string,
   config: { chunkSize: number; chunkOverlap: number; concurrency: number },
-): Promise<{ chunks: CodeChunk[]; filesProcessed: number; filesSkipped: number }> {
+): Promise<{
+  chunks: CodeChunk[];
+  filesProcessed: number;
+  filesSkipped: number;
+  filesErrored: number;
+}> {
   const perFile: CodeChunk[][] = new Array(files.length);
   let filesProcessed = 0;
   let filesSkipped = 0;
+  let filesErrored = 0;
 
   // CPU-bound parse stage (chunkFile) — cap independent of the requested
   // concurrency; see getParseStageConcurrency's doc comment / ADR-013.
@@ -151,12 +165,13 @@ async function chunkAllFiles(
         const outcome = await chunkFileForCollection(file, rootDir, config);
         perFile[i] = outcome.chunks;
         if (outcome.skipped) filesSkipped++;
+        if (outcome.errored) filesErrored++;
         filesProcessed++;
       }),
     ),
   );
 
-  return { chunks: perFile.flat(), filesProcessed, filesSkipped };
+  return { chunks: perFile.flat(), filesProcessed, filesSkipped, filesErrored };
 }
 
 /**
@@ -177,6 +192,7 @@ export async function performChunkOnlyIndex(
         success: false,
         filesIndexed: 0,
         filesSkipped: 0,
+        filesErrored: 0,
         chunksCreated: 0,
         durationMs: Date.now() - startTime,
         chunks: [],
@@ -188,6 +204,7 @@ export async function performChunkOnlyIndex(
       chunks: allChunks,
       filesProcessed,
       filesSkipped,
+      filesErrored,
     } = await chunkAllFiles(files, rootDir, {
       chunkSize: options.chunkSize ?? DEFAULT_CHUNK_SIZE,
       chunkOverlap: options.chunkOverlap ?? DEFAULT_CHUNK_OVERLAP,
@@ -198,6 +215,7 @@ export async function performChunkOnlyIndex(
       success: true,
       filesIndexed: filesProcessed,
       filesSkipped,
+      filesErrored,
       chunksCreated: allChunks.length,
       durationMs: Date.now() - startTime,
       chunks: allChunks,
@@ -207,6 +225,7 @@ export async function performChunkOnlyIndex(
       success: false,
       filesIndexed: 0,
       filesSkipped: 0,
+      filesErrored: 0,
       chunksCreated: 0,
       durationMs: Date.now() - startTime,
       chunks: [],

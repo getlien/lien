@@ -134,3 +134,19 @@ export function resolveRepoRoot(start: string = process.cwd()): AbsolutePath {
     dir = path.dirname(dir);
   }
 }
+
+/**
+ * Re-base a user-supplied path from the invocation directory onto the
+ * analysis root.
+ *
+ * Once a command resolves its own root with {@link resolveRepoRoot}, its
+ * report paths become root-relative — but the paths a user typed are still
+ * relative to wherever they were standing. Run `lien complexity --files
+ * src/thing.ts` from `packages/cli` and, unconverted, it looks for
+ * `<repoRoot>/src/thing.ts`: a file that usually does not exist, and
+ * occasionally a different one that does.
+ */
+export function rebaseToRoot(userPath: string, cwd: string, rootDir: string): string {
+  const absolute = path.isAbsolute(userPath) ? userPath : path.resolve(cwd, userPath);
+  return path.relative(rootDir, absolute);
+}

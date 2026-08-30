@@ -46,7 +46,7 @@ import {
   DEFAULT_COMPLEXITY_THRESHOLDS,
 } from '@liendev/parser';
 import { describeScanFailure } from '../utils/scan-failure.js';
-import { resolveRepoRoot } from './project-root.js';
+import { resolveRepoRoot, rebaseToRoot } from './project-root.js';
 import type { CodeChunk, ComplexityReport, ComplexityViolation } from '@liendev/parser';
 
 export interface HealthOptions {
@@ -492,6 +492,15 @@ export async function analyzeHealth(rootDir: string, includeTests = false): Prom
   const dependentCounts = computeDependentCountsFromChunks(chunks, rootDir);
   const testsByFile = findTestAssociationsFromChunks(violatingFiles(report), chunks, rootDir);
 
+  if (scan.filesErrored > 0) {
+    console.warn(
+      chalk.yellow(
+        `Warning: ${scan.filesErrored} file${scan.filesErrored === 1 ? '' : 's'} could not be parsed and ` +
+          'are absent from this ranking.',
+      ),
+    );
+  }
+
   return {
     filesAnalyzed: report.summary.filesAnalyzed,
     chunks: chunks.length,
@@ -521,17 +530,20 @@ export async function healthCommand(options: HealthOptions): Promise<void> {
 
     const result = await analyzeHealth(rootDir, options.includeTests ?? false);
 
-    const scoped = options.path
-      ? result.entries.filter(entry => entry.filepath.startsWith(options.path as string))
+    // Same re-basing as `lien complexity --files`: `--path` is relative to
+    // the invocation directory, entries are relative to the analysis root.
+    const pathFilter = options.path ? rebaseToRoot(options.path, cwd, rootDir) : undefined;
+    const scoped = pathFilter
+      ? result.entries.filter(entry => entry.filepath.startsWith(pathFilter))
       : result.entries;
     const shown = scoped.slice(0, top);
 
     if (options.format === 'json') {
-      console.log(JSON.stringify(toJson(result, scoped, shown, options.path), null, 2));
+      console.log(JSON.stringify(toJson(result, scoped, shown, pathFilter), null, 2));
       return;
     }
 
-    console.log(renderText(result, shown, options.path));
+    console.log(renderText(result, shown, pathFilter));
   } catch (error) {
     console.error(chalk.red('Error analyzing health:'), error);
     process.exit(1);

@@ -522,8 +522,16 @@ describe('index-state × entry-point matrix (#1029 W1)', () => {
   // now genuinely irrelevant, and that a no-data run is still a hard error.
   // ==========================================================================
 
+  // `resolveRepoRoot` walks upward for a `.git` marker. Without one inside
+  // the fixture it would escape into whatever encloses os.tmpdir(), making
+  // these assertions depend on the machine rather than the fixture.
+  async function markFixtureAsRepoRoot(): Promise<void> {
+    await fs.mkdir(path.join(dir, '.git'), { recursive: true });
+  }
+
   describe('lien complexity', () => {
     it('reports normally with NO index at all — the state that used to be a hard error', async () => {
+      await markFixtureAsRepoRoot();
       await fs.writeFile(
         path.join(dir, 'gnarly.ts'),
         'export function f(a){ if(a){ if(a){ if(a){ if(a){ if(a){ return 1; } } } } } return 0; }\n',
@@ -538,6 +546,7 @@ describe('index-state × entry-point matrix (#1029 W1)', () => {
     });
 
     it('produces the same report whether or not an index exists', async () => {
+      await markFixtureAsRepoRoot();
       await fs.writeFile(
         path.join(dir, 'gnarly.ts'),
         'export function f(a){ if(a){ if(a){ if(a){ if(a){ if(a){ return 1; } } } } } return 0; }\n',
@@ -559,6 +568,7 @@ describe('index-state × entry-point matrix (#1029 W1)', () => {
     });
 
     it('hard-errors when there is nothing to analyze, rather than reporting clean', async () => {
+      await markFixtureAsRepoRoot();
       // Empty directory: the scan yields no chunks. A gate that formats this
       // as "0 violations, exit 0" is the false-clean bug in its original form.
       await complexityCommand({ format: 'text' });

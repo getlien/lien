@@ -39,6 +39,8 @@ function scanOf(chunks: ReturnType<typeof chunk>[]) {
     filesIndexed: new Set(chunks.map(c => c.metadata.file)).size,
     chunksCreated: chunks.length,
     durationMs: 1,
+    filesSkipped: 0,
+    filesErrored: 0,
     chunks,
   };
 }
@@ -181,6 +183,34 @@ describe('complexityCommand', () => {
     await complexityCommand({ format: 'xml' as never });
     expect(processExitSpy).toHaveBeenCalledWith(1);
     expect(consoleErrorSpy.mock.calls.flat().join(' ')).toContain('Invalid --format value "xml"');
+  });
+
+  it('warns loudly when files failed to parse, rather than passing silently', async () => {
+    // A gate that reports "0 violations, exit 0" while files silently failed
+    // to parse is the false-clean bug in another form.
+    vi.mocked(parserModule.performChunkOnlyIndex).mockResolvedValue({
+      ...scanOf([chunk()]),
+      filesErrored: 2,
+    } as never);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await complexityCommand({ format: 'text' });
+
+    const warnings = warnSpy.mock.calls.flat().join(' ');
+    expect(warnings).toContain('2 files could not be parsed');
+    expect(warnings).toContain('absent from this report');
+  });
+
+  it('notes skipped oversized files so a gate never drops one silently', async () => {
+    vi.mocked(parserModule.performChunkOnlyIndex).mockResolvedValue({
+      ...scanOf([chunk()]),
+      filesSkipped: 1,
+    } as never);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await complexityCommand({ format: 'text' });
+
+    expect(warnSpy.mock.calls.flat().join(' ')).toContain('1 file skipped');
   });
 
   // --- No-data honesty -----------------------------------------------------

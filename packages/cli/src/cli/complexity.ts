@@ -5,7 +5,7 @@ import { performChunkOnlyIndex, analyzeComplexityFromChunks } from '@liendev/par
 import { formatReport } from '@liendev/core';
 import type { OutputFormat } from '@liendev/core';
 import { describeScanFailure } from '../utils/scan-failure.js';
-import { resolveRepoRoot } from './project-root.js';
+import { resolveRepoRoot, rebaseToRoot } from './project-root.js';
 
 interface ComplexityOptions {
   files?: string[];
@@ -53,6 +53,33 @@ function validateFilesExist(files: string[] | undefined, rootDir: string): void 
 }
 
 /**
+ * Report files that never made it into the corpus.
+ *
+ * One unreadable or oversized file must not abort the run, but it must not
+ * vanish either: a gate reporting "0 violations, exit 0" while files silently
+ * failed to parse is the false-clean bug in another form. Warnings, not
+ * errors — the answer is still useful, it is just incomplete, and the reader
+ * has to know which.
+ */
+function reportScanCaveats(filesErrored: number, filesSkipped: number): void {
+  if (filesErrored > 0) {
+    console.warn(
+      chalk.yellow(
+        `Warning: ${filesErrored} file${filesErrored === 1 ? '' : 's'} could not be parsed and ` +
+          'are absent from this report. See the [parser] errors above.',
+      ),
+    );
+  }
+  if (filesSkipped > 0) {
+    console.warn(
+      chalk.dim(
+        `  ${filesSkipped} file${filesSkipped === 1 ? '' : 's'} skipped for exceeding the size cap.`,
+      ),
+    );
+  }
+}
+
+/**
  * Analyze code complexity by parsing the working tree.
  *
  * Reads the source directly — there is no persisted index to consult, so
@@ -88,7 +115,12 @@ export async function complexityCommand(options: ComplexityOptions) {
   try {
     validateFailOn(options.failOn);
     validateFormat(options.format);
-    validateFilesExist(options.files, rootDir);
+
+    // `--files` is typed relative to where the user is standing, but the
+    // analysis root may be an ancestor of it. Re-base before validating or
+    // matching, or a subdirectory invocation silently targets the wrong path.
+    const files = options.files?.map(file => rebaseToRoot(file, cwd, rootDir));
+    validateFilesExist(files, rootDir);
 
     const scan = await performChunkOnlyIndex(rootDir, {});
     const scanError = describeScanFailure({
@@ -113,7 +145,9 @@ export async function complexityCommand(options: ComplexityOptions) {
       return;
     }
 
-    const report = analyzeComplexityFromChunks(scan.chunks, options.files);
+    reportScanCaveats(scan.filesErrored, scan.filesSkipped);
+
+    const report = analyzeComplexityFromChunks(scan.chunks, files);
     console.log(formatReport(report, options.format));
 
     // Exit code for CI integration

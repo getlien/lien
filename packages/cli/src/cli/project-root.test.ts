@@ -4,7 +4,7 @@ import os from 'os';
 import fs from 'fs/promises';
 import { getIndexDir } from '@liendev/core';
 import { VERSION_FILE } from '@liendev/core';
-import { resolveRepoRoot, resolveProjectRoot } from './project-root.js';
+import { rebaseToRoot, resolveRepoRoot, resolveProjectRoot } from './project-root.js';
 
 describe('resolveProjectRoot', () => {
   let tmp: string;
@@ -218,12 +218,47 @@ describe('resolveRepoRoot', () => {
 
   it('ignores a completed index, unlike resolveProjectRoot', async () => {
     // The whole point: commands that parse the working tree must not consult
-    // the store to decide where to look. A `.git` further up wins over an
-    // indexed subdirectory.
+    // the store to decide where to look.
+    //
+    // The fixture has to make the two resolvers DISAGREE, or an index-aware
+    // implementation would pass this test too: `nested` gets a real completed
+    // index marker, and only `dir` has `.git`. `resolveProjectRoot` stops at
+    // `nested`; `resolveRepoRoot` must walk past it to `dir`.
     await fs.mkdir(path.join(dir, '.git'), { recursive: true });
     const nested = path.join(dir, 'sub');
     await fs.mkdir(nested, { recursive: true });
 
+    const indexDir = getIndexDir(nested);
+    await fs.mkdir(indexDir, { recursive: true });
+    await fs.writeFile(path.join(indexDir, VERSION_FILE), '1');
+
+    expect(resolveProjectRoot(nested)).toBe(nested);
     expect(resolveRepoRoot(nested)).toBe(dir);
+  });
+});
+
+describe('rebaseToRoot', () => {
+  it('re-bases a path typed in a subdirectory onto the analysis root', () => {
+    // `lien complexity --files src/thing.ts` run from `<root>/packages/cli`
+    // must resolve to `packages/cli/src/thing.ts`, not `src/thing.ts`.
+    expect(rebaseToRoot('src/thing.ts', '/repo/packages/cli', '/repo')).toBe(
+      'packages/cli/src/thing.ts',
+    );
+  });
+
+  it('is a no-op when the invocation directory IS the root', () => {
+    expect(rebaseToRoot('src/thing.ts', '/repo', '/repo')).toBe('src/thing.ts');
+  });
+
+  it('accepts an absolute path', () => {
+    expect(rebaseToRoot('/repo/packages/cli/a.ts', '/repo/packages/cli', '/repo')).toBe(
+      'packages/cli/a.ts',
+    );
+  });
+
+  it('handles a path that walks upward out of the invocation directory', () => {
+    expect(rebaseToRoot('../parser/a.ts', '/repo/packages/cli', '/repo')).toBe(
+      'packages/parser/a.ts',
+    );
   });
 });
