@@ -94,7 +94,7 @@ describe('complexityCommand', () => {
     expect(sarif.$schema).toContain('sarif');
   });
 
-  it('filters to the requested files', async () => {
+  it('filters violation detection to the requested files', async () => {
     const chunks = [
       chunk({ file: 'src/keep.ts', symbolName: 'keep' }),
       chunk({ file: 'src/drop.ts', symbolName: 'drop' }),
@@ -105,9 +105,37 @@ describe('complexityCommand', () => {
 
     await complexityCommand({ format: 'json', files: ['src/keep.ts'] });
 
-    const output = consoleLogSpy.mock.calls[0][0];
-    expect(output).toContain('keep.ts');
-    expect(output).not.toContain('drop.ts');
+    // Assert on structure, not substring: `toContain('keep.ts')` would pass
+    // even with an empty `files` map, because the name also appears in
+    // dependents lists.
+    const parsed = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(parsed.files['src/keep.ts']).toBeDefined();
+    expect(parsed.files['src/drop.ts']).toBeUndefined();
+  });
+
+  it('computes fan-in over the WHOLE corpus even when --files narrows the report', async () => {
+    // The invariant: `--files` narrows violation DETECTION, never the corpus
+    // enrichment runs over. Narrowing the input instead would silently
+    // understate every dependent count — a wrong answer that looks right.
+    // `importer.ts` is outside the --files set and must still be counted.
+    const chunks = [
+      chunk({ file: 'src/keep.ts', symbolName: 'keep' }),
+      chunk({
+        file: 'src/importer.ts',
+        symbolName: 'importer',
+        complexity: 1,
+        imports: ['./keep'],
+      }),
+    ];
+    vi.mocked(parserModule.performChunkOnlyIndex).mockResolvedValue(scanOf(chunks) as never);
+    await fs.mkdir(path.join(dir, 'src'), { recursive: true });
+    await fs.writeFile(path.join(dir, 'src/keep.ts'), '');
+
+    await complexityCommand({ format: 'json', files: ['src/keep.ts'] });
+
+    const parsed = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(parsed.files['src/keep.ts'].dependentCount).toBeGreaterThan(0);
+    expect(parsed.files['src/keep.ts'].dependents).toContain('src/importer.ts');
   });
 
   it('exits 1 when --fail-on error and errors exist', async () => {
@@ -141,14 +169,18 @@ describe('complexityCommand', () => {
     expect(processExitSpy).toHaveBeenCalledWith(1);
   });
 
-  it('rejects an invalid --fail-on value', async () => {
-    await complexityCommand({ format: 'text', failOn: 'invalid' as never });
+  it('rejects an invalid --fail-on value, naming it', async () => {
+    await complexityCommand({ format: 'text', failOn: 'critical' as never });
     expect(processExitSpy).toHaveBeenCalledWith(1);
+    expect(consoleErrorSpy.mock.calls.flat().join(' ')).toContain(
+      'Invalid --fail-on value "critical"',
+    );
   });
 
-  it('rejects an invalid --format value', async () => {
-    await complexityCommand({ format: 'invalid' as never });
+  it('rejects an invalid --format value, naming it', async () => {
+    await complexityCommand({ format: 'xml' as never });
     expect(processExitSpy).toHaveBeenCalledWith(1);
+    expect(consoleErrorSpy.mock.calls.flat().join(' ')).toContain('Invalid --format value "xml"');
   });
 
   // --- No-data honesty -----------------------------------------------------
@@ -175,6 +207,9 @@ describe('complexityCommand', () => {
     const errors = consoleErrorSpy.mock.calls.flat().join(' ');
     expect(errors).toContain('No files found to index');
     expect(errors).toContain('not a clean result');
+    // A refusal must be actionable, never a dead end.
+    expect(errors).toContain('Looked in:');
+    expect(errors).toContain('project root');
     expect(consoleLogSpy).not.toHaveBeenCalled();
   });
 

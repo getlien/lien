@@ -46,6 +46,7 @@ import {
   DEFAULT_COMPLEXITY_THRESHOLDS,
 } from '@liendev/parser';
 import { describeScanFailure } from '../utils/scan-failure.js';
+import { resolveRepoRoot } from './project-root.js';
 import type { CodeChunk, ComplexityReport, ComplexityViolation } from '@liendev/parser';
 
 export interface HealthOptions {
@@ -467,6 +468,7 @@ export async function analyzeHealth(rootDir: string, includeTests = false): Prom
     success: scan.success,
     error: scan.error,
     chunkCount: chunks.length,
+    filesSkipped: scan.filesSkipped,
   });
 
   // `enrich: false` skips `enrichWithDependencies`, which is 609 of this
@@ -504,7 +506,14 @@ export async function analyzeHealth(rootDir: string, includeTests = false): Prom
 }
 
 export async function healthCommand(options: HealthOptions): Promise<void> {
-  const rootDir = process.cwd();
+  // Same reasoning as `lien complexity`: a raw cwd silently ranks a subtree
+  // with understated fan-in. `--path` is the way to narrow the OUTPUT; the
+  // corpus must stay whole. See `resolveRepoRoot`.
+  const cwd = process.cwd();
+  const rootDir = resolveRepoRoot(cwd);
+  if (rootDir !== cwd) {
+    console.warn(chalk.dim(`Analyzing the repository root: ${rootDir}`));
+  }
 
   try {
     validateFormat(options.format);

@@ -4,7 +4,7 @@ import os from 'os';
 import fs from 'fs/promises';
 import { getIndexDir } from '@liendev/core';
 import { VERSION_FILE } from '@liendev/core';
-import { resolveProjectRoot } from './project-root.js';
+import { resolveRepoRoot, resolveProjectRoot } from './project-root.js';
 
 describe('resolveProjectRoot', () => {
   let tmp: string;
@@ -184,5 +184,46 @@ describe('resolveProjectRoot', () => {
 
       expect(resolveProjectRoot(cwd)).toBe(worktreeRoot);
     });
+  });
+});
+
+describe('resolveRepoRoot', () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'lien-reporoot-')));
+  });
+
+  afterEach(async () => {
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it('walks up to the .git marker from a subdirectory', async () => {
+    await fs.mkdir(path.join(dir, '.git'), { recursive: true });
+    const nested = path.join(dir, 'packages', 'cli', 'src');
+    await fs.mkdir(nested, { recursive: true });
+
+    expect(resolveRepoRoot(nested)).toBe(dir);
+  });
+
+  it('returns the directory itself when it is the root', async () => {
+    await fs.mkdir(path.join(dir, '.git'), { recursive: true });
+    expect(resolveRepoRoot(dir)).toBe(dir);
+  });
+
+  it('falls back to the start directory when there is no marker anywhere', async () => {
+    // Non-repo directories must keep working rather than walking to /.
+    expect(resolveRepoRoot(dir)).toBe(dir);
+  });
+
+  it('ignores a completed index, unlike resolveProjectRoot', async () => {
+    // The whole point: commands that parse the working tree must not consult
+    // the store to decide where to look. A `.git` further up wins over an
+    // indexed subdirectory.
+    await fs.mkdir(path.join(dir, '.git'), { recursive: true });
+    const nested = path.join(dir, 'sub');
+    await fs.mkdir(nested, { recursive: true });
+
+    expect(resolveRepoRoot(nested)).toBe(dir);
   });
 });

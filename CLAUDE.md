@@ -120,7 +120,7 @@ blanket "always error"**:
 
 | Disposition | No index / empty store (S0/S1) | Stale vs. HEAD (S2) | Requested path not indexed (S3) |
 |---|---|---|---|
-| Gate-shaped (`--fail-on`-style) | **Hard error, non-zero exit** | Loud warning, still runs | — |
+| Gate-shaped (`--fail-on`-style; no index-reading command is currently in this class) | **Hard error, non-zero exit** | Loud warning, still runs | — |
 | Advisory nudge (`lien annotate`, `lien api-delta`) | Loud, un-suppressible warning or degraded marker (`enriched: false`) — exit 0 is fine | n/a for these two | Explicit "not found in the index" |
 | MCP tool | S0 is structurally impossible (`lien serve` initializes the store before registering tools); S1 → explicit `note`/`attributionCaveat`, never a bare empty result | n/a — `lien serve`'s git-detection keeps it fresh | Explicit `note`/`attributionCaveat` naming the path |
 

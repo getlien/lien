@@ -5,6 +5,7 @@ import { performChunkOnlyIndex, analyzeComplexityFromChunks } from '@liendev/par
 import { formatReport } from '@liendev/core';
 import type { OutputFormat } from '@liendev/core';
 import { describeScanFailure } from '../utils/scan-failure.js';
+import { resolveRepoRoot } from './project-root.js';
 
 interface ComplexityOptions {
   files?: string[];
@@ -73,7 +74,16 @@ function validateFilesExist(files: string[] | undefined, rootDir: string): void 
  * so disabling it would silently empty a documented output field.
  */
 export async function complexityCommand(options: ComplexityOptions) {
-  const rootDir = process.cwd();
+  // Resolve to the repo root rather than trusting cwd. Run from a
+  // subdirectory, a raw cwd analyses that subtree alone and understates every
+  // dependent count, while looking like a perfectly normal report — and for a
+  // gate that means `--fail-on` verdicts on an arbitrary subtree. See
+  // `resolveRepoRoot`.
+  const cwd = process.cwd();
+  const rootDir = resolveRepoRoot(cwd);
+  if (rootDir !== cwd) {
+    console.warn(chalk.dim(`Analyzing the repository root: ${rootDir}`));
+  }
 
   try {
     validateFailOn(options.failOn);
@@ -85,12 +95,19 @@ export async function complexityCommand(options: ComplexityOptions) {
       success: scan.success,
       error: scan.error,
       chunkCount: scan.chunks.length,
+      filesSkipped: scan.filesSkipped,
     });
 
     if (scanError) {
       console.error(chalk.red(`Error: cannot analyze complexity — ${scanError}`));
       console.error(
         chalk.yellow('This is not a clean result. Nothing was analyzed, so nothing was checked.'),
+      );
+      // A refusal must be actionable, never a dead end (see
+      // cli/unsafe-root.ts's same principle).
+      console.error(chalk.dim(`  Looked in: ${rootDir}`));
+      console.error(
+        chalk.dim('  Check that this is your project root and the sources are not all gitignored.'),
       );
       process.exit(1);
       return;

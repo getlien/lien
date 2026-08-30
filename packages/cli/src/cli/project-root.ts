@@ -101,3 +101,36 @@ export function resolveProjectRoot(start: string = process.cwd()): AbsolutePath 
     dir = path.dirname(dir);
   }
 }
+
+/**
+ * Resolve the project root using ONLY the `.git` marker, never the index.
+ *
+ * The index-free counterpart to {@link resolveProjectRoot}, for commands that
+ * parse the working tree (`lien complexity`, `lien health`). Those must not
+ * consult `hasCompletedIndex`: reading the store to decide where to look
+ * would re-introduce the dependency the whole point was to remove, and would
+ * make the answer depend on whether someone had once run `lien index` here.
+ *
+ * Why resolve at all rather than trusting `process.cwd()`: run from
+ * `packages/cli`, a raw cwd analyses that subtree alone. The report looks
+ * perfectly normal — a smaller file count, paths rooted at the subdirectory —
+ * while every dependent count is silently understated, because fan-in is
+ * computed over the visible corpus. For a gate-shaped command that means
+ * `--fail-on error` passing or failing on an arbitrary subtree. The old
+ * index-backed path caught this by accident: no index under `packages/cli`
+ * meant a hard "Index not found" rather than a plausible wrong answer.
+ *
+ * Falls back to `start` when no marker is found anywhere up the tree, which
+ * keeps non-repo directories working.
+ */
+export function resolveRepoRoot(start: string = process.cwd()): AbsolutePath {
+  const resolvedStart = path.resolve(start);
+  const fsRoot = path.parse(resolvedStart).root;
+
+  let dir = resolvedStart;
+  while (true) {
+    if (hasGitMarker(dir)) return toAbsolutePath(dir);
+    if (dir === fsRoot) return toAbsolutePath(resolvedStart);
+    dir = path.dirname(dir);
+  }
+}

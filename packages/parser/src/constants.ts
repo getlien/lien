@@ -36,7 +36,7 @@ export const DEFAULT_INDEX_INCLUDE_PATTERNS = [
 export const MAX_CHUNKS_PER_FILE = 100;
 
 /**
- * Largest file this package will read and chunk, in bytes.
+ * Largest file Lien will read and chunk, in bytes.
  *
  * A backstop independent of path-based filtering: it protects an ordinary
  * project against an accidentally committed multi-GB blob exactly as much as
@@ -44,18 +44,23 @@ export const MAX_CHUNKS_PER_FILE = 100;
  * database. 5 MB comfortably clears every real source/config/doc file a
  * typical codebase produces.
  *
- * Mirrors `MAX_INDEXABLE_FILE_SIZE_BYTES` in `@liendev/core` (#1025), which
- * applies the same cap on the indexing path. The parser needs its own copy
- * because `performChunkOnlyIndex` is now a first-class reader — `lien
- * complexity` and `lien health` go through it and never touch core's indexer
- * — and parser cannot depend on core.
+ * Defined here rather than in `@liendev/core` (where #1025 first put it)
+ * because the parser is now a first-class reader: `lien complexity` and
+ * `lien health` go through `performChunkOnlyIndex` and never touch core's
+ * indexer. Parser cannot depend on core, so core imports it from here and
+ * re-exports it — one definition, two consumers, no copy to drift.
  *
  * Skipping is not merely a resource guard. An 8 MB TypeScript file exceeds
  * the native parser's napi string limit, so it fails AST parsing, falls back
- * to line-based chunking, and lands in the report carrying meaningless
+ * to line-based chunking, and lands in reports carrying meaningless
  * complexity metrics. Excluding it is more correct, not just cheaper.
  */
-export const MAX_CHUNKABLE_FILE_SIZE_BYTES = 5 * 1024 * 1024;
+export const MAX_INDEXABLE_FILE_SIZE_BYTES = 5 * 1024 * 1024;
+
+/** Whether `sizeBytes` exceeds {@link MAX_INDEXABLE_FILE_SIZE_BYTES}. */
+export function isOversizedForIndexing(sizeBytes: number): boolean {
+  return sizeBytes > MAX_INDEXABLE_FILE_SIZE_BYTES;
+}
 
 // Parse-stage concurrency ceiling
 //

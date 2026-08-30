@@ -81,7 +81,7 @@ graph TB
     STATUS --> CONFIG
     STATUS --> FACTORY
     CONFIGCMD --> GLOBALCONFIG
-    COMPLX --> COMPLEXANALYZER
+    COMPLX --> CHUNKER
 
     %% MCP to Core
     MCP --> TOOLS

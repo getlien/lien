@@ -29,6 +29,8 @@ export interface ScanOutcome {
   success: boolean;
   error?: string;
   chunkCount: number;
+  /** Files excluded for exceeding the size cap, if the scan reported any. */
+  filesSkipped?: number;
 }
 
 /**
@@ -40,6 +42,14 @@ export interface ScanOutcome {
  */
 export function describeScanFailure(outcome: ScanOutcome): string | undefined {
   if (!outcome.success) return outcome.error ?? 'the scan failed for an unreported reason';
-  if (outcome.chunkCount === 0) return 'the scan produced no parseable chunks';
-  return undefined;
+  if (outcome.chunkCount > 0) return undefined;
+
+  // Naming the real cause matters more here than anywhere else: "no parseable
+  // chunks" sends someone hunting a parser bug when the actual answer is that
+  // every candidate file was too large to read.
+  const skipped = outcome.filesSkipped ?? 0;
+  if (skipped > 0) {
+    return `every candidate file was skipped for exceeding the size cap (${skipped} file${skipped === 1 ? '' : 's'})`;
+  }
+  return 'the scan produced no parseable chunks';
 }

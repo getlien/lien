@@ -28,4 +28,28 @@ describe('describeScanFailure', () => {
       'parse aborted',
     );
   });
+
+  it('names the size cap when every candidate file was skipped', () => {
+    // "no parseable chunks" would send someone hunting a parser bug when the
+    // real answer is that every file was too large to read.
+    const reason = describeScanFailure({ success: true, chunkCount: 0, filesSkipped: 3 });
+    expect(reason).toContain('size cap');
+    expect(reason).toContain('3 files');
+  });
+
+  it('singularises the skipped-file count', () => {
+    expect(describeScanFailure({ success: true, chunkCount: 0, filesSkipped: 1 })).toContain(
+      '1 file',
+    );
+  });
+
+  it('still reports the generic reason when nothing was skipped', () => {
+    expect(describeScanFailure({ success: true, chunkCount: 0, filesSkipped: 0 })).toContain(
+      'no parseable chunks',
+    );
+  });
+
+  it('does not mention skips when chunks were produced', () => {
+    expect(describeScanFailure({ success: true, chunkCount: 10, filesSkipped: 2 })).toBeUndefined();
+  });
 });
