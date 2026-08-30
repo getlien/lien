@@ -12,10 +12,13 @@
  *   Impact       how much breaks if I do?         fan-in (dependent count)
  *   Detectability would I find out?               test associations
  *
- * Advisory by construction: always exits 0. `lien complexity --fail-on` and
- * `lien delta` are the gates; a ranking whose precision has never been
- * measured must not fail anyone's build (see #1014 for what over-firing
- * costs).
+ * Advisory by construction: it never exits non-zero because of what it FOUND.
+ * `lien complexity --fail-on` and `lien delta` are the gates; a ranking whose
+ * precision has never been measured must not fail anyone's build (see #1014
+ * for what over-firing costs). Usage errors — an unknown `--format`, a
+ * non-numeric `--top` — still exit 1, as they should: that reports a bad
+ * invocation, not a bad codebase. The distinction is the point, so don't
+ * restate this as "always exits 0".
  *
  * Reads the working tree directly via `performChunkOnlyIndex` — no persisted
  * index, so nothing can be stale. That removes staleness, not the obligation
@@ -38,7 +41,9 @@ import {
   performChunkOnlyIndex,
   analyzeComplexityFromChunks,
   computeDependentCountsFromChunks,
+  findTestAssociationsFromChunks,
   isTestFile,
+  DEFAULT_COMPLEXITY_THRESHOLDS,
 } from '@liendev/parser';
 import type { CodeChunk, ComplexityReport, ComplexityViolation } from '@liendev/parser';
 
@@ -94,8 +99,13 @@ export interface HealthResult {
 
 const VALID_FORMATS = ['text', 'json'];
 
-/** Cognitive complexity at or above which a function counts as hard to reason about. */
-const COGNITIVE_HIGH = 15;
+/**
+ * Cognitive complexity at or above which a function counts as hard to reason
+ * about. Shares `DEFAULT_COMPLEXITY_THRESHOLDS.mentalLoad` rather than
+ * restating 15 — #988 consolidated that number precisely so a second copy
+ * could not drift from the one the gates enforce.
+ */
+const COGNITIVE_HIGH = DEFAULT_COMPLEXITY_THRESHOLDS.mentalLoad;
 
 /** Dependent count at or above which a function counts as widely depended on. */
 const FANIN_HIGH = 5;
@@ -137,6 +147,11 @@ export function classifyShape(cognitive: number, dependents: number, hasTests: b
   if (complex && widelyUsed) return hasTests ? 'expensive' : 'dangerous';
   if (!complex && widelyUsed && !hasTests) return 'cheap-win';
   return 'isolated';
+}
+
+/** "1 file", "2 files" — a report that says "1 files" reads as unmaintained. */
+export function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`;
 }
 
 /** One-line explanation of why an entry is on the list. */
@@ -215,19 +230,15 @@ export function describeScanFailure(
 }
 
 /**
- * Test associations, taken from the report rather than recomputed.
+ * Distinct files carrying at least one complexity violation.
  *
- * `analyzeComplexityFromChunks` already calls `findTestAssociationsFromChunks`
- * for every violating file (`chunk-complexity.ts:414-424`). Calling it a
- * second time here cost ~55 ms and returned the identical set. Note that
- * `FileComplexityData.testAssociations`' "TODO: Populate when test-to-code
- * mapping is implemented" comment is stale — it has been populated since the
- * enrichment landed.
+ * Scopes the test-association lookup: running it over the whole corpus is
+ * wasted work, since only violating files can appear in the ranking.
  */
-export function testsFromReport(report: ComplexityReport): Map<string, string[]> {
-  return new Map(
-    Object.entries(report.files).map(([filepath, data]) => [filepath, data.testAssociations ?? []]),
-  );
+export function violatingFiles(report: ComplexityReport): string[] {
+  return Object.entries(report.files)
+    .filter(([, data]) => data.violations.length > 0)
+    .map(([filepath]) => filepath);
 }
 
 /**
@@ -312,9 +323,7 @@ export function computeCoverage(
 function renderEntry(entry: RiskEntry, rank: number): string[] {
   const location = chalk.bold(`${entry.filepath}:${entry.startLine}`);
   const tests =
-    entry.tests.length > 0
-      ? `${entry.tests.length} test${entry.tests.length === 1 ? '' : 's'}`
-      : chalk.yellow('no tests');
+    entry.tests.length > 0 ? plural(entry.tests.length, 'test') : chalk.yellow('no tests');
   const facts = `mental load ${entry.cognitive} · imported by ${entry.dependents} · ${tests}`;
 
   return [
@@ -342,10 +351,40 @@ function renderCoverage(coverage: CoverageRow[]): string[] {
   return lines;
 }
 
-export function renderText(result: HealthResult, shown: RiskEntry[]): string {
+/**
+ * Explain an empty list.
+ *
+ * "Nothing ranked as risky" is true of four different situations, only one of
+ * which is good news, and a reader who cannot tell them apart learns to
+ * distrust the green line. (The failed-scan case is handled earlier and never
+ * reaches here.)
+ */
+export function renderNothingShown(result: HealthResult, pathFilter?: string): string[] {
+  if (pathFilter && result.entries.length > 0) {
+    return [
+      chalk.dim(`  No risky functions under "${pathFilter}".`),
+      chalk.dim(
+        `  ${plural(result.entries.length, 'risky function')} ranked elsewhere in the repo.`,
+      ),
+    ];
+  }
+
+  if (result.entries.length === 0 && result.totalViolations > 0) {
+    return [
+      chalk.dim(`  No risky functions outside test files.`),
+      chalk.dim(
+        `  ${plural(result.totalViolations, 'threshold violation')} — all in tests. Use --include-tests to rank them.`,
+      ),
+    ];
+  }
+
+  return [chalk.green('  Nothing ranked as risky to change.')];
+}
+
+export function renderText(result: HealthResult, shown: RiskEntry[], pathFilter?: string): string {
   const lines: string[] = ['', chalk.bold('lien health'), ''];
 
-  const scanned = `${result.filesAnalyzed} files · ${result.chunks} chunks · ${(result.durationMs / 1000).toFixed(1)}s · no index`;
+  const scanned = `${plural(result.filesAnalyzed, 'file')} · ${plural(result.chunks, 'chunk')} · ${(result.durationMs / 1000).toFixed(1)}s · no index`;
   lines.push(chalk.dim(`  ${scanned}`), '');
 
   if (result.scanError) {
@@ -361,7 +400,7 @@ export function renderText(result: HealthResult, shown: RiskEntry[]): string {
   }
 
   if (shown.length === 0) {
-    lines.push(chalk.green('  Nothing ranked as risky to change.'), '');
+    lines.push(...renderNothingShown(result, pathFilter), '');
   } else {
     const noun = shown.length === 1 ? 'function is' : 'functions are';
     lines.push(chalk.yellow(`  ⚠ ${shown.length} ${noun} risky to change`), '');
@@ -371,12 +410,42 @@ export function renderText(result: HealthResult, shown: RiskEntry[]): string {
   const remaining = result.totalViolations - shown.length;
   if (remaining > 0) {
     lines.push(
-      chalk.dim(`  ${remaining} other threshold violations — \`lien complexity\` to see them`),
+      chalk.dim(
+        `  ${plural(remaining, 'other threshold violation')} — \`lien complexity\` to see them`,
+      ),
     );
   }
 
   lines.push(...renderCoverage(result.coverage), '');
   return lines.join('\n');
+}
+
+/**
+ * JSON payload.
+ *
+ * `entries` is truncated by `--top` while `totalViolations` and `coverage`
+ * describe the whole repo, so the counts are stated explicitly: without
+ * `rankedTotal` a consumer cannot tell five-of-five from five-of-sixty-five,
+ * and the skill that will read this needs to know whether it saw everything.
+ *
+ * `score` is rounded. The design deliberately never shows a score to a human,
+ * and emitting `89.62406251802891` invites someone to treat sixteen digits of
+ * float noise as meaningful precision.
+ */
+export function toJson(
+  result: HealthResult,
+  scoped: RiskEntry[],
+  shown: RiskEntry[],
+  pathFilter?: string,
+): Record<string, unknown> {
+  return {
+    ...result,
+    entries: shown.map(entry => ({ ...entry, score: Math.round(entry.score * 10) / 10 })),
+    shown: shown.length,
+    rankedTotal: result.entries.length,
+    rankedUnderPath: pathFilter ? scoped.length : undefined,
+    pathFilter,
+  };
 }
 
 function validateFormat(format: string): void {
@@ -389,12 +458,13 @@ function validateFormat(format: string): void {
 }
 
 function parseTop(top: string): number {
-  const parsed = Number.parseInt(top, 10);
-  if (Number.isNaN(parsed) || parsed < 1) {
+  // `Number.parseInt` stops at the first non-digit, so "3abc" would silently
+  // become 3. A flag the user got wrong should say so, not guess.
+  if (!/^\d+$/.test(top.trim()) || Number.parseInt(top, 10) < 1) {
     console.error(chalk.red(`Error: Invalid --top value "${top}". Must be a positive integer`));
     process.exit(1);
   }
-  return parsed;
+  return Number.parseInt(top, 10);
 }
 
 /**
@@ -406,35 +476,38 @@ function parseTop(top: string): number {
  * dependent count.
  */
 export async function analyzeHealth(rootDir: string, includeTests = false): Promise<HealthResult> {
+  const startedAt = Date.now();
   const scan = await performChunkOnlyIndex(rootDir, {});
   const { chunks } = scan;
   const scanError = describeScanFailure(scan.success, scan.error, chunks.length);
 
-  const report = analyzeComplexityFromChunks(chunks);
-
-  // Fan-in comes from `computeDependentCountsFromChunks`, NOT from the
-  // report's own `dependentCount`, and the two deliberately disagree.
+  // `enrich: false` skips `enrichWithDependencies`, which is 609 of this
+  // function's 653 ms on this repo and scales with VIOLATING FILE COUNT (one
+  // whole-corpus dependency scan each), not repo size. Health sources fan-in
+  // from `computeDependentCountsFromChunks` instead, so the enrichment would
+  // be both the dominant cost and a discarded result.
   //
-  // The report's number comes from `analyzeDependencies`, which follows
-  // barrel re-export chains (`dependency-analyzer.ts:790-796`). For anything
-  // exported through `packages/parser/src/index.ts` that means "roughly
-  // everything": it scores `insights/complexity-delta.ts` at 229 where four
-  // files import it directly and 164 files import the barrel at all. A number
-  // that large for every re-exported file flattens the ranking into noise,
-  // which is the one thing an "impact" axis must not do.
-  //
-  // `computeDependentCountsFromChunks` counts direct import edges plus the
-  // recovery tiers, is the number the index canonically stored (#1071), and
-  // costs ~33 ms against the enrichment's ~660 ms. It discriminates, so it
-  // ranks. `lien complexity --format json` still exposes the transitive
-  // figure; the two answer different questions and are documented as such.
+  // The two fan-in numbers deliberately disagree. Enrichment's comes from
+  // `analyzeDependencies`, which follows barrel re-export chains
+  // (`dependency-analyzer.ts:790-796`); for anything exported through
+  // `packages/parser/src/index.ts` that approximates "everything", scoring
+  // `insights/complexity-delta.ts` at 229 where four files import it directly
+  // and 164 import the barrel at all. A number that large for every
+  // re-exported file flattens the ranking into noise, which is the one thing
+  // an impact axis must not do. `computeDependentCountsFromChunks` counts
+  // direct import edges plus recovery tiers, is the number the index
+  // canonically stored (#1071), and discriminates. `lien complexity` still
+  // reports the transitive figure; they answer different questions.
+  const report = analyzeComplexityFromChunks(chunks, undefined, undefined, { enrich: false });
   const dependentCounts = computeDependentCountsFromChunks(chunks, rootDir);
-  const testsByFile = testsFromReport(report);
+  const testsByFile = findTestAssociationsFromChunks(violatingFiles(report), chunks, rootDir);
 
   return {
     filesAnalyzed: report.summary.filesAnalyzed,
     chunks: chunks.length,
-    durationMs: scan.durationMs,
+    // Whole analysis, not `scan.durationMs` — that covers parsing only, so
+    // reporting it understated what the user actually waited for.
+    durationMs: Date.now() - startedAt,
     totalViolations: report.summary.totalViolations,
     entries: buildEntries(report, chunks, dependentCounts, testsByFile, includeTests),
     coverage: computeCoverage(chunks, dependentCounts),
@@ -457,11 +530,11 @@ export async function healthCommand(options: HealthOptions): Promise<void> {
     const shown = scoped.slice(0, top);
 
     if (options.format === 'json') {
-      console.log(JSON.stringify({ ...result, entries: shown }, null, 2));
+      console.log(JSON.stringify(toJson(result, scoped, shown, options.path), null, 2));
       return;
     }
 
-    console.log(renderText(result, shown));
+    console.log(renderText(result, shown, options.path));
   } catch (error) {
     console.error(chalk.red('Error analyzing health:'), error);
     process.exit(1);

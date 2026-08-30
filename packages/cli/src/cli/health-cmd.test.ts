@@ -1,14 +1,21 @@
 import { describe, it, expect } from 'vitest';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
 import type { CodeChunk, ComplexityReport } from '@liendev/parser';
 import {
   scoreRisk,
   classifyShape,
   describeShape,
   recommendFor,
+  analyzeHealth,
   buildEntries,
   cognitiveFor,
   computeCoverage,
   describeScanFailure,
+  plural,
+  renderNothingShown,
+  toJson,
   renderText,
   type HealthResult,
   type RiskEntry,
@@ -411,5 +418,129 @@ describe('renderText', () => {
   it('omits the unresolved-language line when every language resolved', () => {
     const clean = { ...result, coverage: [{ language: 'typescript', files: 10, resolved: true }] };
     expect(stripAnsi(renderText(clean, [entry]))).not.toContain('no fan-in found');
+  });
+});
+describe('plural', () => {
+  it('does not say "1 files"', () => {
+    expect(plural(1, 'file')).toBe('1 file');
+    expect(plural(0, 'file')).toBe('0 files');
+    expect(plural(2, 'file')).toBe('2 files');
+  });
+});
+
+describe('renderNothingShown', () => {
+  const base: HealthResult = {
+    filesAnalyzed: 10,
+    chunks: 100,
+    durationMs: 100,
+    totalViolations: 0,
+    entries: [],
+    coverage: [],
+  };
+
+  it('reports a genuinely clean repo as clean', () => {
+    expect(stripAnsi(renderNothingShown(base).join('\n'))).toContain(
+      'Nothing ranked as risky to change.',
+    );
+  });
+
+  it('distinguishes "--path matched nothing" from clean', () => {
+    const withEntries = { ...base, entries: [{ filepath: 'a.ts' }] as never };
+    const out = stripAnsi(renderNothingShown(withEntries, 'src/').join('\n'));
+    expect(out).toContain('No risky functions under "src/"');
+    expect(out).not.toContain('Nothing ranked as risky to change.');
+  });
+
+  it('distinguishes "everything was in test files" and names the escape hatch', () => {
+    const allTests = { ...base, totalViolations: 7 };
+    const out = stripAnsi(renderNothingShown(allTests).join('\n'));
+    expect(out).toContain('outside test files');
+    expect(out).toContain('--include-tests');
+    expect(out).not.toContain('Nothing ranked as risky to change.');
+  });
+});
+
+describe('toJson', () => {
+  const jsonEntry: RiskEntry = {
+    filepath: 'a.ts',
+    startLine: 1,
+    symbolName: 'run',
+    language: 'typescript',
+    cognitive: 20,
+    dependents: 3,
+    tests: [],
+    score: 89.62406251802891,
+    shape: 'dangerous',
+  };
+  const jsonResult: HealthResult = {
+    filesAnalyzed: 10,
+    chunks: 100,
+    durationMs: 100,
+    totalViolations: 65,
+    entries: [jsonEntry, jsonEntry, jsonEntry],
+    coverage: [],
+  };
+
+  it('states how many were shown out of how many ranked', () => {
+    const json = toJson(jsonResult, jsonResult.entries, [jsonEntry]);
+    expect(json.shown).toBe(1);
+    expect(json.rankedTotal).toBe(3);
+  });
+
+  it('rounds the score rather than emitting float noise', () => {
+    const json = toJson(jsonResult, jsonResult.entries, [jsonEntry]);
+    expect((json.entries as RiskEntry[])[0].score).toBe(89.6);
+  });
+
+  it('reports the path-scoped count only when a path filter is in play', () => {
+    expect(toJson(jsonResult, jsonResult.entries, [jsonEntry]).rankedUnderPath).toBeUndefined();
+    expect(toJson(jsonResult, [jsonEntry], [jsonEntry], 'src/').rankedUnderPath).toBe(1);
+  });
+});
+
+const GNARLY = [
+  'export function tangle(a, b, c, d) {',
+  '  if (a) { if (b) { if (c) { if (d) { for (const x of a) { if (x) { while (b) { if (c) { return 1; } } } } } } } }',
+  '  if (b) { if (c) { if (d) { switch (a) { case 1: if (b) return 2; default: return 3; } } } }',
+  '  if (c) { if (d) { if (a) { if (b) { try { return 4; } catch { if (a) return 5; } } } } }',
+  '  return 0;',
+  '}',
+].join('\n');
+
+describe('analyzeHealth (integration — real parse, no index)', () => {
+  async function fixtureDir(files: Record<string, string>): Promise<string> {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-health-'));
+    for (const [name, body] of Object.entries(files)) {
+      const full = path.join(dir, name);
+      await fs.mkdir(path.dirname(full), { recursive: true });
+      await fs.writeFile(full, body);
+    }
+    return dir;
+  }
+
+  it('reports no data for an empty directory instead of a clean bill of health', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-health-empty-'));
+    const result = await analyzeHealth(dir);
+    expect(result.scanError).toBeTruthy();
+    expect(result.entries).toEqual([]);
+    expect(stripAnsi(renderText(result, []))).toContain('NOT a clean bill of health');
+  });
+
+  it('ranks a complex untested function from real source', async () => {
+    const dir = await fixtureDir({ 'src/tangle.js': GNARLY });
+    const result = await analyzeHealth(dir);
+
+    expect(result.scanError).toBeUndefined();
+    expect(result.chunks).toBeGreaterThan(0);
+    expect(result.entries.length).toBeGreaterThan(0);
+    expect(result.entries[0].symbolName).toBe('tangle');
+    expect(result.entries[0].tests).toEqual([]);
+  });
+
+  it('excludes test files from the ranking by default, and includes them on request', async () => {
+    const dir = await fixtureDir({ 'src/thing.test.js': GNARLY });
+
+    expect((await analyzeHealth(dir)).entries).toEqual([]);
+    expect((await analyzeHealth(dir, true)).entries.length).toBeGreaterThan(0);
   });
 });

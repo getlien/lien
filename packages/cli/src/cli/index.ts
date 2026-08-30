@@ -102,7 +102,7 @@ program
 program
   .command('health')
   .description(
-    'Rank the functions that are risky to change: complexity × fan-in ÷ test coverage (advisory, always exits 0)',
+    'Rank the functions that are risky to change: complexity × fan-in ÷ test coverage (advisory — never fails on findings)',
   )
   .option('--format <type>', 'Output format: text, json', 'text')
   .option('--top <n>', 'How many functions to show', '5')
