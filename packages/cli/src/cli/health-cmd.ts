@@ -45,6 +45,7 @@ import {
   isTestFile,
   DEFAULT_COMPLEXITY_THRESHOLDS,
 } from '@liendev/parser';
+import { describeScanFailure } from '../utils/scan-failure.js';
 import type { CodeChunk, ComplexityReport, ComplexityViolation } from '@liendev/parser';
 
 export interface HealthOptions {
@@ -210,23 +211,6 @@ export function cognitiveFor(chunk: CodeChunk | undefined, violation: Complexity
   const comparableScale =
     violation.metricType === 'cognitive' || violation.metricType === 'cyclomatic';
   return comparableScale ? violation.complexity : 0;
-}
-
-/**
- * Whether this run has data to answer from — and if not, why.
- *
- * Returns undefined only when the scan genuinely succeeded with content. A
- * parse failure and an empty scan both mean "no answer available", and
- * neither may be rendered as a clean bill of health.
- */
-export function describeScanFailure(
-  success: boolean,
-  error: string | undefined,
-  chunkCount: number,
-): string | undefined {
-  if (!success) return error ?? 'the scan failed for an unreported reason';
-  if (chunkCount === 0) return 'the scan produced no parseable chunks';
-  return undefined;
 }
 
 /**
@@ -479,7 +463,11 @@ export async function analyzeHealth(rootDir: string, includeTests = false): Prom
   const startedAt = Date.now();
   const scan = await performChunkOnlyIndex(rootDir, {});
   const { chunks } = scan;
-  const scanError = describeScanFailure(scan.success, scan.error, chunks.length);
+  const scanError = describeScanFailure({
+    success: scan.success,
+    error: scan.error,
+    chunkCount: chunks.length,
+  });
 
   // `enrich: false` skips `enrichWithDependencies`, which is 609 of this
   // function's 653 ms on this repo and scales with VIOLATING FILE COUNT (one

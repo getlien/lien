@@ -35,6 +35,28 @@ export const DEFAULT_INDEX_INCLUDE_PATTERNS = [
 // Maximum chunks expected per file when sizing scan queries.
 export const MAX_CHUNKS_PER_FILE = 100;
 
+/**
+ * Largest file this package will read and chunk, in bytes.
+ *
+ * A backstop independent of path-based filtering: it protects an ordinary
+ * project against an accidentally committed multi-GB blob exactly as much as
+ * it protects an explicitly-overridden home-root index against a keychain
+ * database. 5 MB comfortably clears every real source/config/doc file a
+ * typical codebase produces.
+ *
+ * Mirrors `MAX_INDEXABLE_FILE_SIZE_BYTES` in `@liendev/core` (#1025), which
+ * applies the same cap on the indexing path. The parser needs its own copy
+ * because `performChunkOnlyIndex` is now a first-class reader — `lien
+ * complexity` and `lien health` go through it and never touch core's indexer
+ * — and parser cannot depend on core.
+ *
+ * Skipping is not merely a resource guard. An 8 MB TypeScript file exceeds
+ * the native parser's napi string limit, so it fails AST parsing, falls back
+ * to line-based chunking, and lands in the report carrying meaningless
+ * complexity metrics. Excluding it is more correct, not just cheaper.
+ */
+export const MAX_CHUNKABLE_FILE_SIZE_BYTES = 5 * 1024 * 1024;
+
 // Parse-stage concurrency ceiling
 //
 // Hard cap on concurrent CPU-bound parse/chunk operations, independent of

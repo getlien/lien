@@ -12,7 +12,6 @@ import {
   buildEntries,
   cognitiveFor,
   computeCoverage,
-  describeScanFailure,
   plural,
   renderNothingShown,
   toJson,
@@ -96,26 +95,6 @@ describe('scoreRisk', () => {
 
   it('rises with complexity', () => {
     expect(scoreRisk(30, 5, true)).toBeGreaterThan(scoreRisk(10, 5, true));
-  });
-});
-
-describe('describeScanFailure', () => {
-  it('reports the scanner’s own error when the scan failed', () => {
-    expect(describeScanFailure(false, 'No files found to index', 0)).toBe(
-      'No files found to index',
-    );
-  });
-
-  it('still reports a failure when the scanner gave no reason', () => {
-    expect(describeScanFailure(false, undefined, 0)).toContain('unreported reason');
-  });
-
-  it('treats a successful scan with zero chunks as no data, not as clean', () => {
-    expect(describeScanFailure(true, undefined, 0)).toContain('no parseable chunks');
-  });
-
-  it('returns undefined only when the scan genuinely produced content', () => {
-    expect(describeScanFailure(true, undefined, 42)).toBeUndefined();
   });
 });
 

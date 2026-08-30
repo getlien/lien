@@ -120,9 +120,19 @@ blanket "always error"**:
 
 | Disposition | No index / empty store (S0/S1) | Stale vs. HEAD (S2) | Requested path not indexed (S3) |
 |---|---|---|---|
-| Gate-shaped (`lien complexity --fail-on`) | **Hard error, non-zero exit** | Loud warning, still runs | — |
+| Gate-shaped (`--fail-on`-style) | **Hard error, non-zero exit** | Loud warning, still runs | — |
 | Advisory nudge (`lien annotate`, `lien api-delta`) | Loud, un-suppressible warning or degraded marker (`enriched: false`) — exit 0 is fine | n/a for these two | Explicit "not found in the index" |
 | MCP tool | S0 is structurally impossible (`lien serve` initializes the store before registering tools); S1 → explicit `note`/`attributionCaveat`, never a bare empty result | n/a — `lien serve`'s git-detection keeps it fresh | Explicit `note`/`attributionCaveat` naming the path |
+
+**The rule outlives the index.** `lien complexity` and `lien health` now parse
+the working tree instead of reading the store, so S0–S3 do not apply to them
+— but "never render no-data as a clean result" still does. A failed or empty
+parse produces the same false clean an empty index did, and
+`performChunkOnlyIndex` reports failure by RETURNING `{ success: false }`
+rather than throwing, so it is easy to miss. Both route through
+`describeScanFailure` (`packages/cli/src/utils/scan-failure.ts`) and respond
+by disposition: `complexity` is gate-shaped and hard-errors, `health` is
+advisory and warns loudly at exit 0.
 
 **Hard constraint: never turn a genuinely clean, freshly-indexed result into
 a false alarm.** Gate on the actual state (`hasData()`, `getIndexedFiles()`),
