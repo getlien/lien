@@ -109,23 +109,6 @@ interface TableRow {
 }
 
 const TABLE: TableRow[] = [
-  // --- CLI, index-touching (gate-shaped: hard error on S0/S1) ---
-  { entryPoint: 'lien complexity', state: 'S0', expected: 'error, exit 1, "Index not found"' },
-  {
-    entryPoint: 'lien complexity',
-    state: 'S1',
-    expected: 'error, exit 1, "Index is empty (0 indexed files)"',
-  },
-  {
-    entryPoint: 'lien complexity',
-    state: 'S2',
-    expected: 'loud stderr staleness warning, still analyzes (never silent, never blocks)',
-  },
-  {
-    entryPoint: 'lien complexity',
-    state: 'ok',
-    expected: 'real report; exit 0 on a genuinely clean fixture (no over-firing)',
-  },
   // --- CLI, index-touching (advisory nudge: loud warning, exit 0 by design) ---
   {
     entryPoint: 'lien annotate',
@@ -165,16 +148,6 @@ const TABLE: TableRow[] = [
   // --- Layout axis (#1050, #1051): a FRESH linked worktree nested inside
   //     its own main checkout, whose base index is fully populated. See the
   //     `EntryPointState` doc comment above for the two sub-shapes.
-  {
-    entryPoint: 'lien complexity',
-    state: 'worktree-fresh',
-    expected: 'real report from the shared base — no false "Index not found" (#1051 fix)',
-  },
-  {
-    entryPoint: 'lien complexity',
-    state: 'worktree-none',
-    expected: 'still a real hard error (base also never indexed — no overcorrection)',
-  },
   {
     entryPoint: 'lien api-delta',
     state: 'worktree-fresh',
@@ -242,6 +215,12 @@ const TABLE: TableRow[] = [
     entryPoint: 'lien config get',
     state: 'n/a',
     expected: 'global config only, never touches the index — output identical regardless',
+  },
+  {
+    entryPoint: 'lien complexity',
+    state: 'n/a',
+    expected:
+      'parses the working tree; hard-errors (exit 1) when the scan yields no data — gate-shaped, so a false clean is never acceptable',
   },
   {
     entryPoint: 'lien health',
@@ -534,47 +513,71 @@ describe('index-state × entry-point matrix (#1029 W1)', () => {
   }
 
   // ==========================================================================
-  // CLI, index-touching, gate-shaped: S0/S1 must be a hard error.
+  // CLI, index-INDEPENDENT but gate-shaped.
+  //
+  // `lien complexity` parses the working tree, so S0/S1/S2 no longer exist
+  // for it — there is no store to be absent, empty or stale. What survives is
+  // the rule those states enforced: a gate must never turn "nothing was
+  // analyzed" into "nothing is wrong". These assert that the index state is
+  // now genuinely irrelevant, and that a no-data run is still a hard error.
   // ==========================================================================
 
+  // `resolveRepoRoot` walks upward for a `.git` marker. Without one inside
+  // the fixture it would escape into whatever encloses os.tmpdir(), making
+  // these assertions depend on the machine rather than the fixture.
+  async function markFixtureAsRepoRoot(): Promise<void> {
+    await fs.mkdir(path.join(dir, '.git'), { recursive: true });
+  }
+
   describe('lien complexity', () => {
-    it('S0: errors loudly, exit 1, never opens the database', async () => {
-      await complexityCommand({ format: 'text' });
-
-      expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('Index not found'));
-      expect(exitSpy).toHaveBeenCalledWith(1);
-    });
-
-    it('S1: errors loudly, exit 1 (index directory exists, store has 0 rows)', async () => {
-      const vectorDB = await createVectorDB(dir);
-      await vectorDB.initialize();
-
-      await complexityCommand({ format: 'text' });
-
-      expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('Index is empty'));
-      expect(exitSpy).toHaveBeenCalledWith(1);
-    });
-
-    it('S2: warns loudly but still analyzes (stale git state, never silent)', async () => {
-      await buildHealthyIndex(dir);
-      await fs.writeFile(path.join(dir, 'extra.ts'), 'export const z = 1;\n');
-      await commitAll(dir, 'second commit');
-
-      await complexityCommand({ format: 'text' });
-
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('stale'));
-      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('Complexity Analysis'));
-    });
-
-    it('ok: reports the real violation on a genuinely clean, freshly-indexed fixture — no over-firing', async () => {
-      await buildHealthyIndex(dir);
+    it('reports normally with NO index at all — the state that used to be a hard error', async () => {
+      await markFixtureAsRepoRoot();
+      await fs.writeFile(
+        path.join(dir, 'gnarly.ts'),
+        'export function f(a){ if(a){ if(a){ if(a){ if(a){ if(a){ return 1; } } } } } return 0; }\n',
+      );
 
       await complexityCommand({ format: 'json' });
 
       const output = JSON.parse(String(logSpy.mock.calls.at(-1)?.[0]));
       expect(output.summary.filesAnalyzed).toBeGreaterThan(0);
-      expect(output.summary.totalViolations).toBeGreaterThan(0);
       expect(errSpy).not.toHaveBeenCalled();
+      expect(exitSpy).not.toHaveBeenCalled();
+    });
+
+    it('produces the same report whether or not an index exists', async () => {
+      await markFixtureAsRepoRoot();
+      await fs.writeFile(
+        path.join(dir, 'gnarly.ts'),
+        'export function f(a){ if(a){ if(a){ if(a){ if(a){ if(a){ return 1; } } } } } return 0; }\n',
+      );
+
+      await complexityCommand({ format: 'json' });
+      const withoutIndex = String(logSpy.mock.calls.at(-1)?.[0]);
+
+      await buildHealthyIndex(dir);
+      logSpy.mockClear();
+      await complexityCommand({ format: 'json' });
+      const withIndex = String(logSpy.mock.calls.at(-1)?.[0]);
+
+      // The index is now inert for this command; a stale or absent one can no
+      // longer change the answer.
+      expect(JSON.parse(withIndex).files['gnarly.ts']).toEqual(
+        JSON.parse(withoutIndex).files['gnarly.ts'],
+      );
+    });
+
+    it('hard-errors when there is nothing to analyze, rather than reporting clean', async () => {
+      await markFixtureAsRepoRoot();
+      // Empty directory: the scan yields no chunks. A gate that formats this
+      // as "0 violations, exit 0" is the false-clean bug in its original form.
+      await complexityCommand({ format: 'text' });
+
+      expect(exitSpy).toHaveBeenCalledWith(1);
+      const errors = errSpy.mock.calls.flat().join(' ');
+      expect(errors).toContain('cannot analyze complexity');
+      expect(errors).toContain('not a clean result');
+      expect(logSpy).not.toHaveBeenCalled();
     });
   });
 
@@ -756,28 +759,38 @@ describe('index-state × entry-point matrix (#1029 W1)', () => {
     }
 
     describe('lien complexity', () => {
-      it('worktree-fresh: real report from the shared base, not a false "Index not found" (#1051)', async () => {
+      it('worktree-fresh: reports the worktree own source, no shared base needed (#1051 obsolete)', async () => {
         await buildHealthyIndex(dir);
         await chdirIntoFreshNestedWorktree();
 
         await complexityCommand({ format: 'json' });
 
-        expect(errSpy).not.toHaveBeenCalledWith(expect.stringContaining('Index not found'));
+        expect(errSpy).not.toHaveBeenCalled();
         const output = JSON.parse(String(logSpy.mock.calls.at(-1)?.[0]));
         expect(output.summary.filesAnalyzed).toBeGreaterThan(0);
         expect(output.summary.totalViolations).toBeGreaterThan(0);
       });
 
-      it('worktree-none: still a real hard error when the base ALSO has never been indexed (no overcorrection)', async () => {
+      it('worktree-none: an unindexed base is no longer an error, the worktree has source of its own', async () => {
+        // This inverts the old expectation deliberately. #1051 existed because
+        // a fresh linked worktree had no index and inherited a false "Index
+        // not found"; overlay resolution was the fix. Reading the working tree
+        // dissolves the problem rather than solving it: there is no base to
+        // resolve to, and the worktree own files are right there.
         await initRepo(dir);
-        await fs.writeFile(path.join(dir, 'a.ts'), 'export const a = 1;\n');
+        await fs.writeFile(
+          path.join(dir, 'gnarly.ts'),
+          'export function f(a){ if(a){ if(a){ if(a){ if(a){ if(a){ return 1; } } } } } return 0; }\n',
+        );
         await commitAll(dir, 'init');
         await chdirIntoFreshNestedWorktree();
 
-        await complexityCommand({ format: 'text' });
+        await complexityCommand({ format: 'json' });
 
-        expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('Index not found'));
-        expect(exitSpy).toHaveBeenCalledWith(1);
+        expect(errSpy).not.toHaveBeenCalled();
+        expect(exitSpy).not.toHaveBeenCalled();
+        const output = JSON.parse(String(logSpy.mock.calls.at(-1)?.[0]));
+        expect(output.summary.filesAnalyzed).toBeGreaterThan(0);
       });
     });
 
@@ -1472,9 +1485,9 @@ describe('completeness guard (#1029 W1) — table vs. real source', () => {
 
   /** Every entryPoint name TABLE documents for the CLI, index-touching (non-writer) rows. */
   const TABLE_CLI_INDEX_TOUCHING = new Set(
-    TABLE.filter(row =>
-      ['lien complexity', 'lien annotate', 'lien api-delta'].includes(row.entryPoint),
-    ).map(row => row.entryPoint),
+    TABLE.filter(row => ['lien annotate', 'lien api-delta'].includes(row.entryPoint)).map(
+      row => row.entryPoint,
+    ),
   );
 
   /** Every entryPoint name TABLE documents as explicitly index-independent. */
@@ -1485,11 +1498,7 @@ describe('completeness guard (#1029 W1) — table vs. real source', () => {
   it('every file that calls createVectorDB is either a known writer or a CLI row in TABLE', async () => {
     const discovered = await findCreateVectorDbCallers();
     const readOnlyDiscovered = new Set([...discovered].filter(file => !WRITER_EXEMPT.has(file)));
-    const expectedReadOnlyFiles = new Set([
-      'cli/annotate-cmd.ts',
-      'cli/api-delta-cmd.ts',
-      'cli/complexity.ts',
-    ]);
+    const expectedReadOnlyFiles = new Set(['cli/annotate-cmd.ts', 'cli/api-delta-cmd.ts']);
 
     expect(readOnlyDiscovered).toEqual(expectedReadOnlyFiles);
     // Every discovered writer really is on the exemption list (catches a
@@ -1501,12 +1510,10 @@ describe('completeness guard (#1029 W1) — table vs. real source', () => {
     // the other half of "the table must fail when an entry point isn't in
     // it": a discovered file with zero TABLE rows would pass the set
     // equality above but still leave the class undocumented.
-    expect(TABLE_CLI_INDEX_TOUCHING).toEqual(
-      new Set(['lien complexity', 'lien annotate', 'lien api-delta']),
-    );
+    expect(TABLE_CLI_INDEX_TOUCHING).toEqual(new Set(['lien annotate', 'lien api-delta']));
   });
 
-  it('the four index-independent CLI commands (status is index-touching, not independent) stay off the createVectorDB caller list', async () => {
+  it('the five index-independent CLI commands (status is index-touching, not independent) stay off the createVectorDB caller list', async () => {
     const discovered = await findCreateVectorDbCallers();
     expect(discovered.has('cli/path-cmd.ts')).toBe(false);
     expect(discovered.has('cli/delta-cmd.ts')).toBe(false);
@@ -1516,8 +1523,13 @@ describe('completeness guard (#1029 W1) — table vs. real source', () => {
     // createVectorDB call appearing here would be a design regression, not
     // just a bookkeeping one.
     expect(discovered.has('cli/health-cmd.ts')).toBe(false);
+    // `lien complexity` joined this class when it moved to the pure path. It
+    // is the one gate-shaped member: index-independent, but still a hard
+    // error when the scan yields nothing, because a false clean from a gate
+    // is the worst outcome in the table.
+    expect(discovered.has('cli/complexity.ts')).toBe(false);
     expect(TABLE_CLI_INDEX_INDEPENDENT).toEqual(
-      new Set(['lien path', 'lien delta', 'lien config get', 'lien health']),
+      new Set(['lien path', 'lien delta', 'lien config get', 'lien health', 'lien complexity']),
     );
   });
 

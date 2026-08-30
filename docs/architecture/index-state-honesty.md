@@ -12,6 +12,10 @@ data to answer, and the answer came back looking exactly like a genuine
 clean result.
 
 - `lien complexity` on a never-indexed repo → `✓ No violations found!`, exit 0.
+  (The original instance. That command now parses the working tree and has no
+  index states at all — but it still hard-errors on an empty parse, because
+  the shape of the bug never depended on the index. See the gate-shaped
+  bullet below.)
 - …on an indexed-but-empty store (same bug, one layer deeper) → the same
   false clean.
 - `get_complexity({ files: [...] })` on an unindexed path → the path silently
@@ -57,11 +61,18 @@ know."** But "never silent" does not mean "always a hard process error" —
 the right response depends on what kind of command this is:
 
 - **Gate-shaped commands** (their whole purpose is a pass/fail verdict fed
-  to CI or a commit hook — `lien complexity --fail-on`): **S0/S1 is a hard
-  error, non-zero exit.** A confident "0 violations" here is a false "safe
-  to merge." **S2 is a loud warning, never silent** — print it and still run
-  the analysis (don't block; the caller asked for an answer and staleness is
-  a caveat on it, not a reason to refuse one).
+  to CI or a commit hook): **S0/S1 is a hard error, non-zero exit.** A
+  confident "0 violations" here is a false "safe to merge." **S2 is a loud
+  warning, never silent** — print it and still run the analysis (don't block;
+  the caller asked for an answer and staleness is a caveat on it, not a
+  reason to refuse one).
+
+  `lien complexity --fail-on` was the worked example here until it moved to
+  parsing the working tree. It no longer has index states — but it is still
+  gate-shaped, and still hard-errors when the parse yields nothing, via
+  `describeScanFailure` (`packages/cli/src/utils/scan-failure.ts`). The
+  disposition is the durable part; the index was only ever one way to lack
+  data.
 - **Advisory/nudge commands** (`lien annotate`, `lien api-delta` — see
   [Blast-Radius Nudge](./blast-radius-nudge.md)): these are explicitly
   designed to degrade rather than fail the process — shell hooks depend on

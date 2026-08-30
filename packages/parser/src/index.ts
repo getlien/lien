@@ -357,6 +357,7 @@ export type {
 // =============================================================================
 
 export { performChunkOnlyIndex } from './chunk-only-index.js';
+export { MAX_INDEXABLE_FILE_SIZE_BYTES, isOversizedForIndexing } from './constants.js';
 export type { ChunkOnlyOptions, ChunkOnlyResult } from './chunk-only-index.js';
 
 // =============================================================================

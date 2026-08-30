@@ -1,11 +1,11 @@
 import chalk from 'chalk';
 import fs from 'fs';
 import path from 'path';
-import { createVectorDB } from '@liendev/core';
-import { ComplexityAnalyzer } from '@liendev/core';
+import { performChunkOnlyIndex, analyzeComplexityFromChunks } from '@liendev/parser';
 import { formatReport } from '@liendev/core';
-import type { OutputFormat, VectorDBInterface } from '@liendev/core';
-import { classifyIndexState } from '../utils/index-freshness.js';
+import type { OutputFormat } from '@liendev/core';
+import { describeScanFailure } from '../utils/scan-failure.js';
+import { resolveRepoRoot, rebaseToRoot } from './project-root.js';
 
 interface ComplexityOptions {
   files?: string[];
@@ -53,78 +53,101 @@ function validateFilesExist(files: string[] | undefined, rootDir: string): void 
 }
 
 /**
- * Resolve `rootDir`'s whole-index state via the shared classifier
- * (`classifyIndexState`, `../utils/index-freshness.js`) and exit loudly for
- * either "never indexed" (S0) or "indexed, but the store has 0 rows" (S1) —
- * `lien complexity` is a gate-shaped command (`--fail-on`), so a project
- * with no usable data is always a hard error here, independent of
- * `--fail-on`. A confident "0 violations, exit 0" on either state would be
- * exactly the false-clean bug this command exists to never repeat.
+ * Report files that never made it into the corpus.
  *
- * `classifyIndexState` itself guarantees `createVectorDB(...).initialize()`
- * — which unconditionally creates the index directory and an empty-but-
- * valid `structural.db` (see `schema.ts`'s `openDatabase`) — is never even
- * invoked for S0, so a never-indexed project is never left with a stray
- * store as a side effect of this check.
- *
- * Returns the ready-to-use `vectorDB` for `ok`/`S2`, or `undefined` after
- * already exiting for `S0`/`S1`. `process.exit(1)` terminates the process
- * for real in production, but the `undefined` return (checked by the
- * caller) is what actually stops this function's caller from proceeding to
- * `ComplexityAnalyzer` in a test environment where `process.exit` is
- * mocked — belt-and-suspenders against ever analyzing 0 rows as a clean
- * report.
+ * One unreadable or oversized file must not abort the run, but it must not
+ * vanish either: a gate reporting "0 violations, exit 0" while files silently
+ * failed to parse is the false-clean bug in another form. Warnings, not
+ * errors — the answer is still useful, it is just incomplete, and the reader
+ * has to know which.
  */
-async function resolveIndexOrExit(rootDir: string): Promise<VectorDBInterface | undefined> {
-  const result = await classifyIndexState(rootDir, async () => {
-    const vectorDB = await createVectorDB(rootDir);
-    await vectorDB.initialize();
-    return vectorDB;
-  });
-
-  if (result.state === 'S0' || result.state === 'S1') {
-    const reason = result.state === 'S0' ? 'Index not found' : 'Index is empty (0 indexed files)';
-    console.error(chalk.red(`Error: ${reason}`));
-    console.log(
-      chalk.yellow('\nRun'),
-      chalk.bold('lien index'),
-      chalk.yellow('to index your codebase first'),
+function reportScanCaveats(filesErrored: number, filesSkipped: number): void {
+  if (filesErrored > 0) {
+    console.warn(
+      chalk.yellow(
+        `Warning: ${filesErrored} file${filesErrored === 1 ? '' : 's'} could not be parsed and ` +
+          'are absent from this report. See the [parser] errors above.',
+      ),
     );
-    process.exit(1);
-    return undefined;
   }
-
-  // `lien serve`'s auto-reindex machinery (git-detection.ts) doesn't run for
-  // this one-shot command, so a repo whose working tree has moved on since
-  // the last `lien index`/`lien serve` reindex would otherwise report a
-  // silent false clean. Warn, don't block or auto-reindex.
-  if (result.state === 'S2' && result.warning) {
-    console.warn(chalk.yellow(result.warning));
+  if (filesSkipped > 0) {
+    console.warn(
+      chalk.dim(
+        `  ${filesSkipped} file${filesSkipped === 1 ? '' : 's'} skipped for exceeding the size cap.`,
+      ),
+    );
   }
-
-  return result.vectorDB;
 }
 
 /**
- * Analyze code complexity from indexed codebase
+ * Analyze code complexity by parsing the working tree.
+ *
+ * Reads the source directly — there is no persisted index to consult, so
+ * there is no index state to classify and nothing that can be stale. What
+ * survives from the index era is the rule that motivated the classification:
+ * this command is GATE-SHAPED (`--fail-on` drives CI), so a run with no data
+ * to answer from must be a hard error, never a confident "0 violations,
+ * exit 0". That shape is exactly the false-clean bug the index-state-honesty
+ * doctrine was written to prevent, and a failed parse produces it just as
+ * readily as an empty index did.
+ *
+ * `lien health` reads the same signal and responds differently — a loud
+ * warning at exit 0 — because it is advisory. See
+ * `../utils/scan-failure.ts`.
+ *
+ * Enrichment is deliberately left ON here, unlike in `lien health`. It costs
+ * ~600 ms on this repo, but the text formatter reports "Imported by N files"
+ * from `fileData.dependentCount` (`core/src/insights/formatters/text.ts:85`),
+ * so disabling it would silently empty a documented output field.
  */
 export async function complexityCommand(options: ComplexityOptions) {
-  const rootDir = process.cwd();
+  // Resolve to the repo root rather than trusting cwd. Run from a
+  // subdirectory, a raw cwd analyses that subtree alone and understates every
+  // dependent count, while looking like a perfectly normal report — and for a
+  // gate that means `--fail-on` verdicts on an arbitrary subtree. See
+  // `resolveRepoRoot`.
+  const cwd = process.cwd();
+  const rootDir = resolveRepoRoot(cwd);
+  if (rootDir !== cwd) {
+    console.warn(chalk.dim(`Analyzing the repository root: ${rootDir}`));
+  }
 
   try {
-    // Validate options
     validateFailOn(options.failOn);
     validateFormat(options.format);
-    validateFilesExist(options.files, rootDir);
 
-    // Classify the index state and exit loudly for S0/S1 — see
-    // `resolveIndexOrExit`'s doc comment.
-    const vectorDB = await resolveIndexOrExit(rootDir);
-    if (!vectorDB) return;
+    // `--files` is typed relative to where the user is standing, but the
+    // analysis root may be an ancestor of it. Re-base before validating or
+    // matching, or a subdirectory invocation silently targets the wrong path.
+    const files = options.files?.map(file => rebaseToRoot(file, cwd, rootDir));
+    validateFilesExist(files, rootDir);
 
-    // Run analysis and output (uses default thresholds)
-    const analyzer = new ComplexityAnalyzer(vectorDB);
-    const report = await analyzer.analyze(options.files);
+    const scan = await performChunkOnlyIndex(rootDir, {});
+    const scanError = describeScanFailure({
+      success: scan.success,
+      error: scan.error,
+      chunkCount: scan.chunks.length,
+      filesSkipped: scan.filesSkipped,
+    });
+
+    if (scanError) {
+      console.error(chalk.red(`Error: cannot analyze complexity — ${scanError}`));
+      console.error(
+        chalk.yellow('This is not a clean result. Nothing was analyzed, so nothing was checked.'),
+      );
+      // A refusal must be actionable, never a dead end (see
+      // cli/unsafe-root.ts's same principle).
+      console.error(chalk.dim(`  Looked in: ${rootDir}`));
+      console.error(
+        chalk.dim('  Check that this is your project root and the sources are not all gitignored.'),
+      );
+      process.exit(1);
+      return;
+    }
+
+    reportScanCaveats(scan.filesErrored, scan.filesSkipped);
+
+    const report = analyzeComplexityFromChunks(scan.chunks, files);
     console.log(formatReport(report, options.format));
 
     // Exit code for CI integration

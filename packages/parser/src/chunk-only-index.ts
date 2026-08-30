@@ -7,6 +7,7 @@ import { NativeBindingLoadError } from './ast/parser.js';
 import { scanCodebase } from './scanner.js';
 import { detectEcosystems, getEcosystemExcludePatterns } from './ecosystem-presets.js';
 import {
+  isOversizedForIndexing,
   DEFAULT_CHUNK_SIZE,
   DEFAULT_CHUNK_OVERLAP,
   DEFAULT_INDEX_INCLUDE_PATTERNS,
@@ -29,6 +30,23 @@ export interface ChunkOnlyOptions {
 export interface ChunkOnlyResult {
   success: boolean;
   filesIndexed: number;
+  /**
+   * Files excluded for exceeding the size cap (`isOversizedForIndexing`).
+   *
+   * Surfaced rather than swallowed: a gate-shaped caller (`lien complexity
+   * --fail-on`) that silently drops a file from its corpus is a soft form of
+   * the false-clean bug. It also keeps "no parseable chunks" from being a
+   * misleading reason when the real reason is "every file was oversized".
+   */
+  filesSkipped: number;
+  /**
+   * Files whose stat/read/chunk threw and were swallowed per-file.
+   *
+   * One unreadable file must not abort a whole run, but it must not vanish
+   * either: a gate that passes while files silently failed to parse is the
+   * false-clean bug wearing a different hat.
+   */
+  filesErrored: number;
   chunksCreated: number;
   durationMs: number;
   chunks: CodeChunk[];
@@ -62,11 +80,20 @@ async function chunkFileForCollection(
   file: string,
   rootDir: string,
   config: { chunkSize: number; chunkOverlap: number },
-  output: CodeChunk[],
-): Promise<boolean> {
+): Promise<{ chunks: CodeChunk[]; skipped: boolean; errored: boolean }> {
   try {
     const absolutePath = path.isAbsolute(file) ? file : path.join(rootDir, file);
     const relativePath = normalizeToRelativePath(file, rootDir);
+
+    // Size cap before read (#1025's cap, mirrored for the chunk-only path).
+    // Reading first would defeat the point: an 8 MB file costs ~1 GB of RSS
+    // to chunk and then fails AST parsing on the native parser's napi string
+    // limit, silently degrading to line-based chunks whose complexity metrics
+    // are meaningless. `lien index` has always skipped these; the pure path
+    // must too, or `lien complexity` reports on files `lien index` excluded.
+    const { size } = await fs.stat(absolutePath);
+    if (isOversizedForIndexing(size)) return { chunks: [], skipped: true, errored: false };
+
     const content = await fs.readFile(absolutePath, 'utf-8');
 
     const chunks = chunkFile(relativePath, content, {
@@ -77,11 +104,7 @@ async function chunkFileForCollection(
       workspaceRoot: rootDir,
     });
 
-    if (chunks.length > 0) {
-      output.push(...chunks);
-      return true;
-    }
-    return false;
+    return { chunks, skipped: false, errored: false };
   } catch (error) {
     // A native-binding load failure is systemic, not per-file: the binding
     // can't load for ANY file, so every AST-language file throws the same
@@ -97,8 +120,58 @@ async function chunkFileForCollection(
     console.error(
       `[parser] Failed to process ${file}: ${error instanceof Error ? error.message : String(error)}`,
     );
-    return false;
+    return { chunks: [], skipped: false, errored: true };
   }
+}
+
+/**
+ * Chunk every file concurrently, preserving REQUEST order in the output.
+ *
+ * Each file writes into its own slot and the slots are flattened in `files`
+ * order. The obvious alternative — pushing into one shared array from
+ * concurrent tasks — makes chunk order I/O-completion order, which is not
+ * stable run to run. That matters downstream: `analyzeDependencies` builds
+ * its `dependents` list from a Map keyed in chunk order, so
+ * `lien complexity --format json` emitted a different byte stream on every
+ * run of an unchanged tree. `cli-commands.md` documents diffing that JSON
+ * against a committed baseline, and SARIF result order feeds code-scanning
+ * alert identity; both need determinism.
+ *
+ * `filesProcessed` counts files ATTEMPTED, not files that yielded chunks — an
+ * unreadable or oversized file still counts. Existing behaviour; see the
+ * ENOENT case in chunk-only-index.test.ts.
+ */
+async function chunkAllFiles(
+  files: string[],
+  rootDir: string,
+  config: { chunkSize: number; chunkOverlap: number; concurrency: number },
+): Promise<{
+  chunks: CodeChunk[];
+  filesProcessed: number;
+  filesSkipped: number;
+  filesErrored: number;
+}> {
+  const perFile: CodeChunk[][] = new Array(files.length);
+  let filesProcessed = 0;
+  let filesSkipped = 0;
+  let filesErrored = 0;
+
+  // CPU-bound parse stage (chunkFile) — cap independent of the requested
+  // concurrency; see getParseStageConcurrency's doc comment / ADR-013.
+  const limit = pLimit(getParseStageConcurrency(config.concurrency));
+  await Promise.all(
+    files.map((file, i) =>
+      limit(async () => {
+        const outcome = await chunkFileForCollection(file, rootDir, config);
+        perFile[i] = outcome.chunks;
+        if (outcome.skipped) filesSkipped++;
+        if (outcome.errored) filesErrored++;
+        filesProcessed++;
+      }),
+    ),
+  );
+
+  return { chunks: perFile.flat(), filesProcessed, filesSkipped, filesErrored };
 }
 
 /**
@@ -118,6 +191,8 @@ export async function performChunkOnlyIndex(
       return {
         success: false,
         filesIndexed: 0,
+        filesSkipped: 0,
+        filesErrored: 0,
         chunksCreated: 0,
         durationMs: Date.now() - startTime,
         chunks: [],
@@ -125,29 +200,22 @@ export async function performChunkOnlyIndex(
       };
     }
 
-    const config = {
+    const {
+      chunks: allChunks,
+      filesProcessed,
+      filesSkipped,
+      filesErrored,
+    } = await chunkAllFiles(files, rootDir, {
       chunkSize: options.chunkSize ?? DEFAULT_CHUNK_SIZE,
       chunkOverlap: options.chunkOverlap ?? DEFAULT_CHUNK_OVERLAP,
-    };
-
-    const allChunks: CodeChunk[] = [];
-    let filesProcessed = 0;
-
-    // CPU-bound parse stage (chunkFile) — cap independent of the requested
-    // concurrency; see getParseStageConcurrency's doc comment / ADR-013.
-    const limit = pLimit(getParseStageConcurrency(options.concurrency ?? DEFAULT_CONCURRENCY));
-    await Promise.all(
-      files.map(file =>
-        limit(async () => {
-          await chunkFileForCollection(file, rootDir, config, allChunks);
-          filesProcessed++;
-        }),
-      ),
-    );
+      concurrency: options.concurrency ?? DEFAULT_CONCURRENCY,
+    });
 
     return {
       success: true,
       filesIndexed: filesProcessed,
+      filesSkipped,
+      filesErrored,
       chunksCreated: allChunks.length,
       durationMs: Date.now() - startTime,
       chunks: allChunks,
@@ -156,6 +224,8 @@ export async function performChunkOnlyIndex(
     return {
       success: false,
       filesIndexed: 0,
+      filesSkipped: 0,
+      filesErrored: 0,
       chunksCreated: 0,
       durationMs: Date.now() - startTime,
       chunks: [],

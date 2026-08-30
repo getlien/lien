@@ -28,17 +28,14 @@ export const DEFAULT_GIT_POLL_INTERVAL_MS = 10000; // Check every 10 seconds
 // 10.5 GB index on a maintainer's machine (the files responsible were OS
 // cache/binary blobs, not source at any plausible size). This is a backstop
 // independent of path-based filtering (ALWAYS_IGNORE_PATTERNS, the
-// home-root guard in cli/unsafe-root.ts) — it protects an ordinary project
-// against an accidentally committed multi-GB blob exactly as much as it
-// protects an explicitly-overridden home-root index against a keychain
-// database. 5 MB comfortably clears every real source/config/doc file this
-// codebase (or any typical one) produces.
-export const MAX_INDEXABLE_FILE_SIZE_BYTES = 5 * 1024 * 1024;
-
-/** Whether `sizeBytes` exceeds {@link MAX_INDEXABLE_FILE_SIZE_BYTES}. */
-export function isOversizedForIndexing(sizeBytes: number): boolean {
-  return sizeBytes > MAX_INDEXABLE_FILE_SIZE_BYTES;
-}
+// home-root guard in cli/unsafe-root.ts).
+//
+// Re-exported from `@liendev/parser`, which is where it now lives: the
+// parser reads files directly for `lien complexity`/`lien health` via
+// performChunkOnlyIndex, so it needs the cap before its own `fs.readFile`,
+// and it cannot depend on core. Keeping core's public name working means
+// one definition rather than two that can drift.
+export { MAX_INDEXABLE_FILE_SIZE_BYTES, isOversizedForIndexing } from '@liendev/parser';
 
 // Index format version - bump on ANY breaking change to indexing
 // Examples that require version bump:
