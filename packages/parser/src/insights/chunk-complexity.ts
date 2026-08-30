@@ -423,6 +423,28 @@ export function enrichWithDependencies(report: ComplexityReport, allChunks: Code
   }
 }
 
+/** Options for {@link analyzeComplexityFromChunks}. */
+export interface AnalyzeComplexityOptions {
+  /**
+   * Populate `dependents`/`dependentCount`/`dependentComplexityMetrics` and
+   * `testAssociations` on each violating file. Default `true`.
+   *
+   * Enrichment is ~99% of this function's cost and it scales with the number
+   * of VIOLATING FILES, not with repo size: `enrichWithDependencies` runs one
+   * whole-corpus `analyzeDependencies` scan per violating file. Measured on
+   * this repo (10,897 chunks, 38 violating files):
+   *
+   *     findViolations (all four metrics, every chunk)      4 ms
+   *     buildReport                                         2 ms
+   *     enrichWithDependencies                            609 ms
+   *
+   * A debt-heavy repo pays worst — precisely the repo most likely to be
+   * measured. Callers that only need violations, or that source fan-in from
+   * `computeDependentCountsFromChunks` instead, should pass `false`.
+   */
+  enrich?: boolean;
+}
+
 /**
  * Analyze complexity from in-memory chunks (no VectorDB needed).
  * Standalone replacement for ComplexityAnalyzer.analyzeFromChunks().
@@ -431,15 +453,18 @@ export function analyzeComplexityFromChunks(
   chunks: CodeChunk[],
   files?: string[],
   thresholdOverrides?: { testPaths?: number; mentalLoad?: number },
+  options: AnalyzeComplexityOptions = {},
 ): ComplexityReport {
   const thresholds = { ...DEFAULT_COMPLEXITY_THRESHOLDS, ...thresholdOverrides };
 
   // Filter to specified files if provided
   const filtered = files ? chunks.filter(c => matchesAnyFile(c.metadata.file, files)) : chunks;
 
-  // Find violations, build report, enrich with dependencies
   const violations = findViolations(filtered, thresholds);
   const report = buildReport(violations, filtered);
+
+  if (options.enrich === false) return report;
+
   enrichWithDependencies(report, chunks);
 
   // Enrich files with violations with test association data

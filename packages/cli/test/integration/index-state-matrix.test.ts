@@ -243,6 +243,12 @@ const TABLE: TableRow[] = [
     state: 'n/a',
     expected: 'global config only, never touches the index — output identical regardless',
   },
+  {
+    entryPoint: 'lien health',
+    state: 'n/a',
+    expected:
+      'parses the working tree via performChunkOnlyIndex, never touches the index — output identical regardless',
+  },
   // --- MCP tools (S0 is structurally impossible: `lien serve` always
   //     initializes the store before registering tool handlers) ---
   {
@@ -1500,13 +1506,18 @@ describe('completeness guard (#1029 W1) — table vs. real source', () => {
     );
   });
 
-  it('the three index-independent CLI commands (status is index-touching, not independent) stay off the createVectorDB caller list', async () => {
+  it('the four index-independent CLI commands (status is index-touching, not independent) stay off the createVectorDB caller list', async () => {
     const discovered = await findCreateVectorDbCallers();
     expect(discovered.has('cli/path-cmd.ts')).toBe(false);
     expect(discovered.has('cli/delta-cmd.ts')).toBe(false);
     expect(discovered.has('cli/config.ts')).toBe(false);
+    // `lien health` reads the working tree through `performChunkOnlyIndex`.
+    // Its whole point is answering without a persisted index, so a
+    // createVectorDB call appearing here would be a design regression, not
+    // just a bookkeeping one.
+    expect(discovered.has('cli/health-cmd.ts')).toBe(false);
     expect(TABLE_CLI_INDEX_INDEPENDENT).toEqual(
-      new Set(['lien path', 'lien delta', 'lien config get']),
+      new Set(['lien path', 'lien delta', 'lien config get', 'lien health']),
     );
   });
 

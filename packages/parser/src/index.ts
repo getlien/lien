@@ -327,7 +327,10 @@ export {
   effortToMinutes,
   formatTime,
 } from './insights/chunk-complexity.js';
-export type { ComplexityThresholds } from './insights/chunk-complexity.js';
+export type {
+  ComplexityThresholds,
+  AnalyzeComplexityOptions,
+} from './insights/chunk-complexity.js';
 
 // Complexity delta (before/after content → per-function verdicts) — shared by
 // the `lien delta` CLI and (as a follow-up) the PR-review engine.

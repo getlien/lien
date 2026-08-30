@@ -8,6 +8,7 @@ import { statusCommand } from './status.js';
 import { indexCommand } from './index-cmd.js';
 import { serveCommand } from './serve.js';
 import { complexityCommand } from './complexity.js';
+import { healthCommand } from './health-cmd.js';
 import { deltaCommand } from './delta-cmd.js';
 import { apiDeltaCommand } from './api-delta-cmd.js';
 import { statsCommand } from './stats-cmd.js';
@@ -97,6 +98,17 @@ program
   .option('--format <type>', 'Output format: text, json, sarif', 'text')
   .option('--fail-on <severity>', 'Exit 1 if violations: error, warning')
   .action(complexityCommand);
+
+program
+  .command('health')
+  .description(
+    'Rank the functions that are risky to change: complexity × fan-in ÷ test coverage (advisory — never fails on findings)',
+  )
+  .option('--format <type>', 'Output format: text, json', 'text')
+  .option('--top <n>', 'How many functions to show', '5')
+  .option('--path <prefix>', 'Only show functions under this path prefix')
+  .option('--include-tests', 'Rank test files too (excluded by default)')
+  .action(healthCommand);
 
 program
   .command('delta')
