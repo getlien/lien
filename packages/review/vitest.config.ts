@@ -21,6 +21,14 @@ export default defineConfig({
       //
       // Aliasing to source makes both paths the same module, so a source edit
       // is either seen everywhere or nowhere.
+      //
+      // Scope worth knowing: this file governs the VITEST suite only. The
+      // harness entry points (`test/harness/build-prompts.ts`, `capture-pr.ts`)
+      // run under `tsx`, which does not read this config, so they still resolve
+      // `@liendev/parser` to `dist`. That is the right fidelity for them — they
+      // stand in for production, which consumes the built package — but it does
+      // mean a harness run reflects the last `npm run build -w @liendev/parser`
+      // rather than the working tree. Build before measuring anything with them.
       '@liendev/parser': path.resolve(here, '../parser/src/index.ts'),
     },
   },

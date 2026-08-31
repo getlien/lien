@@ -21,6 +21,13 @@
  * filtering findings to "lines this diff touched" wants context lines too:
  * a bug on a context line adjacent to the change is in scope. Deleted (`-`)
  * lines do not advance the counter, since they have no post-image position.
+ *
+ * Known limit: the `+++` file-header guard is a prefix test, so an ADDED line
+ * whose own content starts with `++` reads as a header and is skipped — its
+ * number is absent from the set and every later line in that hunk shifts down
+ * by one. Rare enough to have never been hit (it needs added source beginning
+ * with `++`, e.g. a C pre-increment at column 0), and long-standing behaviour;
+ * recorded because it is invisible from the call site.
  */
 export function parsePatchLines(patch: string): Set<number> {
   const lines = new Set<number>();

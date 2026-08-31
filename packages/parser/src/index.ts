@@ -398,6 +398,13 @@ export { findChunkLineIndex } from './chunk-line-lookup.js';
 //
 // So the rule for this block: a symbol earns a line when production code
 // outside its own module imports it, not when a test does.
+//
+// Two deliberate exceptions, stated rather than left as quiet violations:
+// `SignalDiff` and `SignalLogger` have no importer anywhere. They are the field
+// types of `SignalContext`, and a caller constructing one needs to be able to
+// name them — structural typing lets you pass an object literal, but not
+// declare a helper that returns one. Exporting an interface without its field
+// types is a surface that can be satisfied but not written against.
 // =============================================================================
 
 export { filterAnalyzableFiles } from './signals/analyzable-files.js';
