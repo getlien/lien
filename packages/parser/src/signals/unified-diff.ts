@@ -57,3 +57,56 @@ export function parsePatchLines(patch: string): Set<number> {
 
   return lines;
 }
+
+/**
+ * A whole diff, split into what `SignalContext.pr` carries: the raw patch text
+ * per file, and the post-image line numbers per file.
+ */
+export interface ParsedUnifiedDiff {
+  patches: Map<string, string>;
+  diffLines: Map<string, Set<number>>;
+}
+
+/** Block separator, at the start of a line. */
+const DIFF_BLOCK_RE = /^diff --git /m;
+/** The post-image path, from the `+++` header. `/dev/null` means deleted. */
+const POST_IMAGE_PATH_RE = /^\+\+\+ (?:b\/)?(.+)$/m;
+/** Fallback: the block's own `a/… b/…` header. */
+const GIT_HEADER_PATH_RE = /^a\/(.+?) b\/(.+?)$/m;
+
+/**
+ * Split a unified diff into per-file patches plus the lines each one touches.
+ *
+ * The path comes from the `+++` header rather than the block header wherever
+ * possible, because the block header has no unambiguous split when a filename
+ * contains a space — its only separator is the literal ` b/`. The `+++` line
+ * carries one path and needs no split.
+ *
+ * A block whose post-image is `/dev/null` is a deletion: it gets an entry with
+ * an empty line set rather than being dropped, so a caller can distinguish
+ * "this file was deleted" from "this file was not in the diff at all".
+ *
+ * Known ambiguity, unavoidable without invoking git once per file: a filename
+ * containing the literal ` b/` breaks the fallback split. Only reachable for a
+ * block with no `+++` line — a pure mode change, or a binary file.
+ */
+export function parseUnifiedDiff(diff: string): ParsedUnifiedDiff {
+  const patches = new Map<string, string>();
+  const diffLines = new Map<string, Set<number>>();
+
+  for (const block of diff.split(DIFF_BLOCK_RE).slice(1)) {
+    const postImage = block.match(POST_IMAGE_PATH_RE)?.[1];
+    const filepath =
+      postImage !== undefined && postImage !== '/dev/null'
+        ? postImage
+        : block.match(GIT_HEADER_PATH_RE)?.[2];
+    if (filepath === undefined) continue;
+
+    // Re-attach the separator the split consumed, so a consumer scanning the
+    // patch text sees exactly what git emitted.
+    patches.set(filepath, `diff --git ${block}`.trimEnd());
+    diffLines.set(filepath, postImage === '/dev/null' ? new Set() : parsePatchLines(block));
+  }
+
+  return { patches, diffLines };
+}

@@ -9,6 +9,7 @@ import { indexCommand } from './index-cmd.js';
 import { serveCommand } from './serve.js';
 import { complexityCommand } from './complexity.js';
 import { healthCommand } from './health-cmd.js';
+import { reviewCommand } from './review-cmd.js';
 import { deltaCommand } from './delta-cmd.js';
 import { apiDeltaCommand } from './api-delta-cmd.js';
 import { statsCommand } from './stats-cmd.js';
@@ -109,6 +110,20 @@ program
   .option('--path <prefix>', 'Only show functions under this path prefix')
   .option('--include-tests', 'Rank test files too (excluded by default)')
   .action(healthCommand);
+
+program
+  .command('review')
+  .description(
+    'Run the deterministic signals over your changes: stale duplicate literals, unswept variants, removed exports, doc drift and more (advisory — never fails, no --fail-on)',
+  )
+  .option('--base <ref>', 'Compare the working tree against this ref instead of HEAD')
+  .option('--format <type>', 'Output format: text, json', 'text')
+  .option(
+    '--no-repo-scan',
+    'Skip the whole-repo scan the cross-file signals need (faster, blinder)',
+  )
+  .option('--include-tests', 'Review changed test files too (excluded by default)')
+  .action(reviewCommand);
 
 program
   .command('delta')
