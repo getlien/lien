@@ -41,17 +41,6 @@ features:
 
 ## Quick Start
 
-### Claude Code (recommended): one-time plugin install
-
-```text
-/plugin marketplace add getlien/lien
-/plugin install lien
-```
-
-That's it. Lien's MCP tools and the Explore agent are available in every Claude Code session, in every repo, with no per-project setup. First use in a new git repo triggers a one-time index automatically. See the [Claude Code plugin guide](/guide/claude-code-plugin) for what its hooks do beyond the MCP config.
-
-### Other editors (Cursor, Windsurf, OpenCode, Kilo Code, Antigravity)
-
 **1. Install Lien:**
 
 ```bash
@@ -64,7 +53,8 @@ npm install -g @liendev/lien
 lien init
 ```
 
-This writes the correct MCP config for your editor.
+This writes the correct MCP config for your editor — Cursor, Claude Code, Windsurf,
+OpenCode, Kilo Code or Antigravity.
 
 **3. Restart your editor** and start asking questions about your codebase!
 
@@ -80,7 +70,7 @@ Impact analysis before a refactor, tech-debt hotspots, test coverage lookups, an
 
 ## Privacy First
 
-Your code stays on your machine during indexing and search: no external API calls, no telemetry. The one network step is fetching the published npm package itself (via `npm install` or the Claude Code plugin's `npx`) on first setup. See [How It Works](/how-it-works#privacy-first) for details.
+Your code stays on your machine during indexing and search: no external API calls, no telemetry. The one network step is fetching the published npm package itself (via `npm install`, or `npx` if you skip the global install) on first setup. See [How It Works](/how-it-works#privacy-first) for details.
 
 ## Free & Open Source
 

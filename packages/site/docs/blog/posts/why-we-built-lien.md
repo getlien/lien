@@ -258,15 +258,13 @@ network, the AGPL means their improvements have to be shared back too. A
 private fork that's never distributed or offered as a service can stay
 private.
 
-Install for Claude Code is one command:
+Install is one command plus one setup command, the same for Claude Code, Cursor,
+Windsurf, OpenCode and Kilo Code:
 
-```text
-/plugin marketplace add getlien/lien
-/plugin install lien
+```bash
+npm install -g @liendev/lien
+lien init
 ```
-
-For other AI coding tools, like Cursor, Windsurf, OpenCode, and Kilo Code:
-one install command plus one setup command.
 
 The rest of the docs, the full evidence, and how we test all of this live
 elsewhere on this site. The code is at

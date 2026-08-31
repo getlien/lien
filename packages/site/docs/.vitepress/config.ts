@@ -51,7 +51,6 @@ const themeConfig: DefaultTheme.Config = {
         text: 'Usage',
         items: [
           { text: 'MCP Tools', link: '/guide/mcp-tools' },
-          { text: 'Claude Code Plugin', link: '/guide/claude-code-plugin' },
           { text: 'Cross-Editor Agent Setup', link: '/guide/cross-editor-setup' },
           { text: 'CLI Commands', link: '/guide/cli-commands' },
           { text: 'Lien Review', link: '/guide/lien-review' },

@@ -16,7 +16,6 @@ lien init [options]
 |--------|-------------|
 | `-e, --editor <editor>` | Editor to configure MCP for (`cursor`, `claude-code`, `windsurf`, `opencode`, `kilo-code`, `antigravity`) |
 | `-p, --path <path>` | Path to initialize (defaults to current directory) |
-| `--legacy` | Use legacy per-project setup for Claude Code instead of recommending the plugin |
 
 ### Behavior
 

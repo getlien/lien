@@ -35,7 +35,7 @@ lien init
 # 3. Restart your editor and start asking questions
 ```
 
-`lien init` writes the right MCP config for your editor — Cursor, Claude Code, Windsurf, OpenCode, Kilo Code or Antigravity — and for Claude Code also copies an Explore agent into `.claude/agents/`. Lien auto-detects your project and indexes on first use.
+`lien init` writes the right MCP config for your editor — Cursor, Claude Code, Windsurf, OpenCode, Kilo Code or Antigravity. Lien auto-detects your project and indexes on first use.
 
 > **The Claude Code plugin has been removed.** `/plugin install lien` no longer
 > works; use `lien init` above. The plugin's hooks (read annotation, a

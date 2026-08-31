@@ -1,22 +1,21 @@
 # Cross-Editor Agent Setup
 
-Not using Claude Code? The [Claude Code plugin](/guide/claude-code-plugin) wires
-Lien's nudges in via hooks: deterministic, fires on every matching tool call.
-Most other agentic editors don't have an equivalent hook integration from Lien
-yet, but nearly all of them read a plain instruction file already: a single
-`AGENTS.md` at your repo root is read natively by Codex CLI, Cursor, Windsurf
-(Cascade), GitHub Copilot, Devin, and Amp. `.github/copilot-instructions.md`
-covers every Copilot surface the same way. Two files, five-plus tools raised
-off the rules-file floor.
+Lien ships no hook integration for any editor: the Claude Code plugin that used
+to wire its nudges in via hooks has been removed, so every editor is now on the
+same footing. What nearly all of them do read is a plain instruction file: a
+single `AGENTS.md` at your repo root is read natively by Codex CLI, Cursor,
+Windsurf (Cascade), GitHub Copilot, Devin, and Amp, and Claude Code reads
+`CLAUDE.md` the same way. `.github/copilot-instructions.md` covers every Copilot
+surface. Two files, six-plus tools raised off the floor.
 
 ## Be honest about what this buys you
 
-Treat the blocks below as best-effort, not a hook guarantee: a hook fires on every
-matching tool call regardless of context, while a rules-file instruction is a standing
-suggestion a capable agent can still skip under context pressure. Lien's
-[Claude Code plugin](/guide/claude-code-plugin#why-hooks-not-claude-md-rules) page argues
-that case in full, and a pre-registered A/B measured the underlying signal's effect on its
-own: injecting the same complexity warning cut threshold crossings from 8/8 to 3/8
+Treat the blocks below as best-effort, not a guarantee: a rules-file instruction is a
+standing suggestion a capable agent can still skip under context pressure, where a hook
+fired on every matching tool call regardless of context. That difference is why Lien used
+to ship hooks, and it is what was given up when they were removed — the checks survive as
+commands you run, not as automatic invocation at the tool boundary. The underlying
+signal's effect was measured on its own in a pre-registered A/B: injecting the same complexity warning cut threshold crossings from 8/8 to 3/8
 (N=8/condition; see
 [`docs/development/nudge-behavioral-ab.md`](https://github.com/getlien/lien/blob/main/docs/development/nudge-behavioral-ab.md)).
 For the editors on this page, the block below is the only nudge Lien offers today; a real
@@ -114,8 +113,6 @@ Hook ports are follow-up work, in priority order:
 
 ## Related pages
 
-- [Claude Code Plugin](/guide/claude-code-plugin): the hook-driven version of
-  this same mandate, for Claude Code.
 - [MCP Tools](/guide/mcp-tools): parameters and response shapes for
   `get_files_context`, `get_dependents`, and the rest.
 - [Quick Start](/guide/getting-started): per-editor `lien init` setup if you

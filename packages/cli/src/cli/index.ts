@@ -18,8 +18,6 @@ import { pathCommand } from './path-cmd.js';
 import { annotateCli } from './annotate-cmd.js';
 import { gcCommand } from './gc.js';
 import { noteEditCommand, noteRunCommand, reportCommand } from './verify-tests-cmd.js';
-import { noteShownCommand, noteSignalCommand } from './nudge-cmd.js';
-import { nudgeDoctorCommand } from './nudge-doctor-cmd.js';
 import { recapCommand } from './recap-cmd.js';
 
 // Get version from package.json dynamically
@@ -164,13 +162,13 @@ program
 program
   .command('recap')
   .description(
-    'Session risk-ledger recap: at Stop, re-raise UNRESOLVED risk from this session (unrun tests, live complexity crossings, unacted get_dependents warnings) as one advisory (for the plugin Stop hook)',
+    'Session risk-ledger recap: re-raise UNRESOLVED risk from this session (unrun tests, live complexity crossings, unacted get_dependents warnings) as one advisory',
   )
   .option('--session <id>', 'Session ID to recap')
   .option('--format <type>', 'Output format: text, json', 'text')
   .option(
     '--hooks-dir <path>',
-    "The calling hook script's own directory, for the test-verify shown event's build stamp (for the plugin Stop hook)",
+    "Calling script's own directory, for the test-verify shown event's build stamp",
   )
   .action(recapCommand);
 
@@ -223,7 +221,7 @@ program
 const verifyTestsCmd = program
   .command('verify-tests')
   .description(
-    'Session-scoped did-you-run-the-tests ledger (for the plugin hooks) — record edits/test-runs and report unverified files',
+    'Session-scoped did-you-run-the-tests ledger — record edits/test-runs and report unverified files',
   );
 
 // Session/file/command are plain (not required) options: every subcommand is
@@ -257,54 +255,6 @@ verifyTestsCmd
   .option('--session <id>', 'Session ID to report on')
   .option('--format <type>', 'Output format: text, json', 'text')
   .action(reportCommand);
-
-const nudgeCmd = program
-  .command('nudge')
-  .description(
-    'Record nudge-outcome events for the shown → acted-on funnels in `lien stats` (for the plugin hooks)',
-  );
-
-// Like `verify-tests`, these are hook-driven plumbing: options are plain (not
-// required) so a missing argument is a fail-open no-op (see nudge-cmd.ts), not a
-// hard commander usage error that would contradict the fail-open contract.
-nudgeCmd
-  .command('note-shown')
-  .description('Record that a nudge surfaced to the model this session')
-  .option('--session <id>', 'Session ID to record under')
-  .option('--nudge <name>', 'Which nudge fired: annotate, blast, test-verify')
-  .option('--file <path>', 'File the nudge was about, when it has one')
-  .option('--symbol <name>', 'Symbol the nudge was about, when known')
-  .option(
-    '--hooks-dir <path>',
-    "The calling hook script's own directory, for the event's build stamp",
-  )
-  .action(noteShownCommand);
-
-nudgeCmd
-  .command('note-signal')
-  .description('Record a follow-up tool call a nudge funnel joins against')
-  .option('--session <id>', 'Session ID to record under')
-  .option('--signal <name>', 'Which signal: get_dependents, get_files_context, test_run')
-  .option('--file <path>', 'File the call named, when present')
-  .option('--symbol <name>', 'Symbol the call named, when present')
-  .option(
-    '--hooks-dir <path>',
-    "The calling hook script's own directory, for the event's build stamp",
-  )
-  .action(noteSignalCommand);
-
-nudgeCmd
-  .command('doctor')
-  .description(
-    'Drift/health check for nudge telemetry: warns when the live plugin hooks predate this ' +
-      'instrumentation, or differ from the CLI/hooks that last recorded an event',
-  )
-  .option(
-    '--hooks-dir <path>',
-    'Live plugin hooks directory to check for drift against (omit for a ledger-history-only check)',
-  )
-  .option('--format <type>', 'Output format: text, json', 'text')
-  .action(nudgeDoctorCommand);
 
 program
   .command('gc')
