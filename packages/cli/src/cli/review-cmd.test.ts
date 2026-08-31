@@ -46,6 +46,54 @@ describe('renderText', () => {
     expect(out).toContain('vs origin/main');
   });
 
+  // Three empty states, and conflating any two is a lie. Telling someone who
+  // just changed four test files "no changes against HEAD — make a change" is
+  // worse than an empty report: it sends them after the wrong problem.
+  it('does NOT claim "no changes" when the diff was all test files', () => {
+    const out = renderText(
+      result({
+        changedFiles: [],
+        unexamined: { untracked: [], nonAnalyzable: [], testsExcluded: 4 },
+      }),
+    );
+
+    expect(out).not.toContain('No changes against');
+    expect(out).toContain('nothing reviewable');
+    expect(out).toContain('4 changed test file(s)');
+    expect(out).toContain('--include-tests');
+  });
+
+  it('does NOT claim "no changes" when the diff was all non-analyzable files', () => {
+    const out = renderText(
+      result({
+        changedFiles: [],
+        unexamined: { untracked: [], nonAnalyzable: ['vendor/x.bin'], testsExcluded: 0 },
+      }),
+    );
+
+    expect(out).not.toContain('No changes against');
+    expect(out).toContain('nothing reviewable');
+    expect(out).toContain('1 changed file(s) the parser cannot analyze');
+  });
+
+  it('distinguishes an empty diff from a diff with nothing reviewable', () => {
+    const empty = renderText(
+      result({
+        changedFiles: [],
+        unexamined: { untracked: [], nonAnalyzable: [], testsExcluded: 0 },
+      }),
+    );
+    const unreviewable = renderText(
+      result({
+        changedFiles: [],
+        unexamined: { untracked: [], nonAnalyzable: [], testsExcluded: 1 },
+      }),
+    );
+
+    expect(empty).toContain('No changes against HEAD');
+    expect(unreviewable).not.toBe(empty);
+  });
+
   it('renders a candidate with file and line', () => {
     const out = renderText(
       result({

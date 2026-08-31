@@ -248,6 +248,40 @@ function renderNothingChanged(base: string): string {
   ].join('\n');
 }
 
+/**
+ * The diff was NOT empty, but everything in it was excluded from review.
+ *
+ * Distinct from `renderNothingChanged` on purpose. Saying "no changes against
+ * HEAD" to someone who just changed four test files is simply false, and it
+ * tells them to make a change they already made — which is worse than an empty
+ * report, because it sends them looking for the wrong problem.
+ */
+function renderNothingReviewable(result: ReviewResult): string {
+  const { nonAnalyzable, testsExcluded } = result.unexamined;
+  const reasons: string[] = [];
+
+  if (testsExcluded > 0) {
+    reasons.push(
+      `  ${testsExcluded} changed test file(s) — excluded by default; pass --include-tests to review them`,
+    );
+  }
+  if (nonAnalyzable.length > 0) {
+    reasons.push(
+      `  ${nonAnalyzable.length} changed file(s) the parser cannot analyze ` +
+        '(unsupported extension, vendored, generated, or build output)',
+    );
+  }
+
+  return [
+    `Changes against ${result.base}, but nothing reviewable in them.`,
+    '',
+    'Nothing was analyzed — this is not a clean review, it is an empty one. What changed:',
+    ...reasons,
+    '',
+    'No signal ran, so no signal found anything.',
+  ].join('\n');
+}
+
 /** The caveats block: what this run could not see. Never omitted when non-empty. */
 function renderCaveats(result: ReviewResult): string[] {
   const lines: string[] = [];
@@ -312,9 +346,16 @@ function renderConstrained(reports: SignalReport[]): string[] {
 }
 
 export function renderText(result: ReviewResult): string {
-  if (result.changedFiles.length === 0 && result.unexamined.nonAnalyzable.length === 0) {
-    return renderNothingChanged(result.base);
-  }
+  // Three distinct empty states, and conflating any two of them is a lie:
+  // the diff was empty; the diff had files but none reviewable; the diff was
+  // reviewed and nothing turned up.
+  const inDiff =
+    result.changedFiles.length +
+    result.unexamined.nonAnalyzable.length +
+    result.unexamined.testsExcluded;
+
+  if (inDiff === 0) return renderNothingChanged(result.base);
+  if (result.changedFiles.length === 0) return renderNothingReviewable(result);
 
   const withCandidates = result.reports.filter(r => r.candidates.length > 0);
   const total = withCandidates.reduce((n, r) => n + r.candidates.length, 0);
