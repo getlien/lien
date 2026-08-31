@@ -398,14 +398,20 @@ tree-sitter won't compile) — see `docs/development/worktree-development.md`.
 
 ## Before Merging a PR
 
-- **CI-green ≠ review-clean.** As of #1070, this repo's own `lien-review.yml`
-  sets `fail-on: error`, so the Lien Review check fails on error-severity
-  (🔴) findings and complexity violations the PR worsened. It can still pass
-  with 🟡 warning findings outstanding — fetch and triage the `lien-stats`
-  block and inline comments before merging regardless: `gh pr view N --json
-  body` (look for the `lien-stats` block) and `gh api --paginate
-  repos/getlien/lien/pulls/N/comments`. Fix or explicitly dismiss each
-  finding first.
+- **CodeRabbit is the PR review now.** This repo no longer reviews its own PRs
+  with Lien Review — `lien-review.yml` is gone, since the review engine is being
+  cut (see the simplification plan). Triage CodeRabbit's comments before
+  merging: `gh api --paginate repos/getlien/lien/pulls/N/comments` for inline
+  ones and `gh api --paginate repos/getlien/lien/issues/N/comments` for its
+  summary. Fix or explicitly dismiss each finding.
+  - **A green CodeRabbit check is not proof it reviewed.** Its status line
+    carries the reason: "Review completed" means it ran, "Review rate limited"
+    means it did not. Read the reason, not the colour.
+- **Complexity is gated by `lien delta --base`, not by a review bot.** That job
+  fails only when a function crosses a threshold it was under at the PR's base,
+  which is the question worth gating on. Note it is the ONLY complexity gate
+  now, so a PR that leaves a pre-existing violation untouched passes — by
+  design.
 - Never `gh pr merge --admin` to bypass checks. Wait for CI.
 - Stacked PRs: squash-merging a parent with `--delete-branch` auto-closes
   child PRs whose base was that branch, and a closed PR with a deleted base

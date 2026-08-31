@@ -1,13 +1,23 @@
 # Agent-review pass architecture: `ReviewPassSpec` and the extra-pass executor
 
+> [!IMPORTANT]
+> **This repo stopped reviewing its own PRs on 2026-08-31.**
+> `.github/workflows/lien-review.yml` was deleted — the review engine is being
+> cut, so paying to review ourselves with it stopped making sense. Every
+> statement below of the form "this repo's own CI sets `LIEN_*_PASS=on`" is
+> therefore HISTORICAL: it records which flags that workflow carried while it
+> existed, and is the provenance for the firing data cited throughout. None of
+> it describes a running configuration any more. The per-pass defaults for
+> `@liendev/review`/`@liendev/action` consumers are unchanged and still current.
+
 **Status:** the generalized extra-pass executor and attestation v2 shipped
 in PR #799. Five passes plug into it: doc-truth (production-on by default,
 including its v2 per-claim-verdict contract) and four candidate loops,
 stale-duplicate, incomplete-handling, removed-exports, and docs-drift, all
 dark (default off) for `@liendev/review`/`@liendev/action` consumers. This
-repo's own `.github/workflows/lien-review.yml` opts all four dark loops
-into its own PR reviews (stale-duplicate, incomplete-handling, docs-drift,
-and, as of 2026-07-25, removed-exports). See "Which passes are
+repo's own CI opted all four dark loops into its own PR reviews until that
+workflow was removed (stale-duplicate, incomplete-handling, docs-drift,
+and, from 2026-07-25, removed-exports). See "Which passes are
 live today" below for exact flags and per-pass status, and
 [ADR-014](decisions/0014-per-rule-candidate-loop-passes.md) for the
 decision this doc implements, its rejected alternatives, and its evidence
