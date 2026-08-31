@@ -23,11 +23,13 @@
  * lines do not advance the counter, since they have no post-image position.
  *
  * Known limit: the `+++` file-header guard is a prefix test, so an ADDED line
- * whose own content starts with `++` reads as a header and is skipped — its
- * number is absent from the set and every later line in that hunk shifts down
- * by one. Rare enough to have never been hit (it needs added source beginning
- * with `++`, e.g. a C pre-increment at column 0), and long-standing behaviour;
- * recorded because it is invisible from the call site.
+ * whose own content starts with `++` (`++i;` arrives in the patch as `+++i;`)
+ * reads as a header and is skipped. The skipped line's number is not lost — it
+ * is silently reused by the next line, so every later line in the hunk is
+ * attributed one position too low, and the hunk's LAST line falls out of the
+ * set entirely. Rare enough to have never been hit (it needs added source
+ * beginning with `++`, e.g. a C pre-increment at column 0), and long-standing
+ * behaviour; recorded because it is invisible from the call site.
  */
 export function parsePatchLines(patch: string): Set<number> {
   const lines = new Set<number>();
