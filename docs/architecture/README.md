@@ -2,6 +2,16 @@
 
 This directory documents how Lien's internals fit together: components, data flow, and the request/response sequences for indexing and MCP tool calls.
 
+> [!IMPORTANT]
+> **The Claude Code plugin was deleted on 2026-08-31.** Every reference below to
+> `plugins/claude/hooks/*` — the read-annotation hook, the `lien delta` and
+> `api-delta` write hooks, the test reminder, the Stop-hook recap — describes a
+> delivery mechanism that no longer exists. The *checks* those hooks automated
+> survive as commands (`lien delta`, `lien health`, `lien review`); the automatic
+> invocation does not. Read hook references as history, not as configuration.
+>
+> Replacement: the review skill at `.claude/skills/review/`.
+
 ## Documentation index
 
 ### [System Overview](./system-overview.md)

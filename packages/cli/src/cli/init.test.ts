@@ -94,19 +94,21 @@ describe('initCommand', () => {
 
   // --- Claude Code ---
 
-  it('should point users at the plugin by default and skip writing .mcp.json', async () => {
+  // The plugin is deleted, so `/plugin install lien` would fail. Claude Code
+  // now takes the same per-project path as every other editor, which is what
+  // `--legacy` used to select — hence no flag.
+  it('must not advertise the deleted plugin', async () => {
     const logSpy = vi.spyOn(console, 'log');
 
     await initCommand({ editor: 'claude-code' });
 
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('/plugin install lien'));
-
-    const configPath = path.join(testDir, '.mcp.json');
-    await expect(fs.access(configPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    const said = logSpy.mock.calls.flat().join(' ');
+    expect(said).not.toContain('/plugin install');
+    expect(said).not.toContain('marketplace');
   });
 
-  it('should create .mcp.json for claude-code with --legacy', async () => {
-    await initCommand({ editor: 'claude-code', legacy: true });
+  it('should create .mcp.json for claude-code', async () => {
+    await initCommand({ editor: 'claude-code' });
 
     const configPath = path.join(testDir, '.mcp.json');
     const raw = await fs.readFile(configPath, 'utf-8');
@@ -119,11 +121,11 @@ describe('initCommand', () => {
     });
   });
 
-  it('should merge into existing .mcp.json for claude-code with --legacy', async () => {
+  it('should merge into existing .mcp.json for claude-code', async () => {
     const configPath = path.join(testDir, '.mcp.json');
     await fs.writeFile(configPath, JSON.stringify({ mcpServers: { other: { command: 'other' } } }));
 
-    await initCommand({ editor: 'claude-code', legacy: true });
+    await initCommand({ editor: 'claude-code' });
 
     const raw = await fs.readFile(configPath, 'utf-8');
     const config = JSON.parse(raw);
@@ -132,9 +134,9 @@ describe('initCommand', () => {
     expect(config.mcpServers.other).toEqual({ command: 'other' });
   });
 
-  it('should show Claude Code restart message under --legacy', async () => {
+  it('should show Claude Code restart message', async () => {
     const logSpy = vi.spyOn(console, 'log');
-    await initCommand({ editor: 'claude-code', legacy: true });
+    await initCommand({ editor: 'claude-code' });
     expect(logSpy).toHaveBeenCalledWith(
       expect.stringContaining('Restart Claude Code to activate.'),
     );
@@ -325,7 +327,7 @@ describe('initCommand', () => {
     const perProjectEditors: EditorId[] = ['cursor', 'claude-code', 'opencode', 'kilo-code'];
 
     for (const editorId of perProjectEditors) {
-      await initCommand({ editor: editorId, legacy: editorId === 'claude-code' });
+      await initCommand({ editor: editorId });
     }
 
     // Check cursor config doesn't have --root

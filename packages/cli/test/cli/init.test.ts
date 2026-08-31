@@ -20,20 +20,20 @@ describe('initCommand', () => {
   });
 
   describe('Explore agent installation', () => {
-    it('installs .claude/agents/Explore.md for claude-code under --legacy', async () => {
-      await initCommand({ editor: 'claude-code', path: tmpDir, legacy: true });
+    it('installs .claude/agents/Explore.md for claude-code', async () => {
+      await initCommand({ editor: 'claude-code', path: tmpDir });
 
       const agentPath = path.join(tmpDir, '.claude', 'agents', 'Explore.md');
       const content = await fs.readFile(agentPath, 'utf-8');
       expect(content).toBe(EXPLORE_AGENT_CONTENT);
     });
 
-    it('does not overwrite existing Explore.md under --legacy', async () => {
+    it('does not overwrite existing Explore.md', async () => {
       const agentPath = path.join(tmpDir, '.claude', 'agents', 'Explore.md');
       await fs.mkdir(path.dirname(agentPath), { recursive: true });
       await fs.writeFile(agentPath, 'custom content');
 
-      await initCommand({ editor: 'claude-code', path: tmpDir, legacy: true });
+      await initCommand({ editor: 'claude-code', path: tmpDir });
 
       const content = await fs.readFile(agentPath, 'utf-8');
       expect(content).toBe('custom content');
@@ -46,11 +46,14 @@ describe('initCommand', () => {
       await expect(fs.access(agentPath)).rejects.toMatchObject({ code: 'ENOENT' });
     });
 
-    it('does not install Explore agent for claude-code without --legacy (plugin path)', async () => {
+    // Inverted when the plugin was deleted: the plugin used to ship the Explore
+    // agent, so init deliberately skipped installing it for Claude Code. With no
+    // plugin, per-project install is the only way to get it.
+    it('installs the Explore agent for claude-code, now that no plugin ships it', async () => {
       await initCommand({ editor: 'claude-code', path: tmpDir });
 
       const agentPath = path.join(tmpDir, '.claude', 'agents', 'Explore.md');
-      await expect(fs.access(agentPath)).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(fs.access(agentPath)).resolves.toBeUndefined();
     });
   });
 });

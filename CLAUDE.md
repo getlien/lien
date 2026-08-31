@@ -12,7 +12,7 @@ Local-first structural code search tool (lexical FTS5 search + dependency analys
 **Monorepo Structure:**
 - `packages/` — TypeScript packages: `parser` and `core` publish as `@liendev/parser`/`@liendev/core`; `cli` publishes as `@liendev/lien`; `review`, `action`, and `site` are private (unpublished).
 - Dependency chain: `parser` ← `core` ← `cli`; `review` depends on `parser` only (not `core`); `action` wraps `review` as a self-hostable GitHub Action ([ADR-012](docs/architecture/decisions/0012-self-hostable-review-action.md)).
-- `plugins/claude/` — the dogfooded Claude Code plugin (MCP server config + hooks). Hooks auto-annotate reads, and on writes run the `lien delta` gate plus a test-association reminder, i.e. they automate three of this file's own MANDATORY policies — see `plugins/claude/README.md`.
+- `.claude/skills/review/` — the review skill that replaced the Claude Code plugin. The plugin (MCP config + 12 hooks) is **deleted**: its hooks used to auto-annotate reads and run the `lien delta` gate plus a test-association reminder on writes, automating three of this file's own MANDATORY policies. **Those three are now manual** — run `lien delta` yourself before committing, and check test associations yourself before editing. Nothing enforces them at the tool boundary any more.
 - `lien-review-testbed/` — tracked, multi-language fixture app used by the review-agent test harness. Not a demo to clean up.
 
 **Package Structure:**
@@ -220,7 +220,7 @@ shipping criteria on their own. Before a PR is declared merge-ready,
 exercise the change the way its real consumer experiences it and put the
 verbatim evidence in the PR body:
 - CLI/MCP changes → run the actual command/tool against this repo and read the output.
-- Hook/plugin changes → invoke the hook with the real stdin shape Claude Code sends; verify what surfaces (and TTL/fail-open behavior).
+- Skill changes → invoke it (`/review`) on a real diff and read what it produces. A skill that reads well and guides badly is the failure mode; prose is not self-verifying.
 - Review-engine changes → replay through the harness (build-prompts/fixtures) or a captured real run.
 - Site/docs → `npm run docs:build` AND read the rendered result.
 If pre-merge dogfooding is genuinely impossible (needs production traffic),
