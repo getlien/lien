@@ -44,9 +44,9 @@ function sh(cmd: string): string {
 }
 
 /**
- * Mirror the per-line bookkeeping in `parsePatchLines` from
- * `packages/review/src/github-api.ts` so captured fixtures' diffLines
- * match what the runner builds in production:
+ * Mirror the per-line bookkeeping in `parsePatchLines`
+ * (`@liendev/parser`, `signals/unified-diff.ts`) so captured fixtures'
+ * diffLines match what the runner builds in production:
  *   - hunk header sets `currentLine` to the post-image start (1-based)
  *   - both `+` (added) and ` ` (context) lines are added to the set and
  *     advance the counter

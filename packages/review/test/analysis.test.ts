@@ -1,69 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { filterAnalyzableFiles, runComplexityAnalysis } from '../src/analysis.js';
+import { runComplexityAnalysis } from '../src/analysis.js';
 import { silentLogger } from '../src/test-helpers.js';
 
-// ---------------------------------------------------------------------------
-// filterAnalyzableFiles
-// ---------------------------------------------------------------------------
-
-describe('filterAnalyzableFiles', () => {
-  it('keeps supported code extensions', () => {
-    const files = ['src/app.ts', 'src/main.js', 'lib/utils.py'];
-    const result = filterAnalyzableFiles(files);
-    expect(result).toEqual(files);
-  });
-
-  it('excludes non-code files', () => {
-    const result = filterAnalyzableFiles(['README.md', 'image.png', 'data.csv', 'config.yaml']);
-    expect(result).toEqual([]);
-  });
-
-  it('excludes node_modules', () => {
-    const result = filterAnalyzableFiles(['node_modules/lodash/index.js']);
-    expect(result).toEqual([]);
-  });
-
-  it('excludes vendor directory', () => {
-    const result = filterAnalyzableFiles(['vendor/autoload.php']);
-    expect(result).toEqual([]);
-  });
-
-  it('excludes dist and build directories', () => {
-    const result = filterAnalyzableFiles(['dist/bundle.js', 'build/index.js']);
-    expect(result).toEqual([]);
-  });
-
-  it('excludes minified and bundled files', () => {
-    const result = filterAnalyzableFiles(['app.min.js', 'vendor.bundle.js']);
-    expect(result).toEqual([]);
-  });
-
-  it('excludes generated files', () => {
-    const result = filterAnalyzableFiles(['schema.generated.ts']);
-    expect(result).toEqual([]);
-  });
-
-  it('excludes lockfiles', () => {
-    const result = filterAnalyzableFiles(['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml']);
-    expect(result).toEqual([]);
-  });
-
-  it('returns empty array for empty input', () => {
-    expect(filterAnalyzableFiles([])).toEqual([]);
-  });
-
-  it('filters mixed input correctly', () => {
-    const files = [
-      'src/app.ts',
-      'README.md',
-      'node_modules/pkg/index.js',
-      'src/utils.js',
-      'dist/bundle.js',
-    ];
-    const result = filterAnalyzableFiles(files);
-    expect(result).toEqual(['src/app.ts', 'src/utils.js']);
-  });
-});
+// `filterAnalyzableFiles` moved to `@liendev/parser` alongside the signal
+// modules that gate on it; its tests moved with it, to
+// `packages/parser/src/signals/analyzable-files.test.ts`.
 
 // ---------------------------------------------------------------------------
 // runComplexityAnalysis

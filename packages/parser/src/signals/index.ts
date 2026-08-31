@@ -31,6 +31,8 @@
 
 export { filterAnalyzableFiles } from './analyzable-files.js';
 
+export { parsePatchLines } from './unified-diff.js';
+
 export type { SignalContext, SignalDiff, SignalLogger } from './signal-context.js';
 
 export { renderUndiscriminatedCatchSection } from './catch-discrimination-signals.js';

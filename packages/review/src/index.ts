@@ -113,7 +113,6 @@ export {
   postPRReview,
   updatePRDescription,
   removePRDescriptionSection,
-  parsePatchLines,
   getPRDiffLines,
   getPRPatchData,
   getExistingCommentKeys,
@@ -153,6 +152,9 @@ export {
   type FileSimplicitySignal,
   computeSimplicitySignals,
   serializeSimplicitySignals,
+  // Diff parsing moved to the parser alongside the signals it feeds; kept on
+  // this package's surface so existing importers don't have to care.
+  parsePatchLines,
 } from '@liendev/parser';
 
 // ─── Dependent context ──────────────────────────────────────────────────────
