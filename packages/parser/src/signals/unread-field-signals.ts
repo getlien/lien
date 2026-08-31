@@ -152,8 +152,8 @@
  *    `rename-sweep-signals.ts` variant-sweep documents for its own shape.
  */
 
-import type { CodeChunk } from '@liendev/parser';
-import type { ReviewContext } from './plugin-types.js';
+import type { CodeChunk } from '../types.js';
+import type { SignalContext } from './signal-context.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -738,7 +738,7 @@ function isGeneratedDeclarationFile(file: string, chunks: CodeChunk[]): boolean 
  * declaration need NOT have existed before this PR — see module doc). Exposed
  * for testing.
  */
-export function computeAddedFields(context: ReviewContext): AddedField[] {
+export function computeAddedFields(context: SignalContext): AddedField[] {
   const patches = context.pr?.patches;
   if (!patches || patches.size === 0) return [];
   const chunks = context.chunks;
@@ -1183,7 +1183,7 @@ function hasReadSite(
  * declaration-range bookkeeping. Split out to keep
  * {@link computeUnreadFieldCandidates} flat.
  */
-function buildDeclarationIndex(context: ReviewContext): Map<string, TypeDeclaration> {
+function buildDeclarationIndex(context: SignalContext): Map<string, TypeDeclaration> {
   const declByKey = new Map<string, TypeDeclaration>();
   for (const file of context.pr?.patches?.keys() ?? []) {
     if (!TS_JS_FILE_RE.test(file) || TEST_PATH_RE.test(file)) continue;
@@ -1223,7 +1223,7 @@ function filterUnreadCandidates(
  * type-literal property / class field this PR added that has no read site
  * anywhere else in the indexed corpus. Exposed for testing.
  */
-export function computeUnreadFieldCandidates(context: ReviewContext): UnreadFieldCandidate[] {
+export function computeUnreadFieldCandidates(context: SignalContext): UnreadFieldCandidate[] {
   const added = computeAddedFields(context);
   if (added.length === 0) return [];
   const repoChunks = context.repoChunks;
@@ -1293,6 +1293,6 @@ export function renderUnreadFieldCandidates(candidates: UnreadFieldCandidate[]):
  * Returns '' when the PR adds no interface/type-literal/class field with no
  * read site, or there's no diff/repo index to check against.
  */
-export function renderUnreadFieldSection(context: ReviewContext): string {
+export function renderUnreadFieldSection(context: SignalContext): string {
   return renderUnreadFieldCandidates(computeUnreadFieldCandidates(context));
 }

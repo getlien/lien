@@ -5,7 +5,7 @@ import {
   computeTestCoverageGaps,
   renderTestCoverageGaps,
   renderTestCoverageSection,
-} from '../src/test-coverage-signals.js';
+} from '../../parser/src/signals/test-coverage-signals.js';
 import { buildInitialMessage } from '../src/plugins/agent/system-prompt.js';
 
 // ---------------------------------------------------------------------------

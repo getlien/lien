@@ -7,7 +7,7 @@ import {
   isFullFileDeletion,
   extractDeletedPaths,
   isDistinctiveBareDirectory,
-} from '../src/docs-drift-signals.js';
+} from '../../parser/src/signals/docs-drift-signals.js';
 
 // ---------------------------------------------------------------------------
 // Helpers

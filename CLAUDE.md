@@ -25,6 +25,14 @@ packages/parser/src/        # AST parsing, chunking, complexity, scanning — ze
 │   └── complexity/  # Complexity metrics (cyclomatic, cognitive, Halstead)
 ├── risk/            # Blast-radius risk scoring
 ├── insights/        # Complexity report types
+├── signals/         # Deterministic review signals — pure functions over a diff
+│                    # plus parser output (no LLM/network/index). Lifted out of
+│                    # packages/review. Barrel is CURATED: a symbol is public
+│                    # only when production code outside its module imports it
+│                    # (38 of ~110) — parser is published, so an exported
+│                    # internal is semver-locked. Tests for the 14 *-signals.ts
+│                    # modules still live in packages/review/test/ pending
+│                    # relocation; signals-test-location.test.ts guards that.
 ├── ecosystem-presets.ts  # Project-type detection — replaced the old frameworks/
 │                         # plugin system (ADR-007); NOT a `frameworks/` directory
 ├── workspace-packages.ts # Workspace specifier resolution for cross-package dependents (#681)
@@ -176,7 +184,7 @@ index/diff query wearing an LLM-reasoning costume (e.g. "does this literal
 still appear unconditionally elsewhere?"), precompute it and inject it as a
 signal block — same pattern as `blast_radius` — instead of asking the agent
 to grep-and-reason. Deterministic signals are unit-testable with zero LLM
-spend; see `packages/review/src/stale-literal-signals.ts` for the template.
+spend; see `packages/parser/src/signals/stale-literal-signals.ts` for the template.
 
 ## Workflow Orchestration
 

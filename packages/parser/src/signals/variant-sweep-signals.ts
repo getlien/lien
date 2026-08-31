@@ -78,8 +78,8 @@
  *    worth the parsing cost yet.
  */
 
-import type { CodeChunk } from '@liendev/parser';
-import type { ReviewContext } from './plugin-types.js';
+import type { CodeChunk } from '../types.js';
+import type { SignalContext } from './signal-context.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -658,7 +658,7 @@ function collectAddedVariantsFromChunk(
  * adds to an EXISTING family declaration (a brand-new declaration has no
  * prior consumers, so it's never a candidate). Exposed for testing.
  */
-export function computeAddedVariants(context: ReviewContext): AddedVariant[] {
+export function computeAddedVariants(context: SignalContext): AddedVariant[] {
   const patches = context.pr?.patches;
   if (!patches || patches.size === 0) return [];
   const chunks = context.chunks;
@@ -701,7 +701,7 @@ interface ResolvedFamily {
  * testing.
  */
 export function resolveFamilyExisting(
-  context: ReviewContext,
+  context: SignalContext,
   file: string,
   kind: VariantFamilyKind,
   typeName: string,
@@ -922,7 +922,7 @@ function recordChunkConsumers(
 }
 
 function sweepGroupConsumers(
-  context: ReviewContext,
+  context: SignalContext,
   group: AddedVariantGroup,
   family: ResolvedFamily,
 ): Map<string, VariantConsumerSite[]> {
@@ -950,7 +950,7 @@ function sweepGroupConsumers(
  * one, both stay flat.
  */
 function buildContextsForGroup(
-  context: ReviewContext,
+  context: SignalContext,
   group: AddedVariantGroup,
 ): VariantSweepContext[] {
   const addedNames = new Set(group.variants);
@@ -992,7 +992,7 @@ function compareContexts(a: VariantSweepContext, b: VariantSweepContext): number
  * variants with at least one such site are included — there's nothing for
  * the agent to check otherwise. Exposed for testing.
  */
-export function computeVariantSweepContexts(context: ReviewContext): VariantSweepContext[] {
+export function computeVariantSweepContexts(context: SignalContext): VariantSweepContext[] {
   const added = computeAddedVariants(context);
   if (added.length === 0) return [];
   if (!context.repoChunks || context.repoChunks.length === 0) return [];
@@ -1072,6 +1072,6 @@ export function renderVariantSweepCandidates(contexts: VariantSweepContext[]): s
  * Returns '' when the PR adds no enum/union/const-object variant with a
  * stale consumer, or there's no diff/repo index to check against.
  */
-export function renderVariantSweepSection(context: ReviewContext): string {
+export function renderVariantSweepSection(context: SignalContext): string {
   return renderVariantSweepCandidates(computeVariantSweepContexts(context));
 }

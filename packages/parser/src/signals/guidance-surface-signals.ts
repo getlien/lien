@@ -2,7 +2,7 @@
  * Guidance-surface passthrough for PR reviews.
  *
  * The review pipeline only chunks/analyzes files whose extension is in the
- * parser-supported set (see `filterAnalyzableFiles` in analysis.ts). That drops
+ * parser-supported set (see `filterAnalyzableFiles` in ./analyzable-files.ts). That drops
  * two kinds of prose from the material the reviewer reasons about:
  *  - agent-guidance surfaces — shell hooks, `.mdc` rules, CLAUDE.md; and
  *  - project documentation — architecture docs / ADRs under `docs/`, the
@@ -30,7 +30,7 @@
  * cap bites it says so rather than truncating silently.
  */
 
-import type { ReviewContext } from './plugin-types.js';
+import type { SignalContext } from './signal-context.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -194,7 +194,7 @@ export function renderGuidanceSurfaceChanges(changes: GuidanceSurfaceChange[]): 
  * Build the `<guidance_surface_changes>` section from the review context.
  * Returns '' when there is no diff or no changed guidance/doc surface.
  */
-export function renderGuidanceSurfaceSection(context: ReviewContext): string {
+export function renderGuidanceSurfaceSection(context: SignalContext): string {
   const patches = context.pr?.patches;
   if (!patches || patches.size === 0) return '';
   return renderGuidanceSurfaceChanges(collectGuidanceSurfaceChanges(patches));

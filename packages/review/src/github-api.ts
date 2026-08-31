@@ -4,6 +4,7 @@
  */
 
 import { Octokit } from '@octokit/rest';
+import { parsePatchLines } from '@liendev/parser';
 import type { PRContext, LineComment } from './types.js';
 import type { Logger } from './logger.js';
 
@@ -666,35 +667,6 @@ export async function removePRDescriptionSection(
     logger.warning(`Failed to remove ${sectionId} section from PR description: ${error}`);
     return false;
   }
-}
-
-/**
- * Parse unified diff patch to extract line numbers that can receive comments
- * Exported for testing
- */
-export function parsePatchLines(patch: string): Set<number> {
-  const lines = new Set<number>();
-  let currentLine = 0;
-
-  for (const patchLine of patch.split('\n')) {
-    // Hunk header: @@ -start,count +start,count @@
-    const hunkMatch = patchLine.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-    if (hunkMatch) {
-      currentLine = parseInt(hunkMatch[1], 10);
-      continue;
-    }
-
-    // Added or context line (can have comments)
-    if (patchLine.startsWith('+') || patchLine.startsWith(' ')) {
-      if (!patchLine.startsWith('+++')) {
-        lines.add(currentLine);
-        currentLine++;
-      }
-    }
-    // Deleted lines (-) don't increment currentLine
-  }
-
-  return lines;
 }
 
 /**

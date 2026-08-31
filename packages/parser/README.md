@@ -13,6 +13,7 @@ This package provides the core parsing and analysis capabilities used by Lien's 
 - **Symbol extraction**: extract functions, classes, interfaces, and call sites from AST
 - **Test association detection**: convention-based and import-based test file detection
 - **Codebase scanning**: file discovery with gitignore support and ecosystem presets
+- **Deterministic review signals**: structural questions about a change ("does this literal still appear unconditionally elsewhere?", "did this change add a variant to some but not all of a family's switch statements?") answered as pure functions over a diff plus parser output — no LLM, no network, no persisted index
 
 ## Supported languages
 

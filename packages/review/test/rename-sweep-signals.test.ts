@@ -8,7 +8,7 @@ import {
   computeRenameSweepSignals,
   renderRenameSweepSignals,
   renderRenameSweepSection,
-} from '../src/rename-sweep-signals.js';
+} from '../../parser/src/signals/rename-sweep-signals.js';
 import { buildInitialMessage } from '../src/plugins/agent/system-prompt.js';
 
 // ---------------------------------------------------------------------------

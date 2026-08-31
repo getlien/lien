@@ -45,10 +45,7 @@ import type { ReviewContext } from '../../plugin-types.js';
 import type { AgentConfig, AgentFinding, AgentResult, ResolvedRules } from './types.js';
 import { STALE_DUPLICATE } from './rules.js';
 import { envDisabled } from './agent-client-shared.js';
-import {
-  computeStaleLiteralCandidates,
-  type StaleLiteralCandidate,
-} from '../../stale-literal-signals.js';
+import { computeStaleLiteralCandidates, type StaleLiteralCandidate } from '@liendev/parser';
 import {
   renderPassPrHeader,
   EXTRA_PASS_MIN_BUDGET_TOKENS,

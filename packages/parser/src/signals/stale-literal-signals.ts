@@ -20,8 +20,8 @@
  * chunk content — a blunt content dump was tried and regressed unrelated rules.
  */
 
-import type { CodeChunk } from '@liendev/parser';
-import type { ReviewContext } from './plugin-types.js';
+import type { CodeChunk } from '../types.js';
+import type { SignalContext } from './signal-context.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -473,7 +473,7 @@ function mergeChangedLines(
  * Pre-compute stale-duplicate literal candidates from the review context.
  * Returns [] when there is no diff or no full-repo index to scan against.
  */
-export function computeStaleLiteralCandidates(context: ReviewContext): StaleLiteralCandidate[] {
+export function computeStaleLiteralCandidates(context: SignalContext): StaleLiteralCandidate[] {
   return computeStaleLiteralCandidatesWithDeadline(
     context,
     Date.now() + STALE_LITERAL_TIME_BUDGET_MS,
@@ -527,7 +527,7 @@ function buildRankedCandidates(
 
 /** Log the budget-exceeded diagnostic: elapsed time, scan coverage, and touched-literal count. */
 function logScanTimeout(
-  context: ReviewContext,
+  context: SignalContext,
   elapsedMs: number,
   chunksScanned: number,
   totalChunks: number,
@@ -557,7 +557,7 @@ interface StaleLiteralScanResult {
  * asserting "scan complete, nothing found" when the scan actually aborted
  * before finishing (see `renderStaleLiteralSection`).
  */
-function computeStaleLiteralScan(context: ReviewContext, deadline: number): StaleLiteralScanResult {
+function computeStaleLiteralScan(context: SignalContext, deadline: number): StaleLiteralScanResult {
   const startedAt = Date.now();
   const patches = context.pr?.patches;
   const repoChunks = context.repoChunks;
@@ -612,7 +612,7 @@ function computeStaleLiteralScan(context: ReviewContext, deadline: number): Stal
  * real elapsed time.
  */
 export function computeStaleLiteralCandidatesWithDeadline(
-  context: ReviewContext,
+  context: SignalContext,
   deadline: number,
 ): StaleLiteralCandidate[] {
   return computeStaleLiteralScan(context, deadline).candidates;
@@ -692,7 +692,7 @@ Scan incomplete (time budget exceeded after ${chunksScanned} of ${totalChunks} c
  * mirroring {@link computeStaleLiteralCandidatesWithDeadline}.
  */
 export function renderStaleLiteralSectionWithDeadline(
-  context: ReviewContext,
+  context: SignalContext,
   deadline: number,
 ): string {
   const patches = context.pr?.patches;
@@ -718,6 +718,6 @@ export function renderStaleLiteralSectionWithDeadline(
  * survivors, or '' when no scan was possible (no diff or no repo index — e.g.
  * CLI mode). Callers append unconditionally.
  */
-export function renderStaleLiteralSection(context: ReviewContext): string {
+export function renderStaleLiteralSection(context: SignalContext): string {
   return renderStaleLiteralSectionWithDeadline(context, Date.now() + STALE_LITERAL_TIME_BUDGET_MS);
 }

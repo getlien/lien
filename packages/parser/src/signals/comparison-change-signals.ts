@@ -84,7 +84,7 @@
  *    as a negation toggle.
  */
 
-import type { ReviewContext } from './plugin-types.js';
+import type { SignalContext } from './signal-context.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -608,7 +608,7 @@ function collectCandidatesFromPatch(
  * index-arithmetic off-by-one. Returns [] when there is no diff. Exposed
  * for testing.
  */
-export function computeComparisonChanges(context: ReviewContext): ComparisonChangeCandidate[] {
+export function computeComparisonChanges(context: SignalContext): ComparisonChangeCandidate[] {
   const patches = context.pr?.patches;
   if (!patches || patches.size === 0) return [];
 
@@ -693,7 +693,7 @@ export function renderComparisonChangeCandidates(
  * `buildHeader`'s doc comment; forwarded to `renderComparisonChangeCandidates`.
  */
 export function renderComparisonChangeSection(
-  context: ReviewContext,
+  context: SignalContext,
   blastRadiusPresent = true,
 ): string {
   return renderComparisonChangeCandidates(computeComparisonChanges(context), blastRadiusPresent);

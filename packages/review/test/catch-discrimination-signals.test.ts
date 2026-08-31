@@ -7,7 +7,7 @@ import {
   computeUndiscriminatedCatches,
   renderUndiscriminatedCatchCandidates,
   renderUndiscriminatedCatchSection,
-} from '../src/catch-discrimination-signals.js';
+} from '../../parser/src/signals/catch-discrimination-signals.js';
 import { buildInitialMessage } from '../src/plugins/agent/system-prompt.js';
 
 // ---------------------------------------------------------------------------

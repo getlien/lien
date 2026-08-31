@@ -84,8 +84,8 @@
  *    the backstop, per this block's "confirm before reporting" framing.
  */
 
-import type { CodeChunk } from '@liendev/parser';
-import type { ReviewContext } from './plugin-types.js';
+import type { CodeChunk } from '../types.js';
+import type { SignalContext } from './signal-context.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -574,7 +574,7 @@ function collectCandidatesFromChunk(
  * chunks to scan. Exposed for testing.
  */
 export function computeUndiscriminatedCatches(
-  context: ReviewContext,
+  context: SignalContext,
 ): UndiscriminatedCatchCandidate[] {
   const patches = context.pr?.patches;
   if (!patches || patches.size === 0) return [];
@@ -662,6 +662,6 @@ export function renderUndiscriminatedCatchCandidates(
  * context. Returns '' when the PR adds/modifies no catch clause that fits
  * the shape, or there's no diff/changed-file chunks to scan.
  */
-export function renderUndiscriminatedCatchSection(context: ReviewContext): string {
+export function renderUndiscriminatedCatchSection(context: SignalContext): string {
   return renderUndiscriminatedCatchCandidates(computeUndiscriminatedCatches(context));
 }

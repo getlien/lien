@@ -16,7 +16,7 @@
  * a verdict; the agent still traces each site to its consumers and judges.
  */
 
-import type { ReviewContext } from './plugin-types.js';
+import type { SignalContext } from './signal-context.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -199,7 +199,7 @@ export function renderUntrustedInputSites(sites: UntrustedInputSite[]): string {
  * Build the `<untrusted_input_sites>` section from the review context. Returns
  * '' when there is no diff to scan.
  */
-export function renderUntrustedInputSection(context: ReviewContext): string {
+export function renderUntrustedInputSection(context: SignalContext): string {
   const patches = context.pr?.patches;
   if (!patches || patches.size === 0) return '';
   return renderUntrustedInputSites(extractUntrustedInputSites(patches));

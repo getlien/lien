@@ -6,7 +6,7 @@ import {
   extractSiblingSurfaces,
   renderSiblingSurfaces,
   renderSiblingSurfacesSection,
-} from '../src/sibling-surface-signals.js';
+} from '../../parser/src/signals/sibling-surface-signals.js';
 import { buildInitialMessage } from '../src/plugins/agent/system-prompt.js';
 
 function incompleteHandlingRule(): ReviewRule {

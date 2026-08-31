@@ -8,7 +8,7 @@ import {
   renderStaleLiteralCandidates,
   renderStaleLiteralSection,
   renderStaleLiteralSectionWithDeadline,
-} from '../src/stale-literal-signals.js';
+} from '../../parser/src/signals/stale-literal-signals.js';
 import { buildInitialMessage } from '../src/plugins/agent/system-prompt.js';
 import { silentLogger } from '../src/test-helpers.js';
 

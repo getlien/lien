@@ -6,7 +6,7 @@ import {
   renderGuidanceSurfaceChanges,
   renderGuidanceSurfaceSection,
   type GuidanceSurfaceChange,
-} from '../src/guidance-surface-signals.js';
+} from '../../parser/src/signals/guidance-surface-signals.js';
 import { buildInitialMessage } from '../src/plugins/agent/system-prompt.js';
 
 function ctxWithPatches(patches?: Map<string, string>): ReviewContext {

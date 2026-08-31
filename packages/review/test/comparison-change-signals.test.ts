@@ -7,7 +7,7 @@ import {
   computeComparisonChanges,
   renderComparisonChangeCandidates,
   renderComparisonChangeSection,
-} from '../src/comparison-change-signals.js';
+} from '../../parser/src/signals/comparison-change-signals.js';
 import { buildInitialMessage } from '../src/plugins/agent/system-prompt.js';
 
 // ---------------------------------------------------------------------------

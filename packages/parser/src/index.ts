@@ -381,3 +381,91 @@ export { wordBoundaryRe, isDistinctiveToken } from './doc-reference-matching.js'
 // =============================================================================
 
 export { findChunkLineIndex } from './chunk-line-lookup.js';
+
+// =============================================================================
+// DETERMINISTIC REVIEW SIGNALS
+//
+// Pure functions over a diff plus parser output — no LLM, no network, no
+// persisted index. See src/signals/signal-context.ts for what they take.
+//
+// Listed explicitly, like every other block in this file, and for a sharper
+// reason than consistency: the 18 modules in src/signals/ export ~110 symbols
+// between them, but only these have a consumer outside their own module. The
+// rest are reachable by their tests and nothing else. `export *` over that
+// directory would semver-lock ~70 internals of a PUBLISHED package, and this
+// is the file a reviewer reads to see the public surface change — a wildcard
+// hides exactly that.
+//
+// So the rule for this block: a symbol earns a line when production code
+// outside its own module imports it, not when a test does.
+//
+// Two deliberate exceptions, stated rather than left as quiet violations:
+// `SignalDiff` and `SignalLogger` have no importer anywhere. They are the field
+// types of `SignalContext`, and a caller constructing one needs to be able to
+// name them — structural typing lets you pass an object literal, but not
+// declare a helper that returns one. Exporting an interface without its field
+// types is a surface that can be satisfied but not written against.
+// =============================================================================
+
+export { filterAnalyzableFiles } from './signals/analyzable-files.js';
+export { parsePatchLines } from './signals/unified-diff.js';
+
+export type { SignalContext, SignalDiff, SignalLogger } from './signals/signal-context.js';
+
+export { renderUndiscriminatedCatchSection } from './signals/catch-discrimination-signals.js';
+export { renderComparisonChangeSection } from './signals/comparison-change-signals.js';
+export { renderGuidanceSurfaceSection } from './signals/guidance-surface-signals.js';
+export { renderTestCoverageSection } from './signals/test-coverage-signals.js';
+export { renderUntrustedInputSection } from './signals/untrusted-input-signals.js';
+
+export {
+  extractDocClaims,
+  attachEvidence,
+  renderDocClaimsSection,
+} from './signals/doc-claims-signals.js';
+export type { DocClaim } from './signals/doc-claims-signals.js';
+
+export { computeDocsDriftCandidates, isFullFileDeletion } from './signals/docs-drift-signals.js';
+export type { DocsDriftCandidate } from './signals/docs-drift-signals.js';
+
+export {
+  computeRemovedExportContexts,
+  renderRemovedExportsSection,
+} from './signals/removed-export-signals.js';
+export type { RemovedExportContext } from './signals/removed-export-signals.js';
+
+export {
+  computeRenameSweepSignals,
+  renderRenameSweepSection,
+} from './signals/rename-sweep-signals.js';
+export type { RenameSweepSignal } from './signals/rename-sweep-signals.js';
+
+export {
+  extractSiblingSurfaces,
+  renderSiblingSurfacesSection,
+} from './signals/sibling-surface-signals.js';
+export type { SiblingSurfaceEntry } from './signals/sibling-surface-signals.js';
+
+export {
+  computeSimplicitySignals,
+  serializeSimplicitySignals,
+} from './signals/simplicity-signals.js';
+export type { FileSimplicitySignal } from './signals/simplicity-signals.js';
+
+export {
+  computeStaleLiteralCandidates,
+  renderStaleLiteralSection,
+} from './signals/stale-literal-signals.js';
+export type { StaleLiteralCandidate } from './signals/stale-literal-signals.js';
+
+export {
+  computeUnreadFieldCandidates,
+  renderUnreadFieldSection,
+} from './signals/unread-field-signals.js';
+export type { UnreadFieldCandidate } from './signals/unread-field-signals.js';
+
+export {
+  computeVariantSweepContexts,
+  renderVariantSweepSection,
+} from './signals/variant-sweep-signals.js';
+export type { VariantSweepContext } from './signals/variant-sweep-signals.js';

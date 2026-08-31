@@ -24,7 +24,7 @@ import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve, dirname, join, isAbsolute, relative } from 'node:path';
 
-import { performChunkOnlyIndex } from '@liendev/parser';
+import { performChunkOnlyIndex, parsePatchLines } from '@liendev/parser';
 
 import { runComplexityAnalysis } from '../../src/analysis.js';
 import { silentLogger } from '../../src/test-helpers.js';
@@ -44,45 +44,19 @@ function sh(cmd: string): string {
 }
 
 /**
- * Mirror the per-line bookkeeping in `parsePatchLines` from
- * `packages/review/src/github-api.ts` so captured fixtures' diffLines
- * match what the runner builds in production:
- *   - hunk header sets `currentLine` to the post-image start (1-based)
- *   - both `+` (added) and ` ` (context) lines are added to the set and
- *     advance the counter
- *   - `-` (deleted) lines don't advance
- *   - `+++ b/...` file header is skipped
+ * Captured fixtures' `diffLines` must match what the runner builds in
+ * production, so this calls the SAME function production does rather than
+ * mirroring its per-line bookkeeping.
  *
- * Engine consumers (`engine.ts:600`) use this to filter findings to
- * diff-adjacent lines via `diffLines.get(file)?.has(line)`. If we only
- * captured `+` lines, findings on context lines would silently fall out
- * of the harness's filter behavior vs prod.
+ * It used to hold a byte-identical copy, because `parsePatchLines` lived in
+ * `github-api.ts` and importing it meant importing an Octokit client. That is
+ * no longer true — it is `@liendev/parser`'s `signals/unified-diff.ts` now — so
+ * the copy is gone. Engine consumers (`engine.ts:600`) filter findings to
+ * diff-adjacent lines via `diffLines.get(file)?.has(line)`; if a capture
+ * recorded only `+` lines, findings on context lines would silently fall out of
+ * the harness's filter behavior versus prod. One implementation is what
+ * guarantees they can't diverge.
  */
-/**
- * Extract the post-image line numbers covered by a single file's diff
- * block (the bit between two `diff --git` headers). Tracks both `+`
- * (added) and ` ` (context) lines so the engine's diff-adjacent filter
- * matches what production sees.
- */
-function extractPostImageLines(block: string): Set<number> {
-  const lines = new Set<number>();
-  let currentLine = 0; // overwritten by the first hunk header
-  for (const line of block.split('\n')) {
-    const hunkMatch = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-    if (hunkMatch) {
-      currentLine = parseInt(hunkMatch[1], 10);
-      continue;
-    }
-    // `-` lines don't advance currentLine (post-image counter).
-    // `+++` is the file header, skip without advancing.
-    if ((line.startsWith('+') || line.startsWith(' ')) && !line.startsWith('+++')) {
-      lines.add(currentLine);
-      currentLine++;
-    }
-  }
-  return lines;
-}
-
 function parseUnifiedDiff(diff: string): {
   patches: Map<string, string>;
   diffLines: Map<string, Set<number>>;
@@ -94,7 +68,7 @@ function parseUnifiedDiff(diff: string): {
     if (!headerMatch) continue;
     const path = headerMatch[2];
     patches.set(path, `diff --git ${block}`.trimEnd());
-    diffLines.set(path, extractPostImageLines(block));
+    diffLines.set(path, parsePatchLines(block));
   }
   return { patches, diffLines };
 }

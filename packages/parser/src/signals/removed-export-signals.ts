@@ -24,8 +24,8 @@
  * `pub` shape (the structural-analysis canary is a Rust testbed file).
  */
 
-import type { CodeChunk } from '@liendev/parser';
-import type { ReviewContext } from './plugin-types.js';
+import type { CodeChunk } from '../types.js';
+import type { SignalContext } from './signal-context.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -422,7 +422,7 @@ export function changesetMentions(
  * (most surviving references first), then changeset-mentioned, then the rest;
  * ties broken by symbol name for determinism. Returns [] when no diff.
  */
-export function computeRemovedExportContexts(context: ReviewContext): RemovedExportContext[] {
+export function computeRemovedExportContexts(context: SignalContext): RemovedExportContext[] {
   const patches = context.pr?.patches;
   if (!patches || patches.size === 0) return [];
 
@@ -516,6 +516,6 @@ export function renderRemovedExports(contexts: RemovedExportContext[]): string {
  * Build the `<removed_exports>` section from the review context. Returns ''
  * when the PR removes no exported symbols (or there is no diff).
  */
-export function renderRemovedExportsSection(context: ReviewContext): string {
+export function renderRemovedExportsSection(context: SignalContext): string {
   return renderRemovedExports(computeRemovedExportContexts(context));
 }
