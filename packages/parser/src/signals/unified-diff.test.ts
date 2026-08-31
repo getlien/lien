@@ -133,6 +133,48 @@ describe('parseUnifiedDiff', () => {
     expect(diffLines.get('logo.png')).toEqual(new Set());
   });
 
+  // Git appends a TAB to the `---`/`+++` header whenever the path contains a
+  // space. Left in place the extension reads as `.ts\t`, the file is judged
+  // unanalyzable and silently dropped — which hit exactly the case that taking
+  // the path from `+++` was supposed to fix.
+  it('strips the trailing tab git adds when a path contains a space', () => {
+    const diff = [
+      `${DIFF_HEADER}a/sub dir/my file.ts b/sub dir/my file.ts`,
+      '--- a/sub dir/my file.ts\t',
+      '+++ b/sub dir/my file.ts\t',
+      '@@ -1,1 +1,1 @@',
+      '+x',
+    ].join('\n');
+
+    expect([...parseUnifiedDiff(diff).patches.keys()]).toEqual(['sub dir/my file.ts']);
+  });
+
+  // `core.quotePath` is ON by default, so a non-ASCII path arrives octal-escaped
+  // and quoted. The escapes are per-BYTE, so they must decode to bytes and then
+  // be read as UTF-8.
+  it('unquotes and octal-decodes a non-ASCII path', () => {
+    const diff = [
+      `${DIFF_HEADER}"a/caf\\303\\251.ts" "b/caf\\303\\251.ts"`,
+      '--- "a/caf\\303\\251.ts"',
+      '+++ "b/caf\\303\\251.ts"',
+      '@@ -1,1 +1,1 @@',
+      '+x',
+    ].join('\n');
+
+    expect([...parseUnifiedDiff(diff).patches.keys()]).toEqual(['café.ts']);
+  });
+
+  it('handles a quoted path that also carries a trailing tab', () => {
+    const diff = [
+      `${DIFF_HEADER}"a/caf\\303\\251 dir/x.ts" "b/caf\\303\\251 dir/x.ts"`,
+      '+++ "b/caf\\303\\251 dir/x.ts"\t',
+      '@@ -1,1 +1,1 @@',
+      '+x',
+    ].join('\n');
+
+    expect([...parseUnifiedDiff(diff).patches.keys()]).toEqual(['café dir/x.ts']);
+  });
+
   it('returns empty maps for an empty diff', () => {
     const { patches, diffLines } = parseUnifiedDiff('');
 

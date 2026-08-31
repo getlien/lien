@@ -69,10 +69,71 @@ export interface ParsedUnifiedDiff {
 
 /** Block separator, at the start of a line. */
 const DIFF_BLOCK_RE = /^diff --git /m;
-/** The post-image path, from the `+++` header. `/dev/null` means deleted. */
-const POST_IMAGE_PATH_RE = /^\+\+\+ (?:b\/)?(.+)$/m;
+/**
+ * The post-image path, from the `+++` header. `/dev/null` means deleted.
+ *
+ * Captures everything after `+++ ` and leaves the `b/` prefix on, because when
+ * the path is quoted the prefix is INSIDE the quotes (`"b/caf\303\251.ts"`) —
+ * so stripping it has to happen after unquoting, not in this pattern.
+ */
+const POST_IMAGE_PATH_RE = /^\+\+\+ (.+)$/m;
 /** Fallback: the block's own `a/… b/…` header. */
 const GIT_HEADER_PATH_RE = /^a\/(.+?) b\/(.+?)$/m;
+
+/**
+ * Undo the decorations git applies to a path in a `---`/`+++` header.
+ *
+ * Two of them, both silent and both fatal if left in place, because the result
+ * is used to look the file up on disk and to read its extension:
+ *
+ *  - **A trailing TAB** whenever the path contains a space. `sub dir/a.ts`
+ *    arrives as `sub dir/a.ts\t`, whose extension reads as `.ts\t` — so the file
+ *    is judged unanalyzable and silently dropped from the review. Note this hits
+ *    exactly the case taking the path from `+++` was meant to fix.
+ *  - **Octal-escaped quoting** for non-ASCII, from `core.quotePath`, which is ON
+ *    by default: `café.ts` arrives as `"caf\303\251.ts"`.
+ */
+function undecoratePath(raw: string): string {
+  const detabbed = raw.replace(/\t+$/, '');
+  if (!detabbed.startsWith('"') || !detabbed.endsWith('"')) return detabbed;
+
+  const inner = detabbed.slice(1, -1);
+  // Octal escapes are per-BYTE, so decode to bytes and then read as UTF-8 —
+  // decoding each escape as a code point would mangle any multi-byte character.
+  const bytes: number[] = [];
+  for (let i = 0; i < inner.length; i++) {
+    const octal = /^\\([0-7]{3})/.exec(inner.slice(i));
+    if (octal !== null) {
+      bytes.push(parseInt(octal[1], 8));
+      i += 3;
+      continue;
+    }
+    if (inner[i] === '\\' && i + 1 < inner.length) {
+      i++;
+      bytes.push(inner.charCodeAt(i));
+      continue;
+    }
+    bytes.push(inner.charCodeAt(i));
+  }
+
+  return new TextDecoder().decode(new Uint8Array(bytes));
+}
+
+/**
+ * A `---`/`+++` header path, undecorated and with its `a/`/`b/` prefix removed.
+ *
+ * Order matters: the prefix sits inside the quotes for a quoted path, so it can
+ * only be stripped once the quoting is gone. Stripping is unconditional rather
+ * than pattern-matched on the prefix, which is why `diff.noprefix` should be
+ * pinned off at the git call — with it on, a file genuinely under a directory
+ * named `b` would lose that segment. Accepted: a diff this package generates
+ * always carries the prefix.
+ */
+function headerPath(raw: string): string {
+  const undecorated = undecoratePath(raw);
+  if (undecorated === '/dev/null') return undecorated;
+  return undecorated.replace(/^[ab]\//, '');
+}
 
 /**
  * Split a unified diff into per-file patches plus the lines each one touches.
@@ -95,11 +156,15 @@ export function parseUnifiedDiff(diff: string): ParsedUnifiedDiff {
   const diffLines = new Map<string, Set<number>>();
 
   for (const block of diff.split(DIFF_BLOCK_RE).slice(1)) {
-    const postImage = block.match(POST_IMAGE_PATH_RE)?.[1];
+    const rawPostImage = block.match(POST_IMAGE_PATH_RE)?.[1];
+    const postImage = rawPostImage === undefined ? undefined : headerPath(rawPostImage);
+    const fallback = block.match(GIT_HEADER_PATH_RE)?.[2];
     const filepath =
       postImage !== undefined && postImage !== '/dev/null'
         ? postImage
-        : block.match(GIT_HEADER_PATH_RE)?.[2];
+        : fallback === undefined
+          ? undefined
+          : headerPath(fallback);
     if (filepath === undefined) continue;
 
     // Re-attach the separator the split consumed, so a consumer scanning the

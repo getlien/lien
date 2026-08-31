@@ -75,7 +75,34 @@ export async function readUnifiedDiff(rootDir: string, baseRef = 'HEAD'): Promis
   }
   // `-M` so a rename arrives as one rename block rather than a delete plus an
   // add, which would make every line of a moved file read as newly added.
-  return git(rootDir, ['diff', '-M', baseRef]);
+  //
+  // The config overrides matter more than they look. `git diff` is a
+  // human-facing renderer and honours user settings that change its SHAPE, so
+  // parsing it without pinning them means parsing whatever the user configured:
+  //   - `color.diff = always` prefixes every line with ANSI, so `^diff --git `
+  //     never matches, zero blocks parse, and the command reports "no changes"
+  //     for a diff full of them.
+  //   - `diff.mnemonicPrefix` renames the `a/`…`b/` prefixes to `c/`…`w/`, so
+  //     every path comes out wrong and the parse yields files that do not exist.
+  //   - `core.quotePath` (ON by default) octal-escapes non-ASCII paths and wraps
+  //     them in quotes, so `café.ts` arrives as `"caf\303\251.ts"`.
+  //   - an external diff driver replaces the format wholesale.
+  // Each one silently changes which files get reviewed, which is worse than an
+  // error. `parseUnifiedDiff` also defends itself, so a diff from elsewhere
+  // still parses — this just stops us generating a broken one.
+  return git(rootDir, [
+    '-c',
+    'core.quotePath=false',
+    '-c',
+    'diff.mnemonicPrefix=false',
+    '-c',
+    'diff.noprefix=false',
+    'diff',
+    '--no-color',
+    '--no-ext-diff',
+    '-M',
+    baseRef,
+  ]);
 }
 
 /**
