@@ -120,6 +120,41 @@ describe('renderText', () => {
     expect(out).not.toContain('src/a.ts:');
   });
 
+  // A bare "(8)" reads as "it found 8". For a signal that truncates inside its
+  // own compute function it means "it returned 8 of some number it never told
+  // us" — 8 of 1,241 on one real diff. Showing a ceiling as a total is the same
+  // failure as showing an empty result as a clean one.
+  it('says the count is a ceiling for a signal that caps its own list', () => {
+    const out = renderText(
+      result({
+        reports: [report({ candidates: [{ file: 'a.ts', detail: 'x' }], capped: true })],
+      }),
+    );
+
+    expect(out).toContain('caps its own list');
+    expect(out).not.toMatch(/Stale duplicate literals {2}\(1\)/);
+  });
+
+  it('reports the exact remainder when the signal knows it', () => {
+    const out = renderText(
+      result({
+        reports: [report({ candidates: [{ file: 'a.ts', detail: 'x' }], omitted: 207 })],
+      }),
+    );
+
+    expect(out).toContain('1 shown, 207 more not listed');
+  });
+
+  it('prints a plain count when nothing was dropped', () => {
+    const out = renderText(
+      result({ reports: [report({ candidates: [{ file: 'a.ts', detail: 'x' }] })] }),
+    );
+
+    expect(out).toContain('Stale duplicate literals  (1)');
+    expect(out).not.toContain('not listed');
+    expect(out).not.toContain('caps its own list');
+  });
+
   it('prints the question so a reader can judge relevance', () => {
     const out = renderText(
       result({ reports: [report({ candidates: [{ file: 'a.ts', detail: 'x' }] })] }),

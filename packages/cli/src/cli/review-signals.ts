@@ -54,6 +54,23 @@ export interface SignalReport {
    * about.
    */
   limitation?: string;
+  /**
+   * Candidates this signal found and did not return, where the number is
+   * knowable. Only `rename-sweep` reports its own overflow.
+   */
+  omitted?: number;
+  /**
+   * True when the signal truncates inside its compute function and returns no
+   * count, so the number shown is a CEILING, not a total.
+   *
+   * stale-literal, sibling-surface and docs-drift all do this. Measured on a
+   * 104-file diff of this repo: stale-literal returned 8 of 1,241 it had found,
+   * sibling-surface 15 of 175. The prompt renderers this command replaced did
+   * not disclose it either, so the truncation was inherited rather than
+   * introduced — but a list that looks complete and is not is the exact failure
+   * this command claims to avoid, so it gets said out loud.
+   */
+  capped?: boolean;
 }
 
 /** Modules hard-gated to TypeScript/JavaScript by their own file filters. */
@@ -171,8 +188,13 @@ function guidanceSurfaces(patches: Map<string, string>): ReviewCandidate[] {
   }));
 }
 
-function renameSweeps(context: SignalContext): ReviewCandidate[] {
+function renameSweeps(context: SignalContext): {
+  candidates: ReviewCandidate[];
+  omitted: number;
+} {
   const out: ReviewCandidate[] = [];
+  let omitted = 0;
+
   for (const signal of computeRenameSweepSignals(context)) {
     const { from, to, occurrenceCount, fileCount } = signal.mapping;
     const swept = `${from} → ${to} (${occurrenceCount}× across ${fileCount} files)`;
@@ -191,8 +213,12 @@ function renameSweeps(context: SignalContext): ReviewCandidate[] {
         detail: `${swept}: old name survives in ${where} — ${truncate(survivor.snippet, 60)}`,
       });
     }
+    // This signal DOES report what it dropped. Ignoring these was a silent
+    // truncation with the count sitting right there.
+    omitted += signal.proseOverflow + signal.survivorOverflow;
   }
-  return out;
+
+  return { candidates: out, omitted };
 }
 
 function simplicity(chunks: SignalContext['chunks'], changedFiles: string[]): ReviewCandidate[] {
@@ -208,25 +234,31 @@ export interface RunSignalsOptions {
   hasNonTsJs: boolean;
 }
 
-/**
- * Run every signal over one context and return a report per signal, in a fixed
- * order so successive runs on the same diff are byte-comparable.
- */
-export function runSignals(
-  context: SignalContext,
-  changedFiles: string[],
-  options: RunSignalsOptions,
-): SignalReport[] {
-  const patches = context.pr?.patches ?? new Map<string, string>();
-  const tsJs = options.hasNonTsJs ? TS_JS_ONLY : undefined;
-  const repo = options.repoScanned ? undefined : NEEDS_REPO;
+/** The constraints in force for a run, resolved once and shared by both halves. */
+interface Constraints {
+  /** Set when the diff contains a language the TS/JS-gated modules skip. */
+  tsJs: string | undefined;
+  /** Set when the repo-wide corpus was not gathered. */
+  repo: string | undefined;
+  repoScanned: boolean;
+}
 
+/**
+ * The signals that answer from the code: a changed literal, a removed export, a
+ * new variant, a catch clause, a sibling that did not get the change.
+ *
+ * Split from `documentationSignals` only to keep each function's operand
+ * variety under the complexity gate — the two halves have no other relationship,
+ * and `runSignals` concatenates them in the order a reader should read them.
+ */
+function codeSignals(context: SignalContext, { tsJs, repo }: Constraints): SignalReport[] {
   return [
     {
       id: 'stale-literal',
       title: 'Stale duplicate literals',
       question: 'A literal changed here — does the old value still appear elsewhere?',
       candidates: staleLiterals(context),
+      capped: true,
       limitation: repo,
     },
     {
@@ -268,15 +300,27 @@ export function runSignals(
       title: 'Sibling surfaces',
       question: 'Was this applied to one member of a family and not its siblings?',
       candidates: siblingSurfaces(context),
+      capped: true,
       limitation: repo,
     },
     {
       id: 'rename-sweep',
       title: 'Rename sweeps',
       question: 'A mechanical rename — did it leave stale prose or unrenamed survivors?',
-      candidates: renameSweeps(context),
+      ...renameSweeps(context),
       limitation: repo,
     },
+  ];
+}
+
+/** The signals that answer from prose, coverage, and structural shape. */
+function documentationSignals(
+  context: SignalContext,
+  changedFiles: string[],
+  patches: Map<string, string>,
+  { repo, repoScanned }: Constraints,
+): SignalReport[] {
+  return [
     {
       id: 'untrusted-input',
       title: 'Untrusted input sites',
@@ -292,7 +336,7 @@ export function runSignals(
       // which is empty for every file until the corpus fills it in — so running
       // it unfed does not produce a weaker answer, it produces a confident
       // wrong one: every changed file reported as untested.
-      candidates: options.repoScanned ? testCoverage(context) : [],
+      candidates: repoScanned ? testCoverage(context) : [],
       limitation: repo,
     },
     {
@@ -300,6 +344,7 @@ export function runSignals(
       title: 'Documentation drift',
       question: 'Does an untouched doc still name something this change removed or renamed?',
       candidates: docsDrift(context),
+      capped: true,
       limitation: repo,
     },
     {
@@ -320,5 +365,27 @@ export function runSignals(
       question: 'Is a changed file over-abstracted, even with no single function over threshold?',
       candidates: simplicity(context.chunks, changedFiles),
     },
+  ];
+}
+
+/**
+ * Run every signal over one context and return a report per signal, in a fixed
+ * order so successive runs on the same diff are byte-comparable.
+ */
+export function runSignals(
+  context: SignalContext,
+  changedFiles: string[],
+  options: RunSignalsOptions,
+): SignalReport[] {
+  const patches = context.pr?.patches ?? new Map<string, string>();
+  const constraints: Constraints = {
+    tsJs: options.hasNonTsJs ? TS_JS_ONLY : undefined,
+    repo: options.repoScanned ? undefined : NEEDS_REPO,
+    repoScanned: options.repoScanned,
+  };
+
+  return [
+    ...codeSignals(context, constraints),
+    ...documentationSignals(context, changedFiles, patches, constraints),
   ];
 }

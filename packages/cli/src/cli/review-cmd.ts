@@ -314,9 +314,28 @@ function renderCaveats(result: ReviewResult): string[] {
   return lines;
 }
 
+/**
+ * How many candidates this block is showing — a count, a count-plus-remainder,
+ * or an explicit ceiling.
+ *
+ * A bare "(8)" reads as "it found 8". For a signal that truncates inside its own
+ * compute function, it means "it returned 8, having found some number it did not
+ * tell us" — measured at 8 of 1,241 on one real diff. Showing a ceiling as a
+ * total is the same failure as showing an empty result as a clean one.
+ */
+function renderCount(report: SignalReport): string {
+  const shown = report.candidates.length;
+  if (report.omitted !== undefined && report.omitted > 0) {
+    return `${shown} shown, ${report.omitted} more not listed`;
+  }
+  if (report.capped === true)
+    return `${shown} shown — this signal caps its own list, so there may be more`;
+  return String(shown);
+}
+
 /** One signal's block: heading, its question, its candidates, its constraint. */
 function renderSignalBlock(report: SignalReport): string[] {
-  const lines = [`${report.title}  (${report.candidates.length})`, `  ${report.question}`];
+  const lines = [`${report.title}  (${renderCount(report)})`, `  ${report.question}`];
 
   for (const c of report.candidates) {
     lines.push(`    ${c.line === undefined ? c.file : `${c.file}:${c.line}`}`);
@@ -393,6 +412,8 @@ export function toJson(result: ReviewResult): string {
         title: r.title,
         question: r.question,
         limitation: r.limitation ?? null,
+        omitted: r.omitted ?? 0,
+        capped: r.capped === true,
         candidates: r.candidates,
       })),
     },
