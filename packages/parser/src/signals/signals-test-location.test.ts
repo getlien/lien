@@ -14,14 +14,33 @@
  * case that actually loses coverage: `packages/review` being deleted (it is
  * slated for deletion) while its signal tests are still the only ones there
  * are. That fails here, loudly, naming the modules left uncovered — instead of
- * a test suite that quietly gets smaller.
+ * a test suite that quietly gets smaller. As of this writing 14 of the 16
+ * modules pass only via the `packages/review/test` branch, so a deletion
+ * flips all 14 at once.
+ *
+ * Two limits, deliberately not fixed:
+ *  - It asserts a test FILE EXISTS, not that the file tests anything. An empty
+ *    one, or one that is entirely `it.skip`, satisfies it. That is adequate for
+ *    the deletion case this targets; it is not a coverage guarantee, and should
+ *    not be read as one.
+ *  - It reads `../../../review/test`, outside its own package. Parser's tests
+ *    only ever run from the monorepo, so this is theoretical — but a standalone
+ *    `packages/parser` checkout fails this guard for the same reason a deletion
+ *    does, and with the same message.
  */
 
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const SIGNALS_DIR = path.dirname(new URL(import.meta.url).pathname);
+// `fileURLToPath`, not `new URL(...).pathname` — the latter keeps a leading
+// slash on Windows drive paths (`/C:/…`) and never percent-decodes, so a
+// checkout in a directory with a space in its name would resolve to nowhere.
+// Both failure modes make every `existsSync` below false, which would fail
+// this guard spuriously on someone else's machine — a false alarm, which is
+// the one thing a guard must never be.
+const SIGNALS_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REVIEW_TEST_DIR = path.resolve(SIGNALS_DIR, '../../../review/test');
 
 /**
