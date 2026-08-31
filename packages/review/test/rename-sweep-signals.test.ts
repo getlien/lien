@@ -8,7 +8,7 @@ import {
   computeRenameSweepSignals,
   renderRenameSweepSignals,
   renderRenameSweepSection,
-} from '../src/rename-sweep-signals.js';
+} from '@liendev/parser';
 import { buildInitialMessage } from '../src/plugins/agent/system-prompt.js';
 
 // ---------------------------------------------------------------------------

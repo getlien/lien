@@ -10,7 +10,7 @@ import {
   renderRemovedExportsSection,
   type RemovedExport,
   type RemovedExportContext,
-} from '../src/removed-export-signals.js';
+} from '@liendev/parser';
 import { buildInitialMessage } from '../src/plugins/agent/system-prompt.js';
 
 // ---------------------------------------------------------------------------

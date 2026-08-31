@@ -74,8 +74,8 @@
  * revival adds.
  */
 
-import type { CodeChunk } from '@liendev/parser';
-import type { ReviewContext } from './plugin-types.js';
+import type { CodeChunk } from '../types.js';
+import type { SignalContext } from './signal-context.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -390,7 +390,7 @@ function countInUntouchedCorpus(
   return count;
 }
 
-function collectChangedFileSet(context: ReviewContext): Set<string> {
+function collectChangedFileSet(context: SignalContext): Set<string> {
   const files = new Set<string>(context.changedFiles ?? []);
   for (const f of context.allChangedFiles ?? []) files.add(f);
   for (const f of context.pr?.patches?.keys() ?? []) files.add(f);
@@ -858,7 +858,7 @@ function extractMirrorFamilyEntries(
  * Precompute sibling-surface entries for the review context. Returns [] when
  * there's no repo index to scan against. Exposed for testing.
  */
-export function extractSiblingSurfaces(context: ReviewContext): SiblingSurfaceEntry[] {
+export function extractSiblingSurfaces(context: SignalContext): SiblingSurfaceEntry[] {
   const repoChunks = context.repoChunks;
   if (!repoChunks || repoChunks.length === 0) return [];
 
@@ -999,6 +999,6 @@ export function renderSiblingSurfaces(entries: SiblingSurfaceEntry[]): string {
  * Build the `<sibling_surfaces>` section for the agent's initial message.
  * Returns '' when there is no repo index or no entries survive the scan.
  */
-export function renderSiblingSurfacesSection(context: ReviewContext): string {
+export function renderSiblingSurfacesSection(context: SignalContext): string {
   return renderSiblingSurfaces(extractSiblingSurfaces(context));
 }

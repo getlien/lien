@@ -83,15 +83,9 @@ import type { ReviewContext } from '../../plugin-types.js';
 import type { AgentConfig, AgentFinding, AgentResult, ResolvedRules } from './types.js';
 import { INCOMPLETE_HANDLING } from './rules.js';
 import { envDisabled } from './agent-client-shared.js';
-import {
-  computeVariantSweepContexts,
-  type VariantSweepContext,
-} from '../../variant-sweep-signals.js';
-import { extractSiblingSurfaces, type SiblingSurfaceEntry } from '../../sibling-surface-signals.js';
-import {
-  computeUnreadFieldCandidates,
-  type UnreadFieldCandidate,
-} from '../../unread-field-signals.js';
+import { computeVariantSweepContexts, type VariantSweepContext } from '@liendev/parser';
+import { extractSiblingSurfaces, type SiblingSurfaceEntry } from '@liendev/parser';
+import { computeUnreadFieldCandidates, type UnreadFieldCandidate } from '@liendev/parser';
 import {
   renderPassPrHeader,
   EXTRA_PASS_MIN_BUDGET_TOKENS,

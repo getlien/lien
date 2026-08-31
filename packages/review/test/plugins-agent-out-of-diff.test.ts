@@ -177,7 +177,7 @@ describe('buildOutOfDiffReviewBody', () => {
     const body = buildOutOfDiffReviewBody(
       [
         bug({
-          filepath: 'packages/review/src/stale-literal-signals.ts',
+          filepath: 'packages/parser/src/signals/stale-literal-signals.ts',
           line: 538,
           symbolName: 'renderStaleLiteralSection',
           category: 'logic_error',
@@ -191,7 +191,7 @@ describe('buildOutOfDiffReviewBody', () => {
     expect(body).not.toContain('<details>');
     expect(body).toContain('🟡 **logic error**');
     expect(body).toContain('in `renderStaleLiteralSection`');
-    expect(body).toContain('`packages/review/src/stale-literal-signals.ts:538`');
+    expect(body).toContain('`packages/parser/src/signals/stale-literal-signals.ts:538`');
     expect(body).toContain('*(outside this diff)*');
     expect(body).toContain('The timeout flag is discarded');
     expect(body).toContain('💡 *Thread the flag through.*');

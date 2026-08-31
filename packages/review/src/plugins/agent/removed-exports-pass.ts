@@ -105,10 +105,7 @@
 import type { ReviewContext } from '../../plugin-types.js';
 
 import type { AgentConfig, AgentFinding, AgentResult } from './types.js';
-import {
-  computeRemovedExportContexts,
-  type RemovedExportContext,
-} from '../../removed-export-signals.js';
+import { computeRemovedExportContexts, type RemovedExportContext } from '@liendev/parser';
 import {
   renderPassPrHeader,
   EXTRA_PASS_MIN_BUDGET_TOKENS,

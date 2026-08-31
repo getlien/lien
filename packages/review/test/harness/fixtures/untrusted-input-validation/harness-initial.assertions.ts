@@ -19,7 +19,7 @@
  * failed correct Kimi runs purely on tool choice (7/10 on 2026-07-10; all 3
  * misses called read_file 8x with Tier-2-passing findings). The *discovery*
  * half is now deterministic: a pre-computed <untrusted_input_sites> worklist is
- * injected (see packages/review/src/untrusted-input-signals.ts), which hands the
+ * injected (see packages/parser/src/signals/untrusted-input-signals.ts), which hands the
  * agent the parse sites and counters the silence-bias 0-findings failure mode.
  * Tier 2: the finding mentions one of the four sub-pattern vocabulary
  * families. Set is wide because four sub-patterns can each render with

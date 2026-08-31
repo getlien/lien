@@ -4,7 +4,7 @@ import type { CodeChunk } from './types.js';
  * Shared matching primitives for "does an untouched doc chunk still reference
  * this token" — the piece two independent consumers need identically:
  *
- * - `packages/review/src/docs-drift-signals.ts` (a PR-review-time pass: which
+ * - `packages/parser/src/signals/docs-drift-signals.ts` (a PR-review-time pass: which
  *   untouched docs still name a symbol/path this PR removed/renamed/deleted).
  * - `packages/cli/src/utils/doc-references.ts` (an edit-time nudge: which
  *   indexed doc chunks reference a symbol `lien api-delta` just found

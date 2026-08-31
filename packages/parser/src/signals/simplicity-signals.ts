@@ -6,7 +6,7 @@
  * a complexity threshold.
  */
 
-import type { CodeChunk } from '@liendev/parser';
+import type { CodeChunk } from '../types.js';
 
 export interface FileSimplicitySignal {
   file: string;

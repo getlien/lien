@@ -153,7 +153,7 @@ export {
   type FileSimplicitySignal,
   computeSimplicitySignals,
   serializeSimplicitySignals,
-} from './simplicity-signals.js';
+} from '@liendev/parser';
 
 // ─── Dependent context ──────────────────────────────────────────────────────
 

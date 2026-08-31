@@ -334,7 +334,7 @@ shape is unchanged for any existing caller.
 
 ## E. docRefs: shifting docs-drift left onto a REMOVED change
 
-The PR-review engine's docs-drift pass (`packages/review/src/docs-drift-signals.ts`,
+The PR-review engine's docs-drift pass (`packages/parser/src/signals/docs-drift-signals.ts`,
 dark by default) already catches "an untouched doc still names a symbol this PR
 removed" — but only at PR time. This extends the same fact one step earlier: when
 `enrichOneChange` classifies a change as `kind: 'removed'`, it also looks up which

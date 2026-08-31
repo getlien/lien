@@ -70,10 +70,10 @@
  * when neither resolves — degrading loudly rather than silently omitting.
  */
 
-import type { CodeChunk } from '@liendev/parser';
-import type { ReviewContext } from './plugin-types.js';
+import type { CodeChunk } from '../types.js';
+import type { SignalContext } from './signal-context.js';
 import { collectGuidanceSurfaceChanges, isGuidanceSurface } from './guidance-surface-signals.js';
-import { filterAnalyzableFiles } from './analysis.js';
+import { filterAnalyzableFiles } from './analyzable-files.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -804,7 +804,7 @@ const enum EvidenceTier {
 }
 
 /** The union of every path this PR changed (analyzable + non-code + patched). */
-function collectChangedFiles(context: ReviewContext): Set<string> {
+function collectChangedFiles(context: SignalContext): Set<string> {
   const files = new Set<string>(context.changedFiles ?? []);
   for (const f of context.allChangedFiles ?? []) files.add(f);
   for (const f of context.pr?.patches?.keys() ?? []) files.add(f);
@@ -1234,7 +1234,7 @@ export function findClaimEvidence(
  * claims that would be dropped is never computed). Returns a new array; input
  * claims are not mutated. Exposed for testing.
  */
-export function attachEvidence(claims: DocClaim[], context: ReviewContext): DocClaim[] {
+export function attachEvidence(claims: DocClaim[], context: SignalContext): DocClaim[] {
   const repoChunks = context.repoChunks;
   const changed = collectChangedFiles(context);
   const patches = context.pr?.patches;
@@ -1342,7 +1342,7 @@ export function renderDocClaims(claims: DocClaim[]): string {
  * Each rendered claim carries a deterministically-located code/sibling-doc
  * evidence excerpt when one is found in the repo index.
  */
-export function renderDocClaimsSection(context: ReviewContext): string {
+export function renderDocClaimsSection(context: SignalContext): string {
   const patches = context.pr?.patches;
   if (!patches || patches.size === 0) return '';
   return renderDocClaims(attachEvidence(extractDocClaims(patches), context));

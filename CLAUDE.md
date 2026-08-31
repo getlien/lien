@@ -176,7 +176,7 @@ index/diff query wearing an LLM-reasoning costume (e.g. "does this literal
 still appear unconditionally elsewhere?"), precompute it and inject it as a
 signal block — same pattern as `blast_radius` — instead of asking the agent
 to grep-and-reason. Deterministic signals are unit-testable with zero LLM
-spend; see `packages/review/src/stale-literal-signals.ts` for the template.
+spend; see `packages/parser/src/signals/stale-literal-signals.ts` for the template.
 
 ## Workflow Orchestration
 

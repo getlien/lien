@@ -25,7 +25,7 @@
  * gap" principle.
  */
 
-import type { ReviewContext } from './plugin-types.js';
+import type { SignalContext } from './signal-context.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -57,7 +57,7 @@ const HEADER =
  * enrichment never ran) are skipped — absence of data is not evidence of a
  * gap. Exposed for testing.
  */
-export function computeTestCoverageGaps(context: ReviewContext): string[] {
+export function computeTestCoverageGaps(context: SignalContext): string[] {
   const files = context.complexityReport?.files;
   if (!files) return [];
 
@@ -103,6 +103,6 @@ export function renderTestCoverageGaps(gaps: string[]): string {
  * when every changed file with complexity data has test associations, or when
  * no changed file has complexity data at all.
  */
-export function renderTestCoverageSection(context: ReviewContext): string {
+export function renderTestCoverageSection(context: SignalContext): string {
   return renderTestCoverageGaps(computeTestCoverageGaps(context));
 }

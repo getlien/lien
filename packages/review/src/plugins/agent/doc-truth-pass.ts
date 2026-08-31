@@ -72,18 +72,18 @@
  */
 
 import type { ReviewContext } from '../../plugin-types.js';
-import { renderGuidanceSurfaceSection } from '../../guidance-surface-signals.js';
+import { renderGuidanceSurfaceSection } from '@liendev/parser';
 import {
   extractDocClaims,
   attachEvidence,
   renderDocClaimsSection,
   type DocClaim,
-} from '../../doc-claims-signals.js';
+} from '@liendev/parser';
 import {
   computeRenameSweepSignals,
   renderRenameSweepSection,
   type RenameSweepSignal,
-} from '../../rename-sweep-signals.js';
+} from '@liendev/parser';
 
 import type { AgentConfig, AgentFinding, AgentResult, ResolvedRules } from './types.js';
 import { DOC_TRUTH } from './rules.js';

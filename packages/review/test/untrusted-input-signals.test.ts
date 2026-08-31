@@ -4,7 +4,7 @@ import {
   extractUntrustedInputSites,
   renderUntrustedInputSites,
   renderUntrustedInputSection,
-} from '../src/untrusted-input-signals.js';
+} from '@liendev/parser';
 import { buildInitialMessage } from '../src/plugins/agent/system-prompt.js';
 
 function ctxWithPatches(patches?: Map<string, string>): ReviewContext {

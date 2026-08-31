@@ -7,7 +7,7 @@ import {
   computeUndiscriminatedCatches,
   renderUndiscriminatedCatchCandidates,
   renderUndiscriminatedCatchSection,
-} from '../src/catch-discrimination-signals.js';
+} from '@liendev/parser';
 import { buildInitialMessage } from '../src/plugins/agent/system-prompt.js';
 
 // ---------------------------------------------------------------------------

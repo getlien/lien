@@ -15,18 +15,20 @@
 import type { ReviewContext } from '../../plugin-types.js';
 import type { BlastRadiusReport } from '../../blast-radius.js';
 import { renderBlastRadiusMarkdown } from '../../blast-radius-render.js';
-import { renderStaleLiteralSection } from '../../stale-literal-signals.js';
-import { renderUndiscriminatedCatchSection } from '../../catch-discrimination-signals.js';
-import { renderComparisonChangeSection } from '../../comparison-change-signals.js';
-import { renderRemovedExportsSection } from '../../removed-export-signals.js';
-import { renderVariantSweepSection } from '../../variant-sweep-signals.js';
-import { renderUntrustedInputSection } from '../../untrusted-input-signals.js';
-import { renderRenameSweepSection } from '../../rename-sweep-signals.js';
-import { renderGuidanceSurfaceSection } from '../../guidance-surface-signals.js';
-import { renderDocClaimsSection } from '../../doc-claims-signals.js';
-import { renderTestCoverageSection } from '../../test-coverage-signals.js';
-import { renderSiblingSurfacesSection } from '../../sibling-surface-signals.js';
-import { renderUnreadFieldSection } from '../../unread-field-signals.js';
+import {
+  renderStaleLiteralSection,
+  renderUndiscriminatedCatchSection,
+  renderComparisonChangeSection,
+  renderRemovedExportsSection,
+  renderVariantSweepSection,
+  renderUntrustedInputSection,
+  renderRenameSweepSection,
+  renderGuidanceSurfaceSection,
+  renderDocClaimsSection,
+  renderTestCoverageSection,
+  renderSiblingSurfacesSection,
+  renderUnreadFieldSection,
+} from '@liendev/parser';
 import type { ResolvedRules } from './types.js';
 
 // ---------------------------------------------------------------------------

@@ -74,7 +74,7 @@ import {
   computeDocsDriftCandidates,
   isFullFileDeletion,
   type DocsDriftCandidate,
-} from '../../docs-drift-signals.js';
+} from '@liendev/parser';
 import {
   renderPassPrHeader,
   EXTRA_PASS_MIN_BUDGET_TOKENS,

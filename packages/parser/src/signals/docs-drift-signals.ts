@@ -51,9 +51,9 @@
  * signal down to a selective candidate rate.
  */
 
-import type { CodeChunk } from '@liendev/parser';
-import { wordBoundaryRe, isDistinctiveToken } from '@liendev/parser';
-import type { ReviewContext } from './plugin-types.js';
+import type { CodeChunk } from '../types.js';
+import { wordBoundaryRe, isDistinctiveToken } from '../doc-reference-matching.js';
+import type { SignalContext } from './signal-context.js';
 import { extractRemovedExports } from './removed-export-signals.js';
 import { detectRenameSweeps } from './rename-sweep-signals.js';
 import {
@@ -217,7 +217,7 @@ function directoryIsGone(dir: string, repoChunks: CodeChunk[] | undefined): bool
  * individual file path never carries (both always contain a `/`, so neither can spuriously match a
  * plain English word in the middle of a sentence).
  *
- * Delegates to `@liendev/parser`'s `isDistinctiveToken` — the exact same corpus-driven "does every
+ * Delegates to `isDistinctiveToken` (`doc-reference-matching.ts`) — the same corpus-driven "does every
  * occurrence read as code/path context" check, shared with the CLI's edit-time docRefs lookup (see
  * `doc-reference-matching.ts`'s docstring). Kept as a named export here, rather than inlining the
  * import at call sites, because this module's own test suite exercises it directly under this name.
@@ -268,7 +268,7 @@ export function extractDeletedPaths(
 // ---------------------------------------------------------------------------
 
 /** Every referand this PR's diff produces, deduped by (kind, token). */
-function collectReferands(context: ReviewContext): Referand[] {
+function collectReferands(context: SignalContext): Referand[] {
   const patches = context.pr?.patches;
   if (!patches || patches.size === 0) return [];
 
@@ -293,7 +293,7 @@ function collectReferands(context: ReviewContext): Referand[] {
 
 /** The union of every path this PR changed (mirrors `doc-claims-signals.ts`'s own
  *  `collectChangedFiles`, duplicated locally since that helper is private to its module). */
-function collectChangedFileSet(context: ReviewContext): Set<string> {
+function collectChangedFileSet(context: SignalContext): Set<string> {
   const files = new Set<string>(context.changedFiles ?? []);
   for (const f of context.allChangedFiles ?? []) files.add(f);
   for (const f of context.pr?.patches?.keys() ?? []) files.add(f);
@@ -314,7 +314,7 @@ function collectUntouchedDocChunks(chunks: CodeChunk[], changed: Set<string>): C
 // Word-boundary sweep
 // ---------------------------------------------------------------------------
 //
-// `wordBoundaryRe` is imported from `@liendev/parser` (`doc-reference-matching.ts`) — shared with
+// `wordBoundaryRe` comes from `doc-reference-matching.ts` — shared with
 // the CLI's edit-time docRefs lookup so the two matching behaviors can never drift apart. See that
 // module's docstring for the full "why a negative lookaround, not plain `\b`" rationale.
 
@@ -501,7 +501,7 @@ interface SweepSetup {
 /** Shared setup for both `computeDocsDriftCandidates` and `classifyRawDocReferences`: the
  *  referands to sweep for and the untouched doc/config corpus to sweep, or null when either is
  *  empty (nothing to compute). */
-function setupSweep(context: ReviewContext): SweepSetup | null {
+function setupSweep(context: SignalContext): SweepSetup | null {
   const patches = context.pr?.patches;
   const repoChunks = context.repoChunks;
   if (!patches || patches.size === 0 || !repoChunks || repoChunks.length === 0) return null;
@@ -523,7 +523,7 @@ function setupSweep(context: ReviewContext): SweepSetup | null {
  * removed/renamed/deleted referand, or no untouched doc/config corpus to sweep. Capped at
  * `MAX_CANDIDATES`, sorted deterministically (Tier-1 first, then referand, then doc file:line).
  */
-export function computeDocsDriftCandidates(context: ReviewContext): DocsDriftCandidate[] {
+export function computeDocsDriftCandidates(context: SignalContext): DocsDriftCandidate[] {
   const setup = setupSweep(context);
   if (!setup) return [];
 
@@ -572,7 +572,7 @@ function tallyRawMatch(referand: Referand, match: MatchSite, tally: RawDocRefere
  * raw reference count down to the selective candidate rate. `total` is the same count
  * `computeDocsDriftCandidates` would sweep before its own per-referand cap and position filtering.
  */
-export function classifyRawDocReferences(context: ReviewContext): RawDocReferenceTally {
+export function classifyRawDocReferences(context: SignalContext): RawDocReferenceTally {
   const tally: RawDocReferenceTally = { total: 0, tier1: 0, tier2: 0, suppressed: 0 };
   const setup = setupSweep(context);
   if (!setup) return tally;

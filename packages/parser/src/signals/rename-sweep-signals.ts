@@ -24,8 +24,8 @@
  * the diff (and, when available, the indexed repo chunks); ZERO LLM calls.
  */
 
-import type { CodeChunk } from '@liendev/parser';
-import type { ReviewContext } from './plugin-types.js';
+import type { CodeChunk } from '../types.js';
+import type { SignalContext } from './signal-context.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -517,7 +517,7 @@ function collectProseTouched(group: MappingGroup): {
  * (no prose claims touched, no surviving old name) are dropped — there's
  * nothing for the agent to verify.
  */
-export function computeRenameSweepSignals(context: ReviewContext): RenameSweepSignal[] {
+export function computeRenameSweepSignals(context: SignalContext): RenameSweepSignal[] {
   const patches = context.pr?.patches;
   if (!patches || patches.size === 0) return [];
 
@@ -624,6 +624,6 @@ export function renderRenameSweepSignals(signals: RenameSweepSignal[]): string {
  * there is no diff or no rename sweep worth flagging. Callers append
  * unconditionally.
  */
-export function renderRenameSweepSection(context: ReviewContext): string {
+export function renderRenameSweepSection(context: SignalContext): string {
   return renderRenameSweepSignals(computeRenameSweepSignals(context));
 }

@@ -1,8 +1,12 @@
 /**
- * Analysis utilities — file filtering and complexity analysis.
+ * Analysis utilities — complexity analysis and test-association enrichment.
  *
- * Extracted from review-engine.ts. These are the only two functions
- * from that module still used at runtime.
+ * Extracted from review-engine.ts. These are the only functions from that
+ * module still used at runtime.
+ *
+ * `filterAnalyzableFiles` now lives in `@liendev/parser` alongside the signal
+ * modules that gate on it, and is re-exported here so this module's existing
+ * importers keep resolving it from one place.
  */
 
 import { access, readdir } from 'node:fs/promises';
@@ -11,7 +15,7 @@ import { join } from 'node:path';
 import {
   performChunkOnlyIndex,
   analyzeComplexityFromChunks,
-  getSupportedExtensions,
+  filterAnalyzableFiles,
   findTestAssociationsFromChunks,
   isTestFile,
   type ComplexityReport,
@@ -19,44 +23,6 @@ import {
 } from '@liendev/parser';
 
 import type { Logger } from './logger.js';
-
-/**
- * Filter files to only include those that can be analyzed
- * (excludes non-code files, vendor, node_modules, etc.)
- */
-export function filterAnalyzableFiles(files: string[]): string[] {
-  const codeExtensions = new Set(getSupportedExtensions().map(ext => `.${ext}`));
-
-  const excludePatterns = [
-    /node_modules\//,
-    /vendor\//,
-    /dist\//,
-    /build\//,
-    /\.min\./,
-    /\.bundle\./,
-    /\.generated\./,
-    /package-lock\.json/,
-    /yarn\.lock/,
-    /pnpm-lock\.yaml/,
-  ];
-
-  return files.filter(file => {
-    // Check extension
-    const ext = file.slice(file.lastIndexOf('.'));
-    if (!codeExtensions.has(ext)) {
-      return false;
-    }
-
-    // Check exclude patterns
-    for (const pattern of excludePatterns) {
-      if (pattern.test(file)) {
-        return false;
-      }
-    }
-
-    return true;
-  });
-}
 
 const TEST_SCAN_EXCLUDE = [/node_modules/, /vendor/, /dist/, /build/];
 
@@ -178,3 +144,5 @@ export async function runComplexityAnalysis(
     return null;
   }
 }
+
+export { filterAnalyzableFiles };
