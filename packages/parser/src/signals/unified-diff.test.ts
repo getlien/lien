@@ -175,6 +175,46 @@ describe('parseUnifiedDiff', () => {
     expect([...parseUnifiedDiff(diff).patches.keys()]).toEqual(['café dir/x.ts']);
   });
 
+  // Without the named-escape table `\t` decoded to the LETTER `t`, so a path
+  // containing a tab came out silently wrong rather than failing.
+  it('decodes git C-style escapes rather than dropping the backslash', () => {
+    const diff = [
+      `${DIFF_HEADER}"a/we\\tird.ts" "b/we\\tird.ts"`,
+      '+++ "b/we\\tird.ts"',
+      '@@ -1,1 +1,1 @@',
+      '+x',
+    ].join('\n');
+
+    expect([...parseUnifiedDiff(diff).patches.keys()]).toEqual(['we\tird.ts']);
+  });
+
+  it('keeps an escaped quote as a literal quote', () => {
+    const diff = [
+      `${DIFF_HEADER}"a/od\\"d.ts" "b/od\\"d.ts"`,
+      '+++ "b/od\\"d.ts"',
+      '@@ -1,1 +1,1 @@',
+      '+x',
+    ].join('\n');
+
+    expect([...parseUnifiedDiff(diff).patches.keys()]).toEqual(['od"d.ts']);
+  });
+
+  // A binary or mode-only change has no `+++` line, so it depends entirely on
+  // the header fallback — which could not match a QUOTED header at all, and so
+  // produced no entry whatsoever for a non-ASCII binary file.
+  it('falls back to a QUOTED header when there is no +++ line', () => {
+    const diff = [
+      `${DIFF_HEADER}"a/caf\\303\\251.png" "b/caf\\303\\251.png"`,
+      'index 111..222 100644',
+      'Binary files differ',
+    ].join('\n');
+
+    const { patches, diffLines } = parseUnifiedDiff(diff);
+
+    expect([...patches.keys()]).toEqual(['café.png']);
+    expect(diffLines.get('café.png')).toEqual(new Set());
+  });
+
   it('returns empty maps for an empty diff', () => {
     const { patches, diffLines } = parseUnifiedDiff('');
 

@@ -100,8 +100,34 @@ const TS_JS_ONLY = 'TypeScript/JavaScript only — other languages in this diff 
 /** Modules that need the whole-repo corpus to say anything useful. */
 const NEEDS_REPO = 'Needs the repo-wide scan; run without --no-repo-scan for this one.';
 
-const truncate = (s: string, max = 100): string =>
-  s.length <= max ? s : `${s.slice(0, max - 1)}…`;
+/**
+ * C0 and C1 control characters. Nothing is exempted — a candidate detail is one
+ * line, so even a bare newline would break the report's shape.
+ *
+ * Written as escapes rather than literal bytes: raw control characters in source
+ * are invisible in a diff and break ordinary tooling — they defeated `grep` on
+ * this very file while it was being written.
+ */
+const CONTROL_CHARS_RE = /[\u0000-\u001f\u007f-\u009f]/g;
+
+/**
+ * Bound a snippet's length AND neutralise terminal control characters in it.
+ *
+ * Every candidate detail is built from diff content, and diff content is
+ * attacker-controlled the moment you review a branch you did not write — a
+ * fork's PR, a dependency bump, a colleague's push. An `ESC` sequence reaching
+ * `console.log` unescaped lets that content repaint the terminal, hide lines, or
+ * fake the summary this command prints (CWE-150). Escaping is done here rather
+ * than at the renderer so no future adapter can route around it: the same
+ * function that makes a snippet printable is the one that makes it safe.
+ */
+const truncate = (s: string, max = 100): string => {
+  const safe = s.replace(
+    CONTROL_CHARS_RE,
+    ch => `\\x${ch.charCodeAt(0).toString(16).padStart(2, '0')}`,
+  );
+  return safe.length <= max ? safe : `${safe.slice(0, max - 1)}…`;
+};
 
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`;
 

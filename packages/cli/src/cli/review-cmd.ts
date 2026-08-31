@@ -36,6 +36,7 @@ import {
 
 import { listUntrackedAnalyzable, readUnifiedDiff } from './delta-git.js';
 import { resolveRepoRoot } from './project-root.js';
+import { describeScanFailure } from '../utils/scan-failure.js';
 import { runSignals, withheldSignalIds, type SignalReport } from './review-signals.js';
 
 export interface ReviewOptions {
@@ -80,6 +81,10 @@ export interface ReviewResult {
   repoScanned: boolean;
   /** Signal ids that did not run because they are off by default. */
   withheldSignals: string[];
+  /** Why the changed-file parse produced nothing usable, if it did. */
+  scanFailure?: string;
+  /** Why the repo-wide corpus was withheld, if it was. */
+  repoScanFailure?: string;
   durationMs: number;
 }
 
@@ -160,6 +165,35 @@ function scopeDiff(
 }
 
 /**
+ * Parse files into chunks, and say plainly whether that worked.
+ *
+ * `performChunkOnlyIndex` signals failure by RETURNING `{ success: false }`
+ * rather than throwing — CLAUDE.md flags this as easy to miss — and on failure
+ * `chunks` is `[]`, which is indistinguishable from "parsed fine, found
+ * nothing" unless `success` is read. Reading it once, here, is what keeps both
+ * call sites honest.
+ */
+async function runScan(
+  rootDir: string,
+  filesToIndex?: string[],
+): Promise<{ chunks: CodeChunk[]; failure: string | undefined }> {
+  const result =
+    filesToIndex === undefined
+      ? await performChunkOnlyIndex(rootDir)
+      : await performChunkOnlyIndex(rootDir, { filesToIndex });
+
+  return {
+    chunks: result.chunks ?? [],
+    failure: describeScanFailure({
+      success: result.success,
+      error: result.error,
+      chunkCount: result.chunks?.length ?? 0,
+      filesSkipped: result.filesSkipped,
+    }),
+  };
+}
+
+/**
  * Build the signal input from a diff plus a parse of the changed files.
  *
  * `repoChunks` is what lets the cross-file signals see past the diff — a
@@ -177,6 +211,10 @@ async function buildContext(
   changedFiles: string[];
   nonAnalyzable: string[];
   testsExcluded: number;
+  /** Set when the changed-file parse failed or yielded nothing parseable. */
+  scanFailure?: string;
+  /** Set when the repo-wide parse failed, so the corpus was withheld. */
+  repoScanFailure?: string;
 }> {
   const parsed = parseUnifiedDiff(diff);
   const { changedFiles, nonAnalyzable, testsExcluded } = partitionChangedFiles(
@@ -189,17 +227,20 @@ async function buildContext(
     nonAnalyzable,
   );
 
-  const scan =
-    changedFiles.length > 0
-      ? await performChunkOnlyIndex(rootDir, { filesToIndex: changedFiles })
-      : undefined;
-  const chunks: CodeChunk[] = scan?.chunks ?? [];
+  // Both scans can fail, and they fail differently. A failed changed-file scan
+  // silently removes every chunk-based candidate. A failed REPO scan is worse:
+  // `[]` is not `undefined`, so `attachTestAssociations` would proceed against
+  // an empty corpus and mark every changed file untested — the 160-of-160 bug
+  // by a second route. So the corpus is withheld entirely on failure rather
+  // than half-supplied: a signal reasoning about "everywhere else" from half a
+  // repo reports absence it never established.
+  const scan = changedFiles.length > 0 ? await runScan(rootDir, changedFiles) : undefined;
+  const chunks = scan?.chunks ?? [];
+  const scanFailure = scan?.failure;
 
-  let repoChunks: CodeChunk[] | undefined;
-  if (repoScan) {
-    const repo = await performChunkOnlyIndex(rootDir);
-    repoChunks = repo.chunks ?? undefined;
-  }
+  const repo = repoScan ? await runScan(rootDir) : undefined;
+  const repoScanFailure = repo?.failure;
+  const repoChunks = repo !== undefined && repo.failure === undefined ? repo.chunks : undefined;
 
   const complexityReport = analyzeComplexityFromChunks(chunks, changedFiles, undefined, {
     enrich: false,
@@ -218,6 +259,8 @@ async function buildContext(
     changedFiles,
     nonAnalyzable,
     testsExcluded,
+    scanFailure,
+    repoScanFailure,
   };
 }
 
@@ -235,12 +278,8 @@ export async function analyzeReview(options: ReviewOptions): Promise<ReviewResul
   const repoScanned = allSignals && options.repoScan !== false;
 
   const diff = await readUnifiedDiff(rootDir, base);
-  const { context, changedFiles, nonAnalyzable, testsExcluded } = await buildContext(
-    rootDir,
-    diff,
-    repoScanned,
-    options.includeTests === true,
-  );
+  const { context, changedFiles, nonAnalyzable, testsExcluded, scanFailure, repoScanFailure } =
+    await buildContext(rootDir, diff, repoScanned, options.includeTests === true);
 
   const hasNonTsJs = changedFiles.some(f => !TS_JS_RE.test(f));
   const reports = runSignals(context, changedFiles, { repoScanned, hasNonTsJs, allSignals });
@@ -251,6 +290,8 @@ export async function analyzeReview(options: ReviewOptions): Promise<ReviewResul
     changedFiles,
     unexamined: { untracked: await listUntrackedAnalyzable(rootDir), nonAnalyzable, testsExcluded },
     withheldSignals: allSignals ? [] : withheldSignalIds(),
+    scanFailure,
+    repoScanFailure,
     repoScanned,
     durationMs: Date.now() - started,
   };
@@ -274,7 +315,7 @@ function renderNothingChanged(base: string): string {
  * report, because it sends them looking for the wrong problem.
  */
 function renderNothingReviewable(result: ReviewResult): string {
-  const { nonAnalyzable, testsExcluded } = result.unexamined;
+  const { nonAnalyzable, testsExcluded, untracked } = result.unexamined;
   const reasons: string[] = [];
 
   if (testsExcluded > 0) {
@@ -286,6 +327,15 @@ function renderNothingReviewable(result: ReviewResult): string {
     reasons.push(
       `  ${nonAnalyzable.length} changed file(s) the parser cannot analyze ` +
         '(unsupported extension, vendored, generated, or build output)',
+    );
+  }
+  // Untracked files belong in this list, not only in the caveats of a normal
+  // report: a worktree holding nothing but new files is the case where a plain
+  // "no changes" is most obviously false to the person reading it.
+  if (untracked.length > 0) {
+    reasons.push(
+      `  ${untracked.length} untracked file(s) — an untracked file has no diff; ` +
+        'git add them to review them',
     );
   }
 
@@ -321,6 +371,21 @@ function renderCaveats(result: ReviewResult): string[] {
         'pass --include-tests to review them too.',
     );
   }
+  // A failed parse is the loudest caveat there is: every signal downstream of
+  // it reported on nothing, so its silence means nothing.
+  if (result.scanFailure !== undefined) {
+    lines.push(
+      `  The changed files could not be parsed — ${result.scanFailure}. ` +
+        'Every signal below ran against no code, so their silence proves nothing.',
+    );
+  }
+  if (result.repoScanFailure !== undefined) {
+    lines.push(
+      `  The repo-wide scan failed — ${result.repoScanFailure}. The corpus was ` +
+        'withheld rather than half-supplied, so the cross-file signals saw only the diff.',
+    );
+  }
+
   // Withheld signals belong here, not hidden: a reader who does not know the
   // command has thirteen more cannot ask for them, and would reasonably read
   // one quiet signal as the whole review.
@@ -362,13 +427,38 @@ function renderCount(report: SignalReport): string {
   return String(shown);
 }
 
+/** C0 and C1 control characters, as escapes — never literal bytes in source. */
+const CONTROL_CHARS_RE = /[\u0000-\u001f\u007f-\u009f]/g;
+
+/**
+ * Neutralise terminal control characters in anything derived from repo content.
+ *
+ * Candidate details and file paths both come from the diff, and a diff is
+ * attacker-controlled the moment you review a branch you did not write — a
+ * fork's PR, a dependency bump, a colleague's push. An `ESC` sequence reaching
+ * `console.log` intact lets that content repaint the terminal, hide lines, or
+ * forge the summary this command prints (CWE-150).
+ *
+ * Applied at the render boundary rather than in each adapter because this is the
+ * only place it can be *guaranteed*: the adapters interpolate raw symbol names,
+ * reasons and paths in a dozen places, and a future one would silently opt out.
+ * Idempotent, so a snippet already escaped by `truncate` is unharmed.
+ *
+ * The JSON path needs no equivalent — `JSON.stringify` escapes control
+ * characters itself, and its consumer is not a terminal.
+ */
+function escapeForTerminal(s: string): string {
+  return s.replace(CONTROL_CHARS_RE, ch => `\\x${ch.charCodeAt(0).toString(16).padStart(2, '0')}`);
+}
+
 /** One signal's block: heading, its question, its candidates, its constraint. */
 function renderSignalBlock(report: SignalReport): string[] {
   const lines = [`${report.title}  (${renderCount(report)})`, `  ${report.question}`];
 
   for (const c of report.candidates) {
-    lines.push(`    ${c.line === undefined ? c.file : `${c.file}:${c.line}`}`);
-    lines.push(`      ${c.detail}`);
+    const file = escapeForTerminal(c.file);
+    lines.push(`    ${c.line === undefined ? file : `${file}:${c.line}`}`);
+    lines.push(`      ${escapeForTerminal(c.detail)}`);
   }
   if (report.limitation !== undefined) lines.push(`  Note: ${report.limitation}`);
   lines.push('');
@@ -397,12 +487,18 @@ export function renderText(result: ReviewResult): string {
   // Three distinct empty states, and conflating any two of them is a lie:
   // the diff was empty; the diff had files but none reviewable; the diff was
   // reviewed and nothing turned up.
-  const inDiff =
+  // Untracked files count toward "something was there": a worktree of nothing
+  // but new files is not "no changes", and the early return would otherwise
+  // swallow the untracked list entirely. Patching the test-file case alone left
+  // this third variant of the same bug, so the check is now over everything the
+  // command knows about.
+  const inWorktree =
     result.changedFiles.length +
     result.unexamined.nonAnalyzable.length +
-    result.unexamined.testsExcluded;
+    result.unexamined.testsExcluded +
+    result.unexamined.untracked.length;
 
-  if (inDiff === 0) return renderNothingChanged(result.base);
+  if (inWorktree === 0) return renderNothingChanged(result.base);
   if (result.changedFiles.length === 0) return renderNothingReviewable(result);
 
   const withCandidates = result.reports.filter(r => r.candidates.length > 0);
@@ -435,6 +531,8 @@ export function toJson(result: ReviewResult): string {
       changedFiles: result.changedFiles,
       repoScanned: result.repoScanned,
       withheldSignals: result.withheldSignals,
+      scanFailure: result.scanFailure ?? null,
+      repoScanFailure: result.repoScanFailure ?? null,
       unexamined: result.unexamined,
       durationMs: result.durationMs,
       signals: result.reports.map(r => ({

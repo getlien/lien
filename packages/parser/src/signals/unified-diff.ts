@@ -77,8 +77,16 @@ const DIFF_BLOCK_RE = /^diff --git /m;
  * so stripping it has to happen after unquoting, not in this pattern.
  */
 const POST_IMAGE_PATH_RE = /^\+\+\+ (.+)$/m;
-/** Fallback: the block's own `a/… b/…` header. */
+/** Fallback: the block's own `a/… b/…` header, unquoted. */
 const GIT_HEADER_PATH_RE = /^a\/(.+?) b\/(.+?)$/m;
+/**
+ * The same header when git quoted BOTH paths, which it does for non-ASCII.
+ *
+ * Needed because the unquoted pattern cannot match a quoted header at all, so a
+ * binary or mode-only change to a non-ASCII path — which has no `+++` line to
+ * fall back from — produced no entry whatsoever.
+ */
+const GIT_HEADER_QUOTED_RE = /^("(?:[^"\\]|\\.)*") ("(?:[^"\\]|\\.)*")$/m;
 
 /**
  * Undo the decorations git applies to a path in a `---`/`+++` header.
@@ -93,6 +101,20 @@ const GIT_HEADER_PATH_RE = /^a\/(.+?) b\/(.+?)$/m;
  *  - **Octal-escaped quoting** for non-ASCII, from `core.quotePath`, which is ON
  *    by default: `café.ts` arrives as `"caf\303\251.ts"`.
  */
+/**
+ * Git's C-style escapes, by the character following the backslash, to the byte
+ * it denotes. Anything not here (`\"`, `\\`) is the literal character.
+ */
+const C_ESCAPES: Record<string, number | undefined> = {
+  a: 0x07,
+  b: 0x08,
+  f: 0x0c,
+  n: 0x0a,
+  r: 0x0d,
+  t: 0x09,
+  v: 0x0b,
+};
+
 function undecoratePath(raw: string): string {
   const detabbed = raw.replace(/\t+$/, '');
   if (!detabbed.startsWith('"') || !detabbed.endsWith('"')) return detabbed;
@@ -110,7 +132,11 @@ function undecoratePath(raw: string): string {
     }
     if (inner[i] === '\\' && i + 1 < inner.length) {
       i++;
-      bytes.push(inner.charCodeAt(i));
+      // Git's C-style escapes. Without this table `\t` decoded to the LETTER
+      // `t`, so a path containing a tab came out silently wrong rather than
+      // failing — the worst outcome for something used to open a file.
+      const named = C_ESCAPES[inner[i]];
+      bytes.push(named ?? inner.charCodeAt(i));
       continue;
     }
     bytes.push(inner.charCodeAt(i));
@@ -158,7 +184,9 @@ export function parseUnifiedDiff(diff: string): ParsedUnifiedDiff {
   for (const block of diff.split(DIFF_BLOCK_RE).slice(1)) {
     const rawPostImage = block.match(POST_IMAGE_PATH_RE)?.[1];
     const postImage = rawPostImage === undefined ? undefined : headerPath(rawPostImage);
-    const fallback = block.match(GIT_HEADER_PATH_RE)?.[2];
+    // Quoted form first: a quoted header never matches the unquoted pattern,
+    // but an unquoted one could partially match the quoted pattern's shape.
+    const fallback = block.match(GIT_HEADER_QUOTED_RE)?.[2] ?? block.match(GIT_HEADER_PATH_RE)?.[2];
     const filepath =
       postImage !== undefined && postImage !== '/dev/null'
         ? postImage
