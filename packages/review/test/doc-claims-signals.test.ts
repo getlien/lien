@@ -14,7 +14,7 @@ import {
   type DocClaim,
   type DocClaimCitedPath,
   type DocClaimEvidence,
-} from '@liendev/parser';
+} from '../../parser/src/signals/doc-claims-signals.js';
 import { buildInitialMessage } from '../src/plugins/agent/system-prompt.js';
 
 function ctxWithPatches(patches?: Map<string, string>): ReviewContext {

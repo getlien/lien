@@ -7,7 +7,7 @@ import {
   computeUnreadFieldCandidates,
   renderUnreadFieldCandidates,
   renderUnreadFieldSection,
-} from '@liendev/parser';
+} from '../../parser/src/signals/unread-field-signals.js';
 import { buildInitialMessage } from '../src/plugins/agent/system-prompt.js';
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import type { CodeChunk } from '@liendev/parser';
-import { computeSimplicitySignals, serializeSimplicitySignals } from '@liendev/parser';
+import {
+  computeSimplicitySignals,
+  serializeSimplicitySignals,
+} from '../../parser/src/signals/simplicity-signals.js';
 
 function makeChunk(
   overrides: Partial<CodeChunk['metadata']> & { content?: string } = {},

@@ -386,9 +386,10 @@ export { findChunkLineIndex } from './chunk-line-lookup.js';
 // DETERMINISTIC REVIEW SIGNALS
 //
 // Pure functions over a diff plus parser output — no LLM, no network, no
-// persisted index. Re-exported wholesale rather than curated because the
-// modules' tests still live in `packages/review/test/` and reach for
-// internals; see signals/index.ts's docstring.
+// persisted index. The wildcard is over signals/index.ts, which is itself a
+// hand-curated list of the 37 symbols with a consumer outside their own
+// module — not over the directory's 106 exports. See that file's docstring
+// for why the other 69 stay unpublished.
 // =============================================================================
 
 export * from './signals/index.js';

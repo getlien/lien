@@ -7,7 +7,7 @@ import {
   computeComparisonChanges,
   renderComparisonChangeCandidates,
   renderComparisonChangeSection,
-} from '@liendev/parser';
+} from '../../parser/src/signals/comparison-change-signals.js';
 import { buildInitialMessage } from '../src/plugins/agent/system-prompt.js';
 
 // ---------------------------------------------------------------------------

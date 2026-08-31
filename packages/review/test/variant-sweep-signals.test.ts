@@ -8,7 +8,7 @@ import {
   computeVariantSweepContexts,
   renderVariantSweepCandidates,
   renderVariantSweepSection,
-} from '@liendev/parser';
+} from '../../parser/src/signals/variant-sweep-signals.js';
 import { buildInitialMessage } from '../src/plugins/agent/system-prompt.js';
 
 // ---------------------------------------------------------------------------

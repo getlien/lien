@@ -8,7 +8,7 @@ import {
   renderStaleLiteralCandidates,
   renderStaleLiteralSection,
   renderStaleLiteralSectionWithDeadline,
-} from '@liendev/parser';
+} from '../../parser/src/signals/stale-literal-signals.js';
 import { buildInitialMessage } from '../src/plugins/agent/system-prompt.js';
 import { silentLogger } from '../src/test-helpers.js';
 

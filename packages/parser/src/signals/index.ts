@@ -9,27 +9,69 @@
  * both slower and unverifiable — and they live here because the questions are
  * about source structure, which is this package's subject.
  *
- * See `signal-context.ts` for the single input type they share.
+ * See `signal-context.ts` for the single input type they all take.
  *
- * `export *` rather than a curated list: the modules' own tests currently live
- * in `packages/review/test/` and reach in for internals, so every export has
- * to stay reachable. Once those tests move here and sit beside the code they
- * cover, this barrel can narrow to the surface consumers actually need.
+ * ---
+ *
+ * This barrel is the PUBLIC surface, and it is deliberately curated rather
+ * than a wildcard over the directory. The 16 modules export 106 symbols
+ * between them; exactly 37 have a consumer outside their own module. The
+ * other 69 are exported only so the modules' tests can reach them, and
+ * `@liendev/parser` is a published package — wildcarding them would semver-
+ * lock 69 internals and make the eventual narrowing a BREAKING change.
+ *
+ * The tests that need those internals import them by relative path
+ * (`packages/review/test/*-signals.test.ts` → `../../parser/src/signals/…`)
+ * precisely so they never appear here. That cross-package import is a
+ * deliberate, visible stopgap: those tests belong beside the code they cover,
+ * and the follow-up that moves them into this directory removes it. Until
+ * then, the rule for this file is: a symbol earns a line here when production
+ * code outside its module imports it, not when a test does.
  */
 
-export * from './analyzable-files.js';
-export * from './catch-discrimination-signals.js';
-export * from './comparison-change-signals.js';
-export * from './doc-claims-signals.js';
-export * from './docs-drift-signals.js';
-export * from './guidance-surface-signals.js';
-export * from './removed-export-signals.js';
-export * from './rename-sweep-signals.js';
-export * from './sibling-surface-signals.js';
-export * from './signal-context.js';
-export * from './simplicity-signals.js';
-export * from './stale-literal-signals.js';
-export * from './test-coverage-signals.js';
-export * from './unread-field-signals.js';
-export * from './untrusted-input-signals.js';
-export * from './variant-sweep-signals.js';
+export { filterAnalyzableFiles } from './analyzable-files.js';
+
+export type { SignalContext, SignalDiff, SignalLogger } from './signal-context.js';
+
+export { renderUndiscriminatedCatchSection } from './catch-discrimination-signals.js';
+
+export { renderComparisonChangeSection } from './comparison-change-signals.js';
+
+export { extractDocClaims, attachEvidence, renderDocClaimsSection } from './doc-claims-signals.js';
+export type { DocClaim } from './doc-claims-signals.js';
+
+export { computeDocsDriftCandidates, isFullFileDeletion } from './docs-drift-signals.js';
+export type { DocsDriftCandidate } from './docs-drift-signals.js';
+
+export { renderGuidanceSurfaceSection } from './guidance-surface-signals.js';
+
+export {
+  computeRemovedExportContexts,
+  renderRemovedExportsSection,
+} from './removed-export-signals.js';
+export type { RemovedExportContext } from './removed-export-signals.js';
+
+export { computeRenameSweepSignals, renderRenameSweepSection } from './rename-sweep-signals.js';
+export type { RenameSweepSignal } from './rename-sweep-signals.js';
+
+export { extractSiblingSurfaces, renderSiblingSurfacesSection } from './sibling-surface-signals.js';
+export type { SiblingSurfaceEntry } from './sibling-surface-signals.js';
+
+export { computeSimplicitySignals, serializeSimplicitySignals } from './simplicity-signals.js';
+export type { FileSimplicitySignal } from './simplicity-signals.js';
+
+export {
+  computeStaleLiteralCandidates,
+  renderStaleLiteralSection,
+} from './stale-literal-signals.js';
+export type { StaleLiteralCandidate } from './stale-literal-signals.js';
+
+export { renderTestCoverageSection } from './test-coverage-signals.js';
+
+export { computeUnreadFieldCandidates, renderUnreadFieldSection } from './unread-field-signals.js';
+export type { UnreadFieldCandidate } from './unread-field-signals.js';
+
+export { renderUntrustedInputSection } from './untrusted-input-signals.js';
+
+export { computeVariantSweepContexts, renderVariantSweepSection } from './variant-sweep-signals.js';
+export type { VariantSweepContext } from './variant-sweep-signals.js';
