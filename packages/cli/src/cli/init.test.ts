@@ -107,6 +107,18 @@ describe('initCommand', () => {
     expect(said).not.toContain('marketplace');
   });
 
+  // The Explore agent was 61 lines of routing table for `search_code`,
+  // `list_functions`, `get_files_context` and `get_dependents` — every one of
+  // which the MCP deletion removes, and `search_code` permanently. Writing it
+  // into a user's repo would hand them a subagent whose whole instruction set
+  // is about to stop resolving.
+  it('does not write an Explore agent — its tools are being removed', async () => {
+    await initCommand({ editor: 'claude-code' });
+
+    const agentPath = path.join(testDir, '.claude', 'agents', 'Explore.md');
+    await expect(fs.access(agentPath)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('should create .mcp.json for claude-code', async () => {
     await initCommand({ editor: 'claude-code' });
 
