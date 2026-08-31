@@ -123,6 +123,10 @@ program
     'Skip the whole-repo scan the cross-file signals need (faster, blinder)',
   )
   .option('--include-tests', 'Review changed test files too (excluded by default)')
+  .option(
+    '--all-signals',
+    'Run all 14 signals, not just the measured-useful default set (noisy: see the note it prints)',
+  )
   .action(reviewCommand);
 
 program

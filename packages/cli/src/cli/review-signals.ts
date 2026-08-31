@@ -73,6 +73,27 @@ export interface SignalReport {
   capped?: boolean;
 }
 
+/**
+ * The signals that run by default — the ones whose precision has been measured
+ * and found acceptable for a human reader.
+ *
+ * The other thirteen are not off because they are broken as *signals*. They were
+ * built as pre-computed inputs to an LLM reviewer, which adjudicated them, and a
+ * high false-positive rate is the correct trade when a model does the filtering.
+ * Shown directly to a person that trade inverts. Adversarial review judged 106
+ * candidates across four real diffs of this repo and rated none of them
+ * actionable; `comparison-change` was the only signal with measured true
+ * positives (2/2 on a diff planted with defects, including a real off-by-one)
+ * and zero false positives, and the only one that is language-agnostic rather
+ * than gated to TypeScript/JavaScript.
+ *
+ * A command that stays quiet unless it has something is a command people keep
+ * running — the bargain `lien delta` already makes. One that reports 83 things
+ * on a clean diff gets ignored after the first use, which is the cost #1014
+ * measured. `--all-signals` opts into the rest, with their status stated.
+ */
+export const DEFAULT_SIGNAL_IDS = new Set(['comparison-change']);
+
 /** Modules hard-gated to TypeScript/JavaScript by their own file filters. */
 const TS_JS_ONLY = 'TypeScript/JavaScript only — other languages in this diff were not examined.';
 
@@ -232,6 +253,8 @@ export interface RunSignalsOptions {
   repoScanned: boolean;
   /** True when the diff contains a file outside TypeScript/JavaScript. */
   hasNonTsJs: boolean;
+  /** Run all fourteen signals rather than the measured default set. */
+  allSignals: boolean;
 }
 
 /** The constraints in force for a run, resolved once and shared by both halves. */
@@ -384,8 +407,32 @@ export function runSignals(
     repoScanned: options.repoScanned,
   };
 
-  return [
+  const all = [
     ...codeSignals(context, constraints),
     ...documentationSignals(context, changedFiles, patches, constraints),
   ];
+
+  // Filter rather than skip: the ids of what was withheld are reported, so the
+  // reader knows the command has more to offer and how to ask for it.
+  return options.allSignals ? all : all.filter(r => DEFAULT_SIGNAL_IDS.has(r.id));
 }
+
+/** The ids `runSignals` withholds by default, for the report to name. */
+export function withheldSignalIds(): string[] {
+  const all = [
+    ...codeSignals(EMPTY_CONTEXT, { tsJs: undefined, repo: undefined, repoScanned: true }),
+    ...documentationSignals(EMPTY_CONTEXT, [], new Map(), {
+      tsJs: undefined,
+      repo: undefined,
+      repoScanned: true,
+    }),
+  ];
+  return all.filter(r => !DEFAULT_SIGNAL_IDS.has(r.id)).map(r => r.id);
+}
+
+/** A context with nothing in it, for enumerating signal ids without running work. */
+const EMPTY_CONTEXT: SignalContext = {
+  chunks: [],
+  changedFiles: [],
+  complexityReport: { summary: {}, files: {} } as unknown as SignalContext['complexityReport'],
+};

@@ -36,7 +36,7 @@ import {
 
 import { listUntrackedAnalyzable, readUnifiedDiff } from './delta-git.js';
 import { resolveRepoRoot } from './project-root.js';
-import { runSignals, type SignalReport } from './review-signals.js';
+import { runSignals, withheldSignalIds, type SignalReport } from './review-signals.js';
 
 export interface ReviewOptions {
   base?: string;
@@ -52,6 +52,14 @@ export interface ReviewOptions {
   repoScan?: boolean;
   /** Review test files too. Excluded by default — see `buildContext`. */
   includeTests?: boolean;
+  /**
+   * Run all fourteen signals instead of the measured default set.
+   *
+   * See `DEFAULT_SIGNAL_IDS` for why the other thirteen are off: they were built
+   * as inputs an LLM adjudicated, and shown to a person their false-positive
+   * rate makes the report unreadable rather than merely imprecise.
+   */
+  allSignals?: boolean;
 }
 
 /** Files this diff touched that a signal could not have examined. */
@@ -70,6 +78,8 @@ export interface ReviewResult {
   changedFiles: string[];
   unexamined: Unexamined;
   repoScanned: boolean;
+  /** Signal ids that did not run because they are off by default. */
+  withheldSignals: string[];
   durationMs: number;
 }
 
@@ -216,7 +226,13 @@ export async function analyzeReview(options: ReviewOptions): Promise<ReviewResul
   const started = Date.now();
   const rootDir = resolveRepoRoot();
   const base = options.base ?? 'HEAD';
-  const repoScanned = options.repoScan !== false;
+  const allSignals = options.allSignals === true;
+
+  // The repo-wide scan costs ~3s and exists for the cross-file signals, all of
+  // which are off by default. Running it for the default set would be paying
+  // the whole bill for nothing, so it is tied to --all-signals and can still be
+  // declined there.
+  const repoScanned = allSignals && options.repoScan !== false;
 
   const diff = await readUnifiedDiff(rootDir, base);
   const { context, changedFiles, nonAnalyzable, testsExcluded } = await buildContext(
@@ -227,13 +243,14 @@ export async function analyzeReview(options: ReviewOptions): Promise<ReviewResul
   );
 
   const hasNonTsJs = changedFiles.some(f => !TS_JS_RE.test(f));
-  const reports = runSignals(context, changedFiles, { repoScanned, hasNonTsJs });
+  const reports = runSignals(context, changedFiles, { repoScanned, hasNonTsJs, allSignals });
 
   return {
     base,
     reports,
     changedFiles,
     unexamined: { untracked: await listUntrackedAnalyzable(rootDir), nonAnalyzable, testsExcluded },
+    withheldSignals: allSignals ? [] : withheldSignalIds(),
     repoScanned,
     durationMs: Date.now() - started,
   };
@@ -304,7 +321,19 @@ function renderCaveats(result: ReviewResult): string[] {
         'pass --include-tests to review them too.',
     );
   }
-  if (!result.repoScanned) {
+  // Withheld signals belong here, not hidden: a reader who does not know the
+  // command has thirteen more cannot ask for them, and would reasonably read
+  // one quiet signal as the whole review.
+  if (result.withheldSignals.length > 0) {
+    lines.push(
+      `  ${result.withheldSignals.length} further signal(s) did not run: ` +
+        `${result.withheldSignals.join(', ')}.`,
+    );
+    lines.push(
+      '    They were built as inputs for an LLM to adjudicate, and measured 0 useful ' +
+        'candidates in 106 on this repo when read directly. --all-signals runs them anyway.',
+    );
+  } else if (!result.repoScanned) {
     lines.push(
       '  --no-repo-scan was set, so the cross-file signals saw only the diff. ' +
         'Anything outside it — a surviving old name, an unchanged sibling — was invisible.',
@@ -405,6 +434,7 @@ export function toJson(result: ReviewResult): string {
       base: result.base,
       changedFiles: result.changedFiles,
       repoScanned: result.repoScanned,
+      withheldSignals: result.withheldSignals,
       unexamined: result.unexamined,
       durationMs: result.durationMs,
       signals: result.reports.map(r => ({

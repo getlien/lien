@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { ComplexityReport, SignalContext } from '@liendev/parser';
 
-import { runSignals } from './review-signals.js';
+import { runSignals, withheldSignalIds, DEFAULT_SIGNAL_IDS } from './review-signals.js';
 
 /**
  * A context whose complexity report has an ENTRY per changed file with an EMPTY
@@ -48,6 +48,7 @@ describe('runSignals', () => {
     const reports = runSignals(contextWithUnfedAssociations([]), [], {
       repoScanned: true,
       hasNonTsJs: false,
+      allSignals: true,
     });
 
     expect(reports.length).toBeGreaterThanOrEqual(14);
@@ -56,7 +57,7 @@ describe('runSignals', () => {
 
   it('returns signals in a stable order, so two runs on one diff are comparable', () => {
     const ctx = contextWithUnfedAssociations([]);
-    const opts = { repoScanned: true, hasNonTsJs: false };
+    const opts = { repoScanned: true, hasNonTsJs: false, allSignals: true };
 
     expect(runSignals(ctx, [], opts).map(r => r.id)).toEqual(
       runSignals(ctx, [], opts).map(r => r.id),
@@ -67,6 +68,7 @@ describe('runSignals', () => {
     const reports = runSignals(contextWithUnfedAssociations([]), [], {
       repoScanned: true,
       hasNonTsJs: false,
+      allSignals: true,
     });
 
     for (const r of reports) {
@@ -84,6 +86,7 @@ describe('runSignals', () => {
       runSignals(contextWithUnfedAssociations(files), files, {
         repoScanned: false,
         hasNonTsJs: false,
+        allSignals: true,
       }),
       'test-coverage',
     );
@@ -99,6 +102,7 @@ describe('runSignals', () => {
       runSignals(contextWithUnfedAssociations(files), files, {
         repoScanned: true,
         hasNonTsJs: false,
+        allSignals: true,
       }),
       'test-coverage',
     );
@@ -113,6 +117,7 @@ describe('runSignals', () => {
     const reports = runSignals(contextWithUnfedAssociations([]), [], {
       repoScanned: true,
       hasNonTsJs: true,
+      allSignals: true,
     });
 
     for (const id of ['variant-sweep', 'unread-field', 'catch-discrimination']) {
@@ -126,6 +131,7 @@ describe('runSignals', () => {
     const reports = runSignals(contextWithUnfedAssociations([]), [], {
       repoScanned: true,
       hasNonTsJs: false,
+      allSignals: true,
     });
 
     expect(find(reports, 'variant-sweep').limitation).toBeUndefined();
@@ -135,6 +141,7 @@ describe('runSignals', () => {
     const reports = runSignals(contextWithUnfedAssociations([]), [], {
       repoScanned: false,
       hasNonTsJs: false,
+      allSignals: true,
     });
 
     for (const id of ['stale-literal', 'sibling-surface', 'rename-sweep', 'docs-drift']) {
@@ -146,16 +153,58 @@ describe('runSignals', () => {
     const reports = runSignals(contextWithUnfedAssociations([]), [], {
       repoScanned: false,
       hasNonTsJs: false,
+      allSignals: true,
     });
 
     expect(find(reports, 'untrusted-input').limitation).toBeUndefined();
     expect(find(reports, 'comparison-change').limitation).toBeUndefined();
   });
 
+  // The default set exists because adversarial review judged 106 candidates
+  // across four real diffs of this repo and rated none actionable. These signals
+  // were built as inputs an LLM adjudicated; a high false-positive rate is the
+  // right trade there and the wrong one for a person reading a terminal.
+  it('runs only the measured default set unless --all-signals', () => {
+    const reports = runSignals(contextWithUnfedAssociations([]), [], {
+      repoScanned: true,
+      hasNonTsJs: false,
+      allSignals: false,
+    });
+
+    expect(reports.map(r => r.id)).toEqual([...DEFAULT_SIGNAL_IDS]);
+  });
+
+  it('runs everything under --all-signals', () => {
+    const reports = runSignals(contextWithUnfedAssociations([]), [], {
+      repoScanned: true,
+      hasNonTsJs: false,
+      allSignals: true,
+    });
+
+    expect(reports.length).toBeGreaterThanOrEqual(14);
+  });
+
+  it('withholds every non-default signal, and names them all', () => {
+    const withheld = withheldSignalIds();
+    const all = runSignals(contextWithUnfedAssociations([]), [], {
+      repoScanned: true,
+      hasNonTsJs: false,
+      allSignals: true,
+    });
+
+    expect(withheld.length).toBe(all.length - DEFAULT_SIGNAL_IDS.size);
+    for (const id of withheld) expect(DEFAULT_SIGNAL_IDS.has(id)).toBe(false);
+  });
+
+  it('keeps comparison-change in the default set — the one with measured true positives', () => {
+    expect(DEFAULT_SIGNAL_IDS.has('comparison-change')).toBe(true);
+  });
+
   it('tolerates a context with no diff at all', () => {
     const reports = runSignals({ ...contextWithUnfedAssociations([]), pr: undefined }, [], {
       repoScanned: true,
       hasNonTsJs: false,
+      allSignals: true,
     });
 
     for (const r of reports) expect(r.candidates).toEqual([]);

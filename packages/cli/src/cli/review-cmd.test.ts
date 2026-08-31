@@ -20,6 +20,7 @@ function result(overrides: Partial<ReviewResult> = {}): ReviewResult {
     changedFiles: ['src/a.ts'],
     unexamined: { untracked: [], nonAnalyzable: [], testsExcluded: 0 },
     repoScanned: true,
+    withheldSignals: [],
     durationMs: 12,
     ...overrides,
   };
