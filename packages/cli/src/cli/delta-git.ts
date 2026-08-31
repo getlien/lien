@@ -1,10 +1,15 @@
 /**
- * Git change discovery for `lien delta`.
+ * Git change discovery for the index-free commands.
  *
- * Builds the before/after content pairs the complexity-delta primitive
+ * For `lien delta`: before/after content pairs the complexity-delta primitive
  * consumes, comparing the working tree against HEAD. Handles staged + unstaged
  * changes (via `git diff HEAD`), untracked new files, renames, deletions, and
  * an unborn HEAD (a repo with no commits yet).
+ *
+ * For `lien review`: the raw unified diff, since the deterministic signals read
+ * patch text rather than whole-file content — a signal asking "did this change
+ * add a variant here?" needs to know which lines moved, which the content pair
+ * has thrown away.
  */
 
 import { execFile } from 'node:child_process';
@@ -50,6 +55,65 @@ async function refExists(rootDir: string, ref: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * The working tree's unified diff against `baseRef` (default `HEAD`), covering
+ * staged and unstaged changes to tracked files.
+ *
+ * Untracked files are deliberately absent — they have no diff — and
+ * `listUntrackedAnalyzable` reports them separately so a caller can say what it
+ * did not look at rather than silently omitting it.
+ *
+ * Throws when `baseRef` does not resolve to a commit; returns '' for a repo with
+ * no commits yet, where there is nothing to compare against.
+ */
+export async function readUnifiedDiff(rootDir: string, baseRef = 'HEAD'): Promise<string> {
+  if (baseRef === 'HEAD' && !(await hasCommits(rootDir))) return '';
+  if (!(await refExists(rootDir, baseRef))) {
+    throw new Error(`base ref '${baseRef}' does not resolve to a commit in this repository`);
+  }
+  // `-M` so a rename arrives as one rename block rather than a delete plus an
+  // add, which would make every line of a moved file read as newly added.
+  //
+  // The config overrides matter more than they look. `git diff` is a
+  // human-facing renderer and honours user settings that change its SHAPE, so
+  // parsing it without pinning them means parsing whatever the user configured:
+  //   - `color.diff = always` prefixes every line with ANSI, so `^diff --git `
+  //     never matches, zero blocks parse, and the command reports "no changes"
+  //     for a diff full of them.
+  //   - `diff.mnemonicPrefix` renames the `a/`…`b/` prefixes to `c/`…`w/`, so
+  //     every path comes out wrong and the parse yields files that do not exist.
+  //   - `core.quotePath` (ON by default) octal-escapes non-ASCII paths and wraps
+  //     them in quotes, so `café.ts` arrives as `"caf\303\251.ts"`.
+  //   - an external diff driver replaces the format wholesale.
+  // Each one silently changes which files get reviewed, which is worse than an
+  // error. `parseUnifiedDiff` also defends itself, so a diff from elsewhere
+  // still parses — this just stops us generating a broken one.
+  return git(rootDir, [
+    '-c',
+    'core.quotePath=false',
+    '-c',
+    'diff.mnemonicPrefix=false',
+    '-c',
+    'diff.noprefix=false',
+    'diff',
+    '--no-color',
+    '--no-ext-diff',
+    '-M',
+    baseRef,
+  ]);
+}
+
+/**
+ * Untracked, parser-analyzable files. These carry real changes that
+ * `readUnifiedDiff` cannot see, so a command reporting on a diff has to name
+ * them rather than let them vanish.
+ */
+export async function listUntrackedAnalyzable(rootDir: string): Promise<string[]> {
+  const supported = new Set(getSupportedExtensions().map(ext => `.${ext}`));
+  const out = await git(rootDir, ['ls-files', '--others', '--exclude-standard', '-z']);
+  return splitZ(out).filter(p => isSupported(p, supported));
 }
 
 interface RawChange {

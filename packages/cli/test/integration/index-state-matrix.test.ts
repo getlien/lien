@@ -228,6 +228,12 @@ const TABLE: TableRow[] = [
     expected:
       'parses the working tree via performChunkOnlyIndex, never touches the index — output identical regardless',
   },
+  {
+    entryPoint: 'lien review',
+    state: 'n/a',
+    expected:
+      'git diff + performChunkOnlyIndex, never touches the index — output identical regardless. Advisory: no --fail-on, always exit 0 on findings. States what it could NOT see (untracked files, unsupported languages, signals blinded by --no-repo-scan) rather than letting an empty report read as clean',
+  },
   // --- MCP tools (S0 is structurally impossible: `lien serve` always
   //     initializes the store before registering tool handlers) ---
   {
@@ -1528,8 +1534,21 @@ describe('completeness guard (#1029 W1) — table vs. real source', () => {
     // error when the scan yields nothing, because a false clean from a gate
     // is the worst outcome in the table.
     expect(discovered.has('cli/complexity.ts')).toBe(false);
+    // `lien review` reads a git diff and parses the changed files. It is the
+    // one ADVISORY member with no gate at all — no `--fail-on`, exit 0 whatever
+    // it finds — so its honesty obligation is discharged by naming what it
+    // could not see rather than by failing.
+    expect(discovered.has('cli/review-cmd.ts')).toBe(false);
+    expect(discovered.has('cli/review-signals.ts')).toBe(false);
     expect(TABLE_CLI_INDEX_INDEPENDENT).toEqual(
-      new Set(['lien path', 'lien delta', 'lien config get', 'lien health', 'lien complexity']),
+      new Set([
+        'lien path',
+        'lien delta',
+        'lien config get',
+        'lien health',
+        'lien complexity',
+        'lien review',
+      ]),
     );
   });
 

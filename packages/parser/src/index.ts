@@ -408,15 +408,39 @@ export { findChunkLineIndex } from './chunk-line-lookup.js';
 // =============================================================================
 
 export { filterAnalyzableFiles } from './signals/analyzable-files.js';
-export { parsePatchLines } from './signals/unified-diff.js';
+export { parsePatchLines, parseUnifiedDiff } from './signals/unified-diff.js';
+export type { ParsedUnifiedDiff } from './signals/unified-diff.js';
 
 export type { SignalContext, SignalDiff, SignalLogger } from './signals/signal-context.js';
 
-export { renderUndiscriminatedCatchSection } from './signals/catch-discrimination-signals.js';
-export { renderComparisonChangeSection } from './signals/comparison-change-signals.js';
-export { renderGuidanceSurfaceSection } from './signals/guidance-surface-signals.js';
-export { renderTestCoverageSection } from './signals/test-coverage-signals.js';
-export { renderUntrustedInputSection } from './signals/untrusted-input-signals.js';
+export {
+  computeUndiscriminatedCatches,
+  renderUndiscriminatedCatchSection,
+} from './signals/catch-discrimination-signals.js';
+export type { UndiscriminatedCatchCandidate } from './signals/catch-discrimination-signals.js';
+
+export {
+  computeComparisonChanges,
+  renderComparisonChangeSection,
+} from './signals/comparison-change-signals.js';
+export type { ComparisonChangeCandidate } from './signals/comparison-change-signals.js';
+
+export {
+  collectGuidanceSurfaceChanges,
+  renderGuidanceSurfaceSection,
+} from './signals/guidance-surface-signals.js';
+export type { GuidanceSurfaceChange } from './signals/guidance-surface-signals.js';
+
+export {
+  computeTestCoverageGaps,
+  renderTestCoverageSection,
+} from './signals/test-coverage-signals.js';
+
+export {
+  extractUntrustedInputSites,
+  renderUntrustedInputSection,
+} from './signals/untrusted-input-signals.js';
+export type { UntrustedInputSite } from './signals/untrusted-input-signals.js';
 
 export {
   extractDocClaims,
