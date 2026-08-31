@@ -7,13 +7,21 @@
  * equally well by `lien review` (a local `git diff`) or by the PR review
  * engine (an Octokit-fetched patch set).
  *
- * `SignalContext` is deliberately the NARROWEST interface that satisfies all
- * 14 modules: it was derived by auditing every `context.<field>` access across
- * them, not by copying the review engine's own context and trimming. The audit
- * found seven fields. Notably absent is anything identifying the pull request
- * — no `owner`, `repo`, `pullNumber`, or `title` — because no signal reads
- * them. A signal that starts wanting them is a signal that has stopped being
- * deterministic, and the type will say so.
+ * `SignalContext` is the UNION of what the modules read, derived by auditing
+ * every `context.<field>` access across them rather than by copying the review
+ * engine's own context and trimming. The audit found seven fields. Notably
+ * absent is anything identifying the pull request — no `owner`, `repo`,
+ * `pullNumber`, or `title` — because no signal reads them. A signal that
+ * starts wanting them is a signal that has stopped being deterministic, and
+ * the type will say so.
+ *
+ * Union, not per-module minimum: `chunks` and `complexityReport` are required
+ * of every caller, including ones that read neither. `renderUntrustedInputSection`
+ * and `renderGuidanceSurfaceSection` touch only `pr.patches`, so a caller
+ * wanting just those has to supply an empty report. Making those two fields
+ * optional is NOT the fix — `computeAddedFields` dereferences `chunks`
+ * unguarded — so splitting this into a diff-only and a repo-wide context is
+ * the real answer if that friction ever bites.
  *
  * Review's own `ReviewContext` is a structural superset, so it continues to
  * satisfy this interface with no adapter at the call sites.

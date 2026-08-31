@@ -54,6 +54,7 @@
 import type { CodeChunk } from '../types.js';
 import { wordBoundaryRe, isDistinctiveToken } from '../doc-reference-matching.js';
 import type { SignalContext } from './signal-context.js';
+import { collectChangedFiles } from './changed-files.js';
 import { extractRemovedExports } from './removed-export-signals.js';
 import { detectRenameSweeps } from './rename-sweep-signals.js';
 import {
@@ -222,7 +223,7 @@ function directoryIsGone(dir: string, repoChunks: CodeChunk[] | undefined): bool
  * `doc-reference-matching.ts`'s docstring). Kept as a named export here, rather than inlining the
  * import at call sites, because this module's own test suite exercises it directly under this name.
  * Verified against this repo's own corpus, `platform` reads as ordinary prose in both
- * `STYLE_GUIDE.md` ("...documentation site, platform app...") and this package's own harness
+ * `STYLE_GUIDE.md` ("...documentation site, platform app...") and the review harness's
  * `README.md` ("...the existing platform .env...") — exactly the false-positive risk this gate
  * exists to close. Exposed for testing.
  */
@@ -290,15 +291,6 @@ function collectReferands(context: SignalContext): Referand[] {
 // ---------------------------------------------------------------------------
 // Untouched doc/config corpus
 // ---------------------------------------------------------------------------
-
-/** The union of every path this PR changed (mirrors `doc-claims-signals.ts`'s own
- *  `collectChangedFiles`, duplicated locally since that helper is private to its module). */
-function collectChangedFileSet(context: SignalContext): Set<string> {
-  const files = new Set<string>(context.changedFiles ?? []);
-  for (const f of context.allChangedFiles ?? []) files.add(f);
-  for (const f of context.pr?.patches?.keys() ?? []) files.add(f);
-  return files;
-}
 
 function isDocOrConfigChunk(chunk: CodeChunk): boolean {
   return DOC_CHUNK_TYPES.has(chunk.metadata.type);
@@ -509,7 +501,7 @@ function setupSweep(context: SignalContext): SweepSetup | null {
   const referands = collectReferands(context);
   if (referands.length === 0) return null;
 
-  const changed = collectChangedFileSet(context);
+  const changed = collectChangedFiles(context);
   const docChunks = collectUntouchedDocChunks(repoChunks, changed);
   if (docChunks.length === 0) return null;
 

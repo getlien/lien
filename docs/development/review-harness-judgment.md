@@ -145,7 +145,7 @@ candidates form a closed, enumerable set. An open-investigation rule like
 
 - Harness mechanics + runbooks: `packages/review/test/harness/README.md`
 - Rules + trigger logic: `packages/review/src/plugins/agent/rules.ts`
-- Deterministic signals: `packages/review/src/*-signals.ts`
+- Deterministic signals: `packages/parser/src/signals/*-signals.ts`
 - The extra-pass executor: `packages/review/src/plugins/agent/review-pass.ts`
 - The shipped candidate-loop passes: `doc-truth-pass.ts`,
   `stale-duplicate-pass.ts`, `incomplete-handling-pass.ts`,

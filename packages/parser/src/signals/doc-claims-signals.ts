@@ -74,6 +74,7 @@ import type { CodeChunk } from '../types.js';
 import type { SignalContext } from './signal-context.js';
 import { collectGuidanceSurfaceChanges, isGuidanceSurface } from './guidance-surface-signals.js';
 import { filterAnalyzableFiles } from './analyzable-files.js';
+import { collectChangedFiles } from './changed-files.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -801,14 +802,6 @@ const enum EvidenceTier {
   ChangedCode = 4,
   SymbolMatch = 5,
   SameFile = 6,
-}
-
-/** The union of every path this PR changed (analyzable + non-code + patched). */
-function collectChangedFiles(context: SignalContext): Set<string> {
-  const files = new Set<string>(context.changedFiles ?? []);
-  for (const f of context.allChangedFiles ?? []) files.add(f);
-  for (const f of context.pr?.patches?.keys() ?? []) files.add(f);
-  return files;
 }
 
 interface ChunkMatch {

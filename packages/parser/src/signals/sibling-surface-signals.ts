@@ -76,6 +76,7 @@
 
 import type { CodeChunk } from '../types.js';
 import type { SignalContext } from './signal-context.js';
+import { collectChangedFiles } from './changed-files.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -388,13 +389,6 @@ function countInUntouchedCorpus(
     }
   }
   return count;
-}
-
-function collectChangedFileSet(context: SignalContext): Set<string> {
-  const files = new Set<string>(context.changedFiles ?? []);
-  for (const f of context.allChangedFiles ?? []) files.add(f);
-  for (const f of context.pr?.patches?.keys() ?? []) files.add(f);
-  return files;
 }
 
 // ---------------------------------------------------------------------------
@@ -865,7 +859,7 @@ export function extractSiblingSurfaces(context: SignalContext): SiblingSurfaceEn
   const chunksByFile = groupChunksByFile(repoChunks);
   const familyIndex = buildFamilyIndex(chunksByFile.keys());
   const dirBasenameIndex = buildDirBasenameIndex(chunksByFile.keys());
-  const changedFileSet = collectChangedFileSet(context);
+  const changedFileSet = collectChangedFiles(context);
   const patches = context.pr?.patches;
 
   const entries: SiblingSurfaceEntry[] = [];

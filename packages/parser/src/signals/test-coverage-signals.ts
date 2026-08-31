@@ -11,9 +11,10 @@
  *
  * `testAssociations` is a required `string[]` that defaults to `[]` in TWO
  * situations the type can't distinguish: enrichment ran and genuinely found
- * no test file, OR enrichment never ran (it's wrapped in try/catch in
- * review-pr.ts and silently no-ops when the repo has no test files at all —
- * see `enrichWithTestAssociations` in analysis.ts). There is no separate flag
+ * no test file, OR enrichment never ran (the PR review engine wraps it in
+ * try/catch in `packages/review/src/review-pr.ts` and silently no-ops when the
+ * repo has no test files at all — see `enrichWithTestAssociations` in
+ * `packages/review/src/analysis.ts`). There is no separate flag
  * for "did enrichment run." To avoid manufacturing gaps out of missing data,
  * this module keys off PER-FILE entry presence in `complexityReport.files`
  * rather than trusting every empty array: a changed file with NO entry at all
