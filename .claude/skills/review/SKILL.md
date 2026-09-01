@@ -62,10 +62,16 @@ Earlier guidance here told you to run `lien health --format json` for "test
 associations". That was wrong, and following it produces false findings.
 
 `lien health` ranks functions that already have a **complexity violation**, and
-shows the top 5 for the whole repo. Measured on this repo: 4 of the 5 entries
-were fixture code from `lien-review-testbed/`, and **no file changed by the diff
-under review appeared at all** — not at `--top 5`, not at `--top 40`. `--path`
-does not rescue it either: a file with no violation yields `entries: []`.
+shows the top 5 for the whole repo. Measured here: only **12 functions in the
+entire repo** are ranked at all, so the chance your changed file is among them
+is small — and `--path` does not rescue it, because a file with no violation
+yields `entries: []` regardless of scope.
+
+(An earlier version of this note said 4 of the top 5 were fixtures from
+`lien-review-testbed/`, which was true when that fixture app existed. It has
+been deleted, taking most of the repo's violations with it — the ranked total
+fell from 57 to 12 (and the analysed corpus from 592 files to 396). The conclusion got stronger, not weaker: a shorter ranking
+is a narrower net.)
 
 So it can tell you "this function is risky and under-tested" — and for the
 functions it *does* rank, its `tests` field carries real paths. What it cannot do

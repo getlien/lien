@@ -213,6 +213,14 @@ jobs:
           openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
 ```
 
+**Update for today's reader (2026-09-01):** this Action's source is no
+longer developed or published from the `getlien/lien` repository — Lien is
+now a four-command local CLI (`complexity`, `health`, `review`, `delta`),
+and `lien review` runs the same deterministic signals locally instead. The
+`getlien/lien-review@v1` reference above still resolves for anyone already
+using it (it points at a separately published image), but no new versions
+of the Action will ship.
+
 It doesn't need any special access beyond what that one line already
 grants, and by default it only leaves comments on what it finds. It won't
 block anything over those comments unless you turn that on yourself. The

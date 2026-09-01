@@ -1,45 +1,32 @@
 /**
- * Completeness guard: every signal module has tests SOMEWHERE.
+ * Completeness guard: every signal module has a co-located test file.
  *
  * Parser's vitest config is `include: ['src/**\/*.test.ts']` — strictly
- * co-located. For a while this directory had almost no tests, because the 14
- * signal modules' test-blocks lived in `packages/review/test/`, so
- * `npm run test -w @liendev/parser` exercised nearly none of this directory's
- * ~9,200 LOC and reported green regardless. Green-because-nothing-ran and
+ * co-located — so a test that lives anywhere else does not run. For a while
+ * this directory had almost no tests, because the 14 signal modules'
+ * test-blocks lived in `packages/review/test/`. `npm run test -w
+ * @liendev/parser` therefore exercised nearly none of this directory's ~9,200
+ * LOC and reported green regardless. Green-because-nothing-ran and
  * green-because-it-passed are the same shape unless something checks which one
  * it is; that is this file.
  *
- * **The relocation has since happened.** All 14 moved here, and the 12
- * `buildInitialMessage` prompt-injection blocks were dropped with them — those
- * tested the review engine's rendering, not the signals, and the engine is
- * being deleted. Parser went 2,030 → 2,519 tests; review went 1,714 → 1,186;
- * the 39-test difference is exactly those blocks.
+ * **Both halves of that history have now happened.** The tests moved here
+ * (parser 2,030 → 2,520; the 12 `buildInitialMessage` prompt-injection blocks
+ * were dropped, since they tested the review engine's rendering rather than the
+ * signals), and then `packages/review` was deleted. This guard existed
+ * specifically to make the second impossible before the first, and it did its
+ * job: it is why the relocation shipped as its own PR.
  *
- * This guard still accepts EITHER location, deliberately. It was written to
- * fail loudly if `packages/review` were deleted while its signal tests were
- * still the only ones — which is the deletion it was built for and has now
- * survived. Keeping the both-locations branch costs nothing and means a future
- * move in either direction is caught rather than silently losing coverage.
+ * It used to accept EITHER location. That branch is gone, because the other
+ * location is gone — and an `fs.existsSync` against a deleted directory is not
+ * a neutral leftover, it is a hole: recreate `packages/review/test/` for any
+ * reason and a signal module with no co-located test would pass. Co-located is
+ * now the only place a test can be, so it is the only place this looks.
  *
- * Two limits, deliberately not fixed:
- *  - It asserts a test FILE EXISTS, not that the file tests anything. An empty
- *    one, or one that is entirely `it.skip`, satisfies it. That is adequate for
- *    the deletion case this targets; it is not a coverage guarantee, and should
- *    not be read as one.
- *  - It reads `../../../review/test`, outside its own package. Parser's tests
- *    only ever run from the monorepo, so this is theoretical — but a standalone
- *    `packages/parser` checkout fails this guard for the same reason a deletion
- *    does, and with the same message.
- *
- * On why those tests import across the package boundary: they reach these
- * modules' internals by relative path (`../../parser/src/signals/…`) rather than
- * through `@liendev/parser`, deliberately. Most of the directory's exports have
- * no consumer outside their own module, and parser is a PUBLISHED package — a
- * barrel wide enough for the tests would semver-lock ~70 internals and make
- * narrowing it later a breaking change. So the tests take the internals by a
- * path that never touches the public surface. That is a stopgap, not a home:
- * moving these tests into this directory removes the cross-package import
- * entirely, and is the follow-up this guard exists to protect.
+ * One limit, deliberately not fixed: it asserts a test FILE EXISTS, not that
+ * the file tests anything. An empty one, or one that is entirely `it.skip`,
+ * satisfies it. That was adequate for the deletion this targeted; it is not a
+ * coverage guarantee and should not be read as one.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -54,7 +41,6 @@ import { fileURLToPath } from 'node:url';
 // this guard spuriously on someone else's machine — a false alarm, which is
 // the one thing a guard must never be.
 const SIGNALS_DIR = path.dirname(fileURLToPath(import.meta.url));
-const REVIEW_TEST_DIR = path.resolve(SIGNALS_DIR, '../../../review/test');
 
 /**
  * Modules with no runtime behaviour to test — the one way a module can lack
@@ -102,19 +88,17 @@ describe('signal module test coverage', () => {
     ).toEqual([]);
   });
 
-  it('every signal module has a test file, co-located here or still in packages/review/test', () => {
-    const uncovered = signalModules().filter(mod => {
-      const testName = mod.replace(/\.ts$/, '.test.ts');
-      const coLocated = fs.existsSync(path.join(SIGNALS_DIR, testName));
-      const inReview = fs.existsSync(path.join(REVIEW_TEST_DIR, testName));
-      return !coLocated && !inReview;
-    });
+  it('every signal module has a co-located test file', () => {
+    const uncovered = signalModules().filter(
+      mod => !fs.existsSync(path.join(SIGNALS_DIR, mod.replace(/\.ts$/, '.test.ts'))),
+    );
 
     expect(
       uncovered,
-      `These signal modules have no test file in either location. If packages/review ` +
-        `was just deleted, its signal tests must move to packages/parser/src/signals/ ` +
-        `first — they are the only tests these modules have.`,
+      `These signal modules have no test file. Each is production code in a published ` +
+        `package and drives \`lien review\`, so add \`<module>.test.ts\` beside it — ` +
+        `parser's vitest config only collects \`src/**/*.test.ts\`, so a test anywhere ` +
+        `else does not run.`,
     ).toEqual([]);
   });
 });

@@ -29,12 +29,21 @@ Durable, git-tracked record of corrections. Read this at the start of every sess
 
 ## CI / monorepo
 
-- **Adding a workspace means hunting hardcoded package lists.** The new
-  `packages/parser-native` broke three of them in separate CI rounds:
-  `packages/action/Dockerfile` COPY lines, root `package.json`
-  lint/format/test globs and scripts, and `ci.yml`'s release-smoke pack
-  list. When adding a package, grep `.github/` + Dockerfiles + root
-  scripts for explicit `packages/...` enumerations before pushing.
+- **Adding OR REMOVING a workspace means hunting hardcoded package lists.**
+  Adding `packages/parser-native` broke three in separate CI rounds: the
+  Action Dockerfile's COPY lines (since deleted), root `package.json`
+  lint/format/test globs and scripts, and `ci.yml`'s release-smoke pack list.
+  Removing `packages/review`/`packages/action` in phase 7b hit the same class
+  from the other direction, in six places: `ci.yml` steps, root `package.json`
+  scripts AND `workspaces`, `.gitignore` fixture rules, `.dockerignore` (which
+  turned out to exist only for the deleted Dockerfile), the CONTRIBUTING
+  package tree, and `package-lock.json` — where `--package-lock-only` silently
+  refused to prune the entries because `git rm` had left untracked `dist/` and
+  `node_modules/` behind, so npm still saw the directories. That last one also
+  exposed a stale `packages/app` entry left behind by the SAME mistake in
+  `cbf004c5`, months earlier.
+  Grep `.github/` + root dotfiles + root scripts + the lockfile for explicit
+  `packages/...` enumerations before pushing, in both directions.
 - **Every CI job whose code path reaches `parseAST`/`chunkFile` must build
   the native binary first**, via
   `npm run build:native -w @liendev/parser-native` after `npm ci`

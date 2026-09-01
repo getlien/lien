@@ -18,7 +18,7 @@ function result(overrides: Partial<ReviewResult> = {}): ReviewResult {
     base: 'HEAD',
     reports: [],
     changedFiles: ['src/a.ts'],
-    unexamined: { untracked: [], nonAnalyzable: [], testsExcluded: 0 },
+    unexamined: { untracked: [], nonAnalyzable: [], testsExcluded: 0, deleted: 0 },
     repoScanned: true,
     withheldSignals: [],
     durationMs: 12,
@@ -54,7 +54,7 @@ describe('renderText', () => {
     const out = renderText(
       result({
         changedFiles: [],
-        unexamined: { untracked: [], nonAnalyzable: [], testsExcluded: 4 },
+        unexamined: { untracked: [], nonAnalyzable: [], testsExcluded: 4, deleted: 0 },
       }),
     );
 
@@ -68,7 +68,12 @@ describe('renderText', () => {
     const out = renderText(
       result({
         changedFiles: [],
-        unexamined: { untracked: [], nonAnalyzable: ['vendor/x.bin'], testsExcluded: 0 },
+        unexamined: {
+          untracked: [],
+          nonAnalyzable: ['vendor/x.bin'],
+          testsExcluded: 0,
+          deleted: 0,
+        },
       }),
     );
 
@@ -86,7 +91,12 @@ describe('renderText', () => {
     const out = renderText(
       result({
         changedFiles: [],
-        unexamined: { untracked: [], nonAnalyzable: ['docs/guide.md'], testsExcluded: 0 },
+        unexamined: {
+          untracked: [],
+          nonAnalyzable: ['docs/guide.md'],
+          testsExcluded: 0,
+          deleted: 0,
+        },
         reports: [
           report({
             id: 'doc-claims',
@@ -107,7 +117,12 @@ describe('renderText', () => {
     const out = renderText(
       result({
         changedFiles: [],
-        unexamined: { untracked: [], nonAnalyzable: ['docs/guide.md'], testsExcluded: 0 },
+        unexamined: {
+          untracked: [],
+          nonAnalyzable: ['docs/guide.md'],
+          testsExcluded: 0,
+          deleted: 0,
+        },
         reports: [report({ id: 'doc-claims', candidates: [] })],
       }),
     );
@@ -115,17 +130,41 @@ describe('renderText', () => {
     expect(out).toContain('No signal found anything in the raw diff either');
   });
 
+  /**
+   * A deletion diff is mostly deleted files, and a deleted file has no working
+   * tree content to parse. Counting them as parse FAILURES was the bug: on the
+   * PR that removed `packages/review`, `lien review` reported "92 files could
+   * not be parsed" — all 92 simply gone from disk, zero genuine failures. A
+   * reader cannot tell that from a broken parser.
+   */
+  it('reports deleted files as deleted, not as parse failures', () => {
+    const out = renderText(
+      result({
+        changedFiles: ['src/a.ts'],
+        unexamined: { untracked: [], nonAnalyzable: [], testsExcluded: 0, deleted: 217 },
+      }),
+    );
+
+    expect(out).toContain('217 deleted file(s) — nothing to parse, so not reviewed');
+    expect(out).not.toContain('could not be parsed');
+  });
+
+  it('says nothing about deletions when the diff deletes nothing', () => {
+    const out = renderText(result({ changedFiles: ['src/a.ts'] }));
+    expect(out).not.toContain('deleted file(s)');
+  });
+
   it('distinguishes an empty diff from a diff with nothing reviewable', () => {
     const empty = renderText(
       result({
         changedFiles: [],
-        unexamined: { untracked: [], nonAnalyzable: [], testsExcluded: 0 },
+        unexamined: { untracked: [], nonAnalyzable: [], testsExcluded: 0, deleted: 0 },
       }),
     );
     const unreviewable = renderText(
       result({
         changedFiles: [],
-        unexamined: { untracked: [], nonAnalyzable: [], testsExcluded: 1 },
+        unexamined: { untracked: [], nonAnalyzable: [], testsExcluded: 1, deleted: 0 },
       }),
     );
 
@@ -238,7 +277,12 @@ describe('renderText', () => {
   it('names untracked files as not reviewed', () => {
     const out = renderText(
       result({
-        unexamined: { untracked: ['new.ts', 'other.ts'], nonAnalyzable: [], testsExcluded: 0 },
+        unexamined: {
+          untracked: ['new.ts', 'other.ts'],
+          nonAnalyzable: [],
+          testsExcluded: 0,
+          deleted: 0,
+        },
       }),
     );
 
@@ -248,14 +292,16 @@ describe('renderText', () => {
 
   it('names non-analyzable changed files', () => {
     const out = renderText(
-      result({ unexamined: { untracked: [], nonAnalyzable: ['a.bin'], testsExcluded: 0 } }),
+      result({
+        unexamined: { untracked: [], nonAnalyzable: ['a.bin'], testsExcluded: 0, deleted: 0 },
+      }),
     );
     expect(out).toContain('1 changed file(s) are not parser-analyzable');
   });
 
   it('names excluded test files and how to include them', () => {
     const out = renderText(
-      result({ unexamined: { untracked: [], nonAnalyzable: [], testsExcluded: 3 } }),
+      result({ unexamined: { untracked: [], nonAnalyzable: [], testsExcluded: 3, deleted: 0 } }),
     );
 
     expect(out).toContain('3 changed test file(s) were excluded');
@@ -302,7 +348,12 @@ describe('renderText', () => {
     const out = renderText(
       result({
         changedFiles: [],
-        unexamined: { untracked: ['new.ts', 'other.ts'], nonAnalyzable: [], testsExcluded: 0 },
+        unexamined: {
+          untracked: ['new.ts', 'other.ts'],
+          nonAnalyzable: [],
+          testsExcluded: 0,
+          deleted: 0,
+        },
       }),
     );
 
@@ -382,7 +433,7 @@ describe('toJson', () => {
       toJson(
         result({
           repoScanned: false,
-          unexamined: { untracked: ['x.ts'], nonAnalyzable: [], testsExcluded: 2 },
+          unexamined: { untracked: ['x.ts'], nonAnalyzable: [], testsExcluded: 2, deleted: 0 },
         }),
       ),
     );

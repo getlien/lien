@@ -15,6 +15,12 @@
 > above.** Every `plugins/claude/hooks/*` reference below describes a delivery
 > mechanism that no longer exists — the hooks, `hooks.json`, and the marketplace
 > entry are all gone. Read hook references here as history, not as configuration.
+>
+> **`packages/review` was deleted on 2026-09-01 (phase 7b).** Every reference
+> below to "PR review" or the "review engine" describes a subsystem that no
+> longer exists in this repository — see [ADR-012](decisions/0012-self-hostable-review-action.md).
+> The "Relationship to PR review" section is accordingly moot: the follow-up
+> it proposed has no caller left to build.
 
 
 `lien delta` computes the complexity difference between two versions of a
@@ -26,14 +32,15 @@ an agent or CI job can act on.
 An agent once shipped a PR that passed every gate (format, lint, typecheck,
 build, test) but raised a function's cognitive complexity from under
 threshold to **29 against a threshold of 15**. Nothing at edit time noticed;
-the PR-review engine caught it after the fact, costing a full extra
-fixer-agent run for something a roughly 50 ms deterministic check could have
-flagged while the agent still had the change in hand.
+the PR-review engine (`packages/review`, since deleted — see the banner
+above) caught it after the fact, costing a full extra fixer-agent run for
+something a roughly 50 ms deterministic check could have flagged while the
+agent still had the change in hand.
 
-Lien already computes cognitive, cyclomatic, and Halstead complexity per
-function, and already surfaces threshold violations in PR review. The gap is
-timing: the signal exists, but only after the code is pushed. `lien delta`
-moves it to before the commit.
+Lien already computed cognitive, cyclomatic, and Halstead complexity per
+function, and, while `packages/review` existed, already surfaced threshold
+violations in PR review. The gap was timing: the signal existed, but only
+after the code was pushed. `lien delta` moved it to before the commit.
 
 ## What's built today
 
@@ -59,10 +66,11 @@ current behavior):
   `lien stats` measured whether any of it changed what agents committed. See
   "Measuring the nudge loop" and "The plan-time nudge" below.
 
-One thing from the original design remains unbuilt: review's adoption of the
-shared primitive. `packages/review/src/delta.ts` still computes its own
-report-level delta rather than calling `computeComplexityDelta`; see
-"Relationship to PR review" below.
+One thing from the original design was never built, and now never will be:
+review's adoption of the shared primitive. `packages/review/src/delta.ts`
+computed its own report-level delta rather than calling
+`computeComplexityDelta`, and `packages/review` no longer exists to adopt
+anything; see "Relationship to PR review" below.
 
 ## A. The shared primitive (`@liendev/parser`)
 
@@ -84,8 +92,9 @@ The primitive does not invent metrics. It calls the existing
 
 `chunkFile` takes a content string, not a path on disk, so the primitive can
 chunk a "before" image (`git show HEAD:file`) and an "after" image (working
-tree) purely in memory, with no second checkout. This is the key difference
-from the existing review-side delta (see "Relationship to PR review" below).
+tree) purely in memory, with no second checkout. This was the key difference
+from the review-side delta that used to exist (see "Relationship to PR
+review" below).
 
 Halstead-effort thresholds are expressed in minutes in config; the primitive
 converts via the existing `minutesToEffort()` helper, exactly as
@@ -210,12 +219,13 @@ new-under-threshold > improved > unchanged > removed`. `isRegression` is
 true iff that verdict is `crossed` or `new-over-threshold`.
 
 All four metrics can produce a regression. This is deliberate: it's exactly
-the set `analyzeComplexityFromChunks` (and therefore PR review) already
-scores, so a delta regression and a review violation are the same event
-computed the same way. Metric-selection policy (for example, "only
-cognitive gates, Halstead is advisory") is a plausible future knob, but it
-would then be tuned in this one shared primitive and both engines would
-move together. It is not a config surface today (YAGNI).
+the set `analyzeComplexityFromChunks` scores. (While `packages/review`
+existed, this was also exactly what a PR-review violation scored — the same
+event computed the same way; that parity is moot now that PR review is
+deleted.) Metric-selection policy (for example, "only cognitive gates,
+Halstead is advisory") is a plausible future knob, but it would then be
+tuned in this one shared primitive. It is not a config surface today
+(YAGNI).
 
 ### Function matching across versions
 
@@ -248,10 +258,11 @@ Known limitations:
 
 1. Resolve the project root (walk up to `.git`, mirroring existing commands).
 2. Load thresholds from `.lien.config.json` via `configService.load()`
-   (`@liendev/core`), the same source the review reads, falling back to
-   built-in defaults when the file or the `complexity` block is absent.
-   `--threshold <n>` overrides `testPaths` + `mentalLoad` (parity with the
-   review's single `--threshold`). It must be a positive integer; a
+   (`@liendev/core`) — the same source `packages/review` used to read,
+   before it was deleted — falling back to built-in defaults when the file
+   or the `complexity` block is absent. `--threshold <n>` overrides
+   `testPaths` + `mentalLoad` (this mirrored the review's own single
+   `--threshold`, back when `packages/review` existed). It must be a positive integer; a
    negative, zero, or non-integer value exits 2 with a clear message
    instead of silently changing the gate's meaning. A malformed
    `.lien.config.json` also exits 2, rather than crashing with an
@@ -370,22 +381,22 @@ to git. Phase 5 deleted `get_complexity` and the MCP server itself, so the
 question no longer applies. The CLI is now the only surface, not just the
 primary one.
 
-## Relationship to PR review (a follow-up, not yet built)
+## Relationship to PR review (moot — phase 7b deleted `packages/review`)
 
-`packages/review/src/delta.ts` computes a complexity delta at the report
-level: it diffs two `ComplexityReport`s (base clone vs. head clone), so it
-only sees functions that violate on one side. It cannot observe a function
-that worsened while staying under threshold, and it requires the review
-engine's two full checkouts.
+`packages/review/src/delta.ts` used to compute a complexity delta at the
+report level: it diffed two `ComplexityReport`s (base clone vs. head clone),
+so it only saw functions that violated on one side. It could not observe a
+function that worsened while staying under threshold, and it required the
+review engine's two full checkouts.
 
-The primitive in section A is strictly more capable: function-level, it
+The primitive in section A was strictly more capable: function-level, it
 sees under-threshold movement, and it needs only content strings. The
-intended follow-up, not yet done, is to have `packages/review` call
-`computeComplexityDelta` on the before/after content it already has from
-its two clones, and retire the report-diffing logic in
-`review/src/delta.ts`. That is what would structurally guarantee write-time
-and review-time verdicts agree: one function, one classification table, two
-callers.
+intended follow-up — have `packages/review` call `computeComplexityDelta`
+on the before/after content it already had from its two clones, retiring
+the report-diffing logic in `review/src/delta.ts` — was never built, and
+phase 7b deleted `packages/review` itself, so there is no caller left to
+build it for. Kept here as history: it explains why `computeComplexityDelta`
+was designed function-level rather than report-level in the first place.
 
 ## C. Gate liturgy
 

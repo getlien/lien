@@ -30,10 +30,6 @@ features:
     title: Pre-Commit Complexity Gate
     details: "`lien delta` flags NEW complexity threshold crossings in your working tree before you commit — never fails on pre-existing debt."
 
-  - icon: 🤖
-    title: Self-Hostable PR Review
-    details: Lien Review is a GitHub Action that runs complexity analysis and an agent-driven bug review on every PR, posted back as inline comments.
-
   - icon: 🔒
     title: 100% Local & Private
     details: Code never leaves your machine — Lien parses the working tree on demand with no index, no server, and no telemetry. (Fetching the published package itself, via npm or npx, is the one network step.)

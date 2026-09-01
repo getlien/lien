@@ -135,7 +135,6 @@ Audit all user-facing documentation for accuracy, completeness, and consistency 
 - `guide/installation.md` — Installation steps
 - `guide/cli-commands.md` — CLI command docs vs the actual four commands
 - `guide/configuration.md` — Config options vs actual config schema
-- `guide/lien-review.md`, `guide/review-evidence.md`, `guide/review-harness.md` — the Lien Review GitHub Action docs
 
 **Architecture docs** (`docs/architecture/`):
 - `system-overview.md` — Does it reflect the current on-demand-parse architecture?
@@ -144,7 +143,6 @@ Audit all user-facing documentation for accuracy, completeness, and consistency 
 - `test-association.md` — Does it match test detection logic?
 - `lien-delta.md` — Does it match the `delta` command as built?
 - `native-parser.md` — Parser architecture accuracy
-- `review-pass-architecture.md` — Review engine plugin architecture (the `review`/`action` packages' GitHub Action, not the CLI's `review` command)
 - ADRs in `decisions/` — Are they still accurate? Is the MCP/index removal itself documented anywhere, or missing an ADR?
 
 **Root docs**:
@@ -420,7 +418,7 @@ Review all test files across the three published packages:
 2. Cross-reference `node packages/cli/dist/index.js health --format json` for ranked functions with no detected tests, and `Glob` for missing co-located test files elsewhere
 3. Read test files for the most critical modules (CLI command handlers, config service, signals)
 4. `Grep` for `beforeEach`, `afterEach`, `vi.mock` to find test utilities and mock patterns
-5. If reviewing signal tests, note that `signals-test-location.test.ts` enforces where those live — check `packages/review/test/harness/README.md` for the harness conventions around them
+5. If reviewing signal tests, note that `signals-test-location.test.ts` enforces that every signal module has a test file; they are co-located in `packages/parser/src/signals/`
 
 ### Output
 

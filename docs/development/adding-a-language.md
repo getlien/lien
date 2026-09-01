@@ -104,7 +104,6 @@ Wire it up:
 `packages/parser/src/scanner.ts` (extension → language map),
 `packages/parser/src/ecosystem-presets.ts`,
 `packages/parser/src/utils/path-matching.ts` (`isTestFile`),
-`packages/review/src/prompt.ts` (display names),
 `packages/parser/src/chunk-only-index.ts` (glob). `extractSignature` is
 already body-node-bounded, so no shared-helper change is needed.
 

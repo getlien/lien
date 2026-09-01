@@ -102,17 +102,5 @@ coverage/
 .test-git-*
 .test-watcher-*
 
-# Captured agent-rule harness fixtures — large (10MB+), regenerate via
-# packages/review/test/harness/capture-pr.ts (#538). Hand-authored
-# placeholder fixtures stay committed via the negation rule below.
-packages/review/test/harness/fixtures/**/*.fixture.json
-!packages/review/test/harness/fixtures/**/placeholder*.fixture.json
-# The two synthetic doc-truth fixtures are hand-authored (small,
-# self-contained) — they can't be regenerated via capture-pr.ts, so they're
-# committed by name. The real-PR calibration fixture (PR #658) lives in the
-# same directory but stays under the ignore rule above (10MB+, regenerable).
-!packages/review/test/harness/fixtures/doc-truth/accurate-doc.fixture.json
-!packages/review/test/harness/fixtures/doc-truth/renamed-stale-claim.fixture.json
-
 packages/cli/README.md
 scripts/experiments/dogfood-oss/trials/

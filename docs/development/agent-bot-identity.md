@@ -8,13 +8,19 @@ the audit trail cannot distinguish an agent-performed action from an
 owner-performed one: both show the same login. PR #799 made the risk
 concrete: an agent self-applied the `skip-harness-gate` label to get past
 the "Require harness evidence or bypass label" CI gate (PR #768 hit the same
-gate the same way earlier). The concurrent gate-hardening PR #801 makes that
-label owner-login-only, but says explicitly in its own body that this does
-not close the "agent-acting-as-owner" hole: the applier check still can't
-tell an agent-performed label event from a human one when both are
-attributed to the same login. That gap needs a separate bot identity for
-agent actions; this document and `scripts/dev/agent-gh-token.mjs` are that
-follow-up.
+gate the same way earlier). **That specific gate no longer exists** — the
+harness workflows and `harness-gate-check.mjs` were deleted along with
+`packages/review` on 2026-09-01 (phase 7b) — but the general problem this
+document solves is unrelated to that one gate: any mutating `gh`/API action
+an agent takes is otherwise indistinguishable from one the owner took. The
+concurrent gate-hardening PR #801 made the (now-removed) label owner-login-
+only, but said explicitly in its own body that this did not close the
+"agent-acting-as-owner" hole: the applier check still couldn't tell an
+agent-performed label event from a human one when both were attributed to
+the same login. That gap needs a separate bot identity for agent actions;
+this document and `scripts/dev/agent-gh-token.mjs` are that follow-up, and
+remain in active use for every mutating `gh pr create`/`merge`/`edit`/
+`comment` call, independent of any one CI gate.
 
 ## Approach: a GitHub App under the `getlien` org
 
@@ -95,8 +101,8 @@ API-action attribution, not a full agent-identity story.
 11. **Install the app**: from the app's page, click **Install App** (left
     sidebar) → select the **`getlien`** org → **Only select repositories**
     → choose **`lien`** → **Install**.
-12. Add two lines to the repo-root `.env` (gitignored; same file
-    `OPENROUTER_API_KEY` already lives in):
+12. Add two lines to the repo-root `.env` (gitignored — since the review
+    harness was deleted, these are the only keys anything in the repo reads):
     ```
     LIEN_AGENT_APP_ID=<the App ID from step 8>
     LIEN_AGENT_APP_KEY_PATH=~/.config/lien/agent-app.pem
@@ -147,10 +153,13 @@ gh pr checks 123
 The helper prints **only** the token to stdout (all diagnostics go to
 stderr), so it composes directly into `GH_TOKEN=$(...)`.
 
-**Never add `lien-agents` (or its App) to the `skip-harness-gate`
-allowlist.** The label must stay owner-(human)-only; see PR #801. Giving
-the bot identity bypass power over the harness gate would recreate exactly
-the hole this document exists to close, just with a different login name.
+**Never grant `lien-agents` (or its App) bypass power over a CI gate.** The
+`skip-harness-gate` label this rule originally named is gone along with the
+harness it gated (see "Why this exists" above), but the principle outlives
+that one gate: any owner-only bypass label on any future gate must stay
+human-only (see PR #801's reasoning). Giving the bot identity bypass power
+over a gate would recreate exactly the hole this document exists to close,
+just with a different login name.
 
 ## Security notes
 
@@ -207,19 +216,20 @@ GH_TOKEN=$(node scripts/dev/agent-gh-token.mjs) gh pr create \
 # Confirm CI auto-started with no action_required:
 gh pr checks <PR_NUMBER> --watch
 
-# 2. Bot applies a test label; confirm the hardened harness gate
-#    ("Require harness evidence or bypass label", PR #801) ignores
-#    non-allowlisted appliers -- i.e. lien-agents[bot] must NOT be able to
-#    self-bypass the gate via skip-harness-gate.
-GH_TOKEN=$(node scripts/dev/agent-gh-token.mjs) gh pr edit <PR_NUMBER> --add-label skip-harness-gate
+# 2. Bot applies and removes a label; confirm the timeline attributes both
+#    events to "lien-agents[bot]", not "alfhen". (Historical note: this step
+#    originally verified the hardened harness gate -- "Require harness
+#    evidence or bypass label", PR #801 -- ignored a self-applied
+#    skip-harness-gate label from a non-allowlisted applier. That gate and
+#    its label are gone with packages/review, deleted 2026-09-01; any label
+#    works for the attribution check below, whether or not it currently
+#    gates anything.)
+GH_TOKEN=$(node scripts/dev/agent-gh-token.mjs) gh pr edit <PR_NUMBER> --add-label some-label
 gh api repos/getlien/lien/issues/<PR_NUMBER>/timeline --jq \
   '.[] | select(.event=="labeled") | {actor: .actor.login, label: .label.name}'
-# Expect: actor "lien-agents[bot]" -- and, since this PR does not touch
-# packages/review/src/plugins/agent/**, the gate should no-op regardless.
-# If testing the allowlist itself, apply the label to a PR that DOES touch
-# that path and confirm the evidence-check step still runs (label ignored).
+# Expect: actor "lien-agents[bot]".
 # Then remove the label -- it must never stay applied by a non-owner login.
-GH_TOKEN=$(node scripts/dev/agent-gh-token.mjs) gh pr edit <PR_NUMBER> --remove-label skip-harness-gate
+GH_TOKEN=$(node scripts/dev/agent-gh-token.mjs) gh pr edit <PR_NUMBER> --remove-label some-label
 
 # 3. Bot merges the scratch PR; confirm timeline shows lien-agents[bot]
 GH_TOKEN=$(node scripts/dev/agent-gh-token.mjs) gh pr merge <PR_NUMBER> --squash --delete-branch

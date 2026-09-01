@@ -15,7 +15,7 @@ import * as jvmSignals from '../jvm-same-package-signals.js';
  * Local copy of review's `test-helpers.ts` factory of the same name — kept
  * as a small non-exported duplicate here rather than importing across the
  * package boundary, since this test moved into parser (#994-adjacent lift)
- * while that shared review-only test helper stays in `@liendev/review`
+ * while that shared test helper lived in the since-deleted `@liendev/review`
  * (still used by 3 other review test files).
  */
 function createTestChunk(overrides?: Partial<CodeChunk>): CodeChunk {

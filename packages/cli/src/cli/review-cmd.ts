@@ -34,7 +34,7 @@ import {
   type SignalContext,
 } from '@liendev/parser';
 
-import { listUntrackedAnalyzable, readUnifiedDiff } from './delta-git.js';
+import { listDeletedFiles, listUntrackedAnalyzable, readUnifiedDiff } from './delta-git.js';
 import { resolveRepoRoot } from './project-root.js';
 import { describeScanFailure, describePartialScan } from '../utils/scan-failure.js';
 import { runSignals, withheldSignalIds, type SignalReport } from './review-signals.js';
@@ -68,6 +68,13 @@ interface Unexamined {
   untracked: string[];
   nonAnalyzable: string[];
   testsExcluded: number;
+  /**
+   * Files this diff DELETED. Nothing to parse — they are gone from the working
+   * tree — so they are neither reviewed nor counted as parse failures. Before
+   * this bucket existed they were both: the PR that removed `packages/review`
+   * reported "92 files could not be parsed", every one of them simply deleted.
+   */
+  deleted: number;
 }
 
 const TS_JS_RE = /\.(ts|tsx|js|jsx|mjs|cjs)$/;
@@ -133,15 +140,26 @@ function attachTestAssociations(
 function partitionChangedFiles(
   allChangedFiles: string[],
   includeTests: boolean,
-): { changedFiles: string[]; nonAnalyzable: string[]; testsExcluded: number } {
-  const analyzable = filterAnalyzableFiles(allChangedFiles);
+  deletedFiles: ReadonlySet<string> = new Set(),
+): {
+  changedFiles: string[];
+  nonAnalyzable: string[];
+  testsExcluded: number;
+  deleted: number;
+} {
+  // Deleted files come out of the reckoning before anything else: they have no
+  // content to analyze, so calling them "not analyzable" or "unparseable" both
+  // misdescribe them.
+  const present = allChangedFiles.filter(f => !deletedFiles.has(f));
+  const analyzable = filterAnalyzableFiles(present);
   const analyzableSet = new Set(analyzable);
   const changedFiles = includeTests ? analyzable : analyzable.filter(f => !isTestFile(f));
 
   return {
     changedFiles,
-    nonAnalyzable: allChangedFiles.filter(f => !analyzableSet.has(f)),
+    nonAnalyzable: present.filter(f => !analyzableSet.has(f)),
     testsExcluded: analyzable.length - changedFiles.length,
+    deleted: allChangedFiles.length - present.length,
   };
 }
 
@@ -214,6 +232,7 @@ async function runScan(
 async function buildContext(
   rootDir: string,
   diff: string,
+  baseRef: string,
   repoScan: boolean,
   includeTests: boolean,
 ): Promise<{
@@ -221,6 +240,7 @@ async function buildContext(
   changedFiles: string[];
   nonAnalyzable: string[];
   testsExcluded: number;
+  deleted: number;
   /** Set when the changed-file parse failed or yielded nothing parseable. */
   scanFailure?: string;
   /** Set when some changed files parsed and others could not be read at all. */
@@ -229,9 +249,11 @@ async function buildContext(
   repoScanFailure?: string;
 }> {
   const parsed = parseUnifiedDiff(diff);
-  const { changedFiles, nonAnalyzable, testsExcluded } = partitionChangedFiles(
+  const deletedFiles = new Set(await listDeletedFiles(rootDir, baseRef));
+  const { changedFiles, nonAnalyzable, testsExcluded, deleted } = partitionChangedFiles(
     [...parsed.patches.keys()],
     includeTests,
+    deletedFiles,
   );
   const { patches: scopedPatches, diffLines: scopedDiffLines } = scopeDiff(
     parsed,
@@ -272,6 +294,7 @@ async function buildContext(
     changedFiles,
     nonAnalyzable,
     testsExcluded,
+    deleted,
     scanFailure,
     scanPartial,
     repoScanFailure,
@@ -297,10 +320,11 @@ export async function analyzeReview(options: ReviewOptions): Promise<ReviewResul
     changedFiles,
     nonAnalyzable,
     testsExcluded,
+    deleted,
     scanFailure,
     scanPartial,
     repoScanFailure,
-  } = await buildContext(rootDir, diff, repoScanned, options.includeTests === true);
+  } = await buildContext(rootDir, diff, base, repoScanned, options.includeTests === true);
 
   const hasNonTsJs = changedFiles.some(f => !TS_JS_RE.test(f));
   const reports = runSignals(context, changedFiles, { repoScanned, hasNonTsJs, allSignals });
@@ -309,7 +333,12 @@ export async function analyzeReview(options: ReviewOptions): Promise<ReviewResul
     base,
     reports,
     changedFiles,
-    unexamined: { untracked: await listUntrackedAnalyzable(rootDir), nonAnalyzable, testsExcluded },
+    unexamined: {
+      untracked: await listUntrackedAnalyzable(rootDir),
+      nonAnalyzable,
+      testsExcluded,
+      deleted,
+    },
     withheldSignals: allSignals ? [] : withheldSignalIds(),
     scanFailure,
     scanPartial,
@@ -408,6 +437,13 @@ function renderCaveats(result: ReviewResult): string[] {
     lines.push(
       `  ${result.unexamined.testsExcluded} changed test file(s) were excluded — ` +
         'pass --include-tests to review them too.',
+    );
+  }
+  // Stated, not hidden: a deletion diff is mostly deleted files, and a reader
+  // who sees a small "changed files" count on a large PR should be told why.
+  if (result.unexamined.deleted > 0) {
+    lines.push(
+      `  ${result.unexamined.deleted} deleted file(s) — nothing to parse, so not reviewed.`,
     );
   }
   // Partial failure, which the all-or-nothing `scanFailure` cannot see. A

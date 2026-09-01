@@ -10,6 +10,16 @@ v2 per-claim verdicts: backports this ADR's per-candidate-verdict contract
 into doc-truth's own pass, dark/env-only), `docs/architecture/review-pass-architecture.md`
 (the implementation-level companion to this ADR)
 
+> **Superseded (2026-09-01):** `packages/review` — including
+> `packages/review/src/plugins/agent/` (the agent-review plugin this ADR's
+> candidate-loop passes lived in), `review-pass.ts`, `attestation.ts`, and the
+> offline test harness — is deleted from this repository (Phase 7b of the CLI
+> simplification plan, PR #1133; see [ADR-012](0012-self-hostable-review-action.md)).
+> Nothing this ADR built survives: Lien no longer runs an LLM-driven review
+> pass at all, dedicated or shared. Kept for history: the evidence recorded
+> here (the drizzle-orm#4172 A/B, the FP-guard probes, the firing-rate census)
+> is a real record of what was measured while the engine existed.
+
 ## Context and Problem Statement
 
 Lien Review's agent-review plugin (`packages/review/src/plugins/agent/`)

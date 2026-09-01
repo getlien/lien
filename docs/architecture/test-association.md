@@ -1,10 +1,13 @@
 # Test Association Flow
 
 > [!IMPORTANT]
-> **Phase 5 (2026-09-01) deleted `lien annotate`, `lien verify-tests`, the MCP server
-> (`get_files_context`), and the persisted index they read.** Every present-tense
-> mention below of `lien annotate` reporting something, or of `get_files_context`'s
-> `testAssociations` field, describes one of those now-deleted surfaces — read it as
+> **Phase 5 deleted `lien annotate`, `lien verify-tests`, the MCP server
+> (`get_files_context`), and the persisted index they read. Phase 7b (PR #1133)
+> then deleted `packages/review`.** So ALL FOUR of the surfaces this document
+> weighs against each other below are gone: every present-tense mention of
+> `lien annotate` reporting something, of `get_files_context`'s
+> `testAssociations` field, of `verify-tests`'s ledger, or of `@liendev/review`'s
+> test-coverage gap detection describes a now-deleted surface — read it as
 > history explaining a design decision (why Go's tier 2 and Swift's symbol-usage
 > signal were scoped to a single, narrow surface rather than threaded everywhere),
 > not as current behavior. `findTestAssociationsFromChunks` itself, the core matching

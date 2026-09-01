@@ -48,20 +48,14 @@ jobs:
       - name: Format check
         run: npm run format:check
 
-      - name: Build Parser, Core & Review (required by CLI & Action)
-        run: npm run build -w @liendev/parser && npm run build -w @liendev/core && npm run build -w @liendev/review
+      - name: Build Parser & Core (required by CLI)
+        run: npm run build -w @liendev/parser && npm run build -w @liendev/core
 
       - name: Lint
         run: npm run lint
 
       - name: Type check (CLI)
         run: npm run typecheck --workspace=packages/cli
-
-      - name: Type check (Review)
-        run: npm run typecheck --workspace=packages/review
-
-      - name: Type check (Action)
-        run: npm run typecheck --workspace=packages/action
 
       - name: Run tests (Parser)
         run: npm run test --workspace=packages/parser
@@ -75,12 +69,6 @@ jobs:
       - name: Run tests (CLI)
         run: npm run test --workspace=packages/cli
 
-      - name: Run tests (Review)
-        run: npm run test --workspace=packages/review
-
-      - name: Run tests (Action)
-        run: npm run test --workspace=packages/action
-
       - name: Build all packages
         run: npm run build
 
@@ -88,9 +76,6 @@ jobs:
         run: |
           node packages/cli/dist/index.js --version
           node packages/cli/dist/index.js --help
-
-      - name: Build Action image (Dockerfile smoke test)
-        run: docker build -f packages/action/Dockerfile -t lien-review:ci .
 
   delta:
     name: Complexity delta vs base branch (lien delta --base)
@@ -155,8 +140,10 @@ jobs:
     # the repo root), which resolves @liendev/core and @liendev/parser from
     # the local workspace and never touches the public registry for our own
     # packages. That means a phantom/unpublished/private dependency in
-    # packages/cli/package.json (like the @liendev/review dependency that
-    # broke `npm install` for real users until #620) is invisible to CI.
+    # packages/cli/package.json (the historical case: a `@liendev/review`
+    # dependency that broke `npm install` for real users until #620 -- that
+    # package has since been deleted, the failure mode has not) is invisible
+    # to CI.
     # This job packs the CLI exactly as it will be published and installs
     # the tarball into a scratch project with no workspace and no monorepo
     # lockfile -- the same resolution path an external `npm install
@@ -174,10 +161,11 @@ jobs:
     # core/parser" -- a combination that can't happen in production -- the
     # thing this job tested, which false-positived on any PR adding a new
     # cross-package export (see #644: core shipped `NullEmbeddings` but the
-    # CLI resolved the older, still-published core without it). review,
-    # action, and site are private and intentionally excluded: if the CLI
-    # ever depends on one of them again, it still has to resolve from the
-    # registry and 404, preserving the #620 detection this job exists for.
+    # CLI resolved the older, still-published core without it). `site` is
+    # private and intentionally excluded, as `review` and `action` were before
+    # they were deleted: if the CLI ever depends on a private workspace again,
+    # it still has to resolve from the registry and 404, preserving the #620
+    # detection this job exists for.
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

@@ -57,8 +57,7 @@ lien/
 │   ├── parser/    # @liendev/parser — AST parsing, chunking, complexity, scanning
 │   ├── core/      # @liendev/core — config, git, errors, report formatters (depends on parser)
 │   ├── cli/       # @liendev/lien — the CLI: complexity, health, review, delta (depends on core and parser)
-│   ├── review/    # @liendev/review (private) — PR review engine (depends on parser only)
-│   ├── action/    # @liendev/action (private) — self-hostable GitHub Action wrapping review
+│   ├── parser-native/  # @liendev/parser-native — the Rust tree-sitter addon
 │   └── site/      # @liendev/site (private) — VitePress docs site (lien.dev)
 ├── docs/architecture/     # Architecture docs and ADRs
 ├── docs/development/      # Contributor how-tos (worktrees, adding a language)
@@ -154,30 +153,22 @@ git commit -m "chore: update dependencies"
 
 ### 4. CI Gates
 
-Beyond the 6 pre-commit gates above, one required PR check enforces a
-CLAUDE.md policy directly: **"Require harness evidence or bypass label"**
-(`.github/workflows/harness-attestation.yml`). Any PR touching
-`packages/review/src/plugins/agent/**` must show evidence of a >= 9/10
-harness calibration run (a `harness.yml` run link, a `harness-result.json`
-summary, a `calibrate` mention, or a deterministic fixture-comparison
-census: byte-identical/byte-diff/sha256/`build-prompts.ts`) in the PR body.
+The pre-commit gates above are backstopped by `.github/workflows/ci.yml` on
+every PR. The `lien delta --base` job is the one worth knowing about: it
+compares the working tree against the PR's base branch rather than `HEAD`, and
+fails only on a function that crossed a threshold it was under at the base.
 
-The `skip-harness-gate` label is an **owner-only** bypass for non-behavioral
-changes: it is not a self-serve escape hatch, and agents must never
-self-apply it to get past this check on their own PR. The gate only honors
-the label if its most recent `labeled` event was applied by a login on the
-allowlist in `.github/scripts/harness-gate-check.mjs`; anyone else's label
-application is ignored and the PR falls through to the ordinary evidence
-check. See that script and the workflow file's header comment for the full
-policy and its known limitations.
+There used to be a required "Require harness evidence or bypass label" check,
+enforcing a >= 9/10 calibration run for any PR touching the LLM review rules.
+Both the rules and the harness are deleted, and the check went with them.
 
 ## Releasing
 
-Lien versions and publishes via [Changesets](https://github.com/changesets/changesets), driven by `.changeset/config.json` and `.github/workflows/release.yml`. Published packages: `@liendev/parser`, `@liendev/core`, `@liendev/lien` (the `cli` package). `review`, `action`, and `site` are `"private": true` and never published. The three published packages are `linked`: they always bump together, even when only one has code changes.
+Lien versions and publishes via [Changesets](https://github.com/changesets/changesets), driven by `.changeset/config.json` and `.github/workflows/release.yml`. Published packages: `@liendev/parser`, `@liendev/core`, `@liendev/lien` (the `cli` package), and `@liendev/parser-native`. `site` is `"private": true` and never published. All four published packages are `linked`: they always bump together, even when only one has code changes.
 
 ### Flow
 
-1. **In your PR**, run `npm run changeset` (or invoke the `/changeset` skill to draft one from your commits). Pick the affected packages and bump type, write a summary, commit the generated `.changeset/<name>.md` alongside your change. Skip this for changes scoped only to `packages/review`, `packages/action`, or `packages/site`: they're unpublished and never need one.
+1. **In your PR**, run `npm run changeset` (or invoke the `/changeset` skill to draft one from your commits). Pick the affected packages and bump type, write a summary, commit the generated `.changeset/<name>.md` alongside your change. Skip this for changes scoped only to `packages/site`: it's unpublished and never needs one.
 2. **Merge to main.** The release workflow runs on every push to main.
 3. If there are pending changesets, the **changesets bot** opens (or updates) a "Version Packages" PR that bumps versions, rewrites each published package's `CHANGELOG.md` from the changeset summaries, and deletes the consumed changeset files. The root `version` script also syncs `package-lock.json` in the same step (`changeset version && npx --yes npm@10.9.4 install --package-lock-only`). `changeset version` never touches the lockfile on its own, which otherwise left every workspace's recorded `version` and internal `@liendev/*` ranges stale until the next unrelated `npm install`. The `npm@10.9.4` pin is deliberate: `release.yml` upgrades to npm 11.5.1 for OIDC trusted publishing before this step runs, and npm 11.5.1's dependency resolution on this repo's tree incorrectly prunes `tsx`'s nested pinned `esbuild` from the lockfile (a version genuinely different from the hoisted top-level `esbuild`), which breaks `npm ci` on every subsequent run until someone re-syncs the lockfile again. Pinning `npm@10.9.4` (Node 22's bundled version) for just this invocation sidesteps that regression.
 4. **Merging the Version Packages PR publishes to npm**: the same workflow, seeing no pending changesets left, runs `npm run release` (`npm run build && changeset publish --provenance`) via npm OIDC trusted publishing (no `NPM_TOKEN` needed).

@@ -68,6 +68,31 @@ async function refExists(rootDir: string, ref: string): Promise<boolean> {
  * Throws when `baseRef` does not resolve to a commit; returns '' for a repo with
  * no commits yet, where there is nothing to compare against.
  */
+/**
+ * The files this diff DELETES.
+ *
+ * `lien review` parses the working tree, so a deleted file has nothing to
+ * parse. Without this it counted them as changed files and then reported them
+ * as parse failures: on the PR that removed `packages/review`, "92 files could
+ * not be parsed" — every one of them simply gone from disk, zero genuine
+ * failures. A reader has no way to tell that from a broken parser.
+ *
+ * `lien delta` never had the problem because it reads `--name-status` and
+ * renders deletions as `· removed`; this gives `review` the same fact.
+ */
+export async function listDeletedFiles(rootDir: string, baseRef = 'HEAD'): Promise<string[]> {
+  if (baseRef === 'HEAD' && !(await hasCommits(rootDir))) return [];
+  const out = await git(rootDir, [
+    'diff',
+    '--name-only',
+    '--diff-filter=D',
+    '-z',
+    '--no-renames',
+    baseRef,
+  ]);
+  return out.split('\0').filter(p => p.length > 0);
+}
+
 export async function readUnifiedDiff(rootDir: string, baseRef = 'HEAD'): Promise<string> {
   if (baseRef === 'HEAD' && !(await hasCommits(rootDir))) return '';
   if (!(await refExists(rootDir, baseRef))) {
