@@ -445,4 +445,35 @@ describe('renderRemovedExportsSection', () => {
     ]);
     expect(renderRemovedExportsSection(makeContext({ patches }))).toBe('');
   });
+
+  /**
+   * NEW here, not ported. The deleted `buildInitialMessage injection` block was
+   * the only end-to-end cover for this path — patch + repoChunks all the way
+   * through to rendered text naming the surviving reference — and its assertions
+   * could not move, because they went through the review engine's prompt
+   * builder, which is being deleted.
+   *
+   * The pieces either side of that path are unit-tested above
+   * (`extractRemovedExports`, `findSurvivingReferences`,
+   * `computeRemovedExportContexts`, `renderRemovedExports`), so what was lost is
+   * specifically their COMPOSITION. `renderRemovedExportsSection` is exactly
+   * that composition minus the `<removed_exports>` wrapper, so the coverage is
+   * recoverable without inventing behaviour — only the wrapper, which was
+   * engine-specific, is genuinely gone.
+   *
+   * Same Rust fixture as the deleted test, deliberately: a removed `pub fn`
+   * whose caller survives is the shape that matters here, and Rust exercises the
+   * non-TS path of a signal that only handles TS/JS/Rust at all.
+   */
+  it('renders a removed export together with the surviving reference that still calls it', () => {
+    const patches = new Map([
+      ['src/parser.rs', patch('@@ -1,1 +0,0 @@', '-pub fn parse_input(p: &str) {}')],
+    ]);
+    const repoChunks = [makeChunk('src/main.rs', 210, 'parser::parse_input(p);')];
+
+    const rendered = renderRemovedExportsSection(makeContext({ patches, repoChunks }));
+
+    expect(rendered).toContain('parse_input (removed from src/parser.rs)');
+    expect(rendered).toContain('src/main.rs:210');
+  });
 });
