@@ -1,28 +1,28 @@
 /**
- * @liendev/core - Lien's indexing and analysis engine
+ * @liendev/core - shared support for the Lien CLI
  *
- * This is the public API for:
- * - @liendev/cli (CLI commands)
- * - @liendev/action (GitHub Action)
- * - @liendev/cloud (Cloud workers)
- * - Third-party integrations
+ * The indexing and search engine this package used to be is gone: the SQLite
+ * structural store, the indexer, index GC and FTS5 lexical search were all
+ * removed along with the MCP server. What remains is the support layer the
+ * CLI needs, plus a handful of parser re-exports kept so existing importers
+ * do not have to reach into two packages.
+ *
+ * For anything analytical — chunking, complexity, dependency resolution,
+ * review signals — use `@liendev/parser` directly. That is where the engine
+ * actually lives, and it is unchanged.
  *
  * @example
  * ```typescript
- * import {
- *   indexCodebase,
- *   createVectorDB,
- *   ComplexityAnalyzer,
- * } from '@liendev/core';
+ * import { configService } from '@liendev/core';
+ * import { performChunkOnlyIndex, analyzeComplexityFromChunks } from '@liendev/parser';
  *
- * // Index a codebase
- * const result = await indexCodebase({ rootDir: '/path/to/project' });
+ * // Per-project config (.lien.config.json — complexity.thresholds only)
+ * const config = await configService.load(rootDir);
  *
- * // Run complexity analysis
- * const db = await createVectorDB('/path/to/project');
- * await db.initialize();
- * const analyzer = new ComplexityAnalyzer(db);
- * const report = await analyzer.analyze();
+ * // Parse the working tree on demand; there is no index to build or read
+ * const scan = await performChunkOnlyIndex(rootDir, {});
+ * if (!scan.success) throw new Error(scan.error);
+ * const report = analyzeComplexityFromChunks(scan.chunks);
  * ```
  */
 
