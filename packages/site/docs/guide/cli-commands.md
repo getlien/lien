@@ -1,208 +1,17 @@
 # CLI Commands
 
-Lien provides a simple command-line interface for managing your codebase index.
-
-## lien index
-
-Index your codebase for lexical search and structural analysis. **Automatically uses incremental indexing** to only process changed files.
+Lien is a local CLI with four commands. Every one of them parses your working tree on the spot — there's no index to build first and no server to start.
 
 ```bash
-lien index [options]
+lien complexity   # Analyze code complexity
+lien health       # Rank the functions that are risky to change
+lien review       # Run deterministic signals over your changes
+lien delta        # Flag NEW complexity threshold crossings before commit
 ```
-
-### Options
-
-| Option | Description |
-|--------|-------------|
-| `-f, --force` | Clear existing index and rebuild from scratch |
-| `-v, --verbose` | Show detailed logging during indexing |
-
-### Behavior
-
-**Without `--force` (default - incremental mode):**
-
-1. **Checks for changes** (if manifest exists from previous index)
-   - mtime-based detection (simple and reliable)
-2. **Only indexes changed files**, avoiding unchanged-file parsing and writes
-3. Chunks code into semantic units (Tree-sitter AST)
-4. Computes complexity metrics and dependency metadata
-5. Stores in the SQLite index at `~/.lien/indices/[project-hash]/`
-6. Updates index manifest for future incremental runs
-
-**With `--force` (clean rebuild):**
-
-1. **Deletes existing index and manifest** (clean slate)
-2. Scans entire codebase
-3. Indexes all files from scratch
-4. Use when: config changed, stale results, or corrupted index
-
-### Performance
-
-**Initial index** (full):
-- **Small** (1k files): ~3 seconds
-- **Medium** (10k files): ~25-30 seconds
-- **Large** (50k files): ~2-3 minutes
-
-These are linear extrapolations from measured reindex times; see [How It Works](/how-it-works#performance) for the underlying benchmarks. There's no embedding step, so indexing is CPU-bound Tree-sitter parsing plus a SQLite write.
-
-**Incremental reindex** (typical):
-- **Single file edit**: < 2 seconds
-- **Small changes (5-10 files)**: < 5 seconds
-- **Feature branch (50 files)**: ~15-20 seconds
-- **Large refactor (500 files)**: ~1-2 minutes
-
-### First Run
-
-On first run, Lien indexes your codebase. There's no model to download and no network required: indexing starts immediately.
-
-### Output
-
-```
-🔍 Scanning codebase...
-✓ Found 1,234 files across 2 frameworks
-
-⚡ Processing files...
-████████████████████ 100% | 1,234/1,234 files
-
-💾 Writing index...
-████████████████████ 100% | 5,678/5,678 chunks
-
-✅ Indexing complete!
-   • 1,234 files indexed
-   • 5,678 chunks created
-   • 234 test associations detected
-   • Stored in ~/.lien/indices/abc123
-```
-
-## lien serve
-
-Start the MCP server for AI assistant integration. **Automatically watches for file changes** and reindexes in the background.
-
-```bash
-lien serve [options]
-```
-
-### Options
-
-| Option | Description |
-|--------|-------------|
-| `-p, --port <port>` | Port number (reserved for future use; the MCP server runs over stdio) |
-| `--no-watch` | Disable file watching for this session |
-| `-r, --root <path>` | Root directory to serve (defaults to current directory) |
-
-### Behavior
-
-1. Auto-detects project structure via ecosystem presets
-2. Checks if index exists (auto-indexes if missing)
-3. Starts MCP server on stdio transport
-4. Listens for tool requests from Cursor
-5. **Watches for file changes** and automatically reindexes (< 2 seconds per file!)
-6. Detects git commits and reindexes changed files in background
-
-### Auto-Indexing
-
-If no index exists, `lien serve` will automatically run indexing on first start. This usually takes seconds to a couple of minutes depending on project size (see the Performance table above).
-
-### File Watching
-
-File watching is **enabled by default** for instant updates:
-- Detects when you save a file in your editor
-- Automatically reindexes in < 2 seconds, with no manual `lien index` run required
-
-To disable for a session:
-```bash
-lien serve --no-watch
-```
-
-There's no config file setting for this: `--no-watch` (or omitting it) is the only control, decided fresh each time you run `lien serve`. If you're launching via an editor's MCP config (see below), add `--no-watch` to the `args` array there to make it permanent for that integration.
-
-::: tip
-Usually run via Cursor's MCP configuration, not manually.
-:::
-
-### MCP Configuration
-
-Lien has no setup wizard: you add its MCP server to your editor's config by
-hand. See [Configuring Your Editor (MCP)](/guide/installation#configuring-your-editor-mcp)
-in the installation guide for the exact config file and JSON snippet per
-editor (Cursor, Claude Code, Windsurf, OpenCode, Kilo Code, Antigravity).
-
-## lien status
-
-Show indexing status and statistics.
-
-```bash
-lien status [options]
-```
-
-### Options
-
-| Option | Description |
-|--------|-------------|
-| `-v, --verbose` | Also show indexing settings (concurrency, chunk size/overlap defaults) |
-| `--format <type>` | Output format: `text` (default) or `json` |
-
-### Output
-
-```
-Status
-
-Configuration: ✓ Using defaults (no per-project config needed)
-Index location: ~/.lien/indices/abc123
-Index status: ✓ Exists
-Index files: 1,234
-Last modified: 7/2/2026, 9:41:03 AM
-Last reindex: 7/2/2026, 9:40:12 AM
-
-Features:
-Git detection: ✓ Enabled
-  Poll interval: 2s
-  Current branch: main
-  Current commit: a1b2c3d4
-File watching: ✓ Enabled (default)
-  Batch window: 500ms (collects rapid changes, force-flush after 5s)
-  Disable with: lien serve --no-watch
-```
-
-With `--verbose`, an additional "Indexing Settings (defaults)" block prints the concurrency and chunk size/overlap defaults. With `--format json`, the same data is emitted as a single JSON object (`version`, `indexPath`, `indexStatus`, `indexFiles`, `git`, `features`, `settings`) for scripting.
-
-## lien config
-
-Manage global configuration settings.
-
-```bash
-lien config <command> [key] [value]
-```
-
-### Subcommands
-
-| Subcommand | Description |
-|------------|-------------|
-| `set <key> <value>` | Set a configuration value |
-| `get <key>` | Read a configuration value |
-| `list` | Show all configuration values |
-
-### Allowed Keys
-
-| Key | Values | Description |
-|-----|--------|-------------|
-| `backend` | `sqlite` | Storage backend (SQLite structural store + FTS5 search) |
-
-### Examples
-
-```bash
-# Check current backend
-lien config get backend
-
-# Show all settings
-lien config list
-```
-
-Config is stored in `~/.lien/config.json`. The `LIEN_BACKEND` environment variable takes precedence over the config file.
 
 ## lien complexity
 
-Analyze code complexity across your codebase. Identifies functions exceeding complexity thresholds for tech debt analysis and refactoring prioritization.
+Analyze code complexity across your codebase. Identifies functions exceeding fixed complexity thresholds for tech-debt analysis and refactoring prioritization.
 
 ```bash
 lien complexity [options]
@@ -214,103 +23,59 @@ lien complexity [options]
 |--------|-------------|
 | `--files <paths...>` | Specific files to analyze |
 | `--format <type>` | Output format: `text` (default), `json`, `sarif` |
-| `--fail-on <severity>` | Exit with code 1 if violations found: `error`, `warning` |
+| `--fail-on <severity>` | Exit 1 if violations found: `error`, `warning` |
+
+### Behavior
+
+This is a gate-shaped command: with no index to be stale against, the only failure mode left is a parse that genuinely finds nothing to analyze. If the scan fails outright (a native-binding load error, or zero files parsed), `lien complexity` hard-errors rather than printing a false "0 violations, clean!"
+
+Thresholds are fixed (not read from `.lien.config.json`) — see [Configuration](/guide/configuration#complexity-analysis) for the four metrics and their default values. To customize thresholds, use `lien delta`, which does read `.lien.config.json`.
 
 ### Output Formats
 
-**Text (default)** - Human-readable output for terminal:
+**Text (default)** — real output against this repo:
 
 ```
-📊 Complexity Analysis
-
-Found 3 violations in 2 files
-
-⚠️  src/utils/parser.ts:45 - parseComplexData (complexity: 18)
-   Severity: error | Threshold: 10
-
-⚠️  src/api/handler.ts:23 - handleRequest (complexity: 14)
-   Severity: error | Threshold: 10
-
-⚠️  src/api/handler.ts:89 - processResponse (complexity: 11)
-   Severity: warning | Threshold: 10
+🔍 Complexity Analysis
 
 Summary:
-  Files analyzed: 156
-  Violations: 3 (2 error, 1 warning)
-  Max complexity: 18
-  Avg complexity: 4.2
+  Files analyzed: 595
+  Violations: 79 (16 errors, 63 warnings)
+  Average complexity: 3.2
+  Max complexity: 31
+
+❌ Errors:
+
+  lien-review-testbed/rust/src/main.rs:34 - run()
+    🔀 Test paths: 31 (needs ~31 tests) (threshold: 30)
+    ⬆️  3% over threshold
+    ⚠️  Complexity risk: CRITICAL
 ```
 
-**JSON** - Machine-readable output for CI pipelines:
+**JSON** — machine-readable output for CI pipelines:
 
 ```bash
-lien complexity --format json
+lien complexity --files src/api/handler.ts --format json
 ```
 
 ```json
 {
   "summary": {
-    "filesAnalyzed": 156,
-    "avgComplexity": 4.2,
-    "maxComplexity": 18,
-    "violationCount": 3,
-    "bySeverity": { "error": 2, "warning": 1 }
+    "filesAnalyzed": 1,
+    "totalViolations": 0,
+    "bySeverity": { "error": 0, "warning": 0 },
+    "avgComplexity": 3.5,
+    "maxComplexity": 6
   },
-  "files": {
-    "src/utils/parser.ts": {
-      "violations": [
-        {
-          "symbolName": "parseComplexData",
-          "startLine": 45,
-          "complexity": 18,
-          "severity": "error"
-        }
-      ]
-    }
-  }
+  "files": {}
 }
 ```
 
-**SARIF** - For GitHub Code Scanning and IDE integrations:
+**SARIF** — for GitHub Code Scanning and IDE integrations:
 
 ```bash
 lien complexity --format sarif > results.sarif
 ```
-
-### Use Cases
-
-**CI Pipeline - Fail on new violations:**
-
-```bash
-lien complexity --fail-on error
-```
-
-**Analyze specific files (e.g., PR changed files):**
-
-```bash
-lien complexity --files src/api/handler.ts src/utils/parser.ts
-```
-
-**Generate baseline for delta tracking:**
-
-```bash
-lien complexity --format json > baseline.json
-```
-
-### Complexity Metrics
-
-Lien tracks four metrics: cyclomatic complexity (test paths), cognitive complexity (mental load,
-based on [SonarSource's specification](https://www.sonarsource.com/docs/CognitiveComplexity.pdf)),
-Halstead effort (`Effort = Difficulty × Volume`, time to understand), and Halstead bugs
-(`Bugs = Effort^(2/3) / 3000`, estimated bug count). See
-[Configuration](/guide/configuration#complexity-analysis) for what each one measures and how to
-set thresholds.
-
-| Complexity | Severity | Interpretation |
-|------------|----------|----------------|
-| 1-14 | OK | Simple, easy to understand |
-| 15-29 | Warning | Consider refactoring |
-| 30+ | Error | Should refactor |
 
 ### Examples
 
@@ -318,15 +83,143 @@ set thresholds.
 # Basic analysis
 lien complexity
 
-# Strict mode for code review
-lien complexity --fail-on warning
-
-# JSON output for CI
-lien complexity --format json --fail-on error
+# Fail CI on error-severity violations
+lien complexity --fail-on error
 
 # Analyze only changed files
 git diff --name-only HEAD~1 | xargs lien complexity --files
+
+# JSON baseline for external tracking
+lien complexity --format json > baseline.json
 ```
+
+## lien health
+
+Rank the functions that are risky to change: complexity × fan-in ÷ test coverage. Advisory — this command never fails on findings, only on genuine operational errors (a bad flag, a scan that couldn't run at all).
+
+```bash
+lien health [options]
+```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--format <type>` | Output format: `text` (default), `json` |
+| `--top <n>` | How many functions to show (default: `5`) |
+| `--path <prefix>` | Only show functions under this path prefix |
+| `--include-tests` | Rank test files too (excluded by default) |
+
+### Output
+
+Real output against this repo (`lien health --top 3`):
+
+```
+lien health
+
+  606 files · 8923 chunks · 1.5s · no index
+
+  ⚠ 5 functions are risky to change
+
+  1  lien-review-testbed/typescript/src/validator.ts:54  validateInput
+     mental load 27 · imported by 5 · no tests
+     Complex and widely depended on, and nothing would catch a regression.
+     → add a test before touching it
+
+  2  lien-review-testbed/typescript/src/database.ts:38  query
+     mental load 8 · imported by 5 · no tests
+     Widely depended on and untested, but simple enough to cover quickly.
+     → add a test — cheap, high value
+
+  74 other threshold violations — `lien complexity` to see them
+
+  Coverage
+    fan-in resolved   typescript, php, javascript, rust, python, csharp, java
+    no fan-in found   markdown (81), yaml (11), swift (6), go (6), kotlin (5)
+                      ranked on complexity alone — not judged safe
+```
+
+Fan-in ("imported by N") is resolved per-language; languages without a fan-in resolver are still ranked, on complexity alone, and called out explicitly under **Coverage** rather than silently mixed in as if they'd been judged equally safe.
+
+### Examples
+
+```bash
+# Top 5 riskiest functions (default)
+lien health
+
+# Top 20, JSON for scripting
+lien health --top 20 --format json
+
+# Only functions under a specific path
+lien health --path packages/cli/src
+```
+
+## lien review
+
+Run the deterministic signals over your working-tree changes: stale duplicate literals, unswept variants, removed exports, doc drift, and more. Advisory — never fails, and has no `--fail-on`. These are candidates for you to judge, not findings that block anything.
+
+```bash
+lien review [options]
+```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--base <ref>` | Compare the working tree against this ref instead of `HEAD` |
+| `--format <type>` | Output format: `text` (default), `json` |
+| `--no-repo-scan` | Skip the whole-repo scan the cross-file signals need (faster, blinder) |
+| `--include-tests` | Review changed test files too (excluded by default) |
+| `--all-signals` | Run all 14 signals, not just the measured-useful default set (noisy) |
+
+### Behavior
+
+`review` needs a git repository — it diffs your working tree against `--base` (or `HEAD`) — and fails loudly with a non-zero exit if it can't (an unresolvable ref, or not a git repo at all), rather than printing an empty "all clear."
+
+By default it runs a smaller set of signals than the full 14: measurement against this repo found the other 13 (`stale-literal`, `removed-export`, `variant-sweep`, `unread-field`, `catch-discrimination`, `sibling-surface`, `rename-sweep`, `untrusted-input`, `test-coverage`, `docs-drift`, `doc-claims`, `guidance-surface`, `simplicity`) produced 0 useful candidates read directly — they were built as inputs for an LLM to adjudicate (that's what Lien Review, the CI Action, does). `--all-signals` runs them anyway.
+
+### Output
+
+With no changes against `HEAD`:
+
+```
+No changes against HEAD.
+
+Nothing was analyzed — this is not a clean review, it is an empty one.
+Make a change, or pass --base <ref> to compare against something else.
+```
+
+With changes but no candidates found:
+
+```
+lien review — 1 changed file(s) vs HEAD
+
+No candidates from any signal.
+
+Not examined:
+  13 further signal(s) did not run: stale-literal, removed-export, variant-sweep, ...
+    They were built as inputs for an LLM to adjudicate, and measured 0 useful candidates in 106 on this repo when read directly. --all-signals runs them anyway.
+
+0 candidate(s) across 0 signal(s) · 53 ms
+These are candidates for you to judge, not findings. This command never fails a build.
+```
+
+### Examples
+
+```bash
+# Review your uncommitted changes against HEAD
+lien review
+
+# Review a whole branch against main, in CI
+lien review --base origin/main
+
+# Fast pass, skip the whole-repo cross-file scan
+lien review --no-repo-scan
+```
+
+::: tip Relationship to Lien Review (the GitHub Action)
+`lien review` runs the same underlying deterministic signals locally that [Lien Review](/guide/lien-review) runs in CI — but locally they're printed as candidates for you to read, not adjudicated by an LLM or posted as PR comments.
+:::
 
 ## lien delta
 
@@ -341,14 +234,22 @@ lien delta [options]
 | Option | Description |
 |--------|-------------|
 | `--format <type>` | Output format: `text` (default), `json` |
-| `--threshold <n>` | Override cyclomatic and cognitive thresholds (default: from config) |
+| `--threshold <n>` | Override cyclomatic and cognitive thresholds (default: from `.lien.config.json`, see [Configuration](/guide/configuration)) |
 | `--soft` | Advisory mode: always exit 0, report still prints |
-| `--file <path>` | Analyze only this file vs HEAD (the fast path edit hooks use) |
+| `--file <path>` | Analyze only this file vs HEAD (fast path for a single-file check) |
 | `--base <ref>` | Compare the working tree against this ref instead of HEAD (e.g. `origin/main` in CI) |
 
 ### Behavior
 
-Exits 1 only when a changed function crosses over a threshold it was under at the comparison point, or is new and already over threshold. Improving a function, or merely touching a pre-existing violation, never fails. `--soft` always exits 0, so it advises without blocking.
+Exits 1 only when a changed function crosses over a threshold it was under at the comparison point, or is new and already over threshold. Improving a function, or merely touching a pre-existing violation, never fails. `--soft` always exits 0, so it advises without blocking. Requires a git repository — exits 2 with an explicit error otherwise, the same as an unreadable `.lien.config.json` or an unresolvable `--base` ref.
+
+### Output
+
+A clean run:
+
+```
+lien delta — no complexity-affecting changes vs HEAD (35 ms)
+```
 
 ### Examples
 
@@ -358,113 +259,14 @@ lien delta
 
 # CI: check the whole PR against its base branch
 lien delta --base origin/main
+
+# Single-file fast path, e.g. from an editor hook
+lien delta --file src/api/handler.ts
 ```
 
 See [docs/architecture/lien-delta.md](https://github.com/getlien/lien/blob/main/docs/architecture/lien-delta.md) for the full design.
 
-## lien stats
-
-Local, historical metrics for the `lien delta` nudge loop: how many runs happened, how many had new crossings, how many distinct functions were flagged, and how many were later seen clean, over 7- and 30-day windows. Reads only the local JSONL event log `lien delta` appends to; no network call.
-
-```bash
-lien stats [options]
-```
-
-### Options
-
-| Option | Description |
-|--------|-------------|
-| `--format <type>` | Output format: `text` (default), `json` |
-
-### Example
-
-```bash
-lien stats
-```
-
-"Resolved after flag" means a flagged function was later seen clean; it's a presence and absence signal, not proof the warning caused the fix. Disable event recording with `LIEN_DELTA_EVENTS=off`.
-
-## lien gc
-
-Garbage-collect stale or orphaned index directories under `~/.lien/indices`. By default, removes indices whose source project no longer exists on disk and sweeps legacy `code_chunks.lance` directories left over from the pre-lexical-search embeddings backend. Never touches the current project's index or one a live process holds open.
-
-```bash
-lien gc [options]
-```
-
-### Options
-
-| Option | Description |
-|--------|-------------|
-| `--dry-run` | List candidates with size and reason; delete nothing |
-| `--stale [days]` | Also remove indices not accessed in N days (default 60) |
-| `--format <type>` | Output format: `text` (default), `json` |
-| `-v, --verbose` | Show detailed error output |
-
-### Examples
-
-```bash
-# Preview what would be removed
-lien gc --dry-run
-
-# Also reclaim indices untouched for 90+ days
-lien gc --stale 90
-```
-
-## lien path
-
-Print Lien storage paths and supported extensions. This is a plumbing command intended for **hook scripts** (e.g. a Claude Code `PostToolUse` hook) rather than everyday interactive use.
-
-```bash
-lien path [options]
-```
-
-### Options
-
-Exactly one of the following is required: they are mutually exclusive.
-
-| Option | Description |
-|--------|-------------|
-| `--store` | Print the storage root for the current repo (e.g. `~/.lien/indices/abc123`) |
-| `--extensions` | Print the indexed-file extensions, one per line |
-| `--root` | Print the resolved project root (walks up the directory tree looking for `.git`) |
-
-### Examples
-
-```bash
-lien path --root
-# /Users/you/projects/my-app
-
-lien path --store
-# /Users/you/.lien/indices/a1b2c3d4
-
-lien path --extensions
-# .ts
-# .tsx
-# .js
-# ...
-```
-
-## lien annotate
-
-Print a short impact summary for a single file: dependent count and blast-radius risk, test coverage, and complexity warnings. This is a plumbing command intended for **hook scripts** (for example, a `PostToolUse` hook that annotates a just-edited file) rather than everyday interactive use. It never throws: on any error (missing index, unresolvable path) it exits 0 with empty output, so it never breaks a hook pipeline. Output is also empty when the impact is trivial (0-1 dependents, no complexity warnings, existing test coverage).
-
-```bash
-lien annotate <file>
-```
-
-### Example
-
-```bash
-lien annotate packages/cli/src/cli/status.ts
-# Lien impact for packages/cli/src/cli/status.ts:
-#   • 3 files import this — packages/cli/src/cli/index.ts, ...; risk: low.
-#   • Test coverage: packages/cli/src/cli/status.test.ts.
-```
-
 ## lien --version
-
-Show installed version.
 
 ```bash
 lien --version
@@ -473,111 +275,62 @@ lien --version
 
 ## lien --help
 
-Show help and available commands.
-
 ```bash
 lien --help
 ```
 
 ```
-Quick start: run 'lien serve' in your project directory
+Quick start: run 'lien health' in your project directory
 
 Usage: lien [options] [command]
 
-Local lexical code search and dependency analysis for AI assistants via MCP
-
 Options:
-  -V, --version              output the version number
-  -h, --help                 display help for command
+  -V, --version         output the version number
+  -h, --help            display help for command
 
 Commands:
-  index [options]            Index the codebase for lexical (FTS5) search and
-                             dependency analysis
-  serve [options]            Start the MCP server (works with Cursor, Claude
-                             Code, Windsurf, and any MCP client)
-  status [options]           Show indexing status and statistics
-  complexity [options]       Analyze code complexity
-  delta [options]            Flag NEW complexity threshold crossings in the
-                             working tree (vs HEAD) before commit
-  stats [options]            Local nudge-loop metrics: lien delta runs,
-                             crossings, and functions resolved after being
-                             flagged
-  config                     Manage global configuration (~/.lien/config.json —
-                             currently just the storage backend). Per-project
-                             config (./.lien.config.json) only supports
-                             complexity.thresholds and is not managed by this
-                             command — edit the file directly.
-  path [options]             Print Lien storage paths and supported extensions
-                             (for hook scripts)
-  annotate [options] <file>  Print a short impact summary for a single file
-                             (for hook annotation)
-  gc [options]               Garbage-collect stale/orphaned index directories
-                             under ~/.lien/indices
+  complexity [options]  Analyze code complexity
+  health [options]      Rank the functions that are risky to change: complexity
+                        × fan-in ÷ test coverage (advisory — never fails on
+                        findings)
+  review [options]      Run the deterministic signals over your changes: stale
+                        duplicate literals, unswept variants, removed exports,
+                        doc drift and more (advisory — never fails, no
+                        --fail-on)
+  delta [options]       Flag NEW complexity threshold crossings in the working
+                        tree (vs HEAD) before commit
 ```
-
-## Environment Variables
-
-Lien respects the following environment variables:
-
-### `LIEN_HOME`
-
-Override default index location:
-
-```bash
-export LIEN_HOME=/custom/path
-lien index  # Stores in /custom/path/indices/
-```
-
-Default: `~/.lien`
-
-### `NODE_ENV`
-
-Set to `development` for verbose logging:
-
-```bash
-NODE_ENV=development lien index
-```
-
-## Exit Codes
-
-| Code | Meaning |
-|------|---------|
-| 0 | Success |
-| 1 | General error |
-| 2 | Configuration error |
-| 3 | Index error |
-| 4 | Network error |
 
 ## Common Workflows
 
-### Initial Setup
+### First look at a codebase
 
 ```bash
 cd /path/to/project
-lien index
+lien health
 ```
 
-Then wire up your editor's MCP config by hand — see
-[Configuring Your Editor (MCP)](/guide/installation#configuring-your-editor-mcp).
-
-### Force Rebuild
+### Before opening a PR
 
 ```bash
-# After major changes or stale results
-lien index --force
+lien review
 ```
 
-### Checking Status
+### Before committing
 
 ```bash
-lien status
+lien delta
+```
+
+### CI gate on a PR branch
+
+```bash
+lien delta --base origin/main
+lien complexity --fail-on error
 ```
 
 ### Upgrading Lien
 
 ```bash
 npm update -g @liendev/lien
-# Restart Cursor to load new version
 ```
-
-

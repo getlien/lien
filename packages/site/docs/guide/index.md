@@ -1,12 +1,12 @@
 # Introduction
 
-Lien _(French for "link" or "connection")_ is a local-first **code-intelligence layer** for AI coding assistants like Cursor and Claude Code, delivered through the Model Context Protocol (MCP).
+Lien _(French for "link" or "connection")_ is a local-first **code-intelligence CLI** for AI coding agents like Cursor and Claude Code.
 
 ## What is Lien?
 
-Lien indexes your codebase locally and gives AI assistants the structural context they need to work safely: reverse dependencies and blast radius, complexity hotspots, and test associations, plus fast lexical code search for discovery. Unlike cloud-based solutions, everything runs on your machine. Your code never leaves your computer. See [How It Works](/how-it-works) for the indexing-to-answer pipeline.
+Lien parses your working tree with Tree-sitter, on the spot, every time you run it, and gives you (or your AI assistant) the structural context needed to work safely: complexity hotspots, a risk-ranked list of what's dangerous to change, and deterministic signals over your diff. Unlike cloud-based solutions, everything runs on your machine, and there's nothing persisted between runs. See [How It Works](/how-it-works) for the parse-to-answer pipeline.
 
-**Setup takes about a minute:** install globally, add Lien's MCP server to your editor's config by hand (see [Configuring Your Editor (MCP)](/guide/installation#configuring-your-editor-mcp)), restart your AI assistant. There's no model to download: indexing starts immediately and runs entirely offline, though the first pass over a large repo can take from a few seconds to a couple of minutes.
+**Setup takes about 30 seconds:** install globally, then run a command in your project. There's no config file, no editor wiring, and no model to download — each command parses fresh and prints a report.
 
 ## Key Benefits
 
@@ -17,42 +17,50 @@ Lien auto-detects your project structure and "just works." No config files, no e
 Your code stays local. Lien processes everything on your machine, with no external API calls, no data collection, and no telemetry.
 
 ### Structural Intelligence
-The questions an agent needs answered before editing your code ("what depends on this?", "how complex is this?", "what tests cover it?") are answered from an accurate import graph and per-symbol metrics, not guessed.
+The questions worth answering before editing code ("how complex is this?", "what's risky to touch?", "does this diff introduce a stale literal or a removed export?") are answered from a real Tree-sitter parse and per-symbol metrics, not guessed.
 
-### Explainable Lexical Search
-For discovery, Lien runs full-text (FTS5/BM25) keyword search over code, docstrings, and identifier-split symbol names. It's keyword-based, not meaning-based: query with terms that appear in the code, and you can always see *why* a result matched.
+### No Index, No Server
+There's nothing to keep in sync. Every command parses the current working tree and reports on exactly what's there right now.
 
-### Ecosystem-Aware Indexing
-Lien detects your project type via 12 ecosystem presets (Node.js, Python, PHP, Laravel, Django, Ruby, Rails, Rust, JVM, Swift, .NET, Astro) and applies the right file exclusions automatically. See [Configuration](/guide/configuration) for detection details, or [How It Works](/how-it-works#supported-languages) for the full language list.
+### Ecosystem-Aware Scanning
+Lien detects your project type via 12 ecosystem presets (Node.js, Python, PHP, Laravel, Django, Ruby, Rails, Rust, JVM, Swift, .NET, Astro) and applies the right file exclusions automatically. See [How It Works](/how-it-works#supported-languages) for the full language list.
 
 ## Use Cases
 
-### Understanding New Codebases
-Quickly understand how a new codebase works without reading every file:
-- "Show me the database schema"
-- "How is error handling implemented?"
-- "Where are API routes defined?"
+### Understanding Tech Debt
+Find the functions most worth your attention without reading every file:
 
-### Finding Implementations
-Locate specific functionality across a large codebase:
-- "Find JWT token validation"
-- "Show authentication middleware"
-- "Where is user registration handled?"
+```bash
+lien health
+```
 
-### Discovering Patterns
-Find similar code patterns for refactoring or consistency:
-- "Find similar validation functions"
-- "Show all database queries"
-- "Locate API endpoint handlers"
+Ranks functions by complexity × fan-in ÷ test coverage — the ones that are both complicated and risky to break.
 
-### Test Coverage
-Understand what tests cover specific code:
-- "What tests cover this module?"
-- "Show related test files"
-- "Find test patterns for this feature"
+### Checking Complexity
+Flag functions over a complexity threshold, in CI or locally:
+
+```bash
+lien complexity --fail-on error
+```
+
+### Reviewing a Diff Before You Open a PR
+Run the same deterministic signals Lien Review uses in CI, locally, on your working tree:
+
+```bash
+lien review
+```
+
+Surfaces candidates like stale duplicate literals, removed exports, and doc drift — for you to judge, not a build-breaking check.
+
+### Gating a Commit
+Block a commit only when it makes something new complex enough to cross a threshold it wasn't over before:
+
+```bash
+lien delta
+```
 
 ## Next Steps
 
-- Read [How It Works](/how-it-works) for the indexing pipeline and the lexical-vs-semantic tradeoff
-- Follow the [installation guide](/guide/installation) to set up Lien in minutes
-- See [MCP Tools](/guide/mcp-tools) for the full tool reference
+- Read [How It Works](/how-it-works) for the parse-on-demand pipeline
+- Follow the [installation guide](/guide/installation) to install Lien in seconds
+- See [CLI Commands](/guide/cli-commands) for the full command reference
