@@ -28,10 +28,7 @@ const REPO_ROOT = execFileSync('git', ['rev-parse', '--show-toplevel'], {
 
 // Paths that intentionally contain broken examples or staged test fixtures,
 // not real guidance -- not worth holding to the same standard.
-const EXCLUDED_PATH_PATTERNS = [
-  /^lien-review-testbed\//,
-  /^packages\/[^/]+\/test\/(?:.*\/)?fixtures?\//,
-];
+const EXCLUDED_PATH_PATTERNS = [/^packages\/[^/]+\/test\/(?:.*\/)?fixtures?\//];
 
 function isExcluded(relPath) {
   return EXCLUDED_PATH_PATTERNS.some(re => re.test(relPath));

@@ -8,7 +8,7 @@
 > **Superseded (2026-09-01):** `packages/review` and `packages/action` — the
 > self-hostable GitHub Action this ADR designed, plus the offline prompt-test
 > harness and the `lien-review-testbed/` fixture app — are deleted from this
-> repository (Phase 7b of the CLI simplification plan, commit `0e522852`).
+> repository (Phase 7b of the CLI simplification plan, PR #1133).
 > This does not break existing consumers: the Action was already published to
 > a separate dist repo (`getlien/lien-review`, floating `v1` tag) plus a GHCR
 > image, and every `uses: getlien/lien-review@v1` workflow keeps working

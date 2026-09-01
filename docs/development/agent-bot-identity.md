@@ -101,8 +101,8 @@ API-action attribution, not a full agent-identity story.
 11. **Install the app**: from the app's page, click **Install App** (left
     sidebar) → select the **`getlien`** org → **Only select repositories**
     → choose **`lien`** → **Install**.
-12. Add two lines to the repo-root `.env` (gitignored; same file
-    `OPENROUTER_API_KEY` already lives in):
+12. Add two lines to the repo-root `.env` (gitignored — since the review
+    harness was deleted, these are the only keys anything in the repo reads):
     ```
     LIEN_AGENT_APP_ID=<the App ID from step 8>
     LIEN_AGENT_APP_KEY_PATH=~/.config/lien/agent-app.pem

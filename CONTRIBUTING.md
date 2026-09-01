@@ -164,7 +164,7 @@ Both the rules and the harness are deleted, and the check went with them.
 
 ## Releasing
 
-Lien versions and publishes via [Changesets](https://github.com/changesets/changesets), driven by `.changeset/config.json` and `.github/workflows/release.yml`. Published packages: `@liendev/parser`, `@liendev/core`, `@liendev/lien` (the `cli` package), and `@liendev/parser-native`. `site` is `"private": true` and never published. The three published packages are `linked`: they always bump together, even when only one has code changes.
+Lien versions and publishes via [Changesets](https://github.com/changesets/changesets), driven by `.changeset/config.json` and `.github/workflows/release.yml`. Published packages: `@liendev/parser`, `@liendev/core`, `@liendev/lien` (the `cli` package), and `@liendev/parser-native`. `site` is `"private": true` and never published. All four published packages are `linked`: they always bump together, even when only one has code changes.
 
 ### Flow
 

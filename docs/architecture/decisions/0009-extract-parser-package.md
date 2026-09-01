@@ -23,7 +23,7 @@
 > which is now smaller still (config, git, errors, utils, insights only).
 >
 > **Third update (2026-09-01):** `packages/review` itself is deleted now too
-> (Phase 7b of the CLI simplification plan, commit `0e522852`; see
+> (Phase 7b of the CLI simplification plan, PR #1133; see
 > [ADR-012](0012-self-hostable-review-action.md)). The "Target dependency
 > chain" table's `@liendev/review <- depends on parser only (not core)` row
 > and the Validation section's "Zero core imports in review" line describe a

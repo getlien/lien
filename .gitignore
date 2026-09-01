@@ -102,6 +102,5 @@ coverage/
 .test-git-*
 .test-watcher-*
 
-
 packages/cli/README.md
 scripts/experiments/dogfood-oss/trials/

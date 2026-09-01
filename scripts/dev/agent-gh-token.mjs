@@ -12,8 +12,9 @@
 // Prints ONLY the installation access token to stdout -- nothing else -- so
 // the command above works. All diagnostics go to stderr.
 //
-// Config (read from the environment, or from a repo-root .env -- same
-// convention as OPENROUTER_API_KEY; see packages/review/test/harness/run.ts):
+// Config (read from the environment, or from a repo-root .env -- the repo has
+// no other consumer of that file since the review harness was deleted, so this
+// script is now the only thing that reads it):
 //   LIEN_AGENT_APP_ID       - the GitHub App's numeric ID
 //   LIEN_AGENT_APP_KEY_PATH - path to the App's PEM private key. The PEM
 //                             lives OUTSIDE the repo (e.g.
@@ -49,7 +50,7 @@ const TOKEN_REFRESH_MARGIN_MS = 5 * 60 * 1000;
 const USER_AGENT = 'lien-agent-gh-token';
 
 // Auto-load .env from the repo root, same convention as the review harness
-// (packages/review/test/harness/run.ts). Node's loadEnvFile() does not
+// (the deleted packages/review harness (see git history)). Node's loadEnvFile() does not
 // override variables already set in the environment, so an inline
 // `LIEN_AGENT_APP_ID=... node scripts/dev/agent-gh-token.mjs` still wins.
 try {

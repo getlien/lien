@@ -14,7 +14,7 @@ into doc-truth's own pass, dark/env-only), `docs/architecture/review-pass-archit
 > `packages/review/src/plugins/agent/` (the agent-review plugin this ADR's
 > candidate-loop passes lived in), `review-pass.ts`, `attestation.ts`, and the
 > offline test harness — is deleted from this repository (Phase 7b of the CLI
-> simplification plan, commit `0e522852`; see [ADR-012](0012-self-hostable-review-action.md)).
+> simplification plan, PR #1133; see [ADR-012](0012-self-hostable-review-action.md)).
 > Nothing this ADR built survives: Lien no longer runs an LLM-driven review
 > pass at all, dedicated or shared. Kept for history: the evidence recorded
 > here (the drizzle-orm#4172 A/B, the FP-guard probes, the firing-rate census)
