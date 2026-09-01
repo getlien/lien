@@ -70,7 +70,7 @@ yields `entries: []` regardless of scope.
 (An earlier version of this note said 4 of the top 5 were fixtures from
 `lien-review-testbed/`, which was true when that fixture app existed. It has
 been deleted, taking most of the repo's violations with it — the ranked total
-fell from 65 to 12. The conclusion got stronger, not weaker: a shorter ranking
+fell from 57 to 12 (and the analysed corpus from 592 files to 396). The conclusion got stronger, not weaker: a shorter ranking
 is a narrower net.)
 
 So it can tell you "this function is risky and under-tested" — and for the

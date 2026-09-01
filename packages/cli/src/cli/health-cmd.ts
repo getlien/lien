@@ -30,8 +30,8 @@
  * source. This repo used to demonstrate it perfectly: `lien-review-testbed/`
  * was deliberately complex, deliberately untested tracked code, and it
  * legitimately occupied four of the default five slots. That fixture app has
- * since been deleted (the whole-repo ranked total fell from 65 functions to
- * 12), so the example is gone but the limitation is not — any repo carrying a
+ * since been deleted (the whole-repo ranked total fell from 57 functions to
+ * 12, and the analysed corpus from 592 files to 396), so the example is gone but the limitation is not — any repo carrying a
  * fixture app will see the same thing. The ranking is not wrong in that case;
  * "code I maintain" is a per-repo judgment the tool cannot infer. Scope it
  * with `--path` until an exclude
