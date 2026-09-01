@@ -20,10 +20,11 @@ export type RootSafetyResult =
  * directly under `$HOME` (`~/myproject`) must never match. That scoping is
  * deliberate — see #1025: `lien index` run from `$HOME` swept macOS Keychain
  * databases, `.npm` debug logs, and Claude Code agent caches into a 10.5 GB
- * index, and there was no guard anywhere against it. `lien index` always
- * indexes `process.cwd()` (it has no `--root`/`--path` option), so this is
- * the one place that needs to ask "is this cwd almost certainly a mistake?"
- * before scanning a single file.
+ * index, and there was no guard anywhere against it. That command and its
+ * index are gone, but the hazard is not: `lien complexity` still walks the
+ * tree from wherever it is invoked, so a stray run in `$HOME` would still
+ * spend minutes parsing a home directory. This is the one place that asks
+ * "is this cwd almost certainly a mistake?" before scanning a single file.
  *
  * The home check delegates to {@link isHomeDirectory} (`@liendev/parser`) —
  * the same symlink-safe comparison `getEffectiveAlwaysIgnorePatterns` uses —

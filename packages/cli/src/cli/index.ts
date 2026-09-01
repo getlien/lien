@@ -23,7 +23,7 @@ export const program = new Command();
 
 program
   .name('lien')
-  .description('Local lexical code search and dependency analysis for AI assistants via MCP')
+  .description('Local code health: complexity, change risk, and deterministic review signals')
   .version(packageJson.version);
 
 program
