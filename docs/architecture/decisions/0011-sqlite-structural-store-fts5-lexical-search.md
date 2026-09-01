@@ -1,9 +1,18 @@
 # ADR-011: Replace LanceDB + Embeddings with a SQLite Structural Store and FTS5 Lexical Search
 
-**Status**: Accepted
+**Status**: Superseded (2026-09-01)
 **Date**: 2026-07-04
 **Deciders**: Core Team
 **Related**: ADR-008 (superseded, kept transformers.js while Lien had embeddings), ADR-010 (retired Qdrant, kept the `VectorDBInterface` seam this decision reuses), PR #656, #657, #658, #661
+
+> **Superseded (2026-09-01):** Phase 5 of the CLI simplification plan (commit
+> `0de8ea52`) deleted the SQLite structural store, FTS5 lexical search, the MCP
+> server that queried it, and the `VectorDBInterface`/`createVectorDB` seam this
+> ADR built behind, in their entirety — `search_code`, `get_dependents`,
+> `get_files_context`, and the rest of the MCP surface no longer exist. `lien`
+> now parses the working tree on demand instead of querying a persisted store.
+> This ADR is retained for history: it explains why SQLite/FTS5 was the right
+> replacement for LanceDB+embeddings *while Lien had a persisted index at all*.
 
 ## Context and Problem Statement
 

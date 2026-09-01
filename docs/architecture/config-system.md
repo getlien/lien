@@ -1,49 +1,16 @@
 # Configuration System
 
-Lien's configuration is split into two layers:
+> [!IMPORTANT]
+> **Phase 5 (2026-09-01) deleted `GlobalConfig`, `~/.lien/config.json`, and the
+> `lien config` CLI entirely**, along with the storage backend they configured
+> (there is no storage backend any more — see the phase 5 banner in
+> [docs/architecture/README.md](README.md)). Per-project configuration below
+> (`ConfigService` / `.lien.config.json`) is unaffected and is now Lien's
+> only configuration layer.
 
-- **Global configuration** (`GlobalConfig`): machine-wide, lives in `~/.lien/config.json`, managed via the `lien config` CLI. Today this is just the storage backend.
-- **Per-project configuration** (`LienConfig`, via `ConfigService`): lives in `.lien.config.json` in the project root. The only field any pipeline reads is `complexity.thresholds`, consumed by `lien delta` (`packages/cli/src/cli/delta-cmd.ts`).
+Lien's only configuration layer is **per-project** (`LienConfig`, via `ConfigService`): it lives in `.lien.config.json` in the project root. The only field any pipeline reads is `complexity.thresholds`, consumed by `lien delta` (`packages/cli/src/cli/delta-cmd.ts`).
 
 The framework-based project-type detection described in earlier versions of this system has been replaced by ecosystem presets (see [ADR-007](decisions/0007-replace-framework-detection-with-ecosystem-presets.md)).
-
-## Global configuration (current)
-
-The global config manages settings that apply across all projects, primarily the storage backend.
-
-### GlobalConfig interface
-
-```typescript
-interface GlobalConfig {
-  backend?: 'sqlite'; // Default: 'sqlite'
-}
-```
-
-### Load precedence
-
-1. **Environment variables** (highest priority): `LIEN_BACKEND`
-2. **Global config file**: `~/.lien/config.json`
-3. **Defaults**: `{ backend: 'sqlite' }`
-
-### CLI: `lien config`
-
-```bash
-lien config set backend sqlite     # Set the storage backend
-lien config get backend            # Read a config value
-lien config list                   # Show all config values
-```
-
-`lien config` only ever manages `~/.lien/config.json`. It has no subcommand for per-project settings; edit `.lien.config.json` directly for that.
-
-### Allowed keys
-
-| Key | Values | Description |
-|-----|--------|-------------|
-| `backend` | `sqlite` | Storage backend (SQLite structural store + FTS5 search) |
-
-> **Note:** The SQLite structural store is the only backend. The LanceDB + embeddings backend was removed (see [ADR-011](decisions/0011-sqlite-structural-store-fts5-lexical-search.md)) and the Qdrant backend was retired before it (see [ADR-010](decisions/0010-retire-qdrant-backend.md)). Existing configs that name a retired backend (`backend: "lancedb"` / `"qdrant"`, or `qdrant.*` keys) do not crash: Lien warns once and uses the SQLite backend.
-
----
 
 ## Per-project configuration (ConfigService)
 
@@ -71,11 +38,11 @@ Earlier versions of `LienConfig` also had `core`, `chunking`, `mcp`, `gitDetecti
 - Chunking is always AST-based with an internal line-based fallback (`chunking.useAST`/`astFallback` were dead).
 - The MCP server never loads `.lien.config.json` at all (`mcp.*` was dead; auto-indexing is gated by `hasData()` + `LIEN_FORCE_INDEX`, not `mcp.autoIndexOnFirstRun`).
 - Git-change polling and file watching are governed internally / by the `--watch`/`--no-watch` CLI flag, not config (`gitDetection.*`, `fileWatching.*` were dead).
-- The storage backend is a *global* config concern, not per-project (`storage.backend` was dead; don't confuse it with `GlobalConfig.backend` above, which is live).
+- `storage.backend` was dead per-project config even while `GlobalConfig.backend` (the actual, global storage-backend setting) was live; both the per-project key and `GlobalConfig` itself are gone now (phase 5 deleted the storage backend entirely).
 - `frameworks` was already superseded by ecosystem presets (ADR-007) and unread.
 - The legacy `indexing`-based shape was silently discarded by the merge even before it was formally retired; settings in it just vanished with no warning.
 
-These were all removed from the type and from what gets validated. `ConfigService` still *loads* an existing config file that carries any of them, though: on `load()`, any top-level key other than `complexity` (and `complexity.enabled`, which was the one dead key inside the section that survived) is stripped with a one-time `console.warn` naming what to delete, rather than throwing; the same graceful-degradation pattern `global-config.ts` uses for retired backends.
+These were all removed from the type and from what gets validated. `ConfigService` still *loads* an existing config file that carries any of them, though: on `load()`, any top-level key other than `complexity` (and `complexity.enabled`, which was the one dead key inside the section that survived) is stripped with a one-time `console.warn` naming what to delete, rather than throwing.
 
 ### ConfigService API
 

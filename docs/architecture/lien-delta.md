@@ -1,21 +1,25 @@
 # lien delta: complexity accounting before the commit
 
 > [!IMPORTANT]
-> **The Claude Code plugin was deleted on 2026-08-31.** Every `plugins/claude/hooks/*`
-> reference below describes a delivery mechanism that no longer exists — the hooks,
-> `hooks.json`, and the marketplace entry are all gone, and `lien init` and
-> `lien nudge` went with them. The *checks* those hooks automated survive as
-> commands (`lien delta`, `lien health`, `lien review`); the automatic invocation at
-> the tool boundary does not. Read hook references here as history, not as
-> configuration.
+> **Phase 5 (2026-09-01) deleted the telemetry and priming mechanisms this doc
+> originally described alongside the gate itself.** The MCP server
+> (`get_files_context`), the persisted index, and the whole nudge/stats family
+> are gone: `lien annotate`, `lien stats`, and `delta-events.jsonl`/`delta-stats.ts`
+> no longer exist, so sections D ("plan-time nudge" priming via `get_files_context`)
+> and the event-log/`lien stats` measurement section below are historical only —
+> read them as a record of what once surfaced this signal earlier and measured the
+> gate's effect, not as current behavior. What's current: sections A (the shared
+> primitive), B (the `lien delta` CLI), and the CI backstop.
+>
+> **The Claude Code plugin was deleted on 2026-08-31 (phase 4), separately from the
+> above.** Every `plugins/claude/hooks/*` reference below describes a delivery
+> mechanism that no longer exists — the hooks, `hooks.json`, and the marketplace
+> entry are all gone. Read hook references here as history, not as configuration.
 
 
 `lien delta` computes the complexity difference between two versions of a
-file, per function, and turns a new threshold crossing into signal an agent
-can act on: a CLI exit code, a warning from the plugin's post-edit hook, a
-headroom hint in `get_files_context`, and a check on every pull request. A
-local event log (`lien stats`) tracks whether any of this changes what
-agents actually commit.
+file, per function, and turns a new threshold crossing into a CLI exit code
+an agent or CI job can act on.
 
 ## Motivation
 
@@ -31,7 +35,7 @@ function, and already surfaces threshold violations in PR review. The gap is
 timing: the signal exists, but only after the code is pushed. `lien delta`
 moves it to before the commit.
 
-## What's built
+## What's built today
 
 - **The shared primitive** (`@liendev/parser`): computes a per-function
   complexity verdict from two content strings. See section A.
@@ -40,25 +44,25 @@ moves it to before the commit.
   designed for a commit gate. See section B.
 - **The gate liturgy**: `lien delta` is CLAUDE.md's sixth pre-commit gate.
   See section C.
-- **A PostToolUse hook** (`plugins/claude/hooks/delta-write.sh`): warns
-  once, right after an `Edit`/`Write`/`MultiEdit`, when that edit introduced
-  a new crossing. See section D.
-- **`get_files_context` headroom**: primes the agent with near- or
-  over-budget functions before it writes, not just after. See section E.
 - **A CI backstop**: `.github/workflows/ci.yml`'s `delta` job runs
   `lien delta --base` against the PR's target branch on every pull request.
   See section F.
-- **An event log and `lien stats`**: a local JSONL log of every
-  `lien delta` run, aggregated into 7- and 30-day windows.
-- **The plan-time nudge**: the same headroom signal folded into the
-  mandatory pre-edit `annotate` hook and the `get_files_context` response,
-  so the warning reaches the agent before it writes, not only after.
 
-Two things from the original design remain unbuilt: blocking a commit
-outright on a crossing, and review's adoption of the shared primitive.
-`packages/review/src/delta.ts` still computes its own report-level delta
-rather than calling `computeComplexityDelta`; see "Relationship to PR
-review" below.
+Historical only, both deleted in phase 5 (kept below for context, not as
+current behavior):
+
+- A PostToolUse hook (`plugins/claude/hooks/delta-write.sh`) warned once,
+  right after an `Edit`/`Write`, when that edit introduced a new crossing.
+  See section D.
+- `get_files_context` headroom and the plan-time nudge primed the agent with
+  near- or over-budget functions before it wrote, and an event log +
+  `lien stats` measured whether any of it changed what agents committed. See
+  "Measuring the nudge loop" and "The plan-time nudge" below.
+
+One thing from the original design remains unbuilt: review's adoption of the
+shared primitive. `packages/review/src/delta.ts` still computes its own
+report-level delta rather than calling `computeComplexityDelta`; see
+"Relationship to PR review" below.
 
 ## A. The shared primitive (`@liendev/parser`)
 
@@ -358,13 +362,13 @@ output is honest about what it compared; `--format json` is unaffected,
 since the ref isn't part of `ComplexityDeltaResult`, only the CLI's own
 report header.
 
-### Optional MCP variant (deferred)
+### Optional MCP variant (moot — phase 5)
 
-`get_complexity({ diff: true })` is attractive but doesn't fall out of the
-primitive and CLI for free: the existing `get_complexity` handler reads the
-persisted index, while the delta primitive is content-based against a git
-ref. Wiring it means a new MCP schema field and a handler path that shells
-out to git. Deferred; the CLI remains the primary surface.
+This was speculative even when written: `get_complexity({ diff: true })`
+would have needed a new MCP schema field and a handler path that shells out
+to git. Phase 5 deleted `get_complexity` and the MCP server itself, so the
+question no longer applies. The CLI is now the only surface, not just the
+primary one.
 
 ## Relationship to PR review (a follow-up, not yet built)
 
@@ -397,7 +401,9 @@ callers.
    CLAUDE.md and the review skill instead. A dedicated project-scoped gate
    template was out of scope then and remains so (YAGNI).
 
-## D. Mechanism 2: the PostToolUse hook on Edit/Write (detection)
+## D. Mechanism 2: the PostToolUse hook on Edit/Write (detection) — historical, deleted
+
+*The plugin was deleted 2026-08-31; this section is history, not current behavior.*
 
 A Claude Code plugin hook, `plugins/claude/hooks/delta-write.sh`
 (registered in `plugins/claude/hooks/hooks.json`), fires after every
@@ -493,7 +499,10 @@ subtlety the explore hook already navigates (see
 [claude-code-hook-channels.md](claude-code-hook-channels.md)). Verifying
 this requires a live Claude Code run, not just the offline script tests.
 
-## E. Mechanism 3: `get_files_context` headroom priming (prevention)
+## E. Mechanism 3: `get_files_context` headroom priming (prevention) — historical, deleted
+
+*Phase 5 (2026-09-01) deleted the MCP server and `get_files_context` with it.
+This section describes a mechanism that no longer exists.*
 
 `get_files_context` is mandatory before any edit, which makes it the place
 to prevent a crossing, not just detect one: when the agent asks for a
@@ -582,7 +591,11 @@ crossing introduced by any commit in the PR, not just its latest one, which
 is exactly the gap `--base` exists to close. A non-zero exit (a new
 crossing) fails the job.
 
-## Measuring the nudge loop: `delta-events.jsonl` + `lien stats`
+## Measuring the nudge loop: `delta-events.jsonl` + `lien stats` — historical, deleted
+
+*Phase 5 (2026-09-01) deleted `lien delta`'s own event recording along with
+`lien stats`, its only reader — `lien delta`'s report and exit code never
+depended on this, but the measurement described below no longer runs.*
 
 The primitive, the CLI, the hook, and the CI backstop make `lien delta`
 available, proactive at edit time, and enforced. None of it produces a
@@ -713,7 +726,10 @@ disclaimer belongs in the tool's own output, not only in this doc.
   several worktrees of the same repo gets one independent log per
   worktree (the same isolation the index already has), not a merged view.
 
-## The plan-time nudge: moving the headroom signal before the write
+## The plan-time nudge: moving the headroom signal before the write — historical, deleted
+
+*Depends entirely on mechanisms D and E above, both deleted in phase 5. Kept
+for context on why the design took this shape.*
 
 The hook (D) and a manual `lien delta` both fire after code is written.
 Mechanism E moved the underlying data earlier, to the mandatory pre-edit

@@ -5,6 +5,13 @@
 **Deciders**: Core Team  
 **Related**: v0.14.0 Architecture Improvements
 
+> **Superseded (2026-09-01):** Phase 5 of the CLI simplification plan (commit
+> `0de8ea52`) deleted `packages/core/src/vectordb/` — and the storage backend it
+> held, by then a SQLite structural store rather than the LanceDB module this ADR
+> split — in its entirety. There is no VectorDB module left to be organized into
+> sub-modules; this ADR is retained for history, explaining why splitting it was
+> the right call *while it existed*.
+
 ## Context and Problem Statement
 
 The `packages/cli/src/vectordb/lancedb.ts` file had grown to **1,119 lines**, becoming a monolithic module that:

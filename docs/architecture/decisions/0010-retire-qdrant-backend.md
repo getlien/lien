@@ -10,6 +10,11 @@
 > constructs a SQLite structural store. The reasoning below (keep the factory
 > seam, keep the cross-repo stubs, degrade gracefully on retired config values)
 > is exactly the pattern ADR-011 reused.
+>
+> **Second forward note (2026-09-01):** Phase 5 of the CLI simplification plan
+> (commit `0de8ea52`) deleted the `VectorDBInterface` seam itself, along with the
+> SQLite backend ADR-011 built behind it and `packages/core/src/vectordb/` in its
+> entirety. There is no backend, and no seam left to swap one into.
 
 ## Context and Problem Statement
 

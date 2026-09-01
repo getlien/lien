@@ -44,8 +44,9 @@ version.
 
 ## Stop event: two channels, not one
 
-**Correction (2026-07-24, during the FEATURE 2 build — see
-[test-verification-nudge.md](test-verification-nudge.md)):** an earlier
+**Correction (2026-07-24, during the FEATURE 2 build — the did-you-run-the-tests
+verification nudge; its doc, `test-verification-nudge.md`, was deleted in phase 5
+along with the feature it described):** an earlier
 version of this doc, and the design doc that shipped FEATURE 2, both stated
 "Stop hooks ignore `additionalContext`; `decision:block` is the only channel
 that reaches the model." A fresh read of the official hooks reference during

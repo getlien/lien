@@ -1,5 +1,14 @@
 # Behavioral A/B: does Lien's complexity nudge change what an agent writes?
 
+> [!IMPORTANT]
+> **Both the mechanism this measured and its delivery are gone.** The Claude Code
+> plugin was deleted 2026-08-31 (phase 4). Phase 5 (2026-09-01) then deleted
+> `lien annotate` and the MCP server (`get_files_context`) outright — the two
+> surfaces that rendered the near-budget warning this experiment tested. This
+> document is kept as the durable evidence that the warning, while it existed,
+> measurably changed agent behavior (cited as such in `lien-delta.md`); it is not
+> a description of anything currently running.
+
 A small, pre-registered experiment testing whether the near-budget warning
 Lien surfaces to a coding agent (the mechanism in open PR #772,
 `feat(cli,plugin): plan-time complexity nudge before edits`) measurably

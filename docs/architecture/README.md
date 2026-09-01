@@ -1,16 +1,24 @@
 # Lien Architecture Documentation
 
-This directory documents how Lien's internals fit together: components, data flow, and the request/response sequences for indexing and MCP tool calls.
+This directory documents how Lien's internals fit together: components, data flow, and how the CLI commands compute their answers.
 
 > [!IMPORTANT]
-> **The Claude Code plugin was deleted on 2026-08-31.** Every reference below to
-> `plugins/claude/hooks/*` — the read-annotation hook, the `lien delta` and
-> `api-delta` write hooks, the test reminder, the Stop-hook recap — describes a
-> delivery mechanism that no longer exists. The *checks* those hooks automated
-> survive as commands (`lien delta`, `lien health`, `lien review`); the automatic
-> invocation does not. Read hook references as history, not as configuration.
+> **Phase 5 (2026-09-01, commit `0de8ea52`) deleted the MCP server, the persisted
+> index, and the telemetry family.** `packages/cli/src/mcp/`, `packages/core/src/vectordb/`,
+> `packages/core/src/indexer/`, `packages/core/src/gc/`, `packages/cli/src/watcher/`, and the
+> nudge/recap/stats/verify-tests family are all gone. `lien` no longer runs as a server with a
+> database behind it — it parses the working tree on demand. Surviving commands: `complexity`,
+> `health`, `review`, `delta`. Docs whose entire subject was one of those deleted subsystems have
+> been removed outright rather than left to describe nothing; the rest below have been corrected
+> to match. `docs/architecture/decisions/` (the ADRs) are historical records and were left alone
+> beyond a superseded-status banner where relevant — read those for the deletion's rationale and
+> provenance, not this index.
 >
-> Replacement: the review skill at `.claude/skills/review/`.
+> **The Claude Code plugin was deleted on 2026-08-31 (phase 4), separately from the above.** Every
+> remaining reference below to `plugins/claude/hooks/*` describes a delivery mechanism that no
+> longer exists. The *checks* those hooks automated survive as commands (`lien delta`, `lien
+> health`, `lien review`); the automatic invocation does not. Read hook references as history, not
+> as configuration. Replacement: the review skill at `.claude/skills/review/`.
 
 ## Documentation index
 
@@ -18,12 +26,9 @@ This directory documents how Lien's internals fit together: components, data flo
 High-level component architecture.
 
 A bird's-eye view of Lien's architecture showing:
-- CLI layer and commands (including `lien config` and `lien complexity`)
-- MCP server and all six tools
-- Core services (indexer, scanner, chunker, complexity analyzer, manifest manager, etc.)
-- Data layer (VectorDB factory with the SQLite structural store + FTS5 lexical search)
-- Optional services (git tracking, file watching, ecosystem presets)
-- External dependencies
+- The CLI commands (`complexity`, `health`, `review`, `delta`) and what each one computes
+- Parser services (scanner, chunker, AST traversal, complexity, risk, signals, ecosystem presets)
+- Config (`ConfigService`, per-project `.lien.config.json`) and git helpers
 - Lien Review (the separate GitHub Action product surface: `packages/review` + `packages/action`)
 
 Read this first to understand the overall system structure.
@@ -36,88 +41,41 @@ Key diagrams: component architecture graph, technology stack.
 How data moves through the system.
 
 Detailed flow diagrams showing:
-- Indexing data flow: File → Chunks → SQLite store (FTS5 kept in sync by triggers)
-- Search data flow: Query → FTS5 MATCH → BM25 rank → Results
-- Incremental update flow: change detection → reindex → reconnect
+- Parse-and-analyze flow: File → Chunks (AST) → Complexity/risk/signal metrics → Report
+- `lien delta`'s before/after diff flow: `HEAD`/`--base` content vs. working tree → per-function verdicts
 - Data transformations at each step
 
-Read this to understand how code is processed and searched.
+Read this to understand how code is processed and analyzed.
 
-Key diagrams: indexing flowchart, search flowchart, incremental update flowchart, chunking strategy visualization.
-
----
-
-### [Indexing Flow](./indexing-flow.md)
-Full and incremental indexing workflows.
-
-Sequence diagrams showing:
-- Full indexing: complete workflow from `lien index` to completion
-- Incremental indexing: how individual file changes are handled
-- Chunking strategy with overlap
-- Error handling and recovery
-
-Read this to understand the indexing process in detail.
-
-Key diagrams: full indexing sequence diagram, incremental indexing sequence diagram, chunking visualization, error handling flowchart.
-
----
-
-### [MCP Server Flow](./mcp-server-flow.md)
-MCP server initialization and request handling.
-
-Diagrams of:
-- Server initialization sequence
-- Tool request handling (`search_code`, `find_similar`, `get_files_context`, `list_functions`, `get_dependents`, `get_complexity`)
-- Background update monitoring
-- Version checking and reconnection
-- Error handling
-
-Read this to understand how Lien integrates with Cursor and other AI assistants.
-
-Key diagrams: server initialization sequence, tool request sequences, background monitoring flowchart, shutdown and cleanup sequence.
+Key diagrams: parse-and-analyze flowchart, delta comparison flowchart, chunking strategy visualization.
 
 ---
 
 ### [Configuration System](./config-system.md)
-Global config and per-project config management.
+Per-project config management.
 
-Documentation of Lien's two-layer configuration:
-- Global configuration (`GlobalConfig`) for backend choice
+Documentation of Lien's configuration:
 - Per-project configuration (`ConfigService`) for `complexity.thresholds`
-- `lien config` CLI (set/get/list)
-- Legacy config migration and validation rules
+- Validation and the retired-key warn-and-strip mechanism
 
 Read this to understand configuration management.
-
-Key diagrams: configuration architecture graph, migration sequence diagram, validation flowchart, schema evolution comparison.
 
 ---
 
 ### [Test Association](./test-association.md)
-Two-pass test detection system.
+Links each source file to the tests that cover it.
 
-Explains how Lien links test files to source files:
-- Pass 1: convention-based detection (12 languages)
-- Pass 2: import analysis (TypeScript, JavaScript, Python)
-- Pattern matching algorithms
-- Import path resolution
-- Framework detection
+Explains how Lien's single import-based pass (`findTestAssociationsFromChunks`, all 11
+registered languages) links test files to source files:
+- Identifying test files by convention (`isTestFile`)
+- Matching an import to its target, including manifest-aware resolution (PHP PSR-4, Go modules)
+- Per-language honest limitations (Swift/C# whole-module and enclosing-namespace gaps) and
+  recovered signals (Go same-package convention, Swift symbol-usage fallback)
+- Where associations surface today: `lien health` and `lien review`
 
-Read this to understand how test associations work.
-
-Key diagrams: two-pass detection overview, convention-based detection flowchart, import analysis sequence diagram, merge strategy flowchart, framework detection flowchart.
-
----
-
-### [Worktree-Aware Indexing](./worktree-aware-indexing.md)
-Sharing one index between a git worktree and its main checkout.
-
-Explains how a linked worktree avoids building a full independent index:
-- Read-only base (main checkout's index) + small writable overlay (worktree-only diffs)
-- Detection via `git rev-parse --git-dir` vs `--git-common-dir`
-- Fallback to standalone indexing when the base is missing or incompatible
-
-Read this if you're touching `OverlayBackend` or debugging worktree index staleness.
+Read this to understand how test associations work. Note the doc's own "History" section: the
+two-pass design ADR-004 proposed was never shipped — this is the single-pass system that runs
+instead.
 
 ---
 
@@ -125,46 +83,13 @@ Read this if you're touching `OverlayBackend` or debugging worktree index stalen
 Complexity-delta gate: catch new threshold crossings before commit.
 
 Explains the write-time/commit-time complexity-delta gate:
-- `lien delta` CLI: compares the working tree vs `HEAD`, flags only new crossings
-- `plugins/claude/hooks/delta-write.sh`: the same check as a PostToolUse edit-hook warning
-- Shared `computeComplexityDelta` primitive in `@liendev/parser` (also used by PR review)
+- The shared `computeComplexityDelta` primitive in `@liendev/parser` (also used by PR review)
+- `lien delta` CLI: compares the working tree vs `HEAD` or `--base <ref>`, flags only new crossings
+- The CI backstop (`.github/workflows/ci.yml`'s `delta` job)
 
-Read this to understand CLAUDE.md's sixth pre-commit gate.
-
----
-
-### [Blast-Radius Nudge](./blast-radius-nudge.md)
-`get_dependents` before an exported-signature edit.
-
-Explains the write-time nudge for CLAUDE.md's other honor-system rule:
-- `lien api-delta` CLI: content-based detection of a changed/removed exported function or method signature, best-effort enriched with dependent counts and risk
-- `plugins/claude/hooks/api-delta-write.sh`: the same check as a PostToolUse edit-hook warning
-- `blast-events.jsonl` + `lien stats`'s "Exported-signature nudge" section
-
-Read this to understand the sibling nudge to `lien delta`, and why it's advisory rather than a gate.
-
----
-
-### [Did-You-Run-The-Tests Verification Nudge](./test-verification-nudge.md)
-A session-scoped ledger that advises, at session Stop, on edited files whose associated tests were never observed running.
-
-Explains the write-time/session-scoped test-verification nudge:
-- `lien verify-tests <note-edit|note-run|report>` CLI: a session ledger of edited files with associated tests and observed Bash test runs
-- `plugins/claude/hooks/test-reminder.sh` (rewired), `test-run-note.sh`, and `recap-stop.sh` (the Stop surface, now the consolidated [session risk-ledger recap](session-risk-recap.md)) — the hooks that record and, at Stop, advise
-- The pure `classifyTestCommand`/`computeUnverifiedFiles` matcher (broad vs scoped runs, generous coverage matching)
-
-Read this to understand the sibling nudge to `lien delta` and the blast-radius nudge, and why it fires at Stop rather than as a `lien delta` gate extension.
-
----
-
-### [Session Risk-Ledger Recap](./session-risk-recap.md)
-The single Stop-time advisory that re-raises UNRESOLVED risk from the current session — unrun tests, live complexity crossings, and unacted `get_dependents` warnings — as one block. Replaces `test-verify-stop.sh`.
-
-Explains the consolidated finish-line surface:
-- `lien recap --session <id>` CLI + the pure `session-recap.ts` join (all three sources are unresolved-only)
-- `plugins/claude/hooks/recap-stop.sh` — one `decision:block` per stop episode, both #843 loop-prevention layers kept
-- The delta-source decision: a LIVE working-tree recompute (not mining `delta-events.jsonl`, which has no session_id or before/after values)
-- Why the PreCompact half was dropped (no documented model-visible channel)
+Read this to understand CLAUDE.md's sixth pre-commit gate. The doc also carries, as history, the
+now-deleted PostToolUse hook and the `get_files_context`/`lien stats` telemetry that used to
+surface the same signal earlier and measure the gate's own effect — neither exists any more.
 
 ---
 
@@ -175,18 +100,10 @@ Reference for `plugins/claude/hooks/*` authors: which Claude Code hook output ch
 
 Read this before adding or changing a plugin hook.
 
----
-
-### [Index-State Honesty](./index-state-honesty.md)
-The policy + detector behind never producing a confident answer on missing/stale data.
-
-Explains:
-- The four whole-index/per-path states (S0/S1/S2/S3) and `classifyIndexState`
-- Why the right response differs by command disposition (gate-shaped, advisory, MCP tool) — never a blanket rule
-- The table test (`packages/cli/test/integration/index-state-matrix.test.ts`) and its completeness guard
-- How to wire a new read-only, index-backed command correctly
-
-Read this before adding any command or MCP tool that reads from the structural index.
+> The four-state index-honesty policy (S0-S3, `classifyIndexState`) this used to sit alongside
+> was retired with the index it classified. The surviving principle — a read-only command must
+> never render "no data" as "clean" — is now "No-Data Honesty" in `CLAUDE.md` directly; see
+> `packages/cli/src/utils/scan-failure.ts` (`describeScanFailure`) for the detector.
 
 ---
 
@@ -218,32 +135,23 @@ For the history behind these designs, see the [Architectural Decision Records in
 
 | Feature | Documentation |
 |---------|--------------|
-| Indexing a codebase | [Indexing Flow](./indexing-flow.md) |
-| Search queries | [Data Flow](./data-flow.md) → Search section |
-| MCP integration | [MCP Server Flow](./mcp-server-flow.md) |
+| Complexity analysis (`lien complexity`) | [Data Flow](./data-flow.md), [System Overview](./system-overview.md) |
+| Risk ranking (`lien health`) | [System Overview](./system-overview.md) |
+| Deterministic review signals (`lien review`) | [System Overview](./system-overview.md) |
 | Configuration | [Configuration System](./config-system.md) |
 | Test associations | [Test Association](./test-association.md) |
-| File watching & git tracking | [MCP Server Flow](./mcp-server-flow.md) → Background monitoring |
-| Dependency analysis (`get_dependents`) | [MCP Server Flow](./mcp-server-flow.md) → Available MCP Tools |
-| Complexity analysis (`get_complexity`) | [MCP Server Flow](./mcp-server-flow.md) → Available MCP Tools |
-| Worktree-shared indexing | [Worktree-Aware Indexing](./worktree-aware-indexing.md) |
 | Pre-commit complexity gate (`lien delta`) | [lien delta](./lien-delta.md) |
-| Exported-signature nudge (`lien api-delta`) | [Blast-Radius Nudge](./blast-radius-nudge.md) |
-| Did-you-run-the-tests nudge (`lien verify-tests`) | [Did-You-Run-The-Tests Verification Nudge](./test-verification-nudge.md) |
-| Session risk-ledger recap (`lien recap`) | [Session Risk-Ledger Recap](./session-risk-recap.md) |
-| Plugin hook design (what reaches the model) | [Claude Code Hook Output Channels](./claude-code-hook-channels.md) |
+| Plugin hook design (what reaches the model) — historical | [Claude Code Hook Output Channels](./claude-code-hook-channels.md) |
 | Lien Review's extra LLM passes (doc-truth, candidate loops) | [Agent-Review Pass Architecture](./review-pass-architecture.md) |
-| Never a confident answer on missing/stale data (S0-S3) | [Index-State Honesty](./index-state-honesty.md) |
+| No-Data Honesty (never render "no data" as "clean") | `CLAUDE.md` → "No-Data Honesty" |
 
 ### For debugging
 
 | Issue | Check |
 |-------|-------|
-| Indexing errors | [Indexing Flow](./indexing-flow.md) → Error handling |
-| MCP connection issues | [MCP Server Flow](./mcp-server-flow.md) → Initialization |
 | Config problems | [Configuration System](./config-system.md) → Validation |
-| Missing test associations | [Test Association](./test-association.md) → Detection logic |
-| Slow searches | [Data Flow](./data-flow.md) → Performance section |
+| Missing test associations | [Test Association](./test-association.md) → Known gaps |
+| `lien delta` false positive/negative | [lien delta](./lien-delta.md) → Per-metric classification |
 
 ## Code organization
 

@@ -136,10 +136,13 @@ left to test against.
 
 ## Step 5: e2e + docs + changeset
 
-Dogfood a real repo first: build the CLI in main, `lien index`, sanity-check
-the output.
+Dogfood a real repo first: build the CLI in main, run `lien health` (or
+`lien complexity`) against a clone, sanity-check the output. There's no
+`lien index` any more — every command parses the working tree on demand via
+`performChunkOnlyIndex`, which is also what `real-projects.test.ts` calls
+directly, no persisted store or MCP involved.
 
-**Pick the e2e project by index time (≤60s), which scales with chunk count,
+**Pick the e2e project by parse time (≤60s), which scales with chunk count,
 not file count.** Dense languages produce far more chunks per file, so file
 count alone misleads. `packages/cli/test/e2e/real-projects.test.ts` gives each
 project a 180s timeout; a project that takes close to that risks a CI-timeout

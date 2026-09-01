@@ -13,6 +13,14 @@
 > chain") describe core's composition as of this ADR, before ADR-011: core
 > no longer has an `embeddings/` directory, and `vectordb/` now means the
 > SQLite/FTS5 backend, not LanceDB or Qdrant.
+>
+> **Second update (2026-09-01):** Phase 5 of the CLI simplification plan
+> (commit `0de8ea52`) deleted `vectordb/` from `@liendev/core` too — along with
+> `indexer/`, `gc/`, and the MCP server in `@liendev/cli` — so "MCP tools and
+> CLI commands remain unchanged" (Decision Drivers, above) no longer holds; the
+> MCP tools this ADR referred to don't exist. The parser/core split itself is
+> unaffected: `@liendev/parser` still has zero dependency on `@liendev/core`,
+> which is now smaller still (config, git, errors, utils, insights only).
 
 ## Context and Problem Statement
 
