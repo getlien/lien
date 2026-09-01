@@ -617,7 +617,7 @@ You are a **developer advocate** evaluating the developer experience of Lien fro
 - Are relevance categories helpful for AI assistants to filter results?
 
 **Onboarding flow:**
-- Trace the first-use experience: install -> init -> first MCP query
+- Trace the first-use experience: install -> hand-edit the editor's MCP config -> restart the editor -> first MCP query
 - How long until a user gets value? Are there unnecessary steps?
 - What are the failure modes during onboarding? (missing dependencies, permission errors, etc.)
 - Is the auto-index-on-first-use reliable?

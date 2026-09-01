@@ -186,12 +186,17 @@ The title, body and commit message are claims, not evidence. "Off-by-one fix",
    test paths for that file, then Grep for the function name across the test
    tree. Pass `--include-tests` if you want the signals to see test files too.
    No command hands you this mapping — see the `lien health` note in step 1.
-3. **Report a finding unless** a test calls the function with the exact
-   divergence input *and* asserts the new behaviour. Test absent, test covers a
-   different input, test asserts the old behaviour — all findings. Cite the test
-   file and line you read. If you conclude no test exists, say where you looked;
-   "a tool returned nothing" is not evidence of absence.
-4. Suggest a **test pair** pinning the boundary from both sides: the divergence
+3. Judge the implementation first: does the new boundary match what the change
+   set out to do? If it does not, that is a defect — report it.
+4. Then judge the coverage, and keep the two separate. A test that asserts the
+   *old* behaviour is a defect: it now passes against code it was written to
+   reject, or it fails and someone will "fix" it in the wrong direction. A
+   boundary with no test pinning it is **not** a defect — correct code with thin
+   coverage is still correct. Report it as a required test for this change,
+   which is the one coverage gap this review does raise (see "What to report").
+   Cite the test file and line you read. If you conclude no test exists, say
+   where you looked; "a tool returned nothing" is not evidence of absence.
+5. Suggest a **test pair** pinning the boundary from both sides: the divergence
    input, and the adjacent value on the unchanged side.
 
 ### 5. Incomplete handling
@@ -274,9 +279,21 @@ nothing is parser-analyzable — see the note in step 1 about reading past the
 
 ## What to report
 
-Only defects that produce wrong output, break callers, or swallow failures.
-Not style, not naming, not missing tests in general, not preferences, not
-pre-existing issues the change did not introduce.
+Any concrete defect this change introduces. Wrong output, broken callers and
+swallowed failures are the common shapes, but they are not the whole list: an
+authorization bypass, sensitive data reaching a log or a response, an injection
+site, silent data corruption, or a path that hangs or exhausts a resource all
+count, and several of those return a perfectly valid value while doing it.
+Check 7 exists to find exactly that class, so the report must have room for it.
+
+The test for reportability is *concrete*, not *severe*: you can name the input
+or state that triggers it and what goes wrong. Not style, not naming, not
+preferences, not pre-existing issues the change did not introduce.
+
+One coverage exception, and only one: a **boundary or threshold change with no
+test pinning the new behaviour** (check 4). That is a required test for this
+change, and it is reported as a test to add rather than as a defect in the code.
+Missing tests in general are still out of scope.
 
 For each: the file and line, the concrete trigger (input X → returns Y → should
 return Z), the fix, and one line of evidence naming what you actually inspected.
