@@ -4,17 +4,20 @@ alwaysApply: true
 # Lien Project Rules
 
 `CLAUDE.md` at the repo root is the single source of truth for project
-structure, mandatory MCP tool usage, and commit gates — read it. This file is
+structure, discovery policy, and commit gates — read it. This file is
 deliberately thin: a duplicated package tree or gate list drifts out of sync
 the moment either side changes (as this file previously did for months).
 
 **Load-bearing facts, kept minimal on purpose:**
-- Packages: `parser` ← `core` ← `cli` (published as `@liendev/parser` /
-  `@liendev/core` / `@liendev/lien`); `review`/`action`/`site` are private and
-  unpublished. `review` depends on `parser` only, not `core`.
-- Storage is SQLite + FTS5 lexical (BM25) search only — no embeddings, no
-  vector DB.
+- Packages: `parser` ← `cli` (published as `@liendev/parser` /
+  `@liendev/lien`, alongside `@liendev/parser-native`); `site` is private and
+  unpublished. `core`, `review` and `action` have all been deleted.
+- Nothing is stored. There is no index, no database and no search — Lien
+  parses the working tree on demand and answers from that.
+- The surface is four commands: `lien complexity`, `lien health`,
+  `lien review`, `lien delta`.
 - Before every commit, no exceptions: `npm run format:check`, `npm run lint`,
-  `npm run typecheck`, `npm run build`, `npm test`, `lien delta`.
+  `npm run typecheck`, `npm run build`, `npm test`, `lien delta`, and
+  `node .github/scripts/docs-truth.mjs`.
 - Commits follow Conventional Commits (`feat(scope): ...`, `fix(scope): ...`);
   never `git commit --amend`.

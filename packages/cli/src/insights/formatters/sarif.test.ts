@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { formatSarifReport } from './sarif.js';
-import type { ComplexityReport } from '../types.js';
+import type { ComplexityReport } from '@liendev/parser';
 
 function createReport(overrides: Partial<ComplexityReport> = {}): ComplexityReport {
   return {

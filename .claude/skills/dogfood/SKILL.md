@@ -200,10 +200,9 @@ You are a **senior JavaScript/TypeScript developer** performing a code quality a
 
 ### Scope
 
-Review the source code across the three published packages:
+Review the source code across Lien's TypeScript packages:
 - `packages/parser/src/` — AST parsing, chunking, complexity metrics, dependency/test-association analysis, deterministic review signals, ecosystem detection
-- `packages/core/src/` — config management, git state tracking, complexity-report formatters. (There is no structural store or indexer here any more — both were removed along with the index.)
-- `packages/cli/src/` — the four CLI commands and their shared utilities
+- `packages/cli/src/` — the four CLI commands, their shared utilities, and (folded in from the deleted `@liendev/core` in Phase 8) config management and complexity-report formatters. (There is no structural store or indexer here any more — both were removed along with the index.)
 
 Use `Glob`/`Grep` to enumerate what's actually in each `src/` tree before reviewing — don't assume the list above is exhaustive; it will drift over time.
 
@@ -240,8 +239,8 @@ Use `Glob`/`Grep` to enumerate what's actually in each `src/` tree before review
 ### How to review
 
 1. Start with `node packages/cli/dist/index.js health --top 20 --format json` to identify the riskiest functions (complexity × fan-in ÷ test coverage) — these are where bugs hide
-2. `Glob` `packages/{parser,core,cli}/src/**/*.ts` for an overview of the codebase structure; `Grep` for `^export class`, `^export function`, `^export interface` to enumerate symbols by kind
-3. Read the highest-complexity files and the core modules (CLI command handlers, config service, git tracker)
+2. `Glob` `packages/{parser,cli}/src/**/*.ts` for an overview of the codebase structure; `Grep` for `^export class`, `^export function`, `^export interface` to enumerate symbols by kind
+3. Read the highest-complexity files and the key shared modules (CLI command handlers, config service)
 4. Check for duplicated patterns by reading and by `Grep`ping for repeated literals/snippets — there is no automated similarity search any more
 5. `Grep` for imports of a target file (`from '.*<module-name>'`) to see who depends on it — there is no dependents-lookup command any more
 6. Spot-check error handling in I/O-heavy code (file scanning, chunking, git diffing)
@@ -290,19 +289,19 @@ You are a **senior software architect** evaluating the overall architecture of L
 ### Context
 
 Lien is a local-first code-health CLI: no server, no persisted index, no search. Every command parses the working tree on demand. It's split into three published packages plus three unpublished ones:
-- `@liendev/parser` — AST parsing, language definitions, chunking, complexity analysis, dependency/test-association resolution, deterministic review signals. Zero deps on core.
-- `@liendev/core` — config management (`ConfigService`), git state tracking, complexity-report formatters (text/JSON/SARIF)
-- `@liendev/lien` (cli) — the four commands: `complexity`, `health`, `review`, `delta`
+- `@liendev/parser` — AST parsing, language definitions, chunking, complexity analysis, dependency/test-association resolution, deterministic review signals. Zero deps on cli.
+- `@liendev/parser-native` — the Rust tree-sitter addon `parser` loads through.
+- `@liendev/lien` (cli) — the four commands: `complexity`, `health`, `review`, `delta`, plus (folded in from the deleted `@liendev/core` in Phase 8) config management (`ConfigService`) and complexity-report formatters (text/JSON/SARIF)
 - `review` / `action` / `site` (private, unpublished) — the Lien Review GitHub Action's engine, the Action wrapper, and the docs site
 
-Dependency chain: `parser` ← `core` ← `cli`. `review` depends on `parser` only. This is a **recent, large architectural change**: the MCP server, the SQLite structural store, the indexer, and FTS5 lexical search were all removed from `core`. Verify with `Glob`/`Grep` that no residue (dead imports, orphaned types, stale barrel exports referencing removed modules) was left behind.
+Dependency chain: `parser` ← `cli`. `review` depends on `parser` only. This is a **recent, large architectural change**: the MCP server, the SQLite structural store, the indexer, and FTS5 lexical search were all removed first; then `@liendev/core` itself — what was left after those removals — was folded into `cli` and deleted (Phase 8). Verify with `Glob`/`Grep` that no residue (dead imports, orphaned types, stale barrel exports referencing removed modules) was left behind.
 
 ### What to evaluate
 
 **Package boundaries & responsibilities:**
-- Is the `parser` / `core` / `cli` split clean now that `core` has lost its structural-store responsibilities? Does `core` still earn its place as a separate package, or is it thin enough now that some of it belongs in `cli`?
-- Are there things in `cli` that belong in `core` (or vice versa)?
-- `Grep` for import statements referencing a target module to trace dependency flow — `parser` should not depend on `core`; `core` should not depend on `cli`
+- Is the `parser` / `cli` split clean? `@liendev/core` used to sit between them; Phase 8 folded its three reachable modules (`config/`, `errors/`, `insights/formatters/`) into `cli` and deleted the rest as unreachable. Does that land look intentional inside `cli/src/`, or would those three still be better off as their own package?
+- Are there things in `cli` that belong in `parser` (or vice versa)?
+- `Grep` for import statements referencing a target module to trace dependency flow — `parser` should not depend on `cli`
 
 **Module cohesion & coupling:**
 - Do modules have clear, single responsibilities?
@@ -333,7 +332,7 @@ Dependency chain: `parser` ← `core` ← `cli`. `review` depends on `parser` on
 1. Read `CLAUDE.md` and `docs/architecture/` for the intended architecture — but verify against `Glob`/`Grep`/`Read`, since those docs may themselves be lagging the recent removal (that's exactly what the `docs-reviewer` agent is checking in parallel; cross-reference its findings in your report)
 2. `Glob` each package's `src/` tree to map real structure
 3. `Grep` for `^export class`, `^export interface` to map out the type system
-4. `Grep` for imports of core modules to trace dependency flow
+4. `Grep` for imports of shared modules to trace dependency flow
 5. Read the entry points: `packages/cli/src/index.ts`, `packages/cli/src/cli/index.ts`, and each command's implementation
 6. Run `node packages/cli/dist/index.js complexity --format json` and `health --format json` to identify structural complexity hotspots
 
@@ -376,16 +375,15 @@ You are a **senior QA engineer** auditing the test suite of the Lien codebase. Y
 
 ### Scope
 
-Review all test files across the three published packages:
+Review all test files across Lien's TypeScript packages:
 - `packages/parser/src/**/*.test.ts`
-- `packages/core/src/**/*.test.ts`
 - `packages/cli/src/**/*.test.ts`
 
 ### What to evaluate
 
 **Coverage gaps:**
 - There is no test-associations lookup tool any more. Approximate coverage two ways: (1) run `node packages/cli/dist/index.js health --top 30 --format json` and look at which ranked (risky) functions have an empty `tests` array; (2) `Glob` for a source file's likely co-located test file (`foo.ts` -> `foo.test.ts`) and flag source files with none
-- Systematically check: for each major source directory, are there corresponding test files? Focus on: `packages/cli/src/cli/`, `packages/core/src/config/`, `packages/core/src/git/`, `packages/parser/src/ast/`, `packages/parser/src/signals/`
+- Systematically check: for each major source directory, are there corresponding test files? Focus on: `packages/cli/src/cli/`, `packages/cli/src/config/`, `packages/parser/src/ast/`, `packages/parser/src/signals/`
 
 **Test quality:**
 - Are tests testing behavior or implementation details? (behavior is better)
@@ -429,8 +427,7 @@ Write a detailed report to `.wip/dogfood-tests-report.md` with:
 | Module | Source Files | Test Files | Coverage Gap |
 |--------|-------------|------------|--------------|
 | `cli/cli/` | N | N | list untested files |
-| `core/config/` | N | N | ... |
-| `core/git/` | N | N | ... |
+| `cli/config/` | N | N | ... |
 | `parser/ast/` | N | N | ... |
 | `parser/signals/` | N | N | ... |
 | ... | ... | ... | ... |

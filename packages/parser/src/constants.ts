@@ -8,10 +8,11 @@ export const DEFAULT_CHUNK_SIZE = 75;
 export const DEFAULT_CHUNK_OVERLAP = 10;
 
 /**
- * Default glob include patterns for a full-repo index scan: source languages,
- * prose docs, and YAML config. Shared by `@liendev/core`'s `scanFilesToIndex`
- * (real CLI/MCP indexing path) and `@liendev/parser`'s `chunk-only-index.ts`
- * (review's repoChunks path) so the two stay byte-identical.
+ * Default glob include patterns for a full-repo scan: source languages, prose
+ * docs, and YAML config. Read by `chunk-only-index.ts`, which is the only
+ * scan path left — `@liendev/core`'s `scanFilesToIndex` was the other
+ * consumer these patterns were kept byte-identical for, and it is gone along
+ * with the index it fed.
  *
  * The scanner globs with glob's default `dot:false`, so a bare `**\/*.yml`
  * never descends into a dot-directory like `.github/`. The explicit
@@ -45,10 +46,10 @@ export const MAX_CHUNKS_PER_FILE = 100;
  * typical codebase produces.
  *
  * Defined here rather than in `@liendev/core` (where #1025 first put it)
- * because the parser is now a first-class reader: `lien complexity` and
- * `lien health` go through `performChunkOnlyIndex` and never touch core's
- * indexer. Parser cannot depend on core, so core imports it from here and
- * re-exports it — one definition, two consumers, no copy to drift.
+ * because the parser is the reader that survived: `lien complexity` and
+ * `lien health` go through `performChunkOnlyIndex`. Core re-exported this
+ * constant from here so the two consumers could not drift; core is gone now,
+ * and this is simply where it lives.
  *
  * Skipping is not merely a resource guard. An 8 MB TypeScript file exceeds
  * the native parser's napi string limit, so it fails AST parsing, falls back

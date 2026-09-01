@@ -9,7 +9,7 @@ import {
   DEFAULT_COMPLEXITY_DELTA_THRESHOLDS,
   type ComplexityDeltaThresholds,
 } from '@liendev/parser';
-import * as core from '@liendev/core';
+import * as configModule from '../config/service.js';
 import {
   resolveDeltaThresholds,
   parseThresholdFlag,
@@ -259,7 +259,7 @@ describe('deltaCommand — operational failures exit 2 (Phase-1 findings #2, #3)
   });
 
   it('exits 2 when config fails to load (malformed .lien.config.json)', async () => {
-    vi.spyOn(core.configService, 'load').mockRejectedValue(
+    vi.spyOn(configModule.configService, 'load').mockRejectedValue(
       new SyntaxError('Unexpected token } in JSON'),
     );
     await expect(deltaCommand({ format: 'text' })).rejects.toThrow('__exit__:2');

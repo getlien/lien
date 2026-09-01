@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { chunkFile } from '@liendev/core';
+import { chunkFile } from '@liendev/parser';
 
 describe('Liquid Chunking (Regex-based)', () => {
   it('should keep schema blocks together as single chunk', () => {

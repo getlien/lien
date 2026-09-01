@@ -2,8 +2,8 @@ import chalk from 'chalk';
 import fs from 'fs';
 import path from 'path';
 import { performChunkOnlyIndex, analyzeComplexityFromChunks } from '@liendev/parser';
-import { formatReport } from '@liendev/core';
-import type { OutputFormat } from '@liendev/core';
+import { formatReport } from '../insights/formatters/index.js';
+import type { OutputFormat } from '../insights/formatters/index.js';
 import { describeScanFailure } from '../utils/scan-failure.js';
 import { resolveRepoRoot, rebaseToRoot } from './project-root.js';
 import { assertSafeRoot } from './unsafe-root.js';
@@ -100,7 +100,7 @@ function reportScanCaveats(filesErrored: number, filesSkipped: number): void {
  *
  * Enrichment is deliberately left ON here, unlike in `lien health`. It costs
  * ~600 ms on this repo, but the text formatter reports "Imported by N files"
- * from `fileData.dependentCount` (`core/src/insights/formatters/text.ts:85`),
+ * from `fileData.dependentCount` (`../insights/formatters/text.ts`),
  * so disabling it would silently empty a documented output field.
  */
 export async function complexityCommand(options: ComplexityOptions) {

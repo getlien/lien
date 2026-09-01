@@ -14,7 +14,7 @@ This directory contains Architectural Decision Records (ADRs) documenting signif
 | [ADR-006](0006-consolidated-language-files-with-import-extractors.md) | Consolidate Language Files and Add Import Extractors | 2026-02-05 | Accepted |
 | [ADR-007](0007-replace-framework-detection-with-ecosystem-presets.md) | Replace Framework Detection with Ecosystem Presets | 2026-02-07 | Accepted |
 | [ADR-008](0008-keep-transformers-js-worker-embeddings.md) | Keep transformers.js WorkerEmbeddings as Sole Embedding Backend | 2026-02-10 | Superseded by ADR-011 |
-| [ADR-009](0009-extract-parser-package.md) | Extract `@liendev/parser` from `@liendev/core` | 2026-02-19 | Accepted |
+| [ADR-009](0009-extract-parser-package.md) | Extract `@liendev/parser` from `@liendev/core` | 2026-02-19 | Accepted (partially superseded — phase 8 deleted `@liendev/core`; the parser extraction stands) |
 | [ADR-010](0010-retire-qdrant-backend.md) | Retire the Qdrant Backend | 2026-07-02 | Superseded (phase 5 deleted the backend seam) |
 | [ADR-011](0011-sqlite-structural-store-fts5-lexical-search.md) | Replace LanceDB + Embeddings with a SQLite Structural Store and FTS5 Lexical Search | 2026-07-04 | Superseded (phase 5, 2026-09-01) |
 | [ADR-012](0012-self-hostable-review-action.md) | Self-Hostable GitHub Action for PR Review | 2026-06-27 | Superseded (phase 7b deleted `packages/review`/`packages/action`; published Action unaffected) |

@@ -163,10 +163,8 @@ That's the only place the site's language list lives now: `packages/site/docs/gu
 just links to it (`/how-it-works#supported-languages`) and needs no edit.
 
 Changeset: `minor` for `@liendev/parser`, `@liendev/parser-native`, and
-`@liendev/lien`. `@liendev/core` is in the same `linked` group in
-`.changeset/config.json` and versions alongside them even though it has no
-code change: it resolves the new parser via its `^` dependency range at
-runtime, which is fine.
+`@liendev/lien` — the three packages in `.changeset/config.json`'s `linked`
+group, so they always bump together.
 
 Merging this PR makes the changeset bot open the "Version Packages" PR.
 Merging **that** publishes to npm. That step is irreversible, so leave it

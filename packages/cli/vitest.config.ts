@@ -5,7 +5,6 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['src/**/*.test.ts', 'test/**/*.test.ts'],
-    globalSetup: ['./test/global-setup.ts'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
@@ -17,6 +16,6 @@ export default defineConfig({
         'src/index.ts', // CLI entry point
       ],
     },
-    testTimeout: 30000, // AI embeddings can be slow
+    testTimeout: 30000, // the e2e suite shells out to the built CLI
   },
 });

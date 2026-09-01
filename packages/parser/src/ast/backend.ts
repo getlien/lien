@@ -1,10 +1,10 @@
 /**
  * Parser backend selection for @liendev/parser (ADR-013 / native-parser.md).
  *
- * Self-contained: parser must NOT import @liendev/core, so this mirrors the
- * validation shape of core's config/global-config.ts loadConfigFromEnv
- * (throw a clear Error naming the bad value and the valid set) without
- * depending on it.
+ * Self-contained by design: parser depends on nothing of ours. This mirrors
+ * the validation shape the deleted `@liendev/core` used for env config —
+ * throw a clear Error naming the bad value and the valid set — without ever
+ * having depended on it.
  *
  * ADR-013 Phase 4-B: `native` (@liendev/parser-native) is now the only
  * backend -- `legacy` (node-tree-sitter) was removed one release after the

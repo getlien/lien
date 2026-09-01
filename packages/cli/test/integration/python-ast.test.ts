@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { chunkFile } from '@liendev/core';
+import { chunkFile } from '@liendev/parser';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';

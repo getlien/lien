@@ -149,6 +149,6 @@ For the history behind these designs, see the [Architectural Decision Records in
 
 ## Code organization
 
-`CLAUDE.md`'s "Package Structure" section is the canonical, actively-maintained map of `packages/parser`, `packages/core`, `packages/cli`, and `packages/site`. Read it there rather than here.
+`CLAUDE.md`'s "Package Structure" section is the canonical, actively-maintained map of `packages/parser`, `packages/cli`, and `packages/site`. Read it there rather than here.
 
 For technology stack, performance characteristics, and scaling notes, see [System Overview](./system-overview.md).

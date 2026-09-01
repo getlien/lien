@@ -5,7 +5,7 @@
  */
 
 import chalk from 'chalk';
-import { configService } from '@liendev/core';
+import { configService } from '../config/service.js';
 import {
   computeComplexityDelta,
   resolveComplexityDeltaThresholds,

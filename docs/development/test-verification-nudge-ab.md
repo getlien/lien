@@ -143,12 +143,15 @@ instruction was honored.
 Every single trial, both conditions, ran both `foo.test.ts` and
 `bar.test.ts` — typically as one shell line joined with `&&`
 (`npm run test -w @liendev/lien -- packages/cli/src/foo.test.ts && npm run
-test -w @liendev/core -- packages/core/src/bar.test.ts` [sic: trials
+test -w @liendev/lien -- packages/core/src/bar.test.ts` [sic: trials
 actually named a `@liendev/cli` workspace, which doesn't exist in this repo
 — the CLI package publishes as `@liendev/lien`; corrected here only so this
 doc doesn't itself fail the docs-truth workspace-script check, the raw
 verbatim trial text is preserved unedited in
-`.wip/ab-testverify/trials/results.md`], or the same with
+`.wip/ab-testverify/trials/results.md`. The second command originally named
+`-w @liendev/core`, a real workspace at capture time; `@liendev/core` was
+later deleted and folded into `@liendev/lien` (Phase 8), so it's rewritten
+here for the same docs-truth reason], or the same with
 `src/foo.test.ts`/`src/bar.test.ts` path forms in a few trials). Not one
 trial answered "end the turn" or ran only a single file.
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { chunkFile } from '@liendev/core';
+import { chunkFile } from '@liendev/parser';
 
 describe('Shopify JSON Template Chunking', () => {
   it('should extract section references from JSON template', () => {

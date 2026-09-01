@@ -21,6 +21,14 @@ This document provides a high-level overview of Lien's architecture, showing the
 > unaffected. See [ADR-012](decisions/0012-self-hostable-review-action.md).
 > It has been removed from the diagram and component list below, since
 > nothing in this repository builds or runs it any more.
+>
+> **Phase 8 (2026-09-01) deleted `@liendev/core` and folded what was left of
+> it into `packages/cli`.** Three modules were reachable and moved verbatim
+> (`config/`, `errors/`, `insights/formatters/`); everything else (`git/`,
+> `types/`, `constants.ts`, most of `utils/`, `src/test/`) was unreachable
+> dead code and was deleted outright. The dependency chain is now `parser
+> ← cli`, and the published package count drops from four to three. See
+> [ADR-009](decisions/0009-extract-parser-package.md)'s fourth update.
 
 ## Component architecture
 
@@ -33,7 +41,7 @@ graph TB
         DELTA[lien delta]
     end
 
-    subgraph "Parser (@liendev/parser) — zero deps on core"
+    subgraph "Parser (@liendev/parser) — zero deps on cli"
         PARSEIDX[performChunkOnlyIndex<br/>on-demand working-tree parse]
         SCANNER[File Scanner]
         CHUNKER[Code Chunker]
@@ -46,10 +54,9 @@ graph TB
         ECOSYSTEM[Ecosystem Presets]
     end
 
-    subgraph "Core (@liendev/core) — config, git, errors, formatters"
+    subgraph "CLI support modules — config, errors, formatters"
         CONFIG[ConfigService<br/>.lien.config.json]
         FORMAT[Report formatters<br/>text / JSON / SARIF]
-        GIT[git/ — worktree + state helpers<br/>not currently called by any CLI command]
         ERRORS[Typed errors]
     end
 
@@ -63,7 +70,7 @@ graph TB
     REVIEW --> TESTASSOC
     DELTA --> COMPLEXANALYZER
 
-    %% CLI to Core
+    %% CLI to support modules
     COMPLX --> FORMAT
     DELTA --> CONFIG
 
@@ -78,11 +85,11 @@ graph TB
     %% Styling
     classDef cliClass fill:#e1f5ff,stroke:#01579b,stroke-width:2px
     classDef parserClass fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
-    classDef coreClass fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    classDef supportClass fill:#fff3e0,stroke:#e65100,stroke-width:2px
 
     class COMPLX,HEALTH,REVIEW,DELTA cliClass
     class PARSEIDX,SCANNER,CHUNKER,AST,COMPLEXANALYZER,RISK,SIGNALS,DEPS,TESTASSOC,ECOSYSTEM parserClass
-    class CONFIG,FORMAT,GIT,ERRORS coreClass
+    class CONFIG,FORMAT,ERRORS supportClass
 ```
 
 ## Component descriptions
@@ -107,10 +114,12 @@ All four read the working tree directly, not a persisted index: `complexity`, `h
 - **`findTestAssociationsFromChunks`**: Links source files to the tests that cover them (see [Test Association](./test-association.md)).
 - **Ecosystem Presets**: Auto-detects project type (Node.js, PHP/Laravel, Python, Rust, …) and applies include/exclude patterns (replaces the former Framework Detector, see [ADR-007](decisions/0007-replace-framework-detection-with-ecosystem-presets.md)).
 
-### Core (`@liendev/core`)
+### CLI support modules (`packages/cli/src/{config, errors, insights/formatters}`)
+These moved verbatim out of `@liendev/core` in Phase 8; the package itself
+(including its unreachable `git/` worktree helpers) was deleted rather than
+kept around for code nothing called.
 - **ConfigService**: Loads and validates per-project `.lien.config.json` (`complexity.thresholds` only — see [Configuration System](./config-system.md)). `GlobalConfig` and the storage backend it configured are gone.
 - **Report formatters**: text/JSON/SARIF output for `lien complexity`.
-- **`git/`**: Worktree detection and git-state helpers survive in the package, but no surviving CLI command currently calls them — `delta-cmd.ts` and `health-cmd.ts` shell out to `git` directly instead. Left in place; not wired to anything today.
 - **Typed errors**: `LienError` and error codes shared across commands.
 
 ## Data flow
@@ -137,9 +146,8 @@ const report = analyzeComplexityFromChunks(scan.chunks, thresholds);
 ```
 
 ### Layered architecture
-- **CLI Layer**: User interface — four commands, no server
-- **Parser Layer**: Parsing, chunking, complexity, risk, and signal computation (zero deps on core)
-- **Core Layer**: Config, git helpers, typed errors, output formatters
+- **CLI Layer**: User interface — four commands, plus config, typed errors, and output formatters, no server
+- **Parser Layer**: Parsing, chunking, complexity, risk, and signal computation (zero deps on cli)
 
 ### No persisted state
 There is no index, no database, no file watcher, and no background process. Every command parses

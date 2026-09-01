@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
-// Mock @liendev/core before importing utils
-vi.mock('@liendev/core', () => ({
+// Mock the error helpers before importing utils
+vi.mock('../errors/index.js', () => ({
   isLienError: vi.fn((error: unknown) => {
     return error instanceof Error && error.name === 'LienError';
   }),
@@ -40,7 +40,7 @@ import {
   handleCommandError,
   TaskSpinner,
 } from './utils.js';
-import { isLienError } from '@liendev/core';
+import { isLienError } from '../errors/index.js';
 
 describe('formatDuration', () => {
   it('should format milliseconds below 1000', () => {
