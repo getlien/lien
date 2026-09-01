@@ -2,17 +2,22 @@ import type { CodeChunk } from './types.js';
 
 /**
  * Shared matching primitives for "does an untouched doc chunk still reference
- * this token" — the piece two independent consumers need identically:
+ * this token".
  *
- * - `packages/parser/src/signals/docs-drift-signals.ts` (a PR-review-time pass: which
- *   untouched docs still name a symbol/path this PR removed/renamed/deleted).
- * - `packages/cli/src/utils/doc-references.ts` (an edit-time nudge: which
- *   indexed doc chunks reference a symbol `lien api-delta` just found
- *   removed — see docs/architecture/blast-radius-nudge.md's docRefs section).
+ * Two independent consumers needed this identically when it was lifted here:
+ * the review-time docs-drift pass, and an edit-time nudge in the CLI that
+ * looked up which *indexed* doc chunks referenced a just-removed symbol. The
+ * nudge and the index behind it have since been deleted, so the surviving
+ * consumers are both inside parser:
  *
- * Lifted here (rather than duplicated) so the two stay behavior-identical:
- * `packages/review` depends on `@liendev/parser` only (not `@liendev/core`),
- * so this is the one package both call sites can share.
+ * - `signals/docs-drift-signals.ts` — which untouched docs still name a
+ *   symbol/path this PR removed, renamed or deleted.
+ * - `go-root-package-signals.ts` — `isUnambiguousIdentifierShape` only.
+ *
+ * It stays a separate module because those two must not drift apart on what
+ * counts as a token boundary, and because two other signal modules
+ * (`csharp-type-reference-signals.ts`, `jvm-same-package-signals.ts`)
+ * deliberately do NOT use `wordBoundaryRe` — see their own comments for why.
  */
 
 /**

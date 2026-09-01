@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { formatJsonReport } from './json.js';
-import type { ComplexityReport } from '../types.js';
+import type { ComplexityReport } from '@liendev/parser';
 
 const report: ComplexityReport = {
   summary: {

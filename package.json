@@ -2,7 +2,7 @@
   "name": "lien-monorepo",
   "version": "0.1.0",
   "private": true,
-  "description": "Lien - Local lexical code search and dependency analysis for AI assistants",
+  "description": "Lien - local-first code-health CLI: risk, complexity and review signals for a change",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/getlien/lien.git"
@@ -13,16 +13,14 @@
   },
   "workspaces": [
     "packages/parser",
-    "packages/core",
     "packages/cli",
     "packages/parser-native",
     "packages/site"
   ],
   "scripts": {
-    "build": "npm run build -w @liendev/parser && npm run build -w @liendev/core && npm run build -w packages/cli",
-    "build:core": "npm run build -w @liendev/parser && npm run build -w @liendev/core",
+    "build": "npm run build -w @liendev/parser && npm run build -w packages/cli",
     "dev": "npm run dev -w packages/cli",
-    "typecheck": "npm run build -w @liendev/parser -w @liendev/core && npm run typecheck -w packages/cli",
+    "typecheck": "npm run build -w @liendev/parser && npm run typecheck -w packages/cli",
     "clean": "rm -rf packages/*/dist",
     "changeset": "changeset",
     "version": "changeset version && npx --yes npm@10.9.4 install --package-lock-only",
@@ -30,8 +28,7 @@
     "docs:dev": "npm run docs:dev -w packages/site",
     "docs:build": "npm run docs:build -w packages/site",
     "docs:preview": "npm run docs:preview -w packages/site",
-    "test": "npm run test -w @liendev/parser-native && npm run test -w @liendev/parser && npm run test -w @liendev/core && npm run test -w packages/cli",
-    "test:coverage": "npm run test:coverage -w @liendev/core",
+    "test": "npm run test -w @liendev/parser-native && npm run test -w @liendev/parser && npm run test -w packages/cli",
     "lint": "eslint --no-error-on-unmatched-pattern packages/*/src/ packages/*/test/ packages/parser-native/index.js packages/parser-native/index.d.ts packages/parser-native/scripts/*.mjs",
     "lint:fix": "eslint --fix --no-error-on-unmatched-pattern packages/*/src/ packages/*/test/ packages/parser-native/index.js packages/parser-native/index.d.ts packages/parser-native/scripts/*.mjs",
     "format": "prettier --write packages/*/src/ packages/*/test/ packages/parser-native/index.js packages/parser-native/index.d.ts packages/parser-native/scripts/*.mjs",
@@ -40,11 +37,10 @@
     "fix": "eslint --fix --no-error-on-unmatched-pattern packages/*/src/ packages/*/test/ packages/parser-native/index.js packages/parser-native/index.d.ts packages/parser-native/scripts/*.mjs && prettier --write packages/*/src/ packages/*/test/ packages/parser-native/index.js packages/parser-native/index.d.ts packages/parser-native/scripts/*.mjs"
   },
   "keywords": [
-    "mcp",
-    "lexical-search",
+    "code-health",
+    "complexity",
+    "code-review",
     "codebase",
-    "ai",
-    "cursor",
     "code-intelligence",
     "structural-analysis",
     "local-first"

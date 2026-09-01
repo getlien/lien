@@ -124,7 +124,7 @@ function getScripts(pkg) {
 const rootScripts = getScripts(readJson(path.join(REPO_ROOT, 'package.json')));
 
 // Index each workspace's scripts under both forms docs use to reference it:
-// `-w @liendev/core` (package name) and `-w packages/core` (path).
+// `-w @liendev/parser` (package name) and `-w packages/parser` (path).
 const workspaceScripts = new Map();
 const packagesDir = path.join(REPO_ROOT, 'packages');
 if (fs.existsSync(packagesDir)) {
@@ -173,7 +173,7 @@ function checkNpmRunRefs(relPath, lines) {
       if (PLACEHOLDER_RE.test(line.slice(match.index))) continue;
 
       // Both captures can swallow sentence punctuation ("npm run test -w
-      // @liendev/core." / "run npm run build.") — strip it before lookup.
+      // @liendev/parser." / "run npm run build.") — strip it before lookup.
       const scriptName = match[1].replace(/[.,;:!?]+$/, '');
       const workspace = match[2]?.replace(/[.,;:!?]+$/, '');
       const violation = workspace

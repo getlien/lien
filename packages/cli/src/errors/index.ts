@@ -68,30 +68,6 @@ export class ConfigError extends LienError {
 }
 
 /**
- * Indexing-related errors (file processing, chunking)
- */
-export class IndexingError extends LienError {
-  constructor(
-    message: string,
-    public readonly file?: string,
-    context?: Record<string, unknown>,
-  ) {
-    super(message, LienErrorCode.INTERNAL_ERROR, { ...context, file }, 'medium', true, false);
-    this.name = 'IndexingError';
-  }
-}
-
-/**
- * Vector database errors (connection, query, storage)
- */
-export class DatabaseError extends LienError {
-  constructor(message: string, context?: Record<string, unknown>) {
-    super(message, LienErrorCode.INTERNAL_ERROR, context, 'high', true, true);
-    this.name = 'DatabaseError';
-  }
-}
-
-/**
  * Helper function to wrap unknown errors with context
  * @param error - Unknown error object to wrap
  * @param context - Context message describing what operation failed

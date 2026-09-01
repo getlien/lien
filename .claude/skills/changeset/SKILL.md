@@ -8,7 +8,7 @@ allowed-tools: Bash(git *), Read, Glob, Grep, Write, AskUserQuestion
 
 # Create Changeset for Next Release
 
-You are creating a changeset file (`.changeset/<name>.md`) that will trigger the Changesets CI workflow to version and publish the three linked packages: `@liendev/parser`, `@liendev/core`, and `@liendev/lien` (see `.changeset/config.json`'s `linked` group — `review`, `action`, and `site` are `"private": true` and not part of it).
+You are creating a changeset file (`.changeset/<name>.md`) that will trigger the Changesets CI workflow to version and publish the three linked packages: `@liendev/parser`, `@liendev/parser-native`, and `@liendev/lien` (see `.changeset/config.json`'s `linked` group — `site` is `"private": true` and not part of it). `@liendev/core` used to be a fourth linked package; it was deleted and folded into `packages/cli` (`@liendev/lien`) in Phase 8 and is no longer published from this repo. `review` and `action` were private packages excluded from the group; both have been deleted too.
 
 ## Step 1: Find the Last Release
 
@@ -40,11 +40,11 @@ For each commit, check which packages it touches:
 
 ```bash
 git diff --name-only <tag>..HEAD -- packages/parser/
-git diff --name-only <tag>..HEAD -- packages/core/
+git diff --name-only <tag>..HEAD -- packages/parser-native/
 git diff --name-only <tag>..HEAD -- packages/cli/
 ```
 
-- Check **all three** published packages: `@liendev/parser`, `@liendev/core`, `@liendev/lien`
+- Check **all three** published packages: `@liendev/parser`, `@liendev/parser-native`, `@liendev/lien`
 - Include every package that has changes in the frontmatter
 - These packages are `linked` in `.changeset/config.json`, so they version together. When in doubt, include all three.
 
@@ -69,7 +69,7 @@ The **highest bump wins**: if there's at least one `feat`, bump is `minor`. If t
 
 Skip commits that are purely internal (`chore`, `test`, `docs`, `ci`) unless they have user-facing impact.
 
-**Warning:** commits scoped `(review)` or `(action)` touch private, unpublished packages — exclude them from changeset content even if they use a `feat`/`fix` prefix, unless they *also* touch `packages/parser`, `packages/core`, or `packages/cli` (check with the Step 3 directory diff, not just the commit scope label — e.g. `(delta)` commits look feature-scoped but land in published cli/parser).
+**Warning:** don't trust the scope label — check the Step 3 directory diff. A `(delta)` commit looks feature-scoped but lands in published cli/parser. (Historically `(review)` and `(action)` scopes touched private, unpublished packages and had to be excluded; both packages are deleted, so no new commit will carry those scopes.)
 
 ## Step 5: Build the Changeset Content
 
@@ -113,7 +113,7 @@ Write the file in this exact format:
 ```markdown
 ---
 "@liendev/parser": <bump>
-"@liendev/core": <bump>
+"@liendev/parser-native": <bump>
 "@liendev/lien": <bump>
 ---
 
@@ -131,34 +131,34 @@ Only include package lines for affected packages. Only include sections that hav
 
 ## Example Output
 
-For reference, here's what a real changeset looked like (v0.41.0):
+Here's the current shape. Note it names only packages that exist — a changeset
+naming a package that isn't in the workspace fails `changeset version` during
+the release, so never copy a package line from an older example without
+checking it against `.changeset/config.json`:
 
 ```markdown
 ---
 "@liendev/parser": minor
-"@liendev/core": minor
 "@liendev/lien": minor
 ---
 
-### Features
-- Upgrade to @huggingface/transformers v3 with GPU support + `lien config` command (#160)
-- Parallelize embedding generation and file processing for faster indexing (#156)
-
 ### Fixes
-- Support nested `.gitignore` files in incremental indexing (#147)
-- Filter gitignored files in watcher and unify ignore patterns (#140, #146)
+- `lien review` no longer reports deleted files as parse failures (#1134)
 
 ### Refactors
-- Remove dead embeddings.device (cpu|gpu) config (#161)
-- Extract helper functions from indexing pipeline (#158)
+- Fold `@liendev/core` into the CLI and delete the package (#1135)
 ```
+
+Older changesets in `packages/*/CHANGELOG.md` name `@liendev/core` and describe
+embeddings, the indexer and the MCP server. They are accurate history and
+should not be edited — but they are not templates.
 
 ## Important Notes
 
-- The three published packages are `@liendev/parser`, `@liendev/core`, and `@liendev/lien` — they are **linked** and always get the same version bump
+- The three published packages are `@liendev/parser`, `@liendev/parser-native`, and `@liendev/lien` — they are **linked** and always get the same version bump
 - Always read `.changeset/config.json` to verify the linked group — do not hardcode assumptions about which packages exist
-- Commits with scope `(parser)` affect `@liendev/parser`, scope `(core)` affect `@liendev/core`, scope `(cli)` or `(mcp)` affect `@liendev/lien`, no scope or `(security)` may affect all three
-- Commits with scope `(review)` or `(action)` affect private/unpublished packages — exclude from changeset content unless they also touch parser/core/cli
+- Commits with scope `(parser)` affect `@liendev/parser`, scope `(parser-native)` affect `@liendev/parser-native`, scope `(cli)`, `(core)`, or `(mcp)` affect `@liendev/lien` (config/errors/formatters live in `packages/cli` now, folded in from the deleted `@liendev/core` in Phase 8), no scope or `(security)` may affect all three
+- `packages/review` and `packages/action` were deleted in Phase 7b; a `(review)`/`(action)` scope on a new commit means something else and should be checked against the directory diff
 - Skip merge commits (`chore: version packages`, `Merge pull request`)
 - Skip CI-only changes (`ci:`, workflow files)
 - When in doubt about whether to include a commit, include it — better to over-document than under-document

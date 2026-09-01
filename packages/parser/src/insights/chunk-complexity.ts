@@ -21,7 +21,7 @@ const SEVERITY = { warning: 1.0, error: 2.0 } as const;
 /**
  * Complexity thresholds shape shared by chunk-based analysis (`findViolations`
  * below), `lien delta`'s complexity gate (`complexity-delta.ts`), and the
- * user-facing config default (`@liendev/core`'s `LienConfig.complexity.thresholds`).
+ * user-facing config default (the CLI's `LienConfig.complexity.thresholds`).
  *
  * #988: these four sites used to each hardcode their own copy of the same
  * `{ testPaths: 15, mentalLoad: 15, timeToUnderstandMinutes: 60, estimatedBugs: 1.5 }`

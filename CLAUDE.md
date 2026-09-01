@@ -10,13 +10,13 @@ Local-first code-health CLI. Parses the working tree on demand with Tree-sitter 
 - License: AGPL-3.0 | Domain: lien.dev
 
 **Monorepo Structure:**
-- `packages/` — TypeScript packages: `parser` and `core` publish as `@liendev/parser`/`@liendev/core`; `cli` publishes as `@liendev/lien`; `site` is private (unpublished). `review` and `action` are DELETED.
-- Dependency chain: `parser` ← `core` ← `cli`. That is the whole graph now.
+- `packages/` — TypeScript packages: `parser` publishes as `@liendev/parser`; `cli` publishes as `@liendev/lien`; `parser-native` publishes the prebuilt Rust parser; `site` is private (unpublished). `review`, `action` and `core` are DELETED.
+- Dependency chain: `parser` ← `cli`. That is the whole graph now.
 - `.claude/skills/review/` — the review skill that replaced the Claude Code plugin. The plugin (MCP config + 12 hooks) is **deleted**, and so is the MCP server it configured. Its hooks used to auto-annotate reads and run the `lien delta` gate on writes; **both are manual now** — run `lien delta` yourself before committing. The test-association reminder is gone: it called `lien annotate`'s index-backed per-file lookup. The mapping itself survives in `@liendev/parser` (`findTestAssociationsFromChunks`, chunk-based, never index-backed) — `lien health` prints test paths for the functions it ranks — but no command answers it for an arbitrary file you name.
 
 **Package Structure:**
 ```
-packages/parser/src/        # AST parsing, chunking, complexity, scanning — zero deps on core
+packages/parser/src/        # AST parsing, chunking, complexity, scanning — no deps on cli
 ├── ast/
 │   ├── languages/   # Per-language definitions (single source of truth)
 │   ├── traversers/  # Language-specific AST traversal classes
@@ -37,23 +37,29 @@ packages/parser/src/        # AST parsing, chunking, complexity, scanning — ze
 └── scanner.ts, gitignore.ts, chunker.ts, dependency-analyzer.ts,
     test-associations.ts, symbol-extractor.ts, content-hash.ts
 
-packages/core/src/          # Config, git, errors — depends on parser.
-│                           # The structural store (vectordb/, indexer/, gc/) is
-│                           # DELETED; core is now small enough that it is slated
-│                           # to fold into cli.
-├── config/      # Per-project ConfigService (.lien.config.json — complexity.thresholds only)
-├── git/         # Git state tracking, linked-worktree detection (git/worktree.ts)
-├── errors/      # Error codes + typed error classes
-├── utils/       # Shared helpers (chunk-array, safe-regex, version)
-└── insights/    # Report formatters (text/JSON/SARIF)
-
-packages/cli/src/           # The CLI — depends on core and parser
+packages/cli/src/           # The CLI — depends on parser only
 ├── cli/         # Commands: complexity, health, review, delta (+ their git/signal helpers)
+├── config/      # Per-project ConfigService (.lien.config.json — complexity.thresholds only)
+├── errors/      # Error codes + typed error classes
+├── insights/    # formatters/ — complexity report output (text/JSON/SARIF)
 ├── types/       # Shared TypeScript types
 └── utils/       # CLI utilities (incl. scan-failure.ts — the no-data honesty gate)
 
+packages/parser-native/     # The Rust tree-sitter addon parser loads through
+│                           # (napi-rs, ADR-013). Not a TypeScript package;
+│                           # versions independently of the other two.
+└── src/, scripts/, index.js, index.d.ts
+
 packages/site/              # VitePress docs site (lien.dev)
 ```
+
+`config/`, `errors/` and `insights/formatters/` came from `@liendev/core`,
+which phase 8 deleted. Its `git/` (`GitStateTracker`, linked-worktree
+detection) did **not** come along: those existed to locate and invalidate the
+index, so they died with it. The CLI does its own git work in
+`cli/delta-git.ts`, and `cli/project-root.ts` resolves the root from the
+`.git` marker alone — correct in a linked worktree too, where `.git` is a
+file rather than a directory.
 
 ---
 
@@ -269,9 +275,15 @@ These live in project root and are tracked in git:
 
 ---
 
-## Data Transformation with collect.js
+## Data Transformation
 
-Use `collect.js` for readable data transformations (groupBy, countBy, chained map/filter/sort). Prefer native `.map()`, `.filter()` for simple single operations or performance-critical paths.
+Use native `.map()`, `.filter()`, `.flatMap()` and `Map`/`Set`. This section
+used to mandate `collect.js` for `groupBy`/`countBy`-style chains; that was
+only ever a `@liendev/core` dependency, and when phase 8 deleted core it left
+the repo with no `collect.js` in any manifest and no import of it in any
+surviving file. Following the old instruction would have failed the build.
+Don't add it back for its own sake — if a transformation genuinely needs
+`groupBy`, a four-line helper beats a dependency.
 
 ---
 
@@ -332,13 +344,22 @@ npm run typecheck     # Must pass with 0 errors
 npm run build         # Must compile successfully
 npm test              # All tests must pass
 lien delta            # No NEW complexity threshold crossings vs HEAD (exit 0)
+node .github/scripts/docs-truth.mjs   # Docs name only things that exist
 ```
 
-**No exceptions.** This prevents broken builds. All six gates are CI-backstopped
-(`.github/workflows/ci.yml`) on every PR, including gate 6 (`lien delta`),
-which runs as its own job comparing the working tree against the PR's base
-branch (`lien delta --base`), not against `HEAD`. Don't skip it locally just
-because CI would catch a crossing anyway.
+**No exceptions.** This prevents broken builds. All seven gates are
+CI-backstopped on every PR: gates 1–5 in `.github/workflows/ci.yml`, gate 6
+(`lien delta`) as its own job there comparing the working tree against the
+PR's base branch (`lien delta --base`, not against `HEAD`), and gate 7 in
+`.github/workflows/docs-truth.yml`. Don't skip them locally just because CI
+would catch it anyway.
+
+**`docs-truth`** is the seventh gate: a zero-dependency lint over tracked
+markdown for broken relative links, `ADR-XXXX` references with no matching
+decision file, and `npm run <script>` mentions that don't resolve. It is the
+one gate that catches prose going stale — it will not, however, catch prose
+that describes a deleted thing without naming a command, so deletions still
+need a manual sweep for what the thing was *for*.
 
 `npm run build` doesn't cover `packages/site`; for docs/site changes also run
 `npm run docs:build`. `npm test` excludes `packages/cli`'s E2E suite

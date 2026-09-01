@@ -48,8 +48,8 @@ jobs:
       - name: Format check
         run: npm run format:check
 
-      - name: Build Parser & Core (required by CLI)
-        run: npm run build -w @liendev/parser && npm run build -w @liendev/core
+      - name: Build Parser (required by CLI)
+        run: npm run build -w @liendev/parser
 
       - name: Lint
         run: npm run lint
@@ -62,9 +62,6 @@ jobs:
 
       - name: Run tests (Parser Native)
         run: npm run test --workspace=packages/parser-native
-
-      - name: Run tests (Core)
-        run: npm run test --workspace=packages/core
 
       - name: Run tests (CLI)
         run: npm run test --workspace=packages/cli
@@ -123,8 +120,8 @@ jobs:
       - name: Build native parser
         run: npm run build:native -w @liendev/parser-native
 
-      - name: Build Parser, Core & CLI (required by lien delta)
-        run: npm run build:core && npm run build -w packages/cli
+      - name: Build Parser & CLI (required by lien delta)
+        run: npm run build -w @liendev/parser && npm run build -w packages/cli
 
       - name: lien delta --base origin/<target-branch>
         run: node packages/cli/dist/index.js delta --base "origin/$GITHUB_BASE_REF"
@@ -137,9 +134,9 @@ jobs:
       contents: read
 
     # Every other job installs via the npm workspace protocol (`npm ci` at
-    # the repo root), which resolves @liendev/core and @liendev/parser from
-    # the local workspace and never touches the public registry for our own
-    # packages. That means a phantom/unpublished/private dependency in
+    # the repo root), which resolves @liendev/parser from the local workspace
+    # and never touches the public registry for our own packages. That means
+    # a phantom/unpublished/private dependency in
     # packages/cli/package.json (the historical case: a `@liendev/review`
     # dependency that broke `npm install` for real users until #620 -- that
     # package has since been deleted, the failure mode has not) is invisible
@@ -150,18 +147,20 @@ jobs:
     # @liendev/lien` gets -- so a phantom dependency fails the PR instead of
     # shipping.
     #
-    # It packs and installs all four PUBLISHED packages together (parser,
-    # core, lien, parser-native), not just the CLI. A real release publishes
-    # them together -- all four are in the same `.changeset/config.json`
-    # linked group, so parser-native bumps to the group's max version and
-    # republishes on every release that bumps any linked package, not on a
-    # schedule of its own -- so the CLI's @liendev/* sibling deps should
-    # resolve to those local tarballs, not whatever's currently live on the
-    # registry. Packing only the CLI made "new CLI + old published
-    # core/parser" -- a combination that can't happen in production -- the
-    # thing this job tested, which false-positived on any PR adding a new
-    # cross-package export (see #644: core shipped `NullEmbeddings` but the
-    # CLI resolved the older, still-published core without it). `site` is
+    # It packs and installs all three PUBLISHED packages together (parser,
+    # lien, parser-native), not just the CLI, so the CLI's @liendev/* sibling
+    # deps resolve to those local tarballs rather than whatever is currently
+    # live on the registry. That is the point: this job must test the set as
+    # BUILT HERE. (Note `linked` in .changeset/config.json aligns versions
+    # only across the packages a release actually touches -- it does not
+    # republish one that has no changeset, which is why parser-native
+    # normally trails parser and lien.)
+    # Packing only the CLI made "new CLI + old published parser" --
+    # a combination that can't happen in production -- the thing this job
+    # tested, which false-positived on any PR adding a new cross-package
+    # export (see #644, when core shipped `NullEmbeddings` but the CLI
+    # resolved the older, still-published core without it; core has since
+    # been folded into the CLI, but parser can fail the same way). `site` is
     # private and intentionally excluded, as `review` and `action` were before
     # they were deleted: if the CLI ever depends on a private workspace again,
     # it still has to resolve from the registry and 404, preserving the #620
@@ -191,7 +190,7 @@ jobs:
         run: npm run build:native -w @liendev/parser-native
 
       - name: Build packages required for the CLI tarball
-        run: npm run build:core && npm run build -w packages/cli
+        run: npm run build -w @liendev/parser && npm run build -w packages/cli
 
       # Produces a real, installable @liendev/parser-native-linux-x64-gnu
       # tarball from the binary built above, WITHOUT touching the npm
@@ -210,14 +209,13 @@ jobs:
             --binary "$(pwd)/parser-native.node"
         working-directory: packages/parser-native
 
-      - name: Pack published packages (parser, core, lien, parser-native)
-        run: npm pack -w @liendev/parser -w @liendev/core -w @liendev/lien -w @liendev/parser-native
+      - name: Pack published packages (parser, lien, parser-native)
+        run: npm pack -w @liendev/parser -w @liendev/lien -w @liendev/parser-native
 
       - name: Install tarballs together as an external consumer
         run: |
           set -euo pipefail
           PARSER_TARBALL="$(pwd)/$(ls liendev-parser-[0-9]*.tgz)"
-          CORE_TARBALL="$(pwd)/$(ls liendev-core-*.tgz)"
           CLI_TARBALL="$(pwd)/$(ls liendev-lien-*.tgz)"
           PARSER_NATIVE_TARBALL="$(pwd)/$(ls liendev-parser-native-[0-9]*.tgz)"
           PLATFORM_TARBALL="$(pwd)/$(ls packages/parser-native/platform-packages/linux-x64-gnu/liendev-parser-native-linux-x64-gnu-*.tgz)"
@@ -225,7 +223,7 @@ jobs:
           echo "SCRATCH_DIR=$SCRATCH" >> "$GITHUB_ENV"
           cd "$SCRATCH"
           npm init -y >/dev/null
-          npm install "$PARSER_TARBALL" "$CORE_TARBALL" "$CLI_TARBALL" "$PARSER_NATIVE_TARBALL" "$PLATFORM_TARBALL"
+          npm install "$PARSER_TARBALL" "$CLI_TARBALL" "$PARSER_NATIVE_TARBALL" "$PLATFORM_TARBALL"
 
       - name: Run the installed CLI binary
         run: |

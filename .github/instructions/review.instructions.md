@@ -5,143 +5,128 @@ excludeAgent: "coding-agent"
 
 # Lien Code Review Instructions
 
-Review PRs for the Lien project - a local-first semantic code search tool for AI coding assistants via MCP.
+Review PRs for Lien — a local-first code-health CLI. It parses the working
+tree on demand with Tree-sitter and answers four questions about a change:
+what is risky to touch, what crossed a complexity threshold, what
+deterministic signals fire on the diff, and where the hotspots are.
+
+There is no server, no persisted index and no search. `lien complexity`,
+`lien health`, `lien review` and `lien delta` are the whole surface. The MCP
+server, the SQLite structural store, the file watcher, the LLM review engine
+and the GitHub Action all existed once and were deleted — if a diff
+reintroduces one, that is the finding.
 
 ---
 
-## ⚠️ Critical: Lien-Specific Issues
+## ⚠️ Critical: Lien-specific issues
 
 **These break Lien in ways that are hard to debug. Flag immediately.**
 
-### MCP Server (packages/cli/src/mcp/)
+### No-data honesty (`packages/cli/src/utils/scan-failure.ts`)
 
-- **NEVER use `console.log()` in MCP server code** - stdout is reserved for JSON-RPC. Use the `log()` function passed via `ToolContext`, or `console.error()` for fatal errors.
-- **All MCP tool responses must include `indexInfo`** - AI assistants rely on this for freshness detection.
-- **Tool handlers must call `checkAndReconnect()`** before database operations - index may have been rebuilt externally.
+- **A read-only command must never render "no data" as a clean result.** An
+  empty or failed parse formats identically to a genuinely clean codebase
+  unless the command checks which one it has.
+- `performChunkOnlyIndex` signals failure by **returning `{ success: false }`**,
+  not by throwing — easy to miss. `complexity`, `health` and `review` all
+  route it through `describeScanFailure`.
+- Partial failure counts too: `describeScanFailure` returns `undefined` the
+  moment *anything* parsed, so `describePartialScan` covers the run where most
+  of the corpus failed.
+- **The inverse is equally a bug:** never turn a genuinely clean result into a
+  false alarm. A gate that over-fires gets trained out as noise.
 
-### File Paths (Cross-Platform)
+### Deterministic over inferred (`packages/parser/src/signals/`)
 
-- **Always use `path.join()` or `path.resolve()`** - never string concatenation for paths.
-- **Normalize paths before comparison** - `getCanonicalPath()` exists for this.
-- **Watch for backslash issues on Windows** - use `.replace(/\\/g, '/')` when needed.
+- A check that is really a diff/parse query should be **computed**, not handed
+  to a model to grep-and-reason.
+- New signals must be pure functions over a diff plus parser output — no LLM,
+  no network, no index — unit-tested in a co-located `<module>.test.ts`, and
+  **default OFF** until precision is measured on real diffs. 13 of 14 existing
+  signals have unproven precision; only `comparison-change` runs by default.
 
-### Vector Database (packages/core/src/vectordb/)
+### Published-package surface (`packages/parser/src/index.ts`)
 
-- **Database operations can fail after index rebuild** - handle "Not found" errors gracefully.
-- **Batch inserts must handle size limits** - check `VECTOR_DB_MAX_BATCH_SIZE`.
-- **Version checks prevent stale reads** - don't skip `checkVersion()` calls.
+- `@liendev/parser` is published, so **an exported internal is
+  semver-locked**. The barrel is deliberately curated: a symbol goes public
+  only when production code outside its module imports it.
+- Never widen the export list "for now" — narrowing later is a breaking change.
 
-### File Watcher (packages/cli/src/watcher/)
+### Tree-sitter node iteration
 
-- **Batch timer must be cleared on stop** - or pending changes are lost.
-- **Git change handler must be null-checked** - `this.gitChangeHandler?.()`.
-- **Debounce timers need cleanup** - memory leak if watcher restarts.
+- `.namedChildren` / `.children` are **arrays**. Use `.forEach()`, `.find()`,
+  `.some()`, `.map()`, `.flatMap()` — never manual index loops over
+  `namedChildCount`. No `.findLast()` (ES2023).
 
-### Indexing (packages/core/src/indexer/)
+### File paths (cross-platform)
 
-- **Content hashes must match algorithm** - check `isHashAlgorithmCompatible()`.
-- **Manifest updates need file locking** - concurrent writes corrupt state.
-- **Embedding dimension must be 384** - `EMBEDDING_DIMENSION` constant exists.
+- Always `path.join()` / `path.resolve()`, never string concatenation.
+- Normalize before comparing — `getCanonicalPath()` exists for this.
 
 ---
 
-## 🔍 Standard Review (Quick Scan)
+## 🔍 Standard review
 
-### Must Have
-- [ ] **No `any` types** without `// eslint-disable` comment explaining why
-- [ ] **Async functions have try/catch** or caller handles errors
-- [ ] **New features have tests** - check `testAssociations` in get_files_context
-- [ ] **Resource cleanup** - intervals cleared, watchers stopped, file handles closed
+### Must have
+- [ ] **No `any`** without an `// eslint-disable` explaining why
+- [ ] **Async functions have try/catch** or a caller that handles errors
+- [ ] **New behaviour has tests**
+- [ ] **A changeset** when `parser`, `parser-native` or `lien` change
+      behaviour (they are a `linked` group and bump together)
 
-### Should Have
-- [ ] **Functions under 50 lines** - extract if longer
+### Should have
+- [ ] **Single responsibility** — if it can't be described in one sentence, split it
 - [ ] **Early returns** for error cases, not nested if/else
-- [ ] **Descriptive names** - `processFile` not `doIt`, `userCount` not `n`
-
-### Nice to Have
-- [ ] **collect.js for complex aggregations** - groupBy, countBy, sum chains
-- [ ] **JSDoc on exported functions** - especially in `@liendev/core`
+- [ ] **Descriptive names** — `processFile`, not `doIt`
 
 ---
 
-## 🚩 Red Flags
-
-**Stop and question these patterns:**
+## 🚩 Red flags
 
 ```typescript
-// ❌ stdout pollution in MCP server
-console.log('Processing...'); // BREAKS MCP JSON-RPC
+// ❌ Treating a failed scan as a clean result
+const report = analyzeComplexityFromChunks(scan.chunks); // scan.success unchecked
 
 // ❌ Path concatenation
 const fullPath = rootDir + '/' + filepath; // BREAKS ON WINDOWS
 
-// ❌ Missing null check
-await this.gitChangeHandler(); // CRASHES IF NOT SET
+// ❌ Manual index loop over tree-sitter children
+for (let i = 0; i < node.namedChildCount; i++) { ... } // use .namedChildren
 
 // ❌ Swallowed errors
 try { ... } catch (e) { } // HIDES BUGS
 
-// ❌ Hardcoded dimension
-new Float32Array(384); // USE EMBEDDING_DIMENSION CONSTANT
+// ❌ Widening a published barrel for convenience
+export * from './internal/thing.js'; // semver-locks every symbol in it
 ```
 
 ---
 
-## 📁 Review by Directory
+## 📁 Review by directory
 
-### `packages/cli/src/mcp/`
-- No console.log (use log function)
-- Tool responses include indexInfo
-- Handlers call checkAndReconnect()
+### `packages/parser/src/`
+- Zero dependency on the CLI; it must stay standalone
+- `signals/` — pure, co-located tests, default off
+- Barrel additions are intentional and justified
 
-### `packages/cli/src/watcher/`
-- Timers cleared on stop
-- Debounce logic correct
-- Git handler null-safe
+### `packages/cli/src/cli/`
+- Commands honour the no-data contract for their disposition:
+  `complexity` hard-errors (gate-shaped), `health`/`review` are advisory at
+  exit 0
+- `lien delta` is the only gate, and fires only on a threshold a function was
+  **under** before
 
-### `packages/core/src/vectordb/`
-- Batch size limits respected
-- Error recovery for stale index
-- Version checking in place
-
-### `packages/core/src/indexer/`
-- Content hash backward compatible
-- Manifest locking for concurrent access
-- Embedding dimension from constant
-
-### `packages/action/`
-- Token usage tracked
-- API errors handled gracefully
-- JSON parsing has try/catch
+### `packages/cli/src/{config,errors,insights}/`
+- Came from the deleted `@liendev/core`; keep them CLI-internal rather than
+  re-exporting a new public API
 
 ---
 
-## Example Comments
+## Before approving
 
-**Critical (Lien-specific):**
-```
-🚨 MCP Protocol: `console.log()` on line 45 will corrupt the JSON-RPC stream. 
-Use `log()` from ToolContext or `console.error()` for diagnostics.
-```
-
-**Standard issue:**
-```
-⚠️ Missing error handling: If `vectorDB.search()` throws, this promise rejects 
-without cleanup. Wrap in try/catch and call `reindexStateManager.failReindex()`.
-```
-
-**Suggestion:**
-```
-💡 This nested loop could use collect.js:
-`collect(files).groupBy('language').map(g => g.count()).all()`
-```
-
----
-
-## Before Approving
-
-1. **Does CI pass?** (typecheck, build, test)
-2. **Are Lien-specific concerns addressed?** (MCP, paths, vectordb)
+1. **Does CI pass?** format, lint, typecheck, build, test, `lien delta --base`, docs-truth
+2. **Is a claim in prose still true after the change?** Deleting a thing
+   leaves prose describing what it was *for* — grep for that, not just its name
 3. **Is this the simplest solution?**
 
-**When in doubt: Is this code that a junior dev could debug at 2am?**
+**When in doubt: is this code a junior dev could debug at 2am?**

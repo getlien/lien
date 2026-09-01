@@ -74,4 +74,4 @@ There is no `save()`: nothing in the codebase writes `.lien.config.json` program
 
 ## History
 
-For context on how this shape got smaller: the `core.chunkSize`/`core.chunkOverlap`/`core.concurrency` keys were removed as dead config in mid-2026 (each validated but never read by the indexing pipeline), followed by the rest of the sections listed above in the same pass. The retired-key warn-and-strip mechanism (`RETIRED_TOP_LEVEL_GROUPS` in `packages/core/src/config/service.ts`) is what's left standing from that cleanup, generalized so a future retirement is a new array entry rather than a bespoke migration path.
+For context on how this shape got smaller: the `core.chunkSize`/`core.chunkOverlap`/`core.concurrency` keys were removed as dead config in mid-2026 (each validated but never read by the indexing pipeline), followed by the rest of the sections listed above in the same pass. The retired-key warn-and-strip mechanism (`RETIRED_TOP_LEVEL_GROUPS` in `packages/cli/src/config/service.ts`) is what's left standing from that cleanup, generalized so a future retirement is a new array entry rather than a bespoke migration path.

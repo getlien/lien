@@ -49,14 +49,13 @@ for details and the historical workaround it replaces.
 
 ## Project Structure
 
-Lien is a 6-package monorepo. `CLAUDE.md`'s ["What is Lien?"](./CLAUDE.md#what-is-lien) section (which contains "Package Structure") is the single source of truth for the per-package directory layout. Start there. In short:
+Lien is a 4-package monorepo. `CLAUDE.md`'s ["What is Lien?"](./CLAUDE.md#what-is-lien) section (which contains "Package Structure") is the single source of truth for the per-package directory layout. Start there. In short:
 
 ```
 lien/
 ├── packages/
 │   ├── parser/    # @liendev/parser — AST parsing, chunking, complexity, scanning
-│   ├── core/      # @liendev/core — config, git, errors, report formatters (depends on parser)
-│   ├── cli/       # @liendev/lien — the CLI: complexity, health, review, delta (depends on core and parser)
+│   ├── cli/       # @liendev/lien — the CLI: complexity, health, review, delta (depends on parser)
 │   ├── parser-native/  # @liendev/parser-native — the Rust tree-sitter addon
 │   └── site/      # @liendev/site (private) — VitePress docs site (lien.dev)
 ├── docs/architecture/     # Architecture docs and ADRs
@@ -164,7 +163,7 @@ Both the rules and the harness are deleted, and the check went with them.
 
 ## Releasing
 
-Lien versions and publishes via [Changesets](https://github.com/changesets/changesets), driven by `.changeset/config.json` and `.github/workflows/release.yml`. Published packages: `@liendev/parser`, `@liendev/core`, `@liendev/lien` (the `cli` package), and `@liendev/parser-native`. `site` is `"private": true` and never published. All four published packages are `linked`: they always bump together, even when only one has code changes.
+Lien versions and publishes via [Changesets](https://github.com/changesets/changesets), driven by `.changeset/config.json` and `.github/workflows/release.yml`. Published packages: `@liendev/parser`, `@liendev/lien` (the `cli` package), and `@liendev/parser-native`. `site` is `"private": true` and never published. All three are `linked`, which aligns the version of every package a release *touches* — it does not drag in a package with no changeset. `@liendev/parser-native` is the standing proof: it sits at 0.61.0 while parser and lien are at 0.79.0, because most releases don't change the Rust addon.
 
 ### Flow
 

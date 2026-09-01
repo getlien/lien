@@ -258,8 +258,9 @@ Known limitations:
 
 1. Resolve the project root (walk up to `.git`, mirroring existing commands).
 2. Load thresholds from `.lien.config.json` via `configService.load()`
-   (`@liendev/core`) — the same source `packages/review` used to read,
-   before it was deleted — falling back to built-in defaults when the file
+   (`packages/cli/src/config/`, folded in from the now-deleted `@liendev/core`
+   in Phase 8) — the same source `packages/review` used to read, before it
+   was deleted — falling back to built-in defaults when the file
    or the `complexity` block is absent. `--threshold <n>` overrides
    `testPaths` + `mentalLoad` (this mirrored the review's own single
    `--threshold`, back when `packages/review` existed). It must be a positive integer; a
@@ -589,7 +590,7 @@ delta:
         fetch-depth: 0 # need origin/<base> locally to diff against
     - uses: actions/setup-node@v4
     - run: npm ci
-    - run: npm run build:core && npm run build -w packages/cli
+    - run: npm run build -w @liendev/parser && npm run build -w packages/cli
     - run: node packages/cli/dist/index.js delta --base "origin/$GITHUB_BASE_REF"
 ```
 

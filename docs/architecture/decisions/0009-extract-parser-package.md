@@ -30,6 +30,25 @@
 > package that no longer exists; both are historical, not current. The
 > parser/core split this ADR made is unaffected either way — `@liendev/lien`
 > and `@liendev/parser` remain exactly as this ADR left them.
+>
+> **Fourth update (2026-09-01):** `@liendev/core` is gone. Phase 8 of the CLI
+> simplification plan (PR #1135) folded what was left of it into
+> `packages/cli` and deleted the package, so the "What Stays in
+> `@liendev/core`" table below is entirely historical — every row in it names
+> something that has since been deleted or moved. Of the 2,102 remaining
+> lines, three modules were reachable
+> from the CLI and moved verbatim (`config/`, `errors/`,
+> `insights/formatters/` — 1,034 lines); the remaining 1,068 — `git/`,
+> `types/`, `constants.ts`, all six `utils/` modules, `src/test/` — were
+> unreachable and were deleted. The
+> dependency chain is now `parser <- cli`, and the published set is three
+> packages, not four.
+>
+> This does **not** reverse ADR-009. The decision here was that parsing should
+> be a standalone, dependency-light package; that held, and is why `parser`
+> is the package that survived. What phase 8 removed was the *other* half of
+> the split — the layer whose reason for existing (VectorDB, embeddings, the
+> indexer) had already been deleted underneath it.
 
 ## Context and Problem Statement
 

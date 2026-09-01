@@ -29,7 +29,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REGISTRY="https://registry.npmjs.org/"
-PROBE_TIMEOUT_MS="${MCP_PROBE_TIMEOUT_MS:-90000}"
 CONSUMER_DIR=""
 
 remediation() {
@@ -44,7 +43,6 @@ manual remediation is to deprecate the broken version(s) so npm/npx warns
 consumers away from them, e.g.:
 
   npm deprecate @liendev/lien@<version>   "broken release, use <next-version> instead"
-  npm deprecate @liendev/core@<version>   "broken release, use <next-version> instead"
   npm deprecate @liendev/parser@<version> "broken release, use <next-version> instead"
 
 then ship a fixed patch release through the normal changesets flow.
@@ -115,10 +113,14 @@ CONSUMER_DIR="$(mktemp -d)"
 )
 
 echo "== Probe 1: import integrity (the exact failure mode from the 0.55/0.56 incident) =="
+# This used to probe @liendev/core alongside parser. core has been folded into
+# the CLI and is no longer a dependency, so importing it here would fail on
+# every release -- AFTER an immutable publish. parser is now the only
+# published sibling the CLI resolves, so it is the only one that can skew.
 cat >"$CONSUMER_DIR/probe-imports.mjs" <<'EOF'
-const [core, parser] = await Promise.all([import('@liendev/core'), import('@liendev/parser')]);
-if (typeof core !== 'object' || typeof parser !== 'object') {
-  throw new Error('unexpected module shape from @liendev/core or @liendev/parser');
+const parser = await import('@liendev/parser');
+if (typeof parser !== 'object') {
+  throw new Error('unexpected module shape from @liendev/parser');
 }
 console.log('import probe OK');
 EOF
