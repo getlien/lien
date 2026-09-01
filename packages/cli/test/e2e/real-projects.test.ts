@@ -754,21 +754,12 @@ describe('E2E: Real Open Source Projects', () => {
         console.log(`📁 ${project.name} structure:`, files.slice(0, 10).join(', '));
       });
 
-      it(
-        'should initialize Lien successfully',
-        async () => {
-          const output = runLienCommand(projectDir, 'init --editor cursor');
-
-          // init creates .cursor/mcp.json with lien MCP server entry
-          expect(output).toContain('.cursor/mcp.json');
-
-          // Verify .cursor/mcp.json was created with lien entry
-          const mcpConfigPath = path.join(projectDir, '.cursor', 'mcp.json');
-          const mcpConfig = JSON.parse(await fs.readFile(mcpConfigPath, 'utf-8'));
-          expect(mcpConfig.mcpServers?.lien).toBeDefined();
-        },
-        E2E_TIMEOUT,
-      );
+      // There was a 'should initialize Lien successfully' case here, asserting
+      // `lien init --editor cursor` wrote `.cursor/mcp.json`. `lien init` has
+      // been deleted — writing a six-line MCP block was its whole job, and the
+      // server it configured goes next — so there is nothing to initialize.
+      // Nothing below depended on it: `lien index` resolves the project root
+      // itself and never reads an editor config.
 
       it(
         'should index the project without errors',
