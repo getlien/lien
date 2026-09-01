@@ -2,47 +2,6 @@
 
 Lien provides a simple command-line interface for managing your codebase index.
 
-## lien init
-
-Initialize Lien in the current directory. This is optional: Lien works with zero configuration.
-
-```bash
-lien init [options]
-```
-
-### Options
-
-| Option | Description |
-|--------|-------------|
-| `-e, --editor <editor>` | Editor to configure MCP for (`cursor`, `claude-code`, `windsurf`, `opencode`, `kilo-code`, `antigravity`) |
-| `-p, --path <path>` | Path to initialize (defaults to current directory) |
-| `--legacy` | Use legacy per-project setup for Claude Code instead of recommending the plugin |
-
-### Behavior
-
-1. Prompts you to select your editor (or use `--editor` flag)
-2. Writes the correct MCP config file for your editor
-3. Auto-detects ecosystem presets (Node.js, Laravel, Python, Rust, etc.)
-
-### Examples
-
-```bash
-# Interactive editor selection
-lien init
-
-# Specify editor directly
-lien init --editor cursor
-lien init --editor claude-code
-lien init --editor windsurf
-
-# Initialize a specific directory
-lien init --path /path/to/project --editor cursor
-```
-
-::: tip Zero Config
-Unlike previous versions, `lien init` no longer creates `.lien.config.json`. Lien auto-detects your project structure and uses sensible defaults. For advanced configuration, see [Configuration](/guide/configuration).
-:::
-
 ## lien index
 
 Index your codebase for lexical search and structural analysis. **Automatically uses incremental indexing** to only process changed files.
@@ -163,48 +122,10 @@ Usually run via Cursor's MCP configuration, not manually.
 
 ### MCP Configuration
 
-The easiest way to configure MCP is with `lien init`:
-
-```bash
-lien init --editor cursor       # → .cursor/mcp.json
-lien init --editor claude-code  # → .mcp.json
-lien init --editor windsurf     # → ~/.codeium/windsurf/mcp_config.json
-lien init --editor opencode     # → opencode.json
-lien init --editor kilo-code    # → .kilocode/mcp.json
-lien init --editor antigravity  # → prints config snippet
-```
-
-Or manually add to your editor's MCP config:
-
-```json
-{
-  "mcpServers": {
-    "lien": {
-      "command": "lien",
-      "args": ["serve"]
-    }
-  }
-}
-```
-
-::: tip Per-Project Configuration
-Editors with per-project config (Cursor, Claude Code, OpenCode, Kilo Code) automatically detect the project root. No need to specify `--root`!
-:::
-
-::: warning Global MCP Config (Windsurf)
-Windsurf uses a global config file, so `lien init` automatically includes `--root` with the absolute project path. If configuring manually, you must add it:
-
-```json
-{
-  "mcpServers": {
-    "lien": {
-      "command": "lien",
-      "args": ["serve", "--root", "/absolute/path/to/project"]
-    }
-  }
-}
-```
-:::
+Lien has no setup wizard: you add its MCP server to your editor's config by
+hand. See [Configuring Your Editor (MCP)](/guide/installation#configuring-your-editor-mcp)
+in the installation guide for the exact config file and JSON snippet per
+editor (Cursor, Claude Code, Windsurf, OpenCode, Kilo Code, Antigravity).
 
 ## lien status
 
@@ -570,7 +491,6 @@ Options:
   -h, --help                 display help for command
 
 Commands:
-  init [options]             Initialize Lien in the current directory
   index [options]            Index the codebase for lexical (FTS5) search and
                              dependency analysis
   serve [options]            Start the MCP server (works with Cursor, Claude
@@ -634,9 +554,11 @@ NODE_ENV=development lien index
 
 ```bash
 cd /path/to/project
-lien init
 lien index
 ```
+
+Then wire up your editor's MCP config by hand — see
+[Configuring Your Editor (MCP)](/guide/installation#configuring-your-editor-mcp).
 
 ### Force Rebuild
 

@@ -1,5 +1,13 @@
 # Claude Code Hook Output Channels
 
+> [!NOTE]
+> **Lien no longer ships any hooks** — the Claude Code plugin was deleted on
+> 2026-08-31. This document is kept as a behavioural finding about Claude Code
+> itself, not as a reference for code in this repo: which output channels reach
+> the model is a property of the hook protocol, and it cost real experiments to
+> establish. It stays useful to anyone writing a hook anywhere; it no longer
+> describes anything Lien does.
+
 Reference for which Claude Code hook output channels actually reach the model
 on its next turn, and which are silently dropped. Verified behaviorally (a
 PostToolUse hook emitting a directive, checked for model compliance) against

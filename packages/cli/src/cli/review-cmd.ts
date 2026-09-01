@@ -339,13 +339,30 @@ function renderNothingReviewable(result: ReviewResult): string {
     );
   }
 
+  // The documentation signals (doc-claims, docs-drift, guidance-surface,
+  // untrusted-input) read the raw patch text, not the parsed file set — so they
+  // can have found something even when nothing was parser-analyzable. Asserting
+  // "no signal ran" off an empty analyzable set was false for exactly that case:
+  // a markdown-only diff produced doc-claims and docs-drift candidates while
+  // this renderer told the reader nothing had run. Same false-clean shape as the
+  // three variants above, one layer down.
+  const withCandidates = result.reports.filter(r => r.candidates.length > 0);
+  const total = withCandidates.reduce((n, r) => n + r.candidates.length, 0);
+
   return [
     `Changes against ${result.base}, but nothing reviewable in them.`,
     '',
-    'Nothing was analyzed — this is not a clean review, it is an empty one. What changed:',
+    'No file was parsed — this is not a clean review of the code. What changed:',
     ...reasons,
     '',
-    'No signal ran, so no signal found anything.',
+    ...(total > 0
+      ? [
+          `${total} candidate(s) still came from signals that read the raw diff:`,
+          '',
+          ...withCandidates.flatMap(renderSignalBlock),
+          'These are candidates for you to judge, not findings.',
+        ]
+      : ['No signal found anything in the raw diff either.']),
   ].join('\n');
 }
 

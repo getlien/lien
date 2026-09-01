@@ -4,57 +4,14 @@ This guide walks you through setting up Lien with your editor in under 2 minutes
 
 ## Step 1: Configure Your Editor
 
-### Claude Code (recommended path)
+Lien has no setup wizard: add its MCP server to your editor's config by hand.
+See [Configuring Your Editor (MCP)](/guide/installation#configuring-your-editor-mcp)
+in the installation guide for the exact config file and JSON snippet for your
+editor — Cursor, Claude Code, Windsurf, OpenCode, Kilo Code, or Antigravity.
 
-Install the plugin once and you're done, with no per-project setup:
-
-```text
-/plugin marketplace add getlien/lien
-/plugin install lien
-```
-
-Lien's MCP tools and the Explore agent become available in every Claude Code session, in every repo.
-
-::: tip
-If you previously used `lien init --editor claude-code` per project, you can leave those `.mcp.json` files in place or remove them; the plugin's MCP server replaces them. `lien init --editor claude-code --legacy` is still available if you need the old per-project flow for any reason.
-:::
-
-### Other editors (Cursor, Windsurf, OpenCode, Kilo Code, Antigravity)
-
-These editors don't have a plugin marketplace yet. Run `lien init` per project and select your editor:
-
-```bash
-lien init
-```
-
-Or specify it directly:
-
-```bash
-lien init --editor cursor
-lien init --editor windsurf
-lien init --editor opencode
-lien init --editor kilo-code
-lien init --editor antigravity
-```
-
-This writes the correct MCP config for your editor. Once the MCP tools are
-wired up, see [Cross-Editor Agent Setup](/guide/cross-editor-setup) for a
+Once the MCP tools are wired up, see [Cross-Editor Agent Setup](/guide/cross-editor-setup) for a
 copy-paste `AGENTS.md` block that tells your agent to actually use them
 before editing. Most non-Claude-Code editors read that file natively.
-
-::: details What does `lien init` create?
-
-| Editor | Config File | Scope |
-|--------|-------------|-------|
-| Cursor | `.cursor/mcp.json` | Per-project |
-| Claude Code (`--legacy` only) | `.mcp.json` | Per-project |
-| Windsurf | `~/.codeium/windsurf/mcp_config.json` | Global (with `--root`) |
-| OpenCode | `opencode.json` | Per-project |
-| Kilo Code | `.kilocode/mcp.json` | Per-project |
-| Antigravity | Prints snippet to copy | Manual |
-
-Per-project configs automatically detect the project root. Windsurf uses a global config, so `lien init` includes the absolute project path via `--root`.
-:::
 
 ## Step 2: Restart Your Editor
 
@@ -98,7 +55,7 @@ Lien automatically detects and indexes multiple ecosystems:
 my-app/
   ├── src/                  # Node.js/TypeScript (auto-detected)
   ├── backend/              # Laravel (auto-detected)
-  └── .cursor/mcp.json      # Created by `lien init`
+  └── .cursor/mcp.json      # Your editor's MCP config
 ```
 
 Lien scans your project structure and applies appropriate patterns for each detected ecosystem, no configuration needed.
@@ -107,7 +64,7 @@ Lien scans your project structure and applies appropriate patterns for each dete
 
 ### AI assistant doesn't show Lien tools
 
-1. Run `lien init` to verify the config file was created for your editor
+1. Double-check your editor's MCP config file matches the snippet in the [installation guide](/guide/installation#configuring-your-editor-mcp)
 2. Restart your editor completely (quit, not just reload)
 3. Check your editor's developer console or logs for errors
 4. For Windsurf: ensure the `--root` path in `~/.codeium/windsurf/mcp_config.json` is correct

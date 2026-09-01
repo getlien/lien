@@ -1,6 +1,0 @@
-{
-  "lien": {
-    "command": "npx",
-    "args": ["-y", "@liendev/lien@latest", "serve"]
-  }
-}

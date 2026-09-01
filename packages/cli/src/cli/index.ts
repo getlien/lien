@@ -3,7 +3,6 @@ import { DEFAULT_STALE_DAYS } from '@liendev/core';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { initCommand } from './init.js';
 import { statusCommand } from './status.js';
 import { indexCommand } from './index-cmd.js';
 import { serveCommand } from './serve.js';
@@ -18,8 +17,6 @@ import { pathCommand } from './path-cmd.js';
 import { annotateCli } from './annotate-cmd.js';
 import { gcCommand } from './gc.js';
 import { noteEditCommand, noteRunCommand, reportCommand } from './verify-tests-cmd.js';
-import { noteShownCommand, noteSignalCommand } from './nudge-cmd.js';
-import { nudgeDoctorCommand } from './nudge-doctor-cmd.js';
 import { recapCommand } from './recap-cmd.js';
 
 // Get version from package.json dynamically
@@ -40,26 +37,6 @@ program
   .name('lien')
   .description('Local lexical code search and dependency analysis for AI assistants via MCP')
   .version(packageJson.version);
-
-program
-  .command('init')
-  .description('Initialize Lien in the current directory')
-  .addOption(
-    new Option('-e, --editor <editor>', 'Editor to configure MCP for').choices([
-      'cursor',
-      'claude-code',
-      'windsurf',
-      'opencode',
-      'kilo-code',
-      'antigravity',
-    ]),
-  )
-  .option('-p, --path <path>', 'Path to initialize (defaults to current directory)')
-  .option(
-    '--legacy',
-    'Use legacy per-project setup for Claude Code instead of recommending the plugin',
-  )
-  .action(initCommand);
 
 program
   .command('index')
@@ -137,7 +114,7 @@ program
   .option('--format <type>', 'Output format: text, json', 'text')
   .option('--threshold <n>', 'Override cyclomatic + cognitive thresholds (default: from config)')
   .option('--soft', 'Advisory mode: always exit 0 (still prints the report)')
-  .option('--file <path>', 'Analyze only this file vs HEAD (fast path for edit hooks)')
+  .option('--file <path>', 'Analyze only this file vs HEAD (fast path for a single-file check)')
   .option(
     '--base <ref>',
     'Compare the working tree against this ref instead of HEAD (e.g. origin/main in CI)',
@@ -150,7 +127,7 @@ program
     'Flag exported-symbol signature changes/removals in the working tree (vs HEAD) — advisory, not a gate',
   )
   .option('--format <type>', 'Output format: text, json', 'text')
-  .option('--file <path>', 'Analyze only this file vs HEAD (fast path for edit hooks)')
+  .option('--file <path>', 'Analyze only this file vs HEAD (fast path for a single-file check)')
   .option(
     '--base <ref>',
     'Compare the working tree against this ref instead of HEAD (e.g. origin/main in CI)',
@@ -168,13 +145,13 @@ program
 program
   .command('recap')
   .description(
-    'Session risk-ledger recap: at Stop, re-raise UNRESOLVED risk from this session (unrun tests, live complexity crossings, unacted get_dependents warnings) as one advisory (for the plugin Stop hook)',
+    'Session risk-ledger recap: re-raise UNRESOLVED risk from this session (unrun tests, live complexity crossings, unacted get_dependents warnings) as one advisory',
   )
   .option('--session <id>', 'Session ID to recap')
   .option('--format <type>', 'Output format: text, json', 'text')
   .option(
     '--hooks-dir <path>',
-    "The calling hook script's own directory, for the test-verify shown event's build stamp (for the plugin Stop hook)",
+    "Calling script's own directory, for the test-verify shown event's build stamp",
   )
   .action(recapCommand);
 
@@ -203,7 +180,7 @@ configCmd.command('list').description('Show all current config').action(configLi
 
 program
   .command('path')
-  .description('Print Lien storage paths and supported extensions (for hook scripts)')
+  .description('Print Lien storage paths and supported extensions')
   .option('--store', 'Print the storage root for the current repo')
   .option('--extensions', 'Print the indexed-file extensions, one per line')
   .option('--root', 'Print the resolved project root (walks up for .git)')
@@ -211,11 +188,8 @@ program
 
 program
   .command('annotate <file>')
-  .description('Print a short impact summary for a single file (for hook annotation)')
-  .option(
-    '--tests-only',
-    'Print only the post-edit test-association reminder line (for the write hook)',
-  )
+  .description('Print a short impact summary for a single file')
+  .option('--tests-only', 'Print only the post-edit test-association reminder line')
   .option(
     '--min-risk <level>',
     'Habituation-guard risk floor: only annotate when blast-radius risk is >= this ' +
@@ -227,18 +201,17 @@ program
 const verifyTestsCmd = program
   .command('verify-tests')
   .description(
-    'Session-scoped did-you-run-the-tests ledger (for the plugin hooks) — record edits/test-runs and report unverified files',
+    'Session-scoped did-you-run-the-tests ledger — record edits/test-runs and report unverified files',
   );
 
 // Session/file/command are plain (not required) options: every subcommand is
 // its own fail-open no-op when one is missing (see verify-tests-cmd.ts), so a
 // hard commander usage error here would contradict this feature's fail-open
-// contract for what is, in practice, hook-driven plumbing.
+// contract. The fail-open shape exists because this was hook-driven plumbing;
+// the hooks that drove it are gone, so nothing calls these but a human.
 verifyTestsCmd
   .command('note-edit')
-  .description(
-    'Record that a file was edited and print its test-association reminder (replaces `annotate --tests-only` in the edit hook)',
-  )
+  .description('Record that a file was edited and print its test-association reminder')
   .option('--session <id>', 'Session ID to record under')
   .option('--file <path>', 'File that was edited')
   .option('--format <type>', 'Output format: text, json', 'text')
@@ -246,9 +219,7 @@ verifyTestsCmd
 
 verifyTestsCmd
   .command('note-run')
-  .description(
-    'Record a Bash command as a test run, if it looks like one (silent — for the Bash hook)',
-  )
+  .description('Record a Bash command as a test run, if it looks like one (silent)')
   .option('--session <id>', 'Session ID to record under')
   .option('--command <cmd>', 'The Bash command that was run')
   .action(noteRunCommand);
@@ -261,54 +232,6 @@ verifyTestsCmd
   .option('--session <id>', 'Session ID to report on')
   .option('--format <type>', 'Output format: text, json', 'text')
   .action(reportCommand);
-
-const nudgeCmd = program
-  .command('nudge')
-  .description(
-    'Record nudge-outcome events for the shown → acted-on funnels in `lien stats` (for the plugin hooks)',
-  );
-
-// Like `verify-tests`, these are hook-driven plumbing: options are plain (not
-// required) so a missing argument is a fail-open no-op (see nudge-cmd.ts), not a
-// hard commander usage error that would contradict the fail-open contract.
-nudgeCmd
-  .command('note-shown')
-  .description('Record that a nudge surfaced to the model this session')
-  .option('--session <id>', 'Session ID to record under')
-  .option('--nudge <name>', 'Which nudge fired: annotate, blast, test-verify')
-  .option('--file <path>', 'File the nudge was about, when it has one')
-  .option('--symbol <name>', 'Symbol the nudge was about, when known')
-  .option(
-    '--hooks-dir <path>',
-    "The calling hook script's own directory, for the event's build stamp",
-  )
-  .action(noteShownCommand);
-
-nudgeCmd
-  .command('note-signal')
-  .description('Record a follow-up tool call a nudge funnel joins against')
-  .option('--session <id>', 'Session ID to record under')
-  .option('--signal <name>', 'Which signal: get_dependents, get_files_context, test_run')
-  .option('--file <path>', 'File the call named, when present')
-  .option('--symbol <name>', 'Symbol the call named, when present')
-  .option(
-    '--hooks-dir <path>',
-    "The calling hook script's own directory, for the event's build stamp",
-  )
-  .action(noteSignalCommand);
-
-nudgeCmd
-  .command('doctor')
-  .description(
-    'Drift/health check for nudge telemetry: warns when the live plugin hooks predate this ' +
-      'instrumentation, or differ from the CLI/hooks that last recorded an event',
-  )
-  .option(
-    '--hooks-dir <path>',
-    'Live plugin hooks directory to check for drift against (omit for a ledger-history-only check)',
-  )
-  .option('--format <type>', 'Output format: text, json', 'text')
-  .action(nudgeDoctorCommand);
 
 program
   .command('gc')

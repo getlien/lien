@@ -596,7 +596,7 @@ You are a **developer advocate** evaluating the developer experience of Lien fro
 
 **CLI ergonomics:**
 - Run `npx lien --help` and evaluate: are the commands discoverable? Is the help text clear?
-- Run `npx lien init --help`, `npx lien index --help`, `npx lien serve --help`, `npx lien status --help` — are options well-described?
+- Run `npx lien index --help`, `npx lien serve --help`, `npx lien status --help` — are options well-described?
 - Are command names intuitive? Would a first-time user know what to run?
 - What happens when you run `npx lien` with no arguments?
 - What happens with invalid commands or options?
@@ -617,7 +617,7 @@ You are a **developer advocate** evaluating the developer experience of Lien fro
 - Are relevance categories helpful for AI assistants to filter results?
 
 **Onboarding flow:**
-- Trace the first-use experience: install -> init -> first MCP query
+- Trace the first-use experience: install -> hand-edit the editor's MCP config -> restart the editor -> first MCP query
 - How long until a user gets value? Are there unnecessary steps?
 - What are the failure modes during onboarding? (missing dependencies, permission errors, etc.)
 - Is the auto-index-on-first-use reliable?

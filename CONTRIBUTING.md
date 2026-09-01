@@ -22,7 +22,7 @@ npm link
 
 ### Dogfooding Lien while working on Lien
 
-The repo contains a Claude Code plugin at `plugins/claude/` and a marketplace manifest at `.claude-plugin/marketplace.json`: these are distribution files for end users. **Do not `/plugin install lien` in your dev environment** when working on Lien itself: that points the MCP server at the npm-published `@liendev/lien`, so you'd be testing the released build instead of your local changes.
+The Claude Code plugin (`plugins/claude/`) and its marketplace manifest (`.claude-plugin/marketplace.json`) have been **deleted**. There is nothing to install and nothing to avoid installing: point your editor at your local build by hand-editing its MCP config (see below), or run the commands directly. The warning this paragraph used to carry — that installing the published plugin would test the released build rather than your changes — no longer applies because there is no plugin to install.
 
 Instead, register Lien per-project against your local `dist/`:
 

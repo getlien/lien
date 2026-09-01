@@ -6,24 +6,9 @@
 - No compiler or build toolchain required on supported platforms: Lien's parser ships as prebuilt native binaries for macOS (arm64/x64), Linux (x64/arm64, glibc or musl, including Alpine), and Windows (x64), so there's no `node-gyp`, no Python/make/g++, no Xcode Command Line Tools step. Any other platform needs a one-time local build of the parser crate with the Rust toolchain
 - 8GB+ RAM recommended for large codebases
 
-## Claude Code Plugin (Recommended)
+## Global Installation
 
-For Claude Code users, the simplest path is the one-time plugin install: no `npm install`, no per-project `lien init`. Lien's MCP tools and the Explore agent become available in every Claude Code session, in every repo.
-
-```text
-/plugin marketplace add getlien/lien
-/plugin install lien
-```
-
-The plugin spawns Lien on demand via `npx -y @liendev/lien@latest`, which resolves against the npm registry on every launch, so it always runs the latest published release, even if you have a local `npm link` or workspace copy of `@liendev/lien` on your machine. To upgrade, restart Claude Code: the next spawn fetches the newest version automatically.
-
-::: tip Working on Lien itself?
-Contributors should NOT install the plugin in their dev environment: that points the MCP server at the npm-published binary, bypassing your local changes. See [CONTRIBUTING.md](https://github.com/getlien/lien/blob/main/CONTRIBUTING.md) for the dogfooding setup that points at your local build instead.
-:::
-
-## Global Installation (for Cursor, Windsurf, OpenCode, Kilo Code, Antigravity)
-
-These editors don't have a plugin marketplace yet, so install Lien globally and wire it up per-project with `lien init`:
+Install Lien globally:
 
 ```bash
 npm install -g @liendev/lien
@@ -35,20 +20,69 @@ Verify installation:
 lien --version
 ```
 
-Then in each project:
+Then wire it up per-project — see [Configuring Your Editor (MCP)](#configuring-your-editor-mcp) below.
 
-```bash
-lien init
+## Configuring Your Editor (MCP)
+
+Lien has no setup wizard: you add its MCP server to your editor's config by hand, once per project. Each editor reads that config from a different file:
+
+| Editor | Config File | Scope |
+|--------|-------------|-------|
+| Cursor | `.cursor/mcp.json` | Per-project |
+| Claude Code | `.mcp.json` | Per-project |
+| Windsurf | `~/.codeium/windsurf/mcp_config.json` | Global (needs `--root`) |
+| OpenCode | `opencode.json` | Per-project |
+| Kilo Code | `.kilocode/mcp.json` | Per-project |
+| Antigravity | Paste into MCP settings | Manual |
+
+**Cursor, Claude Code, and Kilo Code** all take the same `mcpServers` block. Create (or edit) the file listed above for your editor with:
+
+```json
+{
+  "mcpServers": {
+    "lien": {
+      "command": "lien",
+      "args": ["serve"]
+    }
+  }
+}
 ```
 
-`lien init` writes the correct MCP config for your editor: `.cursor/mcp.json` for Cursor, `opencode.json` for OpenCode, and so on. See the [Quick Start guide](/guide/getting-started) for the full per-editor flow.
+**Windsurf** shares one global config across every project, so it needs the absolute project path via `--root`:
+
+```json
+{
+  "mcpServers": {
+    "lien": {
+      "command": "lien",
+      "args": ["serve", "--root", "/absolute/path/to/project"]
+    }
+  }
+}
+```
+
+**OpenCode** uses an `mcp` key instead of `mcpServers`, with its own command shape:
+
+```json
+{
+  "mcp": {
+    "lien": {
+      "type": "local",
+      "command": ["lien", "serve"]
+    }
+  }
+}
+```
+
+**Antigravity** has no project config file to edit: open its MCP settings and paste the same `mcpServers` block shown for Cursor above.
+
+Per-project configs (Cursor, Claude Code, OpenCode, Kilo Code) auto-detect the project root, so you don't need `--root` for those. See the [Quick Start guide](/guide/getting-started) for the full per-editor walkthrough.
 
 ## Using npx (no global install)
 
 You can run Lien without installing it globally:
 
 ```bash
-npx @liendev/lien init
 npx @liendev/lien index
 npx @liendev/lien serve
 ```
@@ -73,7 +107,8 @@ Code changes (new features and bug fixes) require restarting your editor. The au
 
 ## Uninstalling
 
-**Plugin users:**
+**If you installed the old Claude Code plugin** (removed in a later release, but
+still present in your Claude Code install until you remove it):
 
 ```text
 /plugin uninstall lien

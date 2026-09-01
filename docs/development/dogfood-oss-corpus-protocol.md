@@ -1,5 +1,15 @@
 # Dogfood protocol: MCP tools + nudge plugin, on foreign repos
 
+> [!IMPORTANT]
+> **The Claude Code plugin was deleted on 2026-08-31.** Every `plugins/claude/hooks/*`
+> reference below describes a delivery mechanism that no longer exists — the hooks,
+> `hooks.json`, and the marketplace entry are all gone, and `lien init` and
+> `lien nudge` went with them. The *checks* those hooks automated survive as
+> commands (`lien delta`, `lien health`, `lien review`); the automatic invocation at
+> the tool boundary does not. Read hook references here as history, not as
+> configuration.
+
+
 **Status:** plan, frozen before any trial runs. **Instrument:**
 [`scripts/experiments/dogfood-oss/`](../../scripts/experiments/dogfood-oss/).
 

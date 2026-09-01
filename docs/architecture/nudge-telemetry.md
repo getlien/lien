@@ -1,5 +1,24 @@
 # Nudge telemetry v2 — shown → acted-on funnels + the habituation guard
 
+> [!IMPORTANT]
+> **Both ends of this pipeline are partly gone as of 2026-08-31.** The Claude Code
+> plugin was deleted, and with it every hook that *emitted* a nudge — so the
+> `annotate`, `blast` and `delta` shown-events described below have no producer any
+> more. `lien nudge` went with them: its `note-shown`/`note-signal` subcommands
+> existed only for those hooks to shell into, and `lien nudge doctor` diagnosed
+> drift against a live plugin hooks directory, so it could only ever report a
+> false `critical` once there was no plugin to check.
+>
+> What survives: the event *store* (`utils/nudge-events.ts`), the `lien stats`
+> funnel that reports it, and two producers that are ordinary commands rather than
+> hooks — `lien recap` (records a `test-verify` shown event) and `lien verify-tests`
+> (records the `test_run` signal). So the funnel is degraded, not dead: it can
+> still populate, from a narrower set of sources than this document describes.
+>
+> The whole family is slated for deletion; read this as history plus a map of what
+> is still wired.
+
+
 Lien's plugin hooks emit several nudges as an agent works: a read-time impact
 annotation, a complexity-delta warning, an exported-signature (blast-radius)
 warning, and a did-you-run-the-tests advisory. Until now the nudges *talked* and
