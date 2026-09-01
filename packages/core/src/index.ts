@@ -26,16 +26,6 @@
  * ```
  */
 
-// =============================================================================
-// INDEXING
-// =============================================================================
-
-export { indexCodebase } from './indexer/index.js';
-export type { IndexingOptions, IndexingProgress, IndexingResult } from './indexer/index.js';
-export { buildOverlay } from './indexer/overlay-index.js';
-export type { OverlayBuildResult } from './indexer/overlay-index.js';
-export { ManifestManager } from './indexer/manifest.js';
-export type { IndexManifest, FileEntry } from './indexer/manifest.js';
 export {
   chunkFile,
   scanCodebase,
@@ -55,68 +45,11 @@ export {
 export type { EcosystemPreset, ChunkOptions } from '@liendev/parser';
 /** @deprecated Use {@link detectFileType} instead. */
 export { detectFileType as detectLanguage } from '@liendev/parser';
-export {
-  indexSingleFile,
-  indexMultipleFiles,
-  normalizeToRelativePath,
-} from './indexer/incremental.js';
-
-// =============================================================================
-// STRUCTURAL STORE (SQLite + FTS5)
-// =============================================================================
-
-export { createVectorDB } from './vectordb/factory.js';
-export { OverlayBackend } from './vectordb/overlay-backend.js';
-export { resolveIndexStrategy } from './vectordb/overlay-resolution.js';
-export type { IndexStrategy } from './vectordb/overlay-resolution.js';
-export type { VectorDBInterface, SearchResult } from './vectordb/types.js';
-export { SYMBOL_TYPE_MATCHES } from './vectordb/types.js';
-export type { RelevanceCategory } from './vectordb/relevance.js';
-export { readVersionFile, writeVersionFile, VERSION_FILE } from './vectordb/version.js';
-
-// =============================================================================
-// INDEX GARBAGE COLLECTION
-// =============================================================================
-
-export {
-  planGc,
-  executeGc,
-  runGc,
-  runAutoGc,
-  getIndicesRoot,
-  enumerateIndexDirs,
-  writeAccessStamp,
-  readAccessStamp,
-  probeIndexLock,
-  computeDirSize,
-  formatBytes,
-  LEGACY_LANCE_DIRNAME,
-  DEFAULT_STALE_DAYS,
-  AUTO_GC_INTERVAL_MS,
-  GC_STAMP_FILE,
-  GC_LOCK_FILE,
-  ACCESS_STAMP_FILE,
-} from './gc/index.js';
-export type {
-  GcOptions,
-  GcPlan,
-  GcResult,
-  GcSummary,
-  GcRemoval,
-  GcRemovalKind,
-  GcLanceSweep,
-  GcSkip,
-  GcSkipReason,
-  AutoGcOptions,
-  AutoGcResult,
-  LockProbeResult,
-} from './gc/index.js';
 
 // =============================================================================
 // COMPLEXITY ANALYSIS
 // =============================================================================
 
-export { ComplexityAnalyzer } from './insights/complexity-analyzer.js';
 export { analyzeComplexityFromChunks } from '@liendev/parser';
 export {
   formatReport,
@@ -129,14 +62,6 @@ export type { OutputFormat } from './insights/formatters/index.js';
 // =============================================================================
 // GLOBAL CONFIGURATION
 // =============================================================================
-
-export {
-  loadGlobalConfig,
-  saveGlobalConfig,
-  mergeGlobalConfig,
-  ConfigValidationError,
-} from './config/global-config.js';
-export type { GlobalConfig } from './config/global-config.js';
 
 // =============================================================================
 // PROJECT CONFIGURATION (.lien.config.json)
@@ -238,7 +163,6 @@ export { normalizePath, matchesFile, getCanonicalPath, isTestFile } from '@liend
 export { safeRegex } from './utils/safe-regex.js';
 export { extractRepoId } from './utils/repo-id.js';
 export { getLienHome } from './utils/lien-home.js';
-export { getIndexDir } from './utils/index-dir.js';
 
 // =============================================================================
 // AST LANGUAGE REGISTRY (re-export from parser)

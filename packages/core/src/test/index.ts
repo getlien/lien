@@ -1,7 +1,1 @@
-export {
-  createTestDir,
-  cleanupTestDir,
-  createTestVectorDB,
-  createTestFile,
-  simulatePreCountTrackingIndex,
-} from './helpers/test-db.js';
+export { createTestDir, cleanupTestDir, createTestFile } from './helpers/test-db.js';

@@ -3,56 +3,61 @@ import fs from 'fs/promises';
 import fsSync from 'fs';
 import path from 'path';
 import os from 'os';
-import crypto from 'crypto';
 import { execSync } from 'child_process';
-import { createVectorDB, getLienHome } from '@liendev/core';
-import type { VectorDBInterface, SearchResult } from '@liendev/core';
-import { findDependents, findTestAssociationsFromChunks } from '@liendev/parser';
+import {
+  performChunkOnlyIndex,
+  findDependents,
+  findTestAssociationsFromChunks,
+} from '@liendev/parser';
+import type { CodeChunk, ChunkOnlyResult } from '@liendev/parser';
 
 /**
  * E2E Tests with Real Open Source Projects
  *
- * These tests validate that Lien works correctly on real-world codebases
- * by cloning popular open source projects and indexing them.
+ * These tests validate that Lien's PARSER works correctly on real-world,
+ * multi-language codebases by cloning popular open source projects and
+ * running them through `performChunkOnlyIndex` — no persisted store, no MCP
+ * server. This is the repo's only cross-language validation, so what it
+ * checks is deliberately narrow but load-bearing:
+ * - AST chunking produces chunks with real metadata (symbols, signatures,
+ *   imports/exports, complexity)
+ * - `findDependents` resolves real dependency edges from those chunks
+ * - `findTestAssociationsFromChunks` resolves real test associations
+ * - `lien complexity --format json` (the one surviving index-free CLI
+ *   command this suite exercises) runs clean and reports real violations
  *
- * **Running these tests:**
- * - Locally: `npm run test:e2e`
- * - CI: Runs automatically on push to main
- * - Individual language: `npm test -- real-projects.test.ts -t "Python"`
- *
- * **Why these projects:**
- * - Flask (Python): Popular web framework, well-structured, moderate size
- * - Zod (TypeScript): Schema validation library, clean codebase, modern TS
- * - Express (JavaScript): Most popular Node.js framework
- * - Monolog (PHP): Logging library, standard PHP patterns
+ * **Why these projects:** one real, moderately-sized OSS repo per supported
+ * language (Zod/TS, Express/JS, Requests/Python, Anyhow/Rust, Chi/Go,
+ * JavaPoet/Java, Klaxon/Kotlin, MediatR/C#, Monolog/PHP, Sinatra/Ruby,
+ * SwiftyJSON/Swift) — enough real-world structure (barrels, re-exports,
+ * package/namespace conventions) to catch resolution collapses that a
+ * synthetic fixture wouldn't.
  *
  * **Test strategy:**
- * 1. Clone project to /tmp/lien-e2e-tests/ (shallow clone for speed)
- * 2. Initialize Lien
- * 3. Index the project
- * 4. Validate results:
- *    - Files indexed > 0
- *    - Chunks created > files (AST chunking working)
- *    - No indexing errors
- *    - AST metadata present
- *    - Search works
+ * 1. Clone project to the OS temp dir (shallow clone for speed)
+ * 2. Run `performChunkOnlyIndex` once per project (in `beforeAll`) and reuse
+ *    the resulting chunks across every test in that project's block
+ * 3. Validate results:
+ *    - Parse succeeded (`scan.success`) and produced files/chunks above a
+ *      per-project floor
+ *    - AST metadata present (symbols, imports/exports)
  *    - #1004/#1023: dependency edges actually resolve (not just "shape")
- *    - #1029 (W3): complexity violations, test associations, exports, and a
- *      known symbol via search all actually resolve too, each as a
- *      collapse-to-zero detector (floor far below measured) or an explicit
- *      `toBe(0)` tripwire for a documented, currently-real gap -- see
- *      `KNOWN_ZERO_EDGE_LANGUAGES`/`KNOWN_ZERO_TESTASSOC_LANGUAGES`'s doc
+ *    - #1029 (W3): complexity violations and test associations also resolve,
+ *      each as a collapse-to-zero detector (floor far below measured) or an
+ *      explicit `toBe(0)` tripwire for a documented, currently-real gap --
+ *      see `KNOWN_ZERO_EDGE_LANGUAGES`/`KNOWN_ZERO_TESTASSOC_LANGUAGES`'s doc
  *      comments below for which languages are which and why.
- * 5. Cleanup temp directory (always, even on failure/interrupt)
+ * 4. Cleanup temp directory (always, even on failure/interrupt)
  *
  * **Cleanup guarantees:**
  * - afterAll() hook cleans up after tests complete
  * - Process signal handlers (SIGINT/SIGTERM) clean up on Ctrl+C or kill
- * - Only /tmp/lien-e2e-tests/ is used (predictable location, easy to find)
+ * - Only the OS temp dir's `lien-e2e-tests/` subdir is used (predictable
+ *   location, easy to find)
  * - Cleanup runs even if tests fail or are interrupted
  */
 
-const E2E_TIMEOUT = 180000; // 3 minutes per test (cloning + indexing)
+const E2E_TIMEOUT = 180000; // 3 minutes per test (cloning + parsing)
 
 interface ProjectConfig {
   name: string;
@@ -61,7 +66,6 @@ interface ProjectConfig {
   language: string;
   expectedMinFiles: number; // Minimum files to index
   expectedMinChunks: number; // Minimum chunks to create
-  sampleSearchQuery: string; // Query that should find results
   /**
    * #1004: floor on TOTAL resolved dependency edges across the whole corpus
    * (sum of `findDependents(...).dependents.length` over every indexed
@@ -97,16 +101,17 @@ interface ProjectConfig {
    * sweep of this project's files (same `sampleFilesForSweep` cap as
    * dependency edges, reusing the same chunks -- see `computeDependencyStats`
    * and the test-association test below that mirrors its sampling).
-   * This is #979's blind spot at the E2E layer: `get_complexity` reported
-   * `testAssociations: []` for every hotspot while `lien annotate` was
-   * correct for the same file, and nothing here would have caught it. Like
+   * This is #979's blind spot at the E2E layer: the old `get_complexity` MCP
+   * tool reported `testAssociations: []` for every hotspot while a different
+   * code path calling the same underlying resolver was correct for the same
+   * file, and nothing here would have caught it. Like
    * `expectedMinDependencyEdges`, a collapse detector, not a precision
    * target. Languages with a genuine, currently-real zero go through
    * `KNOWN_ZERO_TESTASSOC_LANGUAGES` as a tripwire instead.
    */
   expectedMinTestAssociations: number;
   /**
-   * #1029 (W3): floor on the count of indexed chunks with a non-empty
+   * #1029 (W3): floor on the count of parsed chunks with a non-empty
    * `exports` array -- replaces the old blanket "at least SOME chunk in the
    * whole suite has exports" check (which stayed green even if any single
    * project's export extraction collapsed to zero, since it summed across
@@ -114,17 +119,6 @@ interface ProjectConfig {
    * per-project floor.
    */
   expectedMinChunksWithExports: number;
-  /**
-   * #1029 (W3): a search query for a real, verified-present identifier in
-   * this corpus (not the vague natural-language `sampleSearchQuery` above,
-   * which only asserts a generic relevance bucket) -- paired with
-   * `knownSymbolFile`, the file that query must surface, so this test can
-   * catch "search returns SOMETHING plausible" collapsing into "search
-   * returns nothing real" without becoming a brittle exact-rank assertion.
-   */
-  knownSymbolQuery: string;
-  /** File expected among the top results for `knownSymbolQuery` (see its own doc comment). */
-  knownSymbolFile: string;
 }
 
 /**
@@ -165,7 +159,7 @@ const KNOWN_ZERO_EDGE_LANGUAGES = new Set(['swift']);
  *
  * **csharp is FIXED (#1040)** and no longer belongs in this set:
  * `test-associations.ts` now reuses `resolveCSharpTypeReferenceDependents`
- * (the SAME namespace-scoped signal `get_dependents`'s file-level recovery
+ * (the SAME namespace-scoped signal `findDependents`'s file-level recovery
  * already relied on, #930) filtered to test files, recovering C#'s
  * enclosing-namespace test convention -- a C# test file in a nested
  * namespace (e.g. `MediatR.Tests`) sees its parent namespace's (`MediatR`)
@@ -202,13 +196,10 @@ const TEST_PROJECTS: ProjectConfig[] = [
     language: 'python',
     expectedMinFiles: 10, // Requests has clean structure with requests/*.py
     expectedMinChunks: 50, // Conservative estimate
-    sampleSearchQuery: 'make http request',
     expectedMinDependencyEdges: 20, // measured ~353 (2026-07); floor is a collapse detector, not a target
     expectedMinComplexityViolations: 10, // measured ~34 (2026-08)
     expectedMinTestAssociations: 20, // measured ~139 across 51 files (2026-08)
     expectedMinChunksWithExports: 100, // measured ~759/841 chunks (2026-08)
-    knownSymbolQuery: 'get_encoding_from_headers',
-    knownSymbolFile: 'src/requests/utils.py',
   },
   {
     name: 'Zod',
@@ -217,13 +208,10 @@ const TEST_PROJECTS: ProjectConfig[] = [
     language: 'typescript',
     expectedMinFiles: 30,
     expectedMinChunks: 100,
-    sampleSearchQuery: 'validate schema',
     expectedMinDependencyEdges: 50, // measured ~1265 (2026-07); floor is a collapse detector, not a target
     expectedMinComplexityViolations: 50, // measured ~255 (2026-08)
     expectedMinTestAssociations: 1, // measured ~3 across a 100-file sample of 454 (2026-08); zod's test files import a lot via barrel re-exports rather than direct file imports, so the ratio is genuinely low but non-zero
     expectedMinChunksWithExports: 500, // measured ~3139/5078 chunks (2026-08)
-    knownSymbolQuery: 'ZodString',
-    knownSymbolFile: 'packages/zod/src/v4/core/schemas.ts',
   },
   {
     name: 'Express',
@@ -232,13 +220,10 @@ const TEST_PROJECTS: ProjectConfig[] = [
     language: 'javascript',
     expectedMinFiles: 20,
     expectedMinChunks: 80,
-    sampleSearchQuery: 'handle http request',
     expectedMinDependencyEdges: 50, // measured ~2924 (2026-07); floor is a collapse detector, not a target
     expectedMinComplexityViolations: 1, // measured ~3 (2026-08) -- express is a thin, low-complexity router shim
     expectedMinTestAssociations: 100, // measured ~1254 across a 100-file sample of 150 (2026-08)
     expectedMinChunksWithExports: 30, // measured ~159/771 chunks (2026-08)
-    knownSymbolQuery: 'Router prototype',
-    knownSymbolFile: 'lib/express.js',
   },
   {
     name: 'Monolog',
@@ -247,7 +232,6 @@ const TEST_PROJECTS: ProjectConfig[] = [
     language: 'php',
     expectedMinFiles: 30,
     expectedMinChunks: 100,
-    sampleSearchQuery: 'log message handler',
     // measured ~405 edges (2026-07, post-#1002 PSR-4 fix); before that fix
     // this was 0 across all 232 files and the suite was still green -- this
     // floor is exactly the regression detector #1004 asks for.
@@ -255,8 +239,6 @@ const TEST_PROJECTS: ProjectConfig[] = [
     expectedMinComplexityViolations: 10, // measured ~39 (2026-08)
     expectedMinTestAssociations: 3, // measured ~15 across a 100-file sample of 232 (2026-08)
     expectedMinChunksWithExports: 300, // measured ~2672/2857 chunks (2026-08)
-    knownSymbolQuery: 'pushHandler',
-    knownSymbolFile: 'src/Monolog/Logger.php',
   },
   {
     name: 'Anyhow',
@@ -265,7 +247,6 @@ const TEST_PROJECTS: ProjectConfig[] = [
     language: 'rust',
     expectedMinFiles: 5,
     expectedMinChunks: 15,
-    sampleSearchQuery: 'error handling context',
     // DELIBERATELY VERY LOW, do not raise from a measured snapshot (#1004).
     // History: ~39 pre-#1021 (`mod x;` fabricated edges to every file under
     // `x/`, plus self-edges) -> 27 post-#1021/pre-#1056 -> ~32 post-#1056.
@@ -288,8 +269,6 @@ const TEST_PROJECTS: ProjectConfig[] = [
     expectedMinComplexityViolations: 2, // measured ~10 (2026-08)
     expectedMinTestAssociations: 1, // measured ~6 across 40 files (2026-08)
     expectedMinChunksWithExports: 50, // measured ~363/508 chunks (2026-08)
-    knownSymbolQuery: 'struct Chain',
-    knownSymbolFile: 'src/chain.rs',
   },
   {
     name: 'Chi',
@@ -298,7 +277,6 @@ const TEST_PROJECTS: ProjectConfig[] = [
     language: 'go',
     expectedMinFiles: 5,
     expectedMinChunks: 20,
-    sampleSearchQuery: 'http router middleware',
     // #1039 FIXED: was ~11 edges / 94.2% orphan rate (2026-08) -- #1029/W3
     // chased this to a verdict: a REAL GAP, not (only) leaf-heaviness.
     // `resolveGoModuleImport` never resolved a bare root-module self-import
@@ -317,8 +295,6 @@ const TEST_PROJECTS: ProjectConfig[] = [
     expectedMinComplexityViolations: 15, // measured ~72 (2026-08)
     expectedMinTestAssociations: 3, // measured ~20 across 86 files (2026-08)
     expectedMinChunksWithExports: 100, // measured ~662/765 chunks (2026-08)
-    knownSymbolQuery: 'RouteContext',
-    knownSymbolFile: 'context.go',
   },
   {
     name: 'JavaPoet',
@@ -327,7 +303,6 @@ const TEST_PROJECTS: ProjectConfig[] = [
     language: 'java',
     expectedMinFiles: 10,
     expectedMinChunks: 100,
-    sampleSearchQuery: 'generate java source code',
     // #1046 (#1005 Mechanism 1 fix): measured 18 edges / 40 orphans out of 43
     // files (93.0% orphan rate), stable across 5 repeated index+measure runs
     // (2026-08).
@@ -353,8 +328,6 @@ const TEST_PROJECTS: ProjectConfig[] = [
     // across 43 files (2026-08), a real non-zero floor.
     expectedMinTestAssociations: 2,
     expectedMinChunksWithExports: 100, // measured ~892/951 chunks (2026-08)
-    knownSymbolQuery: 'TypeSpec',
-    knownSymbolFile: 'src/main/java/com/squareup/javapoet/TypeSpec.java',
   },
   {
     name: 'MediatR',
@@ -363,7 +336,6 @@ const TEST_PROJECTS: ProjectConfig[] = [
     language: 'csharp',
     expectedMinFiles: 10,
     expectedMinChunks: 30,
-    sampleSearchQuery: 'mediator request handler',
     expectedMinDependencyEdges: 20, // measured ~578 (2026-07); floor is a collapse detector, not a target
     expectedMinComplexityViolations: 5, // measured ~20 (2026-08)
     // #1040 FIXED: C# resolved 0 test associations before this fix despite
@@ -375,8 +347,6 @@ const TEST_PROJECTS: ProjectConfig[] = [
     // a near-total collapse.
     expectedMinTestAssociations: 90,
     expectedMinChunksWithExports: 200, // measured ~1376/1449 chunks (2026-08)
-    knownSymbolQuery: 'IRequestHandler',
-    knownSymbolFile: 'src/MediatR/IRequestHandler.cs',
   },
   {
     name: 'Sinatra',
@@ -385,7 +355,6 @@ const TEST_PROJECTS: ProjectConfig[] = [
     language: 'ruby',
     expectedMinFiles: 50, // sinatra + rack-protection + sinatra-contrib lib/ (~155 indexed)
     expectedMinChunks: 300, // AST chunking yields ~1300 (def/class/module per chunk)
-    sampleSearchQuery: 'route handler matching http request',
     // measured ~109 edges / 87% orphan rate (2026-07/08) -- #1029/W3 chased
     // this: it is GENUINE leaf-heaviness, not a hidden resolution gap.
     // Verified by source inspection: core `lib/sinatra/*.rb` (7 files)
@@ -406,8 +375,6 @@ const TEST_PROJECTS: ProjectConfig[] = [
     expectedMinComplexityViolations: 2, // measured ~11 (2026-08)
     expectedMinTestAssociations: 1, // measured ~3 across a 100-file sample of 170 (2026-08)
     expectedMinChunksWithExports: 150, // measured ~1286/1605 chunks (2026-08)
-    knownSymbolQuery: 'dispatch! route request',
-    knownSymbolFile: 'lib/sinatra/base.rb',
   },
   {
     name: 'Klaxon',
@@ -416,7 +383,6 @@ const TEST_PROJECTS: ProjectConfig[] = [
     language: 'kotlin',
     expectedMinFiles: 40, // ~101 indexed (src/main + tests)
     expectedMinChunks: 250, // AST chunking yields ~960 (fun/class/object per chunk)
-    sampleSearchQuery: 'parse json string into an object',
     // #1046 (#1005 Mechanism 1 fix): measured 4 edges / 97 orphans out of a
     // 100-file sample (97.0% orphan rate), stable across 5 repeated
     // index+measure runs (2026-08).
@@ -450,8 +416,6 @@ const TEST_PROJECTS: ProjectConfig[] = [
     // regression test.
     expectedMinTestAssociations: 70,
     expectedMinChunksWithExports: 100, // measured ~938/987 chunks (2026-08)
-    knownSymbolQuery: 'JsonObject',
-    knownSymbolFile: 'klaxon/src/main/kotlin/com/beust/klaxon/JsonObject.kt',
   },
   {
     name: 'SwiftyJSON',
@@ -460,7 +424,6 @@ const TEST_PROJECTS: ProjectConfig[] = [
     language: 'swift',
     expectedMinFiles: 15, // ~26 indexed (Source + Tests)
     expectedMinChunks: 150, // AST chunking yields ~356 (func/struct/extension per chunk)
-    sampleSearchQuery: 'parse json data into typed values',
     // KNOWN GAP: #1005 -- Swift resolves 0 dependency edges today. See
     // KNOWN_ZERO_EDGE_LANGUAGES: this is asserted as an exact-zero tripwire,
     // not a floor, elsewhere in this file.
@@ -472,13 +435,12 @@ const TEST_PROJECTS: ProjectConfig[] = [
     // instead of this value.
     expectedMinTestAssociations: 0,
     expectedMinChunksWithExports: 50, // measured ~338/381 chunks (2026-08)
-    knownSymbolQuery: 'rawString',
-    knownSymbolFile: 'Source/SwiftyJSON/SwiftyJSON.swift',
   },
 ];
 
 /**
- * Helper to execute CLI commands
+ * Helper to execute CLI commands. Only `complexity` (the one index-free
+ * command this suite still exercises) runs through this today.
  */
 function runLienCommand(cwd: string, command: string): string {
   const lienCli = path.join(__dirname, '../../dist/index.js');
@@ -498,34 +460,6 @@ function runLienCommand(cwd: string, command: string): string {
   }
 }
 
-/**
- * Helper to get the actual index location (same logic as VectorDB)
- */
-function getIndexPath(projectDir: string): string {
-  // Resolve to real path (e.g. /tmp -> /private/tmp on macOS)
-  // This matches what process.cwd() returns when Lien runs
-  const realPath = fsSync.realpathSync(projectDir);
-  const projectName = path.basename(realPath);
-  const pathHash = crypto.createHash('md5').update(realPath).digest('hex').substring(0, 8);
-
-  // Matches getLienHome() from @liendev/core: honors LIEN_HOME (set by
-  // vitest globalSetup during tests) so this never touches the real
-  // ~/.lien/indices/ store. The CLI subprocess spawned below inherits
-  // LIEN_HOME from process.env, so it writes to the same isolated location.
-  return path.join(getLienHome(), '.lien', 'indices', `${projectName}-${pathHash}`);
-}
-
-/**
- * Open the store `lien index` wrote for a project, via the same factory the
- * CLI uses (SQLite by default) — reading through a different backend than the
- * one that indexed would silently return nothing.
- */
-async function loadDb(projectDir: string): Promise<VectorDBInterface> {
-  const db = await createVectorDB(projectDir);
-  await db.initialize();
-  return db;
-}
-
 /** No-op log sink for `findDependents` calls below — this test doesn't care
  * about its warning messages, only the resolved counts. */
 function noopLog(_message: string, _level?: 'warning'): void {
@@ -534,18 +468,18 @@ function noopLog(_message: string, _level?: 'warning'): void {
 
 /**
  * Count of resolved dependents for one target file, via the exported,
- * production `findDependents` -- the exact engine `get_dependents` runs,
- * including re-export-chain resolution and the C# type-reference-matching
- * recovery fallback (#930). A leaner reimplementation using only
- * `findDependentChunks`/raw `imports` was tried and rejected here: it
- * silently under-counts languages whose real resolution leans on that
- * fallback (C#/MediatR measured 0 instead of the ~578 the full pipeline
- * finds), which would have made the floor below meaningless for exactly the
- * languages `hasEnclosingNamespaceAccess` calls out as structurally reliant
- * on it. Fidelity to what `get_dependents` actually returns matters more
- * here than shaving the sweep's cost.
+ * production `findDependents` -- the same resolution engine that used to
+ * back the now-deleted `get_dependents` MCP tool, including re-export-chain
+ * resolution and the C# type-reference-matching recovery fallback (#930). A
+ * leaner reimplementation using only `findDependentChunks`/raw `imports` was
+ * tried and rejected here: it silently under-counts languages whose real
+ * resolution leans on that fallback (C#/MediatR measured 0 instead of the
+ * ~578 the full pipeline finds), which would have made the floor below
+ * meaningless for exactly the languages `hasEnclosingNamespaceAccess` calls
+ * out as structurally reliant on it. Fidelity to what `findDependents`
+ * actually resolves matters more here than shaving the sweep's cost.
  */
-function countDependents(file: string, chunks: SearchResult[], workspaceRoot: string): number {
+function countDependents(file: string, chunks: CodeChunk[], workspaceRoot: string): number {
   return findDependents(chunks, file, noopLog, workspaceRoot).dependents.length;
 }
 
@@ -553,14 +487,14 @@ function countDependents(file: string, chunks: SearchResult[], workspaceRoot: st
  * Every real `findDependents` call above re-scans the whole corpus (its own
  * import-index rebuild, plus a re-export-graph scan that itself walks every
  * OTHER file) -- correct and appropriate for a single interactive
- * `get_dependents` query, but that per-call cost times every file in a
- * ~450-file corpus (Zod) measured out to 70+ seconds for this one test. This
- * caps the sweep to `maxFiles` targets, evenly spaced across the full file
- * list (not just a prefix), so a corpus with edges concentrated in one
- * directory doesn't get an unlucky all-orphan sample. A collapse to zero
- * shows up identically whether every file is swept or every Nth one -- the
- * failure mode this test exists to catch (#1002, #1000) makes EVERY file an
- * orphan, not a directory-scoped subset of them.
+ * dependents query, but that per-call cost times every file in a ~450-file
+ * corpus (Zod) measured out to 70+ seconds for this one test. This caps the
+ * sweep to `maxFiles` targets, evenly spaced across the full file list (not
+ * just a prefix), so a corpus with edges concentrated in one directory
+ * doesn't get an unlucky all-orphan sample. A collapse to zero shows up
+ * identically whether every file is swept or every Nth one -- the failure
+ * mode this test exists to catch (#1002, #1000) makes EVERY file an orphan,
+ * not a directory-scoped subset of them.
  */
 function sampleFilesForSweep(files: string[], maxFiles: number): string[] {
   if (files.length <= maxFiles) return files;
@@ -582,18 +516,18 @@ const MAX_DEPENDENCY_SWEEP_FILES = 100;
  * `totalEdges`/`orphanCount` are a sample-scaled approximation for large
  * corpora, never a precise whole-project total.
  *
- * Reuses the already-built SQLite index via a single `db.scanAll()` rather
- * than re-indexing or re-scanning per file.
+ * Reuses the chunks `performChunkOnlyIndex` already produced in `beforeAll`
+ * rather than re-parsing the project.
  */
-async function computeDependencyStats(projectDir: string): Promise<{
+function computeDependencyStats(
+  chunks: CodeChunk[],
+  workspaceRoot: string,
+): {
   totalEdges: number;
   orphanCount: number;
   fileCount: number;
   sweptFileCount: number;
-}> {
-  const workspaceRoot = fsSync.realpathSync(projectDir);
-  const db = await loadDb(workspaceRoot);
-  const chunks = await db.scanAll();
+} {
   const files = Array.from(new Set(chunks.map(c => c.metadata.file)));
   const sweptFiles = sampleFilesForSweep(files, MAX_DEPENDENCY_SWEEP_FILES);
 
@@ -606,66 +540,6 @@ async function computeDependencyStats(projectDir: string): Promise<{
   }
 
   return { totalEdges, orphanCount, fileCount: files.length, sweptFileCount: sweptFiles.length };
-}
-
-/**
- * Helper to get index statistics from the manifest
- */
-function getIndexStats(projectDir: string): { files: number; chunks: number } {
-  try {
-    // Get the actual index location (Lien stores in ~/.lien/indices/)
-    const indexPath = getIndexPath(projectDir);
-    const manifestPath = path.join(indexPath, 'manifest.json');
-    const manifestContent = fsSync.readFileSync(manifestPath, 'utf-8');
-    const manifest = JSON.parse(manifestContent);
-
-    // Manifest.files is an object/dictionary, not an array
-    const filesObject = manifest.files || {};
-    const fileEntries = Object.values(filesObject);
-
-    const files = fileEntries.length;
-    const chunks = fileEntries.reduce(
-      (total: number, file: any) => total + (file.chunkCount || 0),
-      0,
-    );
-
-    return { files, chunks };
-  } catch (error) {
-    // Fallback: try to parse from index output if manifest isn't available yet
-    console.warn('Could not read manifest, returning 0:', error);
-    return { files: 0, chunks: 0 };
-  }
-}
-
-/**
- * Helper to validate AST metadata in index
- */
-async function validateASTMetadata(projectDir: string): Promise<boolean> {
-  // Check that manifest exists and has AST metadata
-  const indexPath = getIndexPath(projectDir);
-  const manifestPath = path.join(indexPath, 'manifest.json');
-
-  try {
-    const manifestContent = await fs.readFile(manifestPath, 'utf-8');
-    const manifest = JSON.parse(manifestContent);
-
-    // Manifest.files is an object/dictionary, check if any file has chunks with AST metadata
-    // We don't have chunk details in the manifest, so we just verify files exist
-    // The real validation is that chunks > files (which proves AST chunking worked)
-    const filesObject = manifest.files || {};
-    const fileEntries = Object.values(filesObject);
-
-    // If we have files and multiple chunks, AST metadata is working
-    const totalChunks = fileEntries.reduce(
-      (total: number, file: any) => total + (file.chunkCount || 0),
-      0,
-    );
-
-    // AST chunking should create more chunks than files (functions/methods extracted)
-    return totalChunks > fileEntries.length;
-  } catch {
-    return false;
-  }
 }
 
 /**
@@ -726,6 +600,9 @@ describe('E2E: Real Open Source Projects', () => {
   TEST_PROJECTS.forEach(project => {
     describe(`${project.name} (${project.language})`, () => {
       let projectDir: string;
+      let workspaceRoot: string;
+      let scan: ChunkOnlyResult;
+      let chunks: CodeChunk[];
 
       beforeAll(async () => {
         // Create temp directory using OS temp dir for cross-platform compatibility
@@ -744,6 +621,18 @@ describe('E2E: Real Open Source Projects', () => {
         });
 
         console.log(`✓ Cloned ${project.name}`);
+
+        // Parse once and reuse across every test below — performChunkOnlyIndex
+        // re-scans the whole project on every call, so calling it per-test
+        // would multiply this suite's runtime for no benefit.
+        workspaceRoot = fsSync.realpathSync(projectDir);
+        console.log(`\n🔍 Parsing ${project.name}...`);
+        scan = await performChunkOnlyIndex(workspaceRoot, {});
+        chunks = scan.chunks;
+        console.log(
+          `✓ Parsed ${project.name}: success=${scan.success}, ${scan.filesIndexed} files, ` +
+            `${scan.chunksCreated} chunks, ${scan.filesErrored} errored`,
+        );
       }, E2E_TIMEOUT);
 
       it('should have cloned project files', () => {
@@ -754,110 +643,53 @@ describe('E2E: Real Open Source Projects', () => {
         console.log(`📁 ${project.name} structure:`, files.slice(0, 10).join(', '));
       });
 
-      // There was a 'should initialize Lien successfully' case here, asserting
-      // `lien init --editor cursor` wrote `.cursor/mcp.json`. `lien init` has
-      // been deleted — writing a six-line MCP block was its whole job, and the
-      // server it configured goes next — so there is nothing to initialize.
-      // Nothing below depended on it: `lien index` resolves the project root
-      // itself and never reads an editor config.
+      // Replaces the old 'should index the project without errors' (which
+      // asserted CLI output text and a manifest file — both gone with
+      // `lien index`/the persisted store). `performChunkOnlyIndex` reports
+      // failure by RETURNING `{ success: false }` rather than throwing, so a
+      // silently-empty `chunks` array would read as a pass unless `success`
+      // is checked explicitly.
+      it('should parse the project without errors', () => {
+        if (!scan.success) {
+          console.error(`❌ Parse failed for ${project.name}: ${scan.error}`);
+        }
+        expect(scan.success).toBe(true);
+        expect(chunks.length).toBeGreaterThan(0);
+      });
 
-      it(
-        'should index the project without errors',
-        () => {
-          console.log(`\n🔍 Indexing ${project.name}...`);
-
-          const output = runLienCommand(projectDir, 'index');
-          console.log(`Index output:\n${output.substring(0, 500)}`);
-
-          // Should complete successfully (check for success indicators)
-          const hasSuccess =
-            output.includes('Indexed') || output.includes('✔') || output.includes('Manifest saved');
-          expect(hasSuccess).toBe(true);
-
-          // Should not have errors
-          expect(output.toLowerCase()).not.toContain('error');
-          expect(output.toLowerCase()).not.toContain('failed');
-
-          // Verify manifest was created (in ~/.lien/indices/)
-          const indexPath = getIndexPath(projectDir);
-          const manifestPath = path.join(indexPath, 'manifest.json');
-          const manifestExists = fsSync.existsSync(manifestPath);
-
-          if (!manifestExists) {
-            console.error(`❌ Manifest not created at: ${manifestPath}`);
-            console.error(`Index output was:\n${output}`);
-            console.error(`Index path: ${indexPath}`);
-
-            // Check if index directory exists
-            if (fsSync.existsSync(indexPath)) {
-              const indexFiles = fsSync.readdirSync(indexPath);
-              console.error(`Index directory contents:`, indexFiles);
-            } else {
-              console.error(`Index directory does not exist`);
-            }
-          }
-
-          expect(manifestExists).toBe(true);
-
-          console.log(`✓ Indexed ${project.name}`);
-        },
-        E2E_TIMEOUT,
-      );
-
-      it('should index minimum expected number of files', async () => {
-        const stats = getIndexStats(projectDir);
-
-        console.log(`📊 ${project.name} stats: ${stats.files} files, ${stats.chunks} chunks`);
+      it('should parse minimum expected number of files', () => {
+        console.log(
+          `📊 ${project.name} stats: ${scan.filesIndexed} files, ${scan.chunksCreated} chunks`,
+        );
 
         // If this fails, the project structure may have changed.
         // Check: ls {projectDir} to see actual structure
-        if (stats.files === 0) {
-          console.error(`❌ No files indexed for ${project.name}!`);
+        if (scan.filesIndexed === 0) {
+          console.error(`❌ No files parsed for ${project.name}!`);
           console.error(`   Project directory: ${projectDir}`);
           console.error(`   Check project structure and include patterns in config`);
-
-          // Show what files exist
-          try {
-            const findPyFiles = execSync(`find . -name "*.py" -type f | head -20`, {
-              cwd: projectDir,
-              encoding: 'utf-8',
-            });
-            console.error(`   Python files found:\n${findPyFiles}`);
-          } catch (_e) {
-            console.error(`   Could not find Python files`);
-          }
         }
 
-        expect(stats.files).toBeGreaterThanOrEqual(project.expectedMinFiles);
+        expect(scan.filesIndexed).toBeGreaterThanOrEqual(project.expectedMinFiles);
       });
 
       it('should create chunks with AST metadata', () => {
-        const stats = getIndexStats(projectDir);
-
         // AST chunking should create more chunks than files (functions/methods extracted)
-        // Unless no files were indexed (in which case we should fail earlier)
-        if (stats.files > 0) {
-          expect(stats.chunks).toBeGreaterThan(stats.files);
+        // Unless no files were parsed (in which case we should fail earlier)
+        if (scan.filesIndexed > 0) {
+          expect(scan.chunksCreated).toBeGreaterThan(scan.filesIndexed);
         }
-        expect(stats.chunks).toBeGreaterThanOrEqual(project.expectedMinChunks);
+        expect(scan.chunksCreated).toBeGreaterThanOrEqual(project.expectedMinChunks);
       });
 
-      it('should have AST metadata for code chunks', async () => {
-        const hasMetadata = await validateASTMetadata(projectDir);
-
-        expect(hasMetadata).toBe(true);
-      });
-
-      it('should show status after indexing', () => {
-        // Strip ANSI escapes — chalk styles the label and count separately
-
-        const output = runLienCommand(projectDir, 'status').replace(/\[[0-9;]*m/g, '');
-
-        // Should report index exists
-        expect(output).toContain('Exists');
-
-        // Should show index files count
-        expect(output).toMatch(/Index files:\s+\d+/);
+      it('should have AST metadata for code chunks', () => {
+        // The real validation is that chunks > files (proven above); this
+        // additionally checks each chunk carries real per-chunk metadata
+        // rather than being an empty placeholder.
+        const chunksWithSymbolInfo = chunks.filter(
+          c => c.metadata.symbolName || c.metadata.type === 'doc' || c.metadata.type === 'config',
+        );
+        expect(chunksWithSymbolInfo.length).toBeGreaterThan(0);
       });
 
       it(
@@ -895,211 +727,170 @@ describe('E2E: Real Open Source Projects', () => {
         E2E_TIMEOUT,
       );
 
-      it(
-        'should find symbols via querySymbols',
-        async () => {
-          const db = await loadDb(fsSync.realpathSync(projectDir));
+      it('should find symbols with function/method AST metadata', () => {
+        const functions = chunks.filter(
+          c => c.metadata.symbolType === 'function' || c.metadata.symbolType === 'method',
+        );
 
-          // Query for functions — every project should have at least some
-          const functions = await db.querySymbols({ symbolType: 'function', limit: 10 });
+        console.log(`🔣 ${project.name} symbols: ${functions.length} function/method chunks found`);
 
-          console.log(`🔣 ${project.name} symbols: ${functions.length} functions found`);
+        expect(functions.length).toBeGreaterThan(0);
 
-          expect(functions.length).toBeGreaterThan(0);
+        // Every result should have a symbolName and a valid file
+        for (const c of functions.slice(0, 10)) {
+          expect(c.metadata.symbolName).toBeTruthy();
+          expect(c.metadata.file).toBeTruthy();
+        }
+      });
 
-          // Every result should have a symbolName and valid symbol type
-          for (const r of functions) {
-            expect(r.metadata.symbolName).toBeTruthy();
-            expect(['function', 'method']).toContain(r.metadata.symbolType);
-            expect(r.metadata.file).toBeTruthy();
-          }
-        },
-        E2E_TIMEOUT,
-      );
+      it('should retrieve chunks for a specific file', () => {
+        const indexedFiles = Array.from(new Set(chunks.map(c => c.metadata.file)));
+        expect(indexedFiles.length).toBeGreaterThan(0);
 
-      it(
-        'should retrieve chunks for a specific file',
-        async () => {
-          // Pick a file from the manifest
-          const indexPath = getIndexPath(projectDir);
-          const manifest = JSON.parse(
-            fsSync.readFileSync(path.join(indexPath, 'manifest.json'), 'utf-8'),
-          );
-          const indexedFiles = Object.keys(manifest.files);
-          expect(indexedFiles.length).toBeGreaterThan(0);
+        const targetFile = indexedFiles[0];
+        const results = chunks.filter(c => c.metadata.file === targetFile);
 
-          const targetFile = indexedFiles[0];
-          const db = await loadDb(fsSync.realpathSync(projectDir));
-          const results = await db.scanWithFilter({ file: [targetFile], limit: 50 });
+        console.log(`📄 ${project.name} file context: ${results.length} chunks for ${targetFile}`);
 
+        expect(results.length).toBeGreaterThan(0);
+
+        // All results should reference the target file
+        for (const r of results) {
+          expect(r.metadata.file).toBe(targetFile);
+          expect(r.content).toBeTruthy();
+          expect(r.metadata.startLine).toBeGreaterThanOrEqual(0);
+        }
+      });
+
+      it('should have import/export metadata in chunks', () => {
+        // At least some chunks should have imports populated
+        const chunksWithImports = chunks.filter(
+          c => c.metadata.imports && c.metadata.imports.length > 0,
+        );
+
+        // At least some chunks should have exports populated
+        const chunksWithExports = chunks.filter(
+          c => c.metadata.exports && c.metadata.exports.length > 0,
+        );
+
+        console.log(
+          `📦 ${project.name} metadata: ${chunksWithImports.length}/${chunks.length} chunks with imports, ` +
+            `${chunksWithExports.length}/${chunks.length} with exports`,
+        );
+
+        // Every real-world project has imports
+        expect(chunksWithImports.length).toBeGreaterThan(0);
+        // #1029 (W3): upgraded from a blanket `toBeGreaterThan(0)` to a
+        // per-project floor -- see `expectedMinChunksWithExports`'s doc
+        // comment for why "at least SOME chunk has exports" is too weak a
+        // collapse detector.
+        expect(chunksWithExports.length).toBeGreaterThanOrEqual(
+          project.expectedMinChunksWithExports,
+        );
+
+        // #999 (referenced by #1029/W3): Rust has no symbol extractor for
+        // `struct_item`/`enum_item` at all, so a Rust struct/enum
+        // declaration never produces its own chunk with a `struct `/`enum
+        // `-prefixed signature -- unlike every other supported language.
+        // Export extraction is UNAFFECTED (`RustExportExtractor.exportableTypes`
+        // already lists both node kinds, which is why the floor above
+        // passes for Rust too), so this gap is invisible to the exports
+        // check; it only shows up when asking specifically for
+        // declaration-level signature metadata. TRIPWIRE, not a skip: the
+        // moment Rust gets a real struct/enum extractor this starts
+        // finding matches and needs to flip to a `>= 1` floor.
+        if (project.language === 'rust') {
+          const structOrEnumSignatures = chunks.filter(r => {
+            const signature = (r.metadata.signature ?? '').trim();
+            return /^(pub(\([^)]*\))?\s+)?(struct|enum)\s/.test(signature);
+          });
           console.log(
-            `📄 ${project.name} file context: ${results.length} chunks for ${targetFile}`,
+            `🦀 ${project.name} #999 tripwire: ${structOrEnumSignatures.length} chunks with a struct/enum signature`,
           );
-
-          expect(results.length).toBeGreaterThan(0);
-
-          // All results should reference the target file
-          for (const r of results) {
-            expect(r.metadata.file).toBe(targetFile);
-            expect(r.content).toBeTruthy();
-            expect(r.metadata.startLine).toBeGreaterThanOrEqual(0);
-          }
-        },
-        E2E_TIMEOUT,
-      );
-
-      it(
-        'should have import/export metadata in chunks',
-        async () => {
-          const db = await loadDb(fsSync.realpathSync(projectDir));
-          // Scan everything — a small fixed sample is order-dependent and the
-          // first N chunks of a project can legitimately lack imports/exports
-          const results = await db.scanAll();
-
-          // At least some chunks should have imports populated
-          const chunksWithImports = results.filter(
-            r => r.metadata.imports && r.metadata.imports.length > 0,
-          );
-
-          // At least some chunks should have exports populated
-          const chunksWithExports = results.filter(
-            r => r.metadata.exports && r.metadata.exports.length > 0,
-          );
-
-          console.log(
-            `📦 ${project.name} metadata: ${chunksWithImports.length}/${results.length} chunks with imports, ` +
-              `${chunksWithExports.length}/${results.length} with exports`,
-          );
-
-          // Every real-world project has imports
-          expect(chunksWithImports.length).toBeGreaterThan(0);
-          // #1029 (W3): upgraded from a blanket `toBeGreaterThan(0)` to a
-          // per-project floor -- see `expectedMinChunksWithExports`'s doc
-          // comment for why "at least SOME chunk has exports" is too weak a
-          // collapse detector.
-          expect(chunksWithExports.length).toBeGreaterThanOrEqual(
-            project.expectedMinChunksWithExports,
-          );
-
-          // #999 (referenced by #1029/W3): Rust has no symbol extractor for
-          // `struct_item`/`enum_item` at all, so a Rust struct/enum
-          // declaration never produces its own chunk with a `struct `/`enum
-          // `-prefixed signature -- unlike every other supported language.
-          // Export extraction is UNAFFECTED (`RustExportExtractor.exportableTypes`
-          // already lists both node kinds, which is why the floor above
-          // passes for Rust too), so this gap is invisible to the exports
-          // check; it only shows up when asking specifically for
-          // declaration-level signature metadata. TRIPWIRE, not a skip: the
-          // moment Rust gets a real struct/enum extractor this starts
-          // finding matches and needs to flip to a `>= 1` floor.
-          if (project.language === 'rust') {
-            const structOrEnumSignatures = results.filter(r => {
-              const signature = (r.metadata.signature ?? '').trim();
-              return /^(pub(\([^)]*\))?\s+)?(struct|enum)\s/.test(signature);
-            });
-            console.log(
-              `🦀 ${project.name} #999 tripwire: ${structOrEnumSignatures.length} chunks with a struct/enum signature`,
-            );
-            expect(structOrEnumSignatures.length).toBe(0);
-          }
-        },
-        E2E_TIMEOUT,
-      );
+          expect(structOrEnumSignatures.length).toBe(0);
+        }
+      });
 
       // #1004: the assertions above only ever checked shape (files/chunks
       // counts, metadata presence) -- never that `findDependents` actually
       // resolves a single edge. A project with a 100% orphan rate passed
       // every test above; #1002 (Monolog, PSR-4) and #1000 (Rust `mod`) both
       // shipped invisibly through exactly that gap. These two tests close it.
-      it(
-        'should resolve real dependency edges across the corpus (#1004 collapse-to-zero detector)',
-        async () => {
-          const stats = await computeDependencyStats(projectDir);
-          const sweptNote =
-            stats.sweptFileCount < stats.fileCount
-              ? ` (swept ${stats.sweptFileCount}/${stats.fileCount} files, evenly sampled)`
-              : '';
+      it('should resolve real dependency edges across the corpus (#1004 collapse-to-zero detector)', () => {
+        const stats = computeDependencyStats(chunks, workspaceRoot);
+        const sweptNote =
+          stats.sweptFileCount < stats.fileCount
+            ? ` (swept ${stats.sweptFileCount}/${stats.fileCount} files, evenly sampled)`
+            : '';
 
-          console.log(
-            `🔗 ${project.name} dependency stats: ${stats.totalEdges} edges, ` +
-              `${stats.orphanCount} orphans out of ${stats.sweptFileCount} files checked ` +
-              `(${((stats.orphanCount / stats.sweptFileCount) * 100).toFixed(1)}%)${sweptNote}`,
-          );
+        console.log(
+          `🔗 ${project.name} dependency stats: ${stats.totalEdges} edges, ` +
+            `${stats.orphanCount} orphans out of ${stats.sweptFileCount} files checked ` +
+            `(${((stats.orphanCount / stats.sweptFileCount) * 100).toFixed(1)}%)${sweptNote}`,
+        );
 
-          if (KNOWN_ZERO_EDGE_LANGUAGES.has(project.language)) {
-            // KNOWN GAP: #1005. This is a deliberate tripwire, not an
-            // oversight -- see KNOWN_ZERO_EDGE_LANGUAGES's doc comment. If
-            // this fails, #1005 likely just got fixed; update this project's
-            // config to a real `expectedMinDependencyEdges` floor instead of
-            // re-asserting zero.
-            expect(stats.totalEdges).toBe(0);
-          } else {
-            // Floor only -- see `expectedMinDependencyEdges`'s doc comment.
-            // This must NOT be tightened to match `stats.totalEdges` above.
-            expect(stats.totalEdges).toBeGreaterThanOrEqual(project.expectedMinDependencyEdges);
-          }
-        },
-        E2E_TIMEOUT,
-      );
+        if (KNOWN_ZERO_EDGE_LANGUAGES.has(project.language)) {
+          // KNOWN GAP: #1005. This is a deliberate tripwire, not an
+          // oversight -- see KNOWN_ZERO_EDGE_LANGUAGES's doc comment. If
+          // this fails, #1005 likely just got fixed; update this project's
+          // config to a real `expectedMinDependencyEdges` floor instead of
+          // re-asserting zero.
+          expect(stats.totalEdges).toBe(0);
+        } else {
+          // Floor only -- see `expectedMinDependencyEdges`'s doc comment.
+          // This must NOT be tightened to match `stats.totalEdges` above.
+          expect(stats.totalEdges).toBeGreaterThanOrEqual(project.expectedMinDependencyEdges);
+        }
+      });
 
       // #1029 (W3): extends #1004's pattern past dependency edges. #979 was
-      // exactly this gap at the MCP layer -- `get_complexity` reported
-      // `testAssociations: []` for every hotspot while `lien annotate` (a
-      // different code path calling the same underlying resolver) was
+      // exactly this gap at the MCP layer -- the old `get_complexity` MCP
+      // tool reported `testAssociations: []` for every hotspot while a
+      // different code path calling the same underlying resolver was
       // correct for the same file -- and nothing in the E2E suite would
       // have caught it, since no test here ever called
       // `findTestAssociationsFromChunks` at all.
-      it(
-        'should resolve real test associations for source files with real test suites (#1029 collapse-to-zero detector)',
-        async () => {
-          const workspaceRoot = fsSync.realpathSync(projectDir);
-          const db = await loadDb(workspaceRoot);
-          // Reuse the already-built index's chunks (no re-indexing) and the
-          // same evenly-spaced sample cap `computeDependencyStats` uses --
-          // see `sampleFilesForSweep`'s doc comment for why sampling here is
-          // just as valid a collapse detector as sweeping every file.
-          const chunks = await db.scanAll();
-          const files = Array.from(new Set(chunks.map(c => c.metadata.file)));
-          const sweptFiles = sampleFilesForSweep(files, MAX_DEPENDENCY_SWEEP_FILES);
+      it('should resolve real test associations for source files with real test suites (#1029 collapse-to-zero detector)', () => {
+        // Reuse the already-parsed chunks from beforeAll (no re-parsing) and
+        // the same evenly-spaced sample cap `computeDependencyStats` uses --
+        // see `sampleFilesForSweep`'s doc comment for why sampling here is
+        // just as valid a collapse detector as sweeping every file.
+        const files = Array.from(new Set(chunks.map(c => c.metadata.file)));
+        const sweptFiles = sampleFilesForSweep(files, MAX_DEPENDENCY_SWEEP_FILES);
 
-          const associations = findTestAssociationsFromChunks(sweptFiles, chunks, workspaceRoot);
-          let filesWithTests = 0;
-          let totalAssociations = 0;
-          for (const file of sweptFiles) {
-            const tests = associations.get(file) ?? [];
-            if (tests.length > 0) filesWithTests++;
-            totalAssociations += tests.length;
-          }
+        const associations = findTestAssociationsFromChunks(sweptFiles, chunks, workspaceRoot);
+        let filesWithTests = 0;
+        let totalAssociations = 0;
+        for (const file of sweptFiles) {
+          const tests = associations.get(file) ?? [];
+          if (tests.length > 0) filesWithTests++;
+          totalAssociations += tests.length;
+        }
 
-          console.log(
-            `🧪 ${project.name} test-association stats: ${totalAssociations} associations, ` +
-              `${filesWithTests}/${sweptFiles.length} files with at least one`,
-          );
+        console.log(
+          `🧪 ${project.name} test-association stats: ${totalAssociations} associations, ` +
+            `${filesWithTests}/${sweptFiles.length} files with at least one`,
+        );
 
-          if (KNOWN_ZERO_TESTASSOC_LANGUAGES.has(project.language)) {
-            // KNOWN GAP -- see KNOWN_ZERO_TESTASSOC_LANGUAGES's doc comment
-            // for which issue and why. Deliberate tripwire, not an
-            // oversight: if this fails, the gap likely just closed --
-            // update this project's config to a real
-            // `expectedMinTestAssociations` floor instead of re-asserting
-            // zero.
-            expect(totalAssociations).toBe(0);
-          } else {
-            // Floor only -- see `expectedMinTestAssociations`'s doc comment.
-            // This must NOT be tightened to match the measured count above.
-            expect(totalAssociations).toBeGreaterThanOrEqual(project.expectedMinTestAssociations);
-          }
-        },
-        E2E_TIMEOUT,
-      );
+        if (KNOWN_ZERO_TESTASSOC_LANGUAGES.has(project.language)) {
+          // KNOWN GAP -- see KNOWN_ZERO_TESTASSOC_LANGUAGES's doc comment
+          // for which issue and why. Deliberate tripwire, not an
+          // oversight: if this fails, the gap likely just closed --
+          // update this project's config to a real
+          // `expectedMinTestAssociations` floor instead of re-asserting
+          // zero.
+          expect(totalAssociations).toBe(0);
+        } else {
+          // Floor only -- see `expectedMinTestAssociations`'s doc comment.
+          // This must NOT be tightened to match the measured count above.
+          expect(totalAssociations).toBeGreaterThanOrEqual(project.expectedMinTestAssociations);
+        }
+      });
 
       it(
         "should return zero dependents for a nonexistent path, and not inherit a real file's " +
           'graph by basename collision (#928)',
-        async () => {
-          const workspaceRoot = fsSync.realpathSync(projectDir);
-          const db = await loadDb(workspaceRoot);
-          const chunks = await db.scanAll();
+        () => {
           expect(chunks.length).toBeGreaterThan(0);
 
           // Construct a path that shares a real indexed file's basename but
@@ -1121,110 +912,6 @@ describe('E2E: Real Open Source Projects', () => {
           expect(result.targetIndexed).toBe(false);
           expect(result.dependents.length).toBe(0);
         },
-        E2E_TIMEOUT,
-      );
-
-      it(
-        'should find similar code from an indexed chunk',
-        async () => {
-          const db = await loadDb(fsSync.realpathSync(projectDir));
-
-          // Get a function chunk to use as the similarity query
-          const [sample] = await db.querySymbols({ symbolType: 'function', limit: 1 });
-          expect(sample).toBeDefined();
-
-          const results = await db.search(sample.content, 5);
-
-          console.log(
-            `🔍 ${project.name} find_similar: ${results.length} results, ` +
-              `top score: ${results[0]?.score.toFixed(3)}`,
-          );
-
-          expect(results.length).toBeGreaterThan(0);
-
-          // Top result should be the same or very similar chunk
-          expect(results[0].metadata.file).toBeTruthy();
-          expect(['highly_relevant', 'relevant']).toContain(results[0].relevance);
-        },
-        E2E_TIMEOUT,
-      );
-
-      it(
-        'should return relevant results for code search',
-        async () => {
-          const db = await loadDb(fsSync.realpathSync(projectDir));
-          const results = await db.search(project.sampleSearchQuery, 5);
-
-          console.log(
-            `🔎 Search "${project.sampleSearchQuery}" returned ${results.length} results`,
-          );
-          if (results.length > 0) {
-            console.log(
-              `   Top result: ${results[0].metadata.file} (${results[0].relevance}, score: ${results[0].score.toFixed(3)})`,
-            );
-          }
-
-          expect(results.length).toBeGreaterThan(0);
-
-          // Top result should be at least loosely related
-          expect(['highly_relevant', 'relevant', 'loosely_related']).toContain(
-            results[0].relevance,
-          );
-
-          // All results should have valid metadata
-          for (const result of results) {
-            expect(result.metadata.file).toBeTruthy();
-            expect(result.content).toBeTruthy();
-          }
-        },
-        E2E_TIMEOUT,
-      );
-
-      // #1029 (W3): the test above only ever asserts a generic relevance
-      // bucket for a vague natural-language query -- it would pass even if
-      // search surfaced an unrelated-but-plausible-looking file. This test
-      // asks for a specific, verified-present identifier (`knownSymbolQuery`)
-      // and checks that a specific, verified-present file (`knownSymbolFile`)
-      // comes back, so a collapse of the FTS5/BM25 index (empty results, or
-      // results from the wrong corpus entirely) fails loudly instead of
-      // reading as "search returned something, ship it".
-      it(
-        'should find a known, verified-present symbol via search (#1029 collapse-to-zero detector)',
-        async () => {
-          const db = await loadDb(fsSync.realpathSync(projectDir));
-          const results = await db.search(project.knownSymbolQuery, 5);
-
-          console.log(
-            `🔎 Known-symbol search "${project.knownSymbolQuery}" returned ${results.length} results: ` +
-              results.map(r => r.metadata.file).join(', '),
-          );
-
-          expect(results.length).toBeGreaterThan(0);
-          expect(results.some(r => r.metadata.file === project.knownSymbolFile)).toBe(true);
-        },
-        E2E_TIMEOUT,
-      );
-
-      it(
-        'should handle reindexing without errors',
-        () => {
-          console.log(`\n🔄 Reindexing ${project.name}...`);
-
-          const output = runLienCommand(projectDir, 'index');
-
-          // Check for success (either "Indexed" or "Incremental reindex")
-          const hasSuccess =
-            output.includes('Indexed') ||
-            output.includes('Incremental reindex complete') ||
-            output.includes('✔');
-          expect(hasSuccess).toBe(true);
-          expect(output.toLowerCase()).not.toContain('error');
-
-          // Stats should be similar to first index
-          const stats = getIndexStats(projectDir);
-          expect(stats.files).toBeGreaterThanOrEqual(project.expectedMinFiles);
-        },
-        E2E_TIMEOUT,
       );
     });
   });
