@@ -32,10 +32,11 @@
 > and `@liendev/parser` remain exactly as this ADR left them.
 >
 > **Fourth update (2026-09-01):** `@liendev/core` is gone. Phase 8 of the CLI
-> simplification plan folded what was left of it into `packages/cli` and
-> deleted the package, so the "What Stays in `@liendev/core`" table below is
-> entirely historical — every row in it names something that has since been
-> deleted or moved. Of the 2,102 remaining lines, three modules were reachable
+> simplification plan (PR #1135) folded what was left of it into
+> `packages/cli` and deleted the package, so the "What Stays in
+> `@liendev/core`" table below is entirely historical — every row in it names
+> something that has since been deleted or moved. Of the 2,102 remaining
+> lines, three modules were reachable
 > from the CLI and moved verbatim (`config/`, `errors/`,
 > `insights/formatters/`); the rest — `git/`, `types/`, `constants.ts`, six of
 > seven `utils/`, `src/test/` — were unreachable and were deleted. The
