@@ -131,8 +131,30 @@ if [ "$ACTUAL_VERSION" != "$V" ]; then
 fi
 echo "lien --version OK ($ACTUAL_VERSION)"
 
-echo "== Probe 2: MCP stdio boot (initialize handshake) =="
-MCP_PROBE_TIMEOUT_MS="$PROBE_TIMEOUT_MS" node "$SCRIPT_DIR/mcp-initialize-probe.mjs" \
-  "$CONSUMER_DIR/node_modules/.bin/lien" serve --root "$CONSUMER_DIR"
+# Probe 2 used to boot `lien serve` and drive an MCP initialize handshake. The
+# MCP server is gone, so this now exercises the thing that replaced it: the
+# published binary actually parsing a real file. Same purpose as before —
+# catch a release whose entrypoint imports something that is not in the
+# tarball — but against a code path that still exists.
+echo "== Probe 2: parse a real file with the published binary =="
+mkdir -p "$CONSUMER_DIR/probe-src"
+cat >"$CONSUMER_DIR/probe-src/sample.ts" <<'EOF'
+export function classify(n: number): string {
+  if (n < 0) return 'negative';
+  if (n === 0) return 'zero';
+  return n > 100 ? 'large' : 'small';
+}
+EOF
+HEALTH_JSON="$(cd "$CONSUMER_DIR" && ./node_modules/.bin/lien health --format json)"
+echo "$HEALTH_JSON" | node -e '
+let s = "";
+process.stdin.on("data", d => (s += d)).on("end", () => {
+  const r = JSON.parse(s);
+  if (!(r.filesAnalyzed >= 1) || !(r.chunks >= 1)) {
+    console.error("FAIL: lien health parsed nothing —", JSON.stringify(r).slice(0, 300));
+    process.exit(1);
+  }
+  console.log(`lien health OK (${r.filesAnalyzed} files, ${r.chunks} chunks)`);
+});'
 
 echo "== Registry smoke test passed for @liendev/lien@$V =="

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
@@ -16,6 +16,7 @@ import {
   renderNothingShown,
   toJson,
   renderText,
+  healthCommand,
   type HealthResult,
   type RiskEntry,
 } from './health-cmd.js';
@@ -521,5 +522,61 @@ describe('analyzeHealth (integration — real parse, no index)', () => {
 
     expect((await analyzeHealth(dir)).entries).toEqual([]);
     expect((await analyzeHealth(dir, true)).entries.length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * The guard against parsing `$HOME` (or a filesystem root) lived on `lien index`
+ * and was orphaned when that command was deleted — no caller, tree-shaken out of
+ * the bundle — while a doc comment claimed it still protected `lien complexity`.
+ * `unsafe-root.test.ts` stayed green throughout, because a pure predicate passes
+ * its own tests whether or not anything calls it. These assert the WIRING, which
+ * is the part that actually broke.
+ */
+describe('healthCommand — unsafe-root guard wiring', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('refuses to analyze the home directory, and exits 2', async () => {
+    vi.spyOn(process, 'cwd').mockReturnValue(os.homedir());
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exit = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      throw new Error(`__exit__:${code}`);
+    }) as never);
+
+    await expect(healthCommand({ format: 'text', top: '5' })).rejects.toThrow('__exit__:2');
+
+    expect(err).toHaveBeenCalled();
+    expect(stripAnsi(String(err.mock.calls[0]?.[0]))).toContain('your home directory');
+    exit.mockRestore();
+  });
+
+  it('--allow-unsafe-root overrides the refusal', async () => {
+    // Uses a THROWAWAY directory as $HOME rather than the real one: with the
+    // override in effect the command proceeds to scan, and scanning an actual
+    // home directory is precisely the minutes-long mistake this guard prevents
+    // (the first draft of this test did exactly that and timed out at 30s).
+    const fakeHome = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-fakehome-'));
+    const realHome = process.env.HOME;
+    process.env.HOME = fakeHome;
+
+    vi.spyOn(process, 'cwd').mockReturnValue(fakeHome);
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      throw new Error(`__exit__:${code}`);
+    }) as never);
+
+    try {
+      await healthCommand({ format: 'text', top: '5', allowUnsafeRoot: true }).catch(() => {});
+      const messages = err.mock.calls.map(c => stripAnsi(String(c[0]))).join('\n');
+      expect(messages).not.toContain('your home directory');
+    } finally {
+      if (realHome === undefined) delete process.env.HOME;
+      else process.env.HOME = realHome;
+      await fs.rm(fakeHome, { recursive: true, force: true });
+    }
   });
 });

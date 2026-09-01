@@ -22,23 +22,22 @@ npm link
 
 ### Dogfooding Lien while working on Lien
 
-The Claude Code plugin (`plugins/claude/`) and its marketplace manifest (`.claude-plugin/marketplace.json`) have been **deleted**. There is nothing to install and nothing to avoid installing: point your editor at your local build by hand-editing its MCP config (see below), or run the commands directly. The warning this paragraph used to carry — that installing the published plugin would test the released build rather than your changes — no longer applies because there is no plugin to install.
+There is nothing to register any more: Lien has no MCP server and no editor
+integration. Run your local build directly.
 
-Instead, register Lien per-project against your local `dist/`:
-
-```jsonc
-// .mcp.json in this repo, or the corresponding entry in ~/.claude.json
-{
-  "mcpServers": {
-    "lien": {
-      "command": "node",
-      "args": ["/absolute/path/to/lien/packages/cli/dist/index.js", "serve", "-r", "."]
-    }
-  }
-}
+```bash
+npm run build
+node packages/cli/dist/index.js health
+node packages/cli/dist/index.js review --base origin/main
 ```
 
-Rebuild (`npm run build`) and restart your MCP client to pick up changes.
+`npm link` (above) puts `lien` on your PATH pointing at this checkout, so a
+plain `lien health` runs your working copy. Rebuild to pick up changes — the
+binary is the built `dist/`, not the TypeScript sources.
+
+The `/review` skill in `.claude/skills/review/` drives `lien review` and
+`lien health` for a change review; invoking it is the fastest way to exercise
+both the way a real consumer does.
 
 ### Working in a git worktree
 
@@ -56,8 +55,8 @@ Lien is a 6-package monorepo. `CLAUDE.md`'s ["What is Lien?"](./CLAUDE.md#what-i
 lien/
 ├── packages/
 │   ├── parser/    # @liendev/parser — AST parsing, chunking, complexity, scanning
-│   ├── core/      # @liendev/core — SQLite structural store + FTS5 search, config, git (depends on parser)
-│   ├── cli/       # @liendev/lien — CLI + MCP server (depends on core and parser)
+│   ├── core/      # @liendev/core — config, git, errors, report formatters (depends on parser)
+│   ├── cli/       # @liendev/lien — the CLI: complexity, health, review, delta (depends on core and parser)
 │   ├── review/    # @liendev/review (private) — PR review engine (depends on parser only)
 │   ├── action/    # @liendev/action (private) — self-hostable GitHub Action wrapping review
 │   └── site/      # @liendev/site (private) — VitePress docs site (lien.dev)
@@ -138,18 +137,18 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/):
 ```bash
 # Features
 git commit -m "feat: add Python test detection"
-git commit -m "feat(indexer): support for Go modules"
+git commit -m "feat(parser): support for Go modules"
 
 # Bug fixes
 git commit -m "fix: resolve reconnection race condition"
-git commit -m "fix(mcp): handle empty search results"
+git commit -m "fix(cli): handle an empty diff in lien review"
 
 # Documentation
 git commit -m "docs: update README with new examples"
 
 # Other types
 git commit -m "refactor: simplify chunking logic"
-git commit -m "test: add integration tests for MCP"
+git commit -m "test: add integration tests for lien delta"
 git commit -m "chore: update dependencies"
 ```
 
@@ -193,7 +192,7 @@ Lien follows [Semantic Versioning](https://semver.org/). Pick the bump when runn
 | New tool | Minor | Added `find_tests_for` tool |
 | New language | Minor | Added Ruby support |
 | Performance | Patch | Improved indexing speed |
-| Breaking API | Major | Changed MCP tool signatures |
+| Breaking API | Major | Removed a command or changed its output shape |
 | Config change (breaking) | Major | New config file format |
 | Config change (compatible) | Minor | Added optional field |
 

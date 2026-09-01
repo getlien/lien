@@ -11,6 +11,11 @@
 > store with FTS5/BM25 lexical search. This ADR is retained for history: it
 > explains why transformers.js was the right embedding backend *while Lien had
 > embeddings*.
+>
+> **Second forward note (2026-09-01):** ADR-011's own replacement is itself gone
+> now. Phase 5 of the CLI simplification plan (commit `0de8ea52`) deleted the
+> SQLite structural store entirely — there is no storage backend of any kind
+> left, embedding-based or lexical.
 
 ## Context and Problem Statement
 

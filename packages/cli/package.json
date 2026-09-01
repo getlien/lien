@@ -38,7 +38,6 @@
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "vitest run test/e2e/real-projects.test.ts --reporter=verbose",
-    "test:e2e:mcp": "vitest run test/e2e/mcp-roundtrip.test.ts --reporter=verbose",
     "test:e2e:python": "vitest run test/e2e/real-projects.test.ts -t 'Requests'",
     "test:e2e:typescript": "vitest run test/e2e/real-projects.test.ts -t 'Zod'",
     "test:e2e:javascript": "vitest run test/e2e/real-projects.test.ts -t 'Express'",
@@ -70,14 +69,11 @@
   "dependencies": {
     "@liendev/core": "^0.78.0",
     "@liendev/parser": "^0.78.0",
-    "@modelcontextprotocol/sdk": "^1.26.0",
     "@types/figlet": "1.7.0",
     "chalk": "5.3.0",
-    "chokidar": "3.6.0",
     "commander": "12.0.0",
     "figlet": "1.9.3",
-    "ora": "8.0.0",
-    "zod-to-json-schema": "^3.25.0"
+    "ora": "8.0.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

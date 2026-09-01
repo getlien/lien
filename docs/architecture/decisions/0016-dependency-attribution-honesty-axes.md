@@ -1,11 +1,22 @@
 # ADR-016: Dependency-Attribution Honesty Has Two Axes and Three Scopes — Route, Don't Merge
 
-**Status**: Accepted
+**Status**: Accepted (partially superseded — see note)
 **Date**: 2026-08-05
 **Deciders**: Core Team
 **Related**: #1018 (proposal and the refusal recorded here), PR for #1018
 (implementation) · #930, #940, #951, #980, #984, #994, #1005, #1011, #1013,
 #1014, #1015, #1026, #1030, #1039, #1064, #1067, #1072, #1078
+
+> **Partially superseded (2026-09-01):** Phase 5 of the CLI simplification plan
+> (commit `0de8ea52`) deleted the MCP server and `packages/cli/src/mcp/`
+> wholesale — including `attribution-caveat-reasons.ts`, Axis B's concrete home
+> in the model below. The decision's substance is unaffected: Axis A
+> (`confidence`/`EdgeProvenance`) and the underlying structural facts
+> (`INFERRED_DEPENDENT_MECHANISMS`, `FindDependentsResult`'s fields) all live in
+> `@liendev/parser`, which phase 5 did not touch, and remain the basis for
+> `lien health`'s dependent-count computation. Axis B's specific prose-and-enum
+> file is gone along with the MCP tool (`get_dependents`) it served; nothing
+> surviving currently reconstructs an equivalent per-answer caveat.
 
 ## Context and Problem Statement
 

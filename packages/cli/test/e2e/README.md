@@ -122,10 +122,10 @@ ls -la "$TEMP_DIR"
 
 # Run Lien manually in the failed project directory
 cd "$TEMP_DIR"/requests-*  # or zod-*, express-*, monolog-*
-node <path-to-lien-repo>/packages/cli/dist/index.js index --verbose
+node <path-to-lien-repo>/packages/cli/dist/index.js health
 
 # Or if you have lien installed globally
-lien index --verbose
+lien health
 ```
 
 ### Not Enough Files/Chunks
@@ -217,31 +217,10 @@ A: Pin to a specific commit SHA instead of branch name, or update expected value
 **Q: Why shallow clones?**  
 A: Speed. We only need latest code to validate Lien works.
 
-## MCP Protocol Round Trip (`mcp-roundtrip.test.ts`)
-
-Drives a real `@modelcontextprotocol/sdk` `Client` against a real MCP
-`Server` (connected over `InMemoryTransport.createLinkedPair()`), backed by
-a real SQLite index of a small in-memory fixture repo built via the real
-`indexCodebase()` path. Unlike `server.test.ts` (which mocks the SDK's
-`Server`/transport classes and only asserts setup calls) and the handler
-unit tests (which mock the vector DB), this proves a client can actually
-connect and get a real `tools/call` response for `search_code` and
-`get_files_context`.
-
-Uses `LocalEmbeddings` (in-process, no worker thread) loaded once for the
-whole file — same approach as `real-projects.test.ts` — which is why it
-lives here instead of the fast suite.
-
-```bash
-npm run test:e2e:mcp -w @liendev/lien
-```
-
 ## Future Enhancements
 
-- [x] Add code search validation (requires MCP server) — see `mcp-roundtrip.test.ts`
-- [ ] Add performance benchmarks (index time, search latency)
+- [ ] Add performance benchmarks (parse time)
 - [ ] Add multi-language project test (e.g., Django + React)
 - [ ] Cache git clones between runs
 - [ ] Add memory usage monitoring
-- [ ] Test incremental indexing (modify file, reindex)
 

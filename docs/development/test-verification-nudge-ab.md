@@ -17,16 +17,19 @@ verbatim from `lien verify-tests report`) measurably changes whether a Sonnet
 subagent's next action is to run the named associated tests, relative to an
 identical prompt with no advisory.
 
-> **What this experiment measured vs. what ships today.** The A/B captured the
-> **legacy single-source** advisory — `test-verify-stop.sh` shelling out to
-> `lien verify-tests report`. Today `recap-stop.sh` invokes `lien recap`, which
-> folds this unrun-tests advisory into a consolidated
-> [session risk-ledger recap](../architecture/session-risk-recap.md). The text
-> measured here is byte-identical to a **tests-only** recap (no unresolved
-> complexity crossings or unacted blast-radius warnings); when those other
-> sources are also open, the recap prepends their sections above this one. So
-> this result speaks to the unrun-tests advisory specifically, not to the full
-> recap.
+> **What this experiment measured vs. what shipped, and what's left now.** The A/B
+> captured the **legacy single-source** advisory — `test-verify-stop.sh` shelling
+> out to `lien verify-tests report`. That was later consolidated: `recap-stop.sh`
+> invoked `lien recap`, folding this unrun-tests advisory into a consolidated
+> session risk-ledger recap (the text measured here was byte-identical to a
+> **tests-only** recap; when other sources — unresolved complexity crossings,
+> unacted blast-radius warnings — were also open, the recap prepended their
+> sections above this one). Phase 5 (2026-09-01) then deleted `lien recap`,
+> `lien verify-tests`, and the persisted index the association lookup depended
+> on outright, along with the rest of the nudge/telemetry family — so neither
+> the legacy hook nor its consolidated successor exists any more. This result
+> speaks to the unrun-tests advisory as it existed at either point, not to any
+> currently-running mechanism.
 
 **Headline result: null, for the same reason as the sibling blast-radius A/B.**
 Both conditions came back **8/8** on the primary metric — every trial,

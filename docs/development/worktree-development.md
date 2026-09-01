@@ -5,10 +5,13 @@ npm grammar packages), a plain `npm install` / `npm ci` works normally in a
 linked git worktree: no symlink farm needed. The install-time compile
 failure this doc used to work around was `node-tree-sitter`'s `node-gyp`
 build breaking against this environment's Apple-clang toolchain; that native
-binding is gone. The one other native addon in the tree, `better-sqlite3`,
-resolves a prebuilt binary via `prebuild-install` rather than compiling
-locally, so it isn't a blocker either. Verified empirically: `npm ci` in a
-scratch worktree of this branch completed in ~7s with no compile step.
+binding is gone. `better-sqlite3`, the other native addon this doc used to
+note as a non-blocker (it resolved a prebuilt binary via `prebuild-install`
+rather than compiling locally), is gone too — phase 5 (2026-09-01) deleted the
+SQLite structural store it backed, along with the rest of `@liendev/core`'s
+storage layer. `@liendev/parser-native` is the only native addon left in the
+tree. Verified empirically: `npm ci` in a scratch worktree of this branch
+completed in ~7s with no compile step.
 
 ```bash
 # From inside a fresh linked worktree.

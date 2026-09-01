@@ -1,380 +1,158 @@
 # Data Flow
 
-This document illustrates how data flows through Lien during indexing and searching operations. Storage is a local SQLite database; there are no embeddings or vectors (see [ADR-011](decisions/0011-sqlite-structural-store-fts5-lexical-search.md)).
+> [!IMPORTANT]
+> **Phase 5 (2026-09-01, commit `0de8ea52`) deleted the persisted SQLite index,
+> FTS5 lexical search, the MCP server, and the file watcher.** Every diagram this
+> document used to carry — indexing into a `chunks` table, `search_code`/`find_similar`
+> FTS5/BM25 lookups, structural queries against indexed SQL, incremental reindexing
+> kept in sync by triggers — described that now-deleted machinery and has been
+> replaced below. There is no data at rest any more: every command parses the
+> working tree fresh, on every invocation, and holds the result only in memory for
+> the duration of that run.
 
-## Indexing data flow
+This document illustrates how data flows through Lien's four commands (`lien complexity`, `lien health`, `lien review`, `lien delta`), all of which parse the working tree on demand rather than reading a stored index.
 
-Indexing parses source files into chunks, enriches them with complexity and dependency metadata, and writes them to the SQLite `chunks` table. FTS5 index rows are maintained automatically by triggers on `chunks`.
+## Parse-and-analyze data flow
+
+`lien complexity`, `lien health`, and `lien review` all start the same way: scan the repo, chunk every file with Tree-sitter, and compute metrics from the in-memory chunks. Nothing is written anywhere; the process holds the chunks for the run and exits.
 
 ```mermaid
 flowchart TB
-    START([User runs 'lien index'])
-
-    subgraph "Configuration Loading"
-        LOAD_CONFIG[Load Configuration]
-        DETECT_FW[Detect Ecosystems]
-        MERGE_CONFIG[Merge with Defaults]
-    end
+    START([User runs complexity / health / review])
 
     subgraph "File Discovery"
-        SCAN_START[Start File Scanning]
+        SCAN_START[performChunkOnlyIndex]
         READ_GITIGNORE[Read .gitignore]
         APPLY_PATTERNS[Apply Include/Exclude Patterns]
-        FILTER_FRAMEWORK[Apply Ecosystem Exclude Patterns]
-        FILE_LIST[Generate File List]
+        FILTER_ECOSYSTEM[Apply Ecosystem Exclude Patterns]
+        FILE_LIST[File List]
     end
 
-    subgraph "Test Association (Pass 1 + Pass 2)"
-        CONVENTION_DETECT[Convention-Based Detection]
-        IMPORT_ANALYSIS[Import Analysis]
-        ASSOC_MAP[Build Association Map]
-    end
-
-    subgraph "File Processing (Concurrent)"
+    subgraph "File Processing (Concurrent, in memory)"
         READ_FILE[Read File Content]
         DETECT_LANG[Detect Language]
-        CHUNK_FILE[Chunk into Segments AST]
+        CHUNK_FILE[Chunk into Segments — AST]
         EXTRACT_SYMBOLS[Extract Symbols + Imports]
         COMPLEXITY[Compute Complexity Metrics]
-        ADD_METADATA[Add Metadata + Test Assoc]
     end
 
-    subgraph "SQLite Storage (SqliteBackend)"
-        SERIALIZE[Serialize chunk → row]
-        INSERT[INSERT INTO chunks]
-        FTS_SYNC[Triggers sync chunks_fts]
-        UPDATE_VERSION[Write Version File]
+    subgraph "Per-command analysis"
+        HEALTH_RANK[lien health: fan-in × complexity ÷ test coverage]
+        REVIEW_SIGNALS[lien review: deterministic signals over the diff]
+        COMPLEXITY_REPORT[lien complexity: threshold violations]
+        TESTASSOC[findTestAssociationsFromChunks<br/>feeds health + review]
+        DEPS[Dependency analyzer<br/>feeds health's fan-in axis]
     end
 
-    END([Indexing Complete])
+    REPORT([Report: text / JSON / SARIF, printed and process exits])
 
-    %% Main Flow
-    START --> LOAD_CONFIG
-    LOAD_CONFIG --> DETECT_FW
-    DETECT_FW --> MERGE_CONFIG
-    MERGE_CONFIG --> SCAN_START
-
+    START --> SCAN_START
     SCAN_START --> READ_GITIGNORE
     READ_GITIGNORE --> APPLY_PATTERNS
-    APPLY_PATTERNS --> FILTER_FRAMEWORK
-    FILTER_FRAMEWORK --> FILE_LIST
+    APPLY_PATTERNS --> FILTER_ECOSYSTEM
+    FILTER_ECOSYSTEM --> FILE_LIST
 
-    FILE_LIST --> CONVENTION_DETECT
-    CONVENTION_DETECT --> IMPORT_ANALYSIS
-    IMPORT_ANALYSIS --> ASSOC_MAP
-
-    ASSOC_MAP --> READ_FILE
+    FILE_LIST --> READ_FILE
     READ_FILE --> DETECT_LANG
     DETECT_LANG --> CHUNK_FILE
     CHUNK_FILE --> EXTRACT_SYMBOLS
     EXTRACT_SYMBOLS --> COMPLEXITY
-    COMPLEXITY --> ADD_METADATA
 
-    ADD_METADATA --> SERIALIZE
-    SERIALIZE --> INSERT
-    INSERT --> FTS_SYNC
-    FTS_SYNC --> UPDATE_VERSION
-    UPDATE_VERSION --> END
+    COMPLEXITY --> COMPLEXITY_REPORT
+    COMPLEXITY --> TESTASSOC
+    COMPLEXITY --> DEPS
+    TESTASSOC --> HEALTH_RANK
+    DEPS --> HEALTH_RANK
+    TESTASSOC --> REVIEW_SIGNALS
 
-    %% Styling
-    classDef configClass fill:#e1f5ff,stroke:#01579b,stroke-width:2px
+    COMPLEXITY_REPORT --> REPORT
+    HEALTH_RANK --> REPORT
+    REVIEW_SIGNALS --> REPORT
+
     classDef scanClass fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
-    classDef testClass fill:#fff3e0,stroke:#e65100,stroke-width:2px
     classDef processClass fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
-    classDef storageClass fill:#fff9c4,stroke:#f57f17,stroke-width:2px
+    classDef analysisClass fill:#e1f5ff,stroke:#01579b,stroke-width:2px
 
-    class LOAD_CONFIG,DETECT_FW,MERGE_CONFIG configClass
-    class SCAN_START,READ_GITIGNORE,APPLY_PATTERNS,FILTER_FRAMEWORK,FILE_LIST scanClass
-    class CONVENTION_DETECT,IMPORT_ANALYSIS,ASSOC_MAP testClass
-    class READ_FILE,DETECT_LANG,CHUNK_FILE,EXTRACT_SYMBOLS,COMPLEXITY,ADD_METADATA processClass
-    class SERIALIZE,INSERT,FTS_SYNC,UPDATE_VERSION storageClass
+    class SCAN_START,READ_GITIGNORE,APPLY_PATTERNS,FILTER_ECOSYSTEM,FILE_LIST scanClass
+    class READ_FILE,DETECT_LANG,CHUNK_FILE,EXTRACT_SYMBOLS,COMPLEXITY processClass
+    class HEALTH_RANK,REVIEW_SIGNALS,COMPLEXITY_REPORT,TESTASSOC,DEPS analysisClass
 ```
 
-## Search data flow
+`lien review` additionally needs the diff itself (see below) to know which files and lines changed; it reuses the same repo-wide chunk pass for cross-file context (e.g. "does this literal still appear unconditionally elsewhere?").
 
-The `search_code` / `find_similar` tools run FTS5/BM25 lexical search. The query text is turned into an FTS5 MATCH expression, matched against the FTS index, ranked by BM25, and mapped back to results, with no embedding step.
+## `lien delta`'s before/after diff flow
+
+`lien delta` doesn't scan the whole repo — it diffs the working tree against `HEAD` (or `--base <ref>`), reads each changed file's before/after content directly (no second checkout), and chunks only those two strings. See [lien delta](./lien-delta.md) for the full command design.
 
 ```mermaid
 flowchart TB
-    START([AI Assistant Query])
+    START([User runs lien delta])
 
-    subgraph "MCP Request Handling"
-        RECEIVE[Receive MCP Tool Call]
-        VALIDATE[Validate Parameters]
-        EXTRACT[Extract Query Text]
+    subgraph "Change Discovery"
+        DIFF[git diff --name-status --find-renames HEAD]
+        UNTRACKED[git ls-files --others --exclude-standard]
+        FILTER_EXT[Filter to supported code extensions]
     end
 
-    subgraph "FTS5 Lexical Search"
-        BUILD_MATCH[Build MATCH expr<br/>quote + OR-join terms]
-        FTS_MATCH[chunks_fts MATCH ?]
-        BM25[Rank by bm25<br/>symbolName &gt; tokens &gt; content]
-        JOIN[JOIN chunks on rowid]
-        BAND[Derive score + relevance band]
+    subgraph "Per-file content (no second checkout)"
+        BEFORE["before = git show HEAD:path (or null if added)"]
+        AFTER["after = read(worktree) (or null if deleted)"]
     end
 
-    subgraph "Post-Processing"
-        LOAD_TEST_ASSOC[Load Test Associations]
-        PRUNE[Prune not_relevant]
-        FORMAT_RESULTS[Format Results]
-        ADD_INDEX_INFO[Add Index Metadata]
+    subgraph "In-memory chunk + classify (@liendev/parser)"
+        CHUNK_BEFORE[chunkFile before]
+        CHUNK_AFTER[chunkFile after]
+        MATCH[Match functions by qualified name<br/>parentClass::symbolName]
+        CLASSIFY["Per-metric classification:<br/>crossed / new-over-threshold / worsened /<br/>pre-existing / improved / unchanged"]
     end
 
-    subgraph "Response"
-        BUILD_RESPONSE[Build MCP Response]
-        RETURN[Return to AI Assistant]
-    end
+    REPORT([Table + exit code:<br/>0 clean, 1 regression, 2 operational error])
 
-    END([Query Complete])
+    START --> DIFF
+    START --> UNTRACKED
+    DIFF --> FILTER_EXT
+    UNTRACKED --> FILTER_EXT
+    FILTER_EXT --> BEFORE
+    FILTER_EXT --> AFTER
+    BEFORE --> CHUNK_BEFORE
+    AFTER --> CHUNK_AFTER
+    CHUNK_BEFORE --> MATCH
+    CHUNK_AFTER --> MATCH
+    MATCH --> CLASSIFY
+    CLASSIFY --> REPORT
 
-    START --> RECEIVE
-    RECEIVE --> VALIDATE
-    VALIDATE --> EXTRACT
-    EXTRACT --> BUILD_MATCH
+    classDef discoverClass fill:#e1f5ff,stroke:#01579b,stroke-width:2px
+    classDef contentClass fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    classDef classifyClass fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
 
-    BUILD_MATCH --> FTS_MATCH
-    FTS_MATCH --> BM25
-    BM25 --> JOIN
-    JOIN --> BAND
-
-    BAND --> LOAD_TEST_ASSOC
-    LOAD_TEST_ASSOC --> PRUNE
-    PRUNE --> FORMAT_RESULTS
-    FORMAT_RESULTS --> ADD_INDEX_INFO
-
-    ADD_INDEX_INFO --> BUILD_RESPONSE
-    BUILD_RESPONSE --> RETURN
-    RETURN --> END
-
-    %% Styling
-    classDef mcpClass fill:#e1f5ff,stroke:#01579b,stroke-width:2px
-    classDef searchClass fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
-    classDef processClass fill:#fff3e0,stroke:#e65100,stroke-width:2px
-    classDef responseClass fill:#fce4ec,stroke:#880e4f,stroke-width:2px
-
-    class RECEIVE,VALIDATE,EXTRACT mcpClass
-    class BUILD_MATCH,FTS_MATCH,BM25,JOIN,BAND searchClass
-    class LOAD_TEST_ASSOC,PRUNE,FORMAT_RESULTS,ADD_INDEX_INFO processClass
-    class BUILD_RESPONSE,RETURN responseClass
-```
-
-### Structural query flow
-
-The structural tools (`get_files_context`, `get_dependents`, `list_functions`, `get_complexity`) do not touch FTS5 at all: they scan or look up rows in `chunks` with indexed SQL and post-process in JS (dependency graph, complexity enrichment). `get_files_context` is the hot path: an indexed `SELECT ... WHERE file IN (...)` backed by `idx_chunks_file`.
-
-## Relevance scoring
-
-FTS5 lexical search attaches a `score` and a `relevance` category to each result, both derived from the BM25 rank.
-
-```mermaid
-flowchart LR
-    START([FTS5 Results ordered by bm25])
-
-    subgraph "Scoring"
-        RANK[bm25 rank<br/>more negative = better]
-        RATIO[ratio = rank / bestRank<br/>best hit = 1.0]
-        SCORE[score = 1 - ratio × 2<br/>lower = better]
-    end
-
-    subgraph "Categorization"
-        BANDS{ratio band}
-        HIGH[highly_relevant<br/>ratio ≥ 0.75 or exact symbol]
-        REL[relevant<br/>ratio ≥ 0.5]
-        LOOSE[loosely_related<br/>ratio ≥ 0.3]
-        NOT[not_relevant<br/>below — filtered out]
-    end
-
-    END([Results with Relevance])
-
-    START --> RANK
-    RANK --> RATIO
-    RATIO --> SCORE
-    SCORE --> BANDS
-    BANDS --> HIGH
-    BANDS --> REL
-    BANDS --> LOOSE
-    BANDS --> NOT
-    HIGH --> END
-    REL --> END
-    LOOSE --> END
-
-    classDef scoreClass fill:#e1f5ff,stroke:#01579b,stroke-width:2px
-    classDef catClass fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
-    class RANK,RATIO,SCORE scoreClass
-    class BANDS,HIGH,REL,LOOSE,NOT catClass
-```
-
-Because bands are relative to the best hit in each result set, the top result is always `highly_relevant`. Relevance measures **keyword match strength**, not semantic similarity: a match means the query terms appear in the code or its comments.
-
-## Incremental update data flow
-
-When files change, only modified files are reindexed. The FTS5 external-content index is kept consistent by the `AFTER INSERT/UPDATE/DELETE` triggers on `chunks`.
-
-```mermaid
-flowchart TB
-    START([File Change Detected])
-
-    subgraph "Change Detection"
-        GIT_DETECT{Git Detection?}
-        FILE_WATCH{File Watcher?}
-        GET_CHANGED[Get Changed Files]
-    end
-
-    subgraph "Change Analysis"
-        FILTER_IGNORED[Filter Ignored Files]
-        CHECK_DELETED{File Deleted?}
-    end
-
-    subgraph "Deletion Path"
-        DELETE_CHUNKS[DELETE FROM chunks WHERE file = ?]
-    end
-
-    subgraph "Update Path"
-        READ_NEW[Read New Content]
-        RECHUNK[Re-chunk + re-extract metadata]
-        ATOMIC_UPDATE[Atomic Update<br/>delete old rows + insert new]
-    end
-
-    subgraph "Finalize + Reconnect"
-        FTS_TRIGGERS[Triggers update chunks_fts]
-        UPDATE_VERSION[Update Index Version]
-        VERSION_POLL[MCP polls version]
-        RECONNECT{Version Changed?}
-        RELOAD_INDEX[Reopen SQLite handle]
-    end
-
-    END([Update Complete])
-
-    START --> GIT_DETECT
-    GIT_DETECT -->|Yes| GET_CHANGED
-    GIT_DETECT -->|No| FILE_WATCH
-    FILE_WATCH -->|Yes| GET_CHANGED
-    FILE_WATCH -->|No| END
-
-    GET_CHANGED --> FILTER_IGNORED
-    FILTER_IGNORED --> CHECK_DELETED
-
-    CHECK_DELETED -->|Yes| DELETE_CHUNKS
-    DELETE_CHUNKS --> FTS_TRIGGERS
-
-    CHECK_DELETED -->|No| READ_NEW
-    READ_NEW --> RECHUNK
-    RECHUNK --> ATOMIC_UPDATE
-    ATOMIC_UPDATE --> FTS_TRIGGERS
-
-    FTS_TRIGGERS --> UPDATE_VERSION
-    UPDATE_VERSION --> VERSION_POLL
-    VERSION_POLL --> RECONNECT
-    RECONNECT -->|Yes| RELOAD_INDEX
-    RECONNECT -->|No| END
-    RELOAD_INDEX --> END
-
-    classDef detectClass fill:#e1f5ff,stroke:#01579b,stroke-width:2px
-    classDef analysisClass fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
-    classDef deleteClass fill:#ffebee,stroke:#c62828,stroke-width:2px
-    classDef updateClass fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
-    classDef reconnectClass fill:#fff3e0,stroke:#e65100,stroke-width:2px
-
-    class GIT_DETECT,FILE_WATCH,GET_CHANGED detectClass
-    class FILTER_IGNORED,CHECK_DELETED analysisClass
-    class DELETE_CHUNKS deleteClass
-    class READ_NEW,RECHUNK,ATOMIC_UPDATE updateClass
-    class FTS_TRIGGERS,UPDATE_VERSION,VERSION_POLL,RECONNECT,RELOAD_INDEX reconnectClass
+    class DIFF,UNTRACKED,FILTER_EXT discoverClass
+    class BEFORE,AFTER contentClass
+    class CHUNK_BEFORE,CHUNK_AFTER,MATCH,CLASSIFY classifyClass
 ```
 
 ## Data transformations
 
 ### File → Chunks
 
-AST chunking keeps functions and classes whole; a line-based fallback (fixed size + overlap) is used for unsupported languages, very large files, or parse errors. See [Indexing Flow](./indexing-flow.md) → Chunking strategy for the worked example and the traverser mechanics.
+AST chunking keeps functions and classes whole; a line-based fallback (fixed size + overlap) is used for unsupported languages, very large files, or parse errors. One chunk per function/method, carrying `complexity` (cyclomatic), `cognitiveComplexity`, `halsteadEffort`, `halsteadBugs`, `symbolName`, `parentClass`, `signature`, `startLine`, and (repo-wide scans only) `imports`/`exports`/`callSites`.
 
-### Chunk → Row
+### Chunks → Report
 
-Each chunk is flattened to a row in the `chunks` table: scalar columns (file,
-startLine, endLine, symbolName, symbolType, signature, complexity metrics, …) plus
-JSON columns for arrays/maps (imports, exports, callSites, importedSymbols, …).
-`symbolTokens` is an identifier-split copy of the symbol name
-(`parseImportStatement` → `parse import statement`) so a keyword search for `parse`
-matches the symbol.
+Nothing is flattened into a database row any more. `analyzeComplexityFromChunks` walks the in-memory `CodeChunk[]` directly and returns a `ComplexityReport`; `lien health` and `lien review` layer dependency counts, test associations, and (for review) signal findings on top of that same in-memory structure before formatting it as text/JSON/SARIF and printing it. The process exits when the report is printed — there is no row to persist and nothing left to keep in sync.
 
-### Query → Results
+## Error handling: No-Data Honesty
 
-```
-Query text: "authenticate session token"
-    ↓ [orQuery: quote each term, OR-join]
-FTS5 MATCH: "authenticate" OR "session" OR "token"
-    ↓ [chunks_fts MATCH, ORDER BY bm25 ASC]
-Ranked rows (best = most-negative bm25)
-    ↓ [map to score + relevance band, prune not_relevant]
-Top-N results with metadata
-```
-
-## Data storage
-
-### SQLite schema (`chunks`)
-
-```
-chunks (
-  id INTEGER PRIMARY KEY,        -- rowid; referenced by chunks_fts content_rowid
-  file TEXT NOT NULL,            -- backed by idx_chunks_file (get_files_context hot path)
-  startLine INTEGER, endLine INTEGER,
-  type TEXT, language TEXT,
-  symbolName TEXT, symbolType TEXT, parentClass TEXT, signature TEXT,
-  symbolTokens TEXT,            -- identifier-split copy of symbolName (for FTS5)
-  complexity INTEGER, cognitiveComplexity INTEGER,
-  halsteadVolume REAL, halsteadDifficulty REAL, halsteadEffort REAL, halsteadBugs REAL,
-  content TEXT NOT NULL DEFAULT '',
-  functionNames, classNames, interfaceNames, parameters,
-  imports, exports, importedSymbols, callSites   -- JSON text columns
-)
-```
-
-```
-chunks_fts  -- FTS5 external-content virtual table (content='chunks')
-  columns: symbolName, symbolTokens, content
-  tokenize: porter unicode61
-  kept in sync by AFTER INSERT/UPDATE/DELETE triggers on chunks
-```
-
-`startLine`/`endLine` are `INTEGER` (the structural-store spike stored them as REAL; fixed in production). The multi-tenant `ChunkMetadata` fields (`repoId`, `orgId`, `branch`, `commitSha`) were never stored as columns and have since been removed entirely; none were ever wired to a write site. Cross-repo MCP mode itself (the `crossRepo`/`repoIds` tool parameters, `supportsCrossRepo`, `scanCrossRepo`) was removed; it was never implemented in the SQLite era.
-
-### Version file
-
-```json
-{
-  "version": 123456789,
-  "timestamp": "2026-07-04T20:00:00.000Z",
-  "config": { "chunkSize": 75, "chunkOverlap": 10 }
-}
-```
-
-Purpose: lets the MCP server detect index changes and reopen its SQLite handle.
-
-## Error handling
-
-### Graceful degradation
+A failed or empty parse must never format as a clean result — the same failure mode a stale or missing index used to produce, now produced by `performChunkOnlyIndex` returning `{ success: false }` instead of throwing. `describeScanFailure` (`packages/cli/src/utils/scan-failure.ts`) is the shared detector: `lien complexity` (gate-shaped) hard-errors on it, `lien health` (advisory) warns loudly at exit 0. See `CLAUDE.md`'s "No-Data Honesty" section.
 
 ```
 File Processing Error:
     ├─ Binary file detected      → Skip file, continue
     ├─ Parse error (malformed)   → Log warning, fall back to line-based / skip
-    └─ Database write failure    → Throw error (critical)
+    └─ Zero files found to scan  → success: false, routed through describeScanFailure
 ```
 
-### Transaction safety
+## Performance
 
-Atomic file updates run inside a single SQLite transaction:
-```
-1. Begin transaction
-2. DELETE old rows for the file (triggers remove their FTS entries)
-3. INSERT new rows (triggers add their FTS entries)
-4. Commit
-
-If any step fails → Rollback → File remains in its previous state
-```
-
-## Performance optimizations
-
-- **Indexed file lookup**: `get_files_context` uses `idx_chunks_file` for a sub-millisecond `WHERE file IN (...)` scan: the most frequent (mandatory pre-edit) query. Measured at 0.04ms against a 44,430-chunk replicated corpus, down from 40.49ms on the prior LanceDB backend; see [ADR-011](decisions/0011-sqlite-structural-store-fts5-lexical-search.md) for the benchmark.
-- **Concurrent file processing**: `p-limit(concurrency)` parses files in parallel; the SQLite write is a fast synchronous step.
-- **WAL journaling**: `journal_mode=WAL`, `synchronous=NORMAL`, and a `busy_timeout` let the MCP watcher and a concurrent CLI index share handles without immediate `SQLITE_BUSY` failures.
-- **No model load**: there is no embedding model to download or keep resident.
+- **Concurrency**: parser-side file processing runs with bounded concurrency (default 4) during a scan.
+- **No caching between runs**: every invocation re-parses whatever it needs from disk; there is no persisted structure to reuse across commands or across runs of the same command.
+- **No model load, no index load**: nothing to download, nothing to warm up, nothing that can go stale — the tradeoff phase 5 made deliberately in exchange for losing search and cross-invocation caching.

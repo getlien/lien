@@ -50,8 +50,6 @@ const themeConfig: DefaultTheme.Config = {
       {
         text: 'Usage',
         items: [
-          { text: 'MCP Tools', link: '/guide/mcp-tools' },
-          { text: 'Cross-Editor Agent Setup', link: '/guide/cross-editor-setup' },
           { text: 'CLI Commands', link: '/guide/cli-commands' },
           { text: 'Lien Review', link: '/guide/lien-review' },
           { text: 'Review Evidence', link: '/guide/review-evidence' },
@@ -121,7 +119,7 @@ const config: UserConfigExport<DefaultTheme.Config> = ({ command }) =>
     // Use /lien/ for GitHub Pages subdomain, / for custom domain
     base: process.env.VITE_BASE_PATH || '/',
     title: 'Lien',
-    description: 'Local-first structural code search and dependency analysis for AI coding assistants',
+    description: 'Local-first complexity, risk, and PR-review analysis for AI coding assistants — no index, no server',
 
     // Draft blog posts (frontmatter `draft: true`) render in `vitepress dev`
     // for owner review, but are fully excluded from the production build —

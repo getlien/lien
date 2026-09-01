@@ -52,10 +52,9 @@ const RETIRED_TOP_LEVEL_GROUPS: RetiredKeyGroup[] = [
   {
     keys: ['mcp'],
     message:
-      'Warning: the top-level "mcp" .lien.config.json section has been removed — mcp.port, ' +
-      'mcp.transport, and mcp.autoIndexOnFirstRun were validated but never read; the MCP server ' +
-      'does not load .lien.config.json at all. Ignoring it; you can delete "mcp" from your ' +
-      '.lien.config.json.',
+      'Warning: the top-level "mcp" .lien.config.json section has been removed — the MCP server ' +
+      'itself has been deleted, and mcp.port/mcp.transport/mcp.autoIndexOnFirstRun were never read ' +
+      'even while it existed. Ignoring it; you can delete "mcp" from your .lien.config.json.',
     warned: false,
   },
   {
@@ -69,18 +68,17 @@ const RETIRED_TOP_LEVEL_GROUPS: RetiredKeyGroup[] = [
   {
     keys: ['fileWatching'],
     message:
-      'Warning: the top-level "fileWatching" .lien.config.json section has been removed — it was ' +
-      'validated but never read; file watching during `lien serve` is controlled only by the ' +
-      '--watch/--no-watch CLI flag. Ignoring it; you can delete "fileWatching" from your ' +
-      '.lien.config.json.',
+      'Warning: the top-level "fileWatching" .lien.config.json section has been removed — file ' +
+      'watching was deleted along with the MCP server it kept warm, and this key was never read ' +
+      'even before that. Ignoring it; you can delete "fileWatching" from your .lien.config.json.',
     warned: false,
   },
   {
     keys: ['storage'],
     message:
       'Warning: the top-level "storage" .lien.config.json section has been removed — it was ' +
-      'validated but never read. The storage backend is chosen by the separate global config ' +
-      '(~/.lien/config.json, via `lien config set backend`), not per-project .lien.config.json. ' +
+      'validated but never read, and there is no longer any storage to configure: the persisted ' +
+      'index was removed and every command parses the working tree on demand. ' +
       'Ignoring it; you can delete "storage" from your .lien.config.json.',
     warned: false,
   },

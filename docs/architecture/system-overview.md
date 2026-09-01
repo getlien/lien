@@ -2,66 +2,47 @@
 
 This document provides a high-level overview of Lien's architecture, showing the main components and their relationships.
 
-Lien is a **code-intelligence layer** for AI agents. Its storage is a local SQLite
-database: structural queries (dependents, complexity, file context, symbol lookup)
-are served with indexed SQL, and discovery is served with SQLite FTS5/BM25 lexical
-search. There are no embeddings and no vector database (see
-[ADR-011](decisions/0011-sqlite-structural-store-fts5-lexical-search.md)).
+> [!IMPORTANT]
+> **Phase 5 (2026-09-01, commit `0de8ea52`) deleted the MCP server, the persisted
+> SQLite index, FTS5 lexical search, the indexer, the file watcher, and `GlobalConfig`.**
+> `lien` is no longer a server with a database behind it. It is a CLI that parses
+> the working tree on demand (Tree-sitter, via `@liendev/parser`) and answers four
+> questions about a change: what is risky to touch (`lien health`), what crossed a
+> complexity threshold (`lien delta`), what deterministic signals fire on the diff
+> (`lien review`), and where the complexity hotspots are (`lien complexity`). No
+> index means no staleness, but also no search and no server for an AI assistant to
+> connect to — see [ADR-011](decisions/0011-sqlite-structural-store-fts5-lexical-search.md),
+> now superseded, for what this replaced.
 
 ## Component architecture
 
 ```mermaid
 graph TB
-    subgraph "CLI Layer"
-        CLI[CLI Commands]
-        INDEX[lien index]
-        SERVE[lien serve]
-        STATUS[lien status]
-        CONFIGCMD[lien config]
+    subgraph "CLI Layer — the entire surface"
         COMPLX[lien complexity]
+        HEALTH[lien health]
+        REVIEW[lien review]
+        DELTA[lien delta]
     end
 
-    subgraph "MCP Server Layer"
-        MCP[MCP Server]
-        TOOLS[MCP Tools]
-        SEARCH[search_code]
-        SIMILAR[find_similar]
-        CONTEXT[get_files_context]
-        LIST[list_functions]
-        DEPENDENTS[get_dependents]
-        COMPLEXITY[get_complexity]
-    end
-
-    subgraph "Core Services"
-        CONFIG[ConfigService]
-        GLOBALCONFIG[GlobalConfig]
-        INDEXER[Indexer]
+    subgraph "Parser (@liendev/parser) — zero deps on core"
+        PARSEIDX[performChunkOnlyIndex<br/>on-demand working-tree parse]
         SCANNER[File Scanner]
         CHUNKER[Code Chunker]
-        AST[AST Parser]
-        TRAVERSER[Language Traversers]
-        SYMBOLS[Symbol Extractor]
-        TESTASSOC[Test Association Manager]
-        MANIFEST[Manifest Manager]
-        COMPLEXANALYZER[Complexity Analyzer]
-    end
-
-    subgraph "Data Layer"
-        FACTORY[VectorDB Factory]
-        SQLITE[SqliteBackend]
-        STRUCT[Structural queries<br/>indexed SQL]
-        FTS[FTS5 lexical search<br/>BM25]
-    end
-
-    subgraph "Optional Services"
-        GIT[Git State Tracker]
-        WATCHER[File Watcher]
+        AST[AST Parser / Traversers]
+        COMPLEXANALYZER[analyzeComplexityFromChunks]
+        RISK[Risk scoring]
+        SIGNALS[Deterministic signals]
+        DEPS[Dependency analyzer<br/>fan-in / dependent counts]
+        TESTASSOC[findTestAssociationsFromChunks]
         ECOSYSTEM[Ecosystem Presets]
     end
 
-    subgraph "External Dependencies"
-        SQLITELIB[better-sqlite3]
-        GITCMD[Git CLI]
+    subgraph "Core (@liendev/core) — config, git, errors, formatters"
+        CONFIG[ConfigService<br/>.lien.config.json]
+        FORMAT[Report formatters<br/>text / JSON / SARIF]
+        GIT[git/ — worktree + state helpers<br/>not currently called by any CLI command]
+        ERRORS[Typed errors]
     end
 
     subgraph "Lien Review (packages/review + packages/action)"
@@ -71,55 +52,27 @@ graph TB
         AGENTREVIEW[Agent Bug/Summary Review]
     end
 
+    %% CLI to Parser
+    COMPLX --> PARSEIDX
+    HEALTH --> PARSEIDX
+    HEALTH --> DEPS
+    HEALTH --> TESTASSOC
+    REVIEW --> PARSEIDX
+    REVIEW --> SIGNALS
+    REVIEW --> TESTASSOC
+    DELTA --> COMPLEXANALYZER
+
     %% CLI to Core
-    CLI --> CONFIG
-    INDEX --> INDEXER
-    SERVE --> MCP
-    STATUS --> CONFIG
-    STATUS --> FACTORY
-    CONFIGCMD --> GLOBALCONFIG
-    COMPLX --> CHUNKER
+    COMPLX --> FORMAT
+    DELTA --> CONFIG
 
-    %% MCP to Core
-    MCP --> TOOLS
-    TOOLS --> SEARCH
-    TOOLS --> SIMILAR
-    TOOLS --> CONTEXT
-    TOOLS --> LIST
-    TOOLS --> DEPENDENTS
-    TOOLS --> COMPLEXITY
-    SEARCH --> FACTORY
-    SIMILAR --> FACTORY
-    CONTEXT --> FACTORY
-    LIST --> FACTORY
-    DEPENDENTS --> FACTORY
-    COMPLEXITY --> FACTORY
-
-    %% Core Services Relationships
-    INDEXER --> CONFIG
-    INDEXER --> SCANNER
-    INDEXER --> CHUNKER
-    INDEXER --> SYMBOLS
-    INDEXER --> TESTASSOC
-    INDEXER --> FACTORY
-    INDEXER --> MANIFEST
-    INDEXER --> COMPLEXANALYZER
-    SCANNER --> ECOSYSTEM
+    %% Parser internals
+    PARSEIDX --> SCANNER
+    PARSEIDX --> CHUNKER
     CHUNKER --> AST
-    AST --> TRAVERSER
-
-    %% Data Layer
-    FACTORY --> SQLITE
-    SQLITE --> STRUCT
-    SQLITE --> FTS
-    STRUCT --> SQLITELIB
-    FTS --> SQLITELIB
-
-    %% Optional Services
-    MCP --> GIT
-    MCP --> WATCHER
-    GIT --> GITCMD
-    WATCHER --> INDEXER
+    SCANNER --> ECOSYSTEM
+    PARSEIDX --> COMPLEXANALYZER
+    COMPLEXANALYZER --> RISK
 
     %% Lien Review — separate product surface, shares only the parser
     %% package (AST + complexity). Does not depend on core.
@@ -130,72 +83,46 @@ graph TB
 
     %% Styling
     classDef cliClass fill:#e1f5ff,stroke:#01579b,stroke-width:2px
-    classDef mcpClass fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
-    classDef coreClass fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
-    classDef dataClass fill:#fff3e0,stroke:#e65100,stroke-width:2px
-    classDef optionalClass fill:#fce4ec,stroke:#880e4f,stroke-width:2px
-    classDef externalClass fill:#f5f5f5,stroke:#424242,stroke-width:2px
+    classDef parserClass fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
+    classDef coreClass fill:#fff3e0,stroke:#e65100,stroke-width:2px
     classDef reviewClass fill:#ede7f6,stroke:#311b92,stroke-width:2px
 
-    class CLI,INDEX,SERVE,STATUS,CONFIGCMD,COMPLX cliClass
-    class MCP,TOOLS,SEARCH,SIMILAR,CONTEXT,LIST,DEPENDENTS,COMPLEXITY mcpClass
-    class CONFIG,GLOBALCONFIG,INDEXER,SCANNER,CHUNKER,AST,TRAVERSER,SYMBOLS,TESTASSOC,MANIFEST,COMPLEXANALYZER coreClass
-    class FACTORY,SQLITE,STRUCT,FTS dataClass
-    class GIT,WATCHER,ECOSYSTEM optionalClass
-    class SQLITELIB,GITCMD externalClass
+    class COMPLX,HEALTH,REVIEW,DELTA cliClass
+    class PARSEIDX,SCANNER,CHUNKER,AST,COMPLEXANALYZER,RISK,SIGNALS,DEPS,TESTASSOC,ECOSYSTEM parserClass
+    class CONFIG,FORMAT,GIT,ERRORS coreClass
     class GHACTION,REVIEWENGINE,COMPLEXITYCHECK,AGENTREVIEW reviewClass
 ```
 
 ## Component descriptions
 
-### CLI layer
-- **CLI Commands**: Entry points for user interaction via command line
-- **lien index**: Indexes the codebase into the SQLite structural store
-- **lien serve**: Starts the MCP server for AI assistant integration
-- **lien status**: Shows current index status and configuration
-- **lien config**: Manages global configuration (`set`, `get`, `list`)
-- **lien complexity**: Runs complexity analysis on the codebase
+### CLI layer — the entire surface
+- **`lien complexity`**: Parses the working tree and reports cyclomatic/cognitive/Halstead violations. Gate-shaped (`--fail-on`).
+- **`lien health`**: Ranks the functions riskiest to change — cognitive complexity × fan-in (dependent count) ÷ test coverage. Advisory; never fails on findings.
+- **`lien review`**: Runs the deterministic signals (`packages/parser/src/signals/`) over a diff (working tree vs. `HEAD` or `--base`) and prints candidates for a human/agent to adjudicate. No `--fail-on`, deliberately — see the file header comment in `review-cmd.ts`.
+- **`lien delta`**: The sixth pre-commit gate. Compares working tree vs. `HEAD`/`--base` and fails only on a *new* complexity threshold crossing. See [lien delta](./lien-delta.md).
 
-### MCP server layer
-- **MCP Server**: Implements Model Context Protocol for AI assistant communication
-- **MCP Tools**: Six tools exposed to AI assistants
-  - `search_code`: Full-text (FTS5/BM25) keyword search, lexical rather than meaning-based
-  - `find_similar`: Find lexically similar code (BM25 over a snippet's tokens)
-  - `get_files_context`: Get file context with dependencies and test associations (supports batch)
-  - `list_functions`: Fast symbol lookup by naming pattern
-  - `get_dependents`: Reverse dependency lookup for impact analysis
-  - `get_complexity`: Complexity analysis for files or the entire codebase
+All four read the working tree directly, not a persisted index: `complexity`, `health`, and `review` chunk the whole repo via `performChunkOnlyIndex`; `delta` chunks only the changed files' before/after content via `computeComplexityDelta` (`@liendev/parser`, `insights/complexity-delta.ts`). Either way, there is nothing to keep in sync, because nothing is persisted.
 
-### Core services
-- **ConfigService**: Manages per-project configuration loading, saving, and validation
-- **GlobalConfig**: Manages global settings (`~/.lien/config.json`), namely backend choice
-- **Indexer**: Orchestrates the indexing workflow
-- **File Scanner**: Scans codebase respecting .gitignore and ecosystem preset boundaries
-- **Code Chunker**: Splits files using AST-based semantic chunking or line-based fallback
-- **AST Parser**: Parses code into Abstract Syntax Trees using Tree-sitter
-- **Language Traversers**: Language-specific logic for traversing AST nodes (Strategy Pattern)
-- **Symbol Extractor**: Extracts functions, classes, and interfaces from code
-- **Test Association Manager**: Links test files to source files via convention and import analysis
-- **Manifest Manager**: Tracks indexed file metadata for incremental updates
-- **Complexity Analyzer**: Computes cyclomatic, cognitive, and Halstead complexity metrics per function
+### Parser (`@liendev/parser`)
+- **`performChunkOnlyIndex`**: On-demand, in-memory parse of the working tree — the replacement for what used to be a persisted index.
+- **File Scanner**: Scans the codebase respecting `.gitignore` and ecosystem preset boundaries.
+- **Code Chunker**: Splits files using AST-based semantic chunking, with an internal line-based fallback.
+- **AST Parser / Traversers**: Tree-sitter parsing plus per-language traversal (Strategy Pattern).
+- **`analyzeComplexityFromChunks`**: Computes cyclomatic, cognitive, and Halstead complexity per function.
+- **Risk scoring** (`risk/`): Blast-radius risk (`computeBlastRadiusRisk`) and complexity-based risk leveling.
+- **Deterministic signals** (`signals/`): Pure functions over a diff plus parser output — no LLM, no network, no index — that power `lien review`.
+- **Dependency analyzer**: Fan-in / dependent-count computation, the basis for `lien health`'s "impact" axis.
+- **`findTestAssociationsFromChunks`**: Links source files to the tests that cover them (see [Test Association](./test-association.md)).
+- **Ecosystem Presets**: Auto-detects project type (Node.js, PHP/Laravel, Python, Rust, …) and applies include/exclude patterns (replaces the former Framework Detector, see [ADR-007](decisions/0007-replace-framework-detection-with-ecosystem-presets.md)).
 
-### Data layer
-- **VectorDB Factory** (`createVectorDB`): Constructs the storage backend behind the `VectorDBInterface` seam. Always builds `SqliteBackend` today; the seam lets a future backend be introduced without touching call sites.
-- **SqliteBackend**: A single SQLite database (`better-sqlite3`) holding the `chunks` table and its FTS5 index.
-  - **Structural queries**: `get_files_context`, `get_dependents`, `list_functions`, and complexity scans run as indexed SQL over `chunks`.
-  - **FTS5 lexical search**: `chunks_fts` (external-content, `porter unicode61`) over symbol name, identifier-split symbol tokens, and content; ranked with `bm25()`.
-
-### Optional services
-- **Git State Tracker**: Monitors repository changes for incremental indexing
-- **File Watcher**: Real-time file change detection (enabled by default; disable with `--no-watch`)
-- **Ecosystem Presets**: Auto-detects project type (Node.js, PHP/Laravel, Python, Rust, …) and applies include/exclude patterns (replaces the former Framework Detector, see [ADR-007](decisions/0007-replace-framework-detection-with-ecosystem-presets.md))
-
-### External dependencies
-- **better-sqlite3**: Synchronous SQLite binding, the storage engine (~1.8MB native install)
-- **Git CLI**: For repository state tracking
+### Core (`@liendev/core`)
+- **ConfigService**: Loads and validates per-project `.lien.config.json` (`complexity.thresholds` only — see [Configuration System](./config-system.md)). `GlobalConfig` and the storage backend it configured are gone.
+- **Report formatters**: text/JSON/SARIF output for `lien complexity`.
+- **`git/`**: Worktree detection and git-state helpers survive in the package, but no surviving CLI command currently calls them — `delta-cmd.ts` and `health-cmd.ts` shell out to `git` directly instead. Left in place; not wired to anything today.
+- **Typed errors**: `LienError` and error codes shared across commands.
 
 ### Lien Review (packages/review + packages/action)
-Lien Review is a separate product surface from the CLI/MCP pipeline above: a self-hostable GitHub Action that reviews pull requests in CI rather than serving a local AI assistant.
+Lien Review is a separate product surface from the CLI above: a self-hostable GitHub Action that reviews pull requests in CI rather than running as a local command.
 
 - **GitHub Action Entry** (`packages/action`): Docker container action; reads the `pull_request` event, self-clones the PR head (and base, for complexity deltas) by SHA, and posts results with no `actions/checkout`, no server, no database.
 - **Review Engine** (`packages/review`): Orchestrates the enabled review passes and posts inline PR comments, workflow annotations, and a step summary.
@@ -212,10 +139,9 @@ Beyond the main investigation, the agent review can run additional dedicated LLM
 
 The system follows a clear data flow pattern:
 
-1. **Configuration** → Read by all services for settings (per-project via ConfigService, global via GlobalConfig)
-2. **Files** → Scanner → Chunker → Complexity Metrics → SQLite store
-3. **Query** → Structural SQL or FTS5 MATCH → Ranked/looked-up results
-4. **Git Changes** → Git Tracker → Incremental Indexer → SQLite store (FTS5 kept in sync by triggers)
+1. **Configuration** → Read by `lien delta` for `complexity.thresholds` (per-project `ConfigService`; nothing else reads config)
+2. **Files** → Scanner → Chunker → Complexity/risk/signal metrics → Report (in memory, on every invocation)
+3. **Git diff** (`lien delta`, `lien review`) → before/after content per changed file → per-function or per-signal verdicts
 
 ## Design principles
 
@@ -223,52 +149,50 @@ The system follows a clear data flow pattern:
 Each component has one clear purpose. For example:
 - Scanner only finds files
 - Chunker only splits content
-- SqliteBackend only stores and queries chunks
+- Each signal module answers one narrow structural question
 
 ### Dependency injection
-Services accept dependencies as parameters, making testing easy:
+Commands compose parser primitives as plain function calls rather than through an injected storage seam — there's no interface to inject against any more, now that nothing is persisted:
 ```typescript
-await indexCodebase({
-  vectorDB,      // Injected (SqliteBackend behind the interface)
-  config         // Injected
-});
+const scan = await performChunkOnlyIndex(rootDir, {});
+const report = analyzeComplexityFromChunks(scan.chunks, thresholds);
 ```
 
 ### Layered architecture
-- **CLI/MCP Layer**: User/AI interface
-- **Core Layer**: Business logic
-- **Data Layer**: Storage and retrieval (SQLite)
-- **External Layer**: Third-party services
+- **CLI Layer**: User interface — four commands, no server
+- **Parser Layer**: Parsing, chunking, complexity, risk, and signal computation (zero deps on core)
+- **Core Layer**: Config, git helpers, typed errors, output formatters
 
-### Optional features
-Non-essential features (git tracking, file watching) are optional and can be disabled in configuration without affecting core functionality.
+### No persisted state
+There is no index, no database, no file watcher, and no background process. Every command parses
+what it needs, when it's invoked, and exits. This trades away caching and cross-invocation search
+for the guarantee that nothing can ever be stale.
 
 ## Technology stack
 
 - **Language**: TypeScript (ESM)
 - **CLI**: Commander.js
-- **MCP**: @modelcontextprotocol/sdk
-- **Storage**: SQLite via `better-sqlite3` (structural store)
-- **Search**: SQLite FTS5 with BM25 ranking (`porter unicode61` tokenizer)
-- **Parsing**: Tree-sitter (via `@liendev/parser`)
+- **Parsing**: Tree-sitter (via `@liendev/parser`, native binding at `@liendev/parser-native`)
 - **Testing**: Vitest
 - **Build**: tsup
 
 ## Performance characteristics
 
-- **Concurrency**: Configurable parallel file processing (default: 4)
-- **File context lookup**: sub-millisecond (indexed `WHERE file IN (...)`)
-- **No model load**: indexing and serving start immediately, with nothing to download
-- **Incremental Updates**: Only modified files are reindexed; FTS5 stays in sync via triggers
+- **Concurrency**: Configurable parallel file processing (default: 4) during a scan
+- **No model load, no index load**: every command starts cold and finishes cold — nothing to warm up, nothing that can go stale
+- **Cost is proportional to repo size per invocation**: there's no caching between runs, since there's nothing persisted to cache into
 
 ## Scaling considerations
 
 ### Current limits
-- Single machine, single process
-- All analysis and storage are local (SQLite on local disk)
+- Single machine, single process, single invocation at a time
+- Every run re-parses whatever it needs; there is no cross-invocation cache
 
-### Current scaling options
-- **Single-repo, local-first**: `SqliteBackend` is the only backend (LanceDB + embeddings were removed, see [ADR-011](decisions/0011-sqlite-structural-store-fts5-lexical-search.md); Qdrant was retired earlier, see [ADR-010](decisions/0010-retire-qdrant-backend.md))
-- **VectorDB factory pattern**: The `createVectorDB` factory and `VectorDBInterface` seam are retained so an alternative backend can be reintroduced without touching call sites
+### History
+Lien used to be a local-first *storage* system — LanceDB + embeddings, then a SQLite structural
+store with FTS5 lexical search behind a `VectorDBInterface`/`createVectorDB` seam meant to let a
+backend be swapped without touching call sites (see [ADR-010](decisions/0010-retire-qdrant-backend.md),
+[ADR-011](decisions/0011-sqlite-structural-store-fts5-lexical-search.md)). Phase 5 deleted the
+storage layer entirely rather than swapping it again: there is no seam left to plug a backend into.
 
 See the [Architectural Decision Records index](decisions/README.md) for the full history behind these and earlier design changes (per-language definitions, AST-based chunking, the strategy-pattern traverser, test association detection, ecosystem presets, and the parser package extraction).

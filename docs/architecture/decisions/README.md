@@ -6,7 +6,7 @@ This directory contains Architectural Decision Records (ADRs) documenting signif
 
 | ADR | Title | Date | Status |
 |-----|-------|------|--------|
-| [ADR-001](0001-split-vectordb-module.md) | Split VectorDB Module into Focused Sub-Modules | 2025-11-24 | Accepted |
+| [ADR-001](0001-split-vectordb-module.md) | Split VectorDB Module into Focused Sub-Modules | 2025-11-24 | Superseded (phase 5 deleted `vectordb/`) |
 | [ADR-002](0002-strategy-pattern-ast-traversal.md) | Use Strategy Pattern for Language-Specific AST Traversal | 2025-11-25 | Accepted |
 | [ADR-003](0003-ast-based-chunking.md) | Use AST-Based Semantic Chunking Over Line-Based Chunking | 2025-11-23 | Accepted |
 | [ADR-004](0004-test-association-detection.md) | Use Convention-Based and Import-Based Test Association Detection | 2025-11-23 | Accepted |
@@ -15,13 +15,13 @@ This directory contains Architectural Decision Records (ADRs) documenting signif
 | [ADR-007](0007-replace-framework-detection-with-ecosystem-presets.md) | Replace Framework Detection with Ecosystem Presets | 2026-02-07 | Accepted |
 | [ADR-008](0008-keep-transformers-js-worker-embeddings.md) | Keep transformers.js WorkerEmbeddings as Sole Embedding Backend | 2026-02-10 | Superseded by ADR-011 |
 | [ADR-009](0009-extract-parser-package.md) | Extract `@liendev/parser` from `@liendev/core` | 2026-02-19 | Accepted |
-| [ADR-010](0010-retire-qdrant-backend.md) | Retire the Qdrant Backend | 2026-07-02 | Accepted |
-| [ADR-011](0011-sqlite-structural-store-fts5-lexical-search.md) | Replace LanceDB + Embeddings with a SQLite Structural Store and FTS5 Lexical Search | 2026-07-04 | Accepted |
+| [ADR-010](0010-retire-qdrant-backend.md) | Retire the Qdrant Backend | 2026-07-02 | Superseded (phase 5 deleted the backend seam) |
+| [ADR-011](0011-sqlite-structural-store-fts5-lexical-search.md) | Replace LanceDB + Embeddings with a SQLite Structural Store and FTS5 Lexical Search | 2026-07-04 | Superseded (phase 5, 2026-09-01) |
 | [ADR-012](0012-self-hostable-review-action.md) | Self-Hostable GitHub Action for PR Review | 2026-06-27 | Accepted |
 | [ADR-013](0013-prebuilt-native-parser-napi-rs.md) | Prebuilt Native Parser via napi-rs (`@liendev/parser-native`) | 2026-07-08 | Accepted |
 | [ADR-014](0014-per-rule-candidate-loop-passes.md) | Per-Rule Candidate-Loop Passes for Agent Review | 2026-07-16 | Accepted |
 | [ADR-015](0015-required-matcher-path-language-fields.md) | Make Per-Language Matching Policy Mandatory and Declarative | 2026-08-01 | Accepted |
-| [ADR-016](0016-dependency-attribution-honesty-axes.md) | Dependency-Attribution Honesty Has Two Axes and Three Scopes — Route, Don't Merge | 2026-08-05 | Accepted |
+| [ADR-016](0016-dependency-attribution-honesty-axes.md) | Dependency-Attribution Honesty Has Two Axes and Three Scopes — Route, Don't Merge | 2026-08-05 | Accepted (partially superseded — see note) |
 
 ## Conventions
 

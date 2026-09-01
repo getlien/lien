@@ -1,100 +1,80 @@
 # Quick Start
 
-This guide walks you through setting up Lien with your editor in under 2 minutes.
+This guide gets you running Lien's four commands in under a minute.
 
-## Step 1: Configure Your Editor
+## Step 1: Install
 
-Lien has no setup wizard: add its MCP server to your editor's config by hand.
-See [Configuring Your Editor (MCP)](/guide/installation#configuring-your-editor-mcp)
-in the installation guide for the exact config file and JSON snippet for your
-editor — Cursor, Claude Code, Windsurf, OpenCode, Kilo Code, or Antigravity.
+```bash
+npm install -g @liendev/lien
+```
 
-Once the MCP tools are wired up, see [Cross-Editor Agent Setup](/guide/cross-editor-setup) for a
-copy-paste `AGENTS.md` block that tells your agent to actually use them
-before editing. Most non-Claude-Code editors read that file natively.
+See [Installation](/guide/installation) for prerequisites and the `npx` alternative if you'd rather not install globally.
 
-## Step 2: Restart Your Editor
+## Step 2: Run It
 
-Restart your editor completely (quit and reopen, not just reload window).
+There's no setup wizard and nothing to configure. `cd` into a project and run any of the four commands — each one parses your working tree on the spot:
 
-After restarting, your AI assistant will automatically:
-- Start the Lien MCP server
-- Index your codebase (first time only)
-- Make Lien tools available
+```bash
+# Rank the functions riskiest to change
+lien health
 
-::: info First-Time Indexing
-On first run, Lien indexes your codebase. There's no model to download: indexing starts immediately and runs offline. This may take a few minutes depending on project size.
+# Analyze complexity across the codebase
+lien complexity
+
+# Run deterministic signals over your uncommitted changes
+lien review
+
+# Flag NEW complexity threshold crossings before you commit
+lien delta
+```
+
+::: info No index, no wait
+There's no first-run indexing step and no model to download. Every command parses fresh, so the numbers you see always match what's on disk right now.
 :::
 
-## Step 3: Test It Out!
+## Step 3: Try It on a Real Change
 
-In your AI assistant's chat, try queries like:
+Make an edit, then run:
 
-```
-Search for authentication logic
-```
-
-```
-Find error handling patterns
+```bash
+lien review
 ```
 
-```
-Show me database connection code
+If your working tree has no changes against `HEAD`, `review` says so explicitly rather than printing an empty "all clear" report — pass `--base <ref>` to compare against something else (e.g. `origin/main`).
+
+Before committing, run:
+
+```bash
+lien delta
 ```
 
-```
-List all API endpoints
-```
+It only fails when your changes push a function's complexity **over a threshold it was under at HEAD** — pre-existing complexity debt never fails the check.
 
 ## Monorepo Support
 
-Lien automatically detects and indexes multiple ecosystems:
+Lien automatically detects and scans multiple ecosystems:
 
 ```bash
 # Example monorepo structure
 my-app/
   ├── src/                  # Node.js/TypeScript (auto-detected)
-  ├── backend/              # Laravel (auto-detected)
-  └── .cursor/mcp.json      # Your editor's MCP config
+  └── backend/              # Laravel (auto-detected)
 ```
 
-Lien scans your project structure and applies appropriate patterns for each detected ecosystem, no configuration needed.
+Lien scans your project structure and applies the right exclusions for each detected ecosystem, no configuration needed.
 
 ## Troubleshooting
 
-### AI assistant doesn't show Lien tools
+### `lien delta` or `lien review` says "not a git repository"
 
-1. Double-check your editor's MCP config file matches the snippet in the [installation guide](/guide/installation#configuring-your-editor-mcp)
-2. Restart your editor completely (quit, not just reload)
-3. Check your editor's developer console or logs for errors
-4. For Windsurf: ensure the `--root` path in `~/.codeium/windsurf/mcp_config.json` is correct
+`delta` and `review` both diff your working tree against a git ref, so they need to run inside a git repository. `complexity` and `health` don't — they just scan the files on disk.
 
-::: tip Manual Server Start
-You don't need to manually run `lien serve`; it starts automatically. You can run it manually for debugging:
+### Slow scans on very large codebases
 
-```bash
-# Test server manually
-lien serve --root /path/to/your/project
-```
-:::
-
-### Slow indexing
-
-- Lien automatically excludes `node_modules`, `dist`, and build artifacts
-- Close other resource-intensive applications during first index
-- Very large codebases (50k+ files) may take a few minutes on the first index
-
-### Results not relevant
-
-- Try rebuilding the index: `lien index --force`
-- Search is keyword-based (not meaning-based): query with terms that appear in the code, e.g. "authenticate token session" rather than "how does login work?"
-- For an exact symbol name, ask for `list_functions` instead of search
+- Lien automatically excludes `node_modules`, `dist`, and other build artifacts via ecosystem presets
+- A scan is CPU-bound Tree-sitter parsing with no network step, so it's roughly linear in file count — see [Performance](/how-it-works#performance) for measured numbers
 
 ## Next Steps
 
-- Learn about [configuration options](/guide/configuration)
-- Explore [MCP tools](/guide/mcp-tools)
-- Read about [CLI commands](/guide/cli-commands)
-- Not on Claude Code? See [Cross-Editor Agent Setup](/guide/cross-editor-setup)
-
-
+- Learn about [per-project configuration](/guide/configuration) (complexity thresholds only)
+- Read about [CLI Commands](/guide/cli-commands) for the full flag reference

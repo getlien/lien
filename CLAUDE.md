@@ -2,17 +2,17 @@
 
 ## What is Lien?
 
-Local-first structural code search tool (lexical FTS5 search + dependency analysis) providing context to AI coding assistants via MCP (Model Context Protocol).
+Local-first code-health CLI. Parses the working tree on demand with Tree-sitter and answers four questions about a change: what is risky to touch, what crossed a complexity threshold, what deterministic signals fire on the diff, and where the hotspots are. No server, no persisted index, no search.
 
 **Key Facts:**
 - Package: `@liendev/lien`
-- Port: 7133 (L=7, I=1, E=3, N=3)
+- Commands: `lien complexity`, `lien health`, `lien review`, `lien delta` — that is the whole surface
 - License: AGPL-3.0 | Domain: lien.dev
 
 **Monorepo Structure:**
 - `packages/` — TypeScript packages: `parser` and `core` publish as `@liendev/parser`/`@liendev/core`; `cli` publishes as `@liendev/lien`; `review`, `action`, and `site` are private (unpublished).
 - Dependency chain: `parser` ← `core` ← `cli`; `review` depends on `parser` only (not `core`); `action` wraps `review` as a self-hostable GitHub Action ([ADR-012](docs/architecture/decisions/0012-self-hostable-review-action.md)).
-- `.claude/skills/review/` — the review skill that replaced the Claude Code plugin. The plugin (MCP config + 12 hooks) is **deleted**: its hooks used to auto-annotate reads and run the `lien delta` gate plus a test-association reminder on writes, automating three of this file's own MANDATORY policies. **Those three are now manual** — run `lien delta` yourself before committing, and check test associations yourself before editing. Nothing enforces them at the tool boundary any more.
+- `.claude/skills/review/` — the review skill that replaced the Claude Code plugin. The plugin (MCP config + 12 hooks) is **deleted**, and so is the MCP server it configured. Its hooks used to auto-annotate reads and run the `lien delta` gate on writes; **both are manual now** — run `lien delta` yourself before committing. The test-association reminder is gone: it called `lien annotate`'s index-backed per-file lookup. The mapping itself survives in `@liendev/parser` (`findTestAssociationsFromChunks`, chunk-based, never index-backed) — `lien health` prints test paths for the functions it ranks — but no command answers it for an arbitrary file you name.
 - `lien-review-testbed/` — tracked, multi-language fixture app used by the review-agent test harness. Not a demo to clean up.
 
 **Package Structure:**
@@ -39,26 +39,20 @@ packages/parser/src/        # AST parsing, chunking, complexity, scanning — ze
 └── scanner.ts, gitignore.ts, chunker.ts, dependency-analyzer.ts,
     test-associations.ts, symbol-extractor.ts, content-hash.ts
 
-packages/core/src/          # Structural store, config, git — depends on parser
-├── indexer/     # Indexing orchestration: manifest, incremental updates, scanning glue
-├── vectordb/    # Storage backend behind VectorDBInterface + createVectorDB factory;
-│   └── sqlite/  #   SqliteBackend — SQLite structural store + FTS5/BM25 lexical search
-│                #   (LanceDB + embeddings removed — see ADR-011)
-│                #   OverlayBackend shares a linked worktree's index with its main
-│                #   checkout (read-only base + writable overlay) — see
-│                #   docs/architecture/worktree-aware-indexing.md
-├── config/      # Config management & migration (GlobalConfig + per-project ConfigService)
+packages/core/src/          # Config, git, errors — depends on parser.
+│                           # The structural store (vectordb/, indexer/, gc/) is
+│                           # DELETED; core is now small enough that it is slated
+│                           # to fold into cli.
+├── config/      # Per-project ConfigService (.lien.config.json — complexity.thresholds only)
 ├── git/         # Git state tracking, linked-worktree detection (git/worktree.ts)
 ├── errors/      # Error codes + typed error classes
 ├── utils/       # Shared helpers (chunk-array, safe-regex, version)
-└── insights/    # ComplexityAnalyzer + formatters (text/JSON/SARIF)
+└── insights/    # Report formatters (text/JSON/SARIF)
 
-packages/cli/src/           # CLI + MCP server — depends on core and parser
-├── cli/         # Commands: init, index, serve, status, config, complexity, path, annotate
-├── mcp/         # MCP server and tool handlers (search_code, get_dependents, etc.)
-├── watcher/     # File watching
+packages/cli/src/           # The CLI — depends on core and parser
+├── cli/         # Commands: complexity, health, review, delta (+ their git/signal helpers)
 ├── types/       # Shared TypeScript types
-└── utils/       # CLI utilities
+└── utils/       # CLI utilities (incl. scan-failure.ts — the no-data honesty gate)
 
 packages/review/src/        # PR review engine (plugins, blast-radius render, prompt building)
                              # — depends on parser only, not core
@@ -68,90 +62,72 @@ packages/site/              # VitePress docs site (lien.dev)
 
 ---
 
-## Lien MCP Tools — MANDATORY Usage
+## Discovery — grep and Glob
 
-<!-- Keep in sync with SERVER_INSTRUCTIONS in packages/cli/src/mcp/instructions.ts — it re-injects this same policy into every connecting MCP client. -->
+Lien no longer ships an MCP server, a persisted index, or lexical search. The
+`search_code` / `get_files_context` / `get_dependents` / `list_functions`
+workflow this section used to mandate is gone, and so is the store it read
+from. Use Claude Code's own Read, Grep and Glob for discovery; they are now
+the only tools for it, so no policy is needed to choose between them.
 
-Lien provides lexical (FTS5) code search and dependency analysis via MCP. These tools are **not optional** — they MUST be used as described below. Using grep/glob when a Lien tool is appropriate is a violation of this project's workflow.
+What Lien still answers, it answers by parsing the working tree on demand:
 
-### MANDATORY: Before Editing Any File
+| Question | Command |
+|---|---|
+| What is risky to change here? | `lien health` |
+| Did this change push a function over a complexity threshold? | `lien delta` |
+| What deterministic signals fire on this diff? | `lien review` |
+| Where are the complexity hotspots? | `lien complexity` |
 
-**You MUST run `get_files_context` before using the Edit tool on any file. No exceptions.**
-
-- Check `testAssociations` to know which tests to run after your change
-- Review `imports`, `exports`, and `callSites` to understand the file's role
-- Use batch mode when editing multiple files: `get_files_context({ filepaths: ["file1.ts", "file2.ts"] })`
-
-### MANDATORY: Before Modifying Any Exported Symbol
-
-**You MUST run `get_dependents` before renaming, removing, or changing the signature of any exported function, class, or interface.**
-
-- Check `dependentCount` and `riskLevel` to understand impact
-- Use the `symbol` parameter for precise usage tracking: `get_dependents({ filepath: "...", symbol: "MyFunction" })`
-- If `riskLevel` is "high" or "critical", list affected dependents to the user before proceeding
-
-### MANDATORY: For Discovery Questions
-
-**When asked "where is X?", "how does X work?", or any question about understanding the codebase, you MUST use `search_code` BEFORE falling back to grep/glob.**
-
-- `search_code` is full-text (BM25) keyword search over code, docstrings, and camelCase-split identifiers — query with concrete keywords/identifiers/domain terms, not natural-language questions. There are no embeddings, so meaning-only paraphrases that share no words with the code won't match.
-- Use `search_code` for: "authenticate user session", "index codebase pipeline", "file watcher debounce" — words that appear in the code
-- Use grep/glob ONLY for: exact symbol names, literal strings, config keys, TODOs (or `list_functions` for a single exact symbol name)
-- **Zero results is not proof of absence.** If the index hasn't caught up with a recent edit, a symbol that exists on disk is unfindable and the tool cannot tell you which case you're in. Before concluding something doesn't exist — or acting on a plausible-looking result set that omits what you asked for — grep for it, or re-run after `lien index`.
-
-### When to Use Other Tools
-
-| Tool | Trigger |
-|------|---------|
-| `list_functions` | Finding symbols by pattern (e.g., "show me all Service classes", "find all handlers") |
-| `get_complexity` | Before refactoring — check if the target is already a complexity hotspot |
-| `find_similar` | Before adding new code — check for existing similar patterns to stay consistent |
+The `/review` skill (`.claude/skills/review/`) drives the last two for a
+change review.
 
 ---
 
-## Index-State Honesty — MANDATORY for New Commands/Tools
+## No-Data Honesty — MANDATORY for New Commands
 
-**A read-only, index-backed command MUST NEVER produce a confident answer
-when it has no data, or the wrong data, to answer from.** An empty scan
-that formats as "0 violations, clean!" and a genuinely clean codebase are
-the same shape unless the command checks which one it actually has —
-checking is not optional.
+**A read-only command MUST NEVER produce a confident answer when it has no
+data to answer from.** An empty scan that formats as "0 violations, clean!"
+and a genuinely clean codebase are the same shape unless the command checks
+which one it actually has — checking is not optional.
 
-Classify the index state via `classifyIndexState`
-(`packages/cli/src/utils/index-freshness.ts`) for whole-index states, and
-`findUnindexedPaths` (`packages/cli/src/mcp/utils/unindexed-paths.ts`) for a
-specific requested path. **Do not hand-roll this check again** — every
-existing read-only entry point already goes through one of these two.
+This rule outlived the index that motivated it. The four-state index
+vocabulary (S0–S3), `classifyIndexState`, `findUnindexedPaths` and the
+`index-state-matrix.test.ts` completeness guard are all gone with the store,
+but the failure they existed to prevent is not: a failed or empty **parse**
+produces exactly the same false clean an empty index did.
 
-The response required differs by what kind of command it is — **never a
-blanket "always error"**:
-
-| Disposition | No index / empty store (S0/S1) | Stale vs. HEAD (S2) | Requested path not indexed (S3) |
-|---|---|---|---|
-| Gate-shaped (`--fail-on`-style; no index-reading command is currently in this class) | **Hard error, non-zero exit** | Loud warning, still runs | — |
-| Advisory nudge (`lien annotate`, `lien api-delta`) | Loud, un-suppressible warning or degraded marker (`enriched: false`) — exit 0 is fine | n/a for these two | Explicit "not found in the index" |
-| MCP tool | S0 is structurally impossible (`lien serve` initializes the store before registering tools); S1 → explicit `note`/`attributionCaveat`, never a bare empty result | n/a — `lien serve`'s git-detection keeps it fresh | Explicit `note`/`attributionCaveat` naming the path |
-
-**The rule outlives the index.** `lien complexity` and `lien health` now parse
-the working tree instead of reading the store, so S0–S3 do not apply to them
-— but "never render no-data as a clean result" still does. A failed or empty
-parse produces the same false clean an empty index did, and
 `performChunkOnlyIndex` reports failure by RETURNING `{ success: false }`
-rather than throwing, so it is easy to miss. Both route through
-`describeScanFailure` (`packages/cli/src/utils/scan-failure.ts`) and respond
-by disposition: `complexity` is gate-shaped and hard-errors, `health` is
-advisory and warns loudly at exit 0.
+rather than throwing, so it is easy to miss. The three commands that go
+through it — `complexity`, `health`, `review` — all route that outcome through
+`describeScanFailure` (`packages/cli/src/utils/scan-failure.ts`) and respond by
+disposition: `complexity` is gate-shaped and hard-errors; `health` and `review`
+are advisory and say so at exit 0.
 
-**Hard constraint: never turn a genuinely clean, freshly-indexed result into
-a false alarm.** Gate on the actual state (`hasData()`, `getIndexedFiles()`),
-never on the shape of the result — see #1014 for what over-firing costs
-(a false caveat that fires every session gets trained out as noise).
+`lien delta` is the exception, and knowing why matters if you add a fifth
+command: it never calls `performChunkOnlyIndex` at all, it calls `chunkFile`
+per before/after content pair, and `computeComplexityDelta` returns no error
+field. So it has no failure channel to route — not an oversight to copy, but
+not coverage either.
 
-**Before shipping a new command or MCP tool that reads the structural
-index**, add it to `packages/cli/test/integration/index-state-matrix.test.ts`
-— its completeness guard fails the build if a new `createVectorDB` call site
-or MCP tool handler isn't accounted for there. Full policy, the four-state
-vocabulary, and worked examples: `docs/architecture/index-state-honesty.md`.
+**Total failure is only half of it.** `describeScanFailure` returns `undefined`
+the moment anything parsed, so a run where most of the corpus failed looks
+identical to a healthy one. `describePartialScan` is the other half, and it
+exists because `lien review` on a large deletion diff reported "98 changed
+file(s) … No candidates from any signal" while 88 of those files had failed
+with ENOENT — 88 lines to stderr, and not a word in the caveats block the
+reader is told to trust.
+
+The same duty applies to a command's own empty states, which is not only
+about parse failure — `lien review` distinguishes "no changes at all" from
+"changes, but nothing analyzable in them" from "analyzable changes, no
+candidates", because collapsing them tells the reader to go looking for the
+wrong problem.
+
+**Hard constraint: never turn a genuinely clean result into a false alarm.**
+Gate on the actual state, never on the shape of the result — see #1014 for
+what over-firing costs (a false caveat that fires every session gets trained
+out as noise).
 
 ---
 
@@ -219,7 +195,7 @@ spend; see `packages/parser/src/signals/stale-literal-signals.ts` for the templa
 shipping criteria on their own. Before a PR is declared merge-ready,
 exercise the change the way its real consumer experiences it and put the
 verbatim evidence in the PR body:
-- CLI/MCP changes → run the actual command/tool against this repo and read the output.
+- CLI changes → run the actual command against this repo and read the output.
 - Skill changes → invoke it (`/review`) on a real diff and read what it produces. A skill that reads well and guides badly is the failure mode; prose is not self-verifying.
 - Review-engine changes → replay through the harness (build-prompts/fixtures) or a captured real run.
 - Site/docs → `npm run docs:build` AND read the rendered result.
@@ -321,7 +297,7 @@ import fs from 'fs/promises';
 // 2. External dependencies
 import { Command } from 'commander';
 // 3. Internal modules
-import { createVectorDB } from '../vectordb/factory.js';
+import { performChunkOnlyIndex } from '@liendev/parser';
 ```
 
 ### Tree-sitter Node Iteration

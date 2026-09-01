@@ -4,7 +4,7 @@ layout: home
 hero:
   name: "Lien"
   text: "Local-First Code Intelligence for AI"
-  tagline: "Structural analysis + fast lexical search that give AI agents deep understanding of your codebase. 100% local, 100% private."
+  tagline: "Complexity, risky-to-change ranking, and deterministic PR-review signals for AI coding agents. Parses your working tree on demand — no index, no server, 100% local."
   actions:
     - theme: brand
       text: Get Started
@@ -14,29 +14,29 @@ hero:
       link: https://github.com/getlien/lien
 
 features:
-  - icon: 🔍
-    title: Impact Analysis
-    details: Reverse dependencies and blast radius before you refactor. "What breaks if I change this?" answered with a risk level.
-  
   - icon: 📊
     title: Complexity Analysis
-    details: Identify tech debt hotspots with cyclomatic, cognitive, and Halstead metrics. Prioritize refactoring and track code health over time.
-  
-  - icon: 🧪
-    title: Test Associations
-    details: Know which tests cover a file before you touch it, via naming convention and import analysis across 12+ frameworks.
-  
-  - icon: 🚀
-    title: Lexical Code Search
-    details: Fast full-text (FTS5/BM25) keyword search over code, docstrings, and identifier-split symbol names. No embeddings, no model download.
-  
+    details: Identify tech-debt hotspots with cyclomatic, cognitive, and Halstead metrics. Prioritize refactoring with `lien complexity`.
+
+  - icon: 🩺
+    title: Risk-Ranked Health
+    details: "`lien health` ranks the functions that are riskiest to change: complexity × fan-in ÷ test coverage."
+
+  - icon: 🔍
+    title: Deterministic Review Signals
+    details: "`lien review` runs signals over your working-tree changes: stale duplicate literals, removed exports, doc drift, and more."
+
+  - icon: 🚦
+    title: Pre-Commit Complexity Gate
+    details: "`lien delta` flags NEW complexity threshold crossings in your working tree before you commit — never fails on pre-existing debt."
+
+  - icon: 🤖
+    title: Self-Hostable PR Review
+    details: Lien Review is a GitHub Action that runs complexity analysis and an agent-driven bug review on every PR, posted back as inline comments.
+
   - icon: 🔒
     title: 100% Local & Private
-    details: Code never leaves your machine for indexing or search, with no external API calls or telemetry. (Fetching the published package itself, via npm or npx, is the one network step.)
-  
-  - icon: 🎯
-    title: MCP Integration
-    details: Works with Cursor, Claude Code, and other MCP-compatible AI coding assistants via the Model Context Protocol.
+    details: Code never leaves your machine — Lien parses the working tree on demand with no index, no server, and no telemetry. (Fetching the published package itself, via npm or npx, is the one network step.)
 ---
 
 ## Quick Start
@@ -47,28 +47,25 @@ features:
 npm install -g @liendev/lien
 ```
 
-**2. Configure your editor:**
+**2. Run it in your project:**
 
-Lien has no setup wizard: add its MCP server to your editor's config by hand.
-See [Configuring Your Editor (MCP)](/guide/installation#configuring-your-editor-mcp)
-for the exact config file and JSON snippet — Cursor, Claude Code, Windsurf,
-OpenCode, Kilo Code or Antigravity.
+```bash
+lien health
+```
 
-**3. Restart your editor** and start asking questions about your codebase!
-
-Lien auto-detects your project structure and indexes on first use.
+That's it — no setup wizard, no config file, no server to start. Lien parses your working tree on the spot and prints a report.
 
 ## How It Works
 
-Lien parses your code with Tree-sitter into a local SQLite database, then answers structural questions ("what depends on this?", "how complex is this?") with indexed SQL, and handles discovery with FTS5/BM25 lexical search. See [How It Works](/how-it-works) for the full pipeline.
+Lien parses your code with Tree-sitter on demand, every run, and answers structural questions ("how complex is this?", "what's risky to touch?", "did this change introduce a stale literal?") straight from that parse. There is no persisted index and nothing runs in the background. See [How It Works](/how-it-works) for the full pipeline.
 
 ## Use Cases
 
-Impact analysis before a refactor, tech-debt hotspots, test coverage lookups, and keyword-based code discovery. See [Use Cases](/guide/#use-cases) in the guide for examples.
+Tech-debt hotspots, ranking what's risky to change before a refactor, deterministic signals over a diff before you open a PR, and a pre-commit gate against new complexity. See [Use Cases](/guide/#use-cases) in the guide for examples.
 
 ## Privacy First
 
-Your code stays on your machine during indexing and search: no external API calls, no telemetry. The one network step is fetching the published npm package itself (via `npm install`, or `npx` if you skip the global install) on first setup. See [How It Works](/how-it-works#privacy-first) for details.
+Your code stays on your machine every time you run Lien: no external API calls, no telemetry. The one network step is fetching the published npm package itself (via `npm install`, or `npx` if you skip the global install) on first setup. See [How It Works](/how-it-works#privacy-first) for details.
 
 ## Free & Open Source
 
@@ -79,5 +76,3 @@ Lien is licensed under AGPL-3.0 and free forever for local use. Questions about 
 <div style="text-align: center; margin-top: 2rem; color: var(--vp-c-text-2);">
   <p><em>Lien</em> /ljɛ̃/: French for "link"</p>
 </div>
-
-

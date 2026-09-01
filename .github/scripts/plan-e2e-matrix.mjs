@@ -32,7 +32,6 @@ const PROJECTS = [
   { project: 'Sinatra', language: 'Ruby', script: 'test:e2e:ruby' },
   { project: 'Klaxon', language: 'Kotlin', script: 'test:e2e:kotlin' },
   { project: 'SwiftyJSON', language: 'Swift', script: 'test:e2e:swift' },
-  { project: 'MCP Round Trip', language: 'Protocol', script: 'test:e2e:mcp' },
 ];
 
 const matrix = PROJECTS.map(function (p) {

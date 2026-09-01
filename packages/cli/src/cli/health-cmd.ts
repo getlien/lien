@@ -47,6 +47,7 @@ import {
 } from '@liendev/parser';
 import { describeScanFailure } from '../utils/scan-failure.js';
 import { resolveRepoRoot, rebaseToRoot } from './project-root.js';
+import { assertSafeRoot } from './unsafe-root.js';
 import type { CodeChunk, ComplexityReport, ComplexityViolation } from '@liendev/parser';
 
 export interface HealthOptions {
@@ -54,6 +55,8 @@ export interface HealthOptions {
   top: string;
   path?: string;
   includeTests?: boolean;
+  /** Proceed even when the analysis root is `$HOME` or a filesystem root. */
+  allowUnsafeRoot?: boolean;
 }
 
 /** What to do about a risky function, derived from the three axes. */
@@ -523,6 +526,14 @@ export async function healthCommand(options: HealthOptions): Promise<void> {
   if (rootDir !== cwd) {
     console.warn(chalk.dim(`Analyzing the repository root: ${rootDir}`));
   }
+
+  // #1025's hazard outlived the command that motivated it. The guard used to
+  // sit on `lien index`, which is deleted; `lien health` inherited the shape —
+  // it walks from `resolveRepoRoot`, which falls back to the start directory
+  // when there is no `.git` above it, so a run in `$HOME` parses the whole home
+  // directory. That is now MORE reachable, not less: `lien health` is what the
+  // quick-start banner tells a new user to run.
+  assertSafeRoot(rootDir, options.allowUnsafeRoot);
 
   try {
     validateFormat(options.format);

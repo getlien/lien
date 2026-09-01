@@ -79,12 +79,11 @@ Every rule above ships only after clearing a real-PR fixture harness. See
 and [Review Evidence](/guide/review-evidence) for results on codebases Lien
 wasn't tuned on.
 
-## Relationship to the MCP tools
+## Relationship to the local CLI
 
-Lien Review is a separate product surface from the [MCP tools](/guide/mcp-tools): the MCP tools run locally inside your AI assistant, while Lien Review runs in CI against a pull request. Both share the same underlying AST parsing and complexity analysis (`@liendev/parser`), but Lien Review needs no local index and no editor MCP config; it's a drop-in GitHub Action.
+Lien Review is a separate product surface from the [local CLI commands](/guide/cli-commands): the CLI runs on your machine against your working tree, while Lien Review runs in CI against a pull request. Both share the same underlying AST parsing and complexity analysis (`@liendev/parser`), but Lien Review needs no local install and no config; it's a drop-in GitHub Action.
 
 Lien Review catches complexity regressions in CI either way, but the earlier
-and cheaper place to catch them is before the commit exists at all. If your
-agent isn't Claude Code, [Cross-Editor Agent Setup](/guide/cross-editor-setup)
-has the copy-paste instruction block that tells it to run `lien delta` and
-treat crossings as must-fix: a local backstop for the same signal.
+and cheaper place to catch them is before the commit exists at all: run
+[`lien delta`](/guide/cli-commands#lien-delta) locally and treat a new
+crossing as must-fix — a local backstop for the same signal.

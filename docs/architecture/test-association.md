@@ -1,5 +1,17 @@
 # Test Association Flow
 
+> [!IMPORTANT]
+> **Phase 5 (2026-09-01) deleted `lien annotate`, `lien verify-tests`, the MCP server
+> (`get_files_context`), and the persisted index they read.** Every present-tense
+> mention below of `lien annotate` reporting something, or of `get_files_context`'s
+> `testAssociations` field, describes one of those now-deleted surfaces — read it as
+> history explaining a design decision (why Go's tier 2 and Swift's symbol-usage
+> signal were scoped to a single, narrow surface rather than threaded everywhere),
+> not as current behavior. `findTestAssociationsFromChunks` itself, the core matching
+> logic this whole document is otherwise about, is unaffected — it lives in
+> `@liendev/parser`, not the deleted packages. See "Where associations surface"
+> below for what's actually live today.
+
 Test association links each source file to the tests that cover it, so an AI assistant (or a developer) knows which tests to run after changing a given file.
 
 ## How it works today
@@ -51,7 +63,7 @@ Test coverage not determinable from imports (whole-module import).
 
 for any file whose language sets `LanguageDefinition.wholeModuleImports` (checked via `hasWholeModuleImports()` in the language registry, verified empirically against a fixture). Only Swift sets this flag today.
 
-A related guard, `isUnresolvableWholeModuleImport`, additionally excludes the one case a whole-module import can otherwise "win" a match: a coincidental basename, where a source file's name happens to equal its own module's name (`Source/Alamofire.swift` inside a module also named Alamofire). Without it, that file would falsely appear to be imported by every test in the module. The guard is applied at each of the four independent places that match imports against files: `findTestAssociationsFromChunks` (this document), `get_dependents`'s import index, and the two callers above that share `path-matching.ts`.
+A related guard, `isUnresolvableWholeModuleImport`, additionally excludes the one case a whole-module import can otherwise "win" a match: a coincidental basename, where a source file's name happens to equal its own module's name (`Source/Alamofire.swift` inside a module also named Alamofire). Without it, that file would falsely appear to be imported by every test in the module. The guard is applied at each of the four independent places that match imports against files: `findTestAssociationsFromChunks` (this document), the dependency analyzer's import index (`packages/parser/src/dependency-analyzer.ts`, `dependent-count-index.ts` — the fan-in computation behind `lien health`), and the two callers above that share `path-matching.ts`.
 
 ## Enclosing-namespace-access languages: an honest limitation
 
@@ -148,9 +160,16 @@ These are structural: no import-level signal exists for the case, so the honest 
 
 ## Where associations surface
 
-- `get_files_context`'s `testAssociations` field (MCP tool) — includes Go tier 1 (basename pairing), not tier 2 (package-level fallback) or Swift's symbol-usage signal
-- `lien annotate` and the post-edit test-association reminder hook (`lien annotate --tests-only`, and its ledger-recording sibling `lien verify-tests note-edit`) — the only surface that also shows Go's tier 2 fallback and Swift's symbol-usage signal, both distinctly labeled; `verify-tests`'s ledger/scope-matching itself still only sees tier 1
-- `@liendev/review`'s blast-radius rendering (test coverage context for a changed file) — tier 1 only, same reasoning as `get_files_context`
+> [!NOTE]
+> Phase 5 (2026-09-01) deleted the MCP server, `lien annotate`, and `lien verify-tests`
+> along with the persisted index they read. The two surfaces below (`lien health`,
+> `lien review`) are what's left; both call `findTestAssociationsFromChunks` directly
+> against a fresh in-memory parse, so both see tier 1 only (Go's basename pairing) —
+> Go's tier 2 package-level fallback and Swift's symbol-usage signal were `lien annotate`-only
+> and have no surviving surface.
+
+- `lien health` (`packages/cli/src/cli/health-cmd.ts`) — associates tests for the violating files it ranks
+- `lien review` (`packages/cli/src/cli/review-cmd.ts`) — fills in `testAssociations` on the complexity report for changed files, consumed by the review signals
 
 ## Language support
 

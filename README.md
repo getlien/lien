@@ -2,9 +2,9 @@
 
 > **/ljɛ̃/**, French for "link"
 
-**A code-intelligence layer for AI agents: structural analysis + fast lexical search. 100% local, 100% private.**
+**A local code-health CLI: what's risky to change, and what your change just made worse. 100% local, 100% private.**
 
-Lien connects AI coding assistants like Cursor and Claude Code to your codebase through the Model Context Protocol (MCP). Its core value is **structural**: reverse dependencies and blast radius, complexity hotspots, and test associations, the questions an agent needs to answer before it edits your code. Alongside that, it offers **fast lexical code search** (FTS5/BM25 over code, docstrings, and identifier-split symbol names). Everything runs locally, with **no embedding model to download**: it installs in seconds and indexes offline.
+Lien parses your working tree with Tree-sitter and answers four questions about a change — what is risky to touch, what crossed a complexity threshold, what deterministic signals fire on the diff, and where the hotspots are. There is no server, no database, and nothing to index: every command reads the files on disk when you run it. Point it at a repo and it works.
 
 **[Full Documentation](https://lien.dev)** | **[Getting Started](https://lien.dev/guide/getting-started)** | **[How It Works](https://lien.dev/how-it-works)**
 
@@ -12,15 +12,14 @@ Lien connects AI coding assistants like Cursor and Claude Code to your codebase 
 
 ## Features
 
-- **Impact Analysis** - Find all dependents and blast radius before refactoring, with risk assessment
-- **Complexity Analysis** - Human-friendly metrics: test paths, mental load, time to understand
-- **Test Associations** - Know which tests cover a file before you touch it
-- **Lexical Search** - Fast full-text (FTS5/BM25) keyword search over code, docstrings, and identifier-split symbol names
-- **100% Local & Private** - All analysis happens on your machine
-- **No Model Download** - No embeddings, no ~100MB model: tiny install, instant offline indexing
-- **MCP Integration** - Works with Cursor, Claude Code, and other MCP-compatible tools
-- **Fast** - Sub-millisecond file context; minutes to index large codebases
-- **Free Forever** - No API costs, no subscriptions, no usage limits (applies to the local MCP/search tooling; [Lien Review](#lien-review)'s agent pass uses your own LLM key and has its own token cost)
+- **Risk ranking** - `lien health` ranks functions by complexity × fan-in ÷ test coverage
+- **Pre-commit gate** - `lien delta` fails only on NEW complexity threshold crossings, never pre-existing ones
+- **Deterministic diff signals** - `lien review` flags stale duplicated literals, removed exports, doc drift and more
+- **Complexity analysis** - Human-friendly metrics: test paths, mental load, time to understand
+- **Nothing to set up** - No index, no server, no config, no daemon. Install and run
+- **100% Local & Private** - All analysis happens on your machine; no network calls
+- **Fast** - Whole-repo parse in seconds; `lien delta` in ~50 ms
+- **Free Forever** - No API costs, no subscriptions ([Lien Review](#lien-review)'s agent pass uses your own LLM key)
 - **Ecosystem-Aware & Monorepo** - Auto-detects 12 ecosystem presets; supports 15+ languages
 
 ## Quick Start
@@ -29,33 +28,40 @@ Lien connects AI coding assistants like Cursor and Claude Code to your codebase 
 # 1. Install
 npm install -g @liendev/lien
 
-# 2. Wire it up for your editor (see the installation guide below for the JSON per editor)
-
-# 3. Restart your editor and start asking questions
+# 2. Run it in any repo
+lien health
 ```
 
-Lien has no setup wizard: add its MCP server to your editor's config by hand — Cursor, Claude Code, Windsurf, OpenCode, Kilo Code or Antigravity. Lien auto-detects your project and indexes on first use.
+That's the whole setup. No editor configuration, no indexing step, no wizard.
 
-> **The Claude Code plugin has been removed.** `/plugin install lien` no longer
-> works; configure the MCP server by hand as described above. The plugin's hooks (read annotation, a
-> `lien delta` write gate, a test-association reminder) are gone with it — the
-> equivalent checks are now commands you run: `lien delta`, `lien health`,
-> `lien review`.
+```bash
+lien health              # what's risky to change here?
+lien delta               # did my working tree cross a complexity threshold?
+lien review --base main  # deterministic signals over my diff
+lien complexity          # where are the hotspots?
+```
 
 **[Full installation guide](https://lien.dev/guide/installation)**
 
-## MCP Tools
+## The four commands
 
-Lien exposes 6 tools via Model Context Protocol:
+| Command | Answers |
+|---------|---------|
+| `lien health` | Which functions are risky to change? (complexity × fan-in ÷ test coverage) |
+| `lien delta` | Did this change push a function over a threshold it was under before? |
+| `lien review` | What deterministic signals fire on this diff? |
+| `lien complexity` | Where is the tech debt? |
 
-| Tool | Description |
-|------|-------------|
-| `search_code` | Full-text (BM25) keyword code search |
-| `find_similar` | Find similar code patterns |
-| `get_files_context` | Get file context with test associations |
-| `list_functions` | List symbols by pattern |
-| `get_dependents` | Impact analysis (what depends on this?) |
-| `get_complexity` | Tech debt analysis with human-friendly metrics |
+`lien delta` is the one built to sit in a pre-commit hook or CI: it exits non-zero
+**only** for a function that crossed a threshold it was under at the base commit.
+Touching or improving a pre-existing violation never fails it.
+
+> **Previous versions shipped an MCP server, a persisted SQLite index and FTS5
+> lexical search.** All three have been removed, along with `lien serve`,
+> `lien index`, and the `search_code` / `get_files_context` / `get_dependents` /
+> `list_functions` / `find_similar` / `get_complexity` tools. An editor
+> configured against `lien serve` will fail to start it. The structural
+> questions Lien still answers, it answers by parsing on demand.
 
 ### Complexity Metrics
 
@@ -101,23 +107,12 @@ That single `uses:` line is the whole integration: Lien self-clones the PR by SH
 
 **[Lien Review guide](https://lien.dev/guide/lien-review)** · [Action reference](./packages/action/README.md)
 
-## Git Worktrees
-
-A linked git worktree (`git worktree add`) automatically shares the main
-checkout's index instead of building a full independent copy: a read-only
-base plus a small per-worktree overlay for whatever's actually changed. No
-setup required; set `LIEN_WORKTREE_STANDALONE=1` to opt out and get a fully
-independent index for that worktree.
-
-**[How it works](https://lien.dev/how-it-works#git-worktree-support)**
-
 ## Documentation
 
 - **[Installation](https://lien.dev/guide/installation)** - npm, npx, or local setup
-- **[Getting Started](https://lien.dev/guide/getting-started)** - Step-by-step configuration for Cursor or Claude Code
-- **[Configuration](https://lien.dev/guide/configuration)** - Customize indexing, thresholds, performance
+- **[Getting Started](https://lien.dev/guide/getting-started)** - Your first run
+- **[Configuration](https://lien.dev/guide/configuration)** - Complexity thresholds
 - **[CLI Commands](https://lien.dev/guide/cli-commands)** - Full command reference
-- **[MCP Tools](https://lien.dev/guide/mcp-tools)** - Complete API reference for all 6 tools
 - **[Lien Review](https://lien.dev/guide/lien-review)** - GitHub Action PR review setup
 - **[How It Works](https://lien.dev/how-it-works)** - Architecture overview
 
