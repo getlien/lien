@@ -19,6 +19,16 @@ This directory documents how Lien's internals fit together: components, data flo
 > longer exists. The *checks* those hooks automated survive as commands (`lien delta`, `lien
 > health`, `lien review`); the automatic invocation does not. Read hook references as history, not
 > as configuration. Replacement: the review skill at `.claude/skills/review/`.
+>
+> **`packages/review`, `packages/action`, the offline prompt-test harness, and the
+> `lien-review-testbed/` fixture app were deleted on 2026-09-01 (phase 7b).** Lien
+> Review — the LLM-driven GitHub Action that reviewed pull requests in CI — is no
+> longer developed or published from this repository (existing
+> `uses: getlien/lien-review@v1` workflows are unaffected; see
+> [ADR-012](decisions/0012-self-hostable-review-action.md)). Docs whose entire
+> subject was that engine have been removed outright, including the
+> "Agent-Review Pass Architecture" entry this index used to carry; the rest
+> below have been corrected to match.
 
 ## Documentation index
 
@@ -29,7 +39,6 @@ A bird's-eye view of Lien's architecture showing:
 - The CLI commands (`complexity`, `health`, `review`, `delta`) and what each one computes
 - Parser services (scanner, chunker, AST traversal, complexity, risk, signals, ecosystem presets)
 - Config (`ConfigService`, per-project `.lien.config.json`) and git helpers
-- Lien Review (the separate GitHub Action product surface: `packages/review` + `packages/action`)
 
 Read this first to understand the overall system structure.
 
@@ -107,20 +116,6 @@ Read this before adding or changing a plugin hook.
 
 ---
 
-### [Agent-Review Pass Architecture](./review-pass-architecture.md)
-`ReviewPassSpec` and the extra-pass executor (Lien Review).
-
-Explains how Lien Review's agent-review plugin runs additional dedicated LLM passes beyond the main investigation:
-- The `ReviewPassSpec` contract and the serial `runExtraPasses` orchestrator
-- The three shipped passes (doc-truth, stale-duplicate loop, incomplete-handling loop): gates, budgets, toolsets, verdict vocabularies
-- The per-candidate-verdict output contract and `incomplete_verdict` honesty semantics
-- Attestation v2 (`provider.passes[]` / `BudgetAttestation` per pass)
-- Which passes are production-on vs. dark-launched today
-
-Read this if you're adding a rule to the agent-review plugin or touching `packages/review/src/plugins/agent/review-pass.ts`. See also [ADR-014](decisions/0014-per-rule-candidate-loop-passes.md) for the decision and its evidence.
-
----
-
 For the history behind these designs, see the [Architectural Decision Records index](decisions/README.md).
 
 ## Quick reference
@@ -142,7 +137,6 @@ For the history behind these designs, see the [Architectural Decision Records in
 | Test associations | [Test Association](./test-association.md) |
 | Pre-commit complexity gate (`lien delta`) | [lien delta](./lien-delta.md) |
 | Plugin hook design (what reaches the model) — historical | [Claude Code Hook Output Channels](./claude-code-hook-channels.md) |
-| Lien Review's extra LLM passes (doc-truth, candidate loops) | [Agent-Review Pass Architecture](./review-pass-architecture.md) |
 | No-Data Honesty (never render "no data" as "clean") | `CLAUDE.md` → "No-Data Honesty" |
 
 ### For debugging
@@ -155,6 +149,6 @@ For the history behind these designs, see the [Architectural Decision Records in
 
 ## Code organization
 
-`CLAUDE.md`'s "Package Structure" section is the canonical, actively-maintained map of `packages/parser`, `packages/core`, `packages/cli`, `packages/review`, `packages/action`, and `packages/site`. Read it there rather than here.
+`CLAUDE.md`'s "Package Structure" section is the canonical, actively-maintained map of `packages/parser`, `packages/core`, `packages/cli`, and `packages/site`. Read it there rather than here.
 
 For technology stack, performance characteristics, and scaling notes, see [System Overview](./system-overview.md).

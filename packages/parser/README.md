@@ -2,7 +2,7 @@
 
 AST parsing, complexity analysis, and semantic chunking for [Lien](https://lien.dev).
 
-This package provides the core parsing and analysis capabilities used by Lien's lexical code search. It is extracted from `@liendev/core` to enable lightweight consumers (like `@liendev/review`) that need parsing without embeddings or vector DB dependencies.
+This package is Lien's analysis engine: it turns source files into chunks with AST metadata, resolves dependency edges and test associations across 11 languages, computes complexity, and answers the deterministic review signals `lien review` runs. It has no server, no database and no network dependency — every answer is computed from the files you hand it.
 
 ## Features
 

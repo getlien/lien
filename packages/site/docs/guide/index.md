@@ -44,7 +44,7 @@ lien complexity --fail-on error
 ```
 
 ### Reviewing a Diff Before You Open a PR
-Run the same deterministic signals Lien Review uses in CI, locally, on your working tree:
+Run deterministic signals over your working-tree changes:
 
 ```bash
 lien review

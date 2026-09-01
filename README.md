@@ -19,7 +19,7 @@ Lien parses your working tree with Tree-sitter and answers four questions about 
 - **Nothing to set up** - No index, no server, no config, no daemon. Install and run
 - **100% Local & Private** - All analysis happens on your machine; no network calls
 - **Fast** - Whole-repo parse in seconds; `lien delta` in ~50 ms
-- **Free Forever** - No API costs, no subscriptions ([Lien Review](#lien-review)'s agent pass uses your own LLM key)
+- **Free Forever** - No API costs, no subscriptions, no network calls at all
 - **Ecosystem-Aware & Monorepo** - Auto-detects 12 ecosystem presets; supports 15+ languages
 
 ## Quick Start
@@ -72,48 +72,12 @@ Lien tracks code complexity with human-friendly outputs:
 - **Time to understand** - Halstead effort as readable duration (~2h 30m)
 - **Estimated bugs** - Halstead prediction (Effort^(2/3) / 3000)
 
-## Lien Review
-
-Lien Review is a self-hostable **GitHub Action** that reviews pull requests: complexity analysis, agent-driven bug review, and a PR summary, posted back as inline comments and workflow annotations. It runs without a server, a database, or a recurring bill.
-
-```yaml
-# .github/workflows/lien-review.yml
-name: Lien Review
-
-on:
-  pull_request:
-
-permissions:
-  contents: read
-  pull-requests: write
-
-jobs:
-  review:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: getlien/lien-review@v1
-        with:
-          openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
-```
-
-That single `uses:` line is the whole integration: Lien self-clones the PR by SHA using the workflow's own token, so no `actions/checkout` step is needed.
-
-| Feature | Description |
-|---------|-------------|
-| Complexity analysis | Flags new/worsened cyclomatic, cognitive, and Halstead complexity violations |
-| Agent bug review | LLM-driven review for correctness bugs (OpenRouter or Anthropic) |
-| PR summary | A concise summary of the change, posted as a step summary |
-| Advisory by default | `fail-on: never`; the check never blocks a PR unless you opt in |
-
-**[Lien Review guide](https://lien.dev/guide/lien-review)** · [Action reference](./packages/action/README.md)
-
 ## Documentation
 
 - **[Installation](https://lien.dev/guide/installation)** - npm, npx, or local setup
 - **[Getting Started](https://lien.dev/guide/getting-started)** - Your first run
 - **[Configuration](https://lien.dev/guide/configuration)** - Complexity thresholds
 - **[CLI Commands](https://lien.dev/guide/cli-commands)** - Full command reference
-- **[Lien Review](https://lien.dev/guide/lien-review)** - GitHub Action PR review setup
 - **[How It Works](https://lien.dev/how-it-works)** - Architecture overview
 
 ## Supported Languages

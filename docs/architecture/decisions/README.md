@@ -17,9 +17,9 @@ This directory contains Architectural Decision Records (ADRs) documenting signif
 | [ADR-009](0009-extract-parser-package.md) | Extract `@liendev/parser` from `@liendev/core` | 2026-02-19 | Accepted |
 | [ADR-010](0010-retire-qdrant-backend.md) | Retire the Qdrant Backend | 2026-07-02 | Superseded (phase 5 deleted the backend seam) |
 | [ADR-011](0011-sqlite-structural-store-fts5-lexical-search.md) | Replace LanceDB + Embeddings with a SQLite Structural Store and FTS5 Lexical Search | 2026-07-04 | Superseded (phase 5, 2026-09-01) |
-| [ADR-012](0012-self-hostable-review-action.md) | Self-Hostable GitHub Action for PR Review | 2026-06-27 | Accepted |
+| [ADR-012](0012-self-hostable-review-action.md) | Self-Hostable GitHub Action for PR Review | 2026-06-27 | Superseded (phase 7b deleted `packages/review`/`packages/action`; published Action unaffected) |
 | [ADR-013](0013-prebuilt-native-parser-napi-rs.md) | Prebuilt Native Parser via napi-rs (`@liendev/parser-native`) | 2026-07-08 | Accepted |
-| [ADR-014](0014-per-rule-candidate-loop-passes.md) | Per-Rule Candidate-Loop Passes for Agent Review | 2026-07-16 | Accepted |
+| [ADR-014](0014-per-rule-candidate-loop-passes.md) | Per-Rule Candidate-Loop Passes for Agent Review | 2026-07-16 | Superseded (phase 7b deleted `packages/review`) |
 | [ADR-015](0015-required-matcher-path-language-fields.md) | Make Per-Language Matching Policy Mandatory and Declarative | 2026-08-01 | Accepted |
 | [ADR-016](0016-dependency-attribution-honesty-axes.md) | Dependency-Attribution Honesty Has Two Axes and Three Scopes — Route, Don't Merge | 2026-08-05 | Accepted (partially superseded — see note) |
 

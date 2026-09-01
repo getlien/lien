@@ -10,10 +10,9 @@ Local-first code-health CLI. Parses the working tree on demand with Tree-sitter 
 - License: AGPL-3.0 | Domain: lien.dev
 
 **Monorepo Structure:**
-- `packages/` — TypeScript packages: `parser` and `core` publish as `@liendev/parser`/`@liendev/core`; `cli` publishes as `@liendev/lien`; `review`, `action`, and `site` are private (unpublished).
-- Dependency chain: `parser` ← `core` ← `cli`; `review` depends on `parser` only (not `core`); `action` wraps `review` as a self-hostable GitHub Action ([ADR-012](docs/architecture/decisions/0012-self-hostable-review-action.md)).
+- `packages/` — TypeScript packages: `parser` and `core` publish as `@liendev/parser`/`@liendev/core`; `cli` publishes as `@liendev/lien`; `site` is private (unpublished). `review` and `action` are DELETED.
+- Dependency chain: `parser` ← `core` ← `cli`. That is the whole graph now.
 - `.claude/skills/review/` — the review skill that replaced the Claude Code plugin. The plugin (MCP config + 12 hooks) is **deleted**, and so is the MCP server it configured. Its hooks used to auto-annotate reads and run the `lien delta` gate on writes; **both are manual now** — run `lien delta` yourself before committing. The test-association reminder is gone: it called `lien annotate`'s index-backed per-file lookup. The mapping itself survives in `@liendev/parser` (`findTestAssociationsFromChunks`, chunk-based, never index-backed) — `lien health` prints test paths for the functions it ranks — but no command answers it for an arbitrary file you name.
-- `lien-review-testbed/` — tracked, multi-language fixture app used by the review-agent test harness. Not a demo to clean up.
 
 **Package Structure:**
 ```
@@ -26,13 +25,12 @@ packages/parser/src/        # AST parsing, chunking, complexity, scanning — ze
 ├── risk/            # Blast-radius risk scoring
 ├── insights/        # Complexity report types
 ├── signals/         # Deterministic review signals — pure functions over a diff
-│                    # plus parser output (no LLM/network/index). Lifted out of
-│                    # packages/review. Barrel is CURATED: a symbol is public
-│                    # only when production code outside its module imports it
-│                    # (38 of ~110) — parser is published, so an exported
-│                    # internal is semver-locked. Tests for the 14 *-signals.ts
-│                    # modules still live in packages/review/test/ pending
-│                    # relocation; signals-test-location.test.ts guards that.
+│                    # plus parser output (no LLM/network/index). Barrel is
+│                    # CURATED: a symbol is public only when production code
+│                    # outside its module imports it (38 of ~110) — parser is
+│                    # published, so an exported internal is semver-locked.
+│                    # Tests are co-located here; signals-test-location.test.ts
+│                    # guards that every module has some.
 ├── ecosystem-presets.ts  # Project-type detection — replaced the old frameworks/
 │                         # plugin system (ADR-007); NOT a `frameworks/` directory
 ├── workspace-packages.ts # Workspace specifier resolution for cross-package dependents (#681)
@@ -54,9 +52,6 @@ packages/cli/src/           # The CLI — depends on core and parser
 ├── types/       # Shared TypeScript types
 └── utils/       # CLI utilities (incl. scan-failure.ts — the no-data honesty gate)
 
-packages/review/src/        # PR review engine (plugins, blast-radius render, prompt building)
-                             # — depends on parser only, not core
-packages/action/src/        # Self-hostable GitHub Action wrapping @liendev/review
 packages/site/              # VitePress docs site (lien.dev)
 ```
 
@@ -131,36 +126,35 @@ out as noise).
 
 ---
 
-## Agent-Review Rule Development — Use the Test Harness
+## Deterministic over inferred — the surviving design principle
 
-Adding or tweaking a rule in `packages/review/src/plugins/agent/` MUST go
-through the offline test harness at `packages/review/test/harness/`. Don't
-ship prompt or rule changes via the deploy → synthetic-PR loop — the harness
-exists specifically to make that cycle ~30 minutes instead of hours.
+The LLM review engine, its rule prompts and its offline calibration harness are
+deleted. What outlived them is the principle that shrank them:
 
-- Inner loop: invoke `/test-harness <rule-id>` from CC for free
-  Claude-subagent iteration on existing fixtures.
-- Shipping gate: `npm run test:harness -w @liendev/review -- --rule <rule-id> --calibrate 10`
-  must hit ≥ 9/10 against OpenRouter, on the prod default model
-  (`moonshotai/kimi-k2.7-code` — omit `--model` to use it) before merging
-  the change. The harness auto-loads `OPENROUTER_API_KEY` from `.env` at
-  the repo root.
-- Workflow + failure modes: see `packages/review/test/harness/README.md`.
-  Includes the end-to-end recipe for capturing a real-PR fixture, authoring
-  Tier 1/2 assertions, iterating, and calibrating. The formerly known-red
-  Kimi canaries were reconciled 2026-07-10 (see the README's "Known-red
-  reconciliation" note); before trusting any red fixture, confirm it's a
-  healthy capture — the native parser must be built or capture fails loudly.
+**If a check is really a deterministic diff/parse query wearing an
+LLM-reasoning costume — "does this literal still appear unconditionally
+elsewhere?", "did this PR add a variant to some but not all of a family's
+switch statements?" — compute it, do not ask a model to grep-and-reason it.**
 
-A rule is not shippable until its calibration meets the bar. CC mode is
-necessary but not sufficient.
+That is what `packages/parser/src/signals/` is: 14 modules, each answering one
+structural question as a pure function over a diff plus parser output. No LLM,
+no network, no index. `lien review` runs them; they are unit-testable at zero
+marginal cost, which is why they survived the engine that commissioned them.
 
-**Design principle:** if a rule's detection is really a deterministic
-index/diff query wearing an LLM-reasoning costume (e.g. "does this literal
-still appear unconditionally elsewhere?"), precompute it and inject it as a
-signal block — same pattern as `blast_radius` — instead of asking the agent
-to grep-and-reason. Deterministic signals are unit-testable with zero LLM
-spend; see `packages/parser/src/signals/stale-literal-signals.ts` for the template.
+Two things measured along the way, worth not relearning:
+
+- **Precision was never established for 13 of the 14.** Adversarial review
+  judged 106 of their candidates across four real diffs and rated none
+  actionable, which is why `lien review` runs only `comparison-change` by
+  default and `--all-signals` prints a warning. A signal being deterministic
+  makes it cheap and reproducible; it does not make it right.
+- **A gate that over-fires gets trained out as noise** (#1014). `lien review`
+  is advisory and has no `--fail-on` for exactly that reason. `lien delta` is
+  the gate, and it fires only on a threshold a function was under before.
+
+When adding a signal: make it deterministic, unit-test it in
+`packages/parser/src/signals/` beside the module, and default it OFF until its
+precision is measured on real diffs rather than assumed.
 
 ## Workflow Orchestration
 
@@ -197,7 +191,6 @@ exercise the change the way its real consumer experiences it and put the
 verbatim evidence in the PR body:
 - CLI changes → run the actual command against this repo and read the output.
 - Skill changes → invoke it (`/review`) on a real diff and read what it produces. A skill that reads well and guides badly is the failure mode; prose is not self-verifying.
-- Review-engine changes → replay through the harness (build-prompts/fixtures) or a captured real run.
 - Site/docs → `npm run docs:build` AND read the rendered result.
 If pre-merge dogfooding is genuinely impossible (needs production traffic),
 the PR must say so explicitly and the dogfood happens immediately

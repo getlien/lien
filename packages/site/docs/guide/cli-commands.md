@@ -39,17 +39,19 @@ Thresholds are fixed (not read from `.lien.config.json`) — see [Configuration]
 🔍 Complexity Analysis
 
 Summary:
-  Files analyzed: 595
-  Violations: 79 (16 errors, 63 warnings)
+  Files analyzed: 396
+  Violations: 15 (3 errors, 12 warnings)
   Average complexity: 3.2
-  Max complexity: 31
+  Max complexity: 14
 
 ❌ Errors:
 
-  lien-review-testbed/rust/src/main.rs:34 - run()
-    🔀 Test paths: 31 (needs ~31 tests) (threshold: 30)
-    ⬆️  3% over threshold
-    ⚠️  Complexity risk: CRITICAL
+  packages/parser/src/signals/rename-sweep-signals.ts:255 - scanDiff()
+    🧠 Mental load: 30 (threshold: 30)
+    ⬆️  0% over threshold
+    📦  Imported by 30 files
+    - Dependent avg complexity: 2.4, max: 7
+    ⚠️  Complexity risk: HIGH
 ```
 
 **JSON** — machine-readable output for CI pipelines:
@@ -117,25 +119,30 @@ Real output against this repo (`lien health --top 3`):
 ```
 lien health
 
-  606 files · 8923 chunks · 1.5s · no index
+  396 files · 5908 chunks · 0.9s · no index
 
-  ⚠ 5 functions are risky to change
+  ⚠ 3 functions are risky to change
 
-  1  lien-review-testbed/typescript/src/validator.ts:54  validateInput
-     mental load 27 · imported by 5 · no tests
-     Complex and widely depended on, and nothing would catch a regression.
-     → add a test before touching it
+  1  packages/parser/src/signals/rename-sweep-signals.ts:255  scanDiff
+     mental load 30 · imported by 3 · 1 test
+     Complex, but contained — little depends on it.
+     → simplify when you are next in here
 
-  2  lien-review-testbed/typescript/src/database.ts:38  query
-     mental load 8 · imported by 5 · no tests
-     Widely depended on and untested, but simple enough to cover quickly.
-     → add a test — cheap, high value
+  2  packages/parser/src/signals/untrusted-input-signals.ts:112  extractUntrustedInputSites
+     mental load 29 · imported by 2 · 1 test
+     Complex, but contained — little depends on it.
+     → simplify when you are next in here
 
-  74 other threshold violations — `lien complexity` to see them
+  3  packages/parser/src/signals/rename-sweep-signals.ts:576  renderRenameSweepSignals
+     mental load 19 · imported by 3 · 1 test
+     Complex, but contained — little depends on it.
+     → simplify when you are next in here
+
+  12 other threshold violations — `lien complexity` to see them
 
   Coverage
-    fan-in resolved   typescript, php, javascript, rust, python, csharp, java
-    no fan-in found   markdown (81), yaml (11), swift (6), go (6), kotlin (5)
+    fan-in resolved   typescript, javascript, rust, python, csharp, java
+    no fan-in found   markdown (60), swift (6), go (6), yaml (6), php (5), kotlin (5)
                       ranked on complexity alone — not judged safe
 ```
 
@@ -176,7 +183,7 @@ lien review [options]
 
 `review` needs a git repository — it diffs your working tree against `--base` (or `HEAD`) — and fails loudly with a non-zero exit if it can't (an unresolvable ref, or not a git repo at all), rather than printing an empty "all clear."
 
-By default it runs a smaller set of signals than the full 14: measurement against this repo found the other 13 (`stale-literal`, `removed-export`, `variant-sweep`, `unread-field`, `catch-discrimination`, `sibling-surface`, `rename-sweep`, `untrusted-input`, `test-coverage`, `docs-drift`, `doc-claims`, `guidance-surface`, `simplicity`) produced 0 useful candidates read directly — they were built as inputs for an LLM to adjudicate (that's what Lien Review, the CI Action, does). `--all-signals` runs them anyway.
+By default it runs a smaller set of signals than the full 14: measurement against this repo found the other 13 (`stale-literal`, `removed-export`, `variant-sweep`, `unread-field`, `catch-discrimination`, `sibling-surface`, `rename-sweep`, `untrusted-input`, `test-coverage`, `docs-drift`, `doc-claims`, `guidance-surface`, `simplicity`) produced 0 useful candidates read directly — they were originally built as inputs for an LLM to adjudicate rather than for direct human reading. `--all-signals` runs them anyway.
 
 ### Output
 
@@ -216,10 +223,6 @@ lien review --base origin/main
 # Fast pass, skip the whole-repo cross-file scan
 lien review --no-repo-scan
 ```
-
-::: tip Relationship to Lien Review (the GitHub Action)
-`lien review` runs the same underlying deterministic signals locally that [Lien Review](/guide/lien-review) runs in CI — but locally they're printed as candidates for you to read, not adjudicated by an LLM or posted as PR comments.
-:::
 
 ## lien delta
 

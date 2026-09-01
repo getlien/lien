@@ -13,6 +13,14 @@ This document provides a high-level overview of Lien's architecture, showing the
 > index means no staleness, but also no search and no server for an AI assistant to
 > connect to — see [ADR-011](decisions/0011-sqlite-structural-store-fts5-lexical-search.md),
 > now superseded, for what this replaced.
+>
+> **Phase 7b (2026-09-01) deleted `packages/review` and `packages/action` too.**
+> Lien Review — a separate GitHub Action product surface that used to sit
+> alongside this CLI — is no longer developed or published from this
+> repository; existing `uses: getlien/lien-review@v1` workflows are
+> unaffected. See [ADR-012](decisions/0012-self-hostable-review-action.md).
+> It has been removed from the diagram and component list below, since
+> nothing in this repository builds or runs it any more.
 
 ## Component architecture
 
@@ -45,13 +53,6 @@ graph TB
         ERRORS[Typed errors]
     end
 
-    subgraph "Lien Review (packages/review + packages/action)"
-        GHACTION[GitHub Action Entry]
-        REVIEWENGINE[Review Engine]
-        COMPLEXITYCHECK[Complexity Plugin]
-        AGENTREVIEW[Agent Bug/Summary Review]
-    end
-
     %% CLI to Parser
     COMPLX --> PARSEIDX
     HEALTH --> PARSEIDX
@@ -74,23 +75,14 @@ graph TB
     PARSEIDX --> COMPLEXANALYZER
     COMPLEXANALYZER --> RISK
 
-    %% Lien Review — separate product surface, shares only the parser
-    %% package (AST + complexity). Does not depend on core.
-    GHACTION --> REVIEWENGINE
-    REVIEWENGINE --> COMPLEXITYCHECK
-    REVIEWENGINE --> AGENTREVIEW
-    REVIEWENGINE -.->|uses parser AST + complexity, not core| AST
-
     %% Styling
     classDef cliClass fill:#e1f5ff,stroke:#01579b,stroke-width:2px
     classDef parserClass fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
     classDef coreClass fill:#fff3e0,stroke:#e65100,stroke-width:2px
-    classDef reviewClass fill:#ede7f6,stroke:#311b92,stroke-width:2px
 
     class COMPLX,HEALTH,REVIEW,DELTA cliClass
     class PARSEIDX,SCANNER,CHUNKER,AST,COMPLEXANALYZER,RISK,SIGNALS,DEPS,TESTASSOC,ECOSYSTEM parserClass
     class CONFIG,FORMAT,GIT,ERRORS coreClass
-    class GHACTION,REVIEWENGINE,COMPLEXITYCHECK,AGENTREVIEW reviewClass
 ```
 
 ## Component descriptions
@@ -120,20 +112,6 @@ All four read the working tree directly, not a persisted index: `complexity`, `h
 - **Report formatters**: text/JSON/SARIF output for `lien complexity`.
 - **`git/`**: Worktree detection and git-state helpers survive in the package, but no surviving CLI command currently calls them — `delta-cmd.ts` and `health-cmd.ts` shell out to `git` directly instead. Left in place; not wired to anything today.
 - **Typed errors**: `LienError` and error codes shared across commands.
-
-### Lien Review (packages/review + packages/action)
-Lien Review is a separate product surface from the CLI above: a self-hostable GitHub Action that reviews pull requests in CI rather than running as a local command.
-
-- **GitHub Action Entry** (`packages/action`): Docker container action; reads the `pull_request` event, self-clones the PR head (and base, for complexity deltas) by SHA, and posts results with no `actions/checkout`, no server, no database.
-- **Review Engine** (`packages/review`): Orchestrates the enabled review passes and posts inline PR comments, workflow annotations, and a step summary.
-- **Complexity Plugin**: Flags new/worsened cyclomatic, cognitive, and Halstead complexity violations on the diff.
-- **Agent Bug/Summary Review**: LLM-driven review (OpenRouter or Anthropic) for correctness bugs, architectural concerns, and a PR summary.
-
-`packages/review` depends on **`@liendev/parser` only**: it does not import `@liendev/core`, so it carries none of the storage-layer dependency weight (this is the point of [ADR-009](decisions/0009-extract-parser-package.md)). See [`packages/action/README.md`](../../packages/action/README.md) for the full setup guide, or the [Lien Review site page](../../packages/site/docs/guide/lien-review.md).
-
-Beyond the main investigation, the agent review can run additional dedicated LLM passes (doc-truth is on by default; two candidate-loop passes exist dark-launched) via a generalized `ReviewPassSpec` executor. See [Agent-Review Pass Architecture](./review-pass-architecture.md) ([ADR-014](decisions/0014-per-rule-candidate-loop-passes.md)).
-
-**Retired**: the earlier hosted-SaaS shape for review, `packages/runner` (a NATS-based review runner) and `platform/` (a Laravel 12 control plane and its K8s infra), was removed in favor of this self-hostable Action.
 
 ## Data flow
 

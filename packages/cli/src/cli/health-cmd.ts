@@ -27,11 +27,14 @@
  * KNOWN LIMITATION — fixture applications. Test files are excluded via
  * `isTestFile`, which covers the conventions (`*.test.*`, `test/`, `spec/`,
  * `__tests__/`). It does not cover a fixture APP checked in as ordinary
- * source: in this repo, `lien-review-testbed/` is deliberately complex,
- * deliberately untested tracked code, and it legitimately occupies four of
- * the default five slots. The ranking is not wrong — that really is the
- * riskiest code here by these axes — but "code I maintain" is a per-repo
- * judgment the tool cannot infer. Scope it with `--path` until an exclude
+ * source. This repo used to demonstrate it perfectly: `lien-review-testbed/`
+ * was deliberately complex, deliberately untested tracked code, and it
+ * legitimately occupied four of the default five slots. That fixture app has
+ * since been deleted (the whole-repo ranked total fell from 65 functions to
+ * 12), so the example is gone but the limitation is not — any repo carrying a
+ * fixture app will see the same thing. The ranking is not wrong in that case;
+ * "code I maintain" is a per-repo judgment the tool cannot infer. Scope it
+ * with `--path` until an exclude
  * mechanism exists (`LienConfig` has no ignore key today, only
  * `complexity.thresholds`).
  */

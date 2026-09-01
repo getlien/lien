@@ -74,8 +74,10 @@ populate `srcExclude`, so drafts stay fully reachable locally.
 
 1. Edit the post's frontmatter: `draft: true` → `draft: false`. Do any voice
    pass / content edits at the same time.
-2. Commit and merge to `main` (a normal PR is fine — Lien Review's doc-truth
-   rule will check factual claims same as any other change).
+2. Commit and merge to `main` (a normal PR is fine — there's no automated
+   factual-claims check for blog content; the `docs-truth` CI job only
+   lints for broken links and stale references, not accuracy, so proofread
+   claims yourself before merging).
 3. That's it. `main` pushes trigger `.github/workflows/deploy-docs.yml`,
    which runs `npm run docs:build` and deploys the result to GitHub Pages.
    Once `draft: false` is merged, the next deploy includes the post in the

@@ -5,6 +5,19 @@
 **Deciders**: Core Team
 **Related**: ADR-009 (extracted `@liendev/parser` to shrink the *hosted* Review app's image, predates and is not this pivot), PR #581, #593
 
+> **Superseded (2026-09-01):** `packages/review` and `packages/action` — the
+> self-hostable GitHub Action this ADR designed, plus the offline prompt-test
+> harness and the `lien-review-testbed/` fixture app — are deleted from this
+> repository (Phase 7b of the CLI simplification plan, commit `0e522852`).
+> This does not break existing consumers: the Action was already published to
+> a separate dist repo (`getlien/lien-review`, floating `v1` tag) plus a GHCR
+> image, and every `uses: getlien/lien-review@v1` workflow keeps working
+> exactly as before. What ends is future development from this repository: no
+> new source changes, no new published versions, and (already true since
+> 2026-08-31, per the Decision section below) no self-review of this repo's
+> own PRs. This ADR is kept for history: the self-hostable-Action pivot it
+> records happened and shipped.
+
 ## Context and Problem Statement
 
 Lien Review originally ran as a hosted SaaS: a Laravel control plane (`platform/`, `app.lien.dev`) dispatching PR review jobs over NATS to a fleet of `packages/runner` workers. This carried real cost:
