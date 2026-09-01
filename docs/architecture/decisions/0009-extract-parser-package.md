@@ -38,8 +38,9 @@
 > something that has since been deleted or moved. Of the 2,102 remaining
 > lines, three modules were reachable
 > from the CLI and moved verbatim (`config/`, `errors/`,
-> `insights/formatters/`); the rest — `git/`, `types/`, `constants.ts`, six of
-> seven `utils/`, `src/test/` — were unreachable and were deleted. The
+> `insights/formatters/` — 1,034 lines); the remaining 1,068 — `git/`,
+> `types/`, `constants.ts`, all six `utils/` modules, `src/test/` — were
+> unreachable and were deleted. The
 > dependency chain is now `parser <- cli`, and the published set is three
 > packages, not four.
 >

@@ -148,13 +148,14 @@ jobs:
     # shipping.
     #
     # It packs and installs all three PUBLISHED packages together (parser,
-    # lien, parser-native), not just the CLI. A real release publishes them
-    # together -- all three are in the same `.changeset/config.json`
-    # linked group, so parser-native bumps to the group's max version and
-    # republishes on every release that bumps any linked package, not on a
-    # schedule of its own -- so the CLI's @liendev/* sibling deps should
-    # resolve to those local tarballs, not whatever's currently live on the
-    # registry. Packing only the CLI made "new CLI + old published parser" --
+    # lien, parser-native), not just the CLI, so the CLI's @liendev/* sibling
+    # deps resolve to those local tarballs rather than whatever is currently
+    # live on the registry. That is the point: this job must test the set as
+    # BUILT HERE. (Note `linked` in .changeset/config.json aligns versions
+    # only across the packages a release actually touches -- it does not
+    # republish one that has no changeset, which is why parser-native
+    # normally trails parser and lien.)
+    # Packing only the CLI made "new CLI + old published parser" --
     # a combination that can't happen in production -- the thing this job
     # tested, which false-positived on any PR adding a new cross-package
     # export (see #644, when core shipped `NullEmbeddings` but the CLI

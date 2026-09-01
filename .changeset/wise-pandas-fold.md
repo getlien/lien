@@ -17,9 +17,10 @@ search, embeddings — was removed along with the MCP server. What was left was
 | `errors/` (typed errors, `isLienError`) | `packages/cli/src/errors/` |
 | `insights/formatters/` (text/JSON/SARIF) | `packages/cli/src/insights/formatters/` |
 
-The other 60% was unreachable and is gone: `git/` (`GitStateTracker`,
-`detectLinkedWorktree`, git helpers), `types/`, `constants.ts`, six of seven
-`utils/`, and the `src/test/` helpers. These were not arbitrary casualties —
+The rest was unreachable and is gone — 1,068 of those 2,102 lines, across 15 of
+24 files: `git/` (`GitStateTracker`, `detectLinkedWorktree`, git helpers),
+`types/`, `constants.ts`, all six `utils/` modules, and the `src/test/`
+helpers. These were not arbitrary casualties —
 each existed to serve the index. `GitStateTracker` recorded the commit an index
 was built at so it could be invalidated; `detectLinkedWorktree`, `getLienHome`
 and `extractRepoId` located the right index directory for the current worktree.
@@ -56,6 +57,15 @@ Also in this release:
   `packages/core` and `packages/embeddings`, the latter dead since embeddings
   were removed. `npm install --package-lock-only` marks a deleted workspace
   `extraneous` but never prunes it, so these accumulate silently.
+
+- **Index-era dead code that rode along inside the moved modules is gone too.**
+  Deleting at module granularity meant three modules moved wholesale, dead
+  symbols included: `IndexingError` and `DatabaseError` (defined, never
+  constructed — the latter names a database deleted two phases ago), the
+  `INDEX_NOT_FOUND`/`INDEX_CORRUPTED` error codes, and the barrel's
+  `formatTextReport`/`formatJsonReport`/`formatSarifReport` re-exports, which
+  existed to feed core's public API. Nothing outside `src/insights/formatters/`
+  imported them; `formatReport` is the entry point.
 
 - `@liendev/parser` gains no code changes. Its docblocks described themselves
   in terms of core (`scanFilesToIndex`, "parser must NOT import

@@ -131,27 +131,27 @@ Only include package lines for affected packages. Only include sections that hav
 
 ## Example Output
 
-For reference, here's what a real changeset looked like (v0.41.0):
+Here's the current shape. Note it names only packages that exist — a changeset
+naming a package that isn't in the workspace fails `changeset version` during
+the release, so never copy a package line from an older example without
+checking it against `.changeset/config.json`:
 
 ```markdown
 ---
 "@liendev/parser": minor
-"@liendev/core": minor
 "@liendev/lien": minor
 ---
 
-### Features
-- Upgrade to @huggingface/transformers v3 with GPU support + `lien config` command (#160)
-- Parallelize embedding generation and file processing for faster indexing (#156)
-
 ### Fixes
-- Support nested `.gitignore` files in incremental indexing (#147)
-- Filter gitignored files in watcher and unify ignore patterns (#140, #146)
+- `lien review` no longer reports deleted files as parse failures (#1134)
 
 ### Refactors
-- Remove dead embeddings.device (cpu|gpu) config (#161)
-- Extract helper functions from indexing pipeline (#158)
+- Fold `@liendev/core` into the CLI and delete the package (#1135)
 ```
+
+Older changesets in `packages/*/CHANGELOG.md` name `@liendev/core` and describe
+embeddings, the indexer and the MCP server. They are accurate history and
+should not be edited — but they are not templates.
 
 ## Important Notes
 

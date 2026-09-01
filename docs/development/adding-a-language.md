@@ -164,7 +164,10 @@ just links to it (`/how-it-works#supported-languages`) and needs no edit.
 
 Changeset: `minor` for `@liendev/parser`, `@liendev/parser-native`, and
 `@liendev/lien` — the three packages in `.changeset/config.json`'s `linked`
-group, so they always bump together.
+group. Adding a language touches all three, so all three belong in the
+frontmatter. (`linked` aligns the versions of the packages a release touches;
+it does not pull in a package that has no changeset — which is why
+`parser-native` normally trails the other two.)
 
 Merging this PR makes the changeset bot open the "Version Packages" PR.
 Merging **that** publishes to npm. That step is irreversible, so leave it

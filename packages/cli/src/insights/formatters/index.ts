@@ -19,6 +19,3 @@ export function formatReport(report: ComplexityReport, format: OutputFormat): st
       return formatTextReport(report);
   }
 }
-
-// Export individual formatters
-export { formatTextReport, formatJsonReport, formatSarifReport };

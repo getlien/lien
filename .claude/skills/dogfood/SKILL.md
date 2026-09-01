@@ -288,13 +288,13 @@ You are a **senior software architect** evaluating the overall architecture of L
 
 ### Context
 
-Lien is a local-first code-health CLI: no server, no persisted index, no search. Every command parses the working tree on demand. It's split into three published packages plus three unpublished ones:
+Lien is a local-first code-health CLI: no server, no persisted index, no search. Every command parses the working tree on demand. It's split into three published packages plus one unpublished one:
 - `@liendev/parser` — AST parsing, language definitions, chunking, complexity analysis, dependency/test-association resolution, deterministic review signals. Zero deps on cli.
 - `@liendev/parser-native` — the Rust tree-sitter addon `parser` loads through.
-- `@liendev/lien` (cli) — the four commands: `complexity`, `health`, `review`, `delta`, plus (folded in from the deleted `@liendev/core` in Phase 8) config management (`ConfigService`) and complexity-report formatters (text/JSON/SARIF)
-- `review` / `action` / `site` (private, unpublished) — the Lien Review GitHub Action's engine, the Action wrapper, and the docs site
+- `@liendev/lien` (cli) — the four commands: `complexity`, `health`, `review`, `delta`, plus (folded in from the deleted `@liendev/core` in Phase 8) config management (`ConfigService`), typed errors, and complexity-report formatters (text/JSON/SARIF)
+- `site` (private, unpublished) — the VitePress docs site
 
-Dependency chain: `parser` ← `cli`. `review` depends on `parser` only. This is a **recent, large architectural change**: the MCP server, the SQLite structural store, the indexer, and FTS5 lexical search were all removed first; then `@liendev/core` itself — what was left after those removals — was folded into `cli` and deleted (Phase 8). Verify with `Glob`/`Grep` that no residue (dead imports, orphaned types, stale barrel exports referencing removed modules) was left behind.
+Dependency chain: `parser` ← `cli`. That is the whole graph. This is a **recent, large architectural change**: the MCP server, the SQLite structural store, the indexer, and FTS5 lexical search were all removed first (phase 5); then `packages/review` and `packages/action` — the LLM review engine and the GitHub Action wrapping it — were deleted (phase 7b); then `@liendev/core` itself, what was left after those removals, was folded into `cli` and deleted (phase 8). Verify with `Glob`/`Grep` that no residue (dead imports, orphaned types, stale barrel exports referencing removed modules) was left behind.
 
 ### What to evaluate
 

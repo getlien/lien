@@ -270,9 +270,15 @@ These live in project root and are tracked in git:
 
 ---
 
-## Data Transformation with collect.js
+## Data Transformation
 
-Use `collect.js` for readable data transformations (groupBy, countBy, chained map/filter/sort). Prefer native `.map()`, `.filter()` for simple single operations or performance-critical paths.
+Use native `.map()`, `.filter()`, `.flatMap()` and `Map`/`Set`. This section
+used to mandate `collect.js` for `groupBy`/`countBy`-style chains; that was
+only ever a `@liendev/core` dependency, and when phase 8 deleted core it left
+the repo with no `collect.js` in any manifest and no import of it in any
+surviving file. Following the old instruction would have failed the build.
+Don't add it back for its own sake — if a transformation genuinely needs
+`groupBy`, a four-line helper beats a dependency.
 
 ---
 

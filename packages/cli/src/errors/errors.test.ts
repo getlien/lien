@@ -100,7 +100,7 @@ describe('LienError', () => {
 
     const notRecoverable = new LienError(
       'Not recoverable',
-      LienErrorCode.INDEX_CORRUPTED,
+      LienErrorCode.INTERNAL_ERROR,
       undefined,
       'critical',
       false,
@@ -129,8 +129,6 @@ describe('LienError', () => {
     const codes = [
       LienErrorCode.CONFIG_NOT_FOUND,
       LienErrorCode.CONFIG_INVALID,
-      LienErrorCode.INDEX_NOT_FOUND,
-      LienErrorCode.INDEX_CORRUPTED,
       LienErrorCode.FILE_NOT_FOUND,
       LienErrorCode.FILE_NOT_READABLE,
       LienErrorCode.INVALID_PATH,
