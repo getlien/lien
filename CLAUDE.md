@@ -45,6 +45,11 @@ packages/cli/src/           # The CLI — depends on parser only
 ├── types/       # Shared TypeScript types
 └── utils/       # CLI utilities (incl. scan-failure.ts — the no-data honesty gate)
 
+packages/parser-native/     # The Rust tree-sitter addon parser loads through
+│                           # (napi-rs, ADR-013). Not a TypeScript package;
+│                           # versions independently of the other two.
+└── src/, scripts/, index.js, index.d.ts
+
 packages/site/              # VitePress docs site (lien.dev)
 ```
 
