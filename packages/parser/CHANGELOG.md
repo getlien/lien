@@ -1,5 +1,31 @@
 # @liendev/parser
 
+## 0.78.0
+
+### Minor Changes
+
+- fc12f45: `lien complexity` now parses the working tree instead of reading the persisted index, so it works in any repo without `lien index` having been run first — including a fresh linked worktree, which previously reported "Index not found". It can no longer report a stale answer, because there is no stored state to go stale.
+
+  It stays gate-shaped: a run that finds nothing to analyze is a hard error, not a confident "0 violations". A failed parse produces the same false-clean result an empty index used to, so the check moved rather than disappeared.
+
+  Run from a subdirectory, `lien complexity` and `lien health` now resolve the repository root instead of analysing that subtree alone. A subtree analysis looks like a perfectly normal report while silently understating every dependent count, and for a gate that meant `--fail-on` verdicts on an arbitrary slice of the codebase.
+
+  Two fixes in `@liendev/parser` that this exposed, both affecting `performChunkOnlyIndex` and therefore `lien health` as well:
+  - **Chunk order is now deterministic.** Chunks were accumulated into one shared array from concurrent tasks, making their order depend on which file read finished first. Downstream that reached the `dependents` arrays in `--format json` and the result order in `--format sarif`, so an unchanged tree produced a different byte stream on every run — breaking the documented practice of diffing a committed JSON baseline, and churning code-scanning alert identity.
+  - **Files above 5 MB are skipped**, matching the cap `lien index` has always applied, and the count is reported so a gate never silently drops a file from its corpus. An 8 MB source file cost roughly a gigabyte of memory to chunk, then exceeded the native parser's string limit, fell back to line-based chunking, and landed in the report carrying meaningless complexity metrics.
+
+- c9fe9df: `@liendev/parser` now ships the deterministic review signals — 14 modules that answer one structural question each about a change ("does this literal still appear unconditionally elsewhere?", "did this PR add a variant to some but not all of a family's switch statements?") as pure functions over a diff plus parser output. No LLM, no network, no persisted index.
+
+  They previously lived in the unpublished review engine, which meant nothing else could use them without depending on that engine and, through it, on Octokit. They are about source structure, so they belong here.
+
+  The new public surface is 38 symbols, gated on one rule: a symbol is exported when production code outside its own module imports it. The 14 signal modules export 102 between them; the ones with no consumer outside their own module exist so their tests can reach them, and stay unpublished deliberately, because exporting an internal from a published package means semver-locking it.
+
+  New input type: `SignalContext` — `chunks`, `changedFiles`, `allChangedFiles`, `complexityReport`, `repoChunks`, `pr` (`patches` and `diffLines`), and an optional `logger`. It was derived by auditing every field the 14 modules actually read, which is why nothing on it identifies a pull request: no signal reads `owner`, `repo`, `pullNumber`, or `title`, so a caller driving these from a local `git diff` needs no GitHub concepts to satisfy it.
+
+  Also public: `filterAnalyzableFiles`, the extension-and-vendor-path gate the signals run their inputs through, and `parsePatchLines`, which turns unified-diff text into the post-image line numbers `SignalContext.pr.diffLines` carries. The latter previously sat in a module that also imports an Octokit client, so the only way to parse a diff was to take on a GitHub dependency you never call.
+
+  No behavior change. The review engine's rendered prompts are byte-identical across this move on all three committed harness fixtures.
+
 ## 0.77.0
 
 ### Minor Changes

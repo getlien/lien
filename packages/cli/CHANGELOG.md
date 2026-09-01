@@ -1,5 +1,63 @@
 # @liendev/lien
 
+## 0.78.0
+
+### Minor Changes
+
+- 7dc6562: Add `lien health`, which ranks the functions that are risky to change rather than listing everything over a threshold.
+
+  `lien complexity` orders violations by how far over a line they sit, which says nothing about whether anything depends on the code or whether a test would catch you breaking it. `lien health` joins three axes — cognitive complexity, fan-in, and test associations — and prints five, with the shape of that triple driving the recommendation: complex and widely depended on and untested means test it first; the same with tests means split before extending; simple but widely depended on and untested is a cheap win.
+
+  It reads the working tree directly, with no persisted index, and never exits non-zero because of what it found — `lien complexity --fail-on` and `lien delta` remain the gates. (A bad flag still exits 1, as any CLI should.) Flags: `--top`, `--path`, `--include-tests`, `--format text|json`.
+
+- fc12f45: `lien complexity` now parses the working tree instead of reading the persisted index, so it works in any repo without `lien index` having been run first — including a fresh linked worktree, which previously reported "Index not found". It can no longer report a stale answer, because there is no stored state to go stale.
+
+  It stays gate-shaped: a run that finds nothing to analyze is a hard error, not a confident "0 violations". A failed parse produces the same false-clean result an empty index used to, so the check moved rather than disappeared.
+
+  Run from a subdirectory, `lien complexity` and `lien health` now resolve the repository root instead of analysing that subtree alone. A subtree analysis looks like a perfectly normal report while silently understating every dependent count, and for a gate that meant `--fail-on` verdicts on an arbitrary slice of the codebase.
+
+  Two fixes in `@liendev/parser` that this exposed, both affecting `performChunkOnlyIndex` and therefore `lien health` as well:
+  - **Chunk order is now deterministic.** Chunks were accumulated into one shared array from concurrent tasks, making their order depend on which file read finished first. Downstream that reached the `dependents` arrays in `--format json` and the result order in `--format sarif`, so an unchanged tree produced a different byte stream on every run — breaking the documented practice of diffing a committed JSON baseline, and churning code-scanning alert identity.
+  - **Files above 5 MB are skipped**, matching the cap `lien index` has always applied, and the count is reported so a gate never silently drops a file from its corpus. An 8 MB source file cost roughly a gigabyte of memory to chunk, then exceeded the native parser's string limit, fell back to line-based chunking, and landed in the report carrying meaningless complexity metrics.
+
+- fcefa82: Removes the Claude Code plugin and the commands that existed only to serve its hooks. These are breaking removals, kept at `minor` because this package is pre-1.0 and a series of removals is in progress; the 1.0 line is where they would be `major`.
+
+  **Gone: the plugin.** `plugins/claude/` — 12 hook scripts, `hooks.json`, the plugin manifest — and `.claude-plugin/marketplace.json`, whose only entry pointed at it. `/plugin marketplace add getlien/lien` and `/plugin install lien` no longer work, and because marketplace-add resolves against the default branch rather than a release tag, they stop working the moment this merges rather than at the next publish. The docs site has been updated in the same change; if you have the plugin installed, `/plugin uninstall lien` then `/plugin marketplace remove getlien/lien` removes it.
+
+  What the hooks automated is genuinely lost, not relocated: read annotation, a `lien delta` gate on writes, and a test-association reminder all fired at the tool boundary on every matching call. Two of the three have a command you can run yourself — `lien annotate` and `lien delta`. The test-association reminder has no replacement: no command maps a changed file to its tests, and `lien health` does not do this (it ranks functions that already have a complexity violation). Finding the tests for a change is manual now. And in every case the automatic invocation is gone, which was the part that made these fire whether or not anyone remembered. In this repo the review checks are collected in a skill at `.claude/skills/review/`.
+
+  **Gone: `lien init`.** Its whole job was writing a six-line MCP server block into an editor's config file, and the MCP server it configures is itself being removed in the next release. Write the block by hand instead — [the installation guide](https://lien.dev/guide/installation) lists the exact file and JSON for Cursor, Claude Code, Windsurf, OpenCode, Kilo Code and Antigravity. The `--legacy` flag went with it; it selected a per-project setup that became the only setup once the plugin was gone, so it had nothing left to select. `inquirer` is no longer a dependency, since the interactive editor prompt was its only consumer.
+
+  **Gone: `lien nudge`.** `note-shown` and `note-signal` existed for the deleted hooks to shell into, and had no other caller. `nudge doctor` diagnosed drift between the CLI and a live plugin hooks directory by checking for `nudge-signal.sh` — a file this release deletes — so after this change it could only ever report a false `critical` telling you to update a plugin that does not exist. The event store, `lien stats`, `lien recap` and `lien verify-tests` are unaffected: the shown→acted-on funnels still populate, from the narrower set of sources that are ordinary commands rather than hooks.
+
+  **Fixed: `lien review` on a diff with nothing parser-analyzable.** A markdown-only diff has no analyzable files, and the text report asserted "No signal ran, so no signal found anything" off that empty set — while the documentation signals, which read the raw patch text rather than parsed files, had in fact run and found candidates. Both renderers now list them. Ten `--help` descriptions that advertised "(for hook scripts)", "(for the write hook)", "(for the plugin Stop hook)" and similar have been corrected, since there are no hooks to serve.
+
+### Patch Changes
+
+- 1b1aa68: **`lien serve` now warns that it is being removed in the next release.** This version is the last one that ships the MCP server, the persisted SQLite index and FTS5 lexical search; the next removes all three.
+
+  The notice prints to stderr on every `lien serve` start — never to stdout, which carries the MCP protocol stream — and it cannot be suppressed. That is deliberate: an editor configured against `lien serve` will simply stop working when the next version lands, and a user who never sees a warning experiences that as a tool that silently broke.
+
+  Nothing else changes. `lien serve` and every MCP tool behave exactly as before in this release.
+
+  What replaces it is a CLI you run directly, with no server, no index and no editor configuration:
+
+  | Command           | Answers                                                                    |
+  | ----------------- | -------------------------------------------------------------------------- |
+  | `lien health`     | Which functions are risky to change? (complexity × fan-in ÷ test coverage) |
+  | `lien delta`      | Did this change push a function over a threshold it was under before?      |
+  | `lien review`     | What deterministic signals fire on this diff?                              |
+  | `lien complexity` | Where is the tech debt?                                                    |
+
+  The MCP tools themselves — `search_code`, `get_dependents`, `get_files_context`, `list_functions`, `find_similar`, `get_complexity` — have no replacement. Use your editor's own search and your agent's own file-reading tools.
+
+  If you need the server, pin this version: run `lien --version`, then `npm install -g @liendev/lien@<that version>`.
+
+- Updated dependencies [fc12f45]
+- Updated dependencies [c9fe9df]
+  - @liendev/parser@0.78.0
+  - @liendev/core@0.78.0
+
 ## 0.77.0
 
 ### Patch Changes
