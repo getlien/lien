@@ -66,8 +66,8 @@ export interface FileComplexityInfo {
 /**
  * Result of `analyzeDependencies` below -- the chunk-only-index / complexity-
  * report consumer (`lien complexity`). See `FindDependentsResult` further down
- * for the richer shape used by `findDependents` (which `lien health` drives);
- * the two are deliberately separate types -- `calculateOverallComplexityMetrics` (leaves
+ * for the richer shape `findDependents` returns; the two are deliberately
+ * separate types -- `calculateOverallComplexityMetrics` (leaves
  * `complexityMetrics` `undefined` when there's no complexity data at all) is
  * part of what makes them distinct, see that function's own doc comment.
  */
@@ -131,8 +131,8 @@ export interface ImportIndexEntry<T extends CodeChunk> {
  * `isUnresolvableWholeModuleImport`'s doc comment. `findDependents` below
  * applies the identical guard via its own `indexImportEntry` -- this file
  * feeds both `analyzeDependencies` (consumed by `lien complexity` for
- * complexity reports) and `findDependents` (consumed by `lien health` for the
- * fan-in axis), so both index builders need the same
+ * complexity reports) and `findDependents`, so both index builders need the
+ * same
  * treatment. This is an early-drop optimization, not a match-time guard --
  * retaining `rawSpecifier` on every entry that DOES get indexed doesn't
  * require giving it up.
@@ -826,14 +826,24 @@ export function analyzeDependencies(
 }
 
 // =============================================================================
-// findDependents — the richer reverse-dependency engine, now driven by
-// `lien health`'s fan-in axis. Originally the body of the `get_dependents` MCP
-// tool and moved here from `packages/cli/src/mcp/handlers/dependency-analyzer.ts`;
-// that tool, and the persisted store it read from, have since been deleted.
-// The move is why this survived them: it is chunk-in/chunk-out and never
-// depended on the store, so callers now hand it chunks straight from
-// `performChunkOnlyIndex`. Generic over `<T extends CodeChunk>` so a caller
-// carrying a richer chunk type passes it through without a widening cast.
+// findDependents — the richer reverse-dependency engine. Originally the body of
+// the `get_dependents` MCP tool, moved here from
+// `packages/cli/src/mcp/handlers/dependency-analyzer.ts`; that tool, and the
+// persisted store it read from, have since been deleted. Being chunk-in/
+// chunk-out is why it survived them.
+//
+// It has NO production caller today. `lien health` computes its fan-in axis
+// with `computeDependentCountsFromChunks` instead, deliberately — see
+// `health-cmd.ts`, which explains that this function's barrel-re-export
+// following scores a file at 229 against 4 direct importers and flattens the
+// ranking into noise. (An earlier version of this comment claimed `lien health`
+// drove this function. It does not, and never did.)
+//
+// It stays exported because the cross-language E2E suite drives it directly as
+// the dependency-edge resolver for all eleven language corpora — that is real
+// use, just not from a command. Generic over `<T extends CodeChunk>` so a
+// caller carrying a richer chunk type passes it through without a widening
+// cast.
 // =============================================================================
 
 /**

@@ -98,11 +98,25 @@ but the failure they existed to prevent is not: a failed or empty **parse**
 produces exactly the same false clean an empty index did.
 
 `performChunkOnlyIndex` reports failure by RETURNING `{ success: false }`
-rather than throwing, so it is easy to miss. Every command that parses the
-tree routes through `describeScanFailure`
-(`packages/cli/src/utils/scan-failure.ts`) and responds by disposition:
-`complexity` is gate-shaped and hard-errors; `health` is advisory and warns
-loudly at exit 0.
+rather than throwing, so it is easy to miss. The three commands that go
+through it — `complexity`, `health`, `review` — all route that outcome through
+`describeScanFailure` (`packages/cli/src/utils/scan-failure.ts`) and respond by
+disposition: `complexity` is gate-shaped and hard-errors; `health` and `review`
+are advisory and say so at exit 0.
+
+`lien delta` is the exception, and knowing why matters if you add a fifth
+command: it never calls `performChunkOnlyIndex` at all, it calls `chunkFile`
+per before/after content pair, and `computeComplexityDelta` returns no error
+field. So it has no failure channel to route — not an oversight to copy, but
+not coverage either.
+
+**Total failure is only half of it.** `describeScanFailure` returns `undefined`
+the moment anything parsed, so a run where most of the corpus failed looks
+identical to a healthy one. `describePartialScan` is the other half, and it
+exists because `lien review` on a large deletion diff reported "98 changed
+file(s) … No candidates from any signal" while 88 of those files had failed
+with ENOENT — 88 lines to stderr, and not a word in the caveats block the
+reader is told to trust.
 
 The same duty applies to a command's own empty states, which is not only
 about parse failure — `lien review` distinguishes "no changes at all" from

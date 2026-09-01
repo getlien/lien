@@ -36,7 +36,7 @@ import {
 
 import { listUntrackedAnalyzable, readUnifiedDiff } from './delta-git.js';
 import { resolveRepoRoot } from './project-root.js';
-import { describeScanFailure } from '../utils/scan-failure.js';
+import { describeScanFailure, describePartialScan } from '../utils/scan-failure.js';
 import { runSignals, withheldSignalIds, type SignalReport } from './review-signals.js';
 
 export interface ReviewOptions {
@@ -83,6 +83,8 @@ export interface ReviewResult {
   withheldSignals: string[];
   /** Why the changed-file parse produced nothing usable, if it did. */
   scanFailure?: string;
+  /** Some changed files parsed, others could not be read at all. */
+  scanPartial?: string;
   /** Why the repo-wide corpus was withheld, if it was. */
   repoScanFailure?: string;
   durationMs: number;
@@ -176,20 +178,28 @@ function scopeDiff(
 async function runScan(
   rootDir: string,
   filesToIndex?: string[],
-): Promise<{ chunks: CodeChunk[]; failure: string | undefined }> {
+): Promise<{ chunks: CodeChunk[]; failure: string | undefined; partial: string | undefined }> {
   const result =
     filesToIndex === undefined
       ? await performChunkOnlyIndex(rootDir)
       : await performChunkOnlyIndex(rootDir, { filesToIndex });
 
+  const outcome = {
+    success: result.success,
+    error: result.error,
+    chunkCount: result.chunks?.length ?? 0,
+    filesSkipped: result.filesSkipped,
+    filesErrored: result.filesErrored,
+  };
+
   return {
     chunks: result.chunks ?? [],
-    failure: describeScanFailure({
-      success: result.success,
-      error: result.error,
-      chunkCount: result.chunks?.length ?? 0,
-      filesSkipped: result.filesSkipped,
-    }),
+    failure: describeScanFailure(outcome),
+    // Partial failure is invisible to `describeScanFailure`, which stops
+    // looking once anything parsed. On a deletion diff most of the changed
+    // set is gone from disk, so most of it fails with ENOENT while the run
+    // still reports plenty of chunks — see `describePartialScan`.
+    partial: describePartialScan(outcome),
   };
 }
 
@@ -213,6 +223,8 @@ async function buildContext(
   testsExcluded: number;
   /** Set when the changed-file parse failed or yielded nothing parseable. */
   scanFailure?: string;
+  /** Set when some changed files parsed and others could not be read at all. */
+  scanPartial?: string;
   /** Set when the repo-wide parse failed, so the corpus was withheld. */
   repoScanFailure?: string;
 }> {
@@ -237,6 +249,7 @@ async function buildContext(
   const scan = changedFiles.length > 0 ? await runScan(rootDir, changedFiles) : undefined;
   const chunks = scan?.chunks ?? [];
   const scanFailure = scan?.failure;
+  const scanPartial = scan?.partial;
 
   const repo = repoScan ? await runScan(rootDir) : undefined;
   const repoScanFailure = repo?.failure;
@@ -260,6 +273,7 @@ async function buildContext(
     nonAnalyzable,
     testsExcluded,
     scanFailure,
+    scanPartial,
     repoScanFailure,
   };
 }
@@ -278,8 +292,15 @@ export async function analyzeReview(options: ReviewOptions): Promise<ReviewResul
   const repoScanned = allSignals && options.repoScan !== false;
 
   const diff = await readUnifiedDiff(rootDir, base);
-  const { context, changedFiles, nonAnalyzable, testsExcluded, scanFailure, repoScanFailure } =
-    await buildContext(rootDir, diff, repoScanned, options.includeTests === true);
+  const {
+    context,
+    changedFiles,
+    nonAnalyzable,
+    testsExcluded,
+    scanFailure,
+    scanPartial,
+    repoScanFailure,
+  } = await buildContext(rootDir, diff, repoScanned, options.includeTests === true);
 
   const hasNonTsJs = changedFiles.some(f => !TS_JS_RE.test(f));
   const reports = runSignals(context, changedFiles, { repoScanned, hasNonTsJs, allSignals });
@@ -291,6 +312,7 @@ export async function analyzeReview(options: ReviewOptions): Promise<ReviewResul
     unexamined: { untracked: await listUntrackedAnalyzable(rootDir), nonAnalyzable, testsExcluded },
     withheldSignals: allSignals ? [] : withheldSignalIds(),
     scanFailure,
+    scanPartial,
     repoScanFailure,
     repoScanned,
     durationMs: Date.now() - started,
@@ -387,6 +409,15 @@ function renderCaveats(result: ReviewResult): string[] {
       `  ${result.unexamined.testsExcluded} changed test file(s) were excluded — ` +
         'pass --include-tests to review them too.',
     );
+  }
+  // Partial failure, which the all-or-nothing `scanFailure` cannot see. A
+  // deletion diff is the shape that triggers it: most of the changed set is no
+  // longer on disk, so most of it fails with ENOENT while the run still reports
+  // plenty of chunks from what remains. Left unsaid, "N changed files / no
+  // candidates" reads as a clean review of N files when it is a clean review of
+  // whatever fraction could be opened.
+  if (result.scanPartial !== undefined) {
+    lines.push(`  ${result.scanPartial} — signal silence covers only the files that parsed.`);
   }
   // A failed parse is the loudest caveat there is: every signal downstream of
   // it reported on nothing, so its silence means nothing.

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { describeScanFailure } from './scan-failure.js';
+import { describeScanFailure, describePartialScan } from './scan-failure.js';
 
 describe('describeScanFailure', () => {
   it('reports the scanner’s own error when the scan failed', () => {
@@ -51,5 +51,34 @@ describe('describeScanFailure', () => {
 
   it('does not mention skips when chunks were produced', () => {
     expect(describeScanFailure({ success: true, chunkCount: 10, filesSkipped: 2 })).toBeUndefined();
+  });
+});
+
+describe('describePartialScan', () => {
+  // The gap this exists to close: a deletion diff where most of the changed set
+  // is gone from disk. `describeScanFailure` sees chunks and returns undefined,
+  // so without this the report reads as a clean review of files it never opened.
+  it('reports files that failed to parse when others succeeded', () => {
+    expect(describePartialScan({ success: true, chunkCount: 400, filesErrored: 88 })).toBe(
+      '88 files could not be parsed and were not examined',
+    );
+  });
+
+  it('is silent when nothing errored', () => {
+    expect(
+      describePartialScan({ success: true, chunkCount: 400, filesErrored: 0 }),
+    ).toBeUndefined();
+    expect(describePartialScan({ success: true, chunkCount: 400 })).toBeUndefined();
+  });
+
+  it('defers to describeScanFailure when NOTHING parsed', () => {
+    // Total failure is that function's job; reporting both would double-count.
+    expect(describePartialScan({ success: true, chunkCount: 0, filesErrored: 12 })).toBeUndefined();
+  });
+
+  it('says "file"/"was" for exactly one', () => {
+    expect(describePartialScan({ success: true, chunkCount: 5, filesErrored: 1 })).toBe(
+      '1 file could not be parsed and was not examined',
+    );
   });
 });
