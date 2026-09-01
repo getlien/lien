@@ -1,5 +1,15 @@
 # Behavioral A/B: does the blast-radius warning change what an agent says about callers?
 
+> [!IMPORTANT]
+> **The Claude Code plugin was deleted on 2026-08-31.** Every `plugins/claude/hooks/*`
+> reference below describes a delivery mechanism that no longer exists — the hooks,
+> `hooks.json`, and the marketplace entry are all gone, and `lien init` and
+> `lien nudge` went with them. The *checks* those hooks automated survive as
+> commands (`lien delta`, `lien health`, `lien review`); the automatic invocation at
+> the tool boundary does not. Read hook references here as history, not as
+> configuration.
+
+
 A small, pre-registered experiment testing whether Feature 1's real blast-radius
 warning (as rendered by `plugins/claude/hooks/api-delta-write.sh`) measurably
 changes whether a Sonnet subagent addresses caller/dependent impact when asked

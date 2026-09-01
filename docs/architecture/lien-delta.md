@@ -1,5 +1,15 @@
 # lien delta: complexity accounting before the commit
 
+> [!IMPORTANT]
+> **The Claude Code plugin was deleted on 2026-08-31.** Every `plugins/claude/hooks/*`
+> reference below describes a delivery mechanism that no longer exists — the hooks,
+> `hooks.json`, and the marketplace entry are all gone, and `lien init` and
+> `lien nudge` went with them. The *checks* those hooks automated survive as
+> commands (`lien delta`, `lien health`, `lien review`); the automatic invocation at
+> the tool boundary does not. Read hook references here as history, not as
+> configuration.
+
+
 `lien delta` computes the complexity difference between two versions of a
 file, per function, and turns a new threshold crossing into signal an agent
 can act on: a CLI exit code, a warning from the plugin's post-edit hook, a
@@ -379,12 +389,13 @@ callers.
 
 1. CLAUDE.md's "Before EVERY Commit (MANDATORY)" section lists `lien delta`
    after `npm test`.
-2. `lien init`'s only agent-facing artifact today is the read-only Explore
-   agent (`packages/cli/src/cli/agents/explore-agent.ts`); it surfaces
-   `lien delta` guidance under the "Safe to change? / tech-debt" framing
-   that agent already uses. A dedicated project-scoped gate template
-   emitted by `lien init` is a new output surface and stays out of scope
-   (YAGNI).
+2. This originally routed through `lien init`'s Explore agent
+   (`packages/cli/src/cli/agents/explore-agent.ts`), which surfaced
+   `lien delta` guidance under the "Safe to change? / tech-debt" framing.
+   Both the agent and `lien init` have since been deleted, so there is no
+   agent-facing artifact here any more; the gate is reached through
+   CLAUDE.md and the review skill instead. A dedicated project-scoped gate
+   template was out of scope then and remains so (YAGNI).
 
 ## D. Mechanism 2: the PostToolUse hook on Edit/Write (detection)
 

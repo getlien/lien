@@ -258,13 +258,16 @@ network, the AGPL means their improvements have to be shared back too. A
 private fork that's never distributed or offered as a service can stay
 private.
 
-Install is one command plus one setup command, the same for Claude Code, Cursor,
+Install is one command, then a one-time MCP config edit, the same for Claude Code, Cursor,
 Windsurf, OpenCode and Kilo Code:
 
 ```bash
 npm install -g @liendev/lien
-lien init
 ```
+
+Then add Lien's MCP server to your editor's config by hand — see the
+[installation guide](https://lien.dev/guide/installation#configuring-your-editor-mcp)
+for the exact file and JSON snippet per editor.
 
 The rest of the docs, the full evidence, and how we test all of this live
 elsewhere on this site. The code is at

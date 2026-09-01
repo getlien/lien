@@ -115,5 +115,5 @@ Hook ports are follow-up work, in priority order:
 
 - [MCP Tools](/guide/mcp-tools): parameters and response shapes for
   `get_files_context`, `get_dependents`, and the rest.
-- [Quick Start](/guide/getting-started): per-editor `lien init` setup if you
+- [Quick Start](/guide/getting-started): per-editor MCP setup if you
   haven't configured Lien's MCP server yet.

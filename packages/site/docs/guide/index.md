@@ -6,7 +6,7 @@ Lien _(French for "link" or "connection")_ is a local-first **code-intelligence 
 
 Lien indexes your codebase locally and gives AI assistants the structural context they need to work safely: reverse dependencies and blast radius, complexity hotspots, and test associations, plus fast lexical code search for discovery. Unlike cloud-based solutions, everything runs on your machine. Your code never leaves your computer. See [How It Works](/how-it-works) for the indexing-to-answer pipeline.
 
-**Setup takes 30 seconds:** Install globally, run `lien init`, restart your AI assistant. There's no model to download: the first index runs instantly and offline.
+**Setup takes about a minute:** install globally, add Lien's MCP server to your editor's config by hand (see [Configuring Your Editor (MCP)](/guide/installation#configuring-your-editor-mcp)), restart your AI assistant. There's no model to download: the first index runs instantly and offline.
 
 ## Key Benefits
 

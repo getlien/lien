@@ -3,7 +3,6 @@ import { DEFAULT_STALE_DAYS } from '@liendev/core';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { initCommand } from './init.js';
 import { statusCommand } from './status.js';
 import { indexCommand } from './index-cmd.js';
 import { serveCommand } from './serve.js';
@@ -38,22 +37,6 @@ program
   .name('lien')
   .description('Local lexical code search and dependency analysis for AI assistants via MCP')
   .version(packageJson.version);
-
-program
-  .command('init')
-  .description('Initialize Lien in the current directory')
-  .addOption(
-    new Option('-e, --editor <editor>', 'Editor to configure MCP for').choices([
-      'cursor',
-      'claude-code',
-      'windsurf',
-      'opencode',
-      'kilo-code',
-      'antigravity',
-    ]),
-  )
-  .option('-p, --path <path>', 'Path to initialize (defaults to current directory)')
-  .action(initCommand);
 
 program
   .command('index')
@@ -131,7 +114,7 @@ program
   .option('--format <type>', 'Output format: text, json', 'text')
   .option('--threshold <n>', 'Override cyclomatic + cognitive thresholds (default: from config)')
   .option('--soft', 'Advisory mode: always exit 0 (still prints the report)')
-  .option('--file <path>', 'Analyze only this file vs HEAD (fast path for edit hooks)')
+  .option('--file <path>', 'Analyze only this file vs HEAD (fast path for a single-file check)')
   .option(
     '--base <ref>',
     'Compare the working tree against this ref instead of HEAD (e.g. origin/main in CI)',
@@ -144,7 +127,7 @@ program
     'Flag exported-symbol signature changes/removals in the working tree (vs HEAD) — advisory, not a gate',
   )
   .option('--format <type>', 'Output format: text, json', 'text')
-  .option('--file <path>', 'Analyze only this file vs HEAD (fast path for edit hooks)')
+  .option('--file <path>', 'Analyze only this file vs HEAD (fast path for a single-file check)')
   .option(
     '--base <ref>',
     'Compare the working tree against this ref instead of HEAD (e.g. origin/main in CI)',
@@ -197,7 +180,7 @@ configCmd.command('list').description('Show all current config').action(configLi
 
 program
   .command('path')
-  .description('Print Lien storage paths and supported extensions (for hook scripts)')
+  .description('Print Lien storage paths and supported extensions')
   .option('--store', 'Print the storage root for the current repo')
   .option('--extensions', 'Print the indexed-file extensions, one per line')
   .option('--root', 'Print the resolved project root (walks up for .git)')
@@ -205,11 +188,8 @@ program
 
 program
   .command('annotate <file>')
-  .description('Print a short impact summary for a single file (for hook annotation)')
-  .option(
-    '--tests-only',
-    'Print only the post-edit test-association reminder line (for the write hook)',
-  )
+  .description('Print a short impact summary for a single file')
+  .option('--tests-only', 'Print only the post-edit test-association reminder line')
   .option(
     '--min-risk <level>',
     'Habituation-guard risk floor: only annotate when blast-radius risk is >= this ' +
@@ -227,12 +207,11 @@ const verifyTestsCmd = program
 // Session/file/command are plain (not required) options: every subcommand is
 // its own fail-open no-op when one is missing (see verify-tests-cmd.ts), so a
 // hard commander usage error here would contradict this feature's fail-open
-// contract for what is, in practice, hook-driven plumbing.
+// contract. The fail-open shape exists because this was hook-driven plumbing;
+// the hooks that drove it are gone, so nothing calls these but a human.
 verifyTestsCmd
   .command('note-edit')
-  .description(
-    'Record that a file was edited and print its test-association reminder (replaces `annotate --tests-only` in the edit hook)',
-  )
+  .description('Record that a file was edited and print its test-association reminder')
   .option('--session <id>', 'Session ID to record under')
   .option('--file <path>', 'File that was edited')
   .option('--format <type>', 'Output format: text, json', 'text')
@@ -240,9 +219,7 @@ verifyTestsCmd
 
 verifyTestsCmd
   .command('note-run')
-  .description(
-    'Record a Bash command as a test run, if it looks like one (silent — for the Bash hook)',
-  )
+  .description('Record a Bash command as a test run, if it looks like one (silent)')
   .option('--session <id>', 'Session ID to record under')
   .option('--command <cmd>', 'The Bash command that was run')
   .action(noteRunCommand);

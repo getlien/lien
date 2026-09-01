@@ -29,16 +29,15 @@ Lien connects AI coding assistants like Cursor and Claude Code to your codebase 
 # 1. Install
 npm install -g @liendev/lien
 
-# 2. Wire it up for your editor
-lien init
+# 2. Wire it up for your editor (see the installation guide below for the JSON per editor)
 
 # 3. Restart your editor and start asking questions
 ```
 
-`lien init` writes the right MCP config for your editor — Cursor, Claude Code, Windsurf, OpenCode, Kilo Code or Antigravity. Lien auto-detects your project and indexes on first use.
+Lien has no setup wizard: add its MCP server to your editor's config by hand — Cursor, Claude Code, Windsurf, OpenCode, Kilo Code or Antigravity. Lien auto-detects your project and indexes on first use.
 
 > **The Claude Code plugin has been removed.** `/plugin install lien` no longer
-> works; use `lien init` above. The plugin's hooks (read annotation, a
+> works; configure the MCP server by hand as described above. The plugin's hooks (read annotation, a
 > `lien delta` write gate, a test-association reminder) are gone with it — the
 > equivalent checks are now commands you run: `lien delta`, `lien health`,
 > `lien review`.

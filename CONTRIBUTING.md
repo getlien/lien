@@ -22,7 +22,7 @@ npm link
 
 ### Dogfooding Lien while working on Lien
 
-The Claude Code plugin (`plugins/claude/`) and its marketplace manifest (`.claude-plugin/marketplace.json`) have been **deleted**. There is nothing to install and nothing to avoid installing: point your editor at your local build with `lien init`, or run the commands directly. The warning this paragraph used to carry — that installing the published plugin would test the released build rather than your changes — no longer applies because there is no plugin to install.
+The Claude Code plugin (`plugins/claude/`) and its marketplace manifest (`.claude-plugin/marketplace.json`) have been **deleted**. There is nothing to install and nothing to avoid installing: point your editor at your local build by hand-editing its MCP config (see below), or run the commands directly. The warning this paragraph used to carry — that installing the published plugin would test the released build rather than your changes — no longer applies because there is no plugin to install.
 
 Instead, register Lien per-project against your local `dist/`:
 

@@ -77,6 +77,44 @@ describe('renderText', () => {
     expect(out).toContain('1 changed file(s) the parser cannot analyze');
   });
 
+  // A markdown-only diff parses to zero analyzable files, but the doc signals
+  // read the raw patch text and can still have candidates. This renderer used
+  // to assert "No signal ran, so no signal found anything" off the empty
+  // analyzable set — the same false-clean shape as the three cases above, one
+  // layer down, and the one that made the review skill's docs guidance wrong.
+  it('reports candidates from raw-diff signals even when nothing was parser-analyzable', () => {
+    const out = renderText(
+      result({
+        changedFiles: [],
+        unexamined: { untracked: [], nonAnalyzable: ['docs/guide.md'], testsExcluded: 0 },
+        reports: [
+          report({
+            id: 'doc-claims',
+            title: 'Documentation claims',
+            candidates: [{ file: 'docs/guide.md', line: 12, detail: 'claims the old default' }],
+          }),
+        ],
+      }),
+    );
+
+    expect(out).not.toContain('No signal ran');
+    expect(out).toContain('1 candidate(s) still came from signals that read the raw diff');
+    expect(out).toContain('docs/guide.md');
+    expect(out).toContain('not findings');
+  });
+
+  it('still says no signal found anything when the raw-diff signals are also empty', () => {
+    const out = renderText(
+      result({
+        changedFiles: [],
+        unexamined: { untracked: [], nonAnalyzable: ['docs/guide.md'], testsExcluded: 0 },
+        reports: [report({ id: 'doc-claims', candidates: [] })],
+      }),
+    );
+
+    expect(out).toContain('No signal found anything in the raw diff either');
+  });
+
   it('distinguishes an empty diff from a diff with nothing reviewable', () => {
     const empty = renderText(
       result({

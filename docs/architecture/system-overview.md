@@ -14,7 +14,6 @@ search. There are no embeddings and no vector database (see
 graph TB
     subgraph "CLI Layer"
         CLI[CLI Commands]
-        INIT[lien init]
         INDEX[lien index]
         SERVE[lien serve]
         STATUS[lien status]
@@ -74,8 +73,6 @@ graph TB
 
     %% CLI to Core
     CLI --> CONFIG
-    INIT --> CONFIG
-    INIT --> ECOSYSTEM
     INDEX --> INDEXER
     SERVE --> MCP
     STATUS --> CONFIG
@@ -140,7 +137,7 @@ graph TB
     classDef externalClass fill:#f5f5f5,stroke:#424242,stroke-width:2px
     classDef reviewClass fill:#ede7f6,stroke:#311b92,stroke-width:2px
 
-    class CLI,INIT,INDEX,SERVE,STATUS,CONFIGCMD,COMPLX cliClass
+    class CLI,INDEX,SERVE,STATUS,CONFIGCMD,COMPLX cliClass
     class MCP,TOOLS,SEARCH,SIMILAR,CONTEXT,LIST,DEPENDENTS,COMPLEXITY mcpClass
     class CONFIG,GLOBALCONFIG,INDEXER,SCANNER,CHUNKER,AST,TRAVERSER,SYMBOLS,TESTASSOC,MANIFEST,COMPLEXANALYZER coreClass
     class FACTORY,SQLITE,STRUCT,FTS dataClass
@@ -153,7 +150,6 @@ graph TB
 
 ### CLI layer
 - **CLI Commands**: Entry points for user interaction via command line
-- **lien init**: Initializes configuration and detects ecosystem presets
 - **lien index**: Indexes the codebase into the SQLite structural store
 - **lien serve**: Starts the MCP server for AI assistant integration
 - **lien status**: Shows current index status and configuration

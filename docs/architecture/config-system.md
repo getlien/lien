@@ -86,7 +86,7 @@ class ConfigService {
 }
 ```
 
-There is no `save()`: nothing in the codebase writes `.lien.config.json` programmatically (`lien init` never generated one beyond the historical `frameworks` scaffold, and no other command does either); users hand-edit the file. There is no `exists()` either; its only caller was its own test; `lien init` checks for the file directly with `fs.access()` instead of going through `ConfigService`. There is no `migrate()`/`needsMigration()`: the legacy pre-v0.3.0 shape is handled by the same warn-and-strip path as every other retired key, not a dedicated migration step.
+There is no `save()`: nothing in the codebase writes `.lien.config.json` programmatically (the since-deleted `lien init` never generated one beyond the historical `frameworks` scaffold, and no other command does either); users hand-edit the file. There is no `exists()` either — its only caller was its own test, and `lien init`, which checked for the file directly with `fs.access()` rather than going through `ConfigService`, no longer exists. There is no `migrate()`/`needsMigration()`: the legacy pre-v0.3.0 shape is handled by the same warn-and-strip path as every other retired key, not a dedicated migration step.
 
 ### Validation
 

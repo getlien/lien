@@ -1,0 +1,15 @@
+---
+'@liendev/lien': minor
+---
+
+Removes the Claude Code plugin and the commands that existed only to serve its hooks. These are breaking removals, kept at `minor` because this package is pre-1.0 and a series of removals is in progress; the 1.0 line is where they would be `major`.
+
+**Gone: the plugin.** `plugins/claude/` — 12 hook scripts, `hooks.json`, the plugin manifest — and `.claude-plugin/marketplace.json`, whose only entry pointed at it. `/plugin marketplace add getlien/lien` and `/plugin install lien` no longer work, and because marketplace-add resolves against the default branch rather than a release tag, they stop working the moment this merges rather than at the next publish. The docs site has been updated in the same change; if you have the plugin installed, `/plugin uninstall lien` then `/plugin marketplace remove getlien/lien` removes it.
+
+What the hooks automated is genuinely lost, not relocated: read annotation, a `lien delta` gate on writes, and a test-association reminder all fired at the tool boundary on every matching call. The checks survive as commands you run (`lien delta`, `lien health`, `lien review`); the automatic invocation does not. In this repo they are replaced by a skill at `.claude/skills/review/`.
+
+**Gone: `lien init`.** Its whole job was writing a six-line MCP server block into an editor's config file, and the MCP server it configures is itself being removed in the next release. Write the block by hand instead — [the installation guide](https://lien.dev/guide/installation) lists the exact file and JSON for Cursor, Claude Code, Windsurf, OpenCode, Kilo Code and Antigravity. The `--legacy` flag went with it; it selected a per-project setup that became the only setup once the plugin was gone, so it had nothing left to select. `inquirer` is no longer a dependency, since the interactive editor prompt was its only consumer.
+
+**Gone: `lien nudge`.** `note-shown` and `note-signal` existed for the deleted hooks to shell into, and had no other caller. `nudge doctor` diagnosed drift between the CLI and a live plugin hooks directory by checking for `nudge-signal.sh` — a file this release deletes — so after this change it could only ever report a false `critical` telling you to update a plugin that does not exist. The event store, `lien stats`, `lien recap` and `lien verify-tests` are unaffected: the shown→acted-on funnels still populate, from the narrower set of sources that are ordinary commands rather than hooks.
+
+**Fixed: `lien review` on a diff with nothing parser-analyzable.** A markdown-only diff has no analyzable files, and the text report asserted "No signal ran, so no signal found anything" off that empty set — while the documentation signals, which read the raw patch text rather than parsed files, had in fact run and found candidates. Both renderers now list them. Ten `--help` descriptions that advertised "(for hook scripts)", "(for the write hook)", "(for the plugin Stop hook)" and similar have been corrected, since there are no hooks to serve.

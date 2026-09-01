@@ -81,7 +81,7 @@ wasn't tuned on.
 
 ## Relationship to the MCP tools
 
-Lien Review is a separate product surface from the [MCP tools](/guide/mcp-tools): the MCP tools run locally inside your AI assistant, while Lien Review runs in CI against a pull request. Both share the same underlying AST parsing and complexity analysis (`@liendev/parser`), but Lien Review needs no local index and no `lien init`; it's a drop-in GitHub Action.
+Lien Review is a separate product surface from the [MCP tools](/guide/mcp-tools): the MCP tools run locally inside your AI assistant, while Lien Review runs in CI against a pull request. Both share the same underlying AST parsing and complexity analysis (`@liendev/parser`), but Lien Review needs no local index and no editor MCP config; it's a drop-in GitHub Action.
 
 Lien Review catches complexity regressions in CI either way, but the earlier
 and cheaper place to catch them is before the commit exists at all. If your

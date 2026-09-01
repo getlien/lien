@@ -8,7 +8,7 @@
 
 ## Global Installation
 
-Install Lien globally, then wire it up per-project with `lien init`:
+Install Lien globally:
 
 ```bash
 npm install -g @liendev/lien
@@ -20,20 +20,69 @@ Verify installation:
 lien --version
 ```
 
-Then in each project:
+Then wire it up per-project — see [Configuring Your Editor (MCP)](#configuring-your-editor-mcp) below.
 
-```bash
-lien init
+## Configuring Your Editor (MCP)
+
+Lien has no setup wizard: you add its MCP server to your editor's config by hand, once per project. Each editor reads that config from a different file:
+
+| Editor | Config File | Scope |
+|--------|-------------|-------|
+| Cursor | `.cursor/mcp.json` | Per-project |
+| Claude Code | `.mcp.json` | Per-project |
+| Windsurf | `~/.codeium/windsurf/mcp_config.json` | Global (needs `--root`) |
+| OpenCode | `opencode.json` | Per-project |
+| Kilo Code | `.kilocode/mcp.json` | Per-project |
+| Antigravity | Paste into MCP settings | Manual |
+
+**Cursor, Claude Code, and Kilo Code** all take the same `mcpServers` block. Create (or edit) the file listed above for your editor with:
+
+```json
+{
+  "mcpServers": {
+    "lien": {
+      "command": "lien",
+      "args": ["serve"]
+    }
+  }
+}
 ```
 
-`lien init` writes the correct MCP config for your editor: `.cursor/mcp.json` for Cursor, `opencode.json` for OpenCode, and so on. See the [Quick Start guide](/guide/getting-started) for the full per-editor flow.
+**Windsurf** shares one global config across every project, so it needs the absolute project path via `--root`:
+
+```json
+{
+  "mcpServers": {
+    "lien": {
+      "command": "lien",
+      "args": ["serve", "--root", "/absolute/path/to/project"]
+    }
+  }
+}
+```
+
+**OpenCode** uses an `mcp` key instead of `mcpServers`, with its own command shape:
+
+```json
+{
+  "mcp": {
+    "lien": {
+      "type": "local",
+      "command": ["lien", "serve"]
+    }
+  }
+}
+```
+
+**Antigravity** has no project config file to edit: open its MCP settings and paste the same `mcpServers` block shown for Cursor above.
+
+Per-project configs (Cursor, Claude Code, OpenCode, Kilo Code) auto-detect the project root, so you don't need `--root` for those. See the [Quick Start guide](/guide/getting-started) for the full per-editor walkthrough.
 
 ## Using npx (no global install)
 
 You can run Lien without installing it globally:
 
 ```bash
-npx @liendev/lien init
 npx @liendev/lien index
 npx @liendev/lien serve
 ```

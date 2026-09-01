@@ -49,11 +49,9 @@ npm install -g @liendev/lien
 
 **2. Configure your editor:**
 
-```bash
-lien init
-```
-
-This writes the correct MCP config for your editor — Cursor, Claude Code, Windsurf,
+Lien has no setup wizard: add its MCP server to your editor's config by hand.
+See [Configuring Your Editor (MCP)](/guide/installation#configuring-your-editor-mcp)
+for the exact config file and JSON snippet — Cursor, Claude Code, Windsurf,
 OpenCode, Kilo Code or Antigravity.
 
 **3. Restart your editor** and start asking questions about your codebase!
