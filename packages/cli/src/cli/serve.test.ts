@@ -114,3 +114,51 @@ describe('serveCommand', () => {
     expect(processExitSpy).toHaveBeenCalledWith(1);
   });
 });
+
+describe('serveCommand — removal notice', () => {
+  let errSpy: ReturnType<typeof vi.spyOn>;
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  let stdoutSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    vi.spyOn(process, 'exit').mockImplementation((() => {}) as never);
+    vi.mocked(startMCPServer).mockReset().mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('warns that the command is being removed', async () => {
+    await serveCommand({});
+    const stderr = errSpy.mock.calls.map((c: unknown[]) => String(c[0])).join('\n');
+    expect(stderr).toContain('is being REMOVED in the next release');
+    expect(stderr).toContain('lien health');
+    expect(stderr).toContain('lien delta');
+  });
+
+  // The load-bearing assertion. stdout is the MCP protocol stream: one stray
+  // byte of banner on it corrupts the JSON-RPC handshake this command exists
+  // to serve, turning a deprecation warning into a broken editor. The notice
+  // must be on stderr and ONLY stderr.
+  it('never writes the notice to stdout, which is the protocol stream', async () => {
+    await serveCommand({});
+
+    const stdout =
+      logSpy.mock.calls.map((c: unknown[]) => String(c[0])).join('\n') +
+      stdoutSpy.mock.calls.map((c: unknown[]) => String(c[0])).join('\n');
+
+    expect(stdout).not.toContain('REMOVED');
+    expect(stdout).not.toContain('lien health');
+  });
+
+  it('warns before validating --root, so a bad path still shows it', async () => {
+    await serveCommand({ root: '/definitely/does/not/exist' });
+    const stderr = errSpy.mock.calls.map((c: unknown[]) => String(c[0])).join('\n');
+    expect(stderr).toContain('is being REMOVED');
+    expect(stderr).toContain('does not exist');
+  });
+});
