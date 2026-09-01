@@ -7,7 +7,7 @@
 
 A diff that deletes files sent every one of them into the set `review` tried to parse, and a deleted file has no working-tree content — so they came back as failures. On a large deletion the report read:
 
-```
+```text
 lien review — 94 changed file(s) vs origin/main
 Not examined:
   92 files could not be parsed and were not examined
@@ -17,7 +17,7 @@ All 92 were simply gone from disk. Zero were genuine parse failures, and a reade
 
 Deletions now get their own line, and are excluded from the reviewed set rather than silently dropped — a deletion diff is mostly deleted files, so a reader seeing a small "changed files" count on a large PR should be told why:
 
-```
+```text
 lien review — 4 changed file(s) vs origin/main
 Not examined:
   26 changed file(s) are not parser-analyzable ...
