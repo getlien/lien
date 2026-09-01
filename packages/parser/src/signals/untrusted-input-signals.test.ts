@@ -1,18 +1,17 @@
 import { describe, it, expect } from 'vitest';
-import type { ReviewContext } from '../src/plugin-types.js';
+import type { SignalContext } from './signal-context.js';
 import {
   extractUntrustedInputSites,
   renderUntrustedInputSites,
   renderUntrustedInputSection,
-} from '../../parser/src/signals/untrusted-input-signals.js';
-import { buildInitialMessage } from '../src/plugins/agent/system-prompt.js';
+} from './untrusted-input-signals.js';
 
-function ctxWithPatches(patches?: Map<string, string>): ReviewContext {
+function ctxWithPatches(patches?: Map<string, string>): SignalContext {
   return {
     pr: patches ? { patches } : undefined,
     changedFiles: patches ? [...patches.keys()] : [],
     chunks: [],
-  } as unknown as ReviewContext;
+  } as unknown as SignalContext;
 }
 
 // Mirrors the real PR #541 shapes: a JSON.parse cast and a parseInt(argv).
@@ -182,26 +181,5 @@ describe('renderUntrustedInputSection', () => {
     );
     expect(section).toContain('<untrusted_input_sites>');
     expect(section).toContain('test/assert-cli.ts:38');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// buildInitialMessage wiring
-// ---------------------------------------------------------------------------
-
-describe('buildInitialMessage untrusted-input injection', () => {
-  it('includes the <untrusted_input_sites> block when parse sites exist', () => {
-    const ctx = ctxWithPatches(new Map([['test/run.ts', PARSE_FLAGS_PATCH]]));
-    const message = buildInitialMessage(ctx, { blastRadius: null });
-    expect(message).toContain('<untrusted_input_sites>');
-    expect(message).toContain('test/run.ts:47');
-    expect(message).toContain('[parseInt]');
-  });
-
-  it('omits the block when the diff has no untrusted-input sites', () => {
-    const patch = '@@ -1,1 +1,2 @@\n const x = 1;\n+const y = x + 1;';
-    const ctx = ctxWithPatches(new Map([['a.ts', patch]]));
-    const message = buildInitialMessage(ctx, { blastRadius: null });
-    expect(message).not.toContain('<untrusted_input_sites>');
   });
 });

@@ -2,21 +2,24 @@
  * Completeness guard: every signal module has tests SOMEWHERE.
  *
  * Parser's vitest config is `include: ['src/**\/*.test.ts']` — strictly
- * co-located — and this directory currently has almost none, because the 14
- * signal modules' 945 test-blocks still live in `packages/review/test/`. So
- * `npm run test -w @liendev/parser`, the fast inner loop CLAUDE.md prescribes,
- * exercises nearly none of this directory's ~9,200 LOC and reports green
- * regardless. Green-because-nothing-ran and green-because-it-passed are the
- * same shape unless something checks which one it is; that is this file.
+ * co-located. For a while this directory had almost no tests, because the 14
+ * signal modules' test-blocks lived in `packages/review/test/`, so
+ * `npm run test -w @liendev/parser` exercised nearly none of this directory's
+ * ~9,200 LOC and reported green regardless. Green-because-nothing-ran and
+ * green-because-it-passed are the same shape unless something checks which one
+ * it is; that is this file.
  *
- * It accepts EITHER location, so it passes today and keeps passing after the
- * follow-up relocates those tests here. What it will not let happen is the
- * case that actually loses coverage: `packages/review` being deleted (it is
- * slated for deletion) while its signal tests are still the only ones there
- * are. That fails here, loudly, naming the modules left uncovered — instead of
- * a test suite that quietly gets smaller. As of this writing 14 of the 16
- * modules pass only via the `packages/review/test` branch, so a deletion
- * flips all 14 at once.
+ * **The relocation has since happened.** All 14 moved here, and the 12
+ * `buildInitialMessage` prompt-injection blocks were dropped with them — those
+ * tested the review engine's rendering, not the signals, and the engine is
+ * being deleted. Parser went 2,030 → 2,519 tests; review went 1,714 → 1,186;
+ * the 39-test difference is exactly those blocks.
+ *
+ * This guard still accepts EITHER location, deliberately. It was written to
+ * fail loudly if `packages/review` were deleted while its signal tests were
+ * still the only ones — which is the deletion it was built for and has now
+ * survived. Keeping the both-locations branch costs nothing and means a future
+ * move in either direction is caught rather than silently losing coverage.
  *
  * Two limits, deliberately not fixed:
  *  - It asserts a test FILE EXISTS, not that the file tests anything. An empty

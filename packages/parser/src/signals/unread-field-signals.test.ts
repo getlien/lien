@@ -1,14 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import type { CodeChunk } from '@liendev/parser';
-import type { ReviewContext } from '../src/plugin-types.js';
-import type { ReviewRule, ResolvedRules } from '../src/plugins/agent/types.js';
+import type { CodeChunk } from '../types.js';
+import type { SignalContext } from './signal-context.js';
 import {
   computeAddedFields,
   computeUnreadFieldCandidates,
   renderUnreadFieldCandidates,
   renderUnreadFieldSection,
-} from '../../parser/src/signals/unread-field-signals.js';
-import { buildInitialMessage } from '../src/plugins/agent/system-prompt.js';
+} from './unread-field-signals.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -31,39 +29,18 @@ function makeContext(opts: {
   patches?: Map<string, string>;
   chunks?: CodeChunk[];
   repoChunks?: CodeChunk[];
-}): ReviewContext {
+}): SignalContext {
   const pr = opts.patches ? { patches: opts.patches } : undefined;
   return {
     pr,
     chunks: opts.chunks ?? [],
     repoChunks: opts.repoChunks,
     changedFiles: [],
-  } as unknown as ReviewContext;
+  } as unknown as SignalContext;
 }
 
 function patch(...lines: string[]): string {
   return lines.join('\n');
-}
-
-function incompleteHandlingRule(): ReviewRule {
-  return {
-    id: 'incomplete-handling',
-    name: 'Incomplete Interface/Type Handling',
-    description: 'test rule',
-    prompt: 'test prompt',
-    triggers: { always: true },
-    severity: 'error',
-    category: 'logic_error',
-    enabled: true,
-    source: 'builtin',
-  };
-}
-
-function resolvedRulesWith(...ids: string[]): ResolvedRules {
-  return {
-    active: ids.map(id => ({ ...incompleteHandlingRule(), id })),
-    skipped: [],
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -401,7 +378,7 @@ describe('computeAddedFields', () => {
 // ---------------------------------------------------------------------------
 
 describe('computeUnreadFieldCandidates', () => {
-  function baseContext(repoChunks: CodeChunk[]): ReviewContext {
+  function baseContext(repoChunks: CodeChunk[]): SignalContext {
     return makeContext({ patches: optionsPatches(), chunks: optionsChunks(), repoChunks });
   }
 
@@ -896,61 +873,5 @@ describe('renderUnreadFieldSection', () => {
     );
     expect(section).toContain('<unread_field_candidates>');
     expect(section).toContain('Options.timeout');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// buildInitialMessage injection (rule-gated, mirrors variant-sweep/sibling-surface)
-// ---------------------------------------------------------------------------
-
-describe('buildInitialMessage injection (rule-gated)', () => {
-  function contextWithUnreadField(): ReviewContext {
-    return {
-      ...makeContext({
-        patches: optionsPatches(),
-        chunks: optionsChunks(),
-        repoChunks: optionsChunks(),
-      }),
-      changedFiles: ['src/options.ts'],
-    } as ReviewContext;
-  }
-
-  it('includes the block when incomplete-handling is active and candidates exist', () => {
-    const message = buildInitialMessage(contextWithUnreadField(), {
-      blastRadius: null,
-      rules: resolvedRulesWith('incomplete-handling'),
-    });
-    expect(message).toContain('<unread_field_candidates>');
-    expect(message).toContain('Options.timeout');
-  });
-
-  it('omits the block when rules are not provided at all', () => {
-    const message = buildInitialMessage(contextWithUnreadField(), { blastRadius: null });
-    expect(message).not.toContain('<unread_field_candidates>');
-  });
-
-  it('omits the block when incomplete-handling is not among the active rules', () => {
-    const message = buildInitialMessage(contextWithUnreadField(), {
-      blastRadius: null,
-      rules: resolvedRulesWith('error-swallowing'),
-    });
-    expect(message).not.toContain('<unread_field_candidates>');
-  });
-
-  it('omits the block when the rule is active but no candidates are found', () => {
-    const consumer = 'function useOptions(o: Options): number {\n  return o.timeout * 2;\n}';
-    const context = {
-      ...makeContext({
-        patches: optionsPatches(),
-        chunks: optionsChunks(),
-        repoChunks: [...optionsChunks(), makeChunk('src/consumer.ts', 1, consumer)],
-      }),
-      changedFiles: ['src/options.ts'],
-    } as ReviewContext;
-    const message = buildInitialMessage(context, {
-      blastRadius: null,
-      rules: resolvedRulesWith('incomplete-handling'),
-    });
-    expect(message).not.toContain('<unread_field_candidates>');
   });
 });

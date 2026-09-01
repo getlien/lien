@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import type { CodeChunk } from '@liendev/parser';
-import type { ReviewContext } from '../src/plugin-types.js';
+import type { CodeChunk } from '../types.js';
+import type { SignalContext } from './signal-context.js';
 import {
   inferSingleTokenSwap,
   detectRenameSweeps,
@@ -8,8 +8,7 @@ import {
   computeRenameSweepSignals,
   renderRenameSweepSignals,
   renderRenameSweepSection,
-} from '../../parser/src/signals/rename-sweep-signals.js';
-import { buildInitialMessage } from '../src/plugins/agent/system-prompt.js';
+} from './rename-sweep-signals.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -28,14 +27,14 @@ function makeChunk(file: string, startLine: number, content: string): CodeChunk 
   } as unknown as CodeChunk;
 }
 
-function ctx(opts: { patches?: Map<string, string>; repoChunks?: CodeChunk[] }): ReviewContext {
+function ctx(opts: { patches?: Map<string, string>; repoChunks?: CodeChunk[] }): SignalContext {
   const pr = opts.patches ? { patches: opts.patches } : undefined;
   return {
     pr,
     repoChunks: opts.repoChunks,
     changedFiles: opts.patches ? [...opts.patches.keys()] : [],
     chunks: [],
-  } as unknown as ReviewContext;
+  } as unknown as SignalContext;
 }
 
 /** A single modification hunk swapping `removed`/`added` line-pairs (git emits all `-` then all `+`). */
@@ -489,28 +488,5 @@ describe('renderRenameSweepSection', () => {
     expect(section).toContain('<rename_sweep>');
     expect(section).toContain('packages/core/src/config/schema.ts:12');
     expect(section).toContain('When embeddings are off, search_code reports as disabled.');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// buildInitialMessage wiring
-// ---------------------------------------------------------------------------
-
-describe('buildInitialMessage rename-sweep injection', () => {
-  it('includes the <rename_sweep> block when a sweep touches prose', () => {
-    const patches = canonicalSweep();
-    patches.set(
-      'docs.md',
-      '@@ -1,1 +1,1 @@\n-Use semantic_search for retrieval.\n+Use search_code for retrieval.',
-    );
-    const message = buildInitialMessage(ctx({ patches }), { blastRadius: null });
-    expect(message).toContain('<rename_sweep>');
-    expect(message).toContain('docs.md:1 (doc)');
-  });
-
-  it('omits the block when there is no rename sweep', () => {
-    const patches = new Map([['a.ts', '@@ -1,1 +1,2 @@\n const x = 1;\n+const y = x + 1;']]);
-    const message = buildInitialMessage(ctx({ patches }), { blastRadius: null });
-    expect(message).not.toContain('<rename_sweep>');
   });
 });

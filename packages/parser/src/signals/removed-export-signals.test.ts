@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import type { CodeChunk } from '@liendev/parser';
-import type { ReviewContext } from '../src/plugin-types.js';
+import type { CodeChunk } from '../types.js';
+import type { SignalContext } from './signal-context.js';
 import {
   extractRemovedExports,
   findSurvivingReferences,
@@ -10,8 +10,7 @@ import {
   renderRemovedExportsSection,
   type RemovedExport,
   type RemovedExportContext,
-} from '../../parser/src/signals/removed-export-signals.js';
-import { buildInitialMessage } from '../src/plugins/agent/system-prompt.js';
+} from './removed-export-signals.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -33,9 +32,9 @@ function makeChunk(file: string, startLine: number, content: string): CodeChunk 
 function makeContext(opts: {
   patches?: Map<string, string>;
   repoChunks?: CodeChunk[];
-}): ReviewContext {
+}): SignalContext {
   const pr = opts.patches ? { patches: opts.patches } : undefined;
-  return { pr, repoChunks: opts.repoChunks } as unknown as ReviewContext;
+  return { pr, repoChunks: opts.repoChunks } as unknown as SignalContext;
 }
 
 function patch(...lines: string[]): string {
@@ -436,7 +435,7 @@ describe('computeRemovedExportContexts', () => {
 });
 
 // ---------------------------------------------------------------------------
-// renderRemovedExportsSection + buildInitialMessage wiring
+// renderRemovedExportsSection
 // ---------------------------------------------------------------------------
 
 describe('renderRemovedExportsSection', () => {
@@ -445,36 +444,5 @@ describe('renderRemovedExportsSection', () => {
       ['src/a.ts', patch('@@ -1,1 +1,1 @@', '-const x = 1;', '+const x = 2;')],
     ]);
     expect(renderRemovedExportsSection(makeContext({ patches }))).toBe('');
-  });
-});
-
-describe('buildInitialMessage injection', () => {
-  it('includes the <removed_exports> block with surviving references', () => {
-    const patches = new Map([
-      ['src/parser.rs', patch('@@ -1,1 +0,0 @@', '-pub fn parse_input(p: &str) {}')],
-    ]);
-    const repoChunks = [makeChunk('src/main.rs', 210, 'parser::parse_input(p);')];
-    const context = {
-      ...makeContext({ patches, repoChunks }),
-      changedFiles: ['src/parser.rs'],
-      chunks: [],
-    } as unknown as ReviewContext;
-
-    const message = buildInitialMessage(context, { blastRadius: null });
-    expect(message).toContain('<removed_exports>');
-    expect(message).toContain('parse_input (removed from src/parser.rs)');
-    expect(message).toContain('src/main.rs:210');
-  });
-
-  it('omits the block entirely when no exports were removed', () => {
-    const patches = new Map([
-      ['src/a.ts', patch('@@ -1,1 +1,1 @@', '-const x = 1;', '+const x = 2;')],
-    ]);
-    const context = {
-      ...makeContext({ patches }),
-      changedFiles: ['src/a.ts'],
-      chunks: [],
-    } as unknown as ReviewContext;
-    expect(buildInitialMessage(context, { blastRadius: null })).not.toContain('<removed_exports>');
   });
 });

@@ -1,20 +1,19 @@
 import { describe, it, expect } from 'vitest';
-import type { ReviewContext } from '../src/plugin-types.js';
+import type { SignalContext } from './signal-context.js';
 import {
   isGuidanceSurface,
   collectGuidanceSurfaceChanges,
   renderGuidanceSurfaceChanges,
   renderGuidanceSurfaceSection,
   type GuidanceSurfaceChange,
-} from '../../parser/src/signals/guidance-surface-signals.js';
-import { buildInitialMessage } from '../src/plugins/agent/system-prompt.js';
+} from './guidance-surface-signals.js';
 
-function ctxWithPatches(patches?: Map<string, string>): ReviewContext {
+function ctxWithPatches(patches?: Map<string, string>): SignalContext {
   return {
     pr: patches ? { patches } : undefined,
     changedFiles: patches ? [...patches.keys()] : [],
     chunks: [],
-  } as unknown as ReviewContext;
+  } as unknown as SignalContext;
 }
 
 // Mirrors the PR #658 miss: a hook whose guidance text calls a keyword search
@@ -247,35 +246,5 @@ describe('renderGuidanceSurfaceSection', () => {
     expect(section).toContain('docs/architecture/decisions/0011-remove-embeddings.md');
     expect(section).toContain('plugins/claude/hooks/augment-explore-task.sh');
     expect(section).not.toContain('src/index.ts');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// buildInitialMessage wiring
-// ---------------------------------------------------------------------------
-
-describe('buildInitialMessage guidance-surface injection', () => {
-  it('includes the <guidance_surface_changes> block when a guidance surface changed', () => {
-    const ctx = ctxWithPatches(
-      new Map([['plugins/claude/hooks/augment-explore-task.sh', HOOK_PATCH]]),
-    );
-    const message = buildInitialMessage(ctx, { blastRadius: null });
-    expect(message).toContain('<guidance_surface_changes>');
-    expect(message).toContain('plugins/claude/hooks/augment-explore-task.sh');
-  });
-
-  it('includes the block when only a project doc changed', () => {
-    const ctx = ctxWithPatches(
-      new Map([['docs/architecture/decisions/0011-remove-embeddings.md', ADR_PATCH]]),
-    );
-    const message = buildInitialMessage(ctx, { blastRadius: null });
-    expect(message).toContain('<guidance_surface_changes>');
-    expect(message).toContain('docs/architecture/decisions/0011-remove-embeddings.md');
-  });
-
-  it('omits the block when no guidance surface changed', () => {
-    const ctx = ctxWithPatches(new Map([['src/index.ts', '@@ -1 +1 @@\n-a\n+b']]));
-    const message = buildInitialMessage(ctx, { blastRadius: null });
-    expect(message).not.toContain('<guidance_surface_changes>');
   });
 });

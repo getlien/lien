@@ -1,34 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import type { CodeChunk } from '@liendev/parser';
-import type { ReviewContext } from '../src/plugin-types.js';
-import type { ReviewRule, ResolvedRules } from '../src/plugins/agent/types.js';
+import type { CodeChunk } from '../types.js';
+import type { SignalContext } from './signal-context.js';
 import {
   extractSiblingSurfaces,
   renderSiblingSurfaces,
   renderSiblingSurfacesSection,
-} from '../../parser/src/signals/sibling-surface-signals.js';
-import { buildInitialMessage } from '../src/plugins/agent/system-prompt.js';
-
-function incompleteHandlingRule(): ReviewRule {
-  return {
-    id: 'incomplete-handling',
-    name: 'Incomplete Interface/Type Handling',
-    description: 'test rule',
-    prompt: 'test prompt',
-    triggers: { languages: ['typescript'] },
-    severity: 'error',
-    category: 'logic_error',
-    enabled: true,
-    source: 'builtin',
-  };
-}
-
-function resolvedRulesWith(...ids: string[]): ResolvedRules {
-  return {
-    active: ids.map(id => ({ ...incompleteHandlingRule(), id })),
-    skipped: [],
-  };
-}
+} from './sibling-surface-signals.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -51,13 +28,13 @@ function makeContext(opts: {
   patches?: Map<string, string>;
   repoChunks?: CodeChunk[];
   changedFiles?: string[];
-}): ReviewContext {
+}): SignalContext {
   const pr = opts.patches ? { patches: opts.patches } : undefined;
   return {
     pr,
     repoChunks: opts.repoChunks,
     changedFiles: opts.changedFiles ?? [],
-  } as unknown as ReviewContext;
+  } as unknown as SignalContext;
 }
 
 // ---------------------------------------------------------------------------
@@ -112,7 +89,7 @@ const STREAM_HANDLER_CONTENT = [
   '}',
 ].join('\n');
 
-function guzzleLikeContext(): ReviewContext {
+function guzzleLikeContext(): SignalContext {
   const patches = new Map([['src/Handler/CurlHandler.php', CURL_HANDLER_PATCH]]);
   const repoChunks = [
     makeChunk('src/Handler/CurlHandler.php', 1, CURL_HANDLER_CONTENT),
@@ -120,7 +97,7 @@ function guzzleLikeContext(): ReviewContext {
   ];
   return {
     ...makeContext({ patches, repoChunks, changedFiles: ['src/Handler/CurlHandler.php'] }),
-  } as ReviewContext;
+  } as SignalContext;
 }
 
 // Mimics gin #3081: a new `binding/toml.go` whose decode function never calls
@@ -181,7 +158,7 @@ const TOML_GO_PATCH = `@@ -0,0 +1,8 @@
 +\treturn decoder.Decode(obj)
 +}`;
 
-function ginLikeContext(): ReviewContext {
+function ginLikeContext(): SignalContext {
   const patches = new Map([['binding/toml.go', TOML_GO_PATCH]]);
   const repoChunks = [
     makeChunk('binding/json.go', 1, JSON_GO_CONTENT),
@@ -247,7 +224,7 @@ describe('STRING_RE — ReDoS regression', () => {
   // `validateOptions(` clears the cohesion gate) so the pathological line,
   // added to CurlHandler.php's patch, actually reaches collectStringTokens
   // via extractUnmirroredAdditions's diff scan.
-  function contextWithAddedLine(extraLine: string): ReviewContext {
+  function contextWithAddedLine(extraLine: string): SignalContext {
     const patch = `@@ -1,4 +1,5 @@
  <?php
  class CurlHandler {
@@ -462,7 +439,7 @@ const ASYNC_CLIENT_CONTENT = [
 ].join('\n');
 const BLOCKING_CLIENT_CONTENT = ASYNC_CLIENT_CONTENT;
 
-function reqwestLikeContext(): ReviewContext {
+function reqwestLikeContext(): SignalContext {
   const patches = new Map([['async_impl/request.rs', ASYNC_REQUEST_PATCH]]);
   const repoChunks = [
     makeChunk('async_impl/request.rs', 1, ASYNC_REQUEST_CONTENT),
@@ -711,59 +688,5 @@ describe('renderSiblingSurfaces', () => {
     if (block) {
       expect(block.length).toBeLessThanOrEqual(3200); // budget + omission note slack
     }
-  });
-});
-
-// ---------------------------------------------------------------------------
-// buildInitialMessage wiring — gated on the incomplete-handling rule
-// ---------------------------------------------------------------------------
-
-describe('buildInitialMessage injection (rule-gated)', () => {
-  it('includes the <sibling_surfaces> block when incomplete-handling is active and entries exist', () => {
-    const context = {
-      ...guzzleLikeContext(),
-      chunks: [],
-    } as unknown as ReviewContext;
-
-    const message = buildInitialMessage(context, {
-      blastRadius: null,
-      rules: resolvedRulesWith('incomplete-handling'),
-    });
-    expect(message).toContain('<sibling_surfaces>');
-    expect(message).toContain('StreamHandler.php');
-  });
-
-  it('omits the block when rules are not provided at all', () => {
-    const context = {
-      ...guzzleLikeContext(),
-      chunks: [],
-    } as unknown as ReviewContext;
-    const message = buildInitialMessage(context, { blastRadius: null });
-    expect(message).not.toContain('<sibling_surfaces>');
-  });
-
-  it('omits the block when incomplete-handling is not among the active rules', () => {
-    const context = {
-      ...guzzleLikeContext(),
-      chunks: [],
-    } as unknown as ReviewContext;
-    const message = buildInitialMessage(context, {
-      blastRadius: null,
-      rules: resolvedRulesWith('boundary-change', 'edge-case-sweep'),
-    });
-    expect(message).not.toContain('<sibling_surfaces>');
-  });
-
-  it('omits the block when the rule is active but there is no repo index', () => {
-    const context = {
-      ...makeContext({ repoChunks: [] }),
-      changedFiles: ['src/a.ts'],
-      chunks: [],
-    } as unknown as ReviewContext;
-    const message = buildInitialMessage(context, {
-      blastRadius: null,
-      rules: resolvedRulesWith('incomplete-handling'),
-    });
-    expect(message).not.toContain('<sibling_surfaces>');
   });
 });
