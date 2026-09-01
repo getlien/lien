@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import type { CodeChunk } from '@liendev/parser';
-import type { ReviewContext } from '../src/plugin-types.js';
+import type { CodeChunk } from '../types.js';
+import type { SignalContext } from './signal-context.js';
 import {
   extractChangedLiterals,
   computeStaleLiteralCandidates,
@@ -8,9 +8,7 @@ import {
   renderStaleLiteralCandidates,
   renderStaleLiteralSection,
   renderStaleLiteralSectionWithDeadline,
-} from '../../parser/src/signals/stale-literal-signals.js';
-import { buildInitialMessage } from '../src/plugins/agent/system-prompt.js';
-import { silentLogger } from '../src/test-helpers.js';
+} from './stale-literal-signals.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -33,12 +31,12 @@ function makeContext(opts: {
   patches?: Map<string, string>;
   repoChunks?: CodeChunk[];
   diffLines?: Map<string, Set<number>>;
-}): ReviewContext {
+}): SignalContext {
   const pr =
     opts.patches || opts.diffLines
       ? { patches: opts.patches, diffLines: opts.diffLines }
       : undefined;
-  return { pr, repoChunks: opts.repoChunks } as unknown as ReviewContext;
+  return { pr, repoChunks: opts.repoChunks } as unknown as SignalContext;
 }
 
 // The canonical PR #539 shape: an unconditional model literal is
@@ -594,9 +592,9 @@ describe('scanRepoForStaleSites (single-pass restructure)', () => {
     ]);
     const repoChunks = [makeChunk('src/other.ts', 1, "const y = 'budget-test-literal';")];
     const warnings: string[] = [];
-    const context: ReviewContext = {
+    const context: SignalContext = {
       ...makeContext({ patches, repoChunks }),
-      logger: { ...silentLogger, warning: (msg: string) => warnings.push(msg) },
+      logger: { warning: (msg: string) => warnings.push(msg) },
     };
 
     // An already-past deadline trips the very first check deterministically —
@@ -614,9 +612,9 @@ describe('scanRepoForStaleSites (single-pass restructure)', () => {
     ]);
     const repoChunks = [makeChunk('src/other.ts', 1, "const y = 'on-time-literal';")];
     const warnings: string[] = [];
-    const context: ReviewContext = {
+    const context: SignalContext = {
       ...makeContext({ patches, repoChunks }),
-      logger: { ...silentLogger, warning: (msg: string) => warnings.push(msg) },
+      logger: { warning: (msg: string) => warnings.push(msg) },
     };
 
     const candidates = computeStaleLiteralCandidates(context);
@@ -670,53 +668,6 @@ describe('renderStaleLiteralCandidates', () => {
     expect(md).toContain("'claude-sonnet-4-6'");
     expect(md).toContain('src/pr-review.ts:20'); // the stale site
     expect(md).toMatch(/changed at src\/pr-review\.ts:1[1-3]/); // the touched site
-  });
-});
-
-// ---------------------------------------------------------------------------
-// buildInitialMessage wiring (zero-LLM proof the signal reaches the agent)
-// ---------------------------------------------------------------------------
-
-describe('buildInitialMessage injection', () => {
-  it('includes the <stale_literal_candidates> block when candidates exist', () => {
-    const patches = new Map([['src/pr-review.ts', CONDITIONALIZE_PATCH]]);
-    const diffLines = new Map([['src/pr-review.ts', new Set([11, 12, 13])]]);
-    const repoChunks = [makeChunk('src/pr-review.ts', 10, PR_REVIEW_CONTENT)];
-    const context = {
-      ...makeContext({ patches, repoChunks, diffLines }),
-      changedFiles: ['src/pr-review.ts'],
-      chunks: [],
-    } as unknown as ReviewContext;
-
-    const message = buildInitialMessage(context, { blastRadius: null });
-    expect(message).toContain('<stale_literal_candidates>');
-    expect(message).toContain("'claude-sonnet-4-6'");
-    expect(message).toContain('src/pr-review.ts:20');
-  });
-
-  it('omits the block entirely when no scan was possible (no diff / no index)', () => {
-    const context = {
-      ...makeContext({ repoChunks: [] }),
-      changedFiles: ['src/a.ts'],
-      chunks: [],
-    } as unknown as ReviewContext;
-    const message = buildInitialMessage(context, { blastRadius: null });
-    expect(message).not.toContain('<stale_literal_candidates>');
-  });
-
-  it('emits an explicit "None" block when the scan ran but found nothing', () => {
-    const patches = new Map([
-      ['src/a.ts', "@@ -1,1 +1,1 @@\n-const x = 'lonely-literal-xyz';\n+const x = compute();"],
-    ]);
-    const repoChunks = [makeChunk('src/a.ts', 1, 'const x = compute();')];
-    const context = {
-      ...makeContext({ patches, repoChunks }),
-      changedFiles: ['src/a.ts'],
-      chunks: [],
-    } as unknown as ReviewContext;
-    const message = buildInitialMessage(context, { blastRadius: null });
-    expect(message).toContain('<stale_literal_candidates>');
-    expect(message).toContain('None');
   });
 });
 

@@ -1,13 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import type { CodeChunk } from '@liendev/parser';
-import type { ReviewContext } from '../src/plugin-types.js';
+import type { CodeChunk } from '../types.js';
+import type { SignalContext } from './signal-context.js';
 import {
   computeDocsDriftCandidates,
   classifyRawDocReferences,
   isFullFileDeletion,
   extractDeletedPaths,
   isDistinctiveBareDirectory,
-} from '../../parser/src/signals/docs-drift-signals.js';
+} from './docs-drift-signals.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -39,14 +39,14 @@ function makeContext(opts: {
   patches?: Map<string, string>;
   repoChunks?: CodeChunk[];
   changedFiles?: string[];
-}): ReviewContext {
+}): SignalContext {
   const patches = opts.patches ?? new Map<string, string>();
   return {
     pr: { patches },
     repoChunks: opts.repoChunks ?? [],
     changedFiles: opts.changedFiles ?? [...patches.keys()],
     chunks: [],
-  } as unknown as ReviewContext;
+  } as unknown as SignalContext;
 }
 
 /** A hunk-only, PRODUCTION-SHAPED full-file-deletion patch: no `diff --git`/`deleted file

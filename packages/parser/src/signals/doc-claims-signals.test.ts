@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import type { CodeChunk } from '@liendev/parser';
-import type { ReviewContext } from '../src/plugin-types.js';
+import type { CodeChunk } from '../types.js';
+import type { SignalContext } from './signal-context.js';
 import {
   extractAnchors,
   extractCitedPath,
@@ -14,15 +14,14 @@ import {
   type DocClaim,
   type DocClaimCitedPath,
   type DocClaimEvidence,
-} from '../../parser/src/signals/doc-claims-signals.js';
-import { buildInitialMessage } from '../src/plugins/agent/system-prompt.js';
+} from './doc-claims-signals.js';
 
-function ctxWithPatches(patches?: Map<string, string>): ReviewContext {
+function ctxWithPatches(patches?: Map<string, string>): SignalContext {
   return {
     pr: patches ? { patches } : undefined,
     changedFiles: patches ? [...patches.keys()] : [],
     chunks: [],
-  } as unknown as ReviewContext;
+  } as unknown as SignalContext;
 }
 
 /** Build a synthetic repo chunk for evidence-lookup tests. */
@@ -256,27 +255,6 @@ describe('renderDocClaimsSection', () => {
     );
     expect(section).toContain('<doc_claims>');
     expect(section).toContain('The batch size defaults to 32.');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// buildInitialMessage wiring
-// ---------------------------------------------------------------------------
-
-describe('buildInitialMessage doc-claims injection', () => {
-  it('includes the <doc_claims> block when a guidance surface has a claim', () => {
-    const ctx = ctxWithPatches(new Map([[DOC, added('The batch size defaults to 32.')]]));
-    const message = buildInitialMessage(ctx, { blastRadius: null });
-    expect(message).toContain('<doc_claims>');
-    expect(message).toContain('The batch size defaults to 32.');
-  });
-
-  it('omits the block when no guidance surface carries a claim', () => {
-    const ctx = ctxWithPatches(
-      new Map([['packages/core/src/thing.ts', added('const y = x + 1;')]]),
-    );
-    const message = buildInitialMessage(ctx, { blastRadius: null });
-    expect(message).not.toContain('<doc_claims>');
   });
 });
 
@@ -661,7 +639,7 @@ describe('attachEvidence and renderer', () => {
       chunks: [],
       repoChunks: [chunk('packages/core/src/store.ts', 42, 'export const structuralStore = 1;')],
       pr: { patches: new Map() },
-    } as unknown as ReviewContext;
+    } as unknown as SignalContext;
     const claims = attachEvidence([claimOf('the `structuralStore` is the default')], ctx);
     expect(claims[0].evidence?.file).toBe('packages/core/src/store.ts');
 
@@ -1164,7 +1142,7 @@ describe('attachEvidence — referenced-file diff prefetch wiring', () => {
       changedFiles: [],
       chunks: [],
       pr: { patches: new Map([[WORKFLOW_FILE, added("LIEN_STALE_DUP_PASS: 'on'")]]) },
-    } as unknown as ReviewContext;
+    } as unknown as SignalContext;
     const claims = attachEvidence(
       [
         claimWithCitedPath('sets LIEN_STALE_DUP_PASS in .github/workflows/lien-review.yml', {

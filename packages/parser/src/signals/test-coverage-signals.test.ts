@@ -1,12 +1,19 @@
 import { describe, it, expect } from 'vitest';
-import type { ComplexityReport } from '@liendev/parser';
-import { createTestContext } from '../src/test-helpers.js';
+import type { ComplexityReport } from '../insights/types.js';
+import type { SignalContext } from './signal-context.js';
 import {
   computeTestCoverageGaps,
   renderTestCoverageGaps,
   renderTestCoverageSection,
-} from '../../parser/src/signals/test-coverage-signals.js';
-import { buildInitialMessage } from '../src/plugins/agent/system-prompt.js';
+} from './test-coverage-signals.js';
+
+/** Minimal SignalContext for these tests — only `changedFiles`/`complexityReport` matter. */
+function createTestContext(opts: {
+  changedFiles: string[];
+  complexityReport: ComplexityReport;
+}): SignalContext {
+  return { chunks: [], ...opts } as unknown as SignalContext;
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -148,42 +155,5 @@ describe('renderTestCoverageSection', () => {
       complexityReport: makeReport({ 'src/new-module.ts': [] }),
     });
     expect(renderTestCoverageSection(context)).toContain('<test_coverage>');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// buildInitialMessage wiring
-// ---------------------------------------------------------------------------
-
-describe('buildInitialMessage injection', () => {
-  it('includes the <test_coverage> block when a changed file has no tests', () => {
-    const context = createTestContext({
-      changedFiles: ['src/new-module.ts'],
-      complexityReport: makeReport({ 'src/new-module.ts': [] }),
-    });
-
-    const message = buildInitialMessage(context, { blastRadius: null });
-    expect(message).toContain('<test_coverage>');
-    expect(message).toContain('src/new-module.ts');
-  });
-
-  it('omits the block when every changed file has test associations', () => {
-    const context = createTestContext({
-      changedFiles: ['src/auth.ts'],
-      complexityReport: makeReport({ 'src/auth.ts': ['test/auth.test.ts'] }),
-    });
-
-    const message = buildInitialMessage(context, { blastRadius: null });
-    expect(message).not.toContain('<test_coverage>');
-  });
-
-  it('omits the block when there is no test-association data at all', () => {
-    const context = createTestContext({
-      changedFiles: ['src/a.ts'],
-      complexityReport: makeReport({}),
-    });
-
-    const message = buildInitialMessage(context, { blastRadius: null });
-    expect(message).not.toContain('<test_coverage>');
   });
 });

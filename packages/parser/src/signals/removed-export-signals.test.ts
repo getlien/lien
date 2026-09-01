@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import type { CodeChunk } from '@liendev/parser';
-import type { ReviewContext } from '../src/plugin-types.js';
+import type { CodeChunk } from '../types.js';
+import type { SignalContext } from './signal-context.js';
 import {
   extractRemovedExports,
   findSurvivingReferences,
@@ -10,8 +10,7 @@ import {
   renderRemovedExportsSection,
   type RemovedExport,
   type RemovedExportContext,
-} from '../../parser/src/signals/removed-export-signals.js';
-import { buildInitialMessage } from '../src/plugins/agent/system-prompt.js';
+} from './removed-export-signals.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -33,9 +32,9 @@ function makeChunk(file: string, startLine: number, content: string): CodeChunk 
 function makeContext(opts: {
   patches?: Map<string, string>;
   repoChunks?: CodeChunk[];
-}): ReviewContext {
+}): SignalContext {
   const pr = opts.patches ? { patches: opts.patches } : undefined;
-  return { pr, repoChunks: opts.repoChunks } as unknown as ReviewContext;
+  return { pr, repoChunks: opts.repoChunks } as unknown as SignalContext;
 }
 
 function patch(...lines: string[]): string {
@@ -436,7 +435,7 @@ describe('computeRemovedExportContexts', () => {
 });
 
 // ---------------------------------------------------------------------------
-// renderRemovedExportsSection + buildInitialMessage wiring
+// renderRemovedExportsSection
 // ---------------------------------------------------------------------------
 
 describe('renderRemovedExportsSection', () => {
@@ -446,35 +445,35 @@ describe('renderRemovedExportsSection', () => {
     ]);
     expect(renderRemovedExportsSection(makeContext({ patches }))).toBe('');
   });
-});
 
-describe('buildInitialMessage injection', () => {
-  it('includes the <removed_exports> block with surviving references', () => {
+  /**
+   * NEW here, not ported. The deleted `buildInitialMessage injection` block was
+   * the only end-to-end cover for this path — patch + repoChunks all the way
+   * through to rendered text naming the surviving reference — and its assertions
+   * could not move, because they went through the review engine's prompt
+   * builder, which is being deleted.
+   *
+   * The pieces either side of that path are unit-tested above
+   * (`extractRemovedExports`, `findSurvivingReferences`,
+   * `computeRemovedExportContexts`, `renderRemovedExports`), so what was lost is
+   * specifically their COMPOSITION. `renderRemovedExportsSection` is exactly
+   * that composition minus the `<removed_exports>` wrapper, so the coverage is
+   * recoverable without inventing behaviour — only the wrapper, which was
+   * engine-specific, is genuinely gone.
+   *
+   * Same Rust fixture as the deleted test, deliberately: a removed `pub fn`
+   * whose caller survives is the shape that matters here, and Rust exercises the
+   * non-TS path of a signal that only handles TS/JS/Rust at all.
+   */
+  it('renders a removed export together with the surviving reference that still calls it', () => {
     const patches = new Map([
       ['src/parser.rs', patch('@@ -1,1 +0,0 @@', '-pub fn parse_input(p: &str) {}')],
     ]);
     const repoChunks = [makeChunk('src/main.rs', 210, 'parser::parse_input(p);')];
-    const context = {
-      ...makeContext({ patches, repoChunks }),
-      changedFiles: ['src/parser.rs'],
-      chunks: [],
-    } as unknown as ReviewContext;
 
-    const message = buildInitialMessage(context, { blastRadius: null });
-    expect(message).toContain('<removed_exports>');
-    expect(message).toContain('parse_input (removed from src/parser.rs)');
-    expect(message).toContain('src/main.rs:210');
-  });
+    const rendered = renderRemovedExportsSection(makeContext({ patches, repoChunks }));
 
-  it('omits the block entirely when no exports were removed', () => {
-    const patches = new Map([
-      ['src/a.ts', patch('@@ -1,1 +1,1 @@', '-const x = 1;', '+const x = 2;')],
-    ]);
-    const context = {
-      ...makeContext({ patches }),
-      changedFiles: ['src/a.ts'],
-      chunks: [],
-    } as unknown as ReviewContext;
-    expect(buildInitialMessage(context, { blastRadius: null })).not.toContain('<removed_exports>');
+    expect(rendered).toContain('parse_input (removed from src/parser.rs)');
+    expect(rendered).toContain('src/main.rs:210');
   });
 });

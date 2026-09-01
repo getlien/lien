@@ -1,14 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import type { CodeChunk } from '@liendev/parser';
-import type { ReviewContext } from '../src/plugin-types.js';
-import type { ReviewRule, ResolvedRules } from '../src/plugins/agent/types.js';
+import type { CodeChunk } from '../types.js';
+import type { SignalContext } from './signal-context.js';
 import {
   classifyCatchBody,
   computeUndiscriminatedCatches,
   renderUndiscriminatedCatchCandidates,
   renderUndiscriminatedCatchSection,
-} from '../../parser/src/signals/catch-discrimination-signals.js';
-import { buildInitialMessage } from '../src/plugins/agent/system-prompt.js';
+} from './catch-discrimination-signals.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -31,33 +29,12 @@ function makeContext(opts: {
   patches?: Map<string, string>;
   chunks?: CodeChunk[];
   diffLines?: Map<string, Set<number>>;
-}): ReviewContext {
+}): SignalContext {
   const pr =
     opts.patches || opts.diffLines
       ? { patches: opts.patches, diffLines: opts.diffLines }
       : undefined;
-  return { pr, chunks: opts.chunks ?? [], changedFiles: [] } as unknown as ReviewContext;
-}
-
-function errorSwallowingRule(): ReviewRule {
-  return {
-    id: 'error-swallowing',
-    name: 'Silent Error Swallowing',
-    description: 'test rule',
-    prompt: 'test prompt',
-    triggers: { always: true },
-    severity: 'error',
-    category: 'error_handling',
-    enabled: true,
-    source: 'builtin',
-  };
-}
-
-function resolvedRulesWith(...ids: string[]): ResolvedRules {
-  return {
-    active: ids.map(id => ({ ...errorSwallowingRule(), id })),
-    skipped: [],
-  };
+  return { pr, chunks: opts.chunks ?? [], changedFiles: [] } as unknown as SignalContext;
 }
 
 /** All-added unified diff hunk header for a brand-new N-line file. */
@@ -400,40 +377,5 @@ describe('renderUndiscriminatedCatchSection', () => {
     const rendered = renderUndiscriminatedCatchSection(makeContext({ patches, chunks }));
     expect(rendered).toContain('<undiscriminated_catch_candidates>');
     expect(rendered).toContain('src/github-api.ts:5-18');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// buildInitialMessage wiring — gated on the error-swallowing rule
-// ---------------------------------------------------------------------------
-
-describe('buildInitialMessage injection (rule-gated)', () => {
-  const patches = new Map([['src/github-api.ts', asAddedPatch(PR752_FUNCTION)]]);
-  const chunks = [makeChunk('src/github-api.ts', 1, PR752_FUNCTION)];
-
-  it('includes the block when error-swallowing is active and candidates exist', () => {
-    const context = makeContext({ patches, chunks });
-    const message = buildInitialMessage(context, { rules: resolvedRulesWith('error-swallowing') });
-    expect(message).toContain('<undiscriminated_catch_candidates>');
-  });
-
-  it('omits the block when rules are not provided at all', () => {
-    const context = makeContext({ patches, chunks });
-    const message = buildInitialMessage(context);
-    expect(message).not.toContain('<undiscriminated_catch_candidates>');
-  });
-
-  it('omits the block when error-swallowing is not among the active rules', () => {
-    const context = makeContext({ patches, chunks });
-    const message = buildInitialMessage(context, {
-      rules: resolvedRulesWith('boundary-change', 'edge-case-sweep'),
-    });
-    expect(message).not.toContain('<undiscriminated_catch_candidates>');
-  });
-
-  it('omits the block when the rule is active but no candidates are found', () => {
-    const context = makeContext({ chunks: [] });
-    const message = buildInitialMessage(context, { rules: resolvedRulesWith('error-swallowing') });
-    expect(message).not.toContain('<undiscriminated_catch_candidates>');
   });
 });

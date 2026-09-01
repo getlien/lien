@@ -1,15 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import type { CodeChunk } from '@liendev/parser';
-import type { ReviewContext } from '../src/plugin-types.js';
-import type { ReviewRule, ResolvedRules } from '../src/plugins/agent/types.js';
+import type { CodeChunk } from '../types.js';
+import type { SignalContext } from './signal-context.js';
 import {
   computeAddedVariants,
   resolveFamilyExisting,
   computeVariantSweepContexts,
   renderVariantSweepCandidates,
   renderVariantSweepSection,
-} from '../../parser/src/signals/variant-sweep-signals.js';
-import { buildInitialMessage } from '../src/plugins/agent/system-prompt.js';
+} from './variant-sweep-signals.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -32,39 +30,18 @@ function makeContext(opts: {
   patches?: Map<string, string>;
   chunks?: CodeChunk[];
   repoChunks?: CodeChunk[];
-}): ReviewContext {
+}): SignalContext {
   const pr = opts.patches ? { patches: opts.patches } : undefined;
   return {
     pr,
     chunks: opts.chunks ?? [],
     repoChunks: opts.repoChunks,
     changedFiles: [],
-  } as unknown as ReviewContext;
+  } as unknown as SignalContext;
 }
 
 function patch(...lines: string[]): string {
   return lines.join('\n');
-}
-
-function incompleteHandlingRule(): ReviewRule {
-  return {
-    id: 'incomplete-handling',
-    name: 'Incomplete Interface/Type Handling',
-    description: 'test rule',
-    prompt: 'test prompt',
-    triggers: { always: true },
-    severity: 'error',
-    category: 'logic_error',
-    enabled: true,
-    source: 'builtin',
-  };
-}
-
-function resolvedRulesWith(...ids: string[]): ResolvedRules {
-  return {
-    active: ids.map(id => ({ ...incompleteHandlingRule(), id })),
-    skipped: [],
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -657,57 +634,5 @@ describe('renderVariantSweepSection', () => {
     const section = renderVariantSweepSection(makeContext({ patches, chunks, repoChunks }));
     expect(section).toContain('<variant_sweep_candidates>');
     expect(section).toContain('Color.Green');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// buildInitialMessage injection (rule-gated, mirrors catch-discrimination)
-// ---------------------------------------------------------------------------
-
-describe('buildInitialMessage injection (rule-gated)', () => {
-  function contextWithStaleSwitch(): ReviewContext {
-    const patches = new Map([['src/color.ts', COLOR_ENUM_PATCH]]);
-    const chunks = [makeChunk('src/color.ts', 1, COLOR_ENUM)];
-    const repoChunks = [makeChunk('src/consumer.ts', 1, colorSwitchConsumer(false))];
-    return {
-      ...makeContext({ patches, chunks, repoChunks }),
-      changedFiles: ['src/color.ts'],
-    } as ReviewContext;
-  }
-
-  it('includes the block when incomplete-handling is active and candidates exist', () => {
-    const message = buildInitialMessage(contextWithStaleSwitch(), {
-      blastRadius: null,
-      rules: resolvedRulesWith('incomplete-handling'),
-    });
-    expect(message).toContain('<variant_sweep_candidates>');
-    expect(message).toContain('Color.Green');
-  });
-
-  it('omits the block when rules are not provided at all', () => {
-    const message = buildInitialMessage(contextWithStaleSwitch(), { blastRadius: null });
-    expect(message).not.toContain('<variant_sweep_candidates>');
-  });
-
-  it('omits the block when incomplete-handling is not among the active rules', () => {
-    const message = buildInitialMessage(contextWithStaleSwitch(), {
-      blastRadius: null,
-      rules: resolvedRulesWith('error-swallowing'),
-    });
-    expect(message).not.toContain('<variant_sweep_candidates>');
-  });
-
-  it('omits the block when the rule is active but no candidates are found', () => {
-    const patches = new Map([['src/color.ts', COLOR_ENUM_PATCH]]);
-    const chunks = [makeChunk('src/color.ts', 1, COLOR_ENUM)];
-    const context = {
-      ...makeContext({ patches, chunks, repoChunks: [] }),
-      changedFiles: ['src/color.ts'],
-    } as ReviewContext;
-    const message = buildInitialMessage(context, {
-      blastRadius: null,
-      rules: resolvedRulesWith('incomplete-handling'),
-    });
-    expect(message).not.toContain('<variant_sweep_candidates>');
   });
 });
