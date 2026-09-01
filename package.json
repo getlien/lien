@@ -14,17 +14,15 @@
   "workspaces": [
     "packages/parser",
     "packages/core",
-    "packages/review",
     "packages/cli",
-    "packages/action",
     "packages/parser-native",
     "packages/site"
   ],
   "scripts": {
-    "build": "npm run build -w @liendev/parser && npm run build -w @liendev/core && npm run build -w @liendev/review && npm run build -w packages/cli && npm run build -w @liendev/action",
+    "build": "npm run build -w @liendev/parser && npm run build -w @liendev/core && npm run build -w packages/cli",
     "build:core": "npm run build -w @liendev/parser && npm run build -w @liendev/core",
     "dev": "npm run dev -w packages/cli",
-    "typecheck": "npm run build -w @liendev/parser -w @liendev/core -w @liendev/review && npm run typecheck -w packages/cli -w packages/review -w packages/action",
+    "typecheck": "npm run build -w @liendev/parser -w @liendev/core && npm run typecheck -w packages/cli",
     "clean": "rm -rf packages/*/dist",
     "changeset": "changeset",
     "version": "changeset version && npx --yes npm@10.9.4 install --package-lock-only",
@@ -32,7 +30,7 @@
     "docs:dev": "npm run docs:dev -w packages/site",
     "docs:build": "npm run docs:build -w packages/site",
     "docs:preview": "npm run docs:preview -w packages/site",
-    "test": "npm run test -w @liendev/parser-native && npm run test -w @liendev/parser && npm run test -w @liendev/core && npm run test -w @liendev/review && npm run test -w packages/cli && npm run test -w @liendev/action",
+    "test": "npm run test -w @liendev/parser-native && npm run test -w @liendev/parser && npm run test -w @liendev/core && npm run test -w packages/cli",
     "test:coverage": "npm run test:coverage -w @liendev/core",
     "lint": "eslint --no-error-on-unmatched-pattern packages/*/src/ packages/*/test/ packages/parser-native/index.js packages/parser-native/index.d.ts packages/parser-native/scripts/*.mjs",
     "lint:fix": "eslint --fix --no-error-on-unmatched-pattern packages/*/src/ packages/*/test/ packages/parser-native/index.js packages/parser-native/index.d.ts packages/parser-native/scripts/*.mjs",
