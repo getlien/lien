@@ -1,9 +1,9 @@
 ---
 name: dogfood
-description: Build Lien, restart MCP, then use a 7-agent team to test tools, review docs, audit code quality, evaluate architecture, review tests, audit security, and assess DX — all in parallel.
+description: Build Lien, then run a 7-agent team in parallel to test the CLI commands, review docs, audit code quality, evaluate architecture, review tests, audit security, and assess DX.
 disable-model-invocation: true
 user-invocable: true
-allowed-tools: Bash(npm run build), Bash(npm run typecheck), Bash(npm test), Bash(npm audit *), Bash(npx lien *), Bash(kill *), Bash(lsof *), Bash(node *), mcp__plugin_lien_lien__search_code, mcp__plugin_lien_lien__list_functions, mcp__plugin_lien_lien__get_complexity, mcp__plugin_lien_lien__get_files_context, mcp__plugin_lien_lien__get_dependents, mcp__plugin_lien_lien__find_similar, Read, Glob, Grep, Write, Edit, Agent, TaskCreate, TaskUpdate, TaskList, TaskGet
+allowed-tools: Bash(npm run build), Bash(npm run typecheck), Bash(npm test), Bash(npm audit *), Bash(node *), Bash(mktemp *), Read, Glob, Grep, Write, Edit, Agent, TaskCreate, TaskUpdate, TaskList, TaskGet
 ---
 
 # Lien Dogfooding Session
@@ -17,21 +17,19 @@ You are running a full dogfooding session for Lien. This session spawns **seven 
 
 If either fails, stop and report the errors. Do NOT proceed.
 
-## Phase 2: Restart MCP Server
+Lien has no server and no persisted index — there is nothing to restart between the build and the next phase. Every command below parses the working tree fresh, on the spot, reading whatever the build just produced. Every invocation in this skill runs the freshly built dist directly:
 
-The Lien MCP server needs to be restarted so it picks up the fresh build.
+```
+node packages/cli/dist/index.js <command> [options]
+```
 
-1. Find the running Lien MCP server process: `lsof -i :7133` or look for the `node` process running `dist/index.js serve`
-2. Kill it if running: `kill <pid>`
-3. Wait a moment, then tell the user: **"Please run `/mcp` and restart the `lien` server, then press Enter to continue."** Claude Code manages the MCP server lifecycle — you cannot reconnect it programmatically.
+Never `npx lien` — that resolves whatever `@liendev/lien` is currently published on npm, not the code you just built in Phase 1.
 
-**IMPORTANT:** Wait for the user to confirm the MCP server is back before proceeding to Phase 3.
-
-## Phase 3: Spawn Seven Agents in Parallel
+## Phase 2: Spawn Seven Agents in Parallel
 
 | # | Agent | Report File |
 |---|------------|-------------|
-| 1 | `mcp-tester` | `.wip/dogfood-mcp-report.md` |
+| 1 | `cli-tester` | `.wip/dogfood-cli-report.md` |
 | 2 | `docs-reviewer` | `.wip/dogfood-docs-report.md` |
 | 3 | `code-quality` | `.wip/dogfood-quality-report.md` |
 | 4 | `architect` | `.wip/dogfood-architecture-report.md` |
@@ -41,7 +39,7 @@ The Lien MCP server needs to be restarted so it picks up the fresh build.
 
 Create one task per agent with `TaskCreate`, then spawn all seven with the `Agent` tool **in a single message** (parallel Agent calls), each prompted with its full plan from the corresponding section below. Mark each task `in_progress` via `TaskUpdate` as its agent starts.
 
-## Phase 4: Wait & Collect Results
+## Phase 3: Wait & Collect Results
 
 Wait for all seven agents to return. Once all are done:
 
@@ -52,88 +50,70 @@ Wait for all seven agents to return. Once all are done:
 
 ---
 
-## MCP Tool Testing Plan
+## CLI Tool Testing Plan
 
-> Give this entire section to the `mcp-tester` agent.
+> Give this entire section to the `cli-tester` agent.
 
-Test each of the 6 Lien MCP tools against the Lien codebase. For each tool, run meaningful queries, verify the results make sense, and note any issues.
+Lien's entire surface is four commands — `complexity`, `health`, `review`, `delta`. There is no server, no index, and no search: every command parses the working tree on demand. Test each command against the Lien codebase itself, invoking the build from Phase 1 directly (`node packages/cli/dist/index.js <command>`, run from the repo root) — never `npx lien`, which would run whatever is published on npm instead of this build.
 
-### search_code
+For every command, also run **at least one hostile case**: invoke it from a directory that is not a git repository and has no source files (`mktemp -d`, then run the command against that path). Honest empty-state behavior is a MANDATORY project requirement (CLAUDE.md, "Index-State Honesty") — a command must never render "found nothing" as "clean."
 
-Lexical full-text (FTS5/BM25) search — query with concrete keywords/identifiers that appear in the code, not natural-language questions. Run at least 3 queries with varying specificity:
+### complexity
 
-- Broad: `search_code({ query: "indexing pipeline chunk batch" })`
-- Specific: `search_code({ query: "code chunk insert batch structural store" })`
-- Cross-cutting: `search_code({ query: "test file associations imports" })`
+- `node packages/cli/dist/index.js complexity` — whole-repo scan (baseline on this repo: ~600 files, ~2s, dozens of pre-existing threshold violations — that's expected, not a regression)
+- `node packages/cli/dist/index.js complexity --files <one real file>` — scoped to a single file
+- `node packages/cli/dist/index.js complexity --format json` and `--format sarif` — verify both parse as valid JSON / SARIF 2.1.0
+- `node packages/cli/dist/index.js complexity --fail-on error` and `--fail-on warning` — verify the exit code actually changes when violations of that severity exist, and is 0 on a file with none
+- **Hostile case:** run it against an empty non-git directory — expect `Error: cannot analyze complexity — No files found to index` and a non-zero exit, never "0 violations, clean"
 
-**Check:** Results should return relevant files with reasonable relevance scores. Flag if results seem off-topic or if relevance categories don't match expectations.
+**Check:** violations point at real files/lines; JSON and SARIF are well-formed; `--fail-on` changes the exit code; the hostile case hard-errors instead of reporting false-clean.
 
-### list_functions
+### health
 
-Run at least 3 pattern queries:
+- `node packages/cli/dist/index.js health --top 5` — default ranking
+- `node packages/cli/dist/index.js health --top 5 --path <a real subpackage path>` — scoped ranking
+- `node packages/cli/dist/index.js health --top 5 --include-tests` — include test files in the ranking
+- `node packages/cli/dist/index.js health --format json --top 5` — verify the JSON (`entries`, `score`, `shape`, `coverage`) matches the text output
+- **Hostile case:** run it against an empty non-git directory — expect "No health data — No files found to index" with an explicit "This is NOT a clean bill of health" warning (exit 0 is correct here — `health` is advisory, never gate-shaped)
 
-- `list_functions({ pattern: ".*Service.*" })`
-- `list_functions({ pattern: ".*Handler.*" })`
-- `list_functions({ symbolType: "class" })`
-- `list_functions({ symbolType: "interface" })`
+**Check:** ranked functions are genuinely complex and under-tested (spot-check by reading a couple); `--path` actually scopes the ranking; the hostile case is loud about having no data rather than silent.
 
-**Check:** Results should match the regex patterns. Verify a few results by reading the actual files to confirm they exist and are correctly categorized.
+### review
 
-### get_files_context
+- `node packages/cli/dist/index.js review` — against HEAD (expect "nothing reviewable" on a clean working tree, or real candidates if there's a pending diff)
+- `node packages/cli/dist/index.js review --base <an older ref, e.g. HEAD~5>` — compare against a different ref
+- `node packages/cli/dist/index.js review --format json` — verify the JSON structure (`changedFiles`, `withheldSignals`, `scanFailure`, candidates)
+- `node packages/cli/dist/index.js review --no-repo-scan` — verify it explicitly names the cross-file signals it skipped rather than silently running fewer
+- **Hostile case:** run it against a non-git directory — expect `lien review could not run: ... fatal: not a git repository` and a non-zero exit, never a false-clean report
 
-Test with single and batch calls:
+**Check:** the report is explicit about what it did NOT examine (unsupported files, withheld signals) rather than omitting it silently; candidates (when present) point at real diff hunks; the hostile case surfaces the git error.
 
-- Single: `get_files_context({ filepaths: "packages/cli/src/mcp/tools.ts" })`
-- Batch: `get_files_context({ filepaths: ["packages/core/src/indexer/incremental.ts", "packages/core/src/vectordb/factory.ts"] })`
+### delta
 
-**Check:** Verify `testAssociations` are returned and point to actual test files. Verify chunks contain meaningful code sections.
+- `node packages/cli/dist/index.js delta` — against HEAD (expect "no complexity-affecting changes" on a clean working tree)
+- `node packages/cli/dist/index.js delta --file <one real file>` — single-file fast path
+- `node packages/cli/dist/index.js delta --soft` — verify it always exits 0, report content otherwise unchanged
+- `node packages/cli/dist/index.js delta --base <a real ref, e.g. origin/main>` — verify cross-ref comparison
+- **Hostile case:** run it against a non-git directory — expect `lien delta: not a git repository (or git is not installed)` and a non-zero exit. Unlike `health`/`review`, this one is gate-shaped: silently passing here would be worse than erroring, since CI depends on the exit code.
 
-### get_dependents
-
-Test impact analysis:
-
-- `get_dependents({ filepath: "packages/core/src/vectordb/factory.ts" })`
-- `get_dependents({ filepath: "packages/core/src/indexer/incremental.ts" })`
-- With symbol: `get_dependents({ filepath: "packages/core/src/vectordb/sqlite/fts-search.ts", symbol: "keywordSearch" })`
-
-**Check:** Dependents should be files that actually import the target. Verify a few by reading the import statements.
-
-### get_complexity
-
-Test complexity analysis:
-
-- Top hotspots: `get_complexity({ top: 10 })`
-- Specific files: `get_complexity({ files: ["packages/cli/src/mcp/tools.ts"] })`
-
-**Check:** Results should include complexity metrics (cyclomatic, cognitive, halstead). Verify the most complex functions are genuinely complex by reading them.
-
-### find_similar
-
-Test code similarity:
-
-- Pick a real code snippet from the codebase (read a file first) and search for similar patterns
-- Example: find code similar to an import pattern, a function signature, or a common pattern in the codebase
-
-**Check:** Results should return structurally similar code. Verify matches are genuine similarities, not false positives.
+**Check:** delta reports only NEW threshold crossings, not pre-existing ones (make a small, harmless edit that doesn't cross a threshold, confirm delta stays quiet, then discard the edit); `--soft` changes only the exit code, never the report; the hostile case hard-errors.
 
 ### Output
 
-Write a detailed report to `.wip/dogfood-mcp-report.md` with:
+Write a detailed report to `.wip/dogfood-cli-report.md` with:
 
-| Tool | Status | Notes |
-|------|--------|-------|
-| search_code | pass/warn/fail | ... |
-| list_functions | pass/warn/fail | ... |
-| get_files_context | pass/warn/fail | ... |
-| get_dependents | pass/warn/fail | ... |
-| get_complexity | pass/warn/fail | ... |
-| find_similar | pass/warn/fail | ... |
+| Command | Status | Notes |
+|---------|--------|-------|
+| complexity | pass/warn/fail | ... |
+| health | pass/warn/fail | ... |
+| review | pass/warn/fail | ... |
+| delta | pass/warn/fail | ... |
 
-Include for each tool:
-- Queries run and results observed
+Include for each command:
+- Invocations run and output observed, against this repo AND the hostile non-git case
 - Any errors or unexpected behavior
-- Response quality observations (relevance, accuracy)
-- Performance notes (any tool noticeably slow?)
+- Whether index-state honesty holds — does it ever present "found nothing" as "clean"? This is a hard project requirement, not a style preference
+- Performance notes (anything noticeably slow on this repo's ~600 files)
 - Suggestions for improvement
 
 ---
@@ -144,6 +124,8 @@ Include for each tool:
 
 Audit all user-facing documentation for accuracy, completeness, and consistency with the actual codebase. The goal is to catch stale docs, missing features, wrong examples, and broken references.
 
+**Context:** Lien recently removed its MCP server, persisted SQLite index, and FTS5 lexical search entirely — along with `lien serve`, `lien index`, `lien status`, and the `search_code` / `list_functions` / `get_files_context` / `get_dependents` / `find_similar` / `get_complexity` MCP tools. It is now a pure on-demand parser with four commands (`complexity`, `health`, `review`, `delta`). Treat any doc that still describes a server, an index, MCP tools, or those three deleted commands as current instructions as a bug — flag it wherever you find it, not only in the files listed below.
+
 ### What to review
 
 **Site documentation** (`packages/site/docs/`):
@@ -151,34 +133,36 @@ Audit all user-facing documentation for accuracy, completeness, and consistency 
 - `how-it-works.md` — Technical overview accuracy
 - `guide/getting-started.md` — Setup instructions correctness
 - `guide/installation.md` — Installation steps
-- `guide/cli-commands.md` — CLI command docs vs actual CLI
+- `guide/cli-commands.md` — CLI command docs vs the actual four commands
 - `guide/configuration.md` — Config options vs actual config schema
-- `guide/mcp-tools.md` — MCP tool docs vs actual tool parameters and responses
+- `guide/lien-review.md`, `guide/review-evidence.md`, `guide/review-harness.md` — the Lien Review GitHub Action docs
 
 **Architecture docs** (`docs/architecture/`):
-- `system-overview.md` — Does it reflect current architecture?
-- `indexing-flow.md` — Does it match actual indexing code?
-- `mcp-server-flow.md` — Does it match MCP server implementation?
-- `data-flow.md` — Is the data flow diagram still accurate?
+- `system-overview.md` — Does it reflect the current on-demand-parse architecture?
+- `data-flow.md` — Is the data flow diagram still accurate now that there's no index to write to?
 - `config-system.md` — Does it match actual config handling?
 - `test-association.md` — Does it match test detection logic?
-- ADRs in `decisions/` — Are they still accurate and none missing for recent changes?
+- `lien-delta.md` — Does it match the `delta` command as built?
+- `native-parser.md` — Parser architecture accuracy
+- `review-pass-architecture.md` — Review engine plugin architecture (the `review`/`action` packages' GitHub Action, not the CLI's `review` command)
+- ADRs in `decisions/` — Are they still accurate? Is the MCP/index removal itself documented anywhere, or missing an ADR?
 
 **Root docs**:
 - `README.md` — Feature list, quick start, examples
+
+Before trusting this list, `Glob` `packages/site/docs/**/*.md` and `docs/architecture/**/*.md` — files get added and removed, and a hardcoded list here can go just as stale as the one this skill is being fixed for.
 
 ### How to review
 
 For each document:
 
 1. **Read the doc** to understand what it claims
-2. **Verify against code** — use `search_code`, `list_functions`, `Grep`, and `Read` to check:
+2. **Verify against code** — use `Grep`, `Glob`, and `Read` to check:
    - Do referenced files/paths still exist?
-   - Do code examples match actual API signatures?
+   - Do code examples match actual CLI flags? Verify against `node packages/cli/dist/index.js <command> --help`, not memory
    - Are feature descriptions accurate?
    - Are CLI command options correct?
-   - Do MCP tool parameter tables match the actual tool definitions?
-3. **Cross-reference** — check that docs are consistent with each other (e.g., README features match site landing page)
+3. **Cross-reference** — check that docs are consistent with each other (e.g., README features match the site landing page)
 4. **Check for gaps** — are there features in the code not documented? Recently added capabilities missing from docs?
 
 ### What to flag
@@ -199,7 +183,7 @@ Write a detailed report to `.wip/dogfood-docs-report.md` with:
 
 | Document | Status | Issues Found |
 |----------|--------|--------------|
-| `packages/site/docs/guide/mcp-tools.md` | pass/warn/fail | ... |
+| `packages/site/docs/guide/cli-commands.md` | pass/warn/fail | ... |
 | `README.md` | pass/warn/fail | ... |
 | ... | ... | ... |
 
@@ -219,16 +203,18 @@ You are a **senior JavaScript/TypeScript developer** performing a code quality a
 ### Scope
 
 Review the source code across the three published packages:
-- `packages/parser/src/` — AST parsing, chunking, complexity metrics, ecosystem detection
-- `packages/core/src/` — structural store (SQLite + FTS5/BM25 lexical search), config, git state, indexing orchestration
-- `packages/cli/src/` — CLI commands, MCP server, file watcher
+- `packages/parser/src/` — AST parsing, chunking, complexity metrics, dependency/test-association analysis, deterministic review signals, ecosystem detection
+- `packages/core/src/` — config management, git state tracking, complexity-report formatters. (There is no structural store or indexer here any more — both were removed along with the index.)
+- `packages/cli/src/` — the four CLI commands and their shared utilities
+
+Use `Glob`/`Grep` to enumerate what's actually in each `src/` tree before reviewing — don't assume the list above is exhaustive; it will drift over time.
 
 ### What to look for
 
 **Error handling & edge cases:**
 - Unhandled promise rejections or missing `try/catch` on async operations
 - Swallowed errors (empty `catch` blocks, `catch` that logs but doesn't rethrow when it should)
-- Missing validation at system boundaries (user input, file I/O, external data)
+- Missing validation at system boundaries (CLI args, file I/O)
 - Race conditions in concurrent operations
 
 **TypeScript usage:**
@@ -237,10 +223,10 @@ Review the source code across the three published packages:
 - Inconsistent use of `null` vs `undefined`
 
 **Code smells:**
-- Functions that are too long or do too many things (use `get_complexity({ top: 20 })` to find hotspots)
+- Functions that are too long or do too many things — run `node packages/cli/dist/index.js complexity --format json` and `node packages/cli/dist/index.js health --top 20 --format json` to find hotspots (raw complexity, and complexity × fan-in ÷ test coverage)
 - God objects or modules with too many responsibilities
 - Dead code, unused imports, or commented-out code
-- Copy-pasted logic that should be shared (use `find_similar` to detect duplication)
+- Copy-pasted logic that should be shared — there is no similarity-search tool any more, so check by reading and by `Grep`ping for distinctive literals/identifiers repeated across files
 
 **Patterns & consistency:**
 - Inconsistent error handling patterns across modules
@@ -250,17 +236,17 @@ Review the source code across the three published packages:
 
 **Dependencies & external calls:**
 - Unsafe file system operations (missing existence checks, TOCTOU issues)
-- Unvalidated external input (CLI args, config files, MCP requests)
-- Resource leaks (unclosed file handles, database connections)
+- Unvalidated external input (CLI args, config files)
+- Resource leaks (unclosed file handles)
 
 ### How to review
 
-1. Start with `get_complexity({ top: 20 })` to identify the most complex functions — these are where bugs hide
-2. Use `list_functions({ symbolType: "class" })` and `list_functions({ symbolType: "function", limit: 100 })` to get an overview of the codebase structure
-3. Read the highest-complexity files and the core modules (MCP handlers, indexer, structural store)
-4. Use `find_similar` to check for duplicated patterns
-5. Use `get_dependents` on core files to understand which modules are most critical
-6. Spot-check error handling in I/O-heavy code (file scanning, chunking, structural-store writes)
+1. Start with `node packages/cli/dist/index.js health --top 20 --format json` to identify the riskiest functions (complexity × fan-in ÷ test coverage) — these are where bugs hide
+2. `Glob` `packages/{parser,core,cli}/src/**/*.ts` for an overview of the codebase structure; `Grep` for `^export class`, `^export function`, `^export interface` to enumerate symbols by kind
+3. Read the highest-complexity files and the core modules (CLI command handlers, config service, git tracker)
+4. Check for duplicated patterns by reading and by `Grep`ping for repeated literals/snippets — there is no automated similarity search any more
+5. `Grep` for imports of a target file (`from '.*<module-name>'`) to see who depends on it — there is no dependents-lookup command any more
+6. Spot-check error handling in I/O-heavy code (file scanning, chunking, git diffing)
 
 ### What NOT to flag
 
@@ -305,61 +291,53 @@ You are a **senior software architect** evaluating the overall architecture of L
 
 ### Context
 
-Lien is a local-first structural code search tool (lexical FTS5/BM25 search + dependency analysis), split into three published packages plus three unpublished ones:
-- `@liendev/parser` — AST parsing, language definitions, chunking, complexity analysis. Zero deps on core.
-- `@liendev/core` — structural store (`SqliteBackend` behind a `VectorDBInterface`, plus `OverlayBackend` for worktree-shared indices), config, git state tracking
-- `@liendev/lien` (cli) — CLI commands, MCP server, file watcher
-- `review` / `action` / `site` (private, unpublished) — PR review engine, self-hostable GitHub Action, docs site
+Lien is a local-first code-health CLI: no server, no persisted index, no search. Every command parses the working tree on demand. It's split into three published packages plus three unpublished ones:
+- `@liendev/parser` — AST parsing, language definitions, chunking, complexity analysis, dependency/test-association resolution, deterministic review signals. Zero deps on core.
+- `@liendev/core` — config management (`ConfigService`), git state tracking, complexity-report formatters (text/JSON/SARIF)
+- `@liendev/lien` (cli) — the four commands: `complexity`, `health`, `review`, `delta`
+- `review` / `action` / `site` (private, unpublished) — the Lien Review GitHub Action's engine, the Action wrapper, and the docs site
 
-Dependency chain: `parser` ← `core` ← `cli`. It serves AI coding assistants (Cursor, Claude Code) via MCP.
+Dependency chain: `parser` ← `core` ← `cli`. `review` depends on `parser` only. This is a **recent, large architectural change**: the MCP server, the SQLite structural store, the indexer, and FTS5 lexical search were all removed from `core`. Verify with `Glob`/`Grep` that no residue (dead imports, orphaned types, stale barrel exports referencing removed modules) was left behind.
 
 ### What to evaluate
 
 **Package boundaries & responsibilities:**
-- Is the `parser` / `core` / `cli` split clean? Are responsibilities correctly assigned? (`parser` must have zero deps on `core`)
+- Is the `parser` / `core` / `cli` split clean now that `core` has lost its structural-store responsibilities? Does `core` still earn its place as a separate package, or is it thin enough now that some of it belongs in `cli`?
 - Are there things in `cli` that belong in `core` (or vice versa)?
-- Would any additional package splits improve the architecture?
-- Check `get_dependents` on key modules to see if dependency flow is healthy (parser should not depend on core; core should not depend on cli)
+- `Grep` for import statements referencing a target module to trace dependency flow — `parser` should not depend on `core`; `core` should not depend on `cli`
 
 **Module cohesion & coupling:**
 - Do modules have clear, single responsibilities?
 - Are there circular dependencies or overly tight coupling?
-- Use `get_dependents` on high-fan-out files to identify coupling hotspots
-- Check barrel files (`index.ts`) — are they re-exporting cleanly or masking poor boundaries?
+- `Grep` for imports of high-fan-out files to identify coupling hotspots
+- Check barrel files (`index.ts`) — are they re-exporting cleanly, and do they still make sense post-removal (any export of a type/class that no longer exists, or that only ever served the deleted index)?
 
 **Extensibility & plugin points:**
-- Is the language system (AST languages) properly extensible? Review the registry pattern
-- Is the MCP tool system easy to extend with new tools?
-- Is the structural store properly abstracted behind `VectorDBInterface` (`createVectorDB` factory)? Would swapping the backend (beyond `SqliteBackend`/`OverlayBackend`) require touching callers?
+- Is the language system (AST languages) properly extensible? Review the registry pattern in `packages/parser/src/ast/languages/`
+- Is the deterministic-signals system (`packages/parser/src/signals/`) easy to extend with a new signal?
 
 **Data flow & pipeline design:**
-- Trace the indexing pipeline end-to-end: file discovery -> AST parsing -> chunking -> structural-store write
+- Trace each command's pipeline end-to-end: file discovery -> AST parsing -> the command's specific analysis (complexity scoring / health ranking / diff signals / delta comparison)
 - Is the pipeline clear, or are there hidden side effects or implicit ordering?
-- How does incremental indexing work? Is it robust?
-- How does the MCP server handle concurrent requests?
-- For worktrees: does the `OverlayBackend` (read-only base + writable overlay) correctly isolate a linked worktree's index from the main checkout's?
+- How do `review`/`delta` diff against git? Is that logic isolated cleanly, or duplicated across commands?
 
 **Error resilience & failure modes:**
-- What happens when indexing fails mid-way? Is there recovery?
-- What happens when the structural store (SQLite file) is corrupted or missing?
-- How does the system handle a codebase too large for memory?
-- Are there graceful degradation paths?
+- What happens when parsing fails mid-way through a scan?
+- How does the system handle a codebase too large for memory, given every run re-parses from scratch?
+- Are there graceful degradation paths? Does CLAUDE.md's "Index-State Honesty" policy actually hold in the code, not just in the docs?
 
 **Scalability concerns:**
-- What are the current bottlenecks? (Use `get_complexity` for computation hotspots)
-- How does performance scale with codebase size? (file count, LOC, languages)
-- Is FTS5/BM25 lexical search the bottleneck, or is chunking/parsing?
+- Since there's no persisted index any more, every invocation re-parses the whole (or a relevant slice of the) working tree. What's the per-invocation cost, and does it scale acceptably with repo size? (`node packages/cli/dist/index.js health` on this repo takes ~1.5s for ~600 files / ~8,600 chunks — is that representative, and does it hold up on a much larger repo?)
 - Are there O(n^2) operations hiding anywhere?
 
 ### How to review
 
-1. Read `CLAUDE.md` and `docs/architecture/` to understand the intended architecture
-2. Use `search_code` to find key architectural components: indexing pipeline, MCP server, structural store, config system
-3. Use `list_functions({ symbolType: "class" })` and `list_functions({ symbolType: "interface" })` to map out the type system
-4. Use `get_dependents` on core modules to trace dependency flow
-5. Read the entry points: CLI commands, MCP server setup, indexer pipeline
-6. Use `get_complexity({ top: 20 })` to identify structural complexity
-7. Check `packages/parser/src/ast/languages/` for the extensibility pattern
+1. Read `CLAUDE.md` and `docs/architecture/` for the intended architecture — but verify against `Glob`/`Grep`/`Read`, since those docs may themselves be lagging the recent removal (that's exactly what the `docs-reviewer` agent is checking in parallel; cross-reference its findings in your report)
+2. `Glob` each package's `src/` tree to map real structure
+3. `Grep` for `^export class`, `^export interface` to map out the type system
+4. `Grep` for imports of core modules to trace dependency flow
+5. Read the entry points: `packages/cli/src/index.ts`, `packages/cli/src/cli/index.ts`, and each command's implementation
+6. Run `node packages/cli/dist/index.js complexity --format json` and `health --format json` to identify structural complexity hotspots
 
 ### Output
 
@@ -383,7 +361,7 @@ For each finding:
 - **Area** — which dimension above
 - **Impact** — high / medium / low
 - **Description** — what the issue or observation is
-- **Evidence** — specific files, dependency graphs, or complexity data that support the finding
+- **Evidence** — specific files or complexity data that support the finding
 - **Recommendation** — what to do about it (with effort estimate: small/medium/large)
 
 **Architecture strengths** — what's working well and should be preserved.
@@ -408,13 +386,12 @@ Review all test files across the three published packages:
 ### What to evaluate
 
 **Coverage gaps:**
-- Use `get_files_context` on key source files and check their `testAssociations`. Flag any source files with **zero test associations**, especially in critical modules (MCP handlers, indexer, structural store, config)
-- Systematically check: for each major source directory, are there corresponding test files?
-- Focus on: `packages/cli/src/mcp/`, `packages/core/src/indexer/`, `packages/core/src/vectordb/`, `packages/core/src/config/`, `packages/parser/src/ast/`
+- There is no test-associations lookup tool any more. Approximate coverage two ways: (1) run `node packages/cli/dist/index.js health --top 30 --format json` and look at which ranked (risky) functions have an empty `tests` array; (2) `Glob` for a source file's likely co-located test file (`foo.ts` -> `foo.test.ts`) and flag source files with none
+- Systematically check: for each major source directory, are there corresponding test files? Focus on: `packages/cli/src/cli/`, `packages/core/src/config/`, `packages/core/src/git/`, `packages/parser/src/ast/`, `packages/parser/src/signals/`
 
 **Test quality:**
 - Are tests testing behavior or implementation details? (behavior is better)
-- Are there tests that are too tightly coupled to internal implementation (will break on refactor)?
+- Are there tests too tightly coupled to internal implementation (will break on refactor)?
 - Are edge cases covered? (empty inputs, null values, error paths, boundary conditions)
 - Are async operations properly awaited in tests?
 - Are there tests that always pass regardless of the code (vacuous tests)?
@@ -433,19 +410,17 @@ Review all test files across the three published packages:
 
 **Missing test categories:**
 - Unit tests for pure functions and utilities
-- Integration tests for the indexing pipeline
-- Tests for error handling paths (what happens when things fail?)
-- Tests for MCP tool parameter validation
+- Integration tests for each CLI command's end-to-end pipeline (parse -> analyze -> format)
+- Tests for error handling paths — especially the hostile/no-data cases (CLAUDE.md's "Index-State Honesty" policy; see `packages/cli/src/utils/scan-failure.ts` and its test)
 - Tests for edge cases in AST language parsers
 
 ### How to review
 
-1. Use `Glob` to find all test files: `**/*.test.ts`, `**/*.spec.ts`
-2. Use `get_files_context` on critical source files to check `testAssociations`
-3. Read test files for the most critical modules (MCP handlers, indexer, structural store)
-4. Use `search_code({ query: "MCP tool test coverage vi.mock handler" })` to find test patterns
-5. Use `find_similar` on a well-written test to see if the pattern is consistent
-6. Check for test utilities: `Grep` for `beforeEach`, `afterEach`, `jest.mock`, `vi.mock` patterns
+1. `Glob` for all test files: `**/*.test.ts`
+2. Cross-reference `node packages/cli/dist/index.js health --format json` for ranked functions with no detected tests, and `Glob` for missing co-located test files elsewhere
+3. Read test files for the most critical modules (CLI command handlers, config service, signals)
+4. `Grep` for `beforeEach`, `afterEach`, `vi.mock` to find test utilities and mock patterns
+5. If reviewing signal tests, note that `signals-test-location.test.ts` enforces where those live — check `packages/review/test/harness/README.md` for the harness conventions around them
 
 ### Output
 
@@ -455,11 +430,11 @@ Write a detailed report to `.wip/dogfood-tests-report.md` with:
 
 | Module | Source Files | Test Files | Coverage Gap |
 |--------|-------------|------------|--------------|
-| `cli/mcp/` | N | N | list untested files |
-| `core/indexer/` | N | N | ... |
-| `core/vectordb/` | N | N | ... |
+| `cli/cli/` | N | N | list untested files |
 | `core/config/` | N | N | ... |
+| `core/git/` | N | N | ... |
 | `parser/ast/` | N | N | ... |
+| `parser/signals/` | N | N | ... |
 | ... | ... | ... | ... |
 
 **Test Quality Assessment:**
@@ -489,62 +464,51 @@ For each issue:
 
 > Give this entire section to the `security-auditor` agent.
 
-You are a **security engineer** auditing the Lien codebase for vulnerabilities. Lien is a local tool, but it handles arbitrary file paths from MCP clients, reads user codebases, and runs a server on port 7133. Your goal is to find concrete security issues, not theoretical concerns.
+You are a **security engineer** auditing the Lien codebase for vulnerabilities. Lien is a local CLI — no server, no network listener, no persisted index — but it still reads arbitrary file paths and file content from the user's codebase, runs regex against user-supplied patterns, and (for `review`/`delta`) shells out to `git`. Your goal is to find concrete security issues, not theoretical concerns.
 
 ### Attack surface
 
 Lien's attack surface includes:
-- **MCP tool inputs** — AI assistants send file paths, search queries, code snippets, and regex patterns. These are the primary untrusted input.
-- **File system access** — Lien reads files from the user's codebase during indexing. Malicious file content (crafted source files) could exploit the parser.
-- **Network** — The MCP server listens on port 7133. Who can connect? Is it localhost-only?
-- **Dependencies** — Third-party npm packages (tree-sitter grammars, better-sqlite3, etc.)
-- **Config files** — `lien.config.json` is read and parsed. Can a malicious config cause harm?
+- **CLI arguments** — `--files`, `--path`, `--file`, `--base`, `--threshold` are user-supplied paths/refs/numbers passed into the analysis pipeline
+- **File system access** — Lien reads files from the user's codebase during every scan. Malicious file content (crafted source files) could exploit the parser
+- **Git subprocess calls** — `review` and `delta` shell out to `git` (e.g. `git ls-files`, `git diff`) with a user-supplied `--base <ref>`. Can a crafted ref or filename inject an argument into the call?
+- **Dependencies** — third-party npm packages (tree-sitter grammars, etc.)
+- **Config files** — the project config file is read and parsed. Can a malicious config cause harm?
 
 ### What to check
 
 **Path traversal & file access:**
-- Can MCP tool `filepath` parameters escape the project root? (e.g., `../../etc/passwd`, absolute paths, symlinks)
-- Search for path handling: `Grep` for `path.join`, `path.resolve`, `path.normalize` and check if results are validated against the project root
-- Check `get_files_context`, `get_dependents`, and `get_complexity` — do they validate that requested files are within the project?
-- Check if symlinks are followed during indexing (could index files outside project)
+- Can `--files`, `--path`, or `--file` escape the project root? (`../../etc/passwd`, absolute paths, symlinks)
+- `Grep` for `path.join`, `path.resolve`, `path.normalize` and check whether results are validated against the project root
+- Check if symlinks are followed during a scan (could pull in files outside the project)
 
-**Input validation on MCP requests:**
-- Are MCP tool parameters validated before use? (types, lengths, allowed characters)
-- Can a malicious `query` string in `search_code` cause issues? (FTS5 query-syntax injection into the structural store)
-- Can a malicious `pattern` in `list_functions` cause ReDoS (catastrophic regex backtracking)?
-- Can a malicious `code` snippet in `find_similar` cause issues?
-- What happens with extremely large inputs? (memory exhaustion)
-
-**Network exposure:**
-- Does the MCP server bind to `127.0.0.1` (localhost only) or `0.0.0.0` (all interfaces)?
-- Is there any authentication on the MCP endpoint?
-- Could a malicious website trigger requests to the local MCP server? (DNS rebinding, SSRF)
+**Input validation on CLI arguments:**
+- Are CLI options validated before use? (types, lengths, allowed characters)
+- Can a crafted `--base <ref>` inject a git argument (e.g. a ref starting with `-`) into the `git` subprocess call? `Grep` for how `--base` / `git diff` / `git ls-files` are invoked — confirm whether it's an array-args API (`execFile`/`spawn` with an argv array, which is not shell-interpolated) or string interpolation into a shell, and flag the latter
+- What happens with extreme inputs (a huge `--top`, a very large repo)? (memory exhaustion)
 
 **Dependency vulnerabilities:**
 - Run `npm audit --json` and analyze the full output: severity counts, affected packages, fix availability
 - Run `npm audit` (human-readable) to capture the summary for the report
-- Check tree-sitter WASM parsers — are they loaded from trusted sources?
+- Check tree-sitter grammar packages — are they loaded from trusted sources?
 - Check if any dependencies execute shell commands or download code at install time
-- Review `package.json` and `package-lock.json` for pinned vs range versions on security-sensitive deps
+- Review `package.json` / `package-lock.json` for pinned vs range versions on security-sensitive deps
 
 **Information disclosure:**
-- Do error messages leak sensitive information (full file paths, stack traces, system info)?
-- Does the MCP server expose the index contents (could leak code to unauthorized clients)?
+- Do error messages leak more than necessary for a local CLI (full file paths, stack traces, system info)?
 - Are there debug/verbose modes that expose too much?
 
 **Config & file parsing:**
-- Is `lien.config.json` parsing safe? (prototype pollution via JSON, unsafe defaults)
+- Is the project config parsed safely? (prototype pollution via JSON, unsafe defaults)
 - Are `.gitignore` and glob patterns handled safely?
 
 ### How to review
 
-1. Start with the MCP server entry point — find how requests are received and dispatched
-2. Trace each MCP tool from input to output, checking for validation at each step
-3. Use `search_code({ query: "validate file path sanitize resolve" })` to find path validation code
-4. Use `Grep` for security-relevant patterns: `path.join`, `path.resolve`, `fs.readFile`, `new RegExp`, `eval`, `exec`, `spawn`
-5. Use `Grep` for input validation patterns: `zod`, `validate`, `sanitize`, `allowlist`
-6. Check the server binding: search for `listen`, `createServer`, `bind`, `0.0.0.0`, `127.0.0.1`
-7. Run `npm audit` and `npm audit --json` to check dependency vulnerabilities — include the full severity breakdown in the report
+1. Read each command's entry point (`packages/cli/src/cli/complexity.ts`, `health-cmd.ts`, `review-cmd.ts`, `delta-cmd.ts`) and trace CLI-argument handling through to disk/git access
+2. `Grep` for security-relevant patterns: `path.join`, `path.resolve`, `fs.readFile`, `new RegExp`, `eval`, `exec(`, `execFile(`, `spawn(`
+3. `Grep` for how `git` is invoked and confirm it's argv-array based, not shell string interpolation, especially anywhere a user-supplied ref or path reaches it
+4. `Grep` for input validation patterns: `zod`, `validate`, `sanitize`
+5. Run `npm audit` and `npm audit --json` to check dependency vulnerabilities — include the full severity breakdown in the report
 
 ### Output
 
@@ -554,9 +518,9 @@ Write a detailed report to `.wip/dogfood-security-report.md` with:
 
 | Attack Vector | Risk Level | Status |
 |---------------|------------|--------|
-| Path traversal via MCP inputs | critical/high/medium/low/none | mitigated/partial/unmitigated |
-| MCP input validation | ... | ... |
-| Network exposure | ... | ... |
+| Path traversal via CLI arguments | critical/high/medium/low/none | mitigated/partial/unmitigated |
+| Git subprocess argument injection | ... | ... |
+| CLI input validation | ... | ... |
 | Dependency vulnerabilities | ... | ... |
 | Information disclosure | ... | ... |
 | Config/file parsing | ... | ... |
@@ -590,58 +554,50 @@ For each finding:
 
 > Give this entire section to the `dx-reviewer` agent.
 
-You are a **developer advocate** evaluating the developer experience of Lien from the perspective of a first-time user AND a returning user. Your goal is to assess whether the CLI is ergonomic, error messages are helpful, and the MCP tool responses are well-structured for AI consumption.
+You are a **developer advocate** evaluating the developer experience of Lien from the perspective of a first-time user AND a returning user. Your goal is to assess whether the CLI is ergonomic, error messages are helpful, and command output — both human-readable text and `--format json` — is well-structured for a human reading a terminal and for an AI assistant consuming it programmatically.
 
 ### What to evaluate
 
 **CLI ergonomics:**
-- Run `npx lien --help` and evaluate: are the commands discoverable? Is the help text clear?
-- Run `npx lien index --help`, `npx lien serve --help`, `npx lien status --help` — are options well-described?
-- Are command names intuitive? Would a first-time user know what to run?
-- What happens when you run `npx lien` with no arguments?
-- What happens with invalid commands or options?
+- Run `node packages/cli/dist/index.js --help` — are the four commands discoverable? Is the help text clear?
+- Run `node packages/cli/dist/index.js <command> --help` for each of `complexity`, `health`, `review`, `delta` — are options well-described?
+- What happens when you run the CLI with no arguments?
+- What happens with invalid commands or options (e.g. an unknown flag, `--format xml`)?
 
 **Error messages & feedback:**
-- Run `npx lien status` when no index exists — is the error message helpful? Does it tell you what to do?
-- Run `npx lien index` and observe the output — is progress clear? Does the user know what's happening?
-- Check error messages in the source code: use `Grep` for `console.error`, `throw new Error`, and evaluate the messages
-- Are errors actionable? (Do they tell the user what went wrong AND how to fix it?)
+- Run `health`/`complexity`/`review`/`delta` from an empty non-git directory (same hostile case the `cli-tester` agent runs) — is the error message helpful? Does it tell you what to do?
+- Run `complexity`/`health` over this repo and observe the output — is the summary clear?
+- `Grep` for `console.error`, `throw new Error` and evaluate the messages
+- Are errors actionable? (Do they say what went wrong AND how to fix it?)
 - Are there silent failures? (operations that fail without any user-facing message)
 
-**MCP tool response quality:**
-- Read the MCP tool handler source code and evaluate the response format
-- Are responses concise enough for AI context windows? Or do they include unnecessary data?
-- Is the response structure consistent across all 6 tools?
-- Are field names self-explanatory? Would an AI assistant understand the response without docs?
-- Is the `indexInfo` metadata useful or just noise?
-- Are relevance categories helpful for AI assistants to filter results?
+**Output quality for downstream consumption:**
+- Read each command's `--format json` output and evaluate: is the schema consistent in shape across commands (similar field naming for similar concepts)? Are field names self-explanatory without reading the source?
+- Is the human-readable text output well-formatted (colors, structure) without being noisy?
+- Is machine-parseable output available consistently, or only on some commands? (`complexity` has `json`/`sarif`; check whether `health`/`review`/`delta` expose `--format json` too, and whether the docs describe that consistently)
 
 **Onboarding flow:**
-- Trace the first-use experience: install -> hand-edit the editor's MCP config -> restart the editor -> first MCP query
+- Trace the real first-use experience per the README/getting-started docs: install -> `cd` into a project -> run a command directly. There is no server to start, no editor config to hand-edit, no index to build first — verify that claim is actually true by trying a command cold in a scratch directory rather than assuming the docs are right
 - How long until a user gets value? Are there unnecessary steps?
-- What are the failure modes during onboarding? (missing dependencies, permission errors, etc.)
-- Is the auto-index-on-first-use reliable?
+- What are the failure modes during onboarding? (missing `git`, permission errors, running somewhere with no recognized source files)
 
 **Output formatting:**
-- Is CLI output well-formatted? (tables, colors, progress bars)
-- Is the output parseable by scripts? (JSON output option?)
+- Is CLI output well-formatted? (tables, colors, structure)
 - Is the verbosity level appropriate? (not too noisy, not too silent)
 
 ### How to review
 
-1. Run CLI commands and evaluate output: `npx lien --help`, `npx lien status`, `npx lien index --help`
-2. Read the CLI command source files to understand what output is produced
-3. Read MCP tool handlers to evaluate response format and structure
-4. Use `Grep` for error message patterns: `console.error`, `console.warn`, `throw new Error`, `logger.error`
-5. Use `search_code({ query: "error handling CLI command throw catch" })` to find error handling patterns
-6. Check for progress indicators: `Grep` for `spinner`, `progress`, `ora`, `chalk`
-7. Compare output consistency across commands
+1. Run every command (and `--help` for each) and evaluate the output directly
+2. Read the CLI command source files (`packages/cli/src/cli/*.ts`) to understand what output is produced and why
+3. `Grep` for error message patterns: `console.error`, `console.warn`, `throw new Error`
+4. Compare `--format json` output across all four commands for schema consistency
+5. Try the cold-start onboarding flow yourself in a scratch directory
 
 ### What NOT to flag
 
 - Visual design preferences (color choices, emoji usage) — subjective
 - Performance of the CLI itself (the architect covers scalability)
-- Bug reports (the mcp-tester covers functional issues)
+- Bug reports (the `cli-tester` agent covers functional issues)
 
 ### Output
 
@@ -653,14 +609,14 @@ Write a detailed report to `.wip/dogfood-dx-report.md` with:
 |-----------|--------|-------|
 | CLI discoverability | good/fair/poor | ... |
 | Error messages | good/fair/poor | ... |
-| MCP response quality | good/fair/poor | ... |
+| Output quality (text + JSON) | good/fair/poor | ... |
 | Onboarding flow | good/fair/poor | ... |
 | Output formatting | good/fair/poor | ... |
 
 **Top friction points** (max 10, ordered by user impact):
 
 For each issue:
-- **Where** — CLI command, error scenario, or MCP response
+- **Where** — CLI command, error scenario, or JSON output
 - **Impact** — high / medium / low
 - **Description** — what the friction is, from the user's perspective
 - **Current behavior** — what happens now
@@ -676,16 +632,14 @@ For each issue:
 
 After all seven agents finish, produce a unified report in `.wip/dogfood-report.md` with:
 
-### MCP Tools Summary
+### CLI Commands Summary
 
-| Tool | Status | Notes |
-|------|--------|-------|
-| search_code | pass/warn/fail | ... |
-| list_functions | pass/warn/fail | ... |
-| get_files_context | pass/warn/fail | ... |
-| get_dependents | pass/warn/fail | ... |
-| get_complexity | pass/warn/fail | ... |
-| find_similar | pass/warn/fail | ... |
+| Command | Status | Notes |
+|---------|--------|-------|
+| complexity | pass/warn/fail | ... |
+| health | pass/warn/fail | ... |
+| review | pass/warn/fail | ... |
+| delta | pass/warn/fail | ... |
 
 ### Documentation Summary
 
@@ -726,8 +680,8 @@ After all seven agents finish, produce a unified report in `.wip/dogfood-report.
 ### Cross-Cutting Issues
 
 Note anything that spans multiple workstreams:
-- Features that work in tools but are missing from docs
-- Docs describing behavior that doesn't match reality
+- Features that work in the CLI but are missing from docs
+- Docs describing behavior that doesn't match reality (especially leftover MCP/server/index language — see the docs-reviewer's context note)
 - Code quality issues that reflect architectural problems
 - Architecture decisions that cause code quality debt
 - Untested code paths that are also security-sensitive

@@ -32,6 +32,7 @@ program
   .option('--files <paths...>', 'Specific files to analyze')
   .option('--format <type>', 'Output format: text, json, sarif', 'text')
   .option('--fail-on <severity>', 'Exit 1 if violations: error, warning')
+  .option('--allow-unsafe-root', 'Proceed even in $HOME or a filesystem root')
   .action(complexityCommand);
 
 program
@@ -43,6 +44,7 @@ program
   .option('--top <n>', 'How many functions to show', '5')
   .option('--path <prefix>', 'Only show functions under this path prefix')
   .option('--include-tests', 'Rank test files too (excluded by default)')
+  .option('--allow-unsafe-root', 'Proceed even in $HOME or a filesystem root')
   .action(healthCommand);
 
 program

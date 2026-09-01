@@ -67,8 +67,22 @@ were fixture code from `lien-review-testbed/`, and **no file changed by the diff
 under review appeared at all** — not at `--top 5`, not at `--top 40`. `--path`
 does not rescue it either: a file with no violation yields `entries: []`.
 
-So it can tell you "this function is risky and under-tested". It cannot tell you
-"here are the tests for the file I am reviewing". Find tests with Glob and Grep.
+So it can tell you "this function is risky and under-tested" — and for the
+functions it *does* rank, its `tests` field carries real paths. What it cannot do
+is answer "here are the tests for the file I am reviewing", because your changed
+file is almost never in that ranking.
+
+**What does help:** `--all-signals` runs `test-coverage`, which reports exactly
+which changed files have **no** associated test at all:
+
+```
+Changed files with no tests  (1)
+    packages/site/docs/.vitepress/config.ts
+```
+
+That is a real answer to half of check 4 — it settles *whether* a changed file
+has tests. It does not tell you *which* tests, so once it says a file has some,
+find them with Glob and Grep.
 
 ### Read the caveats block
 
@@ -185,7 +199,9 @@ The title, body and commit message are claims, not evidence. "Off-by-one fix",
 2. Find the tests for the changed function **yourself**: Glob the conventional
    test paths for that file, then Grep for the function name across the test
    tree. Pass `--include-tests` if you want the signals to see test files too.
-   No command hands you this mapping — see the `lien health` note in step 1.
+   `--all-signals`' `test-coverage` tells you which changed files have none at
+   all; no command names the specific tests for a file you choose. See the
+   `lien health` note in step 1.
 3. Judge the implementation first: does the new boundary match what the change
    set out to do? If it does not, that is a defect — report it.
 4. Then judge the coverage, and keep the two separate. A test that asserts the

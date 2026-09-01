@@ -6,11 +6,14 @@ import { formatReport } from '@liendev/core';
 import type { OutputFormat } from '@liendev/core';
 import { describeScanFailure } from '../utils/scan-failure.js';
 import { resolveRepoRoot, rebaseToRoot } from './project-root.js';
+import { assertSafeRoot } from './unsafe-root.js';
 
 interface ComplexityOptions {
   files?: string[];
   format: OutputFormat;
   failOn?: 'error' | 'warning';
+  /** Proceed even when the analysis root is `$HOME` or a filesystem root. */
+  allowUnsafeRoot?: boolean;
 }
 
 const VALID_FAIL_ON = ['error', 'warning'];
@@ -111,6 +114,10 @@ export async function complexityCommand(options: ComplexityOptions) {
   if (rootDir !== cwd) {
     console.warn(chalk.dim(`Analyzing the repository root: ${rootDir}`));
   }
+
+  // See health-cmd.ts for why this guard moved here from the deleted
+  // `lien index`: same walk-from-cwd hazard, now on the surviving commands.
+  assertSafeRoot(rootDir, options.allowUnsafeRoot);
 
   try {
     validateFailOn(options.failOn);
