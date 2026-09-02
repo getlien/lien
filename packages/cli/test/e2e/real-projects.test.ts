@@ -439,8 +439,11 @@ const TEST_PROJECTS: ProjectConfig[] = [
 ];
 
 /**
- * Helper to execute CLI commands. Only `complexity` (the one index-free
- * command this suite still exercises) runs through this today.
+ * Helper to execute CLI commands, discarding the exit code.
+ *
+ * Use `runLienCommandWithStatus` when the exit code is part of what you are
+ * asserting — `lien delta` is the gate, so "it ran" and "it passed" are
+ * different claims there.
  */
 function runLienCommand(cwd: string, command: string): string {
   const lienCli = path.join(__dirname, '../../dist/index.js');
@@ -458,6 +461,37 @@ function runLienCommand(cwd: string, command: string): string {
     }
     throw error;
   }
+}
+
+/**
+ * Run a CLI command and keep its exit code.
+ *
+ * `execSync` throws on a non-zero exit, so the code has to be recovered from
+ * the thrown error rather than read from a return value.
+ */
+function runLienCommandWithStatus(
+  cwd: string,
+  command: string,
+): { output: string; status: number } {
+  const lienCli = path.join(__dirname, '../../dist/index.js');
+  try {
+    const output = execSync(`node ${lienCli} ${command} 2>&1`, { cwd, encoding: 'utf-8' });
+    return { output, status: 0 };
+  } catch (error) {
+    const e = error as { stdout?: string; status?: number };
+    return { output: e.stdout ?? '', status: e.status ?? 1 };
+  }
+}
+
+/**
+ * Line comment prefix, so a synthetic edit stays syntactically valid in the
+ * file it is appended to.
+ *
+ * Only Python and Ruby differ among the corpus languages; `//` covers Swift,
+ * Java, Kotlin, C#, PHP, TypeScript, JavaScript, Rust and Go.
+ */
+function commentPrefixFor(language: string): string {
+  return language === 'python' || language === 'ruby' ? '#' : '//';
 }
 
 /** No-op log sink for `findDependents` calls below — this test doesn't care
@@ -912,6 +946,136 @@ describe('E2E: Real Open Source Projects', () => {
           expect(result.targetIndexed).toBe(false);
           expect(result.dependents.length).toBe(0);
         },
+      );
+
+      // ===================================================================
+      // Command-level coverage (#1139)
+      //
+      // Everything above calls the PARSER directly. That left three of the
+      // four shipped commands with no real-repo coverage at all, which is how
+      // #1137 shipped: `lien health` told Swift users a type used by every
+      // file in its module was "contained — little depends on it", and the
+      // SwiftyJSON job below stayed green through every release, because
+      // nothing here ran `health`.
+      //
+      // These assert INVARIANTS, not values. Eleven upstream repos move on
+      // their own schedule, so a value assertion is a maintenance burden and
+      // a floor is already covered above; what matters is that a command's
+      // output cannot contradict itself.
+      // ===================================================================
+
+      it(
+        'lien health never contradicts its own coverage report (#1137, #1139)',
+        () => {
+          const output = runLienCommand(projectDir, 'health --format json');
+          const json = JSON.parse(output.substring(output.indexOf('{')));
+
+          expect(json.scanError).toBeUndefined();
+
+          const resolvedByLanguage = new Map<string, boolean>(
+            json.coverage.map((row: { language: string; resolved: boolean }) => [
+              row.language,
+              row.resolved,
+            ]),
+          );
+
+          json.entries.forEach(
+            (entry: { language: string; dependents: number | null; shape: string }) => {
+              // An entry's language must be accounted for in `coverage`, or
+              // the footer is describing a different corpus than the ranking.
+              expect(resolvedByLanguage.has(entry.language)).toBe(true);
+
+              if (resolvedByLanguage.get(entry.language) === false) {
+                // THE #1137 INVARIANT. No fan-in was resolved for this
+                // language, so the entry must not state a count or claim a
+                // shape that implies a small blast radius.
+                expect(entry.dependents).toBeNull();
+                expect(entry.shape).toBe('unknown-fan-in');
+              } else {
+                expect(typeof entry.dependents).toBe('number');
+                expect(entry.shape).not.toBe('unknown-fan-in');
+              }
+            },
+          );
+
+          expect(json.entries.length).toBe(json.shown);
+          expect(json.shown).toBeLessThanOrEqual(json.rankedTotal);
+
+          console.log(
+            `🩺 ${project.name} health: ${json.rankedTotal} ranked, ${json.shown} shown, ` +
+              `coverage=[${json.coverage
+                .map((r: { language: string; resolved: boolean }) => `${r.language}:${r.resolved}`)
+                .join(' ')}]`,
+          );
+        },
+        E2E_TIMEOUT,
+      );
+
+      it(
+        'lien review calls an empty diff empty, not clean (#1139)',
+        () => {
+          // The corpus is cloned unmodified, so there is nothing to review.
+          // The failure this guards is the command rendering that as a pass:
+          // "no candidates" on an empty diff and "no candidates" after a real
+          // review are the same sentence unless the command distinguishes
+          // them. Verified against a real clone: it says "this is not a clean
+          // review, it is an empty one".
+          const { output, status } = runLienCommandWithStatus(projectDir, 'review --base HEAD');
+
+          expect(status).toBe(0); // advisory by construction — never fails on findings
+          expect(output).toMatch(/not a clean review/i);
+          expect(output).not.toMatch(/No candidates from any signal/i);
+        },
+        E2E_TIMEOUT,
+      );
+
+      it(
+        'lien delta and lien review both see a real working-tree change (#1139)',
+        () => {
+          // A shallow clone has exactly one commit, so `HEAD~1` does not
+          // exist and `--base <parent>` is unavailable. An uncommitted edit
+          // against `--base HEAD` gives both commands a real diff without
+          // needing a deeper clone.
+          const target = chunks.find(c => c.metadata.language === project.language)?.metadata.file;
+          if (target === undefined) {
+            throw new Error(
+              `no ${project.language} chunk to edit — the language floors above should have caught this first`,
+            );
+          }
+
+          const absolute = path.join(projectDir, target);
+          const original = fsSync.readFileSync(absolute, 'utf-8');
+          const prefix = commentPrefixFor(project.language);
+
+          try {
+            fsSync.writeFileSync(
+              absolute,
+              `${original}\n${prefix} lien e2e synthetic change (#1139)\n`,
+            );
+
+            const delta = runLienCommandWithStatus(projectDir, 'delta');
+            // A comment-only edit crosses no threshold, so the gate must pass
+            // — but it must also have actually looked at the file.
+            expect(delta.status).toBe(0);
+
+            const review = runLienCommandWithStatus(projectDir, 'review --base HEAD');
+            expect(review.status).toBe(0);
+            // The tree is dirty, so a zero changed-file count would mean the
+            // diff was never read.
+            expect(review.output).toMatch(/[1-9]\d* changed file/i);
+            expect(review.output).not.toMatch(/No changes against HEAD/i);
+
+            console.log(
+              `✏️  ${project.name} command sweep: edited ${target}, ` +
+                `delta exit ${delta.status}, review exit ${review.status}`,
+            );
+          } finally {
+            // Restore before any later test or the shared afterAll cleanup
+            // observes a mutated corpus.
+            fsSync.writeFileSync(absolute, original);
+          }
+        },
+        E2E_TIMEOUT,
       );
     });
   });

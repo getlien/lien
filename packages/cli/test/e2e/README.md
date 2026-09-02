@@ -1,17 +1,21 @@
 # E2E Tests
 
 Gated tests that are excluded from the fast suite (`npm test`) because they
-load real, non-mocked dependencies (a git clone, the real local embedding
-model, or both) that are too slow/heavy for the default `vitest run`.
+clone real repositories over the network, which is too slow for the default
+`vitest run`.
 
 ## Real Open Source Projects (`real-projects.test.ts`)
 
 End-to-end tests that validate Lien works correctly on real open source projects.
 
 These tests:
-- Clone popular open source projects for each supported language
-- Index them with Lien
-- Validate AST chunking and metadata extraction
+- Clone popular open source projects for each supported language (shallow,
+  `--depth 1`)
+- Parse them with `performChunkOnlyIndex` — there is no persisted index to
+  build, so nothing is stored and nothing can be stale
+- Validate AST chunking, metadata extraction, dependency edges and test
+  associations against per-project floors
+- Run the four commands and check their output cannot contradict itself
 - Ensure no regressions on real-world codebases
 
 ## Test Projects
@@ -56,23 +60,49 @@ See `.github/workflows/e2e.yml` for CI configuration.
 
 ## What Gets Validated
 
-For each project, we verify:
+**Parser, for each project:**
 
-1. **Initialization**: Lien config created successfully
-2. **Indexing**: Project indexed without errors
-3. **File Coverage**: Minimum number of files indexed
-4. **AST Chunking**: More chunks than files (functions/methods extracted)
-5. **AST Metadata**: Symbol names, types, complexity, etc. present
-6. **Reindexing**: Can reindex without errors
+1. **Parse succeeds**: `performChunkOnlyIndex` returns `success: true` —
+   checked explicitly, because it reports failure by RETURNING a flag rather
+   than throwing, so an empty result would otherwise read as a pass
+2. **File coverage**: minimum number of files parsed
+3. **AST chunking**: more chunks than files (functions/methods extracted)
+4. **AST metadata**: symbol names, types, complexity present
+5. **Dependency edges**: a per-project floor, as a collapse detector — plus an
+   exact-zero tripwire for languages known to resolve none (`swift`)
+6. **Test associations**: same shape, same tripwire
+
+Every floor is a **collapse detector, not a target**. Do not tighten one to
+match a current measurement; see each field's doc comment.
+
+**Commands, for each project** (#1139). These assert invariants rather than
+values, since eleven upstream repos move on their own schedule:
+
+7. **`lien complexity --format json`**: parses, reports files analysed
+8. **`lien health --format json`**: no entry may contradict the run's own
+   `coverage[]` — an entry whose language resolved no fan-in must carry
+   `dependents: null` and `shape: "unknown-fan-in"`, never a count or a
+   containment verdict. This is the invariant #1137 violated in a shipped
+   release while this suite stayed green
+9. **`lien review --base HEAD`** on the unmodified clone: must call an empty
+   diff empty rather than clean
+10. **`lien delta` + `lien review`** against a synthetic uncommitted edit:
+    both must see the change, and both must exit 0
+
+**What is deliberately NOT covered:** `lien review --base <parent>` against a
+real historical commit. The corpus is cloned `--depth 1`, so `HEAD~1` does not
+exist. Item 10 works around that with an uncommitted edit against `HEAD`,
+which exercises the diff path but not multi-commit history. Deepening the
+clones would cost network time on every CI run; that trade has not been made.
 
 ## Test Duration
 
-- **Per project**: ~20-60 seconds (clone + index)
-- **Total suite**: ~2-5 minutes (4 projects)
+- **Per project**: ~2-15 seconds (clone + parse + four commands)
+- **Total suite**: 11 projects, sharded one per CI job
 
 Timing depends on:
-- Network speed (git clone)
-- CPU (indexing + embeddings)
+- Network speed (git clone dominates)
+- CPU (parsing)
 - Project size
 
 ## Adding New Projects
@@ -89,7 +119,6 @@ To add a test for a new language or project:
   language: 'rust',
   expectedMinFiles: 20,
   expectedMinChunks: 80,
-  sampleSearchQuery: 'example search query',
   expectedSymbolTypes: ['function', 'method', 'struct'],
 }
 ```
@@ -111,7 +140,7 @@ git ls-remote https://github.com/user/project.git
 git clone --depth 1 --branch main https://github.com/user/project.git /tmp/test
 ```
 
-### Index Failed
+### Parse Failed
 ```bash
 # Find the temp directory (cross-platform)
 TEMP_DIR="$(node -p 'require("path").join(require("os").tmpdir(), "lien-e2e-tests")')"
@@ -121,7 +150,7 @@ echo "Temp directory: $TEMP_DIR"
 ls -la "$TEMP_DIR"
 
 # Run Lien manually in the failed project directory
-cd "$TEMP_DIR"/requests-*  # or zod-*, express-*, monolog-*
+cd "$TEMP_DIR"/requests-*  # or zod-*, swiftyjson-*, monolog-*, ...
 node <path-to-lien-repo>/packages/cli/dist/index.js health
 
 # Or if you have lien installed globally
