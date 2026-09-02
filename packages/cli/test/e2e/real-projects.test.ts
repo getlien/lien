@@ -1054,9 +1054,18 @@ describe('E2E: Real Open Source Projects', () => {
             );
 
             const delta = runLienCommandWithStatus(projectDir, 'delta');
-            // A comment-only edit crosses no threshold, so the gate must pass
-            // — but it must also have actually looked at the file.
+            // A comment-only edit crosses no threshold, so the gate must pass.
             expect(delta.status).toBe(0);
+            // `status === 0` alone would also pass if delta had looked at
+            // nothing, so assert it saw the file. `delta` distinguishes the
+            // two deliberately, and only the second is a measurement:
+            //   clean tree   -> "no complexity-affecting changes vs HEAD"
+            //   file changed -> "no complexity changes across 1 file(s) vs HEAD"
+            // A language where the appended comment somehow does shift a
+            // metric prints the per-function table plus an "N file" summary
+            // instead, which the same assertions accept.
+            expect(delta.output).not.toMatch(/no complexity-affecting changes/i);
+            expect(delta.output).toMatch(/\b[1-9]\d* file/i);
 
             const review = runLienCommandWithStatus(projectDir, 'review --base HEAD');
             expect(review.status).toBe(0);
