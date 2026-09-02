@@ -63,7 +63,7 @@ export interface HealthOptions {
 }
 
 /** What to do about a risky function, derived from the three axes. */
-export type RiskShape = 'dangerous' | 'expensive' | 'cheap-win' | 'isolated';
+export type RiskShape = 'dangerous' | 'expensive' | 'cheap-win' | 'unknown-fan-in' | 'isolated';
 
 export interface RiskEntry {
   filepath: string;
@@ -71,7 +71,21 @@ export interface RiskEntry {
   symbolName: string;
   language: string;
   cognitive: number;
-  dependents: number;
+  /**
+   * Fan-in, or `null` when no fan-in was found for this entry's language
+   * anywhere in this repo.
+   *
+   * `null` is not the same as `0` and must not be collapsed into it (#1137).
+   * `0` says "nothing imports this"; `null` says "this run resolved no fan-in
+   * for this language at all, so the blast radius is unmeasured." Rendering
+   * the second as the first is what let a Swift type used by every file in its
+   * module print as `imported by 0 · little depends on it`.
+   *
+   * Per-language, not per-run, because that is the granularity
+   * `computeCoverage` already reports — and a repo can mix a language with
+   * resolved fan-in and one without.
+   */
+  dependents: number | null;
   tests: string[];
   score: number;
   shape: RiskShape;
@@ -126,12 +140,21 @@ const FANIN_HIGH = 5;
  * depend on and nothing tests, even though the shape table calls the former
  * low priority. Sorting by shape first keeps "what should I do about this?"
  * and "where does it appear in the list?" telling the same story.
+ *
+ * `unknown-fan-in` sits above `cheap-win` and `isolated` deliberately: those
+ * two are judgements that the blast radius is small or manageable, and an
+ * entry whose fan-in was never resolved has not earned either. It stays below
+ * `dangerous`/`expensive` because a measured wide blast radius outranks an
+ * unmeasured one. This placement is what delivers `computeCoverage`'s stated
+ * guarantee — "a language with no resolved fan-in is never silently ranked as
+ * safe" — which sorting it as `isolated` broke (#1137).
  */
 const SHAPE_PRIORITY: Record<RiskShape, number> = {
   dangerous: 0,
   expensive: 1,
-  'cheap-win': 2,
-  isolated: 3,
+  'unknown-fan-in': 2,
+  'cheap-win': 3,
+  isolated: 4,
 };
 
 /**
@@ -142,13 +165,39 @@ const SHAPE_PRIORITY: Record<RiskShape, number> = {
  * Fan-in is log-damped so one mega-imported utility cannot crowd out
  * everything else, and offset by 1 so that a complex, untested function with
  * zero dependents still scores above zero.
+ *
+ * Unresolved fan-in (`null`) contributes the same damping as `0`, which is
+ * safe ONLY because shape sorts ahead of score: every `unknown-fan-in` entry
+ * carries the same constant fan-in term, so within that group the score
+ * reduces to complexity × tests. It is never compared against a resolved
+ * entry's score, because a different shape decides the order first. Do not
+ * reuse this score to compare across shapes.
+ *
+ * Note it reduces to complexity × *tests*, not complexity alone: an untested
+ * entry still scores 2× a tested one of equal complexity. That is deliberate
+ * — fan-in is the only unmeasured axis, and discarding the two that ARE
+ * measured would rank worse, not more honestly. The coverage footer says
+ * "complexity and tests only" for exactly this reason; it must not claim
+ * complexity alone.
  */
-export function scoreRisk(cognitive: number, dependents: number, hasTests: boolean): number {
-  return cognitive * (1 + Math.log2(1 + dependents)) * (hasTests ? 1 : 2);
+export function scoreRisk(cognitive: number, dependents: number | null, hasTests: boolean): number {
+  return cognitive * (1 + Math.log2(1 + (dependents ?? 0))) * (hasTests ? 1 : 2);
 }
 
-/** Which of the four actionable shapes this function falls into. */
-export function classifyShape(cognitive: number, dependents: number, hasTests: boolean): RiskShape {
+/** Which of the five actionable shapes this function falls into. */
+export function classifyShape(
+  cognitive: number,
+  dependents: number | null,
+  hasTests: boolean,
+): RiskShape {
+  // Unresolved fan-in must be decided BEFORE the widelyUsed comparison. The
+  // bug this guards (#1137) was that `null`/absent fan-in arrived here as `0`,
+  // made `widelyUsed` false, and fell through to `isolated` — which then
+  // rendered "little depends on it" about code whose callers were simply never
+  // resolved. Two of the three axes are unknown for such an entry, so no
+  // judgement about blast radius is available to make.
+  if (dependents === null) return 'unknown-fan-in';
+
   const complex = cognitive >= COGNITIVE_HIGH;
   const widelyUsed = dependents >= FANIN_HIGH;
 
@@ -171,6 +220,12 @@ export function describeShape(shape: RiskShape): string {
       return 'Complex and widely depended on. Tested, but a change is expensive.';
     case 'cheap-win':
       return 'Widely depended on and untested, but simple enough to cover quickly.';
+    case 'unknown-fan-in':
+      // Observational, per `computeCoverage`'s rule: this says what this run
+      // found, not that the language is unresolvable. A language whose files
+      // genuinely never reference each other reaches here too, and the wording
+      // must not tell the reader it knows which case this is.
+      return 'No fan-in found for this language here — blast radius unmeasured.';
     case 'isolated':
       return 'Complex, but contained — little depends on it.';
   }
@@ -185,6 +240,8 @@ export function recommendFor(shape: RiskShape): string {
       return 'split before extending';
     case 'cheap-win':
       return 'add a test — cheap, high value';
+    case 'unknown-fan-in':
+      return 'find the callers yourself before changing it';
     case 'isolated':
       return 'simplify when you are next in here';
   }
@@ -233,18 +290,44 @@ export function violatingFiles(report: ComplexityReport): string[] {
 }
 
 /**
+ * Fan-in for one violating file, or `null` when it is unmeasured.
+ *
+ * The distinction is the whole of #1137. `dependentCounts` has no entry for a
+ * file whose language resolved nothing AND no entry for a file that genuinely
+ * has no importers, so `dependentCounts.get(file) ?? 0` cannot tell them
+ * apart — and answering `0` for the first turns "we did not look" into "we
+ * looked and found nothing." Only the language's coverage row knows which
+ * case this is, so it decides first.
+ */
+export function resolveFanIn(
+  filepath: string,
+  language: string,
+  dependentCounts: Map<string, number>,
+  unresolvedLanguages: ReadonlySet<string>,
+): number | null {
+  if (unresolvedLanguages.has(language)) return null;
+  return dependentCounts.get(filepath) ?? 0;
+}
+
+/**
  * Collapse the report's per-metric violations into one entry per function.
  *
  * A single function yields up to three violations (cyclomatic, cognitive,
  * halstead). Ranking wants one row per function, and the authoritative
  * cognitive number comes from the chunk itself rather than whichever metric
  * happened to trip a threshold.
+ *
+ * `unresolvedLanguages` comes from `unresolvedFanInLanguages(computeCoverage(...))`
+ * and is required rather than defaulted: defaulting it to "everything
+ * resolved" would reinstate #1137 silently at any call site that forgot it.
+ * Pass an empty set when every language resolved something.
  */
 export function buildEntries(
   report: ComplexityReport,
   chunks: CodeChunk[],
   dependentCounts: Map<string, number>,
   testsByFile: Map<string, string[]>,
+  unresolvedLanguages: ReadonlySet<string>,
   includeTests = false,
 ): RiskEntry[] {
   const byPosition = indexChunksByPosition(chunks);
@@ -258,7 +341,12 @@ export function buildEntries(
 
       const chunk = byPosition.get(`${filepath}:${violation.startLine}`);
       const cognitive = cognitiveFor(chunk, violation);
-      const dependents = dependentCounts.get(filepath) ?? 0;
+      const dependents = resolveFanIn(
+        filepath,
+        violation.language,
+        dependentCounts,
+        unresolvedLanguages,
+      );
       const tests = testsByFile.get(filepath) ?? [];
       const hasTests = tests.length > 0;
 
@@ -311,11 +399,26 @@ export function computeCoverage(
     .sort((a, b) => b.files - a.files);
 }
 
+/**
+ * Languages the coverage footer reports no resolved fan-in for.
+ *
+ * Derived from `computeCoverage`'s rows rather than recomputed, so the
+ * ranking and the footer can never disagree about which languages were
+ * resolved — the disagreement being exactly what #1137 was.
+ */
+export function unresolvedFanInLanguages(coverage: CoverageRow[]): Set<string> {
+  return new Set(coverage.filter(row => !row.resolved).map(row => row.language));
+}
+
 function renderEntry(entry: RiskEntry, rank: number): string[] {
   const location = chalk.bold(`${entry.filepath}:${entry.startLine}`);
   const tests =
     entry.tests.length > 0 ? plural(entry.tests.length, 'test') : chalk.yellow('no tests');
-  const facts = `mental load ${entry.cognitive} · imported by ${entry.dependents} · ${tests}`;
+  // Never print "imported by 0" for an unmeasured entry -- that states a fact
+  // the run does not have (#1137).
+  const fanIn =
+    entry.dependents === null ? 'fan-in not resolved' : `imported by ${entry.dependents}`;
+  const facts = `mental load ${entry.cognitive} · ${fanIn} · ${tests}`;
 
   return [
     `  ${chalk.dim(String(rank))}  ${location}  ${chalk.bold(entry.symbolName)}`,
@@ -337,7 +440,12 @@ function renderCoverage(coverage: CoverageRow[]): string[] {
   if (unresolved.length > 0) {
     const described = unresolved.map(row => `${row.language} (${row.files})`).join(', ');
     lines.push(`    no fan-in found   ${described}`);
-    lines.push(chalk.dim('                      ranked on complexity alone — not judged safe'));
+    // "complexity and tests only", not "complexity alone": `scoreRisk` still
+    // applies the untested 2x multiplier to these entries, so tests do affect
+    // their order. The older wording understated what the ranking used.
+    lines.push(
+      chalk.dim('                      ranked on complexity and tests only — not judged safe'),
+    );
   }
   return lines;
 }
@@ -497,6 +605,9 @@ export async function analyzeHealth(rootDir: string, includeTests = false): Prom
   const report = analyzeComplexityFromChunks(chunks, undefined, undefined, { enrich: false });
   const dependentCounts = computeDependentCountsFromChunks(chunks, rootDir);
   const testsByFile = findTestAssociationsFromChunks(violatingFiles(report), chunks, rootDir);
+  // Computed before the entries so both the ranking and the footer read the
+  // same per-language resolution (#1137).
+  const coverage = computeCoverage(chunks, dependentCounts);
 
   if (scan.filesErrored > 0) {
     console.warn(
@@ -514,8 +625,15 @@ export async function analyzeHealth(rootDir: string, includeTests = false): Prom
     // reporting it understated what the user actually waited for.
     durationMs: Date.now() - startedAt,
     totalViolations: report.summary.totalViolations,
-    entries: buildEntries(report, chunks, dependentCounts, testsByFile, includeTests),
-    coverage: computeCoverage(chunks, dependentCounts),
+    entries: buildEntries(
+      report,
+      chunks,
+      dependentCounts,
+      testsByFile,
+      unresolvedFanInLanguages(coverage),
+      includeTests,
+    ),
+    coverage,
     scanError,
   };
 }

@@ -12,6 +12,7 @@ import {
   buildEntries,
   cognitiveFor,
   computeCoverage,
+  unresolvedFanInLanguages,
   plural,
   renderNothingShown,
   toJson,
@@ -43,8 +44,18 @@ function chunk(
   } as CodeChunk;
 }
 
+/**
+ * `language` is per-violation and optional, defaulting to TypeScript.
+ *
+ * It used to be hardcoded to `'typescript'`, which is why no test could
+ * express a violation in another language -- and so why nothing here could
+ * catch #1137, whose whole subject is per-language fan-in resolution.
+ */
 function report(
-  files: Record<string, Array<{ startLine: number; symbolName: string; complexity: number }>>,
+  files: Record<
+    string,
+    Array<{ startLine: number; symbolName: string; complexity: number; language?: string }>
+  >,
 ): ComplexityReport {
   const entries = Object.entries(files).map(([filepath, violations]) => [
     filepath,
@@ -55,7 +66,7 @@ function report(
         endLine: v.startLine + 10,
         symbolName: v.symbolName,
         symbolType: 'function',
-        language: 'typescript',
+        language: v.language ?? 'typescript',
         complexity: v.complexity,
         threshold: 10,
         severity: 'warning',
@@ -161,6 +172,29 @@ describe('describeShape / recommendFor', () => {
   });
 });
 
+describe('classifyShape with unresolved fan-in (#1137)', () => {
+  it('returns unknown-fan-in for null, whatever the complexity or tests', () => {
+    expect(classifyShape(28, null, false)).toBe('unknown-fan-in');
+    expect(classifyShape(1, null, true)).toBe('unknown-fan-in');
+  });
+
+  it('does not treat a genuine zero as unknown', () => {
+    expect(classifyShape(28, 0, false)).toBe('isolated');
+  });
+
+  it('describes and recommends without asserting containment', () => {
+    const described = describeShape('unknown-fan-in');
+    const advice = recommendFor('unknown-fan-in');
+    // Must not tell the reader the function is contained or safe...
+    expect(described).not.toMatch(/contained|little depends/i);
+    // ...and must not claim the LANGUAGE is unresolvable -- `computeCoverage`
+    // reports what this repo showed, not what is possible.
+    expect(described).not.toMatch(/cannot|unsupported|never/i);
+    expect(described).toMatch(/no fan-in found/i);
+    expect(advice).toMatch(/callers/i);
+  });
+});
+
 describe('buildEntries', () => {
   it('collapses a function’s multiple metric violations into one entry', () => {
     const r = report({
@@ -169,19 +203,37 @@ describe('buildEntries', () => {
         { startLine: 1, symbolName: 'run', complexity: 40 },
       ],
     });
-    const entries = buildEntries(r, [chunk('a.ts', 1, 'typescript', 25)], new Map(), new Map());
+    const entries = buildEntries(
+      r,
+      [chunk('a.ts', 1, 'typescript', 25)],
+      new Map(),
+      new Map(),
+      new Set(),
+    );
     expect(entries).toHaveLength(1);
   });
 
   it('prefers the chunk’s cognitive complexity over the violation metric', () => {
     const r = report({ 'a.ts': [{ startLine: 1, symbolName: 'run', complexity: 99 }] });
-    const entries = buildEntries(r, [chunk('a.ts', 1, 'typescript', 25)], new Map(), new Map());
+    const entries = buildEntries(
+      r,
+      [chunk('a.ts', 1, 'typescript', 25)],
+      new Map(),
+      new Map(),
+      new Set(),
+    );
     expect(entries[0].cognitive).toBe(25);
   });
 
   it('falls back to the violation metric when the chunk has no cognitive value', () => {
     const r = report({ 'a.ts': [{ startLine: 1, symbolName: 'run', complexity: 99 }] });
-    const entries = buildEntries(r, [chunk('a.ts', 1, 'typescript')], new Map(), new Map());
+    const entries = buildEntries(
+      r,
+      [chunk('a.ts', 1, 'typescript')],
+      new Map(),
+      new Map(),
+      new Set(),
+    );
     expect(entries[0].cognitive).toBe(99);
   });
 
@@ -192,6 +244,7 @@ describe('buildEntries', () => {
       [chunk('a.ts', 1, 'typescript', 20)],
       new Map([['a.ts', 7]]),
       new Map([['a.ts', ['a.test.ts']]]),
+      new Set(),
     );
     expect(entries[0].dependents).toBe(7);
     expect(entries[0].tests).toEqual(['a.test.ts']);
@@ -208,13 +261,20 @@ describe('buildEntries', () => {
       [chunk('low.ts', 1, 'typescript', 11), chunk('high.ts', 1, 'typescript', 40)],
       new Map(),
       new Map(),
+      new Set(),
     );
     expect(entries[0].symbolName).toBe('big');
   });
 
-  it('treats a file with no fan-in entry as zero dependents', () => {
+  it('treats a file with no fan-in entry as zero when its language resolved fan-in', () => {
     const r = report({ 'a.ts': [{ startLine: 1, symbolName: 'run', complexity: 20 }] });
-    const entries = buildEntries(r, [chunk('a.ts', 1, 'typescript', 20)], new Map(), new Map());
+    const entries = buildEntries(
+      r,
+      [chunk('a.ts', 1, 'typescript', 20)],
+      new Map(),
+      new Map(),
+      new Set(),
+    );
     expect(entries[0].dependents).toBe(0);
   });
 
@@ -233,6 +293,7 @@ describe('buildEntries', () => {
       [chunk('lonely.ts', 1, 'typescript', 76), chunk('shared.ts', 1, 'typescript', 15)],
       new Map([['shared.ts', 5]]),
       new Map(),
+      new Set(),
     );
     expect(entries.map(e => e.symbolName)).toEqual(['used', 'huge']);
     expect(entries[0].shape).toBe('dangerous');
@@ -253,6 +314,7 @@ describe('buildEntries', () => {
         ['b.ts', 6],
       ]),
       new Map(),
+      new Set(),
     );
     expect(entries.map(e => e.symbolName)).toEqual(['bigger', 'smaller']);
   });
@@ -264,6 +326,7 @@ describe('buildEntries', () => {
       [chunk('src/a.test.ts', 1, 'typescript', 40)],
       new Map(),
       new Map(),
+      new Set(),
     );
     expect(entries).toEqual([]);
   });
@@ -275,9 +338,126 @@ describe('buildEntries', () => {
       [chunk('src/a.test.ts', 1, 'typescript', 40)],
       new Map(),
       new Map(),
+      new Set(),
       true,
     );
     expect(entries).toHaveLength(1);
+  });
+
+  it('records unresolved fan-in as null, not zero, for a language that resolved none', () => {
+    // #1137: the entry for a language with no resolved fan-in must not claim a
+    // measurement. `null` is the honest value; `0` is a false statement.
+    const r = report({
+      'a.swift': [{ startLine: 1, symbolName: 'classify', complexity: 28, language: 'swift' }],
+    });
+    const entries = buildEntries(
+      r,
+      [chunk('a.swift', 1, 'swift', 28)],
+      new Map(),
+      new Map(),
+      new Set(['swift']),
+    );
+    expect(entries[0].dependents).toBeNull();
+    expect(entries[0].shape).toBe('unknown-fan-in');
+  });
+
+  it('keeps a real zero for a resolved language, so a contained function is not re-labelled', () => {
+    // The other half of #1137's constraint: this must NOT become a false
+    // alarm. A TypeScript file with genuinely no importers, in a repo where
+    // TypeScript fan-in resolved, is still `isolated`.
+    const r = report({
+      'lonely.ts': [{ startLine: 1, symbolName: 'huge', complexity: 40 }],
+      'shared.ts': [{ startLine: 1, symbolName: 'used', complexity: 5 }],
+    });
+    const entries = buildEntries(
+      r,
+      [chunk('lonely.ts', 1, 'typescript', 40), chunk('shared.ts', 1, 'typescript', 5)],
+      new Map([['shared.ts', 4]]),
+      new Map(),
+      new Set(),
+    );
+    const lonely = entries.find(e => e.symbolName === 'huge');
+    expect(lonely?.dependents).toBe(0);
+    expect(lonely?.shape).toBe('isolated');
+  });
+
+  it('ranks an unresolved-fan-in function above an isolated one', () => {
+    // #1137 impact 2: the ranking, not just the wording. Before the fix the
+    // Swift entry classified as `isolated` and sorted purely on score, so a
+    // higher-complexity contained TypeScript function buried it. A function
+    // whose blast radius was never measured must not sort below one measured
+    // as contained.
+    const r = report({
+      'contained.ts': [{ startLine: 1, symbolName: 'big', complexity: 90 }],
+      'unknown.swift': [
+        { startLine: 1, symbolName: 'classify', complexity: 20, language: 'swift' },
+      ],
+    });
+    const entries = buildEntries(
+      r,
+      [chunk('contained.ts', 1, 'typescript', 90), chunk('unknown.swift', 1, 'swift', 20)],
+      new Map([['contained.ts', 0]]),
+      new Map(),
+      new Set(['swift']),
+    );
+    expect(entries.map(e => e.symbolName)).toEqual(['classify', 'big']);
+    // ...even though the contained one scores far higher.
+    expect(entries[1].score).toBeGreaterThan(entries[0].score);
+  });
+
+  it('still lets test coverage order unresolved entries, as the footer now says', () => {
+    // CodeRabbit on #1138: the footer used to claim these were "ranked on
+    // complexity alone", but scoreRisk applies its untested 2x multiplier
+    // regardless of fan-in. That is the behaviour we want -- fan-in is the
+    // only unmeasured axis -- so the wording was corrected and this pins it.
+    const r = report({
+      'tested.swift': [{ startLine: 1, symbolName: 'tested', complexity: 20, language: 'swift' }],
+      'bare.swift': [{ startLine: 1, symbolName: 'bare', complexity: 20, language: 'swift' }],
+    });
+    const entries = buildEntries(
+      r,
+      [chunk('tested.swift', 1, 'swift', 20), chunk('bare.swift', 1, 'swift', 20)],
+      new Map(),
+      new Map([['tested.swift', ['tested.test.swift']]]),
+      new Set(['swift']),
+    );
+    expect(entries.every(e => e.dependents === null)).toBe(true);
+    // Equal complexity, so only tests can separate them -- untested first.
+    expect(entries.map(e => e.symbolName)).toEqual(['bare', 'tested']);
+    expect(entries[0].score).toBe(entries[1].score * 2);
+  });
+
+  it('mixes resolved and unresolved languages in one run', () => {
+    const r = report({
+      'a.ts': [{ startLine: 1, symbolName: 'tsFn', complexity: 20 }],
+      'b.swift': [{ startLine: 1, symbolName: 'swiftFn', complexity: 20, language: 'swift' }],
+    });
+    const entries = buildEntries(
+      r,
+      [chunk('a.ts', 1, 'typescript', 20), chunk('b.swift', 1, 'swift', 20)],
+      new Map([['a.ts', 3]]),
+      new Map(),
+      new Set(['swift']),
+    );
+    expect(entries.find(e => e.symbolName === 'tsFn')?.dependents).toBe(3);
+    expect(entries.find(e => e.symbolName === 'swiftFn')?.dependents).toBeNull();
+  });
+});
+
+describe('unresolvedFanInLanguages', () => {
+  it('names exactly the languages the coverage footer reports unresolved', () => {
+    const set = unresolvedFanInLanguages([
+      { language: 'typescript', files: 10, resolved: true },
+      { language: 'swift', files: 5, resolved: false },
+      { language: 'go', files: 2, resolved: false },
+    ]);
+    expect([...set].sort()).toEqual(['go', 'swift']);
+  });
+
+  it('is empty when everything resolved, so no entry is marked unknown', () => {
+    expect(
+      unresolvedFanInLanguages([{ language: 'typescript', files: 10, resolved: true }]).size,
+    ).toBe(0);
   });
 });
 
