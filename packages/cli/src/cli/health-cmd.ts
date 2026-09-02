@@ -168,11 +168,17 @@ const SHAPE_PRIORITY: Record<RiskShape, number> = {
  *
  * Unresolved fan-in (`null`) contributes the same damping as `0`, which is
  * safe ONLY because shape sorts ahead of score: every `unknown-fan-in` entry
- * carries the same constant term, so within that group the score reduces to
- * complexity × tests — exactly the "ranked on complexity alone" the coverage
- * footer already promises. It is never compared against a resolved entry's
- * score, because a different shape decides the order first. Do not reuse this
- * score to compare across shapes.
+ * carries the same constant fan-in term, so within that group the score
+ * reduces to complexity × tests. It is never compared against a resolved
+ * entry's score, because a different shape decides the order first. Do not
+ * reuse this score to compare across shapes.
+ *
+ * Note it reduces to complexity × *tests*, not complexity alone: an untested
+ * entry still scores 2× a tested one of equal complexity. That is deliberate
+ * — fan-in is the only unmeasured axis, and discarding the two that ARE
+ * measured would rank worse, not more honestly. The coverage footer says
+ * "complexity and tests only" for exactly this reason; it must not claim
+ * complexity alone.
  */
 export function scoreRisk(cognitive: number, dependents: number | null, hasTests: boolean): number {
   return cognitive * (1 + Math.log2(1 + (dependents ?? 0))) * (hasTests ? 1 : 2);
@@ -434,7 +440,12 @@ function renderCoverage(coverage: CoverageRow[]): string[] {
   if (unresolved.length > 0) {
     const described = unresolved.map(row => `${row.language} (${row.files})`).join(', ');
     lines.push(`    no fan-in found   ${described}`);
-    lines.push(chalk.dim('                      ranked on complexity alone — not judged safe'));
+    // "complexity and tests only", not "complexity alone": `scoreRisk` still
+    // applies the untested 2x multiplier to these entries, so tests do affect
+    // their order. The older wording understated what the ranking used.
+    lines.push(
+      chalk.dim('                      ranked on complexity and tests only — not judged safe'),
+    );
   }
   return lines;
 }

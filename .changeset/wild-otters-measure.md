@@ -16,7 +16,7 @@ thing in its coverage footer and then contradicted it one line above:
 
   Coverage
     no fan-in found   swift (5)
-                      ranked on complexity alone — not judged safe
+                      ranked on complexity and tests only — not judged safe
 ```
 
 `Config` is used by every other file in that module. Swift's `import` names a
@@ -60,6 +60,14 @@ Changes:
 
 Per-language, not per-run: a repo mixing a resolved language with an
 unresolved one gets real counts for the first and `null` for the second.
+
+The coverage footer's wording is corrected alongside this. It said unresolved
+languages were "ranked on complexity alone", which was never true — `scoreRisk`
+applies its untested 2× multiplier regardless of fan-in, so an untested entry
+always outranked a tested one of equal complexity. It now says "complexity and
+tests only". The behaviour is deliberate and unchanged: fan-in is the single
+unmeasured axis, and throwing away the two that *are* measured would rank
+worse, not more honestly.
 
 **Deliberately unchanged:** a language that *did* resolve fan-in keeps `0` for
 a file with genuinely no importers, and still reads as `isolated`. Verified on

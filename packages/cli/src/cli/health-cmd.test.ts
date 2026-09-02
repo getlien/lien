@@ -405,6 +405,28 @@ describe('buildEntries', () => {
     expect(entries[1].score).toBeGreaterThan(entries[0].score);
   });
 
+  it('still lets test coverage order unresolved entries, as the footer now says', () => {
+    // CodeRabbit on #1138: the footer used to claim these were "ranked on
+    // complexity alone", but scoreRisk applies its untested 2x multiplier
+    // regardless of fan-in. That is the behaviour we want -- fan-in is the
+    // only unmeasured axis -- so the wording was corrected and this pins it.
+    const r = report({
+      'tested.swift': [{ startLine: 1, symbolName: 'tested', complexity: 20, language: 'swift' }],
+      'bare.swift': [{ startLine: 1, symbolName: 'bare', complexity: 20, language: 'swift' }],
+    });
+    const entries = buildEntries(
+      r,
+      [chunk('tested.swift', 1, 'swift', 20), chunk('bare.swift', 1, 'swift', 20)],
+      new Map(),
+      new Map([['tested.swift', ['tested.test.swift']]]),
+      new Set(['swift']),
+    );
+    expect(entries.every(e => e.dependents === null)).toBe(true);
+    // Equal complexity, so only tests can separate them -- untested first.
+    expect(entries.map(e => e.symbolName)).toEqual(['bare', 'tested']);
+    expect(entries[0].score).toBe(entries[1].score * 2);
+  });
+
   it('mixes resolved and unresolved languages in one run', () => {
     const r = report({
       'a.ts': [{ startLine: 1, symbolName: 'tsFn', complexity: 20 }],
