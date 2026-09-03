@@ -942,7 +942,13 @@ describe('E2E: Real Open Source Projects', () => {
           // assertion rather than a tighter floor -- the two answer different
           // questions ("did resolution collapse?" vs "did it degrade?") and
           // the floor's doc comment explicitly forbids tightening it.
-          const minimum = Math.floor(
+          // `Math.ceil`, not `floor`: the threshold is fractional for an odd
+          // baseline, and flooring it would permit a drop slightly LARGER than
+          // the tolerance this check's own message claims. Requests' baseline
+          // of 353 floors to 176, which `toBeGreaterThanOrEqual` accepts -- a
+          // 50.14% drop passing a check that says 50%. Ceiling makes the
+          // message true for every baseline, odd or even (CodeRabbit, #1147).
+          const minimum = Math.ceil(
             project.baselineDependencyEdges * (1 - EDGE_REGRESSION_TOLERANCE),
           );
           expect(
