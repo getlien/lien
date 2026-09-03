@@ -87,6 +87,31 @@ interface ProjectConfig {
    */
   expectedMinDependencyEdges: number;
   /**
+   * #1053: the sampled edge count measured on THIS corpus at the date noted
+   * beside each value, enforced with a band (see
+   * `EDGE_REGRESSION_TOLERANCE`).
+   *
+   * The floor above is a collapse detector and says so; the gap #1053
+   * quantified is that "far below measured" turns out to mean a real,
+   * measured **78.5%** regression sails through. Reverting the PHP
+   * `namespaceStyleImports` gate on Monolog took edges 186 -> 40 and the
+   * floor of 20 still passed. Across the corpora the mean loss needed to trip
+   * a floor is **80.2%**.
+   *
+   * These numbers already existed as `measured ~X` comments; nothing read
+   * them, so nothing noticed when they went stale. Four of five were wrong
+   * when re-measured (Zod's comment said ~1265 against an actual 428).
+   * Making the value a field is most of the fix: a number the test asserts on
+   * cannot drift silently.
+   *
+   * MEASURE THROUGH `computeDependencyStats`, not by hand. The sweep samples
+   * 100 files evenly, so the count is a function of corpus SIZE as well as
+   * resolution quality — Zod has grown to 565 files, which is most of why its
+   * comment diverged so far. A baseline taken any other way encodes a number
+   * the assertion cannot reproduce.
+   */
+  baselineDependencyEdges: number;
+  /**
    * #1029 (W3): floor on `report.summary.totalViolations` from
    * `lien complexity --format json` -- a COLLAPSE DETECTOR for the same
    * reason `expectedMinDependencyEdges` is: before this, the complexity test
@@ -148,6 +173,31 @@ interface ProjectConfig {
 const KNOWN_ZERO_EDGE_LANGUAGES = new Set(['swift']);
 
 /**
+ * #1053: how far the sampled edge count may fall below
+ * `baselineDependencyEdges` before it is treated as a regression.
+ *
+ * 0.5 means "fail below half the baseline". That is looser than the 20-30%
+ * #1053 suggested, deliberately, and the reason is measurement volatility
+ * rather than timidity: the sweep samples 100 files EVENLY, so when a corpus
+ * grows the sampled set becomes a sparser, different selection and the
+ * absolute count moves with no change in resolution quality. Zod at 565 files
+ * measures 428 against a comment of ~1265 written when it was much smaller.
+ * A 25% band on a number that drifts that far would fail on upstream growth
+ * and get disabled, which is worse than the loose floor it replaced (#1014:
+ * a gate that over-fires gets trained out as noise).
+ *
+ * 50% still improves detection substantially — from a mean of 80.2% loss
+ * needed to trip a floor, to 50% uniformly — and catches the case #1053 was
+ * filed for (-78.5%) with margin to spare.
+ *
+ * The floor assertion is kept ALONGSIDE this, not replaced by it. Java (48.6%)
+ * and Kotlin (47.4%) already have floors tighter than this band, so running
+ * both means the effective threshold is whichever is tighter, per project,
+ * with no special-casing.
+ */
+const EDGE_REGRESSION_TOLERANCE = 0.5;
+
+/**
  * Languages where `findTestAssociationsFromChunks` resolves ZERO test
  * associations today across a real corpus with a real test suite -- same
  * TRIPWIRE contract as `KNOWN_ZERO_EDGE_LANGUAGES` above (`toBe(0)`, not a
@@ -197,7 +247,8 @@ const TEST_PROJECTS: ProjectConfig[] = [
     language: 'python',
     expectedMinFiles: 10, // Requests has clean structure with requests/*.py
     expectedMinChunks: 50, // Conservative estimate
-    expectedMinDependencyEdges: 20, // measured ~353 (2026-07); floor is a collapse detector, not a target
+    expectedMinDependencyEdges: 20, // floor is a collapse detector, not a target; measured value now lives in baselineDependencyEdges (#1053)
+    baselineDependencyEdges: 353, // measured 2026-09-03; comment said ~353 -- the one that was still accurate
     expectedMinComplexityViolations: 10, // measured ~34 (2026-08)
     expectedMinTestAssociations: 20, // measured ~139 across 51 files (2026-08)
     expectedMinChunksWithExports: 100, // measured ~759/841 chunks (2026-08)
@@ -209,7 +260,8 @@ const TEST_PROJECTS: ProjectConfig[] = [
     language: 'typescript',
     expectedMinFiles: 30,
     expectedMinChunks: 100,
-    expectedMinDependencyEdges: 50, // measured ~1265 (2026-07); floor is a collapse detector, not a target
+    expectedMinDependencyEdges: 50, // floor is a collapse detector, not a target; measured value now lives in baselineDependencyEdges (#1053)
+    baselineDependencyEdges: 428, // measured 2026-09-03; comment said ~1265; corpus has grown to 565 files, so the 100-file sample is sparser
     expectedMinComplexityViolations: 50, // measured ~255 (2026-08)
     expectedMinTestAssociations: 1, // measured ~3 across a 100-file sample of 454 (2026-08); zod's test files import a lot via barrel re-exports rather than direct file imports, so the ratio is genuinely low but non-zero
     expectedMinChunksWithExports: 500, // measured ~3139/5078 chunks (2026-08)
@@ -221,7 +273,8 @@ const TEST_PROJECTS: ProjectConfig[] = [
     language: 'javascript',
     expectedMinFiles: 20,
     expectedMinChunks: 80,
-    expectedMinDependencyEdges: 50, // measured ~2924 (2026-07); floor is a collapse detector, not a target
+    expectedMinDependencyEdges: 50, // floor is a collapse detector, not a target; measured value now lives in baselineDependencyEdges (#1053)
+    baselineDependencyEdges: 1753, // measured 2026-09-03; comment said ~2924
     expectedMinComplexityViolations: 1, // measured ~3 (2026-08) -- express is a thin, low-complexity router shim
     expectedMinTestAssociations: 100, // measured ~1254 across a 100-file sample of 150 (2026-08)
     expectedMinChunksWithExports: 30, // measured ~159/771 chunks (2026-08)
@@ -237,6 +290,7 @@ const TEST_PROJECTS: ProjectConfig[] = [
     // this was 0 across all 232 files and the suite was still green -- this
     // floor is exactly the regression detector #1004 asks for.
     expectedMinDependencyEdges: 20,
+    baselineDependencyEdges: 246, // measured 2026-09-03; comment said ~405; #1053 measured 186 on an older HEAD
     expectedMinComplexityViolations: 10, // measured ~39 (2026-08)
     expectedMinTestAssociations: 3, // measured ~15 across a 100-file sample of 232 (2026-08)
     expectedMinChunksWithExports: 300, // measured ~2672/2857 chunks (2026-08)
@@ -267,6 +321,7 @@ const TEST_PROJECTS: ProjectConfig[] = [
     // 1 just proves resolution hasn't collapsed to zero; it is intentionally
     // not a precision target.
     expectedMinDependencyEdges: 1,
+    baselineDependencyEdges: 32, // measured 2026-09-03; comment said ~39 pre-#1021; that landed, real number is 32
     expectedMinComplexityViolations: 2, // measured ~10 (2026-08)
     expectedMinTestAssociations: 1, // measured ~6 across 40 files (2026-08)
     expectedMinChunksWithExports: 50, // measured ~363/508 chunks (2026-08)
@@ -293,6 +348,7 @@ const TEST_PROJECTS: ProjectConfig[] = [
     // to 35 (~55% of measured 64) per #1053 -- tight enough to catch roughly
     // a 45%+ regression, not just a near-total collapse.
     expectedMinDependencyEdges: 35,
+    baselineDependencyEdges: 75, // measured 2026-09-03
     expectedMinComplexityViolations: 15, // measured ~72 (2026-08)
     expectedMinTestAssociations: 3, // measured ~20 across 86 files (2026-08)
     expectedMinChunksWithExports: 100, // measured ~662/765 chunks (2026-08)
@@ -323,6 +379,7 @@ const TEST_PROJECTS: ProjectConfig[] = [
     // (76), tight enough to catch a roughly-half collapse, not just a
     // total-collapse-to-zero (#1053).
     expectedMinDependencyEdges: 76,
+    baselineDependencyEdges: 148, // measured 2026-09-03
     expectedMinComplexityViolations: 5, // measured ~19 (2026-08)
     // NOT a KNOWN_ZERO_TESTASSOC_LANGUAGES tripwire: `samePackageTestConvention`
     // (#925) covers test association only, not dependents -- measured ~13
@@ -337,7 +394,8 @@ const TEST_PROJECTS: ProjectConfig[] = [
     language: 'csharp',
     expectedMinFiles: 10,
     expectedMinChunks: 30,
-    expectedMinDependencyEdges: 20, // measured ~578 (2026-07); floor is a collapse detector, not a target
+    expectedMinDependencyEdges: 20, // floor is a collapse detector, not a target; measured value now lives in baselineDependencyEdges (#1053)
+    baselineDependencyEdges: 378, // measured 2026-09-03; comment said ~578
     expectedMinComplexityViolations: 5, // measured ~20 (2026-08)
     // #1040 FIXED: C# resolved 0 test associations before this fix despite
     // MediatR shipping a real test project (root cause: the enclosing-
@@ -373,6 +431,7 @@ const TEST_PROJECTS: ProjectConfig[] = [
     // bug. Floor stays a collapse detector either way: not raised pending
     // that write-up (see PR description for the full trace).
     expectedMinDependencyEdges: 10,
+    baselineDependencyEdges: 92, // measured 2026-09-03
     expectedMinComplexityViolations: 2, // measured ~11 (2026-08)
     expectedMinTestAssociations: 1, // measured ~3 across a 100-file sample of 170 (2026-08)
     expectedMinChunksWithExports: 150, // measured ~1286/1605 chunks (2026-08)
@@ -405,6 +464,7 @@ const TEST_PROJECTS: ProjectConfig[] = [
     // language). Floor is ~50% of measured (112), tight enough to catch a
     // roughly-half collapse, not just a total-collapse-to-zero (#1053).
     expectedMinDependencyEdges: 112,
+    baselineDependencyEdges: 213, // measured 2026-09-03
     expectedMinComplexityViolations: 3, // measured ~16 (2026-08)
     // #1005 Phase 2, Item 2 fix: Kotlin's same-package test convention
     // (no import at all connecting a test class to its subject) is now
@@ -429,6 +489,7 @@ const TEST_PROJECTS: ProjectConfig[] = [
     // KNOWN_ZERO_EDGE_LANGUAGES: this is asserted as an exact-zero tripwire,
     // not a floor, elsewhere in this file.
     expectedMinDependencyEdges: 0,
+    baselineDependencyEdges: 0, // measured 2026-09-03; KNOWN_ZERO_EDGE_LANGUAGES tripwire -- baseline is 0 and the band is skipped
     expectedMinComplexityViolations: 1, // measured ~6 (2026-08)
     // KNOWN GAP: #869 -- whole-module-import languages have no per-file
     // test-association signal (structural, not a matching bug). See
@@ -875,6 +936,26 @@ describe('E2E: Real Open Source Projects', () => {
           // Floor only -- see `expectedMinDependencyEdges`'s doc comment.
           // This must NOT be tightened to match `stats.totalEdges` above.
           expect(stats.totalEdges).toBeGreaterThanOrEqual(project.expectedMinDependencyEdges);
+
+          // #1053: the floor alone lets a real 78.5% regression through, so
+          // also band against the committed baseline. Deliberately a second
+          // assertion rather than a tighter floor -- the two answer different
+          // questions ("did resolution collapse?" vs "did it degrade?") and
+          // the floor's doc comment explicitly forbids tightening it.
+          const minimum = Math.floor(
+            project.baselineDependencyEdges * (1 - EDGE_REGRESSION_TOLERANCE),
+          );
+          expect(
+            stats.totalEdges,
+            `${project.name}: ${stats.totalEdges} edges is more than ` +
+              `${EDGE_REGRESSION_TOLERANCE * 100}% below the committed baseline of ` +
+              `${project.baselineDependencyEdges} (floor for this check: ${minimum}).\n` +
+              `If resolution genuinely regressed, that is the bug -- find it before ` +
+              `touching this number.\n` +
+              `If the corpus legitimately changed upstream, re-measure and update ` +
+              `baselineDependencyEdges (and its date) in the same commit, saying which ` +
+              `upstream change moved it.`,
+          ).toBeGreaterThanOrEqual(minimum);
         }
       });
 
