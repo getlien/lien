@@ -34,6 +34,35 @@ name: CodeRabbit Review Honesty
 on:
   status:
 
+  # Manual trigger, and the ONLY way to test this workflow.
+  #
+  # GitHub reads workflow definitions from the DEFAULT BRANCH for every event
+  # except `pull_request`/`pull_request_target`. So a `status`-triggered
+  # workflow on a feature branch is invisible to GitHub: this file cannot run
+  # on its own PR, no matter how many CodeRabbit statuses that PR receives.
+  # (Verified the hard way -- #1143 got a real `Review rate limited` status
+  # and this workflow logged zero runs.)
+  #
+  # That would otherwise leave it unverifiable before merge and SILENTLY INERT
+  # if broken after -- the same shape of failure it exists to catch. This input
+  # makes it checkable at any time once merged:
+  #
+  #   gh workflow run coderabbit-honesty.yml \
+  #     -f sha=<head sha of an open PR> \
+  #     -f reason="Review rate limited"
+  #
+  # Then confirm the label and comment appear, and re-run with
+  # reason="Review completed" to confirm they clear.
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Head SHA of an open PR to act on
+        required: true
+      reason:
+        description: CodeRabbit reason string to simulate
+        required: true
+        default: Review rate limited
+
 permissions:
   pull-requests: write # label + comment
   issues: write # labels are the issues API
@@ -43,15 +72,18 @@ jobs:
     # Load-bearing twice: skips CodeRabbit's own queued/in-progress statuses,
     # and stops any other status in the repo from waking this workflow. A
     # skipped job allocates no runner.
-    if: github.event.context == 'CodeRabbit' && github.event.state != 'pending'
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.context == 'CodeRabbit' && github.event.state != 'pending')
     runs-on: ubuntu-latest
     steps:
       - name: Flag or clear the review-completeness label
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          SHA: ${{ github.event.sha }}
-          REASON: ${{ github.event.description }}
+          # Dispatch inputs win when present; otherwise the status payload.
+          SHA: ${{ inputs.sha || github.event.sha }}
+          REASON: ${{ inputs.reason || github.event.description }}
           LABEL: coderabbit-incomplete
           MARKER: '<!-- coderabbit-honesty -->'
         run: |
