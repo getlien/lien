@@ -74,11 +74,22 @@ function validateFilesExist(files: string[] | undefined, rootDir: string): void 
  * errors — the answer is still useful, it is just incomplete, and the reader
  * has to know which.
  */
-function reportScanCaveats(outcome: {
-  chunkCount: number;
+function reportScanCaveats(scan: {
+  success: boolean;
+  chunks: unknown[];
   filesErrored: number;
   filesSkipped: number;
 }): void {
+  // Takes the scan itself rather than a hand-built literal. Four properties
+  // spelled out at the call site is four properties inside
+  // `complexityCommand`'s complexity budget, and it crossed its 60m limit on
+  // the fourth.
+  const outcome = {
+    success: scan.success,
+    chunkCount: scan.chunks.length,
+    filesErrored: scan.filesErrored,
+    filesSkipped: scan.filesSkipped,
+  };
   const { filesSkipped } = outcome;
   // Shared detection, local phrasing: `describePartialScan` owns the question
   // so this cannot drift from `health`'s and `review`'s answers to it, while
@@ -86,7 +97,12 @@ function reportScanCaveats(outcome: {
   // lines only this command emits (#1149). It takes the whole outcome rather
   // than two counts because the shared check reads `chunkCount` too, and
   // synthesising one here would be a second copy of its rule.
-  const partial = describePartialScan({ success: true, ...outcome });
+  // Pass the scan's real `success` rather than a hardcoded `true`. It happens
+  // to be true here -- `describeScanFailure` already returned for a failed
+  // scan, and `describePartialScan` does not read the field anyway -- but
+  // asserting a value we never looked at is how a caller ends up relying on a
+  // coincidence. Nothing enforces that call ordering.
+  const partial = describePartialScan(outcome);
   if (partial) {
     console.warn(
       chalk.yellow(
@@ -299,11 +315,7 @@ export async function complexityCommand(options: ComplexityOptions) {
 
     if (scanError) return refuseNoData(scanError, rootDir, HINTS.root);
 
-    reportScanCaveats({
-      chunkCount: scan.chunks.length,
-      filesErrored: scan.filesErrored,
-      filesSkipped: scan.filesSkipped,
-    });
+    reportScanCaveats(scan);
 
     const report = analyzeComplexityFromChunks(scan.chunks, files);
 

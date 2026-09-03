@@ -831,13 +831,20 @@ describe('displayOrderDivergesFromScore (#1151)', () => {
   });
 
   it('fires on a divergence anywhere in the list, not just at the top', () => {
-    // The check scans all earlier entries, which for a descending-order test
-    // is equivalent to comparing adjacent pairs -- a list is non-descending
-    // iff some adjacent pair increases. Kept as written because it states the
-    // property directly rather than relying on that equivalence holding if
-    // the ordering rule ever gains a third key.
+    // Third entry outscores the second. The check compares adjacent pairs,
+    // which is sufficient: a sequence is non-descending exactly when some
+    // adjacent pair increases.
     expect(
       displayOrderDivergesFromScore([e(100, 'dangerous'), e(40, 'isolated'), e(60, 'isolated')]),
+    ).toBe(true);
+  });
+
+  it('fires when the divergence is against a non-adjacent entry too', () => {
+    // 70 beats the 50 directly above it, so adjacent comparison catches it --
+    // but this pins the user-visible property (something lower outranks
+    // something higher) rather than the implementation detail.
+    expect(
+      displayOrderDivergesFromScore([e(100, 'expensive'), e(50, 'isolated'), e(70, 'isolated')]),
     ).toBe(true);
   });
 });

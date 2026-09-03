@@ -521,7 +521,12 @@ export function renderNothingShown(result: HealthResult, pathFilter?: string): s
  * caveat that fires every run gets trained out (#1014).
  */
 export function displayOrderDivergesFromScore(shown: RiskEntry[]): boolean {
-  return shown.some((entry, i) => shown.slice(0, i).some(above => entry.score > above.score));
+  // Adjacent pairs suffice: a sequence is non-descending exactly when no
+  // adjacent pair increases. An earlier version compared each entry against
+  // every entry above it, which is the same answer at O(n^2) -- and `--top`
+  // has no upper bound, so `shown` is only as small as the ranked set happens
+  // to be.
+  return shown.some((entry, i) => i > 0 && entry.score > shown[i - 1].score);
 }
 
 export function renderText(result: HealthResult, shown: RiskEntry[], pathFilter?: string): string {
