@@ -15,7 +15,7 @@ contents simply never reached the index.
 Measured on `serilog/serilog` (216 `.cs` files), files collapsing to a single
 symbol-less whole-file chunk:
 
-```
+```text
 before: 16
 after:   9
 ```
