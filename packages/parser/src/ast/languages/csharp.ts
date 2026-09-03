@@ -85,7 +85,50 @@ export class CSharpTraverser implements LanguageTraverser {
       node.type === 'compilation_unit' ||
       node.type === 'declaration_list' ||
       node.type === 'namespace_declaration' ||
-      node.type === 'file_scoped_namespace_declaration'
+      node.type === 'file_scoped_namespace_declaration' ||
+      // #970: anything inside `#if ... #endif` used to be invisible. The
+      // grammar wraps it in a `preproc_if`, which was not transparent, so
+      // `findTopLevelNodes` never descended and the declarations produced no
+      // chunk and no symbol at all. Measured on serilog/serilog: this fix
+      // takes the count of files collapsed to a single symbol-less
+      // whole-file chunk from 16 to 9, recovering 7 -- the 9 that remain are
+      // 7 legitimately trivial (GlobalUsings/AssemblyInfo/top-level Program)
+      // and 2 that root in ERROR, which is #970's Bug 2, a tree-sitter
+      // grammar limit no traverser change can reach.
+      //
+      // It hides MEMBERS too, not just top-level declarations — the issue
+      // only documents the latter, but `declaration_list > preproc_if >
+      // method_declaration` is the same blindness for a conditionally
+      // compiled method, and that shape is far more common.
+      //
+      // `preproc_elif`/`preproc_else` are deliberately NOT here. The grammar
+      // NESTS them inside `preproc_if`:
+      //
+      //     preproc_if
+      //       identifier                <- the condition
+      //       <#if branch declarations>
+      //       preproc_elif
+      //         <elif declarations>
+      //         preproc_else
+      //           <else declarations>
+      //
+      // so making them transparent as well would extract the same logical
+      // declaration once per branch — `class Impl` twice for a plain
+      // `#if/#else`, three times with an `#elif`. Duplicate symbols with the
+      // same name are FABRICATION, and this repo has already paid for that
+      // once (#1056: two unrelated files reporting an identical 144-file
+      // dependent list). Omission is the cheaper error.
+      //
+      // The consequence, stated plainly: for `#if/#else`, only the `#if`
+      // branch is indexed. Choosing correctly would require knowing the build
+      // configuration, which a parser reading one file cannot. First branch is
+      // deterministic; "whichever branch happens to be real" is not
+      // available.
+      //
+      // `#region` needs nothing here — `preproc_region`/`preproc_endregion`
+      // are SIBLINGS of the declarations they visually wrap, not parents, so
+      // they never hid anything (verified against the grammar).
+      node.type === 'preproc_if'
     );
   }
 

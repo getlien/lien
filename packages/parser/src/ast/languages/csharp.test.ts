@@ -1055,6 +1055,131 @@ public class App {
       expect(propertyLikeChunks).toEqual([]);
     });
   });
+
+  describe('preprocessor directives (#970)', () => {
+    it('extracts a declaration wholly inside #if ... #endif', () => {
+      // The bug: the grammar wraps this in a `preproc_if`, which was not a
+      // transparent node, so `findTopLevelNodes` never descended and the
+      // class produced NO chunk and NO symbol. Measured on serilog/serilog:
+      // 7 files collapsed to a single symbol-less whole-file chunk.
+      const content = `namespace A;
+#if NET8_0
+class OnlyInIf { void M() {} }
+#endif
+`;
+      const chunks = chunkByAST('OnlyInIf.cs', content);
+      const symbols = chunks.map(c => c.metadata.symbolName).filter(Boolean);
+
+      expect(symbols).toContain('OnlyInIf');
+      expect(symbols).toContain('M');
+    });
+
+    it('extracts a MEMBER inside #if, not just a top-level declaration', () => {
+      // Not in #970's write-up, which only documents whole declarations at
+      // top level. `declaration_list > preproc_if > method_declaration` is
+      // the same blindness for a conditionally compiled method, and that
+      // shape is far more common in real C#.
+      const content = `namespace A;
+class Outer
+{
+    void Always() {}
+#if FEATURE
+    void OnlyWhenFeature() {}
+#endif
+}
+`;
+      const chunks = chunkByAST('Outer.cs', content);
+      const symbols = chunks.map(c => c.metadata.symbolName).filter(Boolean);
+
+      expect(symbols).toContain('Always');
+      expect(symbols).toContain('OnlyWhenFeature');
+    });
+
+    it('takes only the #if branch of an #if/#else, never both', () => {
+      // THE SAFETY PROPERTY. `preproc_else` NESTS inside `preproc_if`, so
+      // making it transparent too would extract `Impl` twice -- two symbols
+      // with the same name from one file. Duplicate symbols are fabrication,
+      // and this repo has already paid for that once (#1056). Omission is
+      // the cheaper error, so `preproc_else` is deliberately not traversed.
+      const content = `namespace A;
+#if NET8_0
+class Impl { void Modern() {} }
+#else
+class Impl { void Legacy() {} }
+#endif
+`;
+      const chunks = chunkByAST('Impl.cs', content);
+      const symbols = chunks.map(c => c.metadata.symbolName).filter(Boolean);
+
+      expect(symbols).toContain('Modern');
+      expect(symbols).not.toContain('Legacy');
+      expect(symbols.filter(s => s === 'Impl')).toHaveLength(1);
+    });
+
+    it('takes only the first branch of an #if/#elif/#else chain', () => {
+      // `preproc_else` nests inside `preproc_elif`, which nests inside
+      // `preproc_if` -- so a naive fix triplicates here rather than merely
+      // doubling.
+      const content = `namespace A;
+#if A
+class T { void One() {} }
+#elif B
+class T { void Two() {} }
+#else
+class T { void Three() {} }
+#endif
+`;
+      const chunks = chunkByAST('T.cs', content);
+      const symbols = chunks.map(c => c.metadata.symbolName).filter(Boolean);
+
+      expect(symbols).toContain('One');
+      expect(symbols).not.toContain('Two');
+      expect(symbols).not.toContain('Three');
+      expect(symbols.filter(s => s === 'T')).toHaveLength(1);
+    });
+
+    it('leaves a file with no preprocessor directives unchanged', () => {
+      // Regression guard: the fix must not alter the ordinary path.
+      const content = `namespace A;
+class Plain { void One() {} void Two() {} }
+`;
+      const chunks = chunkByAST('Plain.cs', content);
+      const symbols = chunks.map(c => c.metadata.symbolName).filter(Boolean);
+
+      expect(symbols).toEqual(['Plain', 'One', 'Two']);
+    });
+
+    it('does not need #region handling — those nodes are siblings, not parents', () => {
+      // Verified against the grammar: `preproc_region`/`preproc_endregion`
+      // sit BESIDE the declarations they visually wrap, so they never hid
+      // anything. Pinned so nobody "fixes" it by adding them to the
+      // transparent set and reintroducing branch-duplication risk for no
+      // gain.
+      expect(traverser.shouldTraverseChildren({ type: 'preproc_region' } as SyntaxNode)).toBe(
+        false,
+      );
+      expect(traverser.shouldTraverseChildren({ type: 'preproc_endregion' } as SyntaxNode)).toBe(
+        false,
+      );
+
+      const content = `namespace A;
+#region Core
+class InRegion { void M() {} }
+#endregion
+`;
+      const symbols = chunkByAST('InRegion.cs', content)
+        .map(c => c.metadata.symbolName)
+        .filter(Boolean);
+      expect(symbols).toContain('InRegion');
+      expect(symbols).toContain('M');
+    });
+
+    it('treats preproc_if as transparent but not preproc_elif/preproc_else', () => {
+      expect(traverser.shouldTraverseChildren({ type: 'preproc_if' } as SyntaxNode)).toBe(true);
+      expect(traverser.shouldTraverseChildren({ type: 'preproc_elif' } as SyntaxNode)).toBe(false);
+      expect(traverser.shouldTraverseChildren({ type: 'preproc_else' } as SyntaxNode)).toBe(false);
+    });
+  });
 });
 
 /** Helper to recursively find a node of a given type (depth-first) */

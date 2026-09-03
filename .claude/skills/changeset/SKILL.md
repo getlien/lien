@@ -108,6 +108,13 @@ Ask the user to confirm or adjust before writing.
 
 ## Step 8: Write the Changeset File
 
+**Tag every fenced code block with a language.** A bare ``` trips markdownlint
+MD040 and CodeRabbit flags it on the PR — twice so far, on two separate
+changesets, because nothing here said so. Use `text` for command output,
+measurements and before/after numbers; `bash`, `json`, `typescript` etc. where
+they apply. The changeset body becomes the published CHANGELOG entry, so it is
+linted like any other markdown in the repo.
+
 Write the file in this exact format:
 
 ```markdown
