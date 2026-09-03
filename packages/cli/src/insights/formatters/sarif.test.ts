@@ -10,7 +10,6 @@ function createReport(overrides: Partial<ComplexityReport> = {}): ComplexityRepo
       bySeverity: { error: 0, warning: 1 },
       avgComplexity: 20,
       maxComplexity: 20,
-      declarationsAnalyzed: 20,
     },
     files: {
       'src/utils.ts': {
@@ -285,7 +284,6 @@ describe('formatSarifReport', () => {
         bySeverity: { error: 0, warning: 0 },
         avgComplexity: 0,
         maxComplexity: 0,
-        declarationsAnalyzed: 1,
       },
       files: {},
     });

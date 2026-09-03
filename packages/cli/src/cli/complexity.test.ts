@@ -264,14 +264,19 @@ describe('complexityCommand', () => {
     expect(consoleLogSpy).not.toHaveBeenCalled();
   });
 
-  it('hard-errors when chunks parsed but NONE of them was code (#1148)', async () => {
-    // The false clean this closes: serilog's ILogger.cs is 1370 lines that
-    // tree-sitter fails on entirely, yielding one whole-file chunk with no
-    // symbol. `describeScanFailure` passes -- a chunk exists -- so 0.80.2
-    // printed "No violations found!" at exit 0.
+  it('hard-errors when files parsed but NONE of them was code (#1148)', async () => {
+    // A documentation-only repo: the README chunks fine, so
+    // `describeScanFailure` passes and 0.80.2 printed "No violations found!"
+    // at exit 0 for a project it had measured nothing in.
     vi.mocked(parserModule.performChunkOnlyIndex).mockResolvedValue(
       scanOf([
-        chunk({ symbolName: undefined, symbolType: undefined, complexity: undefined }),
+        chunk({
+          file: 'README.md',
+          language: 'markdown',
+          symbolName: 'hi',
+          symbolType: undefined,
+          complexity: undefined,
+        }),
       ]) as never,
     );
 
@@ -279,7 +284,7 @@ describe('complexityCommand', () => {
 
     expect(processExitSpy).toHaveBeenCalledWith(1);
     expect(consoleErrorSpy.mock.calls.flat().join(' ')).toContain(
-      'did not contain a function, class or type',
+      'not in a language lien can analyse',
     );
     expect(consoleLogSpy).not.toHaveBeenCalled();
   });
@@ -299,14 +304,12 @@ describe('complexityCommand', () => {
     expect(consoleLogSpy).toHaveBeenCalled();
   });
 
-  it('does NOT refuse a single declaration-free file named by --files (#1148 regression)', async () => {
-    // The defect the first version of this shipped. A barrel of re-exports, an
-    // `export const` module, a config file -- all parse perfectly and declare
-    // nothing the parser types, so they reach this code identically to a file
-    // tree-sitter failed on. 73 of 316 tracked source files in this repo are
-    // this shape, so refusing per-file hard-errors on ~23% of a real project.
-    // Measured false alarms included packages/parser/src/index.ts (the curated
-    // public barrel) and packages/parser/src/ast/languages/typescript.ts.
+  it('does NOT refuse code that declares nothing the parser types (#1148 regression)', async () => {
+    // The defect the first version of this shipped: it gated on declarations,
+    // so a barrel of re-exports, an `export const` module or a config file --
+    // all valid, all parsed -- were refused. 73 of 316 tracked source files in
+    // this repo are that shape (23%), including packages/parser/src/index.ts,
+    // the curated public barrel. It is CODE, so it must report.
     vi.mocked(parserModule.performChunkOnlyIndex).mockResolvedValue(
       scanOf([
         chunk({

@@ -92,69 +92,52 @@ export function describePartialScan(outcome: ScanOutcome): string | undefined {
 }
 
 /**
- * What {@link describeUnanalyzableScan} needs. BOTH fields must come from the
- * same built report, never one from the report and one from the raw scan.
- *
- * Mixing the two scopes produces a message that is simply false. Measured
- * while building #1148: passing the scan-wide chunk count beside the report's
- * declaration count made `complexity --files ILogger.cs` inside serilog say
- * "2618 chunks parsed, but not one contained a function" -- when 2618 was the
- * whole corpus and hundreds of those chunks were functions.
+ * What {@link describeUnanalyzableScan} needs, from one scan.
  */
 export interface AnalyzedOutcome {
-  /** `ComplexityReport.summary.filesAnalyzed`. */
+  /** Files the scan produced chunks for, whatever their language. */
   filesAnalyzed: number;
-  /** `ComplexityReport.summary.declarationsAnalyzed` -- the same scope. */
-  declarationsAnalyzed: number;
+  /** Of those, how many are in a language this parser can analyse. */
+  codeFilesAnalyzed: number;
 }
 
 /**
- * The third state: the scan SUCCEEDED across the whole corpus, produced
- * chunks, and not one of them was a declaration the parser recognised.
+ * The third state: the scan SUCCEEDED and not one file was code.
  *
  * {@link describeScanFailure} cannot see this -- it returns `undefined` the
- * moment `chunkCount > 0`, and a markdown, YAML or unparseable source file
- * chunks perfectly well. So `lien complexity` in a documentation-only repo,
- * and in one whose only source was an unsupported language, printed
- * "No violations found!" at exit 0 (#1148).
+ * moment `chunkCount > 0`, and markdown and YAML chunk perfectly well. So
+ * `lien complexity` printed "No violations found!" at exit 0 in a
+ * documentation-only repository, and in one whose only source file was an
+ * unsupported language: there the `.cbl` was dropped and the `.yaml` that
+ * remained satisfied the gate (#1148).
  *
- * WHOLE-CORPUS ONLY, and the scoping is the correctness argument, not a
- * convenience. `declarationsAnalyzed === 0` does NOT mean "this file failed to
- * parse". `chunker.ts` sets `symbolType: symbolInfo?.type`, so a file
- * tree-sitter fails on and a file that parses fine while declaring nothing
- * emit the SAME single untyped chunk -- byte-identical, hence undecidable
- * here. Declaration-free-but-valid is ordinary: measured on this repo, 73 of
- * 316 tracked source files (23%) contain no recognised declaration, across
- * TypeScript, Python, Rust and Swift. Barrel re-exports, `export const`,
- * `export type` aliases, module constants, Go `var`, Rust `pub const` and
- * `pub struct` all yield zero.
+ * The question is "did I see any code?", answered from `languageExists` --
+ * a fact about the scan, not an inference from it.
  *
- * Applied per file it therefore hard-errors on roughly a quarter of a real
- * repository -- the false alarm CLAUDE.md forbids outright, and the first
- * version of this function did exactly that. Aggregated over a whole corpus
- * the reading is sound: a repository in which NOTHING anywhere declares a
- * function, class or type has no complexity to attest to.
+ * IT IS DELIBERATELY NOT "did anything declare a symbol?", and that
+ * distinction cost a round trip worth recording. A first version of this
+ * refused whenever zero declarations were parsed, reasoning that a failed
+ * parse yields one untyped whole-file chunk (#970's signature). True, but not
+ * exclusive: `chunker.ts` sets `symbolType: symbolInfo?.type`, so a file that
+ * parses fine while declaring nothing emits the SAME chunk -- byte-identical,
+ * hence undecidable. Measured, that shape is ordinary: 73 of 316 tracked
+ * source files in this repo (23%), across TypeScript, Python, Rust and Swift,
+ * plus whole plausible packages (design tokens, `export type` aliases,
+ * barrels, Go `var`, Rust `pub const`). It refused all of them.
  *
- * It is also not `maxComplexity === 0`, which is a third distinct question --
- * a file of pure interfaces measures 0 and is perfectly clean.
- *
- * Telling a single failed parse from a single declaration-free file needs a
- * real signal from the parser (an ERROR-root flag out of `chunkFile`), which
- * does not exist yet. Do not substitute a proxy for it; substituting a proxy
- * is precisely what went wrong the first time.
+ * So: never gate on the presence of declarations, and never gate on
+ * `maxComplexity` either -- a file of pure interfaces measures 0 and is
+ * perfectly clean. Distinguishing a genuine parse failure needs a real
+ * ERROR-root signal out of `chunkFile`, which does not exist yet (#1157).
  */
 export function describeUnanalyzableScan(outcome: AnalyzedOutcome): string | undefined {
-  if (outcome.declarationsAnalyzed > 0) return undefined;
-  // Nothing scanned at all is `describeScanFailure`'s state. Note this is only
-  // true for a whole-corpus outcome: under a `--files` filter that matched
-  // nothing, that function saw the UNFILTERED scan, returned undefined, and
-  // nobody reports anything -- which is why callers must handle an empty
-  // filter themselves rather than rely on this branch (#1148).
+  if (outcome.codeFilesAnalyzed > 0) return undefined;
+  // Nothing scanned at all is `describeScanFailure`'s state.
   if (outcome.filesAnalyzed <= 0) return undefined;
 
   const n = outcome.filesAnalyzed;
   return (
-    `${n} file${n === 1 ? '' : 's'} parsed, but ${n === 1 ? 'it did not contain' : 'not one contained'} ` +
-    'a function, class or type the parser recognised'
+    `${n} file${n === 1 ? '' : 's'} parsed, but ${n === 1 ? 'it is not' : 'none of them are'} ` +
+    'in a language lien can analyse'
   );
 }
