@@ -178,10 +178,17 @@ the gap is invisible unless you diff the renderers, and the machine consumer
 is the one likelier to act on the output unattended.
 
 So when you add or change a caveat, verdict or ordering guarantee, walk the
-consumers: `renderText`, `toJson` (and `sarif` where it exists),
-`.claude/skills/review/SKILL.md` — which reads `--format json`, so a caveat
-missing there is missing from the review workflow — and `packages/site/docs`,
-where a pasted sample-output block is *rendered output*, not prose. That last
+consumers: `renderText` **and each of its early-return paths**, `toJson` (and
+`sarif` where it exists), `.claude/skills/review/SKILL.md` — which reads
+`--format json`, so a caveat missing there is missing from the review workflow
+— and `packages/site/docs`, where a pasted sample-output block is *rendered
+output*, not prose.
+
+The early-return paths are the easiest to miss and bit this rule the first
+time it was written down: `renderNothingReviewable` returns before the main
+path's caveat spread and still prints candidates from the raw-diff signals, so
+`--all-signals` output on a markdown-only diff carried no precision note. Grep
+for `return render` in the renderer before you believe you are done. That last
 one has already gone stale twice; `docs-truth` cannot catch it, since it
 checks links, ADR refs and `npm run` mentions, never whether a pasted block
 still matches reality. Emit an absent value as `null` rather than omitting the

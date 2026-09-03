@@ -29,7 +29,7 @@ lien complexity [options]
 
 This is a gate-shaped command, so it refuses rather than guessing whenever it has no data to answer from. It hard-errors — never a false `0 violations, clean!` — when the scan fails outright (a native-binding load error, or zero files parsed), and when every file it scanned is in a language Lien has no parser for, which is what a documentation-only repository looks like from here.
 
-A `--files` path that doesn't exist is a usage error and also exits non-zero. A `--files` path that exists but sits outside the scanned set — a manifest, a lockfile, a dot-directory, an unsupported language — is reported by name and skipped, without failing the run, so piping a commit's changed filenames in stays usable on a commit that touched none of your source
+A `--files` path that doesn't exist is a usage error and also exits non-zero. A `--files` path that exists but sits outside the scanned set — a manifest, a lockfile, a dot-directory, an unsupported language — is reported by name and skipped, without failing the run, so piping a commit's changed filenames in stays usable on a commit that touched none of your source files.
 
 Thresholds are fixed (not read from `.lien.config.json`) — see [Configuration](/guide/configuration#complexity-analysis) for the four metrics and their default values. To customize thresholds, use `lien delta`, which does read `.lien.config.json`.
 

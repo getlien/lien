@@ -430,6 +430,17 @@ function renderNothingReviewable(result: ReviewResult): string {
           'These are candidates for you to judge, not findings.',
         ]
       : ['No signal found anything in the raw diff either.']),
+    // This renderer returns EARLY, before the main path's calibration spread,
+    // and the raw-diff signals it prints here (doc-claims, docs-drift,
+    // guidance-surface, untrusted-input) are all among the 13 that are off by
+    // default. So under --all-signals this path was emitting unvalidated
+    // candidates with no precision note at all (CodeRabbit, #1156).
+    //
+    // Printed even when nothing was found, matching the main path: a signal
+    // whose precision was never established finding nothing is not evidence
+    // of cleanliness, and this file's whole point is not to render absence of
+    // evidence as a clean result.
+    ...(result.allSignals ? ['', ...renderAllSignalsCalibration(result)] : []),
   ].join('\n');
 }
 

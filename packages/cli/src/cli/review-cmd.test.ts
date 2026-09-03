@@ -574,3 +574,48 @@ describe('reviewCommand outside a git repository (#1150)', () => {
     expect(errSpy.mock.calls.flat().join(' ')).not.toContain('could not run');
   });
 });
+
+describe('the no-reviewable-files path also carries the calibration (CodeRabbit, #1156)', () => {
+  // `renderText` returns `renderNothingReviewable` BEFORE the main path's
+  // calibration spread, and that renderer still prints candidates from the
+  // raw-diff signals -- doc-claims, docs-drift, guidance-surface,
+  // untrusted-input -- every one of which is off by default. So a
+  // markdown-only diff under --all-signals emitted unvalidated candidates
+  // with no precision note. Third instance in this PR of a caveat reaching
+  // one path and not its sibling.
+  const nothingReviewable = (overrides = {}) =>
+    result({
+      changedFiles: [],
+      unexamined: { untracked: [], nonAnalyzable: ['README.md'], testsExcluded: 0, deleted: 0 },
+      ...overrides,
+    });
+
+  it('warns when those signals produced candidates on a non-analyzable diff', () => {
+    const out = renderText(
+      nothingReviewable({
+        allSignals: true,
+        reports: [
+          report({ id: 'docs-drift', candidates: [{ file: 'README.md', line: 1, detail: 'x' }] }),
+        ],
+      }) as never,
+    );
+    expect(out).toContain('nothing reviewable in them');
+    expect(out).toContain('came from signals that read the raw diff');
+    expect(out).toContain('precision has never been established');
+  });
+
+  it('warns even when they found nothing, since silence is not clearance', () => {
+    // Matches the main path. A signal whose precision was never established
+    // finding nothing is not evidence of cleanliness -- rendering absence of
+    // evidence as a clean result is the failure this file exists to prevent.
+    const out = renderText(nothingReviewable({ allSignals: true }) as never);
+    expect(out).toContain('No signal found anything in the raw diff either.');
+    expect(out).toContain('precision has never been established');
+  });
+
+  it('stays quiet on a default run of the same path', () => {
+    const out = renderText(nothingReviewable({ allSignals: false }) as never);
+    expect(out).toContain('nothing reviewable in them');
+    expect(out).not.toContain('precision has never been established');
+  });
+});
