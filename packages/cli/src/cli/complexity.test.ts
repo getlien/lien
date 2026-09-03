@@ -285,10 +285,8 @@ describe('complexityCommand', () => {
   });
 
   it('does NOT fire on code that legitimately has no measurable function', async () => {
-    // The other half, and the one that matters more: an interface parses
-    // perfectly and measures a complexity of 0. Gating on complexity rather
-    // than on declarations would hard-error here -- the false alarm
-    // CLAUDE.md forbids outright.
+    // An interface parses perfectly and measures a complexity of 0. Gating on
+    // complexity rather than on declarations would hard-error here.
     vi.mocked(parserModule.performChunkOnlyIndex).mockResolvedValue(
       scanOf([
         chunk({ symbolName: 'OnlyTypes', symbolType: 'interface', complexity: undefined }),
@@ -299,6 +297,56 @@ describe('complexityCommand', () => {
 
     expect(processExitSpy).not.toHaveBeenCalledWith(1);
     expect(consoleLogSpy).toHaveBeenCalled();
+  });
+
+  it('does NOT refuse a single declaration-free file named by --files (#1148 regression)', async () => {
+    // The defect the first version of this shipped. A barrel of re-exports, an
+    // `export const` module, a config file -- all parse perfectly and declare
+    // nothing the parser types, so they reach this code identically to a file
+    // tree-sitter failed on. 73 of 316 tracked source files in this repo are
+    // this shape, so refusing per-file hard-errors on ~23% of a real project.
+    // Measured false alarms included packages/parser/src/index.ts (the curated
+    // public barrel) and packages/parser/src/ast/languages/typescript.ts.
+    vi.mocked(parserModule.performChunkOnlyIndex).mockResolvedValue(
+      scanOf([
+        chunk({
+          file: 'src/index.ts',
+          symbolName: undefined,
+          symbolType: undefined,
+          complexity: undefined,
+        }),
+      ]) as never,
+    );
+    // Must exist on disk: `validateFilesExist` runs first, and without this
+    // the test would pass for the wrong reason -- exiting 1 on validation
+    // rather than proving the declaration check was skipped.
+    await fs.mkdir(path.join(dir, 'src'), { recursive: true });
+    await fs.writeFile(path.join(dir, 'src/index.ts'), 'export { a } from "./a.js";\n');
+
+    await complexityCommand({ format: 'text', files: ['src/index.ts'] });
+
+    expect(processExitSpy).not.toHaveBeenCalledWith(1);
+    expect(consoleLogSpy).toHaveBeenCalled();
+  });
+
+  it('hard-errors when --files matches no scanned file, rather than reporting clean', async () => {
+    // The opposite defect, and invisible to `describeScanFailure`: it ran
+    // against the UNFILTERED scan, saw chunks, and passed. A mistyped path or
+    // a directory passed where a file was meant printed "0 violations, clean"
+    // at exit 0.
+    vi.mocked(parserModule.performChunkOnlyIndex).mockResolvedValue(
+      scanOf([chunk({ file: 'src/real.ts' })]) as never,
+    );
+    // Exists on disk, so it clears `validateFilesExist`; the scan simply never
+    // covered it. That is the state `describeScanFailure` cannot see.
+    await fs.mkdir(path.join(dir, 'src'), { recursive: true });
+    await fs.writeFile(path.join(dir, 'src/nope.ts'), 'export const x = 1;\n');
+
+    await complexityCommand({ format: 'text', files: ['src/nope.ts'] });
+
+    expect(processExitSpy).toHaveBeenCalledWith(1);
+    expect(consoleErrorSpy.mock.calls.flat().join(' ')).toContain('matched a scanned file');
+    expect(consoleLogSpy).not.toHaveBeenCalled();
   });
 
   it('handles a thrown scan error gracefully', async () => {
