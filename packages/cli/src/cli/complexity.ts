@@ -2,6 +2,7 @@ import chalk from 'chalk';
 import fs from 'fs';
 import path from 'path';
 import { performChunkOnlyIndex, analyzeComplexityFromChunks } from '@liendev/parser';
+import type { ComplexityReport } from '@liendev/parser';
 import { formatReport } from '../insights/formatters/index.js';
 import type { OutputFormat } from '../insights/formatters/index.js';
 import {
@@ -113,20 +114,65 @@ function reportScanCaveats(outcome: {
  * to printing a clean report, which is the exact bug this function exists to
  * prevent. Three tests catch it if you forget.
  */
-function refuseNoData(reason: string, rootDir: string, namedFiles?: string[]): never {
+function refuseNoData(reason: string, rootDir: string, hint: string): never {
   console.error(chalk.red(`Error: cannot analyze complexity — ${reason}`));
   console.error(
     chalk.yellow('This is not a clean result. Nothing was analyzed, so nothing was checked.'),
   );
   console.error(chalk.dim(`  Looked in: ${rootDir}`));
-  console.error(
-    chalk.dim(
-      namedFiles?.length
-        ? '  The named file(s) may be in an unsupported language, or may have failed to parse.'
-        : '  Check that this is your project root and the sources are not all gitignored.',
-    ),
-  );
+  console.error(chalk.dim(hint));
   process.exit(1);
+}
+
+/**
+ * Closing hints, one per no-data state. Separate constants because a hint that
+ * guesses wrong is worse than none: the first version derived the hint from
+ * "did the user pass --files", which conflated an unmatched path with a
+ * language problem and told people to go looking for a parse failure that was
+ * not there (#1148).
+ */
+const HINTS = {
+  root: '  Check that this is your project root and the sources are not all gitignored.',
+  unmatched:
+    '  Check the path spelling, and that it names a file (not a directory) inside this root.',
+  noCode: '  If this project really contains no code, there is nothing for this command to gate.',
+} as const;
+
+/**
+ * Which no-data state this run is in, if any, once the report exists.
+ *
+ * Three states, deliberately ordered, and the ORDER matters:
+ *
+ * 1. `--files` matched nothing. `describeScanFailure` structurally cannot see
+ *    this -- it ran against the unfiltered scan and passed -- so without this
+ *    branch a mistyped path reports "0 violations, clean" (#1148).
+ * 2. `--files` matched something. Return nothing: a single file's declaration
+ *    count is NOT evidence about that file. 73 of 316 tracked source files in
+ *    this repo declare nothing the parser types and parse perfectly, so
+ *    refusing here hard-errors on ~23% of a real project. See
+ *    `describeUnanalyzableScan` for why the two states are undecidable, and
+ *    #1157 for the parser signal that would let this branch be honest.
+ * 3. Whole corpus, nothing declared anywhere. Sound in aggregate: a project in
+ *    which nothing at all declares a function, class or type has no
+ *    complexity to attest to.
+ */
+function describeNoData(
+  report: ComplexityReport,
+  files: string[] | undefined,
+): { reason: string; hint: string } | undefined {
+  if (files?.length) {
+    if (report.summary.filesAnalyzed > 0) return undefined;
+    return {
+      reason: `none of the ${files.length} path(s) named by --files matched a scanned file`,
+      hint: HINTS.unmatched,
+    };
+  }
+
+  const unanalyzable = describeUnanalyzableScan({
+    filesAnalyzed: report.summary.filesAnalyzed,
+    declarationsAnalyzed: report.summary.declarationsAnalyzed,
+  });
+  return unanalyzable ? { reason: unanalyzable, hint: HINTS.noCode } : undefined;
 }
 
 /**
@@ -184,7 +230,7 @@ export async function complexityCommand(options: ComplexityOptions) {
       filesSkipped: scan.filesSkipped,
     });
 
-    if (scanError) return refuseNoData(scanError, rootDir, files);
+    if (scanError) return refuseNoData(scanError, rootDir, HINTS.root);
 
     reportScanCaveats({
       chunkCount: scan.chunks.length,
@@ -194,17 +240,8 @@ export async function complexityCommand(options: ComplexityOptions) {
 
     const report = analyzeComplexityFromChunks(scan.chunks, files);
 
-    // The scan succeeded and produced chunks, but nothing in scope was code.
-    // Gate-shaped command, so this is a hard error for the same reason total
-    // failure is: nothing was checked, so nothing can be attested. Checked
-    // here rather than beside `describeScanFailure` above because it needs the
-    // built report -- `--files` narrows the corpus, and a file the parser
-    // failed on must fail even when the rest of the repo parsed fine (#1148).
-    const unanalyzable = describeUnanalyzableScan({
-      filesAnalyzed: report.summary.filesAnalyzed,
-      declarationsAnalyzed: report.summary.declarationsAnalyzed,
-    });
-    if (unanalyzable) return refuseNoData(unanalyzable, rootDir, files);
+    const noData = describeNoData(report, files);
+    if (noData) return refuseNoData(noData.reason, rootDir, noData.hint);
 
     console.log(formatReport(report, options.format));
 

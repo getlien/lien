@@ -102,25 +102,28 @@ describe('describeUnanalyzableScan', () => {
     );
   });
 
-  // The three below are the false-alarm guard, and they matter more than the
-  // cases above: CLAUDE.md forbids turning a genuinely clean result into an
-  // alarm, and every one of these parses perfectly.
-  it('stays silent for a file of pure type declarations', () => {
-    // types-only.ts measures maxComplexity 0 with one `interface` declaration.
-    // Gating on complexity instead of declarations would hard-error here.
-    expect(describeUnanalyzableScan({ filesAnalyzed: 1, declarationsAnalyzed: 1 })).toBeUndefined();
-  });
-
-  it('stays silent for a class with only fields and no methods', () => {
-    expect(describeUnanalyzableScan({ filesAnalyzed: 1, declarationsAnalyzed: 1 })).toBeUndefined();
-  });
-
-  it('stays silent for a healthy corpus whose chunks are mostly untyped', () => {
+  it('stays silent as soon as anything declared something', () => {
     // Measured on serilog: 440 of 731 chunks carry a symbolType and 291 do
     // not. An untyped chunk is ordinary, so only a corpus-wide zero counts.
     expect(
       describeUnanalyzableScan({ filesAnalyzed: 254, declarationsAnalyzed: 440 }),
     ).toBeUndefined();
+    expect(describeUnanalyzableScan({ filesAnalyzed: 1, declarationsAnalyzed: 1 })).toBeUndefined();
+  });
+
+  // THE IMPORTANT CAVEAT, and the defect the first version of this shipped:
+  // zero declarations does NOT mean "failed to parse". It is also what an
+  // ordinary declaration-free file looks like, and those are common -- 73 of
+  // 316 tracked source files in this repo (23%), across TypeScript, Python,
+  // Rust and Swift. So this function is only sound over a WHOLE CORPUS, and
+  // callers must not apply it to a single named file. `lien complexity`
+  // enforces that by skipping the check entirely under `--files`; there is a
+  // command-level test pinning it.
+  it('cannot distinguish a failed parse from a declaration-free file, by construction', () => {
+    // Both produce one untyped whole-file chunk, so both arrive here as
+    // exactly this input. It fires for both -- which is why the caller, not
+    // this function, decides when the reading is meaningful.
+    expect(describeUnanalyzableScan({ filesAnalyzed: 1, declarationsAnalyzed: 0 })).toBeDefined();
   });
 
   it('defers to describeScanFailure when nothing parsed at all', () => {
