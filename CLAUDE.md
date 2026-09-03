@@ -166,6 +166,27 @@ Gate on the actual state, never on the shape of the result — see #1014 for
 what over-firing costs (a false caveat that fires every session gets trained
 out as noise).
 
+**A caveat that reaches only `renderText` is half a fix.** Every command has
+at least two renderers and the JSON one does not inherit anything: `toJson`
+enumerates its fields, so a new field on the result type simply does not
+appear. Both halves of #1151/#1152 shipped this way — `--all-signals` gained a
+precision warning in the terminal while `--format json` stayed byte-identical
+to a default run, and `lien health` gained "this list is not in risk order"
+while the JSON kept emitting shape-major `entries` with no marker. That is
+worse than the original bug in one respect: the human now sees a caveat, so
+the gap is invisible unless you diff the renderers, and the machine consumer
+is the one likelier to act on the output unattended.
+
+So when you add or change a caveat, verdict or ordering guarantee, walk the
+consumers: `renderText`, `toJson` (and `sarif` where it exists),
+`.claude/skills/review/SKILL.md` — which reads `--format json`, so a caveat
+missing there is missing from the review workflow — and `packages/site/docs`,
+where a pasted sample-output block is *rendered output*, not prose. That last
+one has already gone stale twice; `docs-truth` cannot catch it, since it
+checks links, ADR refs and `npm run` mentions, never whether a pasted block
+still matches reality. Emit an absent value as `null` rather than omitting the
+key: a missing key and "nothing to report" are different statements.
+
 ---
 
 ## Deterministic over inferred — the surviving design principle
