@@ -5,6 +5,7 @@ import {
   performChunkOnlyIndex,
   analyzeComplexityFromChunks,
   languageExists,
+  LANGUAGE_IDS,
 } from '@liendev/parser';
 import type { CodeChunk, ComplexityReport } from '@liendev/parser';
 import { formatReport } from '../insights/formatters/index.js';
@@ -138,8 +139,13 @@ function refuseNoData(reason: string, rootDir: string, hint: string): never {
 const HINTS = {
   root: '  Check that this is your project root and the sources are not all gitignored.',
   unmatched:
-    '  Check the path spelling, and that it names a file (not a directory) inside this root.',
-  noCode: '  If this project really contains no code, there is nothing for this command to gate.',
+    '  Lien scans source files only — manifests, lockfiles, dot-directories and ' +
+    'unsupported languages are outside it.',
+  // Must not assert "there is no code here": a C or C++ project has plenty,
+  // lien simply has no parser for it, and the old wording told the reader
+  // something false about their own repository (#1148 follow-up). Name the
+  // supported set instead, sourced from the registry so it cannot go stale.
+  noCode: `  lien analyses ${LANGUAGE_IDS.join(', ')} — check whether this project's sources are among them.`,
 } as const;
 
 /**
@@ -180,25 +186,60 @@ function describeNoData(
   report: ComplexityReport,
   files: string[] | undefined,
 ): { reason: string; hint: string } | undefined {
-  // `--files` that matched nothing is its own no-data state, and the one
-  // `describeScanFailure` structurally cannot see: it ran against the
-  // UNFILTERED scan, found thousands of chunks, and passed. Reporting
-  // "0 violations, clean" for a path that was never examined is the same false
-  // clean in a narrower window -- a mistyped path, or a directory passed where
-  // a file was meant (#1148).
-  if (files?.length) {
-    if (report.summary.filesAnalyzed > 0) return undefined;
-    return {
-      reason: `none of the ${files.length} path(s) named by --files matched a scanned file`,
-      hint: HINTS.unmatched,
-    };
-  }
+  // Under `--files` the corpus-wide reading does not apply, and a zero match
+  // is NOT a failure worth exiting 1 for -- see `reportUnanalyzedPaths`, which
+  // handles the honest reporting at exit 0.
+  if (files?.length) return undefined;
 
   const unanalyzable = describeUnanalyzableScan({
     filesAnalyzed: report.summary.filesAnalyzed,
     codeFilesAnalyzed: countCodeFiles(chunks),
   });
   return unanalyzable ? { reason: unanalyzable, hint: HINTS.noCode } : undefined;
+}
+
+/**
+ * Say which `--files` paths were never examined, without failing the run.
+ *
+ * The silent case first: `--files package.json src/real.ts` reported
+ * "Files analyzed: 1" and a green tick, never mentioning that one of the two
+ * paths is outside the scanned set. That is a clean verdict about a file
+ * nobody looked at.
+ *
+ * Exit code 0 even when NOTHING matched, deliberately. An earlier version made
+ * it a hard error, which broke the recipe the docs themselves recommend --
+ * `git diff --name-only HEAD~1 | xargs lien complexity --files` -- for any
+ * commit touching only unscanned paths. A lockfile-or-manifest-only commit is
+ * not a complexity regression, and a gate that fails on one gets removed from
+ * CI. `validateFilesExist` already covers the genuine usage error (a path that
+ * does not exist at all) with a non-zero exit.
+ *
+ * So this is loud but passive: it names what was skipped and refuses to call
+ * the result clean, which is the honesty rule without the false alarm.
+ */
+function reportUnanalyzedPaths(report: ComplexityReport, files: string[] | undefined): boolean {
+  if (!files?.length) return false;
+
+  const analyzed = new Set(Object.keys(report.files));
+  const skipped = files.filter(f => !analyzed.has(f));
+  if (skipped.length === 0) return false;
+
+  const all = skipped.length === files.length;
+  const one = skipped.length === 1;
+  console.warn(
+    chalk.yellow(
+      `Warning: ${skipped.length} of ${files.length} path(s) named by --files ` +
+        `${one ? 'is' : 'are'} not in the scanned set and ${one ? 'was' : 'were'} not examined:`,
+    ),
+  );
+  for (const f of skipped) console.warn(chalk.dim(`  ${f}`));
+  if (all) {
+    console.warn(
+      chalk.yellow('Nothing was analyzed, so this is not a clean result — it is an empty one.'),
+    );
+    console.warn(chalk.dim(HINTS.unmatched));
+  }
+  return all;
 }
 
 /**
@@ -268,6 +309,10 @@ export async function complexityCommand(options: ComplexityOptions) {
 
     const noData = describeNoData(scan.chunks, report, files);
     if (noData) return refuseNoData(noData.reason, rootDir, noData.hint);
+
+    // Returns true when NOTHING named was examined, in which case printing the
+    // report would render an empty analysis as "0 violations, clean".
+    if (reportUnanalyzedPaths(report, files)) return;
 
     console.log(formatReport(report, options.format));
 

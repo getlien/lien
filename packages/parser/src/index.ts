@@ -73,6 +73,12 @@ export {
   getLanguage,
   getAllLanguages,
   languageExists,
+  // The definitive supported-language list. Public because a caller that has
+  // to TELL a user what this parser handles otherwise hardcodes its own copy,
+  // and a second copy of this list is how it goes stale -- `lien complexity`
+  // says it in a no-data refusal (#1148). Definitional and append-only in
+  // practice, so unlike most internals it is safe to expose.
+  LANGUAGE_IDS,
   hasWholeModuleImports,
   hasEnclosingNamespaceAccess,
   hasSameDirectoryTestConvention,

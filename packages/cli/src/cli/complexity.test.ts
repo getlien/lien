@@ -332,11 +332,17 @@ describe('complexityCommand', () => {
     expect(consoleLogSpy).toHaveBeenCalled();
   });
 
-  it('hard-errors when --files matches no scanned file, rather than reporting clean', async () => {
-    // The opposite defect, and invisible to `describeScanFailure`: it ran
-    // against the UNFILTERED scan, saw chunks, and passed. A mistyped path or
-    // a directory passed where a file was meant printed "0 violations, clean"
-    // at exit 0.
+  it('names --files paths that were never examined, without failing the run', async () => {
+    // Invisible to `describeScanFailure`: it ran against the UNFILTERED scan,
+    // saw chunks, and passed -- so this printed "0 violations, clean" for a
+    // file nobody looked at.
+    //
+    // Exit 0 is deliberate. An earlier version hard-errored here, which broke
+    // the recipe the docs recommend (`git diff --name-only HEAD~1 | xargs lien
+    // complexity --files`) for any commit touching only manifests, lockfiles
+    // or dot-directories. A gate that fails a lockfile-only commit gets
+    // removed from CI. `validateFilesExist` still covers the real usage error
+    // -- a path that does not exist -- with a non-zero exit.
     vi.mocked(parserModule.performChunkOnlyIndex).mockResolvedValue(
       scanOf([chunk({ file: 'src/real.ts' })]) as never,
     );
@@ -345,11 +351,35 @@ describe('complexityCommand', () => {
     await fs.mkdir(path.join(dir, 'src'), { recursive: true });
     await fs.writeFile(path.join(dir, 'src/nope.ts'), 'export const x = 1;\n');
 
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
     await complexityCommand({ format: 'text', files: ['src/nope.ts'] });
 
-    expect(processExitSpy).toHaveBeenCalledWith(1);
-    expect(consoleErrorSpy.mock.calls.flat().join(' ')).toContain('matched a scanned file');
+    expect(processExitSpy).not.toHaveBeenCalledWith(1);
+    const warned = warnSpy.mock.calls.flat().join(' ');
+    expect(warned).toContain('not in the scanned set');
+    expect(warned).toContain('src/nope.ts');
+    // The load-bearing half: no clean verdict about a file nobody examined.
     expect(consoleLogSpy).not.toHaveBeenCalled();
+  });
+
+  it('still reports the files it DID examine when only some were skipped', async () => {
+    // The silent-drop case: `--files package.json src/real.ts` printed
+    // "Files analyzed: 1" and a green tick, never saying one path was dropped.
+    vi.mocked(parserModule.performChunkOnlyIndex).mockResolvedValue(
+      scanOf([chunk({ file: 'src/real.ts' })]) as never,
+    );
+    await fs.mkdir(path.join(dir, 'src'), { recursive: true });
+    await fs.writeFile(path.join(dir, 'src/real.ts'), 'export function r() {}\n');
+    await fs.writeFile(path.join(dir, 'package.json'), '{}\n');
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await complexityCommand({ format: 'text', files: ['package.json', 'src/real.ts'] });
+
+    expect(warnSpy.mock.calls.flat().join(' ')).toContain('package.json');
+    expect(processExitSpy).not.toHaveBeenCalledWith(1);
+    // It examined something, so the report is legitimate and must still print.
+    expect(consoleLogSpy).toHaveBeenCalled();
   });
 
   it('handles a thrown scan error gracefully', async () => {

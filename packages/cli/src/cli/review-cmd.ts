@@ -505,24 +505,34 @@ function renderCaveats(result: ReviewResult): string[] {
     );
   }
 
-  // The calibration note used to appear ONLY when these signals were withheld,
-  // so it vanished exactly when the user turned them on and started reading
-  // their output — the moment it is most needed (#1152). Same measurement,
-  // stated on the path where it applies.
-  if (result.allSignals) {
-    lines.push(
-      '  --all-signals ran 13 signals whose precision has never been established: ' +
-        'adversarial review judged 106 of their candidates across four real diffs and ' +
-        'rated none actionable.',
-    );
-    lines.push(
-      '    Three are TypeScript/JavaScript-only and the highest-volume ones cap their ' +
-        'own lists, so a short list here is not a complete one. Treat every candidate as ' +
-        'a place to look, never a finding.',
-    );
-  }
-
   return lines;
+}
+
+/**
+ * The `--all-signals` calibration note.
+ *
+ * NOT part of `renderCaveats`, and the separation is the point: the renderer
+ * prints those under a literal "Not examined:" heading, and these 13 signals
+ * are the opposite — they ran, and this says how much to trust what they
+ * produced. Filing it as a caveat put a true sentence under a false heading.
+ *
+ * It also must not be conditioned on `withheldSignals` being empty. The note
+ * used to appear ONLY when these signals were withheld, so it vanished exactly
+ * when a user turned them on and started reading their output — the moment it
+ * is most needed (#1152).
+ */
+function renderAllSignalsCalibration(result: ReviewResult): string[] {
+  if (!result.allSignals) return [];
+  // One string per sentence, not hard-wrapped to a column. Wrapping prose in
+  // code splits phrases across array entries -- "rated none / actionable" --
+  // which broke this note's own tests and would break any grep for it.
+  return [
+    'About those 13 signals: their precision has never been established. Adversarial review ' +
+      'judged 106 of their candidates across four real diffs and rated none actionable.',
+    '  Three are TypeScript/JavaScript-only, and the highest-volume ones cap their own lists, ' +
+      'so a short list here is not a complete one. Every one is a place to look, never a finding.',
+    '',
+  ];
 }
 
 /**
@@ -629,6 +639,7 @@ export function renderText(result: ReviewResult): string {
     ...(total === 0 ? ['No candidates from any signal.', ''] : []),
     ...renderConstrained(result.reports),
     ...(caveats.length > 0 ? ['Not examined:', ...caveats, ''] : []),
+    ...renderAllSignalsCalibration(result),
   ];
 
   out.push(
