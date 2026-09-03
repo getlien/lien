@@ -497,3 +497,34 @@ describe('--all-signals precision caveat (#1152)', () => {
     expect(out).not.toContain('precision has never been established');
   });
 });
+
+describe('toJson carries the caveats a machine consumer needs (#1152)', () => {
+  it('says --all-signals ran, rather than leaving it to be inferred', () => {
+    // The gap this closes: the renderer got an explicit `allSignals` flag
+    // while the JSON path was left inferring it from an empty
+    // `withheldSignals` -- so `--all-signals --format json` emitted exactly
+    // what a default run emits, handing over 13 unvalidated signals'
+    // candidates with no marker. SKILL.md points readers at --format json.
+    const out = JSON.parse(toJson(result({ allSignals: true, withheldSignals: [] })));
+    expect(out.allSignals).toBe(true);
+  });
+
+  it('distinguishes a default run in the same field', () => {
+    const out = JSON.parse(
+      toJson(result({ allSignals: false, withheldSignals: ['stale-literal'] })),
+    );
+    expect(out.allSignals).toBe(false);
+  });
+
+  it('exposes scanPartial, which only the text renderer could see before', () => {
+    const out = JSON.parse(toJson(result({ scanPartial: '3 files could not be parsed' })));
+    expect(out.scanPartial).toBe('3 files could not be parsed');
+  });
+
+  it('emits scanPartial as null rather than dropping the key when there is none', () => {
+    // A missing key and "nothing was partial" are different statements; a
+    // consumer cannot tell the field is supported if it vanishes.
+    const out = JSON.parse(toJson(result({ scanPartial: undefined })));
+    expect(out.scanPartial).toBeNull();
+  });
+});

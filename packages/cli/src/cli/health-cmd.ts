@@ -521,12 +521,22 @@ export function renderNothingShown(result: HealthResult, pathFilter?: string): s
  * caveat that fires every run gets trained out (#1014).
  */
 export function displayOrderDivergesFromScore(shown: RiskEntry[]): boolean {
-  // Adjacent pairs suffice: a sequence is non-descending exactly when no
-  // adjacent pair increases. An earlier version compared each entry against
-  // every entry above it, which is the same answer at O(n^2) -- and `--top`
-  // has no upper bound, so `shown` is only as small as the ranked set happens
-  // to be.
-  return shown.some((entry, i) => i > 0 && entry.score > shown[i - 1].score);
+  // `unknown-fan-in` entries are EXCLUDED, and that is not a nicety.
+  // `scoreRisk`'s contract says an unresolved fan-in contributes the same
+  // damping as zero and that this is "safe ONLY because shape sorts ahead of
+  // score ... Do not reuse this score to compare across shapes." Comparing a
+  // placeholder-fan-in score against a measured one is precisely the
+  // comparison it forbids, so a note built on it would be announcing a
+  // divergence the numbers cannot support.
+  //
+  // Every other shape has a measured fan-in, so their scores ARE comparable,
+  // which is what #1151 was about: on go-chi/chi both `Mount` (expensive,
+  // 91.4) and `findRoute` (isolated, 306) are resolved.
+  //
+  // Adjacent pairs suffice on the filtered list: a sequence is non-descending
+  // exactly when no adjacent pair increases.
+  const comparable = shown.filter(e => e.shape !== 'unknown-fan-in');
+  return comparable.some((entry, i) => i > 0 && entry.score > comparable[i - 1].score);
 }
 
 export function renderText(result: HealthResult, shown: RiskEntry[], pathFilter?: string): string {
@@ -554,8 +564,10 @@ export function renderText(result: HealthResult, shown: RiskEntry[], pathFilter?
     lines.push(chalk.yellow(`  ⚠ ${shown.length} ${noun} risky to change`), '');
     if (displayOrderDivergesFromScore(shown)) {
       lines.push(
-        chalk.dim('  Ordered by how expensive a change is, then by risk within that — so'),
-        chalk.dim('  something further down this list may still be the riskiest thing here.'),
+        chalk.dim('  Grouped by what to do about each one, then by risk inside a group — so'),
+        chalk.dim(
+          '  something further down this list may still score higher than something above.',
+        ),
         '',
       );
     }
@@ -596,6 +608,11 @@ export function toJson(
   return {
     ...result,
     entries: shown.map(entry => ({ ...entry, score: Math.round(entry.score * 10) / 10 })),
+    // `entries` is in DISPLAY order, which is shape-major -- so a consumer
+    // reading it as a risk ranking can be wrong about which entry is worst.
+    // The text renderer says so when it matters; the JSON said nothing, and
+    // the /review skill reads JSON (#1151).
+    displayOrderDivergesFromScore: displayOrderDivergesFromScore(shown),
     shown: shown.length,
     rankedTotal: result.entries.length,
     rankedUnderPath: pathFilter ? scoped.length : undefined,

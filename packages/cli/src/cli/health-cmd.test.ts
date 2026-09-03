@@ -825,6 +825,30 @@ describe('displayOrderDivergesFromScore (#1151)', () => {
     expect(displayOrderDivergesFromScore([e(57, 'expensive'), e(57, 'isolated')])).toBe(false);
   });
 
+  it('ignores unknown-fan-in entries, whose score is not comparable (#1151)', () => {
+    // `scoreRisk`'s contract: an unresolved fan-in contributes the same
+    // damping as zero, which is "safe ONLY because shape sorts ahead of
+    // score ... Do not reuse this score to compare across shapes." So a
+    // placeholder-fan-in score sitting above a measured one is not evidence
+    // of anything, and firing the note on it would announce a divergence the
+    // numbers cannot support.
+    const withUnknown = [e(91.4, 'expensive'), e(306, 'unknown-fan-in')];
+    expect(displayOrderDivergesFromScore(withUnknown)).toBe(false);
+  });
+
+  it('still fires when both entries have a measured fan-in', () => {
+    // The #1151 case survives the exclusion: on go-chi/chi both `Mount`
+    // (expensive, 91.4) and `findRoute` (isolated, 306) are resolved.
+    expect(displayOrderDivergesFromScore([e(91.4, 'expensive'), e(306, 'isolated')])).toBe(true);
+  });
+
+  it('compares across an unknown-fan-in entry rather than stopping at it', () => {
+    // Dropping the unknown entry must not hide a divergence between the two
+    // resolved entries it sat between.
+    const sandwiched = [e(91.4, 'expensive'), e(999, 'unknown-fan-in'), e(306, 'isolated')];
+    expect(displayOrderDivergesFromScore(sandwiched)).toBe(true);
+  });
+
   it('is quiet for zero or one entry', () => {
     expect(displayOrderDivergesFromScore([])).toBe(false);
     expect(displayOrderDivergesFromScore([e(306, 'isolated')])).toBe(false);

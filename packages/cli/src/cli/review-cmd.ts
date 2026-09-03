@@ -662,6 +662,15 @@ export function toJson(result: ReviewResult): string {
       scanFailure: result.scanFailure ?? null,
       repoScanFailure: result.repoScanFailure ?? null,
       unexamined: result.unexamined,
+      // Both of these were missing, and the omission undid the point of
+      // carrying `allSignals` explicitly: the renderer got the flag while the
+      // JSON path was left inferring it from an empty `withheldSignals`. A
+      // consumer of `--all-signals --format json` saw exactly what a default
+      // run emits and got 13 unvalidated signals' candidates with no marker
+      // saying so. `scanPartial` was invisible the same way, though the text
+      // renderer reads it.
+      allSignals: result.allSignals,
+      scanPartial: result.scanPartial ?? null,
       durationMs: result.durationMs,
       signals: result.reports.map(r => ({
         id: r.id,
