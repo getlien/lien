@@ -88,46 +88,43 @@ describe('describePartialScan', () => {
 });
 
 describe('describeUnanalyzableScan', () => {
-  it('fires when the scan parsed chunks but none of them was code', () => {
-    // serilog's ILogger.cs: 1370 lines, one whole-file chunk, no symbol
-    // extracted at all (#970 Bug 2). `lien complexity` called this clean.
-    expect(describeUnanalyzableScan({ filesAnalyzed: 1, declarationsAnalyzed: 0 })).toBe(
-      '1 file parsed, but it did not contain a function, class or type the parser recognised',
+  it('fires when files parsed but none of them was code', () => {
+    // A documentation-only repository: the README chunks fine, so
+    // describeScanFailure passes and the ranking/report is empty for a reason
+    // that has nothing to do with the code being healthy (#1148).
+    expect(describeUnanalyzableScan({ filesAnalyzed: 1, codeFilesAnalyzed: 0 })).toBe(
+      '1 file parsed, but it is not in a language lien can analyse',
     );
   });
 
-  it('pluralises the chunk count', () => {
-    expect(describeUnanalyzableScan({ filesAnalyzed: 58, declarationsAnalyzed: 0 })).toContain(
-      '58 files parsed',
+  it('pluralises', () => {
+    expect(describeUnanalyzableScan({ filesAnalyzed: 58, codeFilesAnalyzed: 0 })).toBe(
+      '58 files parsed, but none of them are in a language lien can analyse',
     );
   });
 
-  it('stays silent as soon as anything declared something', () => {
-    // Measured on serilog: 440 of 731 chunks carry a symbolType and 291 do
-    // not. An untyped chunk is ordinary, so only a corpus-wide zero counts.
-    expect(
-      describeUnanalyzableScan({ filesAnalyzed: 254, declarationsAnalyzed: 440 }),
-    ).toBeUndefined();
-    expect(describeUnanalyzableScan({ filesAnalyzed: 1, declarationsAnalyzed: 1 })).toBeUndefined();
-  });
-
-  // THE IMPORTANT CAVEAT, and the defect the first version of this shipped:
-  // zero declarations does NOT mean "failed to parse". It is also what an
-  // ordinary declaration-free file looks like, and those are common -- 73 of
-  // 316 tracked source files in this repo (23%), across TypeScript, Python,
-  // Rust and Swift. So this function is only sound over a WHOLE CORPUS, and
-  // callers must not apply it to a single named file. `lien complexity`
-  // enforces that by skipping the check entirely under `--files`; there is a
-  // command-level test pinning it.
-  it('cannot distinguish a failed parse from a declaration-free file, by construction', () => {
-    // Both produce one untyped whole-file chunk, so both arrive here as
-    // exactly this input. It fires for both -- which is why the caller, not
-    // this function, decides when the reading is meaningful.
-    expect(describeUnanalyzableScan({ filesAnalyzed: 1, declarationsAnalyzed: 0 })).toBeDefined();
+  it('stays silent as soon as one file is analysable', () => {
+    // The unsupported-language fixture: main.cbl is dropped entirely and
+    // conf.yaml is what remains, so this is the boundary that matters.
+    expect(describeUnanalyzableScan({ filesAnalyzed: 2, codeFilesAnalyzed: 1 })).toBeUndefined();
   });
 
   it('defers to describeScanFailure when nothing parsed at all', () => {
     // Otherwise an empty scan reports two different reasons for one problem.
-    expect(describeUnanalyzableScan({ filesAnalyzed: 0, declarationsAnalyzed: 0 })).toBeUndefined();
+    expect(describeUnanalyzableScan({ filesAnalyzed: 0, codeFilesAnalyzed: 0 })).toBeUndefined();
+  });
+
+  // THE FALSE-ALARM GUARD. These are the shapes a declaration-count gate
+  // refused, and they are ordinary code: 73 of 316 tracked source files in
+  // this repo (23%) declare nothing the parser types, plus whole plausible
+  // packages -- design tokens, `export type` aliases, barrels of re-exports,
+  // Go `var`, Rust `pub const`. All of them ARE code, so all of them must
+  // pass. Never re-gate this on declarations or on maxComplexity (#1148).
+  it('stays silent for code that declares nothing the parser types', () => {
+    expect(describeUnanalyzableScan({ filesAnalyzed: 1, codeFilesAnalyzed: 1 })).toBeUndefined();
+  });
+
+  it('stays silent for a constants-only package across several files', () => {
+    expect(describeUnanalyzableScan({ filesAnalyzed: 3, codeFilesAnalyzed: 3 })).toBeUndefined();
   });
 });

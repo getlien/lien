@@ -43,6 +43,7 @@ import chalk from 'chalk';
 import {
   performChunkOnlyIndex,
   analyzeComplexityFromChunks,
+  languageExists,
   computeDependentCountsFromChunks,
   findTestAssociationsFromChunks,
   isTestFile,
@@ -676,7 +677,9 @@ export async function analyzeHealth(rootDir: string, includeTests = false): Prom
     scanError,
     unanalyzable: describeUnanalyzableScan({
       filesAnalyzed: report.summary.filesAnalyzed,
-      declarationsAnalyzed: report.summary.declarationsAnalyzed,
+      codeFilesAnalyzed: new Set(
+        chunks.filter(c => languageExists(c.metadata.language)).map(c => c.metadata.file),
+      ).size,
     }),
   };
 }

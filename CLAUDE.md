@@ -127,28 +127,33 @@ files had failed with ENOENT — 88 lines to stderr, and not a word in the
 caveats block the reader is told to trust.
 
 `describeUnanalyzableScan` exists because `lien complexity` printed
-"✓ No violations found!" at exit 0 in a documentation-only repository and in
-one whose only source file was an unsupported language (#1148). It tests
-whether any **declaration** was parsed — not whether any complexity was
-measured, since a file of pure interfaces measures 0 and is perfectly clean.
+"✓ No violations found!" at exit 0 in a documentation-only repository, and in
+one whose only source file was an unsupported language — there the `.cbl` was
+dropped and the `.yaml` that remained satisfied the gate (#1148). It asks
+**"did I see any code?"**, answered from `languageExists` — a fact about the
+scan, not an inference from it.
 
-**It is sound only over a WHOLE CORPUS, and that scoping is load-bearing.**
-Zero declarations does not mean "failed to parse": `chunker.ts` sets
-`symbolType: symbolInfo?.type`, so a file tree-sitter fails on and a file that
-parses fine while declaring nothing emit the *same* single untyped chunk. They
-are byte-identical in the chunk stream, so nothing downstream can tell them
-apart. Declaration-free-but-valid is ordinary — measured on this repo, **73 of
-316 tracked source files (23%)**, across TypeScript, Python, Rust and Swift:
-barrel re-exports, `export const`, `export type` aliases, module constants, Go
-`var`, Rust `pub const` and `pub struct`.
+**It is deliberately NOT "did anything declare a symbol?", and that cost a
+round trip worth not repeating.** The first version gated on a zero
+declaration count, reasoning that a failed parse yields one untyped whole-file
+chunk (#970's signature). True, but not exclusive: `chunker.ts` sets
+`symbolType: symbolInfo?.type`, so a file that parses fine while declaring
+nothing emits the *same* chunk — byte-identical, hence undecidable. Measured,
+that shape is ordinary: **73 of 316 tracked source files in this repo (23%)**,
+across TypeScript, Python, Rust and Swift, plus whole plausible packages
+(design tokens, `export type` aliases, barrels of re-exports, Go `var`, Rust
+`pub const`). It refused all of them, including
+`packages/parser/src/index.ts` — the curated public barrel.
 
-The first version of the fix applied it per file under `--files` and therefore
-hard-errored on a quarter of this repo, including `packages/parser/src/index.ts`
-— the curated public barrel. A local adversarial review caught it; CodeRabbit
-reviewed the same diff and reported no actionable comments. So: never apply
-this check to a single named file, and do not reach for a proxy for
-parse failure. Telling those two states apart needs a real ERROR-root signal
-out of `chunkFile`, which does not exist yet (#1157).
+It is also not `maxComplexity === 0`, a third distinct question: a file of pure
+interfaces measures 0 and is perfectly clean.
+
+So when adding a no-data check, gate on a fact the scan reports, never on a
+proxy for one. Reporting a genuine parse failure for a single named file needs
+a real ERROR-root signal out of `chunkFile`, which does not exist yet (#1157) —
+do not substitute something that correlates with it. A local adversarial review
+caught the proxy; CodeRabbit reviewed the same diff and reported no actionable
+comments, so a clean bot review is not evidence about this class.
 
 The same duty applies to a command's own empty states, which is not only
 about parse failure — `lien review` distinguishes "no changes at all" from

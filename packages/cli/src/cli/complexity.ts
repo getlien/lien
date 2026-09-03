@@ -1,8 +1,12 @@
 import chalk from 'chalk';
 import fs from 'fs';
 import path from 'path';
-import { performChunkOnlyIndex, analyzeComplexityFromChunks } from '@liendev/parser';
-import type { ComplexityReport } from '@liendev/parser';
+import {
+  performChunkOnlyIndex,
+  analyzeComplexityFromChunks,
+  languageExists,
+} from '@liendev/parser';
+import type { CodeChunk, ComplexityReport } from '@liendev/parser';
 import { formatReport } from '../insights/formatters/index.js';
 import type { OutputFormat } from '../insights/formatters/index.js';
 import {
@@ -139,6 +143,23 @@ const HINTS = {
 } as const;
 
 /**
+ * How many distinct files the scan produced chunks for in a language this
+ * parser can actually analyse.
+ *
+ * Counts files, not chunks, so the number matches the sentence the caller
+ * builds ("N files parsed, none of them ..."). `languageExists` is the
+ * registry check, so markdown, YAML and anything with no language definition
+ * are excluded -- which is the whole point.
+ */
+function countCodeFiles(chunks: CodeChunk[]): number {
+  const files = new Set<string>();
+  for (const c of chunks) {
+    if (languageExists(c.metadata.language)) files.add(c.metadata.file);
+  }
+  return files.size;
+}
+
+/**
  * Which no-data state this run is in, if any, once the report exists.
  *
  * Three states, deliberately ordered, and the ORDER matters:
@@ -146,20 +167,25 @@ const HINTS = {
  * 1. `--files` matched nothing. `describeScanFailure` structurally cannot see
  *    this -- it ran against the unfiltered scan and passed -- so without this
  *    branch a mistyped path reports "0 violations, clean" (#1148).
- * 2. `--files` matched something. Return nothing: a single file's declaration
- *    count is NOT evidence about that file. 73 of 316 tracked source files in
- *    this repo declare nothing the parser types and parse perfectly, so
- *    refusing here hard-errors on ~23% of a real project. See
- *    `describeUnanalyzableScan` for why the two states are undecidable, and
- *    #1157 for the parser signal that would let this branch be honest.
- * 3. Whole corpus, nothing declared anywhere. Sound in aggregate: a project in
- *    which nothing at all declares a function, class or type has no
- *    complexity to attest to.
+ * 2. `--files` matched something. Nothing to say: whether that file declared
+ *    anything is not evidence about whether it was understood. #1157 is the
+ *    parser signal that would let this branch report a genuine parse failure.
+ * 3. Whole corpus, and not one file was in an analysable language -- a
+ *    documentation-only repository, or one whose sources are all in languages
+ *    with no definition here. Nothing was measured, so nothing can be
+ *    attested.
  */
 function describeNoData(
+  chunks: CodeChunk[],
   report: ComplexityReport,
   files: string[] | undefined,
 ): { reason: string; hint: string } | undefined {
+  // `--files` that matched nothing is its own no-data state, and the one
+  // `describeScanFailure` structurally cannot see: it ran against the
+  // UNFILTERED scan, found thousands of chunks, and passed. Reporting
+  // "0 violations, clean" for a path that was never examined is the same false
+  // clean in a narrower window -- a mistyped path, or a directory passed where
+  // a file was meant (#1148).
   if (files?.length) {
     if (report.summary.filesAnalyzed > 0) return undefined;
     return {
@@ -170,7 +196,7 @@ function describeNoData(
 
   const unanalyzable = describeUnanalyzableScan({
     filesAnalyzed: report.summary.filesAnalyzed,
-    declarationsAnalyzed: report.summary.declarationsAnalyzed,
+    codeFilesAnalyzed: countCodeFiles(chunks),
   });
   return unanalyzable ? { reason: unanalyzable, hint: HINTS.noCode } : undefined;
 }
@@ -240,7 +266,7 @@ export async function complexityCommand(options: ComplexityOptions) {
 
     const report = analyzeComplexityFromChunks(scan.chunks, files);
 
-    const noData = describeNoData(report, files);
+    const noData = describeNoData(scan.chunks, report, files);
     if (noData) return refuseNoData(noData.reason, rootDir, noData.hint);
 
     console.log(formatReport(report, options.format));
