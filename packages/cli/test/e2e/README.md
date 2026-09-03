@@ -52,9 +52,26 @@ npm run test:e2e -- --reporter=verbose
 
 ### CI/CD (Automatic)
 
-These tests run automatically on:
-- Push to `main` branch
-- Pull requests to `main` (optional, can be skipped with `[skip e2e]` in commit message)
+The workflow triggers on `pull_request` to `main` and on `workflow_dispatch`.
+It does **not** run on push.
+
+Within a PR, the matrix runs when **any** of these holds (#1066):
+
+| Condition | Why |
+|---|---|
+| the diff touches `packages/parser/src/`, `packages/parser-native/`, `packages/cli/src/` or `packages/cli/test/e2e/` (ignoring `*.md`) | this is what the suite asserts on — the primary trigger |
+| the diff touches `e2e.yml` or `plan-e2e-matrix.mjs` | a change to the harness should run the harness |
+| the PR contains a changeset | retained so nothing that ran before stops running |
+| the PR carries the `e2e` label | manual escape hatch |
+| `workflow_dispatch` | manual run |
+
+Path is the primary trigger because changeset presence answers *"is this
+release-worthy"*, not *"does this touch dependency resolution"*. Relying on the
+latter let #1065 — a fix for a Rust crate-root **fabrication** bug — merge with
+zero corpora because it carried no changeset. See #1066.
+
+There is **no** `[skip e2e]` commit-message mechanism. To skip, simply don't
+touch the trigger paths; to force a run, add the `e2e` label.
 
 See `.github/workflows/e2e.yml` for CI configuration.
 
@@ -238,7 +255,11 @@ jobs:
 A: Real projects catch issues that toy examples miss (complex nesting, edge cases, performance).
 
 **Q: Can I skip these in CI?**  
-A: Yes, add `[skip e2e]` to your commit message.
+A: Not by commit message — `[skip e2e]` was documented here but never
+implemented anywhere in `.github/`. The matrix is trigger-gated instead: it
+runs when the diff touches the paths listed under "CI/CD" above, when the PR
+has a changeset, or when it carries the `e2e` label. A PR touching none of
+those already skips it.
 
 **Q: What if a project updates and breaks tests?**  
 A: Pin to a specific commit SHA instead of branch name, or update expected values.
