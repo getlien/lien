@@ -15,6 +15,7 @@ import {
   unresolvedFanInLanguages,
   plural,
   renderNothingShown,
+  displayOrderDivergesFromScore,
   toJson,
   renderText,
   healthCommand,
@@ -778,5 +779,65 @@ describe('healthCommand — unsafe-root guard wiring', () => {
       else process.env.HOME = realHome;
       await fs.rm(fakeHome, { recursive: true, force: true });
     }
+  });
+});
+
+describe('displayOrderDivergesFromScore (#1151)', () => {
+  const e = (score: number, shape: RiskEntry['shape']): RiskEntry => ({
+    filepath: 'a.go',
+    startLine: 1,
+    symbolName: 's',
+    language: 'go',
+    cognitive: 10,
+    dependents: 1,
+    tests: [],
+    score,
+    shape,
+  });
+
+  it('detects the real go-chi/chi ordering, where score 306 displays third', () => {
+    // Measured on chi: shape-major sorting puts two `expensive` entries above
+    // `findRoute`, which outscores both by 3.8x and gets the softest advice.
+    const chi = [
+      e(91.4, 'expensive'),
+      e(80, 'expensive'),
+      e(306, 'isolated'),
+      e(96, 'isolated'),
+      e(80, 'isolated'),
+    ];
+    expect(displayOrderDivergesFromScore(chi)).toBe(true);
+  });
+
+  it('stays quiet when display order already matches score order', () => {
+    // This repo's own output: 90, 75, 57, 57, 56.9, all one shape. A note here
+    // would fire on every run and get trained out as noise (#1014).
+    const thisRepo = [
+      e(90, 'isolated'),
+      e(75, 'isolated'),
+      e(57, 'isolated'),
+      e(57, 'isolated'),
+      e(56.9, 'isolated'),
+    ];
+    expect(displayOrderDivergesFromScore(thisRepo)).toBe(false);
+  });
+
+  it('treats equal adjacent scores as agreeing, not diverging', () => {
+    expect(displayOrderDivergesFromScore([e(57, 'expensive'), e(57, 'isolated')])).toBe(false);
+  });
+
+  it('is quiet for zero or one entry', () => {
+    expect(displayOrderDivergesFromScore([])).toBe(false);
+    expect(displayOrderDivergesFromScore([e(306, 'isolated')])).toBe(false);
+  });
+
+  it('fires on a divergence anywhere in the list, not just at the top', () => {
+    // The check scans all earlier entries, which for a descending-order test
+    // is equivalent to comparing adjacent pairs -- a list is non-descending
+    // iff some adjacent pair increases. Kept as written because it states the
+    // property directly rather than relying on that equivalence holding if
+    // the ordering rule ever gains a third key.
+    expect(
+      displayOrderDivergesFromScore([e(100, 'dangerous'), e(40, 'isolated'), e(60, 'isolated')]),
+    ).toBe(true);
   });
 });

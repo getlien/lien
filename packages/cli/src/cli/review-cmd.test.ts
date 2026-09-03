@@ -21,6 +21,7 @@ function result(overrides: Partial<ReviewResult> = {}): ReviewResult {
     unexamined: { untracked: [], nonAnalyzable: [], testsExcluded: 0, deleted: 0 },
     repoScanned: true,
     withheldSignals: [],
+    allSignals: false,
     durationMs: 12,
     ...overrides,
   };
@@ -463,5 +464,36 @@ describe('reviewCommand', () => {
 
     expect(process.exitCode).toBe(1);
     expect(errSpy.mock.calls.flat().join(' ')).toContain('could not run');
+  });
+});
+
+describe('--all-signals precision caveat (#1152)', () => {
+  it('warns about unestablished precision when the 13 signals actually RAN', () => {
+    const out = renderText(result({ allSignals: true, withheldSignals: [] }));
+    expect(out).toContain('precision has never been established');
+    expect(out).toContain('106');
+    expect(out).toContain('rated none actionable');
+  });
+
+  it('says a short list is not a complete one, since the loud signals self-cap', () => {
+    const out = renderText(result({ allSignals: true, withheldSignals: [] }));
+    expect(out).toContain('cap their own lists');
+    expect(out).toContain('TypeScript/JavaScript-only');
+  });
+
+  it('does not print the ran-caveat on a default run', () => {
+    // The default run has its own note, on the withheld list. Printing both
+    // would state the same measurement twice for opposite reasons.
+    const out = renderText(result({ allSignals: false, withheldSignals: ['stale-literal'] }));
+    expect(out).not.toContain('precision has never been established');
+    expect(out).toContain('measured 0 useful');
+  });
+
+  it('keys off the explicit flag, not an empty withheld list', () => {
+    // `withheldSignals: []` is the test fixture default and does NOT mean
+    // --all-signals ran. Inferring it would have fired this caveat on every
+    // existing test in this file (#1152).
+    const out = renderText(result({ allSignals: false, withheldSignals: [] }));
+    expect(out).not.toContain('precision has never been established');
   });
 });

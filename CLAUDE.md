@@ -168,8 +168,11 @@ Two things measured along the way, worth not relearning:
 - **Precision was never established for 13 of the 14.** Adversarial review
   judged 106 of their candidates across four real diffs and rated none
   actionable, which is why `lien review` runs only `comparison-change` by
-  default and `--all-signals` prints a warning. A signal being deterministic
-  makes it cheap and reproducible; it does not make it right.
+  default and `--all-signals` says so before you read its output. A signal
+  being deterministic makes it cheap and reproducible; it does not make it
+  right. (This line claimed the warning existed for some time before it did —
+  the calibration note was printed only when the signals were WITHHELD, so it
+  vanished exactly when someone turned them on. Fixed in #1152.)
 - **A gate that over-fires gets trained out as noise** (#1014). `lien review`
   is advisory and has no `--fail-on` for exactly that reason. `lien delta` is
   the gate, and it fires only on a threshold a function was under before.

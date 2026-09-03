@@ -34,7 +34,13 @@ import {
   type SignalContext,
 } from '@liendev/parser';
 
-import { listDeletedFiles, listUntrackedAnalyzable, readUnifiedDiff } from './delta-git.js';
+import {
+  NOT_A_REPO_MESSAGE,
+  getRepoRoot,
+  listDeletedFiles,
+  listUntrackedAnalyzable,
+  readUnifiedDiff,
+} from './delta-git.js';
 import { resolveRepoRoot } from './project-root.js';
 import { describeScanFailure, describePartialScan } from '../utils/scan-failure.js';
 import { runSignals, withheldSignalIds, type SignalReport } from './review-signals.js';
@@ -88,6 +94,15 @@ export interface ReviewResult {
   repoScanned: boolean;
   /** Signal ids that did not run because they are off by default. */
   withheldSignals: string[];
+  /**
+   * Whether `--all-signals` ran the thirteen low-precision signals.
+   *
+   * Carried explicitly rather than inferred from an empty `withheldSignals`:
+   * that inference holds only while every withheld signal stays off by
+   * default, and the renderer must not silently lose its caveat the day one
+   * flips (#1152).
+   */
+  allSignals: boolean;
   /** Why the changed-file parse produced nothing usable, if it did. */
   scanFailure?: string;
   /** Some changed files parsed, others could not be read at all. */
@@ -340,6 +355,7 @@ export async function analyzeReview(options: ReviewOptions): Promise<ReviewResul
       deleted,
     },
     withheldSignals: allSignals ? [] : withheldSignalIds(),
+    allSignals,
     scanFailure,
     scanPartial,
     repoScanFailure,
@@ -486,6 +502,23 @@ function renderCaveats(result: ReviewResult): string[] {
     lines.push(
       '  --no-repo-scan was set, so the cross-file signals saw only the diff. ' +
         'Anything outside it — a surviving old name, an unchanged sibling — was invisible.',
+    );
+  }
+
+  // The calibration note used to appear ONLY when these signals were withheld,
+  // so it vanished exactly when the user turned them on and started reading
+  // their output — the moment it is most needed (#1152). Same measurement,
+  // stated on the path where it applies.
+  if (result.allSignals) {
+    lines.push(
+      '  --all-signals ran 13 signals whose precision has never been established: ' +
+        'adversarial review judged 106 of their candidates across four real diffs and ' +
+        'rated none actionable.',
+    );
+    lines.push(
+      '    Three are TypeScript/JavaScript-only and the highest-volume ones cap their ' +
+        'own lists, so a short list here is not a complete one. Treat every candidate as ' +
+        'a place to look, never a finding.',
     );
   }
 
@@ -640,6 +673,18 @@ export async function reviewCommand(options: ReviewOptions): Promise<void> {
     console.error(`Unknown format '${format}'. Use text or json.`);
     process.exitCode = 1;
     return;
+  }
+
+  // Detect a missing repository BEFORE running, so the commonest environment
+  // error reads like an answer instead of a stack trace. Without this the
+  // first git call escapes as `Command failed: git ls-files ...` plus git's
+  // own "fatal: not a git repository", which tells the user about our flags
+  // rather than their problem (#1150). Same detection and same exit code as
+  // `lien delta`, which had it right: 2 for an unusable environment, distinct
+  // from 1 for a run that started and then failed.
+  if (!(await getRepoRoot(process.cwd()))) {
+    console.error(`lien review: ${NOT_A_REPO_MESSAGE}`);
+    process.exit(2);
   }
 
   let result: ReviewResult;

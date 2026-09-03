@@ -29,6 +29,17 @@ async function git(rootDir: string, args: string[]): Promise<string> {
 }
 
 /** Resolve the git repository root for `cwd`, or null if not a git repo. */
+/**
+ * What every command says when there is no repository to work in.
+ *
+ * Shared because #1150 was exactly this drifting: `lien delta` said this and
+ * exited 2, while `lien review` let the first git call escape as
+ * "Command failed: git ls-files --others --exclude-standard -z" and exited 1,
+ * telling the user about our flags instead of their problem. One sentence, one
+ * exit code, both commands.
+ */
+export const NOT_A_REPO_MESSAGE = 'not a git repository (or git is not installed)';
+
 export async function getRepoRoot(cwd: string): Promise<string | null> {
   try {
     const out = await git(cwd, ['rev-parse', '--show-toplevel']);

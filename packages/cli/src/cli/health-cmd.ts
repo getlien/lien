@@ -505,10 +505,28 @@ export function renderNothingShown(result: HealthResult, pathFilter?: string): s
   return [chalk.green('  Nothing ranked as risky to change.')];
 }
 
+/**
+ * True when the displayed order is not descending by score.
+ *
+ * The ranking is shape-major on purpose: "expensive to change" is a different
+ * question from "complex", and #1138 put `unknown-fan-in` above `cheap-win`
+ * and `isolated` so unmeasured blast radius cannot read as safety. The cost is
+ * that score order and display order can disagree, with nothing saying so --
+ * on go-chi/chi, `findRoute` scores 306 and displays THIRD, under entries
+ * scoring 91.4 and 80, carrying the softest advice tier (#1151).
+ *
+ * Computed over the shown entries rather than stated unconditionally: when the
+ * two orders agree, which is the common case, the note would be noise, and a
+ * caveat that fires every run gets trained out (#1014).
+ */
+export function displayOrderDivergesFromScore(shown: RiskEntry[]): boolean {
+  return shown.some((entry, i) => shown.slice(0, i).some(above => entry.score > above.score));
+}
+
 export function renderText(result: HealthResult, shown: RiskEntry[], pathFilter?: string): string {
   const lines: string[] = ['', chalk.bold('lien health'), ''];
 
-  const scanned = `${plural(result.filesAnalyzed, 'file')} · ${plural(result.chunks, 'chunk')} · ${(result.durationMs / 1000).toFixed(1)}s · no index`;
+  const scanned = `${plural(result.filesAnalyzed, 'file')} · ${plural(result.chunks, 'chunk')} · ${(result.durationMs / 1000).toFixed(1)}s`;
   lines.push(chalk.dim(`  ${scanned}`), '');
 
   if (result.scanError) {
@@ -528,6 +546,13 @@ export function renderText(result: HealthResult, shown: RiskEntry[], pathFilter?
   } else {
     const noun = shown.length === 1 ? 'function is' : 'functions are';
     lines.push(chalk.yellow(`  ⚠ ${shown.length} ${noun} risky to change`), '');
+    if (displayOrderDivergesFromScore(shown)) {
+      lines.push(
+        chalk.dim('  Ordered by how expensive a change is, then by risk within that — so'),
+        chalk.dim('  something further down this list may still be the riskiest thing here.'),
+        '',
+      );
+    }
     shown.forEach((entry, i) => lines.push(...renderEntry(entry, i + 1)));
   }
 

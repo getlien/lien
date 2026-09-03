@@ -34,8 +34,15 @@ lien --version
 If `lien review --base <ref>` prints `error: unknown option '--base'`, run the
 local build instead — `node packages/cli/dist/index.js review --base <ref>` —
 after `npm run build`. Do not quietly fall back to reviewing by hand; say that
-you did. Watch for a bare `lien review` with no `--base`: it **exits 0 and
-prints the help screen**, which is easy to misread as "ran clean, found nothing".
+you did.
+
+(An earlier version of this note warned that a bare `lien review` with no
+`--base` "exits 0 and prints the help screen". Measured on 0.80.2, it does not:
+it reviews against `HEAD` and labels an empty result honestly — "No changes
+against HEAD. / Nothing was analyzed — this is not a clean review, it is an
+empty one." The warning was training you to distrust output that is correct,
+which is worse than no warning, so it is gone. A bare `lien review` is a fine
+way to review uncommitted work; you still need `--base` for a branch.)
 
 **Refresh the base ref.** `--base` is a two-dot `git diff <ref>`, so a stale
 `origin/main` silently attributes other people's commits to this change. Run
@@ -44,7 +51,7 @@ prints the help screen**, which is easy to misread as "ran clean, found nothing"
 ### Optional, and worth it
 
 ```bash
-lien review --base <ref> --all-signals    # the 13 withheld signals  (~3.5 s)
+lien review --base <ref> --all-signals    # the 13 withheld signals  (~1 s)
 lien review --base <ref> --include-tests  # tests are excluded by default
 lien review --base <ref> --format json    # needed more often than you'd think
 ```
@@ -70,7 +77,7 @@ yields `entries: []` regardless of scope.
 (An earlier version of this note said 4 of the top 5 were fixtures from
 `lien-review-testbed/`, which was true when that fixture app existed. It has
 been deleted, taking most of the repo's violations with it — the ranked total
-fell from 57 to 12 (and the analysed corpus from 592 files to 396). The conclusion got stronger, not weaker: a shorter ranking
+fell from 57 to 12 (and the analysed corpus from 592 files to 370). The conclusion got stronger, not weaker: a shorter ranking
 is a narrower net.)
 
 So it can tell you "this function is risky and under-tested" — and for the
