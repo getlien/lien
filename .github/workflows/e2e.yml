@@ -20,7 +20,7 @@ jobs:
     name: Check E2E trigger
     runs-on: ubuntu-latest
     outputs:
-      should-run: ${{ github.event_name == 'workflow_dispatch' || steps.check.outputs.has-changeset == 'true' || steps.label.outputs.has-label == 'true' }}
+      should-run: ${{ github.event_name == 'workflow_dispatch' || steps.paths.outputs.has-paths == 'true' || steps.check.outputs.has-changeset == 'true' || steps.label.outputs.has-label == 'true' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -36,6 +36,53 @@ jobs:
             echo "has-label=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # PRIMARY TRIGGER (#1066). Changeset presence answers "is this
+      # release-worthy"; this answers "does this touch what E2E asserts",
+      # which is the question the suite exists for. They are not the same, and
+      # relying on the first let #1065 -- the fix for a Rust crate-root
+      # FABRICATION bug (#1056: two unrelated files returning an identical
+      # 144-file dependent list) -- merge with zero corpora, because it
+      # carried no changeset. A detector that does not run is indistinguishable
+      # from one that does not exist, and changeset presence is unrelated to
+      # risk.
+      #
+      # Deliberately broad prefixes rather than an enumerated list of
+      # resolution modules: an enumeration goes stale in the dangerous
+      # direction, silently omitting a module added later.
+      #
+      #   packages/parser/src/       the resolution surface E2E asserts on
+      #   packages/parser-native/    the matrix runs under LIEN_PARSER=native,
+      #                              so the addon changes every corpus result
+      #   packages/cli/src/          since #1141 the suite runs all four
+      #                              commands, so command source is in scope
+      #   packages/cli/test/e2e/     a change to the suite must run the suite;
+      #                              #1141 added command coverage with no
+      #                              changeset and its own E2E was skipped
+      #   the workflow + matrix planner themselves
+      #
+      # Markdown is stripped first. Without it, `packages/parser-native/` --
+      # deliberately broader than the `src/`-scoped entries above, since its
+      # loader and Cargo manifests sit at the package root -- also matched
+      # `packages/parser-native/README.md`, so a docs-only PR (#835, 55 files,
+      # one of them that README) would clone 11 repos. A prose change cannot
+      # alter a parse result.
+      #
+      # Accepted cost: most code PRs now clone 11 repos, so network flakes get
+      # more exposure. That is the cheaper failure -- a flake is visible and
+      # re-runnable, a skipped detector is neither.
+      - name: Check for paths E2E actually covers
+        id: paths
+        run: |
+          if git diff --name-only origin/main...HEAD \
+            | grep -vE '\.md$' \
+            | grep -qE '^(packages/parser/src/|packages/parser-native/|packages/cli/src/|packages/cli/test/e2e/|\.github/workflows/e2e\.yml$|\.github/scripts/plan-e2e-matrix\.mjs$)'; then
+            echo "has-paths=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-paths=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Retained as an OR term so nothing that runs today stops running, not
+      # because it is a good predicate on its own.
       - name: Check for changeset files in PR
         id: check
         run: |
