@@ -556,4 +556,21 @@ describe('reviewCommand outside a git repository (#1150)', () => {
     expect(errs).not.toContain('Command failed');
     expect(errs).not.toContain('ls-files');
   });
+
+  it('stops there rather than falling through to the review', async () => {
+    // The half my first version of this test could not see. `process.exit` is
+    // mocked, so without a `return` control continues into `analyzeReview` and
+    // its first git call throws the raw invocation anyway -- exactly what the
+    // pre-check exists to avoid. Asserting the exit code alone passes either
+    // way, so assert that nothing was reviewed.
+    vi.mocked(deltaGit.getRepoRoot).mockResolvedValueOnce(null);
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+
+    await reviewCommand({ format: 'text' });
+
+    expect(logSpy).not.toHaveBeenCalled();
+    expect(errSpy.mock.calls.flat().join(' ')).not.toContain('could not run');
+  });
 });

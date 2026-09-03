@@ -704,7 +704,14 @@ export async function reviewCommand(options: ReviewOptions): Promise<void> {
   // from 1 for a run that started and then failed.
   if (!(await getRepoRoot(process.cwd()))) {
     console.error(`lien review: ${NOT_A_REPO_MESSAGE}`);
+    // `return` after `process.exit` is load-bearing, not belt-and-braces:
+    // under a mocked exit -- which is how this path is tested -- control comes
+    // back and falls through to `analyzeReview`, whose first git call throws
+    // the raw "Command failed: git ls-files ..." this check exists to prevent.
+    // `complexity.ts` carries the same warning on `refuseNoData`; I wrote it
+    // there and then omitted the `return` here.
     process.exit(2);
+    return;
   }
 
   let result: ReviewResult;
