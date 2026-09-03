@@ -8,6 +8,7 @@ import {
   performChunkOnlyIndex,
   findDependents,
   findTestAssociationsFromChunks,
+  isTestFile,
 } from '@liendev/parser';
 import type { CodeChunk, ChunkOnlyResult } from '@liendev/parser';
 
@@ -1036,10 +1037,18 @@ describe('E2E: Real Open Source Projects', () => {
           // exist and `--base <parent>` is unavailable. An uncommitted edit
           // against `--base HEAD` gives both commands a real diff without
           // needing a deeper clone.
-          const target = chunks.find(c => c.metadata.language === project.language)?.metadata.file;
+          // Must not be a test file. `lien review` excludes tests unless
+          // `--include-tests`, so editing one produces "changes, but nothing
+          // reviewable in them" — review behaving correctly, and the
+          // assertion below failing for the wrong reason. Picking the first
+          // chunk of the language did exactly that on Chi (`tree_test.go`),
+          // JavaPoet, Sinatra and MediatR, whose test files sort first.
+          const target = chunks.find(
+            c => c.metadata.language === project.language && !isTestFile(c.metadata.file),
+          )?.metadata.file;
           if (target === undefined) {
             throw new Error(
-              `no ${project.language} chunk to edit — the language floors above should have caught this first`,
+              `no non-test ${project.language} chunk to edit — the language floors above should have caught this first`,
             );
           }
 
