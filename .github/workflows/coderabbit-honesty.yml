@@ -1,0 +1,105 @@
+name: CodeRabbit Review Honesty
+
+# Makes "CodeRabbit did not actually review this" impossible to miss.
+#
+# WHY: CodeRabbit reports through a commit STATUS, not a check run, and its
+# state is `success` even when no review happened. The reason lives only in the
+# status `description`, which branch protection cannot inspect:
+#
+#   CodeRabbit | success | Review completed                                  <- reviewed
+#   CodeRabbit | success | Review rate limited                               <- did NOT
+#   CodeRabbit | success | Review skipped: 243 files exceed the limit of 100  <- did NOT
+#
+# So the merge checklist's "read the reason, not the colour" rule was left
+# entirely to human vigilance, and it slipped four times during the
+# simplification arc — including on #1133 (243 files, over the hard cap) and
+# on #1135, where the follow-up commit fixing CodeRabbit's OWN finding went in
+# unreviewed. This turns that into a label and a comment.
+#
+# DELIBERATELY NOT A BLOCKING CHECK. Three reasons:
+#   1. The rate limit is a budget problem, not a code problem. Blocking makes
+#      merging impossible for ~43 minutes for reasons unrelated to the diff.
+#   2. The 100-file cap is structural. A large deletion PR CANNOT be reviewed,
+#      and a blocking gate would make it permanently unmergeable.
+#   3. Requiring a third-party status means their outage blocks all merges,
+#      with no recourse but `--admin`, which CLAUDE.md forbids.
+# The failure mode was an invisible signal, not a deliberate merge. So this
+# makes it unmissable rather than impossible.
+#
+# COST: nothing runs while CodeRabbit thinks — the workflow starts BECAUSE it
+# finished. Only ~3 commit statuses exist per commit (all CodeRabbit's; the 18
+# CI/E2E entries are check-runs, which do not fire `status`), and the pending
+# guard skips two of them without allocating a runner.
+
+on:
+  status:
+
+permissions:
+  pull-requests: write # label + comment
+  issues: write # labels are the issues API
+
+jobs:
+  flag-incomplete-review:
+    # Load-bearing twice: skips CodeRabbit's own queued/in-progress statuses,
+    # and stops any other status in the repo from waking this workflow. A
+    # skipped job allocates no runner.
+    if: github.event.context == 'CodeRabbit' && github.event.state != 'pending'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Flag or clear the review-completeness label
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.event.sha }}
+          REASON: ${{ github.event.description }}
+          LABEL: coderabbit-incomplete
+          MARKER: '<!-- coderabbit-honesty -->'
+        run: |
+          set -euo pipefail
+
+          # A status event carries no PR context, so resolve it from the SHA.
+          # Filtered to OPEN PRs: pushes to main fire this too, and a merged
+          # PR is past the point where the label would tell anyone anything.
+          PR=$(gh api "repos/$REPO/commits/$SHA/pulls" \
+                 --jq 'map(select(.state == "open")) | .[0].number // empty')
+          if [ -z "$PR" ]; then
+            echo "No open PR for $SHA — nothing to flag."
+            exit 0
+          fi
+
+          # ALLOWLIST, not denylist. Only the exact success string clears the
+          # flag; an unrecognised reason flags rather than passes. If
+          # CodeRabbit adds a state we have never seen, the failure direction
+          # must be "flagged unnecessarily", never "silently read as
+          # reviewed" — the same fail-loud default the No-Data Honesty rule
+          # uses in the CLI.
+          if [ "$REASON" = "Review completed" ]; then
+            gh pr edit "$PR" --repo "$REPO" --remove-label "$LABEL" 2>/dev/null \
+              && echo "PR #$PR: review completed, label cleared." \
+              || echo "PR #$PR: review completed, label was not present."
+            exit 0
+          fi
+
+          echo "PR #$PR: CodeRabbit reported '$REASON' — flagging."
+          gh pr edit "$PR" --repo "$REPO" --add-label "$LABEL"
+
+          BODY="$MARKER
+          **CodeRabbit did not review this PR.** Its check is green; the reason it gives is:
+
+          > \`$REASON\`
+
+          Green means *it posted*, not *it reviewed*. Either get a review — re-run it, wait out a rate limit, or split a diff that exceeds the file cap — or state explicitly in the PR that it merged unreviewed, and why.
+
+          <sub>Posted by \`.github/workflows/coderabbit-honesty.yml\`. Updated in place, not re-posted, on each new status.</sub>"
+
+          # One comment, edited in place. A fresh comment per push would train
+          # the signal out as noise, which is exactly what #1014 measured.
+          EXISTING=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+                       --jq "map(select(.body | contains(\"$MARKER\"))) | .[0].id // empty")
+          if [ -n "$EXISTING" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$EXISTING" -f body="$BODY" >/dev/null
+            echo "Updated existing comment $EXISTING."
+          else
+            gh pr comment "$PR" --repo "$REPO" --body "$BODY"
+            echo "Posted new comment."
+          fi

@@ -396,7 +396,17 @@ tree-sitter won't compile) — see `docs/development/worktree-development.md`.
   summary. Fix or explicitly dismiss each finding.
   - **A green CodeRabbit check is not proof it reviewed.** Its status line
     carries the reason: "Review completed" means it ran, "Review rate limited"
-    means it did not. Read the reason, not the colour.
+    or "Review skipped: N files exceed the limit of 100" mean it did not. Read
+    the reason, not the colour.
+    - You no longer have to remember to. `.github/workflows/coderabbit-honesty.yml`
+      watches CodeRabbit's commit status and, for any reason other than
+      "Review completed", applies the **`coderabbit-incomplete`** label and
+      posts one comment naming the reason. The label clears itself if a later
+      re-review completes. It is deliberately **not** a blocking check — the
+      rate limit and the 100-file cap are both conditions where the right
+      answer is "merge knowingly", not "cannot merge" (see the workflow's
+      header). So the label means *decide*, not *stop*: either get the review
+      or say in the PR why you merged without it.
 - **Complexity is gated by `lien delta --base`, not by a review bot.** That job
   fails only when a function crosses a threshold it was under at the PR's base,
   which is the question worth gating on. Note it is the ONLY complexity gate
