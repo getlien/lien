@@ -2,6 +2,15 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 
 import { renderText, toJson, reviewCommand, type ReviewResult } from './review-cmd.js';
 import type { SignalReport } from './review-signals.js';
+import * as deltaGit from './delta-git.js';
+import { NOT_A_REPO_MESSAGE } from './delta-git.js';
+
+// Only `getRepoRoot` is stubbed; the rest of delta-git stays real, and it
+// defaults to "we are in a repo" so every other test here is unaffected.
+vi.mock('./delta-git.js', async importOriginal => {
+  const actual = await importOriginal<typeof deltaGit>();
+  return { ...actual, getRepoRoot: vi.fn(async () => '/repo') };
+});
 
 function report(overrides: Partial<SignalReport> = {}): SignalReport {
   return {
@@ -526,5 +535,25 @@ describe('toJson carries the caveats a machine consumer needs (#1152)', () => {
     // consumer cannot tell the field is supported if it vanishes.
     const out = JSON.parse(toJson(result({ scanPartial: undefined })));
     expect(out.scanPartial).toBeNull();
+  });
+});
+
+describe('reviewCommand outside a git repository (#1150)', () => {
+  it('reports the reason and exits 2, without leaking the git invocation', async () => {
+    // Before: the first git call escaped as "Command failed: git ls-files
+    // --others --exclude-standard -z" plus git's own fatal, at exit 1 --
+    // telling the user about our flags rather than their problem, while
+    // `lien delta` in the same directory already answered properly at exit 2.
+    vi.mocked(deltaGit.getRepoRoot).mockResolvedValueOnce(null);
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+
+    await reviewCommand({ format: 'text' });
+
+    expect(exitSpy).toHaveBeenCalledWith(2);
+    const errs = errSpy.mock.calls.flat().join(' ');
+    expect(errs).toContain(NOT_A_REPO_MESSAGE);
+    expect(errs).not.toContain('Command failed');
+    expect(errs).not.toContain('ls-files');
   });
 });

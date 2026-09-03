@@ -185,9 +185,23 @@ const SHAPE_PRIORITY: Record<RiskShape, number> = {
  * Unresolved fan-in (`null`) contributes the same damping as `0`, which is
  * safe ONLY because shape sorts ahead of score: every `unknown-fan-in` entry
  * carries the same constant fan-in term, so within that group the score
- * reduces to complexity × tests. It is never compared against a resolved
- * entry's score, because a different shape decides the order first. Do not
- * reuse this score to compare across shapes.
+ * reduces to complexity × tests.
+ *
+ * **The score of an `unknown-fan-in` entry is therefore not comparable with
+ * any other entry's** — one side of that comparison is a placeholder, and the
+ * ordering never needed it because shape decides first.
+ *
+ * Every OTHER shape has a measured fan-in, so their scores are computed from
+ * the same real inputs and do compare, across shapes included.
+ * `displayOrderDivergesFromScore` depends on exactly that: it exists to say
+ * when the shape-major display order disagrees with risk, which is inherently
+ * a cross-shape question (on go-chi/chi it is `expensive` 91.4 above
+ * `isolated` 306), and it filters `unknown-fan-in` out first.
+ *
+ * An earlier version of this note said "do not reuse this score to compare
+ * across shapes" without qualification. That was broader than its own reason,
+ * and taken literally it forbids the one comparison the ranking needs to be
+ * honest about itself (#1151).
  *
  * Note it reduces to complexity × *tests*, not complexity alone: an untested
  * entry still scores 2× a tested one of equal complexity. That is deliberate
