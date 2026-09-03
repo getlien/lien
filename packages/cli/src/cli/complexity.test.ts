@@ -264,6 +264,43 @@ describe('complexityCommand', () => {
     expect(consoleLogSpy).not.toHaveBeenCalled();
   });
 
+  it('hard-errors when chunks parsed but NONE of them was code (#1148)', async () => {
+    // The false clean this closes: serilog's ILogger.cs is 1370 lines that
+    // tree-sitter fails on entirely, yielding one whole-file chunk with no
+    // symbol. `describeScanFailure` passes -- a chunk exists -- so 0.80.2
+    // printed "No violations found!" at exit 0.
+    vi.mocked(parserModule.performChunkOnlyIndex).mockResolvedValue(
+      scanOf([
+        chunk({ symbolName: undefined, symbolType: undefined, complexity: undefined }),
+      ]) as never,
+    );
+
+    await complexityCommand({ format: 'text' });
+
+    expect(processExitSpy).toHaveBeenCalledWith(1);
+    expect(consoleErrorSpy.mock.calls.flat().join(' ')).toContain(
+      'did not contain a function, class or type',
+    );
+    expect(consoleLogSpy).not.toHaveBeenCalled();
+  });
+
+  it('does NOT fire on code that legitimately has no measurable function', async () => {
+    // The other half, and the one that matters more: an interface parses
+    // perfectly and measures a complexity of 0. Gating on complexity rather
+    // than on declarations would hard-error here -- the false alarm
+    // CLAUDE.md forbids outright.
+    vi.mocked(parserModule.performChunkOnlyIndex).mockResolvedValue(
+      scanOf([
+        chunk({ symbolName: 'OnlyTypes', symbolType: 'interface', complexity: undefined }),
+      ]) as never,
+    );
+
+    await complexityCommand({ format: 'text' });
+
+    expect(processExitSpy).not.toHaveBeenCalledWith(1);
+    expect(consoleLogSpy).toHaveBeenCalled();
+  });
+
   it('handles a thrown scan error gracefully', async () => {
     vi.mocked(parserModule.performChunkOnlyIndex).mockRejectedValue(new Error('boom'));
 

@@ -9,6 +9,7 @@ const report: ComplexityReport = {
     bySeverity: { error: 0, warning: 1 },
     avgComplexity: 12,
     maxComplexity: 20,
+    declarationsAnalyzed: 20,
   },
   files: {
     'src/utils.ts': {
@@ -73,6 +74,7 @@ describe('formatJsonReport', () => {
         bySeverity: { error: 0, warning: 0 },
         avgComplexity: 0,
         maxComplexity: 0,
+        declarationsAnalyzed: 1,
       },
       files: {},
     };

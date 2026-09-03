@@ -618,6 +618,26 @@ describe('renderNothingShown', () => {
     expect(out).toContain('--include-tests');
     expect(out).not.toContain('Nothing ranked as risky to change.');
   });
+
+  it('distinguishes "nothing was code" from clean, and does not call it clean (#1148)', () => {
+    // A docs-only repo parses fine, so `describeScanFailure` passes and the
+    // ranking is empty for a reason that is not good news. This printed a
+    // green "Nothing ranked as risky to change." for a repo holding one
+    // README until #1148.
+    const noCode = { ...base, unanalyzable: '1 file parsed, but it did not contain a function' };
+    const out = stripAnsi(renderNothingShown(noCode).join('\n'));
+    expect(out).toContain('No code found to rank');
+    expect(out).toContain('NOT a clean bill of health');
+    expect(out).not.toContain('Nothing ranked as risky to change.');
+  });
+
+  it('still reports a genuinely clean repo as clean when code WAS analysed', () => {
+    // The other half of #1148: the guard must not fire on real code that
+    // simply has no risky function. `unanalyzable` unset is that state.
+    const out = stripAnsi(renderNothingShown({ ...base, unanalyzable: undefined }).join('\n'));
+    expect(out).toContain('Nothing ranked as risky to change.');
+    expect(out).not.toContain('NOT a clean bill of health');
+  });
 });
 
 describe('toJson', () => {

@@ -85,6 +85,22 @@ export interface ComplexityReport {
     bySeverity: { error: number; warning: number };
     avgComplexity: number;
     maxComplexity: number;
+    /**
+     * Chunks carrying a declaration the parser recognised (a function, method,
+     * class, interface, ...) among the files this report covers.
+     *
+     * Exists so a caller can tell "I analysed code and found no violation"
+     * from "I never saw any code", which are the same report otherwise. Zero
+     * means nothing analyzable was parsed and no clean verdict is available;
+     * see `describeUnanalyzableScan` in the CLI for the honesty rule this
+     * feeds, and #1148 for the false clean it closes.
+     *
+     * Deliberately NOT derived from `maxComplexity`. A file of pure type or
+     * field declarations parses perfectly and measures 0, so treating
+     * `maxComplexity === 0` as "nothing parsed" would hard-error on
+     * legitimately clean code — the false alarm CLAUDE.md forbids.
+     */
+    declarationsAnalyzed: number;
   };
   files: Record<string, FileComplexityData>;
 }

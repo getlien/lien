@@ -4,7 +4,11 @@ import path from 'path';
 import { performChunkOnlyIndex, analyzeComplexityFromChunks } from '@liendev/parser';
 import { formatReport } from '../insights/formatters/index.js';
 import type { OutputFormat } from '../insights/formatters/index.js';
-import { describeScanFailure } from '../utils/scan-failure.js';
+import {
+  describeScanFailure,
+  describePartialScan,
+  describeUnanalyzableScan,
+} from '../utils/scan-failure.js';
 import { resolveRepoRoot, rebaseToRoot } from './project-root.js';
 import { assertSafeRoot } from './unsafe-root.js';
 
@@ -64,12 +68,23 @@ function validateFilesExist(files: string[] | undefined, rootDir: string): void 
  * errors — the answer is still useful, it is just incomplete, and the reader
  * has to know which.
  */
-function reportScanCaveats(filesErrored: number, filesSkipped: number): void {
-  if (filesErrored > 0) {
+function reportScanCaveats(outcome: {
+  chunkCount: number;
+  filesErrored: number;
+  filesSkipped: number;
+}): void {
+  const { filesSkipped } = outcome;
+  // Shared detection, local phrasing: `describePartialScan` owns the question
+  // so this cannot drift from `health`'s and `review`'s answers to it, while
+  // the sentence still names THIS command's output and points at the parser
+  // lines only this command emits (#1149). It takes the whole outcome rather
+  // than two counts because the shared check reads `chunkCount` too, and
+  // synthesising one here would be a second copy of its rule.
+  const partial = describePartialScan({ success: true, ...outcome });
+  if (partial) {
     console.warn(
       chalk.yellow(
-        `Warning: ${filesErrored} file${filesErrored === 1 ? '' : 's'} could not be parsed and ` +
-          'are absent from this report. See the [parser] errors above.',
+        `Warning: ${partial} — they are absent from this report. See the [parser] errors above.`,
       ),
     );
   }
@@ -80,6 +95,38 @@ function reportScanCaveats(filesErrored: number, filesSkipped: number): void {
       ),
     );
   }
+}
+
+/**
+ * Refuse, actionably, when there is no data to answer from.
+ *
+ * `complexity` is gate-shaped, so both no-data states end the same way: a hard
+ * error, never a confident "0 violations, exit 0". Shared because the two
+ * call sites printed identical four-line refusals differing only in reason and
+ * closing hint, and because a refusal must never be a dead end (see
+ * cli/unsafe-root.ts's same principle).
+ */
+/*
+ * Call as `return refuseNoData(...)`, never bare. The `never` return type is a
+ * compile-time truth only: under a mocked `process.exit` -- which is how the
+ * no-data invariants are tested -- control comes BACK here and falls through
+ * to printing a clean report, which is the exact bug this function exists to
+ * prevent. Three tests catch it if you forget.
+ */
+function refuseNoData(reason: string, rootDir: string, namedFiles?: string[]): never {
+  console.error(chalk.red(`Error: cannot analyze complexity — ${reason}`));
+  console.error(
+    chalk.yellow('This is not a clean result. Nothing was analyzed, so nothing was checked.'),
+  );
+  console.error(chalk.dim(`  Looked in: ${rootDir}`));
+  console.error(
+    chalk.dim(
+      namedFiles?.length
+        ? '  The named file(s) may be in an unsupported language, or may have failed to parse.'
+        : '  Check that this is your project root and the sources are not all gitignored.',
+    ),
+  );
+  process.exit(1);
 }
 
 /**
@@ -137,24 +184,28 @@ export async function complexityCommand(options: ComplexityOptions) {
       filesSkipped: scan.filesSkipped,
     });
 
-    if (scanError) {
-      console.error(chalk.red(`Error: cannot analyze complexity — ${scanError}`));
-      console.error(
-        chalk.yellow('This is not a clean result. Nothing was analyzed, so nothing was checked.'),
-      );
-      // A refusal must be actionable, never a dead end (see
-      // cli/unsafe-root.ts's same principle).
-      console.error(chalk.dim(`  Looked in: ${rootDir}`));
-      console.error(
-        chalk.dim('  Check that this is your project root and the sources are not all gitignored.'),
-      );
-      process.exit(1);
-      return;
-    }
+    if (scanError) return refuseNoData(scanError, rootDir, files);
 
-    reportScanCaveats(scan.filesErrored, scan.filesSkipped);
+    reportScanCaveats({
+      chunkCount: scan.chunks.length,
+      filesErrored: scan.filesErrored,
+      filesSkipped: scan.filesSkipped,
+    });
 
     const report = analyzeComplexityFromChunks(scan.chunks, files);
+
+    // The scan succeeded and produced chunks, but nothing in scope was code.
+    // Gate-shaped command, so this is a hard error for the same reason total
+    // failure is: nothing was checked, so nothing can be attested. Checked
+    // here rather than beside `describeScanFailure` above because it needs the
+    // built report -- `--files` narrows the corpus, and a file the parser
+    // failed on must fail even when the rest of the repo parsed fine (#1148).
+    const unanalyzable = describeUnanalyzableScan({
+      filesAnalyzed: report.summary.filesAnalyzed,
+      declarationsAnalyzed: report.summary.declarationsAnalyzed,
+    });
+    if (unanalyzable) return refuseNoData(unanalyzable, rootDir, files);
+
     console.log(formatReport(report, options.format));
 
     // Exit code for CI integration

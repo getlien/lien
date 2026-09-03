@@ -15,6 +15,7 @@ import {
   enrichWithDependencies,
   analyzeComplexityFromChunks,
   DEFAULT_COMPLEXITY_THRESHOLDS,
+  countDeclarations,
 } from './chunk-complexity.js';
 import type { ChunkMetadata, CodeChunk } from '../types.js';
 
@@ -477,6 +478,7 @@ describe('buildReport', () => {
         bySeverity: { error: 0, warning: 0 },
         avgComplexity: 0,
         maxComplexity: 0,
+        declarationsAnalyzed: 0,
       },
       files: {},
     });
@@ -699,6 +701,7 @@ describe('analyzeComplexityFromChunks — entry point', () => {
       bySeverity: { error: 0, warning: 0 },
       avgComplexity: 0,
       maxComplexity: 0,
+      declarationsAnalyzed: 0,
     });
     expect(report.files).toEqual({});
   });
@@ -714,5 +717,36 @@ describe('analyzeComplexityFromChunks — entry point', () => {
       dependents: [],
       testAssociations: [],
     });
+  });
+});
+
+describe('countDeclarations', () => {
+  const c = (symbolType?: string) => ({ metadata: { symbolType } });
+
+  it('counts only chunks the parser typed as a declaration', () => {
+    expect(countDeclarations([c('method'), c('class'), c(undefined), c('interface')])).toBe(3);
+  });
+
+  it('is zero when a parse produced nothing but an untyped whole-file chunk', () => {
+    // #970's signature, and the input that made `lien complexity` claim
+    // serilog's ILogger.cs was clean (#1148).
+    expect(countDeclarations([c(undefined)])).toBe(0);
+  });
+
+  it('is non-zero for code that has declarations but no functions', () => {
+    // The false-alarm guard: this file measures maxComplexity 0 and is
+    // legitimately clean, so the honesty gate must NOT fire on it.
+    expect(countDeclarations([c('interface')])).toBe(1);
+  });
+
+  it('treats an unrecognised future symbol kind as a declaration', () => {
+    // Fails safe on purpose: an unknown kind can only make the caller more
+    // willing to report a clean result, never less. Under-counting would turn
+    // clean code into a false alarm.
+    expect(countDeclarations([c('trait_definition_we_have_not_added_yet')])).toBe(1);
+  });
+
+  it('is zero for an empty corpus', () => {
+    expect(countDeclarations([])).toBe(0);
   });
 });

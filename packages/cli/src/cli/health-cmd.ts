@@ -48,7 +48,11 @@ import {
   isTestFile,
   DEFAULT_COMPLEXITY_THRESHOLDS,
 } from '@liendev/parser';
-import { describeScanFailure } from '../utils/scan-failure.js';
+import {
+  describeScanFailure,
+  describePartialScan,
+  describeUnanalyzableScan,
+} from '../utils/scan-failure.js';
 import { resolveRepoRoot, rebaseToRoot } from './project-root.js';
 import { assertSafeRoot } from './unsafe-root.js';
 import type { CodeChunk, ComplexityReport, ComplexityViolation } from '@liendev/parser';
@@ -117,6 +121,17 @@ export interface HealthResult {
    * the run fails loudly — so this must be read, never assumed.
    */
   scanError?: string;
+  /**
+   * Why this run has no CODE to answer from, when the scan itself succeeded.
+   *
+   * The sibling of `scanError` and invisible to it: a markdown-only or
+   * unsupported-language repo parses fine and yields chunks, so
+   * `describeScanFailure` passes and the ranking is empty for a reason that
+   * has nothing to do with the codebase being healthy. Left unset, `health`
+   * printed a green "Nothing ranked as risky to change." for a repo
+   * containing one README (#1148).
+   */
+  unanalyzable?: string;
 }
 
 const VALID_FORMATS = ['text', 'json'];
@@ -477,6 +492,16 @@ export function renderNothingShown(result: HealthResult, pathFilter?: string): s
     ];
   }
 
+  // Advisory command, so this reports at exit 0 rather than erroring the way
+  // gate-shaped `complexity` does -- but it must not be GREEN. An empty
+  // ranking because nothing was code is not a clean bill of health (#1148).
+  if (result.unanalyzable) {
+    return [
+      chalk.red(`  ⚠ No code found to rank — ${result.unanalyzable}`),
+      chalk.yellow('    This is NOT a clean bill of health. Nothing was analyzed.'),
+    ];
+  }
+
   return [chalk.green('  Nothing ranked as risky to change.')];
 }
 
@@ -609,11 +634,25 @@ export async function analyzeHealth(rootDir: string, includeTests = false): Prom
   // same per-language resolution (#1137).
   const coverage = computeCoverage(chunks, dependentCounts);
 
-  if (scan.filesErrored > 0) {
+  // Shared detection, local phrasing: `describePartialScan` owns the question
+  // ("did most of the corpus fail?") so a third copy cannot drift from it,
+  // while the sentence still names THIS command's output. #1149 found the
+  // wording had already diverged three ways.
+  const partial = describePartialScan({
+    success: scan.success,
+    chunkCount: chunks.length,
+    filesErrored: scan.filesErrored,
+  });
+  if (partial) {
+    console.warn(chalk.yellow(`Warning: ${partial} — they are absent from this ranking.`));
+  }
+  // #1149: health passed `filesSkipped` to `describeScanFailure` for the
+  // total case but never caveated the partial one, so a run where the size cap
+  // excluded much of the corpus ranked the remainder in silence.
+  if (scan.filesSkipped > 0) {
     console.warn(
-      chalk.yellow(
-        `Warning: ${scan.filesErrored} file${scan.filesErrored === 1 ? '' : 's'} could not be parsed and ` +
-          'are absent from this ranking.',
+      chalk.dim(
+        `  ${scan.filesSkipped} file${scan.filesSkipped === 1 ? '' : 's'} skipped for exceeding the size cap.`,
       ),
     );
   }
@@ -635,6 +674,10 @@ export async function analyzeHealth(rootDir: string, includeTests = false): Prom
     ),
     coverage,
     scanError,
+    unanalyzable: describeUnanalyzableScan({
+      filesAnalyzed: report.summary.filesAnalyzed,
+      declarationsAnalyzed: report.summary.declarationsAnalyzed,
+    }),
   };
 }
 

@@ -111,13 +111,29 @@ per before/after content pair, and `computeComplexityDelta` returns no error
 field. So it has no failure channel to route — not an oversight to copy, but
 not coverage either.
 
-**Total failure is only half of it.** `describeScanFailure` returns `undefined`
-the moment anything parsed, so a run where most of the corpus failed looks
-identical to a healthy one. `describePartialScan` is the other half, and it
-exists because `lien review` on a large deletion diff reported "98 changed
-file(s) … No candidates from any signal" while 88 of those files had failed
-with ENOENT — 88 lines to stderr, and not a word in the caveats block the
-reader is told to trust.
+**Total failure is one of THREE states, not the whole question.**
+`describeScanFailure` sees only the first; each of the others is invisible to
+it, so a command must route all three to be honest.
+
+| state | function | why it hides |
+|---|---|---|
+| nothing parsed | `describeScanFailure` | — |
+| most of the corpus failed | `describePartialScan` | returns `undefined` the moment anything parsed |
+| it parsed, and none of it is code | `describeUnanalyzableScan` | a markdown, YAML or unparseable source file chunks fine |
+
+`describePartialScan` exists because `lien review` on a large deletion diff
+reported "98 changed file(s) … No candidates from any signal" while 88 of those
+files had failed with ENOENT — 88 lines to stderr, and not a word in the
+caveats block the reader is told to trust.
+
+`describeUnanalyzableScan` exists because `lien complexity` printed
+"✓ No violations found!" at exit 0 for serilog's 1370-line `ILogger.cs`, a file
+tree-sitter fails on in its entirety (#1148). It tests whether any
+**declaration** was parsed, deliberately NOT whether any complexity was
+measured: a file of pure type or field declarations parses correctly and
+measures 0, so gating on complexity would hard-error on legitimately clean
+code. That distinction IS the hard constraint below, so do not "simplify" it
+into a `maxComplexity === 0` check.
 
 The same duty applies to a command's own empty states, which is not only
 about parse failure — `lien review` distinguishes "no changes at all" from

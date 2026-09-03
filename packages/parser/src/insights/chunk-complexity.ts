@@ -344,6 +344,28 @@ function computeComplexityStats(allChunks: Array<{ content: string; metadata: Ch
 }
 
 /**
+ * Count chunks carrying a declaration the parser recognised.
+ *
+ * The discriminator for "did I see any code at all?". A parse that fails
+ * yields one whole-file chunk with `symbolType` undefined (#970's signature);
+ * a file the parser understood yields chunks typed `function`, `method`,
+ * `class`, `interface` and so on. Measured on serilog: 440 of 731 chunks in a
+ * healthy C# corpus carry a type, and the 291 that do not are ordinary
+ * sub-chunks -- so an untyped chunk is normal and only the corpus-level total
+ * being ZERO means nothing was analyzable.
+ *
+ * Any unrecognised future `symbolType` counts as a declaration, which fails
+ * safe: a new symbol kind can only ever make this MORE willing to report a
+ * clean result, never less. Under-counting here would turn clean code into a
+ * false alarm, which CLAUDE.md forbids outright.
+ */
+export function countDeclarations(
+  chunks: ReadonlyArray<{ metadata: { symbolType?: string } }>,
+): number {
+  return chunks.filter(c => Boolean(c.metadata.symbolType)).length;
+}
+
+/**
  * Build the final report with summary and per-file data.
  */
 export function buildReport(
@@ -386,6 +408,7 @@ export function buildReport(
       bySeverity: { error: errorCount, warning: warningCount },
       avgComplexity,
       maxComplexity,
+      declarationsAnalyzed: countDeclarations(allChunks),
     },
     files,
   };

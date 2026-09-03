@@ -10,6 +10,7 @@ function createReport(overrides: Partial<ComplexityReport> = {}): ComplexityRepo
       bySeverity: { error: 1, warning: 1 },
       avgComplexity: 15,
       maxComplexity: 35,
+      declarationsAnalyzed: 35,
     },
     files: {
       'src/utils.ts': {
@@ -128,6 +129,7 @@ describe('formatTextReport', () => {
           bySeverity: { error: 0, warning: 0 },
           avgComplexity: 5,
           maxComplexity: 10,
+          declarationsAnalyzed: 10,
         },
         files: {},
       }),

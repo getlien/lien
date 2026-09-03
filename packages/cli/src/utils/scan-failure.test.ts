@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { describeScanFailure, describePartialScan } from './scan-failure.js';
+import {
+  describeScanFailure,
+  describePartialScan,
+  describeUnanalyzableScan,
+} from './scan-failure.js';
 
 describe('describeScanFailure', () => {
   it('reports the scanner’s own error when the scan failed', () => {
@@ -80,5 +84,47 @@ describe('describePartialScan', () => {
     expect(describePartialScan({ success: true, chunkCount: 5, filesErrored: 1 })).toBe(
       '1 file could not be parsed and was not examined',
     );
+  });
+});
+
+describe('describeUnanalyzableScan', () => {
+  it('fires when the scan parsed chunks but none of them was code', () => {
+    // serilog's ILogger.cs: 1370 lines, one whole-file chunk, no symbol
+    // extracted at all (#970 Bug 2). `lien complexity` called this clean.
+    expect(describeUnanalyzableScan({ filesAnalyzed: 1, declarationsAnalyzed: 0 })).toBe(
+      '1 file parsed, but it did not contain a function, class or type the parser recognised',
+    );
+  });
+
+  it('pluralises the chunk count', () => {
+    expect(describeUnanalyzableScan({ filesAnalyzed: 58, declarationsAnalyzed: 0 })).toContain(
+      '58 files parsed',
+    );
+  });
+
+  // The three below are the false-alarm guard, and they matter more than the
+  // cases above: CLAUDE.md forbids turning a genuinely clean result into an
+  // alarm, and every one of these parses perfectly.
+  it('stays silent for a file of pure type declarations', () => {
+    // types-only.ts measures maxComplexity 0 with one `interface` declaration.
+    // Gating on complexity instead of declarations would hard-error here.
+    expect(describeUnanalyzableScan({ filesAnalyzed: 1, declarationsAnalyzed: 1 })).toBeUndefined();
+  });
+
+  it('stays silent for a class with only fields and no methods', () => {
+    expect(describeUnanalyzableScan({ filesAnalyzed: 1, declarationsAnalyzed: 1 })).toBeUndefined();
+  });
+
+  it('stays silent for a healthy corpus whose chunks are mostly untyped', () => {
+    // Measured on serilog: 440 of 731 chunks carry a symbolType and 291 do
+    // not. An untyped chunk is ordinary, so only a corpus-wide zero counts.
+    expect(
+      describeUnanalyzableScan({ filesAnalyzed: 254, declarationsAnalyzed: 440 }),
+    ).toBeUndefined();
+  });
+
+  it('defers to describeScanFailure when nothing parsed at all', () => {
+    // Otherwise an empty scan reports two different reasons for one problem.
+    expect(describeUnanalyzableScan({ filesAnalyzed: 0, declarationsAnalyzed: 0 })).toBeUndefined();
   });
 });
