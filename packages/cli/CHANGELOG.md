@@ -1,5 +1,39 @@
 # @liendev/lien
 
+## 0.80.3
+
+### Patch Changes
+
+- c93f00f: ### Fixes
+  - `lien review` now reports a missing repository the way `lien delta` already did, instead of leaking the git invocation (#1150). Before, it exited 1 with `Command failed: git ls-files --others --exclude-standard -z` and git's own `fatal: not a git repository`; now both commands print `not a git repository (or git is not installed)` and exit 2. The sentence is shared between them, so they cannot drift apart again.
+  - `lien health` now says when its list is not in risk order (#1151). Entries are grouped by how expensive a change is and ranked by risk _within_ each group, so a higher-risk function can appear below a lower-risk one. On go-chi/chi, `findRoute` scores 306 — 3.8x the top-ranked entry — and displays third with the softest advice tier. The note appears only when the shown entries actually diverge, so a run whose display order already matches its risk order stays quiet.
+  - `lien review --all-signals` now states that the 13 signals it enables have never had their precision established (#1152). The calibration note was printed only when those signals were _withheld_, so it vanished exactly when a user turned them on and started reading their output.
+  - `lien health` no longer prints `no index` in its stats line (#1154). There is no index and no alternative mode, so the phrase read as a degraded state and invited a hunt for the flag that would fix it.
+
+- c93f00f: ### Fixes
+  - `lien complexity` no longer reports a clean result for a project where nothing it scanned was code (#1148). It hard-errors instead, the way it already did for a scan that produced nothing at all — the command is gate-shaped, so a run with no data to answer from must never exit 0 with a green verdict. Previously a documentation-only repository, and one whose only source file was in an unsupported language, both produced:
+
+    ```text
+      Files analyzed: 1
+      Violations: 0 (0 errors, 0 warnings)
+      Max complexity: 0
+    ✓ No violations found!                              # exit 0
+    ```
+
+    The check is whether any scanned file is in a language lien can analyse — a fact about the scan, not an inference from it. It is deliberately **not** "did anything declare a symbol", and not "was any complexity measured": a constants-only or `export type`-only package, a barrel of re-exports, a Go `var` module or a Rust `const` crate are all perfectly valid code that declare nothing and measure zero, and refusing those would fail CI on working projects. Reporting a genuine parse failure for a single named file needs a parser signal that does not exist yet, tracked as #1157.
+
+  - `lien complexity --files <path>` now names the paths it never examined, instead of reporting "0 violations" about them (#1148). `--files package.json src/real.ts` said "Files analyzed: 1" and printed a green tick without mentioning that one path is outside the scanned set. Manifests, lockfiles, dot-directories and unsupported languages are all outside it.
+
+    It warns and continues rather than failing: the recipe the docs recommend, piping changed filenames into `--files`, would otherwise exit 1 on any commit touching only those paths, and a lockfile-only commit is not a complexity regression. When nothing named was examined it says so explicitly instead of printing a clean report. A path that does not exist at all is still a usage error and still exits 1.
+
+  - `lien health` no longer prints a green "Nothing ranked as risky to change." when nothing it scanned was code (#1148). It is advisory, so it says so at exit 0 rather than erroring.
+  - `lien health` now reports files excluded by the size cap (#1149). It already passed that count into its total-failure check but never mentioned it in the partial case, so a run where the cap excluded much of the corpus ranked the remainder in silence.
+  - `lien complexity`'s no-data hint no longer claims the project "contains no code" (#1148). For a C or C++ repository that is false — lien simply has no parser for it — so the hint now names the languages it does analyse, read from the parser's own registry rather than a second copy of the list.
+  - `lien review --all-signals`' precision note is no longer printed under the "Not examined:" heading (#1152). Those 13 signals _were_ examined; the note says how much to trust what they produced, which is the opposite of a caveat about something skipped.
+
+  ### Refactors
+  - Consolidate the three separate implementations of the partial-scan check onto `describePartialScan` (#1149). Each command still names its own output; only the detection is shared, which is what it was centralised for. The wording had already diverged three ways, and only one of the three mentioned the size cap.
+
 ## 0.80.2
 
 ### Patch Changes
