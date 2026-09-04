@@ -5,7 +5,7 @@ import {
   performChunkOnlyIndex,
   analyzeComplexityFromChunks,
   languageExists,
-  LANGUAGE_IDS,
+  getAllLanguages,
 } from '@liendev/parser';
 import type { CodeChunk, ComplexityReport } from '@liendev/parser';
 import { formatReport } from '../insights/formatters/index.js';
@@ -160,8 +160,18 @@ const HINTS = {
   // Must not assert "there is no code here": a C or C++ project has plenty,
   // lien simply has no parser for it, and the old wording told the reader
   // something false about their own repository (#1148 follow-up). Name the
-  // supported set instead, sourced from the registry so it cannot go stale.
-  noCode: `  lien analyses ${LANGUAGE_IDS.join(', ')} — check whether this project's sources are among them.`,
+  // supported set instead, read from the registry so it cannot go stale.
+  //
+  // Derived from `getAllLanguages`, NOT from a `LANGUAGE_IDS` export. The
+  // first version of this added that export to the parser barrel and consumed
+  // it here, while the changeset named only `@liendev/lien` -- so parser was
+  // never bumped, the published CLI resolved `^0.80.2`, and 0.80.3 threw
+  // `does not provide an export named 'LANGUAGE_IDS'` on its first import
+  // (#1160). `getAllLanguages` has been in the barrel since before 0.80.2, so
+  // this works against the dependency range the CLI actually declares.
+  noCode: `  lien analyses ${getAllLanguages()
+    .map(d => d.id)
+    .join(', ')} — check whether this project's sources are among them.`,
 } as const;
 
 /**
