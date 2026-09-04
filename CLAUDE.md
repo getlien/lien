@@ -111,13 +111,49 @@ per before/after content pair, and `computeComplexityDelta` returns no error
 field. So it has no failure channel to route — not an oversight to copy, but
 not coverage either.
 
-**Total failure is only half of it.** `describeScanFailure` returns `undefined`
-the moment anything parsed, so a run where most of the corpus failed looks
-identical to a healthy one. `describePartialScan` is the other half, and it
-exists because `lien review` on a large deletion diff reported "98 changed
-file(s) … No candidates from any signal" while 88 of those files had failed
-with ENOENT — 88 lines to stderr, and not a word in the caveats block the
-reader is told to trust.
+**Total failure is one of THREE states, not the whole question.**
+`describeScanFailure` sees only the first; each of the others is invisible to
+it, so a command must route all three to be honest.
+
+| state | function | why it hides |
+|---|---|---|
+| nothing parsed | `describeScanFailure` | — |
+| most of the corpus failed | `describePartialScan` | returns `undefined` the moment anything parsed |
+| it parsed, and none of it is code | `describeUnanalyzableScan` | a markdown, YAML or unparseable source file chunks fine |
+
+`describePartialScan` exists because `lien review` on a large deletion diff
+reported "98 changed file(s) … No candidates from any signal" while 88 of those
+files had failed with ENOENT — 88 lines to stderr, and not a word in the
+caveats block the reader is told to trust.
+
+`describeUnanalyzableScan` exists because `lien complexity` printed
+"✓ No violations found!" at exit 0 in a documentation-only repository, and in
+one whose only source file was an unsupported language — there the `.cbl` was
+dropped and the `.yaml` that remained satisfied the gate (#1148). It asks
+**"did I see any code?"**, answered from `languageExists` — a fact about the
+scan, not an inference from it.
+
+**It is deliberately NOT "did anything declare a symbol?", and that cost a
+round trip worth not repeating.** The first version gated on a zero
+declaration count, reasoning that a failed parse yields one untyped whole-file
+chunk (#970's signature). True, but not exclusive: `chunker.ts` sets
+`symbolType: symbolInfo?.type`, so a file that parses fine while declaring
+nothing emits the *same* chunk — byte-identical, hence undecidable. Measured,
+that shape is ordinary: **73 of 316 tracked source files in this repo (23%)**,
+across TypeScript, Python, Rust and Swift, plus whole plausible packages
+(design tokens, `export type` aliases, barrels of re-exports, Go `var`, Rust
+`pub const`). It refused all of them, including
+`packages/parser/src/index.ts` — the curated public barrel.
+
+It is also not `maxComplexity === 0`, a third distinct question: a file of pure
+interfaces measures 0 and is perfectly clean.
+
+So when adding a no-data check, gate on a fact the scan reports, never on a
+proxy for one. Reporting a genuine parse failure for a single named file needs
+a real ERROR-root signal out of `chunkFile`, which does not exist yet (#1157) —
+do not substitute something that correlates with it. A local adversarial review
+caught the proxy; CodeRabbit reviewed the same diff and reported no actionable
+comments, so a clean bot review is not evidence about this class.
 
 The same duty applies to a command's own empty states, which is not only
 about parse failure — `lien review` distinguishes "no changes at all" from
@@ -129,6 +165,34 @@ wrong problem.
 Gate on the actual state, never on the shape of the result — see #1014 for
 what over-firing costs (a false caveat that fires every session gets trained
 out as noise).
+
+**A caveat that reaches only `renderText` is half a fix.** Every command has
+at least two renderers and the JSON one does not inherit anything: `toJson`
+enumerates its fields, so a new field on the result type simply does not
+appear. Both halves of #1151/#1152 shipped this way — `--all-signals` gained a
+precision warning in the terminal while `--format json` stayed byte-identical
+to a default run, and `lien health` gained "this list is not in risk order"
+while the JSON kept emitting shape-major `entries` with no marker. That is
+worse than the original bug in one respect: the human now sees a caveat, so
+the gap is invisible unless you diff the renderers, and the machine consumer
+is the one likelier to act on the output unattended.
+
+So when you add or change a caveat, verdict or ordering guarantee, walk the
+consumers: `renderText` **and each of its early-return paths**, `toJson` (and
+`sarif` where it exists), `.claude/skills/review/SKILL.md` — which reads
+`--format json`, so a caveat missing there is missing from the review workflow
+— and `packages/site/docs`, where a pasted sample-output block is *rendered
+output*, not prose.
+
+The early-return paths are the easiest to miss and bit this rule the first
+time it was written down: `renderNothingReviewable` returns before the main
+path's caveat spread and still prints candidates from the raw-diff signals, so
+`--all-signals` output on a markdown-only diff carried no precision note. Grep
+for `return render` in the renderer before you believe you are done. That last
+one has already gone stale twice; `docs-truth` cannot catch it, since it
+checks links, ADR refs and `npm run` mentions, never whether a pasted block
+still matches reality. Emit an absent value as `null` rather than omitting the
+key: a missing key and "nothing to report" are different statements.
 
 ---
 
@@ -152,8 +216,11 @@ Two things measured along the way, worth not relearning:
 - **Precision was never established for 13 of the 14.** Adversarial review
   judged 106 of their candidates across four real diffs and rated none
   actionable, which is why `lien review` runs only `comparison-change` by
-  default and `--all-signals` prints a warning. A signal being deterministic
-  makes it cheap and reproducible; it does not make it right.
+  default and `--all-signals` says so before you read its output. A signal
+  being deterministic makes it cheap and reproducible; it does not make it
+  right. (This line claimed the warning existed for some time before it did —
+  the calibration note was printed only when the signals were WITHHELD, so it
+  vanished exactly when someone turned them on. Fixed in #1152.)
 - **A gate that over-fires gets trained out as noise** (#1014). `lien review`
   is advisory and has no `--fail-on` for exactly that reason. `lien delta` is
   the gate, and it fires only on a threshold a function was under before.

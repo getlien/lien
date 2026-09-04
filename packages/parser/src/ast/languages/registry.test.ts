@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  LANGUAGE_IDS,
   detectLanguage,
   getLanguage,
   languageExists,
@@ -357,5 +358,45 @@ describe('Language Registry', () => {
       expect(hasSamePackageTestConvention('kotlin')).toBe(false);
       expect(hasWholeModuleImports('kotlin')).toBe(false);
     });
+  });
+});
+
+describe('LANGUAGE_IDS as published surface', () => {
+  // It is exported from the package barrel so a caller that must TELL a user
+  // what this parser handles does not hardcode its own copy of the list
+  // (`lien complexity` prints it in a no-data refusal). That makes REMOVING an
+  // entry a breaking change: `SupportedLanguage` is `(typeof LANGUAGE_IDS)[number]`,
+  // so a removal narrows a published union. The barrel comment calls the list
+  // "append-only in practice" -- these tests are what make that more than a
+  // claim in a comment.
+  const PUBLISHED = [
+    'typescript',
+    'javascript',
+    'php',
+    'python',
+    'rust',
+    'go',
+    'java',
+    'csharp',
+    'ruby',
+    'kotlin',
+    'swift',
+  ];
+
+  it('still contains every language it has published', () => {
+    // Membership, not deep equality: ADDING a language is fine and must not
+    // fail this. Removing one, or renaming an id, is the breaking change.
+    for (const id of PUBLISHED) expect(LANGUAGE_IDS).toContain(id);
+  });
+
+  it('has no duplicate ids', () => {
+    expect(new Set(LANGUAGE_IDS).size).toBe(LANGUAGE_IDS.length);
+  });
+
+  it('agrees with languageExists, which reads the registry rather than this array', () => {
+    // The two could drift: `languageExists` consults the Map built from the
+    // definitions, while this array is written by hand.
+    for (const id of LANGUAGE_IDS) expect(languageExists(id)).toBe(true);
+    expect(getAllLanguages()).toHaveLength(LANGUAGE_IDS.length);
   });
 });

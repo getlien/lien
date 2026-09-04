@@ -34,7 +34,13 @@ import {
   type SignalContext,
 } from '@liendev/parser';
 
-import { listDeletedFiles, listUntrackedAnalyzable, readUnifiedDiff } from './delta-git.js';
+import {
+  NOT_A_REPO_MESSAGE,
+  getRepoRoot,
+  listDeletedFiles,
+  listUntrackedAnalyzable,
+  readUnifiedDiff,
+} from './delta-git.js';
 import { resolveRepoRoot } from './project-root.js';
 import { describeScanFailure, describePartialScan } from '../utils/scan-failure.js';
 import { runSignals, withheldSignalIds, type SignalReport } from './review-signals.js';
@@ -88,6 +94,15 @@ export interface ReviewResult {
   repoScanned: boolean;
   /** Signal ids that did not run because they are off by default. */
   withheldSignals: string[];
+  /**
+   * Whether `--all-signals` ran the thirteen low-precision signals.
+   *
+   * Carried explicitly rather than inferred from an empty `withheldSignals`:
+   * that inference holds only while every withheld signal stays off by
+   * default, and the renderer must not silently lose its caveat the day one
+   * flips (#1152).
+   */
+  allSignals: boolean;
   /** Why the changed-file parse produced nothing usable, if it did. */
   scanFailure?: string;
   /** Some changed files parsed, others could not be read at all. */
@@ -340,6 +355,7 @@ export async function analyzeReview(options: ReviewOptions): Promise<ReviewResul
       deleted,
     },
     withheldSignals: allSignals ? [] : withheldSignalIds(),
+    allSignals,
     scanFailure,
     scanPartial,
     repoScanFailure,
@@ -414,6 +430,17 @@ function renderNothingReviewable(result: ReviewResult): string {
           'These are candidates for you to judge, not findings.',
         ]
       : ['No signal found anything in the raw diff either.']),
+    // This renderer returns EARLY, before the main path's calibration spread,
+    // and the raw-diff signals it prints here (doc-claims, docs-drift,
+    // guidance-surface, untrusted-input) are all among the 13 that are off by
+    // default. So under --all-signals this path was emitting unvalidated
+    // candidates with no precision note at all (CodeRabbit, #1156).
+    //
+    // Printed even when nothing was found, matching the main path: a signal
+    // whose precision was never established finding nothing is not evidence
+    // of cleanliness, and this file's whole point is not to render absence of
+    // evidence as a clean result.
+    ...(result.allSignals ? ['', ...renderAllSignalsCalibration(result)] : []),
   ].join('\n');
 }
 
@@ -490,6 +517,33 @@ function renderCaveats(result: ReviewResult): string[] {
   }
 
   return lines;
+}
+
+/**
+ * The `--all-signals` calibration note.
+ *
+ * NOT part of `renderCaveats`, and the separation is the point: the renderer
+ * prints those under a literal "Not examined:" heading, and these 13 signals
+ * are the opposite — they ran, and this says how much to trust what they
+ * produced. Filing it as a caveat put a true sentence under a false heading.
+ *
+ * It also must not be conditioned on `withheldSignals` being empty. The note
+ * used to appear ONLY when these signals were withheld, so it vanished exactly
+ * when a user turned them on and started reading their output — the moment it
+ * is most needed (#1152).
+ */
+function renderAllSignalsCalibration(result: ReviewResult): string[] {
+  if (!result.allSignals) return [];
+  // One string per sentence, not hard-wrapped to a column. Wrapping prose in
+  // code splits phrases across array entries -- "rated none / actionable" --
+  // which broke this note's own tests and would break any grep for it.
+  return [
+    'About those 13 signals: their precision has never been established. Adversarial review ' +
+      'judged 106 of their candidates across four real diffs and rated none actionable.',
+    '  Three are TypeScript/JavaScript-only, and the highest-volume ones cap their own lists, ' +
+      'so a short list here is not a complete one. Every one is a place to look, never a finding.',
+    '',
+  ];
 }
 
 /**
@@ -596,6 +650,7 @@ export function renderText(result: ReviewResult): string {
     ...(total === 0 ? ['No candidates from any signal.', ''] : []),
     ...renderConstrained(result.reports),
     ...(caveats.length > 0 ? ['Not examined:', ...caveats, ''] : []),
+    ...renderAllSignalsCalibration(result),
   ];
 
   out.push(
@@ -618,6 +673,15 @@ export function toJson(result: ReviewResult): string {
       scanFailure: result.scanFailure ?? null,
       repoScanFailure: result.repoScanFailure ?? null,
       unexamined: result.unexamined,
+      // Both of these were missing, and the omission undid the point of
+      // carrying `allSignals` explicitly: the renderer got the flag while the
+      // JSON path was left inferring it from an empty `withheldSignals`. A
+      // consumer of `--all-signals --format json` saw exactly what a default
+      // run emits and got 13 unvalidated signals' candidates with no marker
+      // saying so. `scanPartial` was invisible the same way, though the text
+      // renderer reads it.
+      allSignals: result.allSignals,
+      scanPartial: result.scanPartial ?? null,
       durationMs: result.durationMs,
       signals: result.reports.map(r => ({
         id: r.id,
@@ -639,6 +703,25 @@ export async function reviewCommand(options: ReviewOptions): Promise<void> {
   if (format !== 'text' && format !== 'json') {
     console.error(`Unknown format '${format}'. Use text or json.`);
     process.exitCode = 1;
+    return;
+  }
+
+  // Detect a missing repository BEFORE running, so the commonest environment
+  // error reads like an answer instead of a stack trace. Without this the
+  // first git call escapes as `Command failed: git ls-files ...` plus git's
+  // own "fatal: not a git repository", which tells the user about our flags
+  // rather than their problem (#1150). Same detection and same exit code as
+  // `lien delta`, which had it right: 2 for an unusable environment, distinct
+  // from 1 for a run that started and then failed.
+  if (!(await getRepoRoot(process.cwd()))) {
+    console.error(`lien review: ${NOT_A_REPO_MESSAGE}`);
+    // `return` after `process.exit` is load-bearing, not belt-and-braces:
+    // under a mocked exit -- which is how this path is tested -- control comes
+    // back and falls through to `analyzeReview`, whose first git call throws
+    // the raw "Command failed: git ls-files ..." this check exists to prevent.
+    // `complexity.ts` carries the same warning on `refuseNoData`; I wrote it
+    // there and then omitted the `return` here.
+    process.exit(2);
     return;
   }
 

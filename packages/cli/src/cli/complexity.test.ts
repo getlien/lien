@@ -264,6 +264,124 @@ describe('complexityCommand', () => {
     expect(consoleLogSpy).not.toHaveBeenCalled();
   });
 
+  it('hard-errors when files parsed but NONE of them was code (#1148)', async () => {
+    // A documentation-only repo: the README chunks fine, so
+    // `describeScanFailure` passes and 0.80.2 printed "No violations found!"
+    // at exit 0 for a project it had measured nothing in.
+    vi.mocked(parserModule.performChunkOnlyIndex).mockResolvedValue(
+      scanOf([
+        chunk({
+          file: 'README.md',
+          language: 'markdown',
+          symbolName: 'hi',
+          symbolType: undefined,
+          complexity: undefined,
+        }),
+      ]) as never,
+    );
+
+    await complexityCommand({ format: 'text' });
+
+    expect(processExitSpy).toHaveBeenCalledWith(1);
+    expect(consoleErrorSpy.mock.calls.flat().join(' ')).toContain(
+      'not in a language lien can analyse',
+    );
+    expect(consoleLogSpy).not.toHaveBeenCalled();
+  });
+
+  it('does NOT fire on code that legitimately has no measurable function', async () => {
+    // An interface parses perfectly and measures a complexity of 0. Gating on
+    // complexity rather than on declarations would hard-error here.
+    vi.mocked(parserModule.performChunkOnlyIndex).mockResolvedValue(
+      scanOf([
+        chunk({ symbolName: 'OnlyTypes', symbolType: 'interface', complexity: undefined }),
+      ]) as never,
+    );
+
+    await complexityCommand({ format: 'text' });
+
+    expect(processExitSpy).not.toHaveBeenCalledWith(1);
+    expect(consoleLogSpy).toHaveBeenCalled();
+  });
+
+  it('does NOT refuse code that declares nothing the parser types (#1148 regression)', async () => {
+    // The defect the first version of this shipped: it gated on declarations,
+    // so a barrel of re-exports, an `export const` module or a config file --
+    // all valid, all parsed -- were refused. 73 of 316 tracked source files in
+    // this repo are that shape (23%), including packages/parser/src/index.ts,
+    // the curated public barrel. It is CODE, so it must report.
+    vi.mocked(parserModule.performChunkOnlyIndex).mockResolvedValue(
+      scanOf([
+        chunk({
+          file: 'src/index.ts',
+          symbolName: undefined,
+          symbolType: undefined,
+          complexity: undefined,
+        }),
+      ]) as never,
+    );
+    // Must exist on disk: `validateFilesExist` runs first, and without this
+    // the test would pass for the wrong reason -- exiting 1 on validation
+    // rather than proving the declaration check was skipped.
+    await fs.mkdir(path.join(dir, 'src'), { recursive: true });
+    await fs.writeFile(path.join(dir, 'src/index.ts'), 'export { a } from "./a.js";\n');
+
+    await complexityCommand({ format: 'text', files: ['src/index.ts'] });
+
+    expect(processExitSpy).not.toHaveBeenCalledWith(1);
+    expect(consoleLogSpy).toHaveBeenCalled();
+  });
+
+  it('names --files paths that were never examined, without failing the run', async () => {
+    // Invisible to `describeScanFailure`: it ran against the UNFILTERED scan,
+    // saw chunks, and passed -- so this printed "0 violations, clean" for a
+    // file nobody looked at.
+    //
+    // Exit 0 is deliberate. An earlier version hard-errored here, which broke
+    // the recipe the docs recommend (`git diff --name-only HEAD~1 | xargs lien
+    // complexity --files`) for any commit touching only manifests, lockfiles
+    // or dot-directories. A gate that fails a lockfile-only commit gets
+    // removed from CI. `validateFilesExist` still covers the real usage error
+    // -- a path that does not exist -- with a non-zero exit.
+    vi.mocked(parserModule.performChunkOnlyIndex).mockResolvedValue(
+      scanOf([chunk({ file: 'src/real.ts' })]) as never,
+    );
+    // Exists on disk, so it clears `validateFilesExist`; the scan simply never
+    // covered it. That is the state `describeScanFailure` cannot see.
+    await fs.mkdir(path.join(dir, 'src'), { recursive: true });
+    await fs.writeFile(path.join(dir, 'src/nope.ts'), 'export const x = 1;\n');
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await complexityCommand({ format: 'text', files: ['src/nope.ts'] });
+
+    expect(processExitSpy).not.toHaveBeenCalledWith(1);
+    const warned = warnSpy.mock.calls.flat().join(' ');
+    expect(warned).toContain('not in the scanned set');
+    expect(warned).toContain('src/nope.ts');
+    // The load-bearing half: no clean verdict about a file nobody examined.
+    expect(consoleLogSpy).not.toHaveBeenCalled();
+  });
+
+  it('still reports the files it DID examine when only some were skipped', async () => {
+    // The silent-drop case: `--files package.json src/real.ts` printed
+    // "Files analyzed: 1" and a green tick, never saying one path was dropped.
+    vi.mocked(parserModule.performChunkOnlyIndex).mockResolvedValue(
+      scanOf([chunk({ file: 'src/real.ts' })]) as never,
+    );
+    await fs.mkdir(path.join(dir, 'src'), { recursive: true });
+    await fs.writeFile(path.join(dir, 'src/real.ts'), 'export function r() {}\n');
+    await fs.writeFile(path.join(dir, 'package.json'), '{}\n');
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await complexityCommand({ format: 'text', files: ['package.json', 'src/real.ts'] });
+
+    expect(warnSpy.mock.calls.flat().join(' ')).toContain('package.json');
+    expect(processExitSpy).not.toHaveBeenCalledWith(1);
+    // It examined something, so the report is legitimate and must still print.
+    expect(consoleLogSpy).toHaveBeenCalled();
+  });
+
   it('handles a thrown scan error gracefully', async () => {
     vi.mocked(parserModule.performChunkOnlyIndex).mockRejectedValue(new Error('boom'));
 

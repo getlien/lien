@@ -4,7 +4,13 @@ import path from 'node:path';
 import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { getRepoRoot, collectFileChanges, collectFileChange, readWorktree } from './delta-git.js';
+import {
+  getRepoRoot,
+  collectFileChanges,
+  collectFileChange,
+  readWorktree,
+  NOT_A_REPO_MESSAGE,
+} from './delta-git.js';
 import type { FileContentChange } from '@liendev/parser';
 
 const execFileAsync = promisify(execFile);
@@ -413,5 +419,24 @@ describe('delta-git', () => {
       await fs.mkdir(path.join(dir, 'a-dir'), { recursive: true });
       await expect(readWorktree(dir, 'a-dir')).rejects.toThrow();
     });
+  });
+});
+
+describe('NOT_A_REPO_MESSAGE (#1150)', () => {
+  it('names the two causes a user can act on, and leaks no git invocation', () => {
+    // The bug: `lien review` let the first git call escape as "Command
+    // failed: git ls-files --others --exclude-standard -z", reporting our
+    // flags rather than the user's problem, while `lien delta` in the same
+    // directory printed this and exited 2.
+    expect(NOT_A_REPO_MESSAGE).toBe('not a git repository (or git is not installed)');
+    expect(NOT_A_REPO_MESSAGE).not.toContain('Command failed');
+    expect(NOT_A_REPO_MESSAGE).not.toContain('ls-files');
+  });
+
+  it('is a bare reason so each command prefixes its own name', () => {
+    // `lien delta: <msg>` / `lien review: <msg>`. Sharing the reason is what
+    // stops the two answers drifting apart again -- the same duplication
+    // lesson #1149 records for the partial-scan check.
+    expect(NOT_A_REPO_MESSAGE.startsWith('lien')).toBe(false);
   });
 });

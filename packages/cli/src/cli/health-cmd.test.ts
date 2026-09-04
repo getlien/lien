@@ -15,6 +15,7 @@ import {
   unresolvedFanInLanguages,
   plural,
   renderNothingShown,
+  displayOrderDivergesFromScore,
   toJson,
   renderText,
   healthCommand,
@@ -618,6 +619,26 @@ describe('renderNothingShown', () => {
     expect(out).toContain('--include-tests');
     expect(out).not.toContain('Nothing ranked as risky to change.');
   });
+
+  it('distinguishes "nothing was code" from clean, and does not call it clean (#1148)', () => {
+    // A docs-only repo parses fine, so `describeScanFailure` passes and the
+    // ranking is empty for a reason that is not good news. This printed a
+    // green "Nothing ranked as risky to change." for a repo holding one
+    // README until #1148.
+    const noCode = { ...base, unanalyzable: '1 file parsed, but it did not contain a function' };
+    const out = stripAnsi(renderNothingShown(noCode).join('\n'));
+    expect(out).toContain('No code found to rank');
+    expect(out).toContain('NOT a clean bill of health');
+    expect(out).not.toContain('Nothing ranked as risky to change.');
+  });
+
+  it('still reports a genuinely clean repo as clean when code WAS analysed', () => {
+    // The other half of #1148: the guard must not fire on real code that
+    // simply has no risky function. `unanalyzable` unset is that state.
+    const out = stripAnsi(renderNothingShown({ ...base, unanalyzable: undefined }).join('\n'));
+    expect(out).toContain('Nothing ranked as risky to change.');
+    expect(out).not.toContain('NOT a clean bill of health');
+  });
 });
 
 describe('toJson', () => {
@@ -758,5 +779,96 @@ describe('healthCommand — unsafe-root guard wiring', () => {
       else process.env.HOME = realHome;
       await fs.rm(fakeHome, { recursive: true, force: true });
     }
+  });
+});
+
+describe('displayOrderDivergesFromScore (#1151)', () => {
+  const e = (score: number, shape: RiskEntry['shape']): RiskEntry => ({
+    filepath: 'a.go',
+    startLine: 1,
+    symbolName: 's',
+    language: 'go',
+    cognitive: 10,
+    dependents: 1,
+    tests: [],
+    score,
+    shape,
+  });
+
+  it('detects the real go-chi/chi ordering, where score 306 displays third', () => {
+    // Measured on chi: shape-major sorting puts two `expensive` entries above
+    // `findRoute`, which outscores both by 3.8x and gets the softest advice.
+    const chi = [
+      e(91.4, 'expensive'),
+      e(80, 'expensive'),
+      e(306, 'isolated'),
+      e(96, 'isolated'),
+      e(80, 'isolated'),
+    ];
+    expect(displayOrderDivergesFromScore(chi)).toBe(true);
+  });
+
+  it('stays quiet when display order already matches score order', () => {
+    // This repo's own output: 90, 75, 57, 57, 56.9, all one shape. A note here
+    // would fire on every run and get trained out as noise (#1014).
+    const thisRepo = [
+      e(90, 'isolated'),
+      e(75, 'isolated'),
+      e(57, 'isolated'),
+      e(57, 'isolated'),
+      e(56.9, 'isolated'),
+    ];
+    expect(displayOrderDivergesFromScore(thisRepo)).toBe(false);
+  });
+
+  it('treats equal adjacent scores as agreeing, not diverging', () => {
+    expect(displayOrderDivergesFromScore([e(57, 'expensive'), e(57, 'isolated')])).toBe(false);
+  });
+
+  it('ignores unknown-fan-in entries, whose score is not comparable (#1151)', () => {
+    // `scoreRisk`'s contract: an unresolved fan-in contributes the same
+    // damping as zero, which is "safe ONLY because shape sorts ahead of
+    // score ... Do not reuse this score to compare across shapes." So a
+    // placeholder-fan-in score sitting above a measured one is not evidence
+    // of anything, and firing the note on it would announce a divergence the
+    // numbers cannot support.
+    const withUnknown = [e(91.4, 'expensive'), e(306, 'unknown-fan-in')];
+    expect(displayOrderDivergesFromScore(withUnknown)).toBe(false);
+  });
+
+  it('still fires when both entries have a measured fan-in', () => {
+    // The #1151 case survives the exclusion: on go-chi/chi both `Mount`
+    // (expensive, 91.4) and `findRoute` (isolated, 306) are resolved.
+    expect(displayOrderDivergesFromScore([e(91.4, 'expensive'), e(306, 'isolated')])).toBe(true);
+  });
+
+  it('compares across an unknown-fan-in entry rather than stopping at it', () => {
+    // Dropping the unknown entry must not hide a divergence between the two
+    // resolved entries it sat between.
+    const sandwiched = [e(91.4, 'expensive'), e(999, 'unknown-fan-in'), e(306, 'isolated')];
+    expect(displayOrderDivergesFromScore(sandwiched)).toBe(true);
+  });
+
+  it('is quiet for zero or one entry', () => {
+    expect(displayOrderDivergesFromScore([])).toBe(false);
+    expect(displayOrderDivergesFromScore([e(306, 'isolated')])).toBe(false);
+  });
+
+  it('fires on a divergence anywhere in the list, not just at the top', () => {
+    // Third entry outscores the second. The check compares adjacent pairs,
+    // which is sufficient: a sequence is non-descending exactly when some
+    // adjacent pair increases.
+    expect(
+      displayOrderDivergesFromScore([e(100, 'dangerous'), e(40, 'isolated'), e(60, 'isolated')]),
+    ).toBe(true);
+  });
+
+  it('fires when the divergence is against a non-adjacent entry too', () => {
+    // 70 beats the 50 directly above it, so adjacent comparison catches it --
+    // but this pins the user-visible property (something lower outranks
+    // something higher) rather than the implementation detail.
+    expect(
+      displayOrderDivergesFromScore([e(100, 'expensive'), e(50, 'isolated'), e(70, 'isolated')]),
+    ).toBe(true);
   });
 });

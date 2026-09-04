@@ -16,7 +16,12 @@ import {
   type MetricComplexityDelta,
   type ComplexityDeltaVerdict,
 } from '@liendev/parser';
-import { getRepoRoot, collectFileChanges, collectFileChange } from './delta-git.js';
+import {
+  NOT_A_REPO_MESSAGE,
+  getRepoRoot,
+  collectFileChanges,
+  collectFileChange,
+} from './delta-git.js';
 
 export interface DeltaOptions {
   soft?: boolean;
@@ -279,7 +284,7 @@ export async function deltaCommand(options: DeltaOptions): Promise<void> {
 
   const rootDir = await getRepoRoot(process.cwd());
   if (!rootDir) {
-    console.error(chalk.red('lien delta: not a git repository (or git is not installed)'));
+    console.error(chalk.red(`lien delta: ${NOT_A_REPO_MESSAGE}`));
     process.exit(2);
   }
 

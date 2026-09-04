@@ -2,6 +2,15 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 
 import { renderText, toJson, reviewCommand, type ReviewResult } from './review-cmd.js';
 import type { SignalReport } from './review-signals.js';
+import * as deltaGit from './delta-git.js';
+import { NOT_A_REPO_MESSAGE } from './delta-git.js';
+
+// Only `getRepoRoot` is stubbed; the rest of delta-git stays real, and it
+// defaults to "we are in a repo" so every other test here is unaffected.
+vi.mock('./delta-git.js', async importOriginal => {
+  const actual = await importOriginal<typeof deltaGit>();
+  return { ...actual, getRepoRoot: vi.fn(async () => '/repo') };
+});
 
 function report(overrides: Partial<SignalReport> = {}): SignalReport {
   return {
@@ -21,6 +30,7 @@ function result(overrides: Partial<ReviewResult> = {}): ReviewResult {
     unexamined: { untracked: [], nonAnalyzable: [], testsExcluded: 0, deleted: 0 },
     repoScanned: true,
     withheldSignals: [],
+    allSignals: false,
     durationMs: 12,
     ...overrides,
   };
@@ -463,5 +473,149 @@ describe('reviewCommand', () => {
 
     expect(process.exitCode).toBe(1);
     expect(errSpy.mock.calls.flat().join(' ')).toContain('could not run');
+  });
+});
+
+describe('--all-signals precision caveat (#1152)', () => {
+  it('warns about unestablished precision when the 13 signals actually RAN', () => {
+    const out = renderText(result({ allSignals: true, withheldSignals: [] }));
+    expect(out).toContain('precision has never been established');
+    expect(out).toContain('106');
+    expect(out).toContain('rated none actionable');
+  });
+
+  it('says a short list is not a complete one, since the loud signals self-cap', () => {
+    const out = renderText(result({ allSignals: true, withheldSignals: [] }));
+    expect(out).toContain('cap their own lists');
+    expect(out).toContain('TypeScript/JavaScript-only');
+  });
+
+  it('does not print the ran-caveat on a default run', () => {
+    // The default run has its own note, on the withheld list. Printing both
+    // would state the same measurement twice for opposite reasons.
+    const out = renderText(result({ allSignals: false, withheldSignals: ['stale-literal'] }));
+    expect(out).not.toContain('precision has never been established');
+    expect(out).toContain('measured 0 useful');
+  });
+
+  it('keys off the explicit flag, not an empty withheld list', () => {
+    // `withheldSignals: []` is the test fixture default and does NOT mean
+    // --all-signals ran. Inferring it would have fired this caveat on every
+    // existing test in this file (#1152).
+    const out = renderText(result({ allSignals: false, withheldSignals: [] }));
+    expect(out).not.toContain('precision has never been established');
+  });
+});
+
+describe('toJson carries the caveats a machine consumer needs (#1152)', () => {
+  it('says --all-signals ran, rather than leaving it to be inferred', () => {
+    // The gap this closes: the renderer got an explicit `allSignals` flag
+    // while the JSON path was left inferring it from an empty
+    // `withheldSignals` -- so `--all-signals --format json` emitted exactly
+    // what a default run emits, handing over 13 unvalidated signals'
+    // candidates with no marker. SKILL.md points readers at --format json.
+    const out = JSON.parse(toJson(result({ allSignals: true, withheldSignals: [] })));
+    expect(out.allSignals).toBe(true);
+  });
+
+  it('distinguishes a default run in the same field', () => {
+    const out = JSON.parse(
+      toJson(result({ allSignals: false, withheldSignals: ['stale-literal'] })),
+    );
+    expect(out.allSignals).toBe(false);
+  });
+
+  it('exposes scanPartial, which only the text renderer could see before', () => {
+    const out = JSON.parse(toJson(result({ scanPartial: '3 files could not be parsed' })));
+    expect(out.scanPartial).toBe('3 files could not be parsed');
+  });
+
+  it('emits scanPartial as null rather than dropping the key when there is none', () => {
+    // A missing key and "nothing was partial" are different statements; a
+    // consumer cannot tell the field is supported if it vanishes.
+    const out = JSON.parse(toJson(result({ scanPartial: undefined })));
+    expect(out.scanPartial).toBeNull();
+  });
+});
+
+describe('reviewCommand outside a git repository (#1150)', () => {
+  it('reports the reason and exits 2, without leaking the git invocation', async () => {
+    // Before: the first git call escaped as "Command failed: git ls-files
+    // --others --exclude-standard -z" plus git's own fatal, at exit 1 --
+    // telling the user about our flags rather than their problem, while
+    // `lien delta` in the same directory already answered properly at exit 2.
+    vi.mocked(deltaGit.getRepoRoot).mockResolvedValueOnce(null);
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+
+    await reviewCommand({ format: 'text' });
+
+    expect(exitSpy).toHaveBeenCalledWith(2);
+    const errs = errSpy.mock.calls.flat().join(' ');
+    expect(errs).toContain(NOT_A_REPO_MESSAGE);
+    expect(errs).not.toContain('Command failed');
+    expect(errs).not.toContain('ls-files');
+  });
+
+  it('stops there rather than falling through to the review', async () => {
+    // The half my first version of this test could not see. `process.exit` is
+    // mocked, so without a `return` control continues into `analyzeReview` and
+    // its first git call throws the raw invocation anyway -- exactly what the
+    // pre-check exists to avoid. Asserting the exit code alone passes either
+    // way, so assert that nothing was reviewed.
+    vi.mocked(deltaGit.getRepoRoot).mockResolvedValueOnce(null);
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+
+    await reviewCommand({ format: 'text' });
+
+    expect(logSpy).not.toHaveBeenCalled();
+    expect(errSpy.mock.calls.flat().join(' ')).not.toContain('could not run');
+  });
+});
+
+describe('the no-reviewable-files path also carries the calibration (CodeRabbit, #1156)', () => {
+  // `renderText` returns `renderNothingReviewable` BEFORE the main path's
+  // calibration spread, and that renderer still prints candidates from the
+  // raw-diff signals -- doc-claims, docs-drift, guidance-surface,
+  // untrusted-input -- every one of which is off by default. So a
+  // markdown-only diff under --all-signals emitted unvalidated candidates
+  // with no precision note. Third instance in this PR of a caveat reaching
+  // one path and not its sibling.
+  const nothingReviewable = (overrides = {}) =>
+    result({
+      changedFiles: [],
+      unexamined: { untracked: [], nonAnalyzable: ['README.md'], testsExcluded: 0, deleted: 0 },
+      ...overrides,
+    });
+
+  it('warns when those signals produced candidates on a non-analyzable diff', () => {
+    const out = renderText(
+      nothingReviewable({
+        allSignals: true,
+        reports: [
+          report({ id: 'docs-drift', candidates: [{ file: 'README.md', line: 1, detail: 'x' }] }),
+        ],
+      }) as never,
+    );
+    expect(out).toContain('nothing reviewable in them');
+    expect(out).toContain('came from signals that read the raw diff');
+    expect(out).toContain('precision has never been established');
+  });
+
+  it('warns even when they found nothing, since silence is not clearance', () => {
+    // Matches the main path. A signal whose precision was never established
+    // finding nothing is not evidence of cleanliness -- rendering absence of
+    // evidence as a clean result is the failure this file exists to prevent.
+    const out = renderText(nothingReviewable({ allSignals: true }) as never);
+    expect(out).toContain('No signal found anything in the raw diff either.');
+    expect(out).toContain('precision has never been established');
+  });
+
+  it('stays quiet on a default run of the same path', () => {
+    const out = renderText(nothingReviewable({ allSignals: false }) as never);
+    expect(out).toContain('nothing reviewable in them');
+    expect(out).not.toContain('precision has never been established');
   });
 });

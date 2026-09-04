@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { describeScanFailure, describePartialScan } from './scan-failure.js';
+import {
+  describeScanFailure,
+  describePartialScan,
+  describeUnanalyzableScan,
+} from './scan-failure.js';
 
 describe('describeScanFailure', () => {
   it('reports the scanner’s own error when the scan failed', () => {
@@ -80,5 +84,47 @@ describe('describePartialScan', () => {
     expect(describePartialScan({ success: true, chunkCount: 5, filesErrored: 1 })).toBe(
       '1 file could not be parsed and was not examined',
     );
+  });
+});
+
+describe('describeUnanalyzableScan', () => {
+  it('fires when files parsed but none of them was code', () => {
+    // A documentation-only repository: the README chunks fine, so
+    // describeScanFailure passes and the ranking/report is empty for a reason
+    // that has nothing to do with the code being healthy (#1148).
+    expect(describeUnanalyzableScan({ filesAnalyzed: 1, codeFilesAnalyzed: 0 })).toBe(
+      '1 file parsed, but it is not in a language lien can analyse',
+    );
+  });
+
+  it('pluralises', () => {
+    expect(describeUnanalyzableScan({ filesAnalyzed: 58, codeFilesAnalyzed: 0 })).toBe(
+      '58 files parsed, but none of them are in a language lien can analyse',
+    );
+  });
+
+  it('stays silent as soon as one file is analysable', () => {
+    // The unsupported-language fixture: main.cbl is dropped entirely and
+    // conf.yaml is what remains, so this is the boundary that matters.
+    expect(describeUnanalyzableScan({ filesAnalyzed: 2, codeFilesAnalyzed: 1 })).toBeUndefined();
+  });
+
+  it('defers to describeScanFailure when nothing parsed at all', () => {
+    // Otherwise an empty scan reports two different reasons for one problem.
+    expect(describeUnanalyzableScan({ filesAnalyzed: 0, codeFilesAnalyzed: 0 })).toBeUndefined();
+  });
+
+  // THE FALSE-ALARM GUARD. These are the shapes a declaration-count gate
+  // refused, and they are ordinary code: 73 of 316 tracked source files in
+  // this repo (23%) declare nothing the parser types, plus whole plausible
+  // packages -- design tokens, `export type` aliases, barrels of re-exports,
+  // Go `var`, Rust `pub const`. All of them ARE code, so all of them must
+  // pass. Never re-gate this on declarations or on maxComplexity (#1148).
+  it('stays silent for code that declares nothing the parser types', () => {
+    expect(describeUnanalyzableScan({ filesAnalyzed: 1, codeFilesAnalyzed: 1 })).toBeUndefined();
+  });
+
+  it('stays silent for a constants-only package across several files', () => {
+    expect(describeUnanalyzableScan({ filesAnalyzed: 3, codeFilesAnalyzed: 3 })).toBeUndefined();
   });
 });

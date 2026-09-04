@@ -43,12 +43,17 @@ import chalk from 'chalk';
 import {
   performChunkOnlyIndex,
   analyzeComplexityFromChunks,
+  languageExists,
   computeDependentCountsFromChunks,
   findTestAssociationsFromChunks,
   isTestFile,
   DEFAULT_COMPLEXITY_THRESHOLDS,
 } from '@liendev/parser';
-import { describeScanFailure } from '../utils/scan-failure.js';
+import {
+  describeScanFailure,
+  describePartialScan,
+  describeUnanalyzableScan,
+} from '../utils/scan-failure.js';
 import { resolveRepoRoot, rebaseToRoot } from './project-root.js';
 import { assertSafeRoot } from './unsafe-root.js';
 import type { CodeChunk, ComplexityReport, ComplexityViolation } from '@liendev/parser';
@@ -117,6 +122,17 @@ export interface HealthResult {
    * the run fails loudly — so this must be read, never assumed.
    */
   scanError?: string;
+  /**
+   * Why this run has no CODE to answer from, when the scan itself succeeded.
+   *
+   * The sibling of `scanError` and invisible to it: a markdown-only or
+   * unsupported-language repo parses fine and yields chunks, so
+   * `describeScanFailure` passes and the ranking is empty for a reason that
+   * has nothing to do with the codebase being healthy. Left unset, `health`
+   * printed a green "Nothing ranked as risky to change." for a repo
+   * containing one README (#1148).
+   */
+  unanalyzable?: string;
 }
 
 const VALID_FORMATS = ['text', 'json'];
@@ -169,9 +185,23 @@ const SHAPE_PRIORITY: Record<RiskShape, number> = {
  * Unresolved fan-in (`null`) contributes the same damping as `0`, which is
  * safe ONLY because shape sorts ahead of score: every `unknown-fan-in` entry
  * carries the same constant fan-in term, so within that group the score
- * reduces to complexity × tests. It is never compared against a resolved
- * entry's score, because a different shape decides the order first. Do not
- * reuse this score to compare across shapes.
+ * reduces to complexity × tests.
+ *
+ * **The score of an `unknown-fan-in` entry is therefore not comparable with
+ * any other entry's** — one side of that comparison is a placeholder, and the
+ * ordering never needed it because shape decides first.
+ *
+ * Every OTHER shape has a measured fan-in, so their scores are computed from
+ * the same real inputs and do compare, across shapes included.
+ * `displayOrderDivergesFromScore` depends on exactly that: it exists to say
+ * when the shape-major display order disagrees with risk, which is inherently
+ * a cross-shape question (on go-chi/chi it is `expensive` 91.4 above
+ * `isolated` 306), and it filters `unknown-fan-in` out first.
+ *
+ * An earlier version of this note said "do not reuse this score to compare
+ * across shapes" without qualification. That was broader than its own reason,
+ * and taken literally it forbids the one comparison the ranking needs to be
+ * honest about itself (#1151).
  *
  * Note it reduces to complexity × *tests*, not complexity alone: an untested
  * entry still scores 2× a tested one of equal complexity. That is deliberate
@@ -477,13 +507,56 @@ export function renderNothingShown(result: HealthResult, pathFilter?: string): s
     ];
   }
 
+  // Advisory command, so this reports at exit 0 rather than erroring the way
+  // gate-shaped `complexity` does -- but it must not be GREEN. An empty
+  // ranking because nothing was code is not a clean bill of health (#1148).
+  if (result.unanalyzable) {
+    return [
+      chalk.red(`  ⚠ No code found to rank — ${result.unanalyzable}`),
+      chalk.yellow('    This is NOT a clean bill of health. Nothing was analyzed.'),
+    ];
+  }
+
   return [chalk.green('  Nothing ranked as risky to change.')];
+}
+
+/**
+ * True when the displayed order is not descending by score.
+ *
+ * The ranking is shape-major on purpose: "expensive to change" is a different
+ * question from "complex", and #1138 put `unknown-fan-in` above `cheap-win`
+ * and `isolated` so unmeasured blast radius cannot read as safety. The cost is
+ * that score order and display order can disagree, with nothing saying so --
+ * on go-chi/chi, `findRoute` scores 306 and displays THIRD, under entries
+ * scoring 91.4 and 80, carrying the softest advice tier (#1151).
+ *
+ * Computed over the shown entries rather than stated unconditionally: when the
+ * two orders agree, which is the common case, the note would be noise, and a
+ * caveat that fires every run gets trained out (#1014).
+ */
+export function displayOrderDivergesFromScore(shown: RiskEntry[]): boolean {
+  // `unknown-fan-in` entries are EXCLUDED, and that is not a nicety.
+  // `scoreRisk`'s contract says an unresolved fan-in contributes the same
+  // damping as zero and that this is "safe ONLY because shape sorts ahead of
+  // score ... Do not reuse this score to compare across shapes." Comparing a
+  // placeholder-fan-in score against a measured one is precisely the
+  // comparison it forbids, so a note built on it would be announcing a
+  // divergence the numbers cannot support.
+  //
+  // Every other shape has a measured fan-in, so their scores ARE comparable,
+  // which is what #1151 was about: on go-chi/chi both `Mount` (expensive,
+  // 91.4) and `findRoute` (isolated, 306) are resolved.
+  //
+  // Adjacent pairs suffice on the filtered list: a sequence is non-descending
+  // exactly when no adjacent pair increases.
+  const comparable = shown.filter(e => e.shape !== 'unknown-fan-in');
+  return comparable.some((entry, i) => i > 0 && entry.score > comparable[i - 1].score);
 }
 
 export function renderText(result: HealthResult, shown: RiskEntry[], pathFilter?: string): string {
   const lines: string[] = ['', chalk.bold('lien health'), ''];
 
-  const scanned = `${plural(result.filesAnalyzed, 'file')} · ${plural(result.chunks, 'chunk')} · ${(result.durationMs / 1000).toFixed(1)}s · no index`;
+  const scanned = `${plural(result.filesAnalyzed, 'file')} · ${plural(result.chunks, 'chunk')} · ${(result.durationMs / 1000).toFixed(1)}s`;
   lines.push(chalk.dim(`  ${scanned}`), '');
 
   if (result.scanError) {
@@ -503,6 +576,15 @@ export function renderText(result: HealthResult, shown: RiskEntry[], pathFilter?
   } else {
     const noun = shown.length === 1 ? 'function is' : 'functions are';
     lines.push(chalk.yellow(`  ⚠ ${shown.length} ${noun} risky to change`), '');
+    if (displayOrderDivergesFromScore(shown)) {
+      lines.push(
+        chalk.dim('  Grouped by what to do about each one, then by risk inside a group — so'),
+        chalk.dim(
+          '  something further down this list may still score higher than something above.',
+        ),
+        '',
+      );
+    }
     shown.forEach((entry, i) => lines.push(...renderEntry(entry, i + 1)));
   }
 
@@ -540,6 +622,11 @@ export function toJson(
   return {
     ...result,
     entries: shown.map(entry => ({ ...entry, score: Math.round(entry.score * 10) / 10 })),
+    // `entries` is in DISPLAY order, which is shape-major -- so a consumer
+    // reading it as a risk ranking can be wrong about which entry is worst.
+    // The text renderer says so when it matters; the JSON said nothing, and
+    // the /review skill reads JSON (#1151).
+    displayOrderDivergesFromScore: displayOrderDivergesFromScore(shown),
     shown: shown.length,
     rankedTotal: result.entries.length,
     rankedUnderPath: pathFilter ? scoped.length : undefined,
@@ -609,11 +696,25 @@ export async function analyzeHealth(rootDir: string, includeTests = false): Prom
   // same per-language resolution (#1137).
   const coverage = computeCoverage(chunks, dependentCounts);
 
-  if (scan.filesErrored > 0) {
+  // Shared detection, local phrasing: `describePartialScan` owns the question
+  // ("did most of the corpus fail?") so a third copy cannot drift from it,
+  // while the sentence still names THIS command's output. #1149 found the
+  // wording had already diverged three ways.
+  const partial = describePartialScan({
+    success: scan.success,
+    chunkCount: chunks.length,
+    filesErrored: scan.filesErrored,
+  });
+  if (partial) {
+    console.warn(chalk.yellow(`Warning: ${partial} — they are absent from this ranking.`));
+  }
+  // #1149: health passed `filesSkipped` to `describeScanFailure` for the
+  // total case but never caveated the partial one, so a run where the size cap
+  // excluded much of the corpus ranked the remainder in silence.
+  if (scan.filesSkipped > 0) {
     console.warn(
-      chalk.yellow(
-        `Warning: ${scan.filesErrored} file${scan.filesErrored === 1 ? '' : 's'} could not be parsed and ` +
-          'are absent from this ranking.',
+      chalk.dim(
+        `  ${scan.filesSkipped} file${scan.filesSkipped === 1 ? '' : 's'} skipped for exceeding the size cap.`,
       ),
     );
   }
@@ -635,6 +736,12 @@ export async function analyzeHealth(rootDir: string, includeTests = false): Prom
     ),
     coverage,
     scanError,
+    unanalyzable: describeUnanalyzableScan({
+      filesAnalyzed: report.summary.filesAnalyzed,
+      codeFilesAnalyzed: new Set(
+        chunks.filter(c => languageExists(c.metadata.language)).map(c => c.metadata.file),
+      ).size,
+    }),
   };
 }
 
