@@ -361,14 +361,16 @@ describe('Language Registry', () => {
   });
 });
 
-describe('LANGUAGE_IDS as published surface', () => {
-  // It is exported from the package barrel so a caller that must TELL a user
-  // what this parser handles does not hardcode its own copy of the list
-  // (`lien complexity` prints it in a no-data refusal). That makes REMOVING an
-  // entry a breaking change: `SupportedLanguage` is `(typeof LANGUAGE_IDS)[number]`,
-  // so a removal narrows a published union. The barrel comment calls the list
-  // "append-only in practice" -- these tests are what make that more than a
-  // claim in a comment.
+describe('LANGUAGE_IDS', () => {
+  // Internal, deliberately: it was briefly exported from the package barrel so
+  // the CLI could name the supported languages, and that broke the 0.80.3
+  // release (#1160) -- the changeset named only `@liendev/lien`, so the
+  // published CLI resolved a parser without the export and threw on import.
+  // Callers use `getAllLanguages()` instead, which has been public for longer.
+  //
+  // `SupportedLanguage` is `(typeof LANGUAGE_IDS)[number]`, so removing an
+  // entry still narrows a type the package publishes. These tests keep that
+  // honest without exporting the array itself.
   const PUBLISHED = [
     'typescript',
     'javascript',
@@ -383,10 +385,20 @@ describe('LANGUAGE_IDS as published surface', () => {
     'swift',
   ];
 
-  it('still contains every language it has published', () => {
+  it('still contains every language whose id has shipped', () => {
     // Membership, not deep equality: ADDING a language is fine and must not
     // fail this. Removing one, or renaming an id, is the breaking change.
     for (const id of PUBLISHED) expect(LANGUAGE_IDS).toContain(id);
+  });
+
+  it('matches what getAllLanguages reports, since that is what callers read', () => {
+    // The CLI names the supported set from `getAllLanguages()`. If that ever
+    // diverged from this array, the CLI would tell users something false.
+    expect(
+      getAllLanguages()
+        .map(d => d.id)
+        .sort(),
+    ).toEqual([...LANGUAGE_IDS].sort());
   });
 
   it('has no duplicate ids', () => {
