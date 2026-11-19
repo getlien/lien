@@ -167,6 +167,42 @@
   font-size: 0.85em;
 }
 
+.lien-deprecation-home {
+  max-width: 1152px;
+  margin: 0 auto;
+  padding: 24px 24px 0;
+}
+
+.lien-deprecation-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  margin: 0 0 1.5rem;
+  padding: 0.65rem 1rem;
+  border: 1px solid rgba(220, 38, 38, 0.45);
+  border-radius: 8px;
+  background: rgba(220, 38, 38, 0.12);
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--vp-c-text-1);
+}
+
+.lien-deprecation-banner-badge {
+  flex-shrink: 0;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  background: #dc2626;
+  color: #fff;
+  font-weight: 500;
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+}
+
+.lien-deprecation-banner a {
+  color: inherit;
+  text-decoration: underline;
+}
+
 /* Post meta line — date · author · tags, shown above a blog post's title */
 .lien-post-meta {
   display: flex;

@@ -1,5 +1,9 @@
 # Lien
 
+> **Deprecated: Lien is no longer maintained, as of November 2026.** There will be no further releases, and issues and pull requests will not be handled. The code stays available under its existing AGPL-3.0 license.
+>
+> Evaluations in November 2026 found that Lien did not measurably improve agent code review, that its complexity gate made agent-written code score lower on blind readability review, and that its cross-file dependents lookup was less accurate than plain text search.
+
 > **/ljɛ̃/**, French for "link"
 
 **A local code-health CLI: what's risky to change, and what your change just made worse. 100% local, 100% private.**

@@ -1,5 +1,7 @@
 # @liendev/parser-native
 
+> **Deprecated: Lien is no longer maintained, as of November 2026.** There will be no further releases of this package, and issues and pull requests will not be handled. The code stays available under its existing AGPL-3.0 license. See [github.com/getlien/lien](https://github.com/getlien/lien) for details.
+
 Prebuilt native tree-sitter parser bindings for Lien, via a hand-rolled
 napi-rs crate (no `@napi-rs/cli`). One export, `parseTree(lang, source)`,
 returns a JSON-serialized tree. See

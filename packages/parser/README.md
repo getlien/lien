@@ -1,5 +1,7 @@
 # @liendev/parser
 
+> **Deprecated: Lien is no longer maintained, as of November 2026.** There will be no further releases of this package, and issues and pull requests will not be handled. The code stays available under its existing AGPL-3.0 license. See [github.com/getlien/lien](https://github.com/getlien/lien) for details.
+
 AST parsing, complexity analysis, and semantic chunking for [Lien](https://lien.dev).
 
 This package is Lien's analysis engine: it turns source files into chunks with AST metadata, resolves dependency edges and test associations across 11 languages, computes complexity, and answers the deterministic review signals `lien review` runs. It has no server, no database and no network dependency — every answer is computed from the files you hand it.
